@@ -5,11 +5,13 @@ import { useState } from "react";
 import Link from "next/link";
 
 const items = [
+  ["/", "Dashboard", "⌂"],
   ["/inbox", "Priority inbox", "▣"],
   ["/profiles", "Profiles", "♙"],
   ["/calendar", "Follow-up calendar", "□"],
   ["/analytics", "Analytics", "▥"],
   ["/health", "System health", "⌁"],
+  ["/admin", "Configuration", "⚙"],
 ] as const;
 
 export default function AppSidebar() {
@@ -75,13 +77,6 @@ export default function AppSidebar() {
         </button>
       </div>
       <div className="sidebar-bottom">
-        <a
-          href="/admin"
-          className={`nav-item ${pathname === "/admin" ? "active" : ""}`}
-        >
-          <span style={{ flex: "none", width: 16 }}>⚙</span>
-          <span>Admin console</span>
-        </a>
         <div className="user-chip">
           <div className="user-avatar">AS</div>
           <div>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardHome from "./components/DashboardHome";
+import AppSidebar from "./components/AppSidebar";
 
 type Lead = {
   initials: string;
@@ -163,7 +164,13 @@ export function InboxPage() {
     if (activeNav !== "inbox") router.push(`/${activeNav}`);
   }, [activeNav, router]);
   useEffect(() => {
-    const routes = ["/inbox", "/profiles", "/calendar", "/analytics", "/health"];
+    const routes = [
+      "/inbox",
+      "/profiles",
+      "/calendar",
+      "/analytics",
+      "/health",
+    ];
     const buttons = Array.from(
       document.querySelectorAll(".sidebar nav .nav-item"),
     );
@@ -176,7 +183,10 @@ export function InboxPage() {
     const adminHandler = () => router.push("/admin");
     admin?.addEventListener("click", adminHandler);
     const help = document.querySelector(".top-actions .icon-button");
-    const helpHandler = () => window.alert("Reply Radar help: use the sidebar to switch workspaces, profiles, calendar, analytics, health, and admin configuration.");
+    const helpHandler = () =>
+      window.alert(
+        "Reply Radar help: use the sidebar to switch workspaces, profiles, calendar, analytics, health, and admin configuration.",
+      );
     help?.addEventListener("click", helpHandler);
     return () => {
       handlers.forEach(([button, handler]) =>
@@ -293,7 +303,10 @@ export function InboxPage() {
   );
   return (
     <main className={`app-shell ${theme === "light" ? "light-mode" : ""}`}>
-      <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
+      <AppSidebar />
+      <aside
+        className={`sidebar legacy-sidebar ${sidebarOpen ? "sidebar-open" : ""}`}
+      >
         <div className="brand-row">
           <div className="brand-mark">
             <span />
