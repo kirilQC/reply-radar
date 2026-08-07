@@ -20,6 +20,32 @@ type Lead = {
   replies: number;
   avatar: string;
 };
+type LayoutPrefs = {
+  order: Array<"metrics" | "queue">;
+  showMetrics: boolean;
+  showDetail: boolean;
+  compact: boolean;
+};
+type AppearancePrefs = {
+  mode: "midnight" | "light";
+  zoom: number;
+  font: string;
+  background: string;
+  accent: string;
+};
+const defaultLayout: LayoutPrefs = {
+  order: ["metrics", "queue"],
+  showMetrics: true,
+  showDetail: true,
+  compact: false,
+};
+const defaultAppearance: AppearancePrefs = {
+  mode: "midnight",
+  zoom: 100,
+  font: "Inter, ui-sans-serif, system-ui, sans-serif",
+  background: "#0b0c10",
+  accent: "#8b7cff",
+};
 const leads: Lead[] = [
   {
     initials: "JM",
@@ -160,6 +186,10 @@ export function InboxPage() {
     [theme, setTheme] = useState("midnight"),
     [sent, setSent] = useState(false),
     [sidebarOpen, setSidebarOpen] = useState(false);
+  const [layoutPrefs, setLayoutPrefs] = useState(defaultLayout);
+  const [appearance, setAppearance] = useState(defaultAppearance);
+  const [layoutOpen, setLayoutOpen] = useState(false);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [clientParam] = useState(() =>
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("client")
@@ -201,43 +231,44 @@ export function InboxPage() {
         : clientParam === "vectorly"
           ? "Vectorly"
           : "All clients";
+  const preferenceScope = profileParam || "general";
+  const preferenceKey = `reply-radar-prefs:${preferenceScope}`;
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem(preferenceKey);
+        const fallback = window.localStorage.getItem("reply-radar-prefs:general");
+        const cookieValue = document.cookie
+          .split("; ")
+          .find((item) => item.startsWith("reply-radar-preferences="))
+          ?.split("=")[1];
+        const parsed = JSON.parse(saved || fallback || (cookieValue ? decodeURIComponent(cookieValue) : "null"));
+        if (parsed?.layout) setLayoutPrefs({ ...defaultLayout, ...parsed.layout });
+        if (parsed?.appearance) {
+          const nextAppearance = { ...defaultAppearance, ...parsed.appearance };
+          setAppearance(nextAppearance);
+          setTheme(nextAppearance.mode);
+        }
+      } catch {
+        // Keep defaults if a saved preference cannot be read.
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [preferenceKey]);
+  const savePreferences = (nextLayout = layoutPrefs, nextAppearance = appearance) => {
+    const payload = { layout: nextLayout, appearance: nextAppearance };
+    window.localStorage.setItem(preferenceKey, JSON.stringify(payload));
+    // Also retain the device-level fallback for the general inbox.
+    window.localStorage.setItem("reply-radar-prefs:general", JSON.stringify(payload));
+    void fetch("/api/preferences", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ scope: preferenceScope, preferences: payload }),
+    }).catch(() => undefined);
+  };
   useEffect(() => {
     if (activeNav !== "inbox") router.push(`/${activeNav}`);
   }, [activeNav, router]);
-  useEffect(() => {
-    const routes = [
-      "/",
-      "/profiles",
-      "/calendar",
-      "/analytics",
-      "/health",
-      "/admin",
-    ];
-    const buttons = Array.from(
-      document.querySelectorAll(".sidebar nav .nav-item"),
-    );
-    const handlers = buttons.map((button, index) => {
-      const handler = () => router.push(routes[index]);
-      button.addEventListener("click", handler);
-      return [button, handler] as const;
-    });
-    const admin = document.querySelector(".sidebar-bottom .nav-item");
-    const adminHandler = () => router.push("/admin");
-    admin?.addEventListener("click", adminHandler);
-    const help = document.querySelector(".top-actions .icon-button");
-    const helpHandler = () =>
-      window.alert(
-        "Reply Radar help: use the sidebar to switch workspaces, profiles, calendar, analytics, health, and admin configuration.",
-      );
-    help?.addEventListener("click", helpHandler);
-    return () => {
-      handlers.forEach(([button, handler]) =>
-        button.removeEventListener("click", handler),
-      );
-      admin?.removeEventListener("click", adminHandler);
-      help?.removeEventListener("click", helpHandler);
-    };
-  }, [router]);
   useEffect(() => {
     const toast = (message: string) => {
       let node = document.querySelector<HTMLDivElement>(
@@ -345,7 +376,15 @@ export function InboxPage() {
     [search, filter, assignedClients],
   );
   return (
-    <main className={`app-shell ${theme === "light" ? "light-mode" : ""}`}>
+    <main
+      className={`app-shell ${theme === "light" ? "light-mode" : ""} ${layoutPrefs.compact ? "compact-inbox" : ""}`}
+      style={{
+        "--accent": appearance.accent,
+        "--bg": appearance.background,
+        "--font": appearance.font,
+        zoom: appearance.zoom / 100,
+      } as React.CSSProperties}
+    >
       <AppSidebar />
       <aside
         className={`sidebar legacy-sidebar ${sidebarOpen ? "sidebar-open" : ""}`}
@@ -444,15 +483,51 @@ export function InboxPage() {
               />
               <kbd>⌘ K</kbd>
             </label>
-            <button className="icon-button">?</button>
+            <button
+              className="icon-button layout-button"
+              aria-label="Customize inbox layout"
+              title="Customize inbox layout"
+              onClick={() => {
+                setLayoutOpen((open) => !open);
+                setAppearanceOpen(false);
+              }}
+            >
+              ⚙
+            </button>
             <button
               className="icon-button theme-toggle"
-              onClick={() =>
-                setTheme(theme === "midnight" ? "light" : "midnight")
-              }
+              aria-label="Customize appearance"
+              title="Customize appearance"
+              onClick={() => {
+                setAppearanceOpen((open) => !open);
+                setLayoutOpen(false);
+              }}
             >
               ◐
             </button>
+            {layoutOpen && (
+              <LayoutPanel
+                prefs={layoutPrefs}
+                onChange={setLayoutPrefs}
+                onSave={() => {
+                  savePreferences(layoutPrefs, appearance);
+                  setLayoutOpen(false);
+                }}
+              />
+            )}
+            {appearanceOpen && (
+              <AppearancePanel
+                prefs={appearance}
+                onChange={(next) => {
+                  setAppearance(next);
+                  setTheme(next.mode);
+                }}
+                onSave={() => {
+                  savePreferences(layoutPrefs, appearance);
+                  setAppearanceOpen(false);
+                }}
+              />
+            )}
           </div>
         </header>
         <div className="content-wrap">
@@ -482,7 +557,8 @@ export function InboxPage() {
               <button className="primary-button">+ Add follow-up</button>
             </div>
           </div>
-          <div className="metrics">
+          <div className="inbox-layout">
+          <div className="layout-section metrics-section" style={{ order: layoutPrefs.order.indexOf("metrics") }} hidden={!layoutPrefs.showMetrics}>
             <Metric
               label="Needs action"
               value="12"
@@ -512,6 +588,7 @@ export function InboxPage() {
               sub="pipeline influenced"
             />
           </div>
+          <div className="layout-section queue-section" style={{ order: layoutPrefs.order.indexOf("queue") }}>
           <div className="health-strip">
             <div className="health-icon">
               <Icon name="health" />
@@ -622,7 +699,7 @@ export function InboxPage() {
                 </button>
               </div>
             </section>
-            <aside className="detail-card">
+            <aside className={`detail-card ${layoutPrefs.showDetail ? "" : "layout-hidden"}`}>
               <div className="detail-top">
                 <div className="detail-context">
                   <span className="detail-label">SELECTED CONVERSATION</span>
@@ -707,6 +784,8 @@ export function InboxPage() {
               </div>
             </aside>
           </div>
+          </div>
+          </div>
         </div>
       </section>
     </main>
@@ -732,6 +811,74 @@ function Metric({
       <strong>{value}</strong>
       <em>{delta}</em>
       <small>{sub}</small>
+    </div>
+  );
+}
+
+function LayoutPanel({
+  prefs,
+  onChange,
+  onSave,
+}: {
+  prefs: LayoutPrefs;
+  onChange: (prefs: LayoutPrefs) => void;
+  onSave: () => void;
+}) {
+  const [dragged, setDragged] = useState<"metrics" | "queue" | null>(null);
+  const labels = { metrics: "Summary metrics", queue: "Conversation queue" };
+  const move = (target: "metrics" | "queue") => {
+    if (!dragged || dragged === target) return;
+    onChange({ ...prefs, order: [target, dragged] });
+    setDragged(null);
+  };
+  return (
+    <div className="customize-popover layout-popover">
+      <div className="customize-popover-heading">
+        <div><strong>Inbox layout</strong><small>Drag sections into your preferred order.</small></div>
+        <span>⌗</span>
+      </div>
+      <div className="layout-sort-list">
+        {prefs.order.map((section) => (
+          <div
+            className="layout-sort-row"
+            key={section}
+            draggable
+            onDragStart={() => setDragged(section)}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={() => move(section)}
+          >
+            <span className="drag-handle">⠿</span><strong>{labels[section]}</strong><span className="drag-hint">drag</span>
+          </div>
+        ))}
+      </div>
+      <label className="customize-check"><input type="checkbox" checked={prefs.showMetrics} onChange={(event) => onChange({ ...prefs, showMetrics: event.target.checked })} /> Show summary metrics</label>
+      <label className="customize-check"><input type="checkbox" checked={prefs.showDetail} onChange={(event) => onChange({ ...prefs, showDetail: event.target.checked })} /> Show conversation detail</label>
+      <label className="customize-check"><input type="checkbox" checked={prefs.compact} onChange={(event) => onChange({ ...prefs, compact: event.target.checked })} /> Compact spacing</label>
+      <button className="customize-save" onClick={onSave}>Save layout</button>
+    </div>
+  );
+}
+
+function AppearancePanel({
+  prefs,
+  onChange,
+  onSave,
+}: {
+  prefs: AppearancePrefs;
+  onChange: (prefs: AppearancePrefs) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="customize-popover appearance-popover">
+      <div className="customize-popover-heading">
+        <div><strong>Appearance</strong><small>Saved to this profile and device.</small></div>
+        <span>◐</span>
+      </div>
+      <label className="customize-field">MODE<select value={prefs.mode} onChange={(event) => onChange({ ...prefs, mode: event.target.value as AppearancePrefs["mode"] })}><option value="midnight">Dark</option><option value="light">Light</option></select></label>
+      <label className="customize-field">ZOOM <b>{prefs.zoom}%</b><input type="range" min="85" max="120" step="5" value={prefs.zoom} onChange={(event) => onChange({ ...prefs, zoom: Number(event.target.value) })} /></label>
+      <label className="customize-field">FONT<select value={prefs.font} onChange={(event) => onChange({ ...prefs, font: event.target.value })}><option value="Inter, ui-sans-serif, system-ui, sans-serif">Inter / System</option><option value="Georgia, serif">Georgia</option><option value="ui-monospace, SFMono-Regular, Menlo, monospace">Mono</option><option value="Arial, sans-serif">Arial</option></select></label>
+      <div className="customize-color-row"><label className="customize-field">BACKGROUND<input type="color" value={prefs.background} onChange={(event) => onChange({ ...prefs, background: event.target.value })} /></label><label className="customize-field">ACCENT<input type="color" value={prefs.accent} onChange={(event) => onChange({ ...prefs, accent: event.target.value })} /></label></div>
+      <button className="customize-save" onClick={onSave}>Save appearance</button>
     </div>
   );
 }

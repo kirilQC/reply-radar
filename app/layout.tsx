@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./reply-radar-overrides.css";
 import "./dashboard.css";
+import PreferenceBootstrap from "./components/PreferenceBootstrap";
 
 export const metadata: Metadata = {
   title: "Reply Radar — Follow-up intelligence",
@@ -19,7 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body><PreferenceBootstrap />{children}</body>
     </html>
   );
 }
