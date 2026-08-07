@@ -30,24 +30,9 @@ const clients = [
   },
 ];
 const profiles = [
-  [
-    "Morning queue",
-    "Hot and warm conversations across every active client",
-    "12",
-    "#8b7cff",
-  ],
-  [
-    "Northstar revenue",
-    "Pricing, meeting, and objection signals",
-    "6",
-    "#55c7a2",
-  ],
-  [
-    "Re-engagement",
-    "Threads that went quiet after a positive exchange",
-    "8",
-    "#f2a36b",
-  ],
+  ["Alex Spencer", "Northstar AI · Pylon Labs", "2 clients", "#8b7cff", "AS"],
+  ["Jordan Lee", "Vectorly", "1 client", "#55c7a2", "JL"],
+  ["Maya Patel", "Northstar AI · Vectorly", "2 clients", "#f2a36b", "MP"],
 ];
 
 export default function DashboardHome() {
@@ -135,25 +120,25 @@ export default function DashboardHome() {
           <section>
             <div className="section-heading">
               <div>
-                <h2>Saved user profiles</h2>
-                <p>Cross-client queues your team can open in one click.</p>
+                <h2>Teammate profiles</h2>
+                <p>Open a teammate’s assigned client view.</p>
               </div>
               <a href="/profiles" className="text-button">
-                View all profiles →
+                Manage profiles →
               </a>
             </div>
             <div className="dashboard-profile-grid">
-              {profiles.map(([name, description, count, tone]) => (
+              {profiles.map(([name, description, count, tone, initials]) => (
                 <a
-                  href="/profiles"
+                  href={`/profiles?profile=${name.toLowerCase().replaceAll(" ", "-")}`}
                   className="dashboard-profile-card"
                   key={name}
                 >
-                  <i style={{ background: tone }}>✦</i>
+                  <i style={{ background: tone }}>{initials}</i>
                   <div>
                     <h3>{name}</h3>
                     <p>{description}</p>
-                    <small>{count} conversations need action</small>
+                    <small>{count}</small>
                   </div>
                   <span>→</span>
                 </a>

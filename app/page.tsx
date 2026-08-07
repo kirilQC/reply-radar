@@ -160,16 +160,30 @@ export function InboxPage() {
     [theme, setTheme] = useState("midnight"),
     [sent, setSent] = useState(false),
     [sidebarOpen, setSidebarOpen] = useState(false);
+  const [clientParam] = useState(() =>
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("client")
+      : null,
+  );
+  const clientName =
+    clientParam === "northstar"
+      ? "Northstar AI"
+      : clientParam === "pylon"
+        ? "Pylon Labs"
+        : clientParam === "vectorly"
+          ? "Vectorly"
+          : "All clients";
   useEffect(() => {
     if (activeNav !== "inbox") router.push(`/${activeNav}`);
   }, [activeNav, router]);
   useEffect(() => {
     const routes = [
-      "/inbox",
+      "/",
       "/profiles",
       "/calendar",
       "/analytics",
       "/health",
+      "/admin",
     ];
     const buttons = Array.from(
       document.querySelectorAll(".sidebar nav .nav-item"),
@@ -387,7 +401,7 @@ export function InboxPage() {
           <div className="crumb">
             <span>All clients</span>
             <Icon name="chevron" />
-            <strong>Priority inbox</strong>
+            <strong>{clientParam ? clientName : "All clients"}</strong>
           </div>
           <div className="top-actions">
             <label className="search">

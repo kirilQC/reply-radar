@@ -1,5 +1,81 @@
 "use client";
 import AppSidebar from "../components/AppSidebar";
 /* eslint-disable @next/next/no-html-link-for-pages */
-const profiles = [{name:"Morning queue",desc:"Hot and warm conversations across every active client",count:"12",clients:"5 clients",color:"#8b7cff"},{name:"Northstar revenue",desc:"Northstar AI · pricing, meeting, and objection signals",count:"6",clients:"Northstar AI",color:"#55c7a2"},{name:"Re-engagement",desc:"Threads that went quiet after a positive exchange",count:"8",clients:"4 clients",color:"#f2a36b"}];
-export default function ProfilesPage(){return <div className="app-shell"><AppSidebar/><section className="main-area"><header className="topbar"><div className="crumb"><span>All clients</span><strong>Profiles</strong></div></header><main className="admin-shell"><section className="admin-content"><div className="admin-heading"><div><div className="eyebrow"><span className="live-dot"/>CROSS-CLIENT VIEWS</div><h1>Profiles</h1><p>Saved queues that span clients without losing context.</p></div><button className="primary-button">+ New profile</button></div><div className="profile-grid">{profiles.map(profile=><button className="profile-card" key={profile.name}><div className="profile-icon" style={{background:profile.color}}>✦</div><div><h2>{profile.name}</h2><p>{profile.desc}</p><small>{profile.clients}</small></div><strong>{profile.count}<span> needs action</span></strong><div className="profile-open">Open profile →</div></button>)}</div></section></main></section></div>}
+const profiles = [
+  {
+    name: "Alex Spencer",
+    desc: "Agency owner",
+    clients: "Northstar AI · Pylon Labs",
+    color: "#8b7cff",
+    initials: "AS",
+  },
+  {
+    name: "Jordan Lee",
+    desc: "Sales teammate",
+    clients: "Vectorly",
+    color: "#55c7a2",
+    initials: "JL",
+  },
+  {
+    name: "Maya Patel",
+    desc: "Growth teammate",
+    clients: "Northstar AI · Vectorly",
+    color: "#f2a36b",
+    initials: "MP",
+  },
+];
+export default function ProfilesPage() {
+  return (
+    <div className="app-shell">
+      <AppSidebar />
+      <section className="main-area">
+        <header className="topbar">
+          <div className="crumb">
+            <span>All clients</span>
+            <strong>Profiles</strong>
+          </div>
+        </header>
+        <main className="admin-shell">
+          <section className="admin-content">
+            <div className="admin-heading">
+              <div>
+                <div className="eyebrow">
+                  <span className="live-dot" />
+                  TEAM PROFILES
+                </div>
+                <h1>Profiles</h1>
+                <p>
+                  Each teammate gets a simple profile and an assigned client
+                  view.
+                </p>
+              </div>
+              <button className="primary-button">+ New profile</button>
+            </div>
+            <div className="profile-grid">
+              {profiles.map((profile) => (
+                <button className="profile-card" key={profile.name}>
+                  <div
+                    className="profile-icon"
+                    style={{ background: profile.color }}
+                  >
+                    {profile.initials}
+                  </div>
+                  <div>
+                    <h2>{profile.name}</h2>
+                    <p>{profile.desc}</p>
+                    <small>{profile.clients}</small>
+                  </div>
+                  <strong>
+                    {profile.clients.split("·").length}
+                    <span> clients</span>
+                  </strong>
+                  <div className="profile-open">Open profile →</div>
+                </button>
+              ))}
+            </div>
+          </section>
+        </main>
+      </section>
+    </div>
+  );
+}
