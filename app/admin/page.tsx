@@ -71,7 +71,7 @@ export default function AdminPage() {
   const [heartbeat, setHeartbeat] = useState<HeartbeatPayload | null>(null);
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
-  const client = clients[Math.min(selected, Math.max(0, clients.length - 1))];
+  const client = clients[Math.min(selected, Math.max(0, clients.length - 1))] ?? { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced" };
   const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "", apiKey: "" });
   useEffect(() => {
     try {
@@ -88,16 +88,22 @@ export default function AdminPage() {
     /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.isNew ? "" : "Northstar helps modern revenue teams turn outbound signals into qualified pipeline. Their buyers are RevOps leaders at growing B2B companies.", timezone: client.isNew ? "" : "America/Chicago", apiKey: "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
-    const next: ClientWorkspace = { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", isNew: true };
+    const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", isNew: true };
     setWorkspaceClients((current) => [...current, next]);
     setSelected(clients.length);
     setWorkspaceOpen(true);
   };
   const saveWorkspaceChanges = () => {
     const normalizedName = workspaceDraft.name.trim();
-    const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || client.slug;
     setWorkspaceClients((current) => current.map((item, index) => index === selected ? { ...item, name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: workspaceDraft.apiKey, timezone: workspaceDraft.timezone, isNew: false } : item));
     setSaved(true);
+  };
+  const removeWorkspace = () => {
+    setWorkspaceClients((current) => current.filter((_, index) => index !== selected));
+    setSelected(0);
+    setWorkspaceOpen(false);
+    setSaved(false);
   };
   const isNewWorkspace = Boolean(client.isNew);
   const visibleClients = clients.filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()));
@@ -360,7 +366,7 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>}
-                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button></div>}
+                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><button className="secondary-button" onClick={removeWorkspace}>Remove workspace</button></div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
                       <div className="panel-heading">

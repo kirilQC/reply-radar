@@ -2,7 +2,16 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import AppSidebar from "./AppSidebar";
+import AppearancePanel, { type AppearancePrefs } from "./AppearancePanel";
 import { useEffect, useState } from "react";
+
+const defaultAppearance: AppearancePrefs = {
+  mode: "midnight",
+  zoom: 100,
+  font: "Inter, ui-sans-serif, system-ui, sans-serif",
+  background: "#0b0c10",
+  accent: "#8b7cff",
+};
 
 const seedClients = [
   {
@@ -39,14 +48,34 @@ const seedProfiles = [
 export default function DashboardHome() {
   const [clients, setClients] = useState(seedClients);
   const [profiles, setProfiles] = useState(seedProfiles.map(([name, description, tone, initials]) => ({ name, description, tone, initials, slug: name.toLowerCase().replaceAll(" ", "-") })));
+  const [appearance, setAppearance] = useState<AppearancePrefs>(defaultAppearance);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   useEffect(() => {
     try {
       const savedClients = window.localStorage.getItem("reply-radar-workspaces");
       if (savedClients) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setClients(JSON.parse(savedClients)); }
       const savedProfiles = window.localStorage.getItem("reply-radar-profiles");
       if (savedProfiles) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients: string[]; color: string; initials: string; slug: string }) => ({ ...profile, description: profile.clients.join(" · "), tone: profile.color }))); }
+      const savedPreferences = window.localStorage.getItem("reply-radar-prefs:general");
+      if (savedPreferences) {
+        const parsed = JSON.parse(savedPreferences);
+        if (parsed.appearance) setAppearance({ ...defaultAppearance, ...parsed.appearance });
+      }
     } catch { /* keep seed data */ }
   }, []);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--accent", appearance.accent);
+    root.style.setProperty("--bg", appearance.background);
+    root.style.setProperty("--font", appearance.font);
+    root.style.setProperty("--reply-radar-zoom", `${appearance.zoom / 100}`);
+    document.body.classList.toggle("light-mode", appearance.mode === "light");
+  }, [appearance]);
+  const saveAppearance = () => {
+    const existing = JSON.parse(window.localStorage.getItem("reply-radar-prefs:general") || "{}");
+    window.localStorage.setItem("reply-radar-prefs:general", JSON.stringify({ ...existing, appearance }));
+    setAppearanceOpen(false);
+  };
   return (
     <div className="app-shell">
       <AppSidebar />
@@ -54,7 +83,8 @@ export default function DashboardHome() {
         <header className="topbar">
           <div className="crumb dashboard-brand">QC Growth</div>
           <div className="top-actions">
-            <button className="icon-button theme-toggle" aria-label="Customize appearance" title="Customize appearance" onClick={() => { window.location.href = "/inbox?appearance=1"; }}>◐</button>
+            <button className="icon-button theme-toggle" aria-label="Customize appearance" title="Customize appearance" onClick={() => setAppearanceOpen((open) => !open)}>◐</button>
+            {appearanceOpen && <AppearancePanel prefs={appearance} onChange={setAppearance} onSave={saveAppearance} />}
           </div>
         </header>
         <main className="dashboard-home">
