@@ -21,12 +21,15 @@ type Lead = {
   avatar: string;
 };
 type LayoutPrefs = {
-  order: Array<"metrics" | "queue">;
+  order: Array<"metrics" | "analytics" | "queue">;
   showMetrics: boolean;
+  showAnalytics: boolean;
   showDetail: boolean;
   compact: boolean;
   metrics: string[];
+  graphs: GraphConfig[];
 };
+type GraphConfig = { id: string; title: string; metric: string; kind: "line" | "bars" | "donut" };
 type AppearancePrefs = {
   mode: "midnight" | "light";
   zoom: number;
@@ -35,11 +38,16 @@ type AppearancePrefs = {
   accent: string;
 };
 const defaultLayout: LayoutPrefs = {
-  order: ["metrics", "queue"],
+  order: ["metrics", "analytics", "queue"],
   showMetrics: true,
+  showAnalytics: true,
   showDetail: true,
   compact: false,
   metrics: ["needsAction", "hotConversations", "avgReplyTime", "pipelineSaved"],
+  graphs: [
+    { id: "reply-volume", title: "Reply volume", metric: "Replies · 7 days", kind: "line" },
+    { id: "queue-mix", title: "Queue mix", metric: "Lead status", kind: "donut" },
+  ],
 };
 const defaultAppearance: AppearancePrefs = {
   mode: "midnight",
@@ -255,7 +263,11 @@ export function InboxPage() {
           .find((item) => item.startsWith("reply-radar-preferences="))
           ?.split("=")[1];
         const parsed = JSON.parse(saved || fallback || (cookieValue ? decodeURIComponent(cookieValue) : "null"));
-        if (parsed?.layout) setLayoutPrefs({ ...defaultLayout, ...parsed.layout });
+        if (parsed?.layout) {
+          const nextLayout = { ...defaultLayout, ...parsed.layout };
+          nextLayout.order = Array.from(new Set([...nextLayout.order, "analytics"])).filter((item) => ["metrics", "analytics", "queue"].includes(item)) as LayoutPrefs["order"];
+          setLayoutPrefs(nextLayout);
+        }
         if (parsed?.appearance) {
           const nextAppearance = { ...defaultAppearance, ...parsed.appearance };
           setAppearance(nextAppearance);
@@ -571,6 +583,9 @@ export function InboxPage() {
               return metric ? <Metric key={metric.id} {...metric} /> : null;
             })}
           </div>
+          <div className="layout-section" style={{ order: layoutPrefs.order.indexOf("analytics") }} hidden={!layoutPrefs.showAnalytics}>
+            <InboxAnalytics graphs={layoutPrefs.graphs} onChange={(graphs) => setLayoutPrefs({ ...layoutPrefs, graphs })} />
+          </div>
           <div className="layout-section queue-section" style={{ order: layoutPrefs.order.indexOf("queue") }}>
           <div className="health-strip">
             <div className="health-icon">
@@ -804,6 +819,55 @@ function Metric({
   );
 }
 
+const graphPresets: Array<Omit<GraphConfig, "id">> = [
+  { title: "Reply volume", metric: "Replies · 7 days", kind: "line" },
+  { title: "Queue mix", metric: "Lead status", kind: "donut" },
+  { title: "Positive reply rate", metric: "Positive replies", kind: "bars" },
+  { title: "Response speed", metric: "Avg. reply time", kind: "line" },
+  { title: "Client load", metric: "Leads by client", kind: "bars" },
+];
+
+function InboxAnalytics({
+  graphs,
+  onChange,
+}: {
+  graphs: GraphConfig[];
+  onChange: (graphs: GraphConfig[]) => void;
+}) {
+  const [newPreset, setNewPreset] = useState(2);
+  const [newKind, setNewKind] = useState<GraphConfig["kind"]>("line");
+  const [newTitle, setNewTitle] = useState("");
+  const addGraph = () => {
+    if (graphs.length >= 4) return;
+    const preset = graphPresets[newPreset];
+    onChange([
+      ...graphs,
+      {
+        ...preset,
+        id: `custom-${Date.now()}`,
+        title: newTitle.trim() || preset.title,
+        kind: newKind,
+      },
+    ]);
+    setNewTitle("");
+  };
+  return (
+    <section className="inbox-analytics-section">
+      <div className="inbox-analytics-heading">
+        <div><span>INBOX ANALYTICS</span><h2>Conversation trends</h2><p>Choose preset graphs or build a custom view for this inbox.</p></div>
+        <div className="graph-builder"><select value={newPreset} onChange={(event) => setNewPreset(Number(event.target.value))}>{graphPresets.map((preset, index) => <option key={preset.title} value={index}>{preset.title}</option>)}</select><select value={newKind} onChange={(event) => setNewKind(event.target.value as GraphConfig["kind"])}><option value="line">Line</option><option value="bars">Bars</option><option value="donut">Donut</option></select><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Custom title"/><button onClick={addGraph} disabled={graphs.length >= 4}>+ Add graph</button></div>
+      </div>
+      <div className="inbox-graph-grid">{graphs.map((graph) => <article className="inbox-graph-card" key={graph.id}><div className="inbox-graph-card-heading"><div><span>{graph.metric}</span><strong>{graph.title}</strong></div><button aria-label={`Remove ${graph.title}`} onClick={() => onChange(graphs.filter((item) => item.id !== graph.id))}>×</button></div><GraphVisual kind={graph.kind} /></article>)}</div>
+    </section>
+  );
+}
+
+function GraphVisual({ kind }: { kind: GraphConfig["kind"] }) {
+  if (kind === "donut") return <div className="inbox-donut"><div><strong>12</strong><small>leads</small></div></div>;
+  if (kind === "bars") return <div className="inbox-bars">{[42, 58, 48, 73, 65, 82, 68].map((height, index) => <i key={index} style={{ height: `${height}%` }} />)}</div>;
+  return <svg className="inbox-line" viewBox="0 0 420 110" role="img" aria-label="Trend graph"><path d="M0 90 L60 72 L120 78 L180 43 L240 58 L300 30 L360 45 L420 12" /><circle cx="420" cy="12" r="4" /></svg>;
+}
+
 function LayoutPanel({
   prefs,
   onChange,
@@ -813,9 +877,9 @@ function LayoutPanel({
   onChange: (prefs: LayoutPrefs) => void;
   onSave: () => void;
 }) {
-  const [dragged, setDragged] = useState<"metrics" | "queue" | null>(null);
-  const labels = { metrics: "Summary metrics", queue: "Conversation queue" };
-  const move = (target: "metrics" | "queue") => {
+  const [dragged, setDragged] = useState<"metrics" | "analytics" | "queue" | null>(null);
+  const labels = { metrics: "Summary metrics", analytics: "Inbox analytics", queue: "Conversation queue" };
+  const move = (target: "metrics" | "analytics" | "queue") => {
     if (!dragged || dragged === target) return;
     onChange({ ...prefs, order: [target, dragged] });
     setDragged(null);
@@ -841,6 +905,7 @@ function LayoutPanel({
         ))}
       </div>
       <label className="customize-check"><input type="checkbox" checked={prefs.showMetrics} onChange={(event) => onChange({ ...prefs, showMetrics: event.target.checked })} /> Show summary metrics</label>
+      <label className="customize-check"><input type="checkbox" checked={prefs.showAnalytics} onChange={(event) => onChange({ ...prefs, showAnalytics: event.target.checked })} /> Show inbox analytics</label>
       <label className="customize-check"><input type="checkbox" checked={prefs.showDetail} onChange={(event) => onChange({ ...prefs, showDetail: event.target.checked })} /> Show conversation detail</label>
       <label className="customize-check"><input type="checkbox" checked={prefs.compact} onChange={(event) => onChange({ ...prefs, compact: event.target.checked })} /> Compact spacing</label>
       <div className="metric-picker-heading"><strong>Summary metrics</strong><small>{prefs.metrics.length}/6 selected</small></div>
