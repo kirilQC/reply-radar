@@ -64,6 +64,19 @@ export default function DashboardHome() {
     } catch { /* keep seed data */ }
   }, []);
   useEffect(() => {
+    const refresh = () => {
+      try {
+        const savedClients = window.localStorage.getItem("reply-radar-workspaces");
+        if (savedClients) setClients(JSON.parse(savedClients));
+        const savedProfiles = window.localStorage.getItem("reply-radar-profiles");
+        if (savedProfiles) setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients: string[]; color: string; initials: string; slug: string }) => ({ ...profile, description: profile.clients.join(" · "), tone: profile.color })));
+      } catch { /* keep current data */ }
+    };
+    window.addEventListener("reply-radar-workspaces-changed", refresh);
+    window.addEventListener("reply-radar-profiles-changed", refresh);
+    return () => { window.removeEventListener("reply-radar-workspaces-changed", refresh); window.removeEventListener("reply-radar-profiles-changed", refresh); };
+  }, []);
+  useEffect(() => {
     const root = document.documentElement;
     root.style.setProperty("--accent", appearance.accent);
     root.style.setProperty("--bg", appearance.background);

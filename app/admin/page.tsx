@@ -11,6 +11,7 @@ type ClientWorkspace = {
   status: string;
   tone: string;
   lastSync: string;
+  createdAt?: string;
   isNew?: boolean;
   brief?: string;
   apiKey?: string;
@@ -25,6 +26,7 @@ const seedClients: ClientWorkspace[] = [
     status: "Connected",
     tone: "#8b7cff",
     lastSync: "24 sec ago",
+    createdAt: "2026-08-01T09:00:00.000Z",
   },
   {
     name: "Pylon Labs",
@@ -33,6 +35,7 @@ const seedClients: ClientWorkspace[] = [
     status: "Connected",
     tone: "#55c7a2",
     lastSync: "2 min ago",
+    createdAt: "2026-08-02T10:30:00.000Z",
   },
   {
     name: "Vectorly",
@@ -41,6 +44,7 @@ const seedClients: ClientWorkspace[] = [
     status: "Needs attention",
     tone: "#f2a36b",
     lastSync: "3 hr ago",
+    createdAt: "2026-08-03T14:15:00.000Z",
   },
 ];
 type HeartbeatPayload = {
@@ -73,10 +77,13 @@ export default function AdminPage() {
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))] ?? { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced" };
   const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "", apiKey: "" });
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [workspacePassword, setWorkspacePassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem("reply-radar-workspaces");
-      if (saved) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceClients(JSON.parse(saved) as ClientWorkspace[]); }
+      if (saved) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceClients((JSON.parse(saved) as ClientWorkspace[]).map((item) => ({ ...item, createdAt: item.createdAt ?? new Date().toISOString() }))); }
     } catch { /* keep seed data */ }
     setWorkspaceStorageReady(true);
   }, []);
@@ -88,7 +95,7 @@ export default function AdminPage() {
     /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.isNew ? "" : "Northstar helps modern revenue teams turn outbound signals into qualified pipeline. Their buyers are RevOps leaders at growing B2B companies.", timezone: client.isNew ? "" : "America/Chicago", apiKey: "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
-    const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", isNew: true };
+    const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
     setWorkspaceClients((current) => [...current, next]);
     setSelected(clients.length);
     setWorkspaceOpen(true);
@@ -100,10 +107,20 @@ export default function AdminPage() {
     setSaved(true);
   };
   const removeWorkspace = () => {
-    setWorkspaceClients((current) => current.filter((_, index) => index !== selected));
+    const next = clients.filter((_, index) => index !== selected);
+    setWorkspaceClients(next);
+    window.localStorage.setItem("reply-radar-workspaces", JSON.stringify(next));
+    window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
     setSelected(0);
     setWorkspaceOpen(false);
     setSaved(false);
+    setPasswordOpen(false);
+    setWorkspacePassword("");
+  };
+  const requestRemoveWorkspace = () => { setPasswordError(""); setWorkspacePassword(""); setPasswordOpen(true); };
+  const confirmRemoveWorkspace = () => {
+    if (workspacePassword !== "QueenCity@2026") { setPasswordError("Incorrect password."); return; }
+    removeWorkspace();
   };
   const isNewWorkspace = Boolean(client.isNew);
   const visibleClients = clients.filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()));
@@ -350,9 +367,7 @@ export default function AdminPage() {
                           </span>
                         </div>
                         <strong>{item.name || "Unnamed workspace"}</strong>
-                        <small>
-                          {item.leads} leads · Last sync {item.lastSync}
-                        </small>
+                        <small>{item.leads} leads · Created {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "—"}</small>
                         <div className="workspace-progress">
                           <span
                             style={{
@@ -366,7 +381,7 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>}
-                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><button className="secondary-button" onClick={removeWorkspace}>Remove workspace</button></div>}
+                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><button className="secondary-button" onClick={requestRemoveWorkspace}>Remove workspace</button></div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
                       <div className="panel-heading">
@@ -765,6 +780,7 @@ export default function AdminPage() {
           </div>
         </main>
       </section>
+      {passwordOpen && <div className="help-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-title"><div className="help-card delete-confirm-card"><button className="help-close" onClick={() => setPasswordOpen(false)} aria-label="Cancel">×</button><h2 id="delete-workspace-title">Remove workspace?</h2><p>This permanently removes {client.name || "this workspace"} from the local workspace directory. Enter the admin password to continue.</p><label className="field-label">ADMIN PASSWORD<input autoFocus type="password" value={workspacePassword} onChange={(event) => setWorkspacePassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && confirmRemoveWorkspace()} /></label>{passwordError && <p className="delete-password-error">{passwordError}</p>}<div className="delete-confirm-actions"><button className="secondary-button" onClick={() => setPasswordOpen(false)}>Cancel</button><button className="primary-button delete-danger-button" onClick={confirmRemoveWorkspace}>Remove workspace</button></div></div></div>}
     </div>
   );
 }

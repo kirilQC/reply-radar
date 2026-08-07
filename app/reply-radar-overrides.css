@@ -30,5 +30,7 @@ body{zoom:var(--reply-radar-zoom,1)}
 .global-caption{margin-top:24px}
 html:not(.hydrated) body{visibility:hidden}
 .client-config-heading{display:flex;align-items:center;gap:13px;font-size:34px!important}.client-config-heading .admin-client-heading-logo{width:44px;height:44px;margin-right:0;border-radius:12px;font-size:17px}
+.profile-card-actions{margin-left:auto;display:flex;align-items:center;gap:12px}.profile-delete-button{color:var(--muted-2);background:transparent;font-size:10px;opacity:0;transition:opacity .15s}.profile-card-modern:hover .profile-delete-button,.profile-delete-button:focus{opacity:1}.delete-confirm-card h2{margin-top:0}.delete-confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}.delete-danger-button{background:#b94d4d}
+.delete-password-error{color:#ff9a8c!important;font-size:11px!important;margin-top:8px!important}
 .topbar:has(.dashboard-brand){position:relative}.dashboard-brand{position:absolute;left:50%;transform:translateX(-50%);font-family:"Bodoni 72","Didot",Georgia,serif;font-size:24px;font-weight:700;letter-spacing:.01em;color:#fff;white-space:nowrap}
 .analytics-shell .admin-content,.health-shell .admin-content{max-width:none;width:100%;box-sizing:border-box}.analytics-shell .bar-col i{background:var(--accent)!important}

@@ -66,6 +66,7 @@ export default function ProfilesPage() {
 
 function ProfileIndex() {
   const [profiles, setProfiles] = useState<Profile[]>(initialProfiles);
+  const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
@@ -77,6 +78,14 @@ function ProfileIndex() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+  const deleteProfile = () => {
+    if (!deleteTarget) return;
+    const next = profiles.filter((item) => item.slug !== deleteTarget.slug);
+    window.localStorage.setItem("reply-radar-profiles", JSON.stringify(next));
+    setProfiles(next);
+    window.dispatchEvent(new Event("reply-radar-profiles-changed"));
+    setDeleteTarget(null);
+  };
   return (
     <main className="profiles-page">
       <div className="profiles-heading">
@@ -123,10 +132,11 @@ function ProfileIndex() {
                 ))}
               </div>
             </div>
-            <div className="profile-card-arrow">→</div>
+            <div className="profile-card-actions"><button type="button" className="profile-delete-button" aria-label={`Delete ${profile.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setDeleteTarget(profile); }}>Delete</button><div className="profile-card-arrow">→</div></div>
           </a>
         ))}
       </div>
+      {deleteTarget && <div className="help-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-profile-title"><div className="help-card delete-confirm-card"><button className="help-close" onClick={() => setDeleteTarget(null)} aria-label="Cancel">×</button><h2 id="delete-profile-title">Delete profile?</h2><p>This will remove {deleteTarget.name || "this profile"} and their saved client assignments.</p><div className="delete-confirm-actions"><button className="secondary-button" onClick={() => setDeleteTarget(null)}>Cancel</button><button className="primary-button delete-danger-button" onClick={deleteProfile}>Delete profile</button></div></div></div>}
     </main>
   );
 }

@@ -220,10 +220,10 @@ export function InboxPage() {
     // URL search params are client-only state on this static route.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setQueryString(window.location.search);
-    try {
-      const saved = window.localStorage.getItem("reply-radar-workspaces");
-      if (saved) setWorkspaceDirectory(JSON.parse(saved));
-    } catch { /* use seeded routes */ }
+    const refreshWorkspaces = () => { try { const saved = window.localStorage.getItem("reply-radar-workspaces"); if (saved) setWorkspaceDirectory(JSON.parse(saved)); } catch { /* use seeded routes */ } };
+    refreshWorkspaces();
+    window.addEventListener("reply-radar-workspaces-changed", refreshWorkspaces);
+    return () => window.removeEventListener("reply-radar-workspaces-changed", refreshWorkspaces);
   }, []);
   useEffect(() => {
     if (new URLSearchParams(queryString).get("appearance") === "1") setAppearanceOpen(true);

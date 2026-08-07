@@ -77,7 +77,8 @@ export default function AppSidebar() {
       try { const saved = window.localStorage.getItem("reply-radar-workspaces"); if (saved) setSidebarClients(JSON.parse(saved)); } catch { /* ignore */ }
     };
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener("reply-radar-workspaces-changed", onStorage);
+    return () => { window.removeEventListener("storage", onStorage); window.removeEventListener("reply-radar-workspaces-changed", onStorage); };
   }, []);
   useEffect(() => {
     window.localStorage.setItem(
