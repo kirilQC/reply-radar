@@ -173,7 +173,7 @@ function ProfileEditor({
     const existing = (() => {
       try {
         return JSON.parse(
-          window.localStorage.getItem("reply-radar-profiles") || "[]",
+          window.localStorage.getItem("reply-radar-profiles") || JSON.stringify(initialProfiles),
         ) as Profile[];
       } catch {
         return [];
