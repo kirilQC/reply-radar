@@ -148,22 +148,6 @@ export default function AdminPage() {
                       <i style={{ background: item.tone }}>{item.name[0]}</i>
                       <span>{item.name}</span>
                     </button>
-                    {selected === index && workspaceOpen && (
-                      <div className="admin-client-configs">
-                        <button onClick={() => setActive("workspaces")}>
-                          Connection & profile
-                        </button>
-                        <button onClick={() => setActive("ai")}>
-                          AI context & voice
-                        </button>
-                        <button onClick={() => setActive("scoring")}>
-                          Scoring engine
-                        </button>
-                        <button onClick={() => setActive("theme")}>
-                          Theme & logo
-                        </button>
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
@@ -194,7 +178,7 @@ export default function AdminPage() {
                     ADMIN CONSOLE
                   </div>
                   <h1>
-                    {active === "global"
+                    {active === "workspaces" && workspaceOpen ? <><span className="admin-client-heading-logo" style={{ background: client.tone }}>{client.name[0]}</span>{client.name}</> : active === "global"
                       ? "Global config"
                       : active === "workspaces"
                         ? "Client workspaces"
@@ -321,7 +305,7 @@ export default function AdminPage() {
                       return (
                       <button
                         key={item.slug}
-                        className={`workspace-card ${selected === index ? "selected" : ""}`}
+                        className="workspace-card"
                         onClick={() => { setSelected(index); setWorkspaceOpen(true); }}
                       >
                         <div className="workspace-card-top">
@@ -350,7 +334,7 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>}
-                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><span>Editing {client.name}</span></div>}
+                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button></div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
                       <div className="panel-heading">
@@ -459,6 +443,23 @@ export default function AdminPage() {
                           </small>
                         </div>
                       </div>
+                    </section>
+                  </div>}
+                  {workspaceOpen && <div className="client-config-sections">
+                    <section className="admin-panel client-config-section" id="client-ai">
+                      <div className="panel-heading"><div><h2>AI context & voice</h2><p>Client-specific Anthropic drafting rules and review guardrails.</p></div><span className="connection-badge"><i /> Client-specific</span></div>
+                      <div className="field-row"><label className="field-label">MODEL<select defaultValue="claude-sonnet-4-20250514"><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" defaultValue="0.35" step="0.05" /></label></div>
+                      <label className="field-label">CUSTOM SYSTEM PROMPT<textarea defaultValue="Be concise, specific, and human. Never invent customer proof. Ask one clear next-step question." /></label>
+                    </section>
+                    <section className="admin-panel client-config-section" id="client-scoring">
+                      <div className="panel-heading"><div><h2>Scoring engine</h2><p>Client-specific queue weights and urgency thresholds.</p></div><span className="saved-dot">● Draft config</span></div>
+                      <div className="field-row"><label className="field-label">HOT THRESHOLD<input type="number" defaultValue="80" /></label><label className="field-label">WARM THRESHOLD<input type="number" defaultValue="60" /></label></div>
+                      <label className="field-label">UNANSWERED QUESTION WEIGHT<input type="range" defaultValue="78" /></label>
+                    </section>
+                    <section className="admin-panel client-config-section" id="client-theme">
+                      <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
+                      <div className="logo-drop"><div className="logo-sample" style={{ background: accentColor }}>{client.name[0]}</div><div><strong>Upload client logo</strong><small>SVG, PNG, JPG · max 2MB</small></div><button className="secondary-button" onClick={chooseLogo}>Choose file</button><input ref={logoInput} type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={handleLogo} /></div>
+                      <label className="field-label">CLIENT ACCENT<input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} /></label>
                     </section>
                   </div>}
                 </>

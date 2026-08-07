@@ -40,11 +40,7 @@ function SidebarIcon({ name }: { name: string }) {
 
 export default function AppSidebar() {
   const pathname = usePathname();
-  const [selectedClient] = useState(() =>
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("client")
-      : null,
-  );
+  const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [profileParam] = useState(() =>
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("profile")
@@ -61,6 +57,11 @@ export default function AppSidebar() {
       typeof window !== "undefined" &&
       window.localStorage.getItem("reply-radar-sidebar") === "collapsed",
   );
+  useEffect(() => {
+    // URL selection is client-only state for static navigation.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedClient(new URLSearchParams(window.location.search).get("client"));
+  }, [pathname]);
   useEffect(() => {
     window.localStorage.setItem(
       "reply-radar-sidebar",

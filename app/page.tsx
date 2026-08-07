@@ -518,7 +518,6 @@ export function InboxPage() {
             <Icon name="chevron" />
             <strong>
               {profileName ?? (clientParam ? clientName : "General inbox")}
-              {clientParam && <span className="crumb-client-logo" style={{ background: clientParam === "northstar" ? "#8b7cff" : clientParam === "pylon" ? "#55c7a2" : "#f2a36b" }}>{clientName[0]}</span>}
             </strong>
           </div>
           <div className="top-actions">
@@ -587,6 +586,7 @@ export function InboxPage() {
                 06
               </div>
               <h1>
+                {clientParam && <span className="inbox-heading-logo" style={{ background: clientParam === "northstar" ? "#8b7cff" : clientParam === "pylon" ? "#55c7a2" : "#f2a36b" }}>{clientName[0]}</span>}
                 {profileName ? `${greeting}, ${profileName}` : clientParam ? clientName : "General inbox"}
               </h1>
               <p>
