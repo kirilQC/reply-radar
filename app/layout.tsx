@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./reply-radar-overrides.css";
 
 export const metadata: Metadata = {
   title: "Reply Radar — Follow-up intelligence",

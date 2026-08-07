@@ -2,7 +2,6 @@
 /* eslint-disable @next/next/no-html-link-for-pages, jsx-a11y/label-has-associated-control, react/no-unescaped-entities */
 
 import { useState } from "react";
-import "../reply-radar-overrides.css";
 
 const clients = [
   { name: "Northstar AI", slug: "northstar", leads: 486, status: "Connected", tone: "#8b7cff", lastSync: "24 sec ago" },

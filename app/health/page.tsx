@@ -1,7 +1,6 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages */
 import { useEffect, useState } from "react";
-import "../reply-radar-overrides.css";
 
 export default function HealthPage() {
   const [health, setHealth] = useState<{ status?: string; services?: Record<string, boolean> }>({});
