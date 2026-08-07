@@ -6,6 +6,7 @@ import Link from "next/link";
 
 const items = [
   ["/", "Dashboard", "⌂"],
+  ["/inbox", "Priority inbox", "▣"],
   ["/profiles", "Profiles", "♙"],
   ["/calendar", "Follow-up calendar", "□"],
   ["/analytics", "Analytics", "▥"],
@@ -15,6 +16,11 @@ const items = [
 
 export default function AppSidebar() {
   const pathname = usePathname();
+  const [selectedClient] = useState(() =>
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("client")
+      : null,
+  );
   const [collapsed, setCollapsed] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -36,7 +42,11 @@ export default function AppSidebar() {
           className="brand-name"
           style={{ textDecoration: "none", color: "inherit" }}
         >
-          <span style={{ color: "var(--accent)" }}>▰</span>{" "}
+          <span className="brand-mark">
+            <span />
+            <span />
+            <span />
+          </span>{" "}
           <span className="sidebar-label">
             reply<span>radar</span>
           </span>
@@ -49,6 +59,18 @@ export default function AppSidebar() {
           {collapsed ? "→" : "←"}
         </button>
       </div>
+      <button className="workspace-select">
+        <span className="workspace-dot" />
+        <span>
+          <small>WORKSPACE</small>
+          <strong>
+            {selectedClient
+              ? selectedClient[0].toUpperCase() + selectedClient.slice(1)
+              : "All client workspaces"}
+          </strong>
+        </span>
+        <span>⌄</span>
+      </button>
       <div className="nav-label">Operate</div>
       <nav>
         {items.map(([href, label, icon]) => (
@@ -66,15 +88,24 @@ export default function AppSidebar() {
         Clients <button aria-label="Add client">+</button>
       </div>
       <div className="client-list">
-        <button>
+        <a
+          className={`client-directory-item ${selectedClient === "northstar" ? "selected" : ""}`}
+          href="/inbox?client=northstar"
+        >
           <i style={{ background: "#8b7cff" }}>N</i>Northstar AI <span>6</span>
-        </button>
-        <button>
+        </a>
+        <a
+          className={`client-directory-item ${selectedClient === "pylon" ? "selected" : ""}`}
+          href="/inbox?client=pylon"
+        >
           <i style={{ background: "#55c7a2" }}>P</i>Pylon Labs <span>3</span>
-        </button>
-        <button>
+        </a>
+        <a
+          className={`client-directory-item ${selectedClient === "vectorly" ? "selected" : ""}`}
+          href="/inbox?client=vectorly"
+        >
           <i style={{ background: "#f2a36b" }}>V</i>Vectorly <span>2</span>
-        </button>
+        </a>
       </div>
       <div className="sidebar-bottom">
         <div className="user-chip">
