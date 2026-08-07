@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 
 const initialProfiles = [
@@ -29,6 +29,7 @@ const initialProfiles = [
     initials: "MP",
   },
 ];
+type Profile = (typeof initialProfiles)[number] & { photo?: string };
 
 export default function ProfilesPage() {
   const [profileSlug] = useState(() =>
@@ -64,6 +65,18 @@ export default function ProfilesPage() {
 }
 
 function ProfileIndex() {
+  const [profiles, setProfiles] = useState<Profile[]>(initialProfiles);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem("reply-radar-profiles");
+        if (saved) setProfiles(JSON.parse(saved));
+      } catch {
+        // Keep the seeded profiles if browser storage is unavailable.
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
   return (
     <main className="profiles-page">
       <div className="profiles-heading">
@@ -85,18 +98,22 @@ function ProfileIndex() {
         </button>
       </div>
       <div className="profile-card-grid">
-        {initialProfiles.map((profile) => (
+        {profiles.map((profile) => (
           <a
             href={`/profiles?profile=${profile.slug}`}
             className="profile-card-modern"
             key={profile.slug}
           >
-            <div
-              className="profile-card-avatar"
-              style={{ background: profile.color }}
-            >
-              {profile.initials}
-            </div>
+            {profile.photo ? (
+              <img src={profile.photo} alt="" className="profile-card-avatar" />
+            ) : (
+              <div
+                className="profile-card-avatar"
+                style={{ background: profile.color }}
+              >
+                {profile.initials}
+              </div>
+            )}
             <div className="profile-card-copy">
               <h2>{profile.name}</h2>
               <p>{profile.role}</p>
@@ -117,10 +134,10 @@ function ProfileIndex() {
 function ProfileEditor({
   profile,
 }: {
-  profile: (typeof initialProfiles)[number];
+  profile: Profile;
 }) {
   const [name, setName] = useState(profile.name);
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<string | null>(profile.photo ?? null);
   const [assigned, setAssigned] = useState(profile.clients);
   const fileRef = useRef<HTMLInputElement>(null);
   const allClients = ["Northstar AI", "Pylon Labs", "Vectorly"];
@@ -135,8 +152,40 @@ function ProfileEditor({
     setAssigned((current) =>
       current.includes(client)
         ? current.filter((item) => item !== client)
-        : [...current, client],
+      : [...current, client],
     );
+  const saveProfile = () => {
+    const normalizedName = name.trim() || "Unnamed teammate";
+    const initials = normalizedName
+      .split(/\s+/)
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+    const savedProfile = {
+      ...profile,
+      name: normalizedName,
+      role: profile.role || "Teammate",
+      clients: assigned,
+      initials: initials || "?",
+      ...(photo ? { photo } : {}),
+    };
+    const existing = (() => {
+      try {
+        return JSON.parse(
+          window.localStorage.getItem("reply-radar-profiles") || "[]",
+        ) as Profile[];
+      } catch {
+        return [];
+      }
+    })();
+    const next = [
+      ...existing.filter((item) => item.slug !== savedProfile.slug),
+      savedProfile,
+    ];
+    window.localStorage.setItem("reply-radar-profiles", JSON.stringify(next));
+    window.location.href = "/profiles";
+  };
   return (
     <main className="profile-editor-page">
       <a className="back-link" href="/profiles">
@@ -151,7 +200,9 @@ function ProfileEditor({
           <h1>{name}</h1>
           <p>Configure this teammate’s identity and assigned client view.</p>
         </div>
-        <button className="primary-button">Save profile</button>
+        <button className="primary-button" onClick={saveProfile}>
+          Save profile
+        </button>
       </div>
       <div className="profile-editor-grid">
         <section className="profile-editor-panel">
