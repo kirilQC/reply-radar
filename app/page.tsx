@@ -216,14 +216,24 @@ export function InboxPage() {
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
   const [queryString, setQueryString] = useState("");
   const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string }>>([]);
+  const [liveProfiles, setLiveProfiles] = useState<Array<{ slug: string; name: string; clients: string[] }>>([]);
   useEffect(() => {
     // URL search params are client-only state on this static route.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setQueryString(window.location.search);
-    const refreshWorkspaces = () => { try { const saved = window.localStorage.getItem("reply-radar-workspaces"); if (saved) setWorkspaceDirectory(JSON.parse(saved)); } catch { /* use seeded routes */ } };
+    const refreshWorkspaces = () => {
+      try {
+        const saved = window.localStorage.getItem("reply-radar-workspaces");
+        if (saved) setWorkspaceDirectory(JSON.parse(saved));
+        const savedProfiles = window.localStorage.getItem("reply-radar-profiles");
+        if (savedProfiles) setLiveProfiles(JSON.parse(savedProfiles));
+      } catch { /* use seeded routes */ }
+    };
     refreshWorkspaces();
     window.addEventListener("reply-radar-workspaces-changed", refreshWorkspaces);
-    return () => window.removeEventListener("reply-radar-workspaces-changed", refreshWorkspaces);
+    window.addEventListener("reply-radar-profiles-changed", refreshWorkspaces);
+    window.addEventListener("storage", refreshWorkspaces);
+    return () => { window.removeEventListener("reply-radar-workspaces-changed", refreshWorkspaces); window.removeEventListener("reply-radar-profiles-changed", refreshWorkspaces); window.removeEventListener("storage", refreshWorkspaces); };
   }, []);
   useEffect(() => {
     if (new URLSearchParams(queryString).get("appearance") === "1") setAppearanceOpen(true);
@@ -231,13 +241,13 @@ export function InboxPage() {
   const query = new URLSearchParams(queryString);
   const clientParam = query.get("client");
   const profileParam = query.get("profile");
-  const assignedClients =
-    profileParam === "alex-spencer"
-      ? ["Northstar", "Pylon"]
-      : profileParam === "jordan-lee"
-        ? ["Vectorly"]
-        : profileParam === "maya-patel"
-          ? ["Northstar", "Vectorly"]
+  const liveProfile = liveProfiles.find((profile) => profile.slug === profileParam);
+  const clientLabel = (name: string) => {
+    const workspace = workspaceDirectory.find((item) => item.name === name);
+    return workspace?.slug === "northstar" ? "Northstar" : workspace?.slug === "pylon" ? "Pylon" : workspace?.slug === "vectorly" ? "Vectorly" : name;
+  };
+  const assignedClients = liveProfile
+      ? liveProfile.clients.map(clientLabel)
         : clientParam === "northstar"
           ? ["Northstar"]
           : clientParam === "pylon"
@@ -247,14 +257,7 @@ export function InboxPage() {
                 : clientParam
                   ? [workspaceDirectory.find((item) => item.slug === clientParam)?.name || clientParam]
                   : null;
-  const profileName =
-    profileParam === "alex-spencer"
-      ? "Alex Spencer"
-      : profileParam === "jordan-lee"
-        ? "Jordan Lee"
-        : profileParam === "maya-patel"
-          ? "Maya Patel"
-          : null;
+  const profileName = liveProfile?.name ?? null;
   const allWorkspaceNames = workspaceDirectory.map((item) => item.name).filter(Boolean);
   const trackedClients = assignedClients ?? (allWorkspaceNames.length ? allWorkspaceNames : ["Northstar", "Pylon", "Vectorly"]);
   const trackedWorkspaceSlugs = trackedClients.map((client) => workspaceDirectory.find((item) => item.name === client)?.slug || client.toLowerCase());

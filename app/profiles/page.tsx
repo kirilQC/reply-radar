@@ -37,6 +37,29 @@ export default function ProfilesPage() {
       ? new URLSearchParams(window.location.search).get("profile")
       : null,
   );
+  const [profiles, setProfiles] = useState<Profile[]>(initialProfiles);
+  const [workspaceNames, setWorkspaceNames] = useState<string[]>([]);
+  useEffect(() => {
+    const hydrate = () => {
+      try {
+        const savedProfiles = window.localStorage.getItem("reply-radar-profiles");
+        if (savedProfiles) setProfiles(JSON.parse(savedProfiles));
+        const savedWorkspaces = window.localStorage.getItem("reply-radar-workspaces");
+        if (savedWorkspaces) setWorkspaceNames((JSON.parse(savedWorkspaces) as Array<{ name?: string }>).map((item) => item.name ?? "").filter(Boolean));
+      } catch {
+        // Keep seeded data when storage is unavailable or malformed.
+      }
+    };
+    hydrate();
+    window.addEventListener("storage", hydrate);
+    window.addEventListener("reply-radar-profiles-changed", hydrate);
+    window.addEventListener("reply-radar-workspaces-changed", hydrate);
+    return () => {
+      window.removeEventListener("storage", hydrate);
+      window.removeEventListener("reply-radar-profiles-changed", hydrate);
+      window.removeEventListener("reply-radar-workspaces-changed", hydrate);
+    };
+  }, []);
   const profile =
     profileSlug === "new"
       ? {
@@ -47,7 +70,7 @@ export default function ProfilesPage() {
           color: "#8b7cff",
           initials: "+",
         }
-      : initialProfiles.find((item) => item.slug === profileSlug);
+      : profiles.find((item) => item.slug === profileSlug);
   return (
     <div className="app-shell">
       <AppSidebar />
@@ -59,7 +82,7 @@ export default function ProfilesPage() {
             <strong>{profile ? profile.name || "New profile" : "Profiles"}</strong>
           </div>
         </header>
-        {profile ? <ProfileEditor profile={profile} /> : <ProfileIndex />}
+        {profile ? <ProfileEditor profile={profile} liveClients={workspaceNames} /> : <ProfileIndex />}
       </section>
     </div>
   );
@@ -69,15 +92,22 @@ function ProfileIndex() {
   const [profiles, setProfiles] = useState<Profile[]>(initialProfiles);
   const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null);
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const hydrate = () => {
       try {
         const saved = window.localStorage.getItem("reply-radar-profiles");
         if (saved) setProfiles(JSON.parse(saved));
       } catch {
         // Keep the seeded profiles if browser storage is unavailable.
       }
-    }, 0);
-    return () => window.clearTimeout(timer);
+    };
+    const timer = window.setTimeout(hydrate, 0);
+    window.addEventListener("storage", hydrate);
+    window.addEventListener("reply-radar-profiles-changed", hydrate);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("storage", hydrate);
+      window.removeEventListener("reply-radar-profiles-changed", hydrate);
+    };
   }, []);
   const deleteProfile = () => {
     if (!deleteTarget) return;
@@ -143,14 +173,19 @@ function ProfileIndex() {
 
 function ProfileEditor({
   profile,
+  liveClients,
 }: {
   profile: Profile;
+  liveClients: string[];
 }) {
   const [name, setName] = useState(profile.name);
   const [photo, setPhoto] = useState<string | null>(profile.photo ?? null);
   const [assigned, setAssigned] = useState(profile.clients);
   const fileRef = useRef<HTMLInputElement>(null);
-  const allClients = ["Northstar AI", "Pylon Labs", "Vectorly"];
+  const allClients = liveClients.length ? liveClients : profile.clients;
+  useEffect(() => {
+    setAssigned((current) => current.filter((client) => allClients.includes(client)));
+  }, [liveClients.join("|")]);
   const onPhoto = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -194,6 +229,7 @@ function ProfileEditor({
       savedProfile,
     ];
     window.localStorage.setItem("reply-radar-profiles", JSON.stringify(next));
+    window.dispatchEvent(new Event("reply-radar-profiles-changed"));
     window.location.href = "/profiles";
   };
   return (
