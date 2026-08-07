@@ -6,7 +6,6 @@ import Link from "next/link";
 
 const items = [
   ["/", "Dashboard", "⌂"],
-  ["/inbox", "Priority inbox", "▣"],
   ["/profiles", "Profiles", "♙"],
   ["/calendar", "Follow-up calendar", "□"],
   ["/analytics", "Analytics", "▥"],
@@ -16,8 +15,17 @@ const items = [
 
 export default function AppSidebar() {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && window.localStorage.getItem("reply-radar-sidebar") === "collapsed");
-  useEffect(() => { window.localStorage.setItem("reply-radar-sidebar", collapsed ? "collapsed" : "expanded"); }, [collapsed]);
+  const [collapsed, setCollapsed] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.localStorage.getItem("reply-radar-sidebar") === "collapsed",
+  );
+  useEffect(() => {
+    window.localStorage.setItem(
+      "reply-radar-sidebar",
+      collapsed ? "collapsed" : "expanded",
+    );
+  }, [collapsed]);
   return (
     <aside
       className={`sidebar app-sidebar ${collapsed ? "sidebar-collapsed" : ""}`}
@@ -41,14 +49,6 @@ export default function AppSidebar() {
           {collapsed ? "→" : "←"}
         </button>
       </div>
-      <button className="workspace-select">
-        <span className="workspace-dot" />
-        <span>
-          <small>WORKSPACE</small>
-          <strong>All client workspaces</strong>
-        </span>
-        <span>⌄</span>
-      </button>
       <div className="nav-label">Operate</div>
       <nav>
         {items.map(([href, label, icon]) => (
@@ -59,7 +59,6 @@ export default function AppSidebar() {
           >
             <span style={{ flex: "none", width: 16 }}>{icon}</span>
             <span>{label}</span>
-            {href === "/inbox" && <b className="nav-count">12</b>}
           </a>
         ))}
       </nav>

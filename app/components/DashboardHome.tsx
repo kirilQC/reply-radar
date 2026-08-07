@@ -99,7 +99,7 @@ export default function DashboardHome() {
             <div className="dashboard-client-grid">
               {clients.map((client) => (
                 <a
-                  href={`/admin?client=${client.slug}`}
+                  href={`/inbox?client=${client.slug}`}
                   className="dashboard-client-card"
                   key={client.slug}
                 >
