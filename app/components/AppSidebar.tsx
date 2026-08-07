@@ -6,6 +6,7 @@ import Link from "next/link";
 
 const items = [
   ["/", "Dashboard", "dashboard"],
+  ["/inbox", "Inbox", "inbox"],
   ["/profiles", "Profiles", "profiles"],
   ["/calendar", "Follow-up calendar", "calendar"],
   ["/analytics", "Analytics", "analytics"],
@@ -18,6 +19,7 @@ const iconPaths: Record<string, string> = {
   calendar: "M5 4v3m14-3v3M4 9h16M6 6h12a2 2 0 0 1 2 2v10H4V8a2 2 0 0 1 2-2",
   analytics: "M5 19V9m5 10V5m5 14v-7m5 7V3",
   health: "M4 12h3l2-6 4 12 2-6h5",
+  inbox: "M4 5h16v14H4z M4 9h5l1.5 2h3L15 9h5",
   settings: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7",
 };
 function SidebarIcon({ name }: { name: string }) {

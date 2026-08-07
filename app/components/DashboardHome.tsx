@@ -46,12 +46,6 @@ export default function DashboardHome() {
           </div>
         </header>
         <main className="dashboard-home">
-          <div className="dashboard-welcome">
-            <div>
-              <h1>Good morning, Alex.</h1>
-              <p />
-            </div>
-          </div>
           <section>
             <div className="section-heading">
               <div>
@@ -109,7 +103,7 @@ export default function DashboardHome() {
             <div className="dashboard-profile-grid">
               {profiles.map(([name, description, count, tone, initials]) => (
                 <a
-                  href={`/profiles?profile=${name.toLowerCase().replaceAll(" ", "-")}`}
+                  href={`/inbox?profile=${name.toLowerCase().replaceAll(" ", "-")}`}
                   className="dashboard-profile-card"
                   key={name}
                 >

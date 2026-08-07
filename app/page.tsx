@@ -165,6 +165,27 @@ export function InboxPage() {
       ? new URLSearchParams(window.location.search).get("client")
       : null,
   );
+  const [profileParam] = useState(() =>
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("profile")
+      : null,
+  );
+  const assignedClients =
+    profileParam === "alex-spencer"
+      ? ["Northstar", "Pylon"]
+      : profileParam === "jordan-lee"
+        ? ["Vectorly"]
+        : profileParam === "maya-patel"
+          ? ["Northstar", "Vectorly"]
+          : null;
+  const profileName =
+    profileParam === "alex-spencer"
+      ? "Alex Spencer"
+      : profileParam === "jordan-lee"
+        ? "Jordan Lee"
+        : profileParam === "maya-patel"
+          ? "Maya Patel"
+          : null;
   const clientName =
     clientParam === "northstar"
       ? "Northstar AI"
@@ -310,10 +331,11 @@ export function InboxPage() {
             `${lead.name} ${lead.company} ${lead.client}`
               .toLowerCase()
               .includes(search.toLowerCase())) &&
+          (!assignedClients || assignedClients.includes(lead.client)) &&
           (filter === "All follow-ups" ||
             (filter === "Hot" ? lead.tier === "hot" : lead.tier !== "hot")),
       ),
-    [search, filter],
+    [search, filter, assignedClients],
   );
   return (
     <main className={`app-shell ${theme === "light" ? "light-mode" : ""}`}>
@@ -401,7 +423,9 @@ export function InboxPage() {
           <div className="crumb">
             <span>All clients</span>
             <Icon name="chevron" />
-            <strong>{clientParam ? clientName : "All clients"}</strong>
+            <strong>
+              {profileName ?? (clientParam ? clientName : "All clients")}
+            </strong>
           </div>
           <div className="top-actions">
             <label className="search">
