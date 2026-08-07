@@ -1,8 +1,10 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect */
 
 import AppSidebar from "./AppSidebar";
+import { useEffect, useState } from "react";
 
-const clients = [
+const seedClients = [
   {
     name: "Northstar AI",
     slug: "northstar",
@@ -28,13 +30,23 @@ const clients = [
     status: "Needs attention",
   },
 ];
-const profiles = [
+const seedProfiles = [
   ["Alex Spencer", "Northstar AI · Pylon Labs", "#8b7cff", "AS"],
   ["Jordan Lee", "Vectorly", "#55c7a2", "JL"],
   ["Maya Patel", "Northstar AI · Vectorly", "#f2a36b", "MP"],
 ];
 
 export default function DashboardHome() {
+  const [clients, setClients] = useState(seedClients);
+  const [profiles, setProfiles] = useState(seedProfiles.map(([name, description, tone, initials]) => ({ name, description, tone, initials, slug: name.toLowerCase().replaceAll(" ", "-") })));
+  useEffect(() => {
+    try {
+      const savedClients = window.localStorage.getItem("reply-radar-workspaces");
+      if (savedClients) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setClients(JSON.parse(savedClients)); }
+      const savedProfiles = window.localStorage.getItem("reply-radar-profiles");
+      if (savedProfiles) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients: string[]; color: string; initials: string; slug: string }) => ({ ...profile, description: profile.clients.join(" · "), tone: profile.color }))); }
+    } catch { /* keep seed data */ }
+  }, []);
   return (
     <div className="app-shell">
       <AppSidebar />
@@ -101,9 +113,9 @@ export default function DashboardHome() {
               </a>
             </div>
             <div className="dashboard-profile-grid">
-              {profiles.map(([name, description, tone, initials]) => (
+              {profiles.map(({ name, description, tone, initials, slug }) => (
                 <a
-                  href={`/inbox?profile=${name.toLowerCase().replaceAll(" ", "-")}`}
+                  href={`/inbox?profile=${slug}`}
                   className="dashboard-profile-card"
                   key={name}
                 >

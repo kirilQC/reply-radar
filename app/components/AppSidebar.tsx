@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect */
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -41,6 +42,11 @@ function SidebarIcon({ name }: { name: string }) {
 export default function AppSidebar() {
   const pathname = usePathname();
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  const [sidebarClients, setSidebarClients] = useState([
+    { name: "Northstar AI", slug: "northstar", tone: "#8b7cff" },
+    { name: "Pylon Labs", slug: "pylon", tone: "#55c7a2" },
+    { name: "Vectorly", slug: "vectorly", tone: "#f2a36b" },
+  ]);
   const [profileParam] = useState(() =>
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("profile")
@@ -62,6 +68,17 @@ export default function AppSidebar() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedClient(new URLSearchParams(window.location.search).get("client"));
   }, [pathname]);
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("reply-radar-workspaces");
+      if (saved) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setSidebarClients(JSON.parse(saved)); }
+    } catch { /* keep defaults */ }
+    const onStorage = () => {
+      try { const saved = window.localStorage.getItem("reply-radar-workspaces"); if (saved) setSidebarClients(JSON.parse(saved)); } catch { /* ignore */ }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
   useEffect(() => {
     window.localStorage.setItem(
       "reply-radar-sidebar",
@@ -112,24 +129,11 @@ export default function AppSidebar() {
       </nav>
       <div className="nav-label clients-label">Clients</div>
       <div className="client-list">
-        <a
-          className={`client-directory-item ${selectedClient === "northstar" ? "selected" : ""}`}
-          href="/inbox?client=northstar"
-        >
-          <i style={{ background: "#8b7cff" }}>N</i>Northstar AI
-        </a>
-        <a
-          className={`client-directory-item ${selectedClient === "pylon" ? "selected" : ""}`}
-          href="/inbox?client=pylon"
-        >
-          <i style={{ background: "#55c7a2" }}>P</i>Pylon Labs
-        </a>
-        <a
-          className={`client-directory-item ${selectedClient === "vectorly" ? "selected" : ""}`}
-          href="/inbox?client=vectorly"
-        >
-          <i style={{ background: "#f2a36b" }}>V</i>Vectorly
-        </a>
+        {sidebarClients.filter((client) => client.name).map((client) => (
+          <a className={`client-directory-item ${selectedClient === client.slug ? "selected" : ""}`} href={`/inbox?client=${client.slug}`} key={client.slug}>
+            <i style={{ background: client.tone }}>{client.name[0]}</i>{client.name}
+          </a>
+        ))}
       </div>
       {profileParam && (
         <div className="sidebar-bottom">

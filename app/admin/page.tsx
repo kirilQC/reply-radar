@@ -1,5 +1,5 @@
 "use client";
-/* eslint-disable @next/next/no-html-link-for-pages, jsx-a11y/label-has-associated-control, react/no-unescaped-entities */
+/* eslint-disable @next/next/no-html-link-for-pages, jsx-a11y/label-has-associated-control, react/no-unescaped-entities, react-hooks/set-state-in-effect */
 
 import { useEffect, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
@@ -12,6 +12,9 @@ type ClientWorkspace = {
   tone: string;
   lastSync: string;
   isNew?: boolean;
+  brief?: string;
+  apiKey?: string;
+  timezone?: string;
 };
 
 const seedClients: ClientWorkspace[] = [
@@ -49,6 +52,7 @@ type HeartbeatPayload = {
 export default function AdminPage() {
   const [active, setActive] = useState("workspaces");
   const [workspaceClients, setWorkspaceClients] = useState(seedClients);
+  const [workspaceStorageReady, setWorkspaceStorageReady] = useState(false);
   const [selected, setSelected] = useState(0);
   const [clientSearch, setClientSearch] = useState("");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -68,11 +72,32 @@ export default function AdminPage() {
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))];
+  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "", apiKey: "" });
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("reply-radar-workspaces");
+      if (saved) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceClients(JSON.parse(saved) as ClientWorkspace[]); }
+    } catch { /* keep seed data */ }
+    setWorkspaceStorageReady(true);
+  }, []);
+  useEffect(() => {
+    if (workspaceStorageReady) window.localStorage.setItem("reply-radar-workspaces", JSON.stringify(workspaceClients));
+  }, [workspaceClients, workspaceStorageReady]);
+  useEffect(() => {
+    if (!workspaceOpen || !client) return;
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.isNew ? "" : "Northstar helps modern revenue teams turn outbound signals into qualified pipeline. Their buyers are RevOps leaders at growing B2B companies.", timezone: client.isNew ? "" : "America/Chicago", apiKey: "" });
+  }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", isNew: true };
     setWorkspaceClients((current) => [...current, next]);
     setSelected(clients.length);
     setWorkspaceOpen(true);
+  };
+  const saveWorkspaceChanges = () => {
+    const normalizedName = workspaceDraft.name.trim();
+    const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    setWorkspaceClients((current) => current.map((item, index) => index === selected ? { ...item, name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: workspaceDraft.apiKey, timezone: workspaceDraft.timezone, isNew: false } : item));
+    setSaved(true);
   };
   const isNewWorkspace = Boolean(client.isNew);
   const visibleClients = clients.filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()));
@@ -215,7 +240,7 @@ export default function AdminPage() {
                 </div>
                 {active !== "heartbeat" && active !== "audit" && <button
                   className="primary-button"
-                  onClick={() => active === "workspaces" ? addWorkspace() : setSaved(true)}
+                  onClick={() => active === "workspaces" ? (workspaceOpen ? saveWorkspaceChanges() : addWorkspace()) : setSaved(true)}
                 >
                   {saved
                     ? "Saved ✓"
@@ -352,14 +377,15 @@ export default function AdminPage() {
                       </div>
                       <label className="field-label">
                         WORKSPACE NAME
-                        <input defaultValue={client.name} placeholder="Enter workspace name" />
+                        <input value={workspaceDraft.name} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder="Enter workspace name" />
                       </label>
                       <label className="field-label">
                         HEYREACH API KEY
                         <div className="secret-field">
                           <input
                             type="text"
-                              value={isNewWorkspace ? "" : (showKey ? "hr_live_northstar_••••••••••••3f8a" : "hr_live_••••••••••••••••••••••••")}
+                              value={isNewWorkspace ? workspaceDraft.apiKey : (showKey ? "hr_live_northstar_••••••••••••3f8a" : "hr_live_••••••••••••••••••••••••")}
+                              onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, apiKey: event.target.value }))}
                               placeholder={isNewWorkspace ? "Enter HeyReach API key" : undefined}
                             readOnly
                           />
@@ -412,11 +438,11 @@ export default function AdminPage() {
                       </div>
                       <label className="field-label">
                         DISPLAY NAME
-                        <input defaultValue={client.name} placeholder="Enter display name" />
+                        <input value={workspaceDraft.name} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder="Enter display name" />
                       </label>
                       <label className="field-label">
                         CLIENT BRIEF
-                        <textarea defaultValue={isNewWorkspace ? "" : "Northstar helps modern revenue teams turn outbound signals into qualified pipeline. Their buyers are RevOps leaders at growing B2B companies."} placeholder="Add a short client brief" />
+                        <textarea value={workspaceDraft.brief} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, brief: event.target.value }))} placeholder="Add a short client brief" />
                       </label>
                       <div className="field-row">
                         <label className="field-label">
@@ -430,7 +456,7 @@ export default function AdminPage() {
                         </label>
                         <label className="field-label">
                           WORKSPACE SLUG
-                          <input defaultValue={client.slug} placeholder="Enter workspace slug" />
+                          <input value={workspaceDraft.slug} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slug: event.target.value }))} placeholder="Enter workspace slug" />
                         </label>
                       </div>
                       <div className="upload-zone">
