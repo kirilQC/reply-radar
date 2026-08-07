@@ -310,7 +310,7 @@ export default function AdminPage() {
               {active === "audit" && <AuditView />}
               {active === "workspaces" && (
                 <>
-                  <div className="workspace-directory">
+                  {!workspaceOpen && <div className="workspace-directory">
                     <div className="workspace-directory-heading">
                       <div><strong>Client directory</strong><small>{clients.length} workspaces · Search and select a client to configure</small></div>
                       <input aria-label="Search clients" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder="Search clients…" />
@@ -325,9 +325,6 @@ export default function AdminPage() {
                         onClick={() => { setSelected(index); setWorkspaceOpen(true); }}
                       >
                         <div className="workspace-card-top">
-                          <i style={{ background: item.tone }}>
-                            {item.name[0]}
-                          </i>
                           <span
                             className={
                               item.status === "Connected" ? "ok" : "warn"
@@ -352,7 +349,7 @@ export default function AdminPage() {
                     ); })}
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
-                  </div>
+                  </div>}
                   {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><span>Editing {client.name}</span></div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">

@@ -235,7 +235,13 @@ export function InboxPage() {
         ? ["Vectorly"]
         : profileParam === "maya-patel"
           ? ["Northstar", "Vectorly"]
-          : null;
+        : clientParam === "northstar"
+          ? ["Northstar"]
+          : clientParam === "pylon"
+            ? ["Pylon"]
+            : clientParam === "vectorly"
+              ? ["Vectorly"]
+              : null;
   const profileName =
     profileParam === "alex-spencer"
       ? "Alex Spencer"
@@ -581,7 +587,7 @@ export function InboxPage() {
                 06
               </div>
               <h1>
-                {profileName ? `${greeting}, ${profileName}` : "General inbox"}
+                {profileName ? `${greeting}, ${profileName}` : clientParam ? clientName : "General inbox"}
               </h1>
               <p>
                 {filtered.length} leads across {trackedClients.length} clients
