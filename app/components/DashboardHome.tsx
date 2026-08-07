@@ -157,7 +157,6 @@ export default function DashboardHome() {
             <div className="section-heading">
               <div>
                 <h2>Performance overview</h2>
-                <p>Trends across every connected client.</p>
               </div>
               <a href="/analytics" className="text-button">View full analytics →</a>
             </div>

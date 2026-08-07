@@ -55,7 +55,8 @@ export default function ProfilesPage() {
         <header className="topbar">
           <div className="crumb">
             <span>Reply Radar</span>
-            <strong>› {profile ? profile.name || "New profile" : "Profiles"}</strong>
+            <span className="crumb-chevron" aria-hidden="true">›</span>
+            <strong>{profile ? profile.name || "New profile" : "Profiles"}</strong>
           </div>
         </header>
         {profile ? <ProfileEditor profile={profile} /> : <ProfileIndex />}
@@ -95,7 +96,6 @@ function ProfileIndex() {
             TEAM PROFILES
           </div>
           <h1>Profiles</h1>
-          <p>Choose a teammate to open their assigned client inbox.</p>
         </div>
         <button
           className="primary-button"
