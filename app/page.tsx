@@ -25,6 +25,7 @@ type LayoutPrefs = {
   showMetrics: boolean;
   showDetail: boolean;
   compact: boolean;
+  metrics: string[];
 };
 type AppearancePrefs = {
   mode: "midnight" | "light";
@@ -38,6 +39,7 @@ const defaultLayout: LayoutPrefs = {
   showMetrics: true,
   showDetail: true,
   compact: false,
+  metrics: ["needsAction", "hotConversations", "avgReplyTime", "pipelineSaved"],
 };
 const defaultAppearance: AppearancePrefs = {
   mode: "midnight",
@@ -46,6 +48,16 @@ const defaultAppearance: AppearancePrefs = {
   background: "#0b0c10",
   accent: "#8b7cff",
 };
+const metricCatalog = [
+  { id: "needsAction", label: "Needs action", value: "12", delta: "↑ 3", tone: "coral", sub: "since yesterday" },
+  { id: "hotConversations", label: "Hot conversations", value: "4", delta: "↑ 2", tone: "purple", sub: "score 80+" },
+  { id: "avgReplyTime", label: "Avg. reply time", value: "2.4h", delta: "↓ 18%", tone: "green", sub: "this week" },
+  { id: "pipelineSaved", label: "Follow-ups saved", value: "$48.2k", delta: "↑ 12%", tone: "amber", sub: "pipeline influenced" },
+  { id: "replyCount7d", label: "Replies · 7 days", value: "86", delta: "↑ 14%", tone: "purple", sub: "across campaigns" },
+  { id: "totalReplies", label: "Total replies", value: "1,284", delta: "↑ 9%", tone: "green", sub: "all time" },
+  { id: "positiveRate", label: "Positive reply rate", value: "68%", delta: "↑ 5%", tone: "green", sub: "of all replies" },
+  { id: "avgRepliesCampaign", label: "Replies / campaign", value: "3.7", delta: "↑ 0.6", tone: "coral", sub: "average" },
+];
 const leads: Lead[] = [
   {
     initials: "JM",
@@ -234,7 +246,7 @@ export function InboxPage() {
   const preferenceScope = profileParam || "general";
   const preferenceKey = `reply-radar-prefs:${preferenceScope}`;
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+      const timer = window.setTimeout(() => {
       try {
         const saved = window.localStorage.getItem(preferenceKey);
         const fallback = window.localStorage.getItem("reply-radar-prefs:general");
@@ -383,6 +395,7 @@ export function InboxPage() {
         "--bg": appearance.background,
         "--font": appearance.font,
         zoom: appearance.zoom / 100,
+        fontFamily: appearance.font,
       } as React.CSSProperties}
     >
       <AppSidebar />
@@ -558,35 +571,11 @@ export function InboxPage() {
             </div>
           </div>
           <div className="inbox-layout">
-          <div className="layout-section metrics-section" style={{ order: layoutPrefs.order.indexOf("metrics") }} hidden={!layoutPrefs.showMetrics}>
-            <Metric
-              label="Needs action"
-              value="12"
-              delta="↑ 3"
-              tone="coral"
-              sub="since yesterday"
-            />
-            <Metric
-              label="Hot conversations"
-              value="4"
-              delta="↑ 2"
-              tone="purple"
-              sub="score 80+"
-            />
-            <Metric
-              label="Avg. reply time"
-              value="2.4h"
-              delta="↓ 18%"
-              tone="green"
-              sub="this week"
-            />
-            <Metric
-              label="Follow-ups saved"
-              value="$48.2k"
-              delta="↑ 12%"
-              tone="amber"
-              sub="pipeline influenced"
-            />
+          <div className="layout-section metrics metrics-section" style={{ order: layoutPrefs.order.indexOf("metrics"), "--metric-count": layoutPrefs.metrics.length } as React.CSSProperties} hidden={!layoutPrefs.showMetrics}>
+            {layoutPrefs.metrics.map((metricId) => {
+              const metric = metricCatalog.find((item) => item.id === metricId);
+              return metric ? <Metric key={metric.id} {...metric} /> : null;
+            })}
           </div>
           <div className="layout-section queue-section" style={{ order: layoutPrefs.order.indexOf("queue") }}>
           <div className="health-strip">
@@ -854,6 +843,13 @@ function LayoutPanel({
       <label className="customize-check"><input type="checkbox" checked={prefs.showMetrics} onChange={(event) => onChange({ ...prefs, showMetrics: event.target.checked })} /> Show summary metrics</label>
       <label className="customize-check"><input type="checkbox" checked={prefs.showDetail} onChange={(event) => onChange({ ...prefs, showDetail: event.target.checked })} /> Show conversation detail</label>
       <label className="customize-check"><input type="checkbox" checked={prefs.compact} onChange={(event) => onChange({ ...prefs, compact: event.target.checked })} /> Compact spacing</label>
+      <div className="metric-picker-heading"><strong>Summary metrics</strong><small>{prefs.metrics.length}/6 selected</small></div>
+      <div className="metric-picker">
+        {metricCatalog.map((metric) => {
+          const checked = prefs.metrics.includes(metric.id);
+          return <label className="customize-check" key={metric.id}><input type="checkbox" checked={checked} disabled={!checked && prefs.metrics.length >= 6} onChange={() => onChange({ ...prefs, metrics: checked ? prefs.metrics.filter((id) => id !== metric.id) : [...prefs.metrics, metric.id] })} /> {metric.label}</label>;
+        })}
+      </div>
       <button className="customize-save" onClick={onSave}>Save layout</button>
     </div>
   );
