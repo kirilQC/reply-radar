@@ -187,6 +187,12 @@ export function InboxPage() {
           ? "Maya Patel"
           : null;
   const trackedClients = assignedClients ?? ["Northstar", "Pylon", "Vectorly"];
+  const greeting =
+    new Date().getHours() < 12
+      ? "Good morning"
+      : new Date().getHours() < 18
+        ? "Good afternoon"
+        : "Good evening";
   const clientName =
     clientParam === "northstar"
       ? "Northstar AI"
@@ -458,7 +464,9 @@ export function InboxPage() {
                 LIVE QUEUE <span className="eyebrow-separator">/</span> WED, AUG
                 06
               </div>
-              <h1>{profileName ?? "Inbox"}</h1>
+              <h1>
+                {profileName ? `${greeting}, ${profileName}` : "General inbox"}
+              </h1>
               <p>
                 {filtered.length} leads across {trackedClients.length} clients
               </p>

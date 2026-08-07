@@ -8,7 +8,6 @@ const items = [
   ["/", "Dashboard", "dashboard"],
   ["/inbox", "Inbox", "inbox"],
   ["/profiles", "Profiles", "profiles"],
-  ["/calendar", "Follow-up calendar", "calendar"],
   ["/analytics", "Analytics", "analytics"],
   ["/health", "System health", "health"],
   ["/admin", "Configuration", "settings"],
@@ -110,9 +109,7 @@ export default function AppSidebar() {
           </a>
         ))}
       </nav>
-      <div className="nav-label clients-label">
-        Clients <button aria-label="Add client">+</button>
-      </div>
+      <div className="nav-label clients-label">Clients</div>
       <div className="client-list">
         <a
           className={`client-directory-item ${selectedClient === "northstar" ? "selected" : ""}`}
