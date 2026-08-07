@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardHome from "./components/DashboardHome";
 import AppSidebar from "./components/AppSidebar";
@@ -219,11 +219,12 @@ export function InboxPage() {
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
-  const queryString = useSyncExternalStore(
-    () => () => undefined,
-    () => (typeof window !== "undefined" ? window.location.search : ""),
-    () => "",
-  );
+  const [queryString, setQueryString] = useState("");
+  useEffect(() => {
+    // URL search params are client-only state on this static route.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setQueryString(window.location.search);
+  }, []);
   const query = new URLSearchParams(queryString);
   const clientParam = query.get("client");
   const profileParam = query.get("profile");
