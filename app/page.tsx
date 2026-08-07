@@ -215,7 +215,7 @@ export function InboxPage() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
   const [queryString, setQueryString] = useState("");
-  const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string }>>([]);
+  const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string; tone?: string }>>([]);
   const [liveProfiles, setLiveProfiles] = useState<Array<{ slug: string; name: string; clients: string[] }>>([]);
   useEffect(() => {
     // URL search params are client-only state on this static route.
@@ -267,15 +267,19 @@ export function InboxPage() {
       : new Date().getHours() < 18
         ? "Good afternoon"
         : "Good evening";
-  const clientName = clientParam === "northstar"
-    ? "Northstar AI"
-    : clientParam === "pylon"
-      ? "Pylon Labs"
-      : clientParam === "vectorly"
-        ? "Vectorly"
-        : clientParam
-          ? workspaceDirectory.find((item) => item.slug === clientParam)?.name || clientParam
-          : "All clients";
+  const activeWorkspace = clientParam ? workspaceDirectory.find((item) => item.slug === clientParam) : undefined;
+  const clientName = activeWorkspace?.name || (clientParam === "northstar" ? "Northstar AI" : clientParam === "pylon" ? "Pylon Labs" : clientParam === "vectorly" ? "Vectorly" : clientParam || "All clients");
+  const clientTone = activeWorkspace?.tone || (clientParam === "northstar" ? "#8b7cff" : clientParam === "pylon" ? "#55c7a2" : "#f2a36b");
+  useEffect(() => {
+    if (!clientParam) return;
+    const root = document.documentElement;
+    const previous = root.style.getPropertyValue("--accent");
+    root.style.setProperty("--accent", clientTone);
+    return () => {
+      if (previous) root.style.setProperty("--accent", previous);
+      else root.style.removeProperty("--accent");
+    };
+  }, [clientParam, clientTone]);
   const preferenceScope = profileParam || "general";
   const preferenceKey = `reply-radar-prefs:${preferenceScope}`;
   useEffect(() => {
@@ -500,15 +504,16 @@ export function InboxPage() {
           Clients <button>+</button>
         </div>
         <div className="client-list">
-          <button>
-            <i style={{ background: "#8b7cff" }}>N</i>Northstar AI
-          </button>
-          <button>
-            <i style={{ background: "#55c7a2" }}>P</i>Pylon Labs
-          </button>
-          <button>
-            <i style={{ background: "#f2a36b" }}>V</i>Vectorly
-          </button>
+          {workspaceDirectory.map((workspace) => (
+            <a
+              href={`/inbox?client=${workspace.slug}`}
+              className={`client-directory-item ${clientParam === workspace.slug ? "selected" : ""}`}
+              key={workspace.slug}
+            >
+              <i style={{ background: workspace.tone ?? "#8b7cff" }}>{workspace.name?.[0] ?? "?"}</i>
+              {workspace.name || "Unnamed client"}
+            </a>
+          ))}
         </div>
         <div className="sidebar-bottom">
           <button className="nav-item">
@@ -603,7 +608,7 @@ export function InboxPage() {
                 06
               </div>
               <h1>
-                {clientParam && <span className="inbox-heading-logo" style={{ background: clientParam === "northstar" ? "#8b7cff" : clientParam === "pylon" ? "#55c7a2" : "#f2a36b" }}>{clientName[0]}</span>}
+                {clientParam && <span className="inbox-heading-logo" style={{ background: clientTone }}>{clientName[0]}</span>}
                 {profileName ? `${greeting}, ${profileName}` : clientParam ? clientName : "General inbox"}
               </h1>
               {!clientParam && <><p>{filtered.length} leads across {trackedClients.length} clients</p><div className="tracked-clients">{trackedClients.map((client) => <span key={client}>{client}</span>)}</div></>}

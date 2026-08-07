@@ -63,6 +63,7 @@ export default function AdminPage() {
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
   const [themePreset, setThemePreset] = useState("midnight");
+  const [consoleAccent, setConsoleAccent] = useState("#f0cf00");
   const [logos, setLogos] = useState<Record<string, string>>({});
   const [documents, setDocuments] = useState<Record<string, string[]>>({});
   const [accentOverrides, setAccentOverrides] = useState<Record<string, string>>(() => {
@@ -93,6 +94,15 @@ export default function AdminPage() {
     if (workspaceStorageReady) window.localStorage.setItem("reply-radar-workspaces", JSON.stringify(workspaceClients));
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("reply-radar-prefs:general");
+      if (saved) {
+        const parsed = JSON.parse(saved) as { appearance?: { accent?: string } };
+        if (parsed.appearance?.accent) setConsoleAccent(parsed.appearance.accent);
+      }
+    } catch { /* keep console default */ }
+  }, []);
+  useEffect(() => {
     if (!workspaceOpen || !client) return;
     /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.isNew ? "" : "Northstar helps modern revenue teams turn outbound signals into qualified pipeline. Their buyers are RevOps leaders at growing B2B companies.", timezone: client.isNew ? "" : "America/Chicago", apiKey: "" });
   }, [selected, workspaceOpen]);
@@ -105,7 +115,10 @@ export default function AdminPage() {
   const saveWorkspaceChanges = () => {
     const normalizedName = workspaceDraft.name.trim();
     const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || client.slug;
-    setWorkspaceClients((current) => current.map((item, index) => index === selected ? { ...item, name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: workspaceDraft.apiKey, timezone: workspaceDraft.timezone, isNew: false } : item));
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: workspaceDraft.apiKey, timezone: workspaceDraft.timezone, tone: accentOverrides[client.slug] ?? item.tone, isNew: false } : item);
+    setWorkspaceClients(next);
+    window.localStorage.setItem("reply-radar-workspaces", JSON.stringify(next));
+    window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
     setSaved(true);
   };
   const removeWorkspace = () => {
@@ -170,20 +183,10 @@ export default function AdminPage() {
       <section className="main-area">
         <main
           className={`admin-shell admin-theme-${themePreset}`}
-          style={{ "--accent": accentColor } as unknown as React.CSSProperties}
+          style={{ "--accent": consoleAccent } as unknown as React.CSSProperties}
         >
           <header className="admin-topbar">
-            <a className="admin-brand" href="/">
-              ←{" "}
-              <span className="brand-mark">
-                <i />
-                <i />
-                <i />
-              </span>
-              <strong>
-                reply<span>radar</span>
-              </strong>
-            </a>
+            <a className="admin-brand admin-back-link" href="/" aria-label="Back to dashboard">←</a>
             <div className="admin-breadcrumb">
               Admin Console <span>/</span>{" "}
               {active === "workspaces"

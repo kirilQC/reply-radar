@@ -44,7 +44,7 @@ function SidebarIcon({ name }: { name: string }) {
 export default function AppSidebar() {
   const pathname = usePathname();
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
-  const [sidebarClients, setSidebarClients] = useState([
+  const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string }>>([
     { name: "Northstar AI", slug: "northstar", tone: "#8b7cff" },
     { name: "Pylon Labs", slug: "pylon", tone: "#55c7a2" },
     { name: "Vectorly", slug: "vectorly", tone: "#f2a36b" },

@@ -177,7 +177,11 @@ export default function DashboardHome() {
               </article>
               <article className="dashboard-chart-card client-performance-card">
                 <div className="dashboard-chart-heading"><div><span>CLIENT PERFORMANCE</span><strong>Positive reply rate</strong></div><small>30 days</small></div>
-                {[['Northstar AI','72%', '#8b7cff'],['Pylon Labs','64%', '#55c7a2'],['Vectorly','51%', '#f2a36b']].map(([name, value, color]) => <div className="client-performance-row" key={name}><div><span>{name}</span><b>{value}</b></div><div className="performance-track"><i style={{ width: value, background: color }} /></div></div>)}
+                {clients.map((client, index) => {
+                  const values = ["72%", "64%", "51%", "—"];
+                  const value = values[index] ?? "—";
+                  return <div className="client-performance-row" key={client.slug}><div><span>{client.name}</span><b>{value}</b></div><div className="performance-track"><i style={{ width: value === "—" ? "0%" : value, background: client.tone }} /></div></div>;
+                })}
               </article>
             </div>
           </section>
