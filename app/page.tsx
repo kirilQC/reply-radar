@@ -163,7 +163,7 @@ export function InboxPage() {
     if (activeNav !== "inbox") router.push(`/${activeNav}`);
   }, [activeNav, router]);
   useEffect(() => {
-    const routes = ["/", "/profiles", "/calendar", "/analytics", "/health"];
+    const routes = ["/inbox", "/profiles", "/calendar", "/analytics", "/health"];
     const buttons = Array.from(
       document.querySelectorAll(".sidebar nav .nav-item"),
     );
@@ -175,11 +175,15 @@ export function InboxPage() {
     const admin = document.querySelector(".sidebar-bottom .nav-item");
     const adminHandler = () => router.push("/admin");
     admin?.addEventListener("click", adminHandler);
+    const help = document.querySelector(".top-actions .icon-button");
+    const helpHandler = () => window.alert("Reply Radar help: use the sidebar to switch workspaces, profiles, calendar, analytics, health, and admin configuration.");
+    help?.addEventListener("click", helpHandler);
     return () => {
       handlers.forEach(([button, handler]) =>
         button.removeEventListener("click", handler),
       );
       admin?.removeEventListener("click", adminHandler);
+      help?.removeEventListener("click", helpHandler);
     };
   }, [router]);
   useEffect(() => {
