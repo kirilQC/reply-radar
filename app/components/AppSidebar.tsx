@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 const items = [
@@ -16,7 +16,8 @@ const items = [
 
 export default function AppSidebar() {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && window.localStorage.getItem("reply-radar-sidebar") === "collapsed");
+  useEffect(() => { window.localStorage.setItem("reply-radar-sidebar", collapsed ? "collapsed" : "expanded"); }, [collapsed]);
   return (
     <aside
       className={`sidebar app-sidebar ${collapsed ? "sidebar-collapsed" : ""}`}
