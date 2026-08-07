@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import AppSidebar from "./AppSidebar";
 
 const clients = [
@@ -36,46 +35,27 @@ const profiles = [
 ];
 
 export default function DashboardHome() {
-  const [helpOpen, setHelpOpen] = useState(false);
   return (
     <div className="app-shell">
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <div className="crumb">
-            <strong>Reply Radar dashboard</strong>
-          </div>
+          <div className="crumb" />
           <div className="top-actions">
-            <button
-              className="icon-button"
-              onClick={() => setHelpOpen(true)}
-              aria-label="Open help"
-            >
-              ?
-            </button>
             <button className="icon-button theme-toggle">◐</button>
-            <div className="top-avatar">AS</div>
           </div>
         </header>
         <main className="dashboard-home">
           <div className="dashboard-welcome">
             <div>
-              <div className="eyebrow">
-                <span className="live-dot" />
-                AGENCY OVERVIEW
-              </div>
               <h1>Good morning, Alex.</h1>
-              <p>Choose a client or saved profile to start working.</p>
+              <p />
             </div>
-            <a href="/admin" className="primary-button dashboard-admin-link">
-              Open admin console
-            </a>
           </div>
           <section>
             <div className="section-heading">
               <div>
                 <h2>Client workspaces</h2>
-                <p>Connection health and active conversation volume.</p>
               </div>
               <a href="/admin" className="text-button">
                 Manage clients →
@@ -121,7 +101,6 @@ export default function DashboardHome() {
             <div className="section-heading">
               <div>
                 <h2>Teammate profiles</h2>
-                <p>Open a teammate’s assigned client view.</p>
               </div>
               <a href="/profiles" className="text-button">
                 Manage profiles →
@@ -146,27 +125,6 @@ export default function DashboardHome() {
             </div>
           </section>
         </main>
-        {helpOpen && (
-          <div className="help-overlay" role="dialog" aria-modal="true">
-            <div className="help-card">
-              <button className="help-close" onClick={() => setHelpOpen(false)}>
-                ×
-              </button>
-              <div className="eyebrow">
-                <span className="live-dot" />
-                REPLY RADAR HELP
-              </div>
-              <h2>How can we help?</h2>
-              <p>
-                Use the left rail to move between the dashboard, inbox,
-                profiles, calendar, analytics, health, and admin configuration.
-              </p>
-              <a href="/health" className="primary-button">
-                Check system health
-              </a>
-            </div>
-          </div>
-        )}
       </section>
     </div>
   );

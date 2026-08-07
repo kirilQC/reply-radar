@@ -44,6 +44,17 @@ export default function AppSidebar() {
       ? new URLSearchParams(window.location.search).get("client")
       : null,
   );
+  const [profileParam] = useState(() =>
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("profile")
+      : null,
+  );
+  const profileName =
+    profileParam === "jordan-lee"
+      ? "Jordan Lee"
+      : profileParam === "maya-patel"
+        ? "Maya Patel"
+        : "Alex Spencer";
   const [collapsed, setCollapsed] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -120,15 +131,17 @@ export default function AppSidebar() {
           <i style={{ background: "#f2a36b" }}>V</i>Vectorly <span>2</span>
         </a>
       </div>
-      <div className="sidebar-bottom">
-        <div className="user-chip">
-          <div className="user-avatar">AS</div>
-          <div>
-            <strong>Alex Spencer</strong>
-            <small>Agency owner</small>
+      {profileParam && (
+        <div className="sidebar-bottom">
+          <div className="user-chip">
+            <div className="user-avatar">AS</div>
+            <div>
+              <strong>{profileName}</strong>
+              <small>Agency owner</small>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </aside>
   );
 }

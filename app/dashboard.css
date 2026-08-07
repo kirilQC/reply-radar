@@ -2,3 +2,4 @@
 .legacy-sidebar{display:none!important}
 .client-directory-item{display:flex;align-items:center;gap:9px;padding:6px 10px;background:transparent;color:var(--muted);text-align:left;border-radius:7px;font-size:12px;text-decoration:none}.client-directory-item:hover,.client-directory-item.selected{background:var(--panel-2);color:var(--text)}.client-directory-item i{width:20px;height:20px;display:grid;place-items:center;border-radius:5px;color:#fff;font-size:10px;font-style:normal;font-weight:750}.client-directory-item span{margin-left:auto;color:var(--muted-2);font-size:10px}
 .sidebar-icon{display:grid;place-items:center;flex:0 0 16px!important;width:16px!important}.sidebar-svg{width:17px;height:17px}
+.dashboard-home{display:flex;flex-direction:column}.dashboard-home>section:first-of-type{order:2}.dashboard-home>section:nth-of-type(2){order:1}
