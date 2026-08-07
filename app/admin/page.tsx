@@ -122,11 +122,11 @@ export default function AdminPage() {
               </strong>
             </a>
             <div className="admin-breadcrumb">
-              Admin console <span>/</span>{" "}
-              {active === "global"
+              Admin Console <span>/</span>{" "}
+              {active === "workspaces"
+                ? <>Client Directory {workspaceOpen && <><span>/</span> {client.name || "New workspace"}</>}</>
+                : active === "global"
                 ? "Global config"
-                : active === "workspaces"
-                  ? "Client workspaces"
                   : active === "ai"
                     ? "AI context"
                     : active === "scoring"
@@ -149,7 +149,7 @@ export default function AdminPage() {
               >
                 <span>▦</span>Client directory
               </button>
-              <div className="admin-nav-caption">GLOBAL CONFIG</div>
+              <div className="admin-nav-caption global-caption">GLOBAL CONFIG</div>
               <button
                 className={active === "global" ? "active" : ""}
                 onClick={() => setActive("global")}
@@ -220,7 +220,7 @@ export default function AdminPage() {
                   {saved
                     ? "Saved ✓"
                     : active === "workspaces"
-                      ? "+ Add workspace"
+                      ? workspaceOpen ? "Save changes" : "+ Add workspace"
                       : "Save changes"}
                 </button>}
               </div>
