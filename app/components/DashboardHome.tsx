@@ -52,9 +52,9 @@ export default function DashboardHome() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <div className="crumb" />
+          <div className="crumb dashboard-brand">QC Growth</div>
           <div className="top-actions">
-            <button className="icon-button theme-toggle">◐</button>
+            <button className="icon-button theme-toggle" aria-label="Customize appearance" title="Customize appearance" onClick={() => { window.location.href = "/inbox?appearance=1"; }}>◐</button>
           </div>
         </header>
         <main className="dashboard-home">

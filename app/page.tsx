@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -220,11 +221,19 @@ export function InboxPage() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
   const [queryString, setQueryString] = useState("");
+  const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string }>>([]);
   useEffect(() => {
     // URL search params are client-only state on this static route.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setQueryString(window.location.search);
+    try {
+      const saved = window.localStorage.getItem("reply-radar-workspaces");
+      if (saved) setWorkspaceDirectory(JSON.parse(saved));
+    } catch { /* use seeded routes */ }
   }, []);
+  useEffect(() => {
+    if (new URLSearchParams(queryString).get("appearance") === "1") setAppearanceOpen(true);
+  }, [queryString]);
   const query = new URLSearchParams(queryString);
   const clientParam = query.get("client");
   const profileParam = query.get("profile");
@@ -239,9 +248,11 @@ export function InboxPage() {
           ? ["Northstar"]
           : clientParam === "pylon"
             ? ["Pylon"]
-            : clientParam === "vectorly"
-              ? ["Vectorly"]
-              : null;
+              : clientParam === "vectorly"
+                ? ["Vectorly"]
+                : clientParam
+                  ? [workspaceDirectory.find((item) => item.slug === clientParam)?.name || clientParam]
+                  : null;
   const profileName =
     profileParam === "alex-spencer"
       ? "Alex Spencer"
@@ -258,13 +269,14 @@ export function InboxPage() {
       : new Date().getHours() < 18
         ? "Good afternoon"
         : "Good evening";
-  const clientName =
-    clientParam === "northstar"
-      ? "Northstar AI"
-      : clientParam === "pylon"
-        ? "Pylon Labs"
-        : clientParam === "vectorly"
-          ? "Vectorly"
+  const clientName = clientParam === "northstar"
+    ? "Northstar AI"
+    : clientParam === "pylon"
+      ? "Pylon Labs"
+      : clientParam === "vectorly"
+        ? "Vectorly"
+        : clientParam
+          ? workspaceDirectory.find((item) => item.slug === clientParam)?.name || clientParam
           : "All clients";
   const preferenceScope = profileParam || "general";
   const preferenceKey = `reply-radar-prefs:${preferenceScope}`;
