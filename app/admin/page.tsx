@@ -37,8 +37,14 @@ export default function AdminPage() {
   const [saved, setSaved] = useState(false);
   const [themePreset, setThemePreset] = useState("midnight");
   const [logos, setLogos] = useState<Record<string, string>>({});
+  const [accentOverrides, setAccentOverrides] = useState<
+    Record<string, string>
+  >({});
   const logoInput = useRef<HTMLInputElement>(null);
   const client = clients[selected];
+  const accentColor = accentOverrides[client.slug] ?? client.tone;
+  const setAccentColor = (value: string) =>
+    setAccentOverrides((current) => ({ ...current, [client.slug]: value }));
   const chooseLogo = () => logoInput.current?.click();
   const handleLogo = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -52,7 +58,10 @@ export default function AdminPage() {
     reader.readAsDataURL(file);
   };
   return (
-    <main className={`admin-shell admin-theme-${themePreset}`}>
+    <main
+      className={`admin-shell admin-theme-${themePreset}`}
+      style={{ "--accent": accentColor } as React.CSSProperties}
+    >
       <header className="admin-topbar">
         <a className="admin-brand" href="/">
           ←{" "}
@@ -101,6 +110,42 @@ export default function AdminPage() {
               {id === "workspaces" && <b>3</b>}
             </button>
           ))}
+          <div className="admin-nav-caption client-caption">CLIENTS</div>
+          <div className="admin-client-list">
+            {clients.map((item, index) => (
+              <div
+                className={`admin-client-group ${selected === index ? "selected" : ""}`}
+                key={item.slug}
+              >
+                <button
+                  className="admin-client-button"
+                  onClick={() => {
+                    setSelected(index);
+                    setActive("workspaces");
+                  }}
+                >
+                  <i style={{ background: item.tone }}>{item.name[0]}</i>
+                  <span>{item.name}</span>
+                </button>
+                {selected === index && (
+                  <div className="admin-client-configs">
+                    <button onClick={() => setActive("workspaces")}>
+                      Connection & profile
+                    </button>
+                    <button onClick={() => setActive("ai")}>
+                      AI context & voice
+                    </button>
+                    <button onClick={() => setActive("scoring")}>
+                      Scoring engine
+                    </button>
+                    <button onClick={() => setActive("theme")}>
+                      Theme & logo
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
           <div className="admin-nav-caption system-caption">SYSTEM</div>
           {[
             ["health", "System health", "⌁"],
@@ -158,21 +203,6 @@ export default function AdminPage() {
                   : "Save changes"}
             </button>
           </div>
-          {active !== "workspaces" && (
-            <div className="scope-picker">
-              <span>CLIENT SCOPE</span>
-              <select
-                value={selected}
-                onChange={(event) => setSelected(Number(event.target.value))}
-              >
-                {clients.map((item, index) => (
-                  <option value={index} key={item.slug}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
           {active === "workspaces" && (
             <>
               <div className="workspace-cards">
@@ -501,7 +531,11 @@ export default function AdminPage() {
                 <div className="field-row">
                   <label className="field-label">
                     ACCENT COLOR
-                    <input type="color" defaultValue="#8b7cff" />
+                    <input
+                      type="color"
+                      value={accentColor}
+                      onChange={(event) => setAccentColor(event.target.value)}
+                    />
                   </label>
                   <label className="field-label">
                     ROW DENSITY
@@ -552,7 +586,11 @@ export default function AdminPage() {
                 </div>
                 <label className="field-label">
                   CLIENT ACCENT
-                  <input defaultValue={client.tone} />
+                  <input
+                    type="text"
+                    value={accentColor}
+                    onChange={(event) => setAccentColor(event.target.value)}
+                  />
                 </label>
                 <div className="contrast-check">
                   <i /> WCAG AA contrast passes <span>6.8:1</span>
