@@ -563,12 +563,6 @@ export function InboxPage() {
                 ))}
               </div>
             </div>
-            <div className="heading-actions">
-              <button className="secondary-button">
-                Export <span>↓</span>
-              </button>
-              <button className="primary-button">+ Add follow-up</button>
-            </div>
           </div>
           <div className="inbox-layout">
           <div className="layout-section metrics metrics-section" style={{ order: layoutPrefs.order.indexOf("metrics"), "--metric-count": layoutPrefs.metrics.length } as React.CSSProperties} hidden={!layoutPrefs.showMetrics}>
@@ -609,6 +603,12 @@ export function InboxPage() {
               <p>Ranked by urgency and conversation intent</p>
             </div>
             <div className="queue-tools">
+              <div className="heading-actions inbox-actions">
+                <button className="secondary-button">
+                  Export <span>↓</span>
+                </button>
+                <button className="primary-button">+ Add follow-up</button>
+              </div>
               <div className="segmented">
                 {["All follow-ups", "Hot", "Snoozed"].map((f) => (
                   <button
