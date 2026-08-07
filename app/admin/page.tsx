@@ -4,7 +4,17 @@
 import { useEffect, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 
-const seedClients = [
+type ClientWorkspace = {
+  name: string;
+  slug: string;
+  leads: number;
+  status: string;
+  tone: string;
+  lastSync: string;
+  isNew?: boolean;
+};
+
+const seedClients: ClientWorkspace[] = [
   {
     name: "Northstar AI",
     slug: "northstar",
@@ -59,14 +69,12 @@ export default function AdminPage() {
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))];
   const addWorkspace = () => {
-    const name = window.prompt("Workspace name", "New client");
-    if (!name?.trim()) return;
-    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || `workspace-${Date.now()}`;
-    const next = { name: name.trim(), slug, leads: 0, status: "Needs attention", tone: "#8b7cff", lastSync: "not synced" };
+    const next: ClientWorkspace = { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", isNew: true };
     setWorkspaceClients((current) => [...current, next]);
     setSelected(clients.length);
     setWorkspaceOpen(true);
   };
+  const isNewWorkspace = Boolean(client.isNew);
   const visibleClients = clients.filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()));
   useEffect(() => {
     window.localStorage.setItem("reply-radar-admin-accent-overrides", JSON.stringify(accentOverrides));
@@ -171,7 +179,7 @@ export default function AdminPage() {
                     ADMIN CONSOLE
                   </div>
                   <h1>
-                    {active === "workspaces" && workspaceOpen ? <><span className="admin-client-heading-logo" style={{ background: client.tone }}>{client.name[0]}</span>{client.name}</> : active === "global"
+                    {active === "workspaces" && workspaceOpen ? <><span className="admin-client-heading-logo" style={{ background: client.tone }}>{client.name[0] || "?"}</span>{client.name || "New workspace"}</> : active === "global"
                       ? "Global config"
                       : active === "workspaces"
                         ? "Client workspaces"
@@ -310,7 +318,7 @@ export default function AdminPage() {
                             {item.status}
                           </span>
                         </div>
-                        <strong>{item.name}</strong>
+                        <strong>{item.name || "Unnamed workspace"}</strong>
                         <small>
                           {item.leads} leads · Last sync {item.lastSync}
                         </small>
@@ -338,24 +346,21 @@ export default function AdminPage() {
                             endpoint.
                           </p>
                         </div>
-                        <span className="connection-badge">
-                          <i /> API healthy
+                        <span className={isNewWorkspace ? "saved-dot" : "connection-badge"}>
+                          <i /> {isNewWorkspace ? "Not configured" : "API healthy"}
                         </span>
                       </div>
                       <label className="field-label">
                         WORKSPACE NAME
-                        <input value={client.name} readOnly />
+                        <input defaultValue={client.name} placeholder="Enter workspace name" />
                       </label>
                       <label className="field-label">
                         HEYREACH API KEY
                         <div className="secret-field">
                           <input
                             type="text"
-                            value={
-                              showKey
-                                ? "hr_live_northstar_••••••••••••3f8a"
-                                : "hr_live_••••••••••••••••••••••••"
-                            }
+                              value={isNewWorkspace ? "" : (showKey ? "hr_live_northstar_••••••••••••3f8a" : "hr_live_••••••••••••••••••••••••")}
+                              placeholder={isNewWorkspace ? "Enter HeyReach API key" : undefined}
                             readOnly
                           />
                           <button onClick={() => setShowKey(!showKey)}>
@@ -367,13 +372,13 @@ export default function AdminPage() {
                         <label className="field-label">
                           WEBHOOK STATUS
                           <div className="status-field">
-                            <i /> Registered · 10 event types
+                            <i /> {isNewWorkspace ? "Not configured" : "Registered · 10 event types"}
                           </div>
                         </label>
                         <label className="field-label">
                           LAST RECONCILIATION
                           <div className="status-field">
-                            Today, 09:42 AM <span>↻</span>
+                            {isNewWorkspace ? "—" : <>Today, 09:42 AM <span>↻</span></>}
                           </div>
                         </label>
                       </div>
@@ -381,7 +386,7 @@ export default function AdminPage() {
                         <div>
                           <small>WEBHOOK ENDPOINT</small>
                           <code>
-                            replyradar.app/api/webhooks/heyreach/{client.slug}
+                            replyradar.app/api/webhooks/heyreach/{client.slug || ""}
                             /••••••••
                           </code>
                         </div>
@@ -407,16 +412,17 @@ export default function AdminPage() {
                       </div>
                       <label className="field-label">
                         DISPLAY NAME
-                        <input defaultValue={client.name} />
+                        <input defaultValue={client.name} placeholder="Enter display name" />
                       </label>
                       <label className="field-label">
                         CLIENT BRIEF
-                        <textarea defaultValue="Northstar helps modern revenue teams turn outbound signals into qualified pipeline. Their buyers are RevOps leaders at growing B2B companies." />
+                        <textarea defaultValue={isNewWorkspace ? "" : "Northstar helps modern revenue teams turn outbound signals into qualified pipeline. Their buyers are RevOps leaders at growing B2B companies."} placeholder="Add a short client brief" />
                       </label>
                       <div className="field-row">
                         <label className="field-label">
                           TIMEZONE
                           <select defaultValue="America/Chicago">
+                            <option value="">Select timezone</option>
                             <option>America/Chicago</option>
                             <option>America/New_York</option>
                             <option>Europe/London</option>
@@ -424,7 +430,7 @@ export default function AdminPage() {
                         </label>
                         <label className="field-label">
                           WORKSPACE SLUG
-                          <input defaultValue={client.slug} />
+                          <input defaultValue={client.slug} placeholder="Enter workspace slug" />
                         </label>
                       </div>
                       <div className="upload-zone">
@@ -441,17 +447,17 @@ export default function AdminPage() {
                   {workspaceOpen && <div className="client-config-sections">
                     <section className="admin-panel client-config-section" id="client-ai">
                       <div className="panel-heading"><div><h2>AI context & voice</h2><p>Client-specific Anthropic drafting rules and review guardrails.</p></div><span className="connection-badge"><i /> Client-specific</span></div>
-                      <div className="field-row"><label className="field-label">MODEL<select defaultValue="claude-sonnet-4-20250514"><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" defaultValue="0.35" step="0.05" /></label></div>
-                      <label className="field-label">CUSTOM SYSTEM PROMPT<textarea defaultValue="Be concise, specific, and human. Never invent customer proof. Ask one clear next-step question." /></label>
+                      <div className="field-row"><label className="field-label">MODEL<select defaultValue={isNewWorkspace ? "" : "claude-sonnet-4-20250514"}><option value="">Select model</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" defaultValue={isNewWorkspace ? "" : "0.35"} placeholder="Set temperature" step="0.05" /></label></div>
+                      <label className="field-label">CUSTOM SYSTEM PROMPT<textarea defaultValue={isNewWorkspace ? "" : "Be concise, specific, and human. Never invent customer proof. Ask one clear next-step question."} placeholder="Add client-specific drafting rules" /></label>
                     </section>
                     <section className="admin-panel client-config-section" id="client-scoring">
                       <div className="panel-heading"><div><h2>Scoring engine</h2><p>Client-specific queue weights and urgency thresholds.</p></div><span className="saved-dot">● Draft config</span></div>
-                      <div className="field-row"><label className="field-label">HOT THRESHOLD<input type="number" defaultValue="80" /></label><label className="field-label">WARM THRESHOLD<input type="number" defaultValue="60" /></label></div>
-                      <label className="field-label">UNANSWERED QUESTION WEIGHT<input type="range" defaultValue="78" /></label>
+                      <div className="field-row"><label className="field-label">HOT THRESHOLD<input type="number" defaultValue={isNewWorkspace ? "" : "80"} /></label><label className="field-label">WARM THRESHOLD<input type="number" defaultValue={isNewWorkspace ? "" : "60"} /></label></div>
+                      <label className="field-label">UNANSWERED QUESTION WEIGHT<input type="range" defaultValue={isNewWorkspace ? "0" : "78"} /></label>
                     </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
-                      <div className="logo-drop"><div className="logo-sample" style={{ background: accentColor }}>{client.name[0]}</div><div><strong>Upload client logo</strong><small>SVG, PNG, JPG · max 2MB</small></div><button className="secondary-button" onClick={chooseLogo}>Choose file</button><input ref={logoInput} type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={handleLogo} /></div>
+                      <div className="logo-drop"><div className="logo-sample" style={{ background: accentColor }}>{client.name[0] || "?"}</div><div><strong>Upload client logo</strong><small>SVG, PNG, JPG · max 2MB</small></div><button className="secondary-button" onClick={chooseLogo}>Choose file</button><input ref={logoInput} type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={handleLogo} /></div>
                       <label className="field-label">CLIENT ACCENT<input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} /></label>
                     </section>
                   </div>}
