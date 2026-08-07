@@ -115,19 +115,19 @@ export default function AppSidebar() {
           className={`client-directory-item ${selectedClient === "northstar" ? "selected" : ""}`}
           href="/inbox?client=northstar"
         >
-          <i style={{ background: "#8b7cff" }}>N</i>Northstar AI <span>6</span>
+          <i style={{ background: "#8b7cff" }}>N</i>Northstar AI
         </a>
         <a
           className={`client-directory-item ${selectedClient === "pylon" ? "selected" : ""}`}
           href="/inbox?client=pylon"
         >
-          <i style={{ background: "#55c7a2" }}>P</i>Pylon Labs <span>3</span>
+          <i style={{ background: "#55c7a2" }}>P</i>Pylon Labs
         </a>
         <a
           className={`client-directory-item ${selectedClient === "vectorly" ? "selected" : ""}`}
           href="/inbox?client=vectorly"
         >
-          <i style={{ background: "#f2a36b" }}>V</i>Vectorly <span>2</span>
+          <i style={{ background: "#f2a36b" }}>V</i>Vectorly
         </a>
       </div>
       {profileParam && (

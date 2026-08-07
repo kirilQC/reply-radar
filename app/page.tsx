@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import DashboardHome from "./components/DashboardHome";
 import AppSidebar from "./components/AppSidebar";
@@ -219,16 +219,14 @@ export function InboxPage() {
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
-  const [clientParam] = useState(() =>
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("client")
-      : null,
+  const queryString = useSyncExternalStore(
+    () => () => undefined,
+    () => (typeof window !== "undefined" ? window.location.search : ""),
+    () => "",
   );
-  const [profileParam] = useState(() =>
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("profile")
-      : null,
-  );
+  const query = new URLSearchParams(queryString);
+  const clientParam = query.get("client");
+  const profileParam = query.get("profile");
   const assignedClients =
     profileParam === "alex-spencer"
       ? ["Northstar", "Pylon"]
@@ -479,14 +477,13 @@ export function InboxPage() {
         </div>
         <div className="client-list">
           <button>
-            <i style={{ background: "#8b7cff" }}>N</i>Northstar AI{" "}
-            <span>6</span>
+            <i style={{ background: "#8b7cff" }}>N</i>Northstar AI
           </button>
           <button>
-            <i style={{ background: "#55c7a2" }}>P</i>Pylon Labs <span>3</span>
+            <i style={{ background: "#55c7a2" }}>P</i>Pylon Labs
           </button>
           <button>
-            <i style={{ background: "#f2a36b" }}>V</i>Vectorly <span>2</span>
+            <i style={{ background: "#f2a36b" }}>V</i>Vectorly
           </button>
         </div>
         <div className="sidebar-bottom">
@@ -514,6 +511,7 @@ export function InboxPage() {
             <Icon name="chevron" />
             <strong>
               {profileName ?? (clientParam ? clientName : "General inbox")}
+              {clientParam && <span className="crumb-client-logo" style={{ background: clientParam === "northstar" ? "#8b7cff" : clientParam === "pylon" ? "#55c7a2" : "#f2a36b" }}>{clientName[0]}</span>}
             </strong>
           </div>
           <div className="top-actions">
