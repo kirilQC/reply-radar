@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 type Row = Record<string, unknown>;
-const ageMinutes = (value: unknown) => value ? Math.round((Date.now() - new Date(String(value)).getTime()) / 60000) : null;
+const ageSeconds = (value: unknown) => value ? Math.max(0, Math.floor((Date.now() - new Date(String(value)).getTime()) / 1000)) : null;
 
 export async function GET() {
   const url = process.env.SUPABASE_URL;
@@ -17,12 +17,12 @@ export async function GET() {
     if (!response.ok) throw new Error("Unable to read workspace heartbeat data");
     const rows = (await response.json()) as Row[];
     const clients = rows.map((row) => {
-      const webhookAgeMinutes = ageMinutes(row.last_webhook_received_at);
-      const pollAgeMinutes = ageMinutes(row.last_successful_poll_at);
+      const webhookAgeSeconds = ageSeconds(row.last_webhook_received_at);
+      const pollAgeSeconds = ageSeconds(row.last_successful_poll_at);
       const keyConfigured = Boolean(row.heyreach_api_key_ciphertext);
-      const webhookHealthy = webhookAgeMinutes !== null && webhookAgeMinutes <= 30;
-      const pollHealthy = pollAgeMinutes !== null && pollAgeMinutes <= 60;
-      return { name: row.name, slug: row.slug, keyConfigured, webhookAgeMinutes, pollAgeMinutes, status: keyConfigured && webhookHealthy && pollHealthy ? "healthy" : keyConfigured ? "attention" : "missing" };
+      const webhookHealthy = webhookAgeSeconds !== null && webhookAgeSeconds <= 30 * 60;
+      const pollHealthy = pollAgeSeconds !== null && pollAgeSeconds <= 60 * 60;
+      return { name: row.name, slug: row.slug, keyConfigured, webhookAgeSeconds, pollAgeSeconds, status: keyConfigured && webhookHealthy && pollHealthy ? "healthy" : keyConfigured ? "attention" : "missing" };
     });
     return NextResponse.json({ status: "live", services, clients, checkedAt: new Date().toISOString() });
   } catch {

@@ -914,7 +914,14 @@ function LayoutPanel({
   const labels = { metrics: "Summary metrics", analytics: "Inbox analytics", queue: "Conversation queue" };
   const move = (target: "metrics" | "analytics" | "queue") => {
     if (!dragged || dragged === target) return;
-    onChange({ ...prefs, order: [target, dragged] });
+    const order = [...prefs.order];
+    const from = order.indexOf(dragged);
+    const to = order.indexOf(target);
+    if (from >= 0 && to >= 0) {
+      order.splice(from, 1);
+      order.splice(to, 0, dragged);
+      onChange({ ...prefs, order });
+    }
     setDragged(null);
   };
   const moveMetric = (target: string) => {

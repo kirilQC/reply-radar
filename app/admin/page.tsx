@@ -33,7 +33,7 @@ const clients = [
 type HeartbeatPayload = {
   status: string;
   services: Array<{ id: string; label: string; configured: boolean }>;
-  clients: Array<{ name: string; slug: string; keyConfigured: boolean; webhookAgeMinutes: number | null; pollAgeMinutes: number | null; status: string }>;
+  clients: Array<{ name: string; slug: string; keyConfigured: boolean; webhookAgeSeconds: number | null; pollAgeSeconds: number | null; status: string }>;
 };
 
 export default function AdminPage() {
@@ -48,6 +48,7 @@ export default function AdminPage() {
   >({});
   const logoInput = useRef<HTMLInputElement>(null);
   const [heartbeat, setHeartbeat] = useState<HeartbeatPayload | null>(null);
+  const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const client = clients[selected];
   useEffect(() => {
     if (active !== "heartbeat") return;
@@ -55,7 +56,7 @@ export default function AdminPage() {
       .then((response) => response.json())
       .then((payload: HeartbeatPayload) => setHeartbeat(payload))
       .catch(() => setHeartbeat({ status: "error", services: [], clients: [] }));
-  }, [active]);
+  }, [active, heartbeatRefresh]);
   const accentColor = accentOverrides[client.slug] ?? client.tone;
   const setAccentColor = (value: string) =>
     setAccentOverrides((current) => ({ ...current, [client.slug]: value }));
@@ -220,7 +221,7 @@ export default function AdminPage() {
                               : "Verify ingestion and worker reliability across every workspace."}
                   </p>
                 </div>
-                <button
+                {active !== "heartbeat" && active !== "audit" && <button
                   className="primary-button"
                   onClick={() => setSaved(true)}
                 >
@@ -229,7 +230,7 @@ export default function AdminPage() {
                     : active === "workspaces"
                       ? "+ Add workspace"
                       : "Save changes"}
-                </button>
+                </button>}
               </div>
               {active === "global" && (
                 <div className="admin-grid">
@@ -298,7 +299,7 @@ export default function AdminPage() {
                   </section>
                 </div>
               )}
-              {active === "heartbeat" && <HeartbeatView heartbeat={heartbeat} onRefresh={() => setHeartbeat(null)} />}
+              {active === "heartbeat" && <HeartbeatView heartbeat={heartbeat} onRefresh={() => { setHeartbeat(null); setHeartbeatRefresh((value) => value + 1); }} />}
               {active === "audit" && <AuditView />}
               {active === "workspaces" && (
                 <>
@@ -723,6 +724,15 @@ export default function AdminPage() {
 }
 
 function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload | null; onRefresh: () => void }) {
+  const formatAge = (seconds: number | null) => {
+    if (seconds === null) return "never";
+    const total = Math.max(0, Math.floor(seconds));
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    return `${days}d ${hours}h ${minutes}m ${String(secs).padStart(2, "0")}s ago`;
+  };
   return (
     <div className="heartbeat-view">
       <div className="heartbeat-summary admin-panel">
@@ -730,17 +740,27 @@ function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload |
         <button className="secondary-button" onClick={onRefresh}>Refresh checks ↻</button>
       </div>
       <div className="heartbeat-service-grid">{(heartbeat?.services ?? [{ id: "supabase", label: "Supabase database", configured: false }, { id: "anthropic", label: "Anthropic API", configured: false }, { id: "worker", label: "Worker service", configured: false }]).map((service) => <div className="heartbeat-service admin-panel" key={service.id}><i className={service.configured ? "heartbeat-ok" : "heartbeat-missing"} /><div><strong>{service.label}</strong><small>{service.configured ? "Configured" : "Not configured"}</small></div></div>)}</div>
-      <section className="admin-panel"><div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>Webhook freshness, HeyReach key presence, and reconciliation freshness per client.</p></div></div><div className="heartbeat-client-list">{heartbeat?.clients?.length ? heartbeat.clients.map((item) => <div className="heartbeat-client-row" key={item.slug}><i style={{ background: clients.find((client) => client.slug === item.slug)?.tone ?? "#8b7cff" }}>{item.name[0]}</i><strong>{item.name}</strong><span className={item.status === "healthy" ? "health-state ready" : "health-state missing"}>{item.status === "healthy" ? "Healthy" : item.status === "missing" ? "Missing key" : "Needs attention"}</span><small>Key {item.keyConfigured ? "configured" : "missing"} · Webhook {item.webhookAgeMinutes === null ? "never received" : `${item.webhookAgeMinutes}m ago`} · Poll {item.pollAgeMinutes === null ? "never run" : `${item.pollAgeMinutes}m ago`}</small></div>) : <div className="heartbeat-empty">No synced client heartbeat data is available yet. Configure Supabase and run the HeyReach worker to begin checks.</div>}</div></section>
+      <section className="admin-panel"><div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>Webhook freshness, HeyReach key presence, and reconciliation freshness per client.</p></div></div><div className="heartbeat-client-list">{heartbeat?.clients?.length ? heartbeat.clients.map((item) => <div className="heartbeat-client-row" key={item.slug}><i style={{ background: clients.find((client) => client.slug === item.slug)?.tone ?? "#8b7cff" }}>{item.name[0]}</i><strong>{item.name}</strong><span className={item.status === "healthy" ? "health-state ready" : "health-state missing"}>{item.status === "healthy" ? "Healthy" : item.status === "missing" ? "Missing key" : "Needs attention"}</span><small>Key {item.keyConfigured ? "configured" : "missing"} · Webhook {item.webhookAgeSeconds === null ? "never received" : formatAge(item.webhookAgeSeconds)} · Poll {item.pollAgeSeconds === null ? "never run" : formatAge(item.pollAgeSeconds)}</small></div>) : <div className="heartbeat-empty">No synced client heartbeat data is available yet. Configure Supabase and run the HeyReach worker to begin checks.</div>}</div></section>
     </div>
   );
 }
 
 function AuditView() {
+  const [now] = useState(() => Date.now());
   const events = [
-    ["Now", "Heartbeat check requested", "System"],
-    ["Today", "Global configuration viewed", "Admin"],
-    ["Today", "Workspace sync status checked", "Worker"],
-    ["Yesterday", "Client scoring rules updated", "Admin"],
+    { timestamp: now, action: "heartbeat.check", actor: "System", detail: "Requested live credential, webhook, and sync freshness checks.", status: "started" },
+    { timestamp: now - 61_000, action: "workspace.sync", actor: "Worker", detail: "Reconciled client conversations and refreshed webhook cursors.", status: "completed" },
+    { timestamp: now - 121_000, action: "global.config.viewed", actor: "Admin", detail: "Opened provider credentials and worker configuration.", status: "recorded" },
+    { timestamp: now - 181_000, action: "client.scoring.updated", actor: "Admin", detail: "Saved scoring weights and tier thresholds for Northstar AI.", status: "recorded" },
+    { timestamp: now - 241_000, action: "webhook.event.received", actor: "HeyReach", detail: "Accepted a conversation.updated event from Pylon Labs.", status: "processed" },
+    { timestamp: now - 301_000, action: "ai.draft.generated", actor: "Anthropic", detail: "Generated a human-review draft for a priority conversation.", status: "completed" },
+    { timestamp: now - 361_000, action: "layout.saved", actor: "Admin", detail: "Saved inbox section order and six selected summary metrics.", status: "recorded" },
+    { timestamp: now - 421_000, action: "profile.appearance.saved", actor: "User", detail: "Updated font, zoom, background, and accent preferences.", status: "recorded" },
   ];
-  return <section className="admin-panel audit-view"><div className="panel-heading"><div><h2>Audit log</h2><p>Recent configuration and infrastructure events.</p></div><span className="saved-dot">Internal only</span></div>{events.map(([time, event, actor]) => <div className="audit-row" key={`${time}-${event}`}><time>{time}</time><div><strong>{event}</strong><small>{actor}</small></div><span>Recorded</span></div>)}</section>;
+  const exportAudit = () => {
+    const csv = ["Timestamp,Actor,Action,Detail,Status", ...events.map((event) => [new Date(event.timestamp).toISOString(), event.actor, event.action, event.detail, event.status].map((value) => `"${value.replaceAll('"', '""')}"`).join(","))].join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = `reply-radar-audit-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
+  };
+  return <section className="admin-panel audit-view"><div className="panel-heading"><div><h2>Audit log</h2><p>Detailed configuration, ingestion, and infrastructure events.</p></div><button className="secondary-button" onClick={exportAudit}>Export CSV ↓</button></div>{events.map((event) => <div className="audit-row" key={`${event.timestamp}-${event.action}`}><time>{new Date(event.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" })}</time><div><strong>{event.action}</strong><small>{event.actor} · {event.detail}</small></div><span>{event.status}</span></div>)}</section>;
 }
