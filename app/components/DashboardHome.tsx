@@ -117,6 +117,35 @@ export default function DashboardHome() {
               ))}
             </div>
           </section>
+          <section className="dashboard-insights">
+            <div className="section-heading">
+              <div>
+                <h2>Performance overview</h2>
+                <p>Trends across every connected client.</p>
+              </div>
+              <a href="/analytics" className="text-button">View full analytics →</a>
+            </div>
+            <div className="dashboard-chart-grid">
+              <article className="dashboard-chart-card dashboard-line-card">
+                <div className="dashboard-chart-heading"><div><span>REPLY VOLUME</span><strong>1,284 replies</strong></div><small>Last 7 days</small></div>
+                <svg className="reply-line-chart" viewBox="0 0 520 170" role="img" aria-label="Reply volume trend over the last seven days">
+                  <path className="chart-grid-line" d="M0 30H520M0 78H520M0 126H520" />
+                  <path className="chart-area" d="M0 130 L74 112 L148 119 L222 74 L296 92 L370 48 L444 63 L520 22 L520 150 L0 150Z" />
+                  <path className="chart-line" d="M0 130 L74 112 L148 119 L222 74 L296 92 L370 48 L444 63 L520 22" />
+                  <circle cx="520" cy="22" r="4" className="chart-point" />
+                </svg>
+                <div className="chart-axis"><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span></div>
+              </article>
+              <article className="dashboard-chart-card">
+                <div className="dashboard-chart-heading"><div><span>QUEUE MIX</span><strong>12 conversations</strong></div><small>Current</small></div>
+                <div className="queue-mix-visual"><div className="donut-chart"><div><strong>12</strong><small>leads</small></div></div><div className="queue-legend"><span><i className="legend-hot"/>Hot <b>4</b></span><span><i className="legend-warm"/>Warm <b>3</b></span><span><i className="legend-nurture"/>Nurture <b>5</b></span></div></div>
+              </article>
+              <article className="dashboard-chart-card client-performance-card">
+                <div className="dashboard-chart-heading"><div><span>CLIENT PERFORMANCE</span><strong>Positive reply rate</strong></div><small>30 days</small></div>
+                {[['Northstar AI','72%', '#8b7cff'],['Pylon Labs','64%', '#55c7a2'],['Vectorly','51%', '#f2a36b']].map(([name, value, color]) => <div className="client-performance-row" key={name}><div><span>{name}</span><b>{value}</b></div><div className="performance-track"><i style={{ width: value, background: color }} /></div></div>)}
+              </article>
+            </div>
+          </section>
         </main>
       </section>
     </div>
