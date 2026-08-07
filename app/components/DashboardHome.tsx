@@ -87,7 +87,7 @@ export default function DashboardHome() {
           <section>
             <div className="section-heading">
               <div>
-                <h2>Teammate profiles</h2>
+                <h2>Profiles</h2>
               </div>
               <a href="/profiles" className="text-button">
                 Manage profiles →

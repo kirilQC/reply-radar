@@ -203,7 +203,7 @@ export default function AdminPage() {
                     <span className="live-dot" />
                     ADMIN CONSOLE
                   </div>
-                  <h1>
+                  <h1 className={active === "workspaces" && workspaceOpen ? "client-config-heading" : undefined}>
                     {active === "workspaces" && workspaceOpen ? <><span className="admin-client-heading-logo" style={{ background: client.tone }}>{client.name[0] || "?"}</span>{client.name || "New workspace"}</> : active === "global"
                       ? "Global config"
                       : active === "workspaces"
@@ -220,7 +220,7 @@ export default function AdminPage() {
                                   ? "Audit log"
                                   : "System health"}
                   </h1>
-                  <p>
+                  {!(active === "workspaces" && workspaceOpen) && <p>
                     {active === "global"
                       ? "Shared runtime credentials and worker settings for Reply Radar."
                       : active === "workspaces"
@@ -236,7 +236,7 @@ export default function AdminPage() {
                             : active === "theme"
                               ? "Customize the interface without touching code."
                               : "Verify ingestion and worker reliability across every workspace."}
-                  </p>
+                  </p>}
                 </div>
                 {active !== "heartbeat" && active !== "audit" && <button
                   className="primary-button"

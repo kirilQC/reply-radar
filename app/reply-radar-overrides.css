@@ -29,3 +29,4 @@
 body{zoom:var(--reply-radar-zoom,1)}
 .global-caption{margin-top:24px}
 html:not(.hydrated) body{visibility:hidden}
+.client-config-heading{display:flex;align-items:center;gap:13px;font-size:34px!important}.client-config-heading .admin-client-heading-logo{width:44px;height:44px;margin-right:0;border-radius:12px;font-size:17px}
