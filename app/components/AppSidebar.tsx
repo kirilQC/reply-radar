@@ -5,7 +5,7 @@ import { useState } from "react";
 import Link from "next/link";
 
 const items = [
-  ["/", "Priority inbox", "▣"],
+  ["/inbox", "Priority inbox", "▣"],
   ["/profiles", "Profiles", "♙"],
   ["/calendar", "Follow-up calendar", "□"],
   ["/analytics", "Analytics", "▥"],
@@ -56,7 +56,7 @@ export default function AppSidebar() {
           >
             <span style={{ flex: "none", width: 16 }}>{icon}</span>
             <span>{label}</span>
-            {href === "/" && <b className="nav-count">12</b>}
+            {href === "/inbox" && <b className="nav-count">12</b>}
           </a>
         ))}
       </nav>
