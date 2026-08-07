@@ -30,3 +30,5 @@ body{zoom:var(--reply-radar-zoom,1)}
 .global-caption{margin-top:24px}
 html:not(.hydrated) body{visibility:hidden}
 .client-config-heading{display:flex;align-items:center;gap:13px;font-size:34px!important}.client-config-heading .admin-client-heading-logo{width:44px;height:44px;margin-right:0;border-radius:12px;font-size:17px}
+.topbar:has(.dashboard-brand){position:relative}.dashboard-brand{position:absolute;left:50%;transform:translateX(-50%);font-family:"Bodoni 72","Didot",Georgia,serif;font-size:24px;font-weight:700;letter-spacing:.01em;color:#fff;white-space:nowrap}
+.analytics-shell .admin-content,.health-shell .admin-content{max-width:none;width:100%;box-sizing:border-box}.analytics-shell .bar-col i{background:var(--accent)!important}
