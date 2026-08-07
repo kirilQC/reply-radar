@@ -40,6 +40,7 @@ export default function AdminPage() {
   const [active, setActive] = useState("global");
   const [selected, setSelected] = useState(0);
   const [clientSearch, setClientSearch] = useState("");
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
   const [themePreset, setThemePreset] = useState("midnight");
@@ -50,6 +51,13 @@ export default function AdminPage() {
       const stored = window.localStorage.getItem("reply-radar-admin-accent-overrides");
       return stored ? (JSON.parse(stored) as Record<string, string>) : {};
     } catch { return {}; }
+  });
+  const [globalAccent] = useState(() => {
+    if (typeof window === "undefined") return "#8b7cff";
+    try {
+      const raw = window.localStorage.getItem("reply-radar-prefs:general");
+      return JSON.parse(raw || "null")?.appearance?.accent || "#8b7cff";
+    } catch { return "#8b7cff"; }
   });
   const logoInput = useRef<HTMLInputElement>(null);
   const [heartbeat, setHeartbeat] = useState<HeartbeatPayload | null>(null);
@@ -66,7 +74,7 @@ export default function AdminPage() {
       .then((payload: HeartbeatPayload) => setHeartbeat(payload))
       .catch(() => setHeartbeat({ status: "error", services: [], clients: [] }));
   }, [active, heartbeatRefresh]);
-  const accentColor = accentOverrides[client.slug] ?? client.tone;
+  const accentColor = accentOverrides[client.slug] ?? globalAccent;
   const setAccentColor = (value: string) =>
     setAccentOverrides((current) => ({ ...current, [client.slug]: value }));
   const chooseLogo = () => logoInput.current?.click();
@@ -141,6 +149,7 @@ export default function AdminPage() {
                       onClick={() => {
                         setSelected(index);
                         setActive("workspaces");
+                        setWorkspaceOpen(true);
                       }}
                     >
                       <i style={{ background: item.tone }}>{item.name[0]}</i>
@@ -228,7 +237,7 @@ export default function AdminPage() {
                 </div>
                 {active !== "heartbeat" && active !== "audit" && <button
                   className="primary-button"
-                  onClick={() => setSaved(true)}
+                  onClick={() => active === "workspaces" ? setWorkspaceOpen(true) : setSaved(true)}
                 >
                   {saved
                     ? "Saved ✓"
@@ -320,7 +329,7 @@ export default function AdminPage() {
                       <button
                         key={item.slug}
                         className={`workspace-card ${selected === index ? "selected" : ""}`}
-                        onClick={() => setSelected(index)}
+                        onClick={() => { setSelected(index); setWorkspaceOpen(true); }}
                       >
                         <div className="workspace-card-top">
                           <i style={{ background: item.tone }}>
@@ -351,7 +360,8 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>
-                  <div className="admin-grid">
+                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><span>Editing {client.name}</span></div>}
+                  {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
                       <div className="panel-heading">
                         <div>
@@ -460,7 +470,7 @@ export default function AdminPage() {
                         </div>
                       </div>
                     </section>
-                  </div>
+                  </div>}
                 </>
               )}
               {active === "ai" && (
