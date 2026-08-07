@@ -30,6 +30,14 @@ type LayoutPrefs = {
   graphs: GraphConfig[];
 };
 type GraphConfig = { id: string; title: string; metric: string; kind: "line" | "bars" | "donut" };
+type AnalyticsSnapshot = {
+  status: "live" | "no_data" | "not_configured" | "error";
+  totalReplies: number;
+  replies7d: number;
+  trend: number[];
+  queueMix: { hot: number; warm: number; nurture: number };
+  clientLoad: Array<{ name: string; leads: number }>;
+};
 type AppearancePrefs = {
   mode: "midnight" | "light";
   zoom: number;
@@ -210,6 +218,7 @@ export function InboxPage() {
   const [appearance, setAppearance] = useState(defaultAppearance);
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
   const [clientParam] = useState(() =>
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("client")
@@ -237,6 +246,7 @@ export function InboxPage() {
           ? "Maya Patel"
           : null;
   const trackedClients = assignedClients ?? ["Northstar", "Pylon", "Vectorly"];
+  const trackedWorkspaceSlugs = trackedClients.map((client) => client.toLowerCase());
   const greeting =
     new Date().getHours() < 12
       ? "Good morning"
@@ -279,6 +289,14 @@ export function InboxPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [preferenceKey]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/analytics?workspaces=${trackedWorkspaceSlugs.join(",")}`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload: AnalyticsSnapshot) => { if (!cancelled) setAnalytics(payload); })
+      .catch(() => { if (!cancelled) setAnalytics({ status: "error", totalReplies: 0, replies7d: 0, trend: [], queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] }); });
+    return () => { cancelled = true; };
+  }, [trackedClients.join(",")]);
   const savePreferences = (nextLayout = layoutPrefs, nextAppearance = appearance) => {
     const payload = { layout: nextLayout, appearance: nextAppearance };
     window.localStorage.setItem(preferenceKey, JSON.stringify(payload));
@@ -584,7 +602,7 @@ export function InboxPage() {
             })}
           </div>
           <div className="layout-section" style={{ order: layoutPrefs.order.indexOf("analytics") }} hidden={!layoutPrefs.showAnalytics}>
-            <InboxAnalytics graphs={layoutPrefs.graphs} onChange={(graphs) => setLayoutPrefs({ ...layoutPrefs, graphs })} />
+            <InboxAnalytics graphs={layoutPrefs.graphs} analytics={analytics} onChange={(graphs) => setLayoutPrefs({ ...layoutPrefs, graphs })} />
           </div>
           <div className="layout-section queue-section" style={{ order: layoutPrefs.order.indexOf("queue") }}>
           <div className="health-strip">
@@ -829,9 +847,11 @@ const graphPresets: Array<Omit<GraphConfig, "id">> = [
 
 function InboxAnalytics({
   graphs,
+  analytics,
   onChange,
 }: {
   graphs: GraphConfig[];
+  analytics: AnalyticsSnapshot | null;
   onChange: (graphs: GraphConfig[]) => void;
 }) {
   const [newPreset, setNewPreset] = useState(2);
@@ -854,18 +874,30 @@ function InboxAnalytics({
   return (
     <section className="inbox-analytics-section">
       <div className="inbox-analytics-heading">
-        <div><span>INBOX ANALYTICS</span><h2>Conversation trends</h2><p>Choose preset graphs or build a custom view for this inbox.</p></div>
+        <div><span>INBOX ANALYTICS</span><h2>Conversation trends</h2><p>{analytics?.status === "live" ? "Live aggregates from synced conversations and messages." : "Analytics will populate after Supabase receives synced HeyReach data."}</p></div>
         <div className="graph-builder"><select value={newPreset} onChange={(event) => setNewPreset(Number(event.target.value))}>{graphPresets.map((preset, index) => <option key={preset.title} value={index}>{preset.title}</option>)}</select><select value={newKind} onChange={(event) => setNewKind(event.target.value as GraphConfig["kind"])}><option value="line">Line</option><option value="bars">Bars</option><option value="donut">Donut</option></select><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Custom title"/><button onClick={addGraph} disabled={graphs.length >= 4}>+ Add graph</button></div>
       </div>
-      <div className="inbox-graph-grid">{graphs.map((graph) => <article className="inbox-graph-card" key={graph.id}><div className="inbox-graph-card-heading"><div><span>{graph.metric}</span><strong>{graph.title}</strong></div><button aria-label={`Remove ${graph.title}`} onClick={() => onChange(graphs.filter((item) => item.id !== graph.id))}>×</button></div><GraphVisual kind={graph.kind} /></article>)}</div>
+      <div className="inbox-graph-grid">{graphs.map((graph) => <article className="inbox-graph-card" key={graph.id}><div className="inbox-graph-card-heading"><div><span>{graph.metric}</span><strong>{graph.title}</strong></div><button aria-label={`Remove ${graph.title}`} onClick={() => onChange(graphs.filter((item) => item.id !== graph.id))}>×</button></div><GraphVisual kind={graph.kind} metric={graph.metric} analytics={analytics} /></article>)}</div>
     </section>
   );
 }
 
-function GraphVisual({ kind }: { kind: GraphConfig["kind"] }) {
-  if (kind === "donut") return <div className="inbox-donut"><div><strong>12</strong><small>leads</small></div></div>;
-  if (kind === "bars") return <div className="inbox-bars">{[42, 58, 48, 73, 65, 82, 68].map((height, index) => <i key={index} style={{ height: `${height}%` }} />)}</div>;
-  return <svg className="inbox-line" viewBox="0 0 420 110" role="img" aria-label="Trend graph"><path d="M0 90 L60 72 L120 78 L180 43 L240 58 L300 30 L360 45 L420 12" /><circle cx="420" cy="12" r="4" /></svg>;
+function GraphVisual({ kind, metric, analytics }: { kind: GraphConfig["kind"]; metric: string; analytics: AnalyticsSnapshot | null }) {
+  if (!analytics || analytics.status !== "live") return <div className="analytics-empty">No synced data yet</div>;
+  if (kind === "donut") {
+    const total = analytics.queueMix.hot + analytics.queueMix.warm + analytics.queueMix.nurture;
+    const hot = total ? (analytics.queueMix.hot / total) * 100 : 0;
+    const warm = total ? hot + (analytics.queueMix.warm / total) * 100 : 0;
+    return <div className="inbox-donut" style={{ background: `conic-gradient(var(--coral) 0 ${hot}%,var(--amber) ${hot}% ${warm}%,#687080 ${warm}% 100%)` }}><div><strong>{total}</strong><small>leads</small></div></div>;
+  }
+  const values = metric === "Leads by client" ? analytics.clientLoad.map((item) => item.leads) : analytics.trend;
+  if (kind === "bars") {
+    const max = Math.max(...values, 1);
+    return <div className="inbox-bars">{values.map((value, index) => <i key={index} style={{ height: `${Math.max(5, (value / max) * 100)}%` }} />)}</div>;
+  }
+  const max = Math.max(...values, 1);
+  const points = values.map((value, index) => `${values.length === 1 ? 210 : (index / (values.length - 1)) * 420} ${96 - (value / max) * 82}`).join(" L");
+  return values.length ? <svg className="inbox-line" viewBox="0 0 420 110" role="img" aria-label="Live trend graph"><path d={`M${points}`} /><circle cx={values.length === 1 ? 210 : 420} cy={96 - ((values[values.length - 1] / max) * 82)} r="4" /></svg> : <div className="analytics-empty">No synced data yet</div>;
 }
 
 function LayoutPanel({
@@ -878,11 +910,24 @@ function LayoutPanel({
   onSave: () => void;
 }) {
   const [dragged, setDragged] = useState<"metrics" | "analytics" | "queue" | null>(null);
+  const [draggedMetric, setDraggedMetric] = useState<string | null>(null);
   const labels = { metrics: "Summary metrics", analytics: "Inbox analytics", queue: "Conversation queue" };
   const move = (target: "metrics" | "analytics" | "queue") => {
     if (!dragged || dragged === target) return;
     onChange({ ...prefs, order: [target, dragged] });
     setDragged(null);
+  };
+  const moveMetric = (target: string) => {
+    if (!draggedMetric || draggedMetric === target) return;
+    const order = [...prefs.metrics];
+    const from = order.indexOf(draggedMetric);
+    const to = order.indexOf(target);
+    if (from >= 0 && to >= 0) {
+      order.splice(from, 1);
+      order.splice(to, 0, draggedMetric);
+      onChange({ ...prefs, metrics: order });
+    }
+    setDraggedMetric(null);
   };
   return (
     <div className="customize-popover layout-popover">
@@ -910,9 +955,10 @@ function LayoutPanel({
       <label className="customize-check"><input type="checkbox" checked={prefs.compact} onChange={(event) => onChange({ ...prefs, compact: event.target.checked })} /> Compact spacing</label>
       <div className="metric-picker-heading"><strong>Summary metrics</strong><small>{prefs.metrics.length}/6 selected</small></div>
       <div className="metric-picker">
-        {metricCatalog.map((metric) => {
+        {[...prefs.metrics, ...metricCatalog.map((metric) => metric.id).filter((id) => !prefs.metrics.includes(id))].map((metricId) => {
+          const metric = metricCatalog.find((item) => item.id === metricId)!;
           const checked = prefs.metrics.includes(metric.id);
-          return <label className="customize-check" key={metric.id}><input type="checkbox" checked={checked} disabled={!checked && prefs.metrics.length >= 6} onChange={() => onChange({ ...prefs, metrics: checked ? prefs.metrics.filter((id) => id !== metric.id) : [...prefs.metrics, metric.id] })} /> {metric.label}</label>;
+          return <div className="metric-picker-row" key={metric.id} draggable={checked} onDragStart={() => checked && setDraggedMetric(metric.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveMetric(metric.id)}><span className="drag-handle">⠿</span><label className="customize-check"><input type="checkbox" checked={checked} disabled={!checked && prefs.metrics.length >= 6} onChange={() => onChange({ ...prefs, metrics: checked ? prefs.metrics.filter((id) => id !== metric.id) : [...prefs.metrics, metric.id] })} /> {metric.label}</label></div>;
         })}
       </div>
       <button className="customize-save" onClick={onSave}>Save layout</button>
