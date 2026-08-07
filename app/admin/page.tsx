@@ -64,6 +64,7 @@ export default function AdminPage() {
   const [saved, setSaved] = useState(false);
   const [themePreset, setThemePreset] = useState("midnight");
   const [logos, setLogos] = useState<Record<string, string>>({});
+  const [documents, setDocuments] = useState<Record<string, string[]>>({});
   const [accentOverrides, setAccentOverrides] = useState<Record<string, string>>(() => {
     if (typeof window === "undefined") return {};
     try {
@@ -72,6 +73,7 @@ export default function AdminPage() {
     } catch { return {}; }
   });
   const logoInput = useRef<HTMLInputElement>(null);
+  const docsInput = useRef<HTMLInputElement>(null);
   const [heartbeat, setHeartbeat] = useState<HeartbeatPayload | null>(null);
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
@@ -149,13 +151,26 @@ export default function AdminPage() {
       }));
     reader.readAsDataURL(file);
   };
+  const handleDocuments = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    if (!files.length) return;
+    setDocuments((current) => ({
+      ...current,
+      [client.slug]: [...(current[client.slug] ?? []), ...files.map((file) => file.name)],
+    }));
+    event.target.value = "";
+  };
+  const copyWebhook = () => {
+    void navigator.clipboard?.writeText(`https://replyradar.app/api/webhooks/heyreach/${client.slug}`);
+    setSaved(true);
+  };
   return (
     <div className="app-shell">
       <AppSidebar />
       <section className="main-area">
         <main
           className={`admin-shell admin-theme-${themePreset}`}
-          style={(accentOverrides[client.slug] ? { "--accent": accentColor } : undefined) as unknown as React.CSSProperties}
+          style={{ "--accent": accentColor } as unknown as React.CSSProperties}
         >
           <header className="admin-topbar">
             <a className="admin-brand" href="/">
@@ -227,7 +242,7 @@ export default function AdminPage() {
                     ADMIN CONSOLE
                   </div>
                   <h1 className={active === "workspaces" && workspaceOpen ? "client-config-heading" : undefined}>
-                    {active === "workspaces" && workspaceOpen ? <><span className="admin-client-heading-logo" style={{ background: client.tone }}>{client.name[0] || "?"}</span>{client.name || "New workspace"}</> : active === "global"
+                    {active === "workspaces" && workspaceOpen ? <><span className="admin-client-heading-logo" style={{ background: accentColor }}>{client.name[0] || "?"}</span>{client.name || "New workspace"}</> : active === "global"
                       ? "Global config"
                       : active === "workspaces"
                         ? "Client workspaces"
@@ -367,7 +382,7 @@ export default function AdminPage() {
                           </span>
                         </div>
                         <strong>{item.name || "Unnamed workspace"}</strong>
-                        <small>{item.leads} leads · Created {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "—"}</small>
+                        <small>{item.leads} leads</small>
                         <div className="workspace-progress">
                           <span
                             style={{
@@ -381,7 +396,7 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>}
-                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><button className="secondary-button" onClick={requestRemoveWorkspace}>Remove workspace</button></div>}
+                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><span>Created {client.createdAt ? new Date(client.createdAt).toLocaleDateString() : "—"}</span><button className="secondary-button" onClick={requestRemoveWorkspace}>Remove workspace</button></div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
                       <div className="panel-heading">
@@ -437,14 +452,14 @@ export default function AdminPage() {
                             /••••••••
                           </code>
                         </div>
-                        <button>Copy</button>
+                        <button onClick={copyWebhook}>Copy</button>
                       </div>
                       <div className="panel-actions">
-                        <button className="secondary-button">Rotate key</button>
-                        <button className="secondary-button">
+                        <button className="secondary-button" onClick={() => setSaved(true)}>Rotate key</button>
+                        <button className="secondary-button" onClick={() => setSaved(true)}>
                           Run backfill
                         </button>
-                        <button className="text-button">
+                        <button className="text-button" onClick={() => setActive("audit")}>
                           View event log →
                         </button>
                       </div>
@@ -480,15 +495,18 @@ export default function AdminPage() {
                           <input value={workspaceDraft.slug} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slug: event.target.value }))} placeholder="Enter workspace slug" />
                         </label>
                       </div>
-                      <div className="upload-zone">
+                      <button className="upload-zone" type="button" onClick={() => docsInput.current?.click()}>
                         ＋{" "}
                         <div>
                           <strong>Drop client docs here</strong>
                           <small>
-                            PDF, DOCX, TXT, MD · stored in Supabase Storage
+                            {documents[client.slug]?.length
+                              ? `${documents[client.slug].length} file${documents[client.slug].length === 1 ? "" : "s"} selected`
+                              : "PDF, DOCX, TXT, MD · stored in Supabase Storage"}
                           </small>
                         </div>
-                      </div>
+                      </button>
+                      <input ref={docsInput} type="file" accept=".pdf,.doc,.docx,.txt,.md" multiple hidden onChange={handleDocuments} />
                     </section>
                   </div>}
                   {workspaceOpen && <div className="client-config-sections">

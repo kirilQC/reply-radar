@@ -36,3 +36,4 @@ html:not(.hydrated) body{visibility:hidden}
 .dashboard-home .section-heading h2{font-size:19px;line-height:1.15;font-weight:650;letter-spacing:-.025em}
 .crumb-chevron{display:inline-flex;align-items:center;color:var(--muted-2);font-size:18px;line-height:1;margin:0 2px}
 .analytics-shell .admin-content,.health-shell .admin-content{max-width:none;width:100%;box-sizing:border-box}.analytics-shell .bar-col i{background:var(--accent)!important}
+.upload-zone{width:100%;text-align:left;background:var(--panel);color:var(--accent);font:inherit;cursor:pointer}.upload-zone:hover{border-color:var(--accent);background:var(--panel-2)}.workspace-editor-toolbar>span{color:var(--muted-2);font-size:10px}.client-created-date{display:block;color:var(--muted-2);font-size:10px;margin-top:-5px}
