@@ -186,6 +186,7 @@ export function InboxPage() {
         : profileParam === "maya-patel"
           ? "Maya Patel"
           : null;
+  const trackedClients = assignedClients ?? ["Northstar", "Pylon", "Vectorly"];
   const clientName =
     clientParam === "northstar"
       ? "Northstar AI"
@@ -457,8 +458,15 @@ export function InboxPage() {
                 LIVE QUEUE <span className="eyebrow-separator">/</span> WED, AUG
                 06
               </div>
-              <h1>Good morning, Alex.</h1>
-              <p>12 conversations need your attention across 5 clients.</p>
+              <h1>{profileName ?? "Inbox"}</h1>
+              <p>
+                {filtered.length} leads across {trackedClients.length} clients
+              </p>
+              <div className="tracked-clients">
+                {trackedClients.map((client) => (
+                  <span key={client}>{client}</span>
+                ))}
+              </div>
             </div>
             <div className="heading-actions">
               <button className="secondary-button">
