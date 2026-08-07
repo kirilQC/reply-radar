@@ -134,6 +134,13 @@ export default function AdminPage() {
           </header>
           <div className="admin-layout">
             <aside className="admin-nav">
+              <div className="admin-nav-caption">CONFIGURATION</div>
+              <button
+                className={active === "workspaces" ? "active" : ""}
+                onClick={() => { setActive("workspaces"); setWorkspaceOpen(false); }}
+              >
+                <span>▦</span>Client directory
+              </button>
               <div className="admin-nav-caption">GLOBAL CONFIG</div>
               <button
                 className={active === "global" ? "active" : ""}
@@ -141,27 +148,6 @@ export default function AdminPage() {
               >
                 <span>◈</span>Global config
               </button>
-              <div className="admin-nav-caption client-caption">CLIENTS</div>
-              <div className="admin-client-list">
-                {clients.map((item, index) => (
-                  <div
-                    className={`admin-client-group ${selected === index ? "selected" : ""}`}
-                    key={item.slug}
-                  >
-                    <button
-                      className="admin-client-button"
-                      onClick={() => {
-                        setSelected(index);
-                        setActive("workspaces");
-                        setWorkspaceOpen(true);
-                      }}
-                    >
-                      <i style={{ background: item.tone }}>{item.name[0]}</i>
-                      <span>{item.name}</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
               <div className="admin-nav-caption system-caption">SYSTEM</div>
               {[
                 ["heartbeat", "Heartbeat", "⌁"],
