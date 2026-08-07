@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages, jsx-a11y/label-has-associated-control, react/no-unescaped-entities */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 
 const clients = [
@@ -30,9 +30,14 @@ const clients = [
     lastSync: "3 hr ago",
   },
 ];
+type HeartbeatPayload = {
+  status: string;
+  services: Array<{ id: string; label: string; configured: boolean }>;
+  clients: Array<{ name: string; slug: string; keyConfigured: boolean; webhookAgeMinutes: number | null; pollAgeMinutes: number | null; status: string }>;
+};
 
 export default function AdminPage() {
-  const [active, setActive] = useState("workspaces");
+  const [active, setActive] = useState("global");
   const [selected, setSelected] = useState(0);
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -42,7 +47,15 @@ export default function AdminPage() {
     Record<string, string>
   >({});
   const logoInput = useRef<HTMLInputElement>(null);
+  const [heartbeat, setHeartbeat] = useState<HeartbeatPayload | null>(null);
   const client = clients[selected];
+  useEffect(() => {
+    if (active !== "heartbeat") return;
+    fetch("/api/heartbeat", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload: HeartbeatPayload) => setHeartbeat(payload))
+      .catch(() => setHeartbeat({ status: "error", services: [], clients: [] }));
+  }, [active]);
   const accentColor = accentOverrides[client.slug] ?? client.tone;
   const setAccentColor = (value: string) =>
     setAccentOverrides((current) => ({ ...current, [client.slug]: value }));
@@ -88,6 +101,10 @@ export default function AdminPage() {
                     ? "AI context"
                     : active === "scoring"
                       ? "Scoring engine"
+                      : active === "heartbeat"
+                        ? "Heartbeat"
+                        : active === "audit"
+                          ? "Audit log"
                       : "Theme studio"}
             </div>
             <div className="admin-top-actions">
@@ -144,7 +161,7 @@ export default function AdminPage() {
               </div>
               <div className="admin-nav-caption system-caption">SYSTEM</div>
               {[
-                ["health", "System health", "⌁"],
+                ["heartbeat", "Heartbeat", "⌁"],
                 ["audit", "Audit log", "≡"],
               ].map(([id, label, icon]) => (
                 <button
@@ -179,7 +196,11 @@ export default function AdminPage() {
                             ? "Scoring engine"
                             : active === "theme"
                               ? "Theme studio"
-                              : "System health"}
+                              : active === "heartbeat"
+                                ? "Heartbeat"
+                                : active === "audit"
+                                  ? "Audit log"
+                                  : "System health"}
                   </h1>
                   <p>
                     {active === "global"
@@ -190,6 +211,10 @@ export default function AdminPage() {
                           ? "Tune the Anthropic drafting context for every client."
                           : active === "scoring"
                             ? "Make follow-up urgency explainable and client-specific."
+                            : active === "heartbeat"
+                              ? "Live pulse checks for credentials, webhooks, and sync freshness."
+                              : active === "audit"
+                                ? "A chronological record of configuration and ingestion events."
                             : active === "theme"
                               ? "Customize the interface without touching code."
                               : "Verify ingestion and worker reliability across every workspace."}
@@ -273,6 +298,8 @@ export default function AdminPage() {
                   </section>
                 </div>
               )}
+              {active === "heartbeat" && <HeartbeatView heartbeat={heartbeat} onRefresh={() => setHeartbeat(null)} />}
+              {active === "audit" && <AuditView />}
               {active === "workspaces" && (
                 <>
                   <div className="workspace-cards">
@@ -693,4 +720,27 @@ export default function AdminPage() {
       </section>
     </div>
   );
+}
+
+function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload | null; onRefresh: () => void }) {
+  return (
+    <div className="heartbeat-view">
+      <div className="heartbeat-summary admin-panel">
+        <div><span className="eyebrow"><span className="live-dot" /> LIVE PULSE</span><h2>{heartbeat?.status === "live" ? "All checks completed" : heartbeat?.status === "not_configured" ? "Configuration required" : "Checking infrastructure…"}</h2><p>Checks run against the configured Supabase records and service settings.</p></div>
+        <button className="secondary-button" onClick={onRefresh}>Refresh checks ↻</button>
+      </div>
+      <div className="heartbeat-service-grid">{(heartbeat?.services ?? [{ id: "supabase", label: "Supabase database", configured: false }, { id: "anthropic", label: "Anthropic API", configured: false }, { id: "worker", label: "Worker service", configured: false }]).map((service) => <div className="heartbeat-service admin-panel" key={service.id}><i className={service.configured ? "heartbeat-ok" : "heartbeat-missing"} /><div><strong>{service.label}</strong><small>{service.configured ? "Configured" : "Not configured"}</small></div></div>)}</div>
+      <section className="admin-panel"><div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>Webhook freshness, HeyReach key presence, and reconciliation freshness per client.</p></div></div><div className="heartbeat-client-list">{heartbeat?.clients?.length ? heartbeat.clients.map((item) => <div className="heartbeat-client-row" key={item.slug}><i style={{ background: clients.find((client) => client.slug === item.slug)?.tone ?? "#8b7cff" }}>{item.name[0]}</i><strong>{item.name}</strong><span className={item.status === "healthy" ? "health-state ready" : "health-state missing"}>{item.status === "healthy" ? "Healthy" : item.status === "missing" ? "Missing key" : "Needs attention"}</span><small>Key {item.keyConfigured ? "configured" : "missing"} · Webhook {item.webhookAgeMinutes === null ? "never received" : `${item.webhookAgeMinutes}m ago`} · Poll {item.pollAgeMinutes === null ? "never run" : `${item.pollAgeMinutes}m ago`}</small></div>) : <div className="heartbeat-empty">No synced client heartbeat data is available yet. Configure Supabase and run the HeyReach worker to begin checks.</div>}</div></section>
+    </div>
+  );
+}
+
+function AuditView() {
+  const events = [
+    ["Now", "Heartbeat check requested", "System"],
+    ["Today", "Global configuration viewed", "Admin"],
+    ["Today", "Workspace sync status checked", "Worker"],
+    ["Yesterday", "Client scoring rules updated", "Admin"],
+  ];
+  return <section className="admin-panel audit-view"><div className="panel-heading"><div><h2>Audit log</h2><p>Recent configuration and infrastructure events.</p></div><span className="saved-dot">Internal only</span></div>{events.map(([time, event, actor]) => <div className="audit-row" key={`${time}-${event}`}><time>{time}</time><div><strong>{event}</strong><small>{actor}</small></div><span>Recorded</span></div>)}</section>;
 }
