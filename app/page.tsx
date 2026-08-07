@@ -603,14 +603,7 @@ export function InboxPage() {
                 {clientParam && <span className="inbox-heading-logo" style={{ background: clientParam === "northstar" ? "#8b7cff" : clientParam === "pylon" ? "#55c7a2" : "#f2a36b" }}>{clientName[0]}</span>}
                 {profileName ? `${greeting}, ${profileName}` : clientParam ? clientName : "General inbox"}
               </h1>
-              <p>
-                {filtered.length} leads across {trackedClients.length} clients
-              </p>
-              <div className="tracked-clients">
-                {trackedClients.map((client) => (
-                  <span key={client}>{client}</span>
-                ))}
-              </div>
+              {!clientParam && <><p>{filtered.length} leads across {trackedClients.length} clients</p><div className="tracked-clients">{trackedClients.map((client) => <span key={client}>{client}</span>)}</div></>}
             </div>
           </div>
           <div className="inbox-layout">
