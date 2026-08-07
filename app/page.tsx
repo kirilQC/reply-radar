@@ -36,8 +36,8 @@ export default function Home() {
     const sortButton = document.querySelector<HTMLButtonElement>(".queue-tools .filter-button + .filter-button");
     const exportButton = document.querySelector<HTMLButtonElement>(".heading-actions .secondary-button");
     const addButton = document.querySelector<HTMLButtonElement>(".heading-actions .primary-button");
-    const workspaceHandler = () => toast("Workspace switcher ready — choose a client from the sidebar.");
-    const clientHandlers = clientButtons.map((button) => { const handler = () => { const name = button.textContent?.replace(/\d+$/, "").trim() || "client"; toast(`Switched to ${name} workspace`); }; button.addEventListener("click", handler); return [button, handler] as const; });
+    const workspaceHandler = () => { const name = window.prompt("Switch workspace", "All client workspaces"); const label = workspace?.querySelector("strong"); if (name && label) label.textContent = name; if (name) toast(`Switched to ${name}`); };
+    const clientHandlers = clientButtons.map((button) => { const handler = () => { const name = button.textContent?.replace(/\d+$/, "").trim() || "client"; const label = workspace?.querySelector("strong"); if (label) label.textContent = name; toast(`Switched to ${name} workspace`); }; button.addEventListener("click", handler); return [button, handler] as const; });
     const filterHandler = () => toast("Filter menu ready — use All follow-ups, Hot, or Snoozed above.");
     const sortHandler = () => toast("Sorted by urgency score (highest first).");
     const exportHandler = () => { const csv = ["Lead,Client,Score,Tier", ...leads.map((lead) => `${lead.name},${lead.client},${lead.score},${lead.tier}`)].join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = "reply-radar-follow-ups.csv"; link.click(); URL.revokeObjectURL(link.href); toast("Follow-up queue exported."); };
