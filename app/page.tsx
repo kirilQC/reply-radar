@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Lead = { initials: string; name: string; role: string; company: string; client: string; clientTone: string; score: number; tier: "hot" | "warm" | "nurture"; reason: string; preview: string; age: string; replies: number; avatar: string };
 const leads: Lead[] = [
@@ -14,7 +15,9 @@ const leads: Lead[] = [
 const nav = [["inbox", "Priority inbox", "⌘1"], ["profiles", "Profiles", "⌘2"], ["calendar", "Follow-up calendar", "⌘3"], ["analytics", "Analytics", "⌘4"], ["health", "System health", ""]];
 function Icon({ name }: { name: string }) { const paths: Record<string, string> = { inbox: "M4 5h16v14H4z M4 9h5l1.5 2h3L15 9h5", profiles: "M16 20a4 4 0 0 0-8 0 M12 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6 M19 8v4m-2-2h4", calendar: "M5 4v3m14-3v3M4 9h16M6 6h12a2 2 0 0 1 2 2v10H4V8a2 2 0 0 1 2-2", analytics: "M5 19V9m5 10V5m5 14v-7m5 7V3", health: "M4 12h3l2-6 4 12 2-6h5", settings: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7", search: "m19 19-4-4m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0", arrow: "M5 12h14m-6-6 6 6-6 6", more: "M5 12h.01M12 12h.01M19 12h.01", chevron: "m8 10 4 4 4-4" }; return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name] ?? paths.more} /></svg>; }
 export default function Home() {
+  const router = useRouter();
   const [selected, setSelected] = useState(0), [activeNav, setActiveNav] = useState("inbox"), [filter, setFilter] = useState("All follow-ups"), [search, setSearch] = useState(""), [theme, setTheme] = useState("midnight"), [sent, setSent] = useState(false), [sidebarOpen, setSidebarOpen] = useState(false);
+  useEffect(() => { if (activeNav !== "inbox") router.push(`/${activeNav}`); }, [activeNav, router]);
   const current = leads[selected]; const filtered = useMemo(() => leads.filter((lead) => !search || `${lead.name} ${lead.company} ${lead.client}`.toLowerCase().includes(search.toLowerCase())), [search]);
   return <main className={`app-shell ${theme === "light" ? "light-mode" : ""}`}>
     <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}><div className="brand-row"><div className="brand-mark"><span/><span/><span/></div><div className="brand-name">reply<span>radar</span></div><button className="mobile-close" onClick={() => setSidebarOpen(false)}>×</button></div><button className="workspace-select"><span className="workspace-dot"/><span><small>WORKSPACE</small><strong>All client workspaces</strong></span><Icon name="chevron"/></button><div className="nav-label">Operate</div><nav>{nav.map(([id, label, shortcut]) => <button key={id} className={`nav-item ${activeNav === id ? "active" : ""}`} onClick={() => { setActiveNav(id); setSidebarOpen(false); }}><Icon name={id}/><span>{label}</span>{id === "inbox" && <b className="nav-count">12</b>}{shortcut && <kbd>{shortcut}</kbd>}</button>)}</nav><div className="nav-label clients-label">Clients <button>+</button></div><div className="client-list"><button><i style={{background:"#8b7cff"}}>N</i>Northstar AI <span>6</span></button><button><i style={{background:"#55c7a2"}}>P</i>Pylon Labs <span>3</span></button><button><i style={{background:"#f2a36b"}}>V</i>Vectorly <span>2</span></button></div><div className="sidebar-bottom"><button className="nav-item"><Icon name="settings"/><span>Admin console</span></button><div className="user-chip"><div className="user-avatar">AS</div><div><strong>Alex Spencer</strong><small>Agency owner</small></div><Icon name="more"/></div></div></aside>
