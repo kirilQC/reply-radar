@@ -15,6 +15,6 @@ export async function POST(request: Request) {
   const { url, key } = supabaseConfig();
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const payload = await request.json();
-  const response = await fetch(`${url}/rest/v1/workspaces`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify({ name: payload.name, slug: payload.slug, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ?? "claude-sonnet-4-20250514" }) });
+  const response = await fetch(`${url}/rest/v1/workspaces`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify({ name: payload.name, slug: payload.slug, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ?? null }) });
   return NextResponse.json({ ok: response.ok, workspaces: await response.json() }, { status: response.ok ? 201 : response.status });
 }

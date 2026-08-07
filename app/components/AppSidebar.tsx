@@ -44,22 +44,13 @@ function SidebarIcon({ name }: { name: string }) {
 export default function AppSidebar() {
   const pathname = usePathname();
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
-  const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string }>>([
-    { name: "Northstar AI", slug: "northstar", tone: "#8b7cff" },
-    { name: "Pylon Labs", slug: "pylon", tone: "#55c7a2" },
-    { name: "Vectorly", slug: "vectorly", tone: "#f2a36b" },
-  ]);
+  const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string }>>([]);
   const [profileParam] = useState(() =>
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("profile")
       : null,
   );
-  const profileName =
-    profileParam === "jordan-lee"
-      ? "Jordan Lee"
-      : profileParam === "maya-patel"
-        ? "Maya Patel"
-        : "Alex Spencer";
+  const [profileName, setProfileName] = useState("");
   const [collapsed, setCollapsed] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -71,12 +62,20 @@ export default function AppSidebar() {
     setSelectedClient(new URLSearchParams(window.location.search).get("client"));
   }, [pathname]);
   useEffect(() => {
+    if (!profileParam) return;
     try {
-      const saved = window.localStorage.getItem("reply-radar-workspaces");
+      const saved = window.localStorage.getItem("reply-radar-profiles:v2");
+      const profile = saved ? (JSON.parse(saved) as Array<{ slug: string; name?: string }>).find((item) => item.slug === profileParam) : undefined;
+      setProfileName(profile?.name ?? "");
+    } catch { setProfileName(""); }
+  }, [profileParam]);
+  useEffect(() => {
+    try {
+        const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
       if (saved) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setSidebarClients(JSON.parse(saved)); }
     } catch { /* keep defaults */ }
     const onStorage = () => {
-      try { const saved = window.localStorage.getItem("reply-radar-workspaces"); if (saved) setSidebarClients(JSON.parse(saved)); } catch { /* ignore */ }
+      try { const saved = window.localStorage.getItem("reply-radar-workspaces:v2"); if (saved) setSidebarClients(JSON.parse(saved)); } catch { /* ignore */ }
     };
     window.addEventListener("storage", onStorage);
     window.addEventListener("reply-radar-workspaces-changed", onStorage);

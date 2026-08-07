@@ -60,108 +60,16 @@ const defaultAppearance: AppearancePrefs = {
   accent: "#8b7cff",
 };
 const metricCatalog = [
-  { id: "needsAction", label: "Needs action", value: "12", delta: "↑ 3", tone: "coral", sub: "since yesterday" },
-  { id: "hotConversations", label: "Hot conversations", value: "4", delta: "↑ 2", tone: "purple", sub: "score 80+" },
-  { id: "avgReplyTime", label: "Avg. reply time", value: "2.4h", delta: "↓ 18%", tone: "green", sub: "this week" },
-  { id: "pipelineSaved", label: "Follow-ups saved", value: "$48.2k", delta: "↑ 12%", tone: "amber", sub: "pipeline influenced" },
-  { id: "replyCount7d", label: "Replies · 7 days", value: "86", delta: "↑ 14%", tone: "purple", sub: "across campaigns" },
-  { id: "totalReplies", label: "Total replies", value: "1,284", delta: "↑ 9%", tone: "green", sub: "all time" },
-  { id: "positiveRate", label: "Positive reply rate", value: "68%", delta: "↑ 5%", tone: "green", sub: "of all replies" },
-  { id: "avgRepliesCampaign", label: "Replies / campaign", value: "3.7", delta: "↑ 0.6", tone: "coral", sub: "average" },
+  { id: "needsAction", label: "Needs action", value: "—", delta: "", tone: "coral", sub: "Awaiting synced data" },
+  { id: "hotConversations", label: "Hot conversations", value: "—", delta: "", tone: "purple", sub: "Awaiting synced data" },
+  { id: "avgReplyTime", label: "Avg. reply time", value: "—", delta: "", tone: "green", sub: "Awaiting synced data" },
+  { id: "pipelineSaved", label: "Follow-ups saved", value: "—", delta: "", tone: "amber", sub: "Awaiting synced data" },
+  { id: "replyCount7d", label: "Replies · 7 days", value: "—", delta: "", tone: "purple", sub: "Awaiting synced data" },
+  { id: "totalReplies", label: "Total replies", value: "—", delta: "", tone: "green", sub: "Awaiting synced data" },
+  { id: "positiveRate", label: "Positive reply rate", value: "—", delta: "", tone: "green", sub: "Awaiting synced data" },
+  { id: "avgRepliesCampaign", label: "Replies / campaign", value: "—", delta: "", tone: "coral", sub: "Awaiting synced data" },
 ];
-const leads: Lead[] = [
-  {
-    initials: "JM",
-    name: "Jordan Mendez",
-    role: "VP Revenue Operations",
-    company: "Northstar AI",
-    client: "Northstar",
-    clientTone: "#8b7cff",
-    score: 94,
-    tier: "hot",
-    reason: "Asked for pricing 4 days ago, never answered",
-    preview: "This is interesting. How does pricing work for a team of 40?",
-    age: "4d",
-    replies: 4,
-    avatar: "#3c365e",
-  },
-  {
-    initials: "AK",
-    name: "Aisha Khan",
-    role: "Head of Growth",
-    company: "Pylon Labs",
-    client: "Pylon",
-    clientTone: "#55c7a2",
-    score: 88,
-    tier: "hot",
-    reason: "Three replies with increasing detail and a clear timeline",
-    preview:
-      "We are finalizing the stack this month — can you send over a case study?",
-    age: "2h",
-    replies: 5,
-    avatar: "#254c48",
-  },
-  {
-    initials: "RB",
-    name: "Riley Brooks",
-    role: "Founder",
-    company: "Vectorly",
-    client: "Vectorly",
-    clientTone: "#f2a36b",
-    score: 76,
-    tier: "warm",
-    reason: "Said ‘circle back in September’ — due today",
-    preview: "Let's reconnect after our board meeting in September.",
-    age: "1d",
-    replies: 3,
-    avatar: "#5d3f2d",
-  },
-  {
-    initials: "ST",
-    name: "Samira Torres",
-    role: "Director of Partnerships",
-    company: "Cohort Health",
-    client: "Cohort",
-    clientTone: "#e6819c",
-    score: 71,
-    tier: "warm",
-    reason: "Replied quickly, but objection is still unresolved",
-    preview: "I like the idea, but implementation is our concern right now.",
-    age: "6h",
-    replies: 2,
-    avatar: "#5d3043",
-  },
-  {
-    initials: "NW",
-    name: "Noah Williams",
-    role: "COO",
-    company: "Harbor Systems",
-    client: "Harbor",
-    clientTone: "#6fafe5",
-    score: 52,
-    tier: "nurture",
-    reason: "Warm thread went quiet after our last message",
-    preview: "Thanks for the context. I will share with the team.",
-    age: "8d",
-    replies: 2,
-    avatar: "#294766",
-  },
-  {
-    initials: "EC",
-    name: "Elena Chen",
-    role: "VP Marketing",
-    company: "Goodline",
-    client: "Goodline",
-    clientTone: "#cfaa61",
-    score: 46,
-    tier: "nurture",
-    reason: "Positive reply, no explicit next step yet",
-    preview: "This looks relevant for the team. Keep me posted.",
-    age: "11d",
-    replies: 1,
-    avatar: "#564521",
-  },
-];
+const leads: Lead[] = [];
 const nav = [
   ["inbox", "Priority inbox", "⌘1"],
   ["profiles", "Profiles", "⌘2"],
@@ -223,11 +131,11 @@ export function InboxPage() {
     setQueryString(window.location.search);
     const refreshWorkspaces = () => {
       try {
-        const saved = window.localStorage.getItem("reply-radar-workspaces");
+        const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
         if (saved) setWorkspaceDirectory(JSON.parse(saved));
-        const savedProfiles = window.localStorage.getItem("reply-radar-profiles");
+        const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
         if (savedProfiles) setLiveProfiles(JSON.parse(savedProfiles));
-      } catch { /* use seeded routes */ }
+      } catch { /* keep the empty live state */ }
     };
     refreshWorkspaces();
     window.addEventListener("reply-radar-workspaces-changed", refreshWorkspaces);
@@ -244,22 +152,16 @@ export function InboxPage() {
   const liveProfile = liveProfiles.find((profile) => profile.slug === profileParam);
   const clientLabel = (name: string) => {
     const workspace = workspaceDirectory.find((item) => item.name === name);
-    return workspace?.slug === "northstar" ? "Northstar" : workspace?.slug === "pylon" ? "Pylon" : workspace?.slug === "vectorly" ? "Vectorly" : name;
+    return workspace?.name || name;
   };
   const assignedClients = liveProfile
       ? liveProfile.clients.map(clientLabel)
-        : clientParam === "northstar"
-          ? ["Northstar"]
-          : clientParam === "pylon"
-            ? ["Pylon"]
-              : clientParam === "vectorly"
-                ? ["Vectorly"]
-                : clientParam
-                  ? [workspaceDirectory.find((item) => item.slug === clientParam)?.name || clientParam]
-                  : null;
+        : clientParam
+          ? [workspaceDirectory.find((item) => item.slug === clientParam)?.name || clientParam]
+          : null;
   const profileName = liveProfile?.name ?? null;
   const allWorkspaceNames = workspaceDirectory.map((item) => item.name).filter(Boolean);
-  const trackedClients = assignedClients ?? (allWorkspaceNames.length ? allWorkspaceNames : ["Northstar", "Pylon", "Vectorly"]);
+  const trackedClients = assignedClients ?? allWorkspaceNames;
   const trackedWorkspaceSlugs = trackedClients.map((client) => workspaceDirectory.find((item) => item.name === client)?.slug || client.toLowerCase());
   const greeting =
     new Date().getHours() < 12
@@ -268,8 +170,8 @@ export function InboxPage() {
         ? "Good afternoon"
         : "Good evening";
   const activeWorkspace = clientParam ? workspaceDirectory.find((item) => item.slug === clientParam) : undefined;
-  const clientName = activeWorkspace?.name || (clientParam === "northstar" ? "Northstar AI" : clientParam === "pylon" ? "Pylon Labs" : clientParam === "vectorly" ? "Vectorly" : clientParam || "All clients");
-  const clientTone = activeWorkspace?.tone || (clientParam === "northstar" ? "#8b7cff" : clientParam === "pylon" ? "#55c7a2" : "#f2a36b");
+  const clientName = activeWorkspace?.name || clientParam || "All clients";
+  const clientTone = activeWorkspace?.tone || "var(--accent)";
   useEffect(() => {
     if (!clientParam) return;
     const root = document.documentElement;
@@ -429,7 +331,21 @@ export function InboxPage() {
       addButton?.removeEventListener("click", addHandler);
     };
   }, []);
-  const current = leads[selected];
+  const current: Lead = leads[selected] ?? {
+    initials: "?",
+    name: "No conversation selected",
+    role: "",
+    company: "",
+    client: "",
+    clientTone: "var(--accent)",
+    score: 0,
+    tier: "nurture",
+    reason: "Connect a data source to load conversation details.",
+    preview: "",
+    age: "",
+    replies: 0,
+    avatar: "var(--panel-2)",
+  };
   const filtered = useMemo(
     () =>
       leads.filter(
@@ -510,7 +426,7 @@ export function InboxPage() {
               className={`client-directory-item ${clientParam === workspace.slug ? "selected" : ""}`}
               key={workspace.slug}
             >
-              <i style={{ background: workspace.tone ?? "#8b7cff" }}>{workspace.name?.[0] ?? "?"}</i>
+              <i style={{ background: workspace.tone ?? "var(--accent)" }}>{workspace.name?.[0] ?? "?"}</i>
               {workspace.name || "Unnamed client"}
             </a>
           ))}
@@ -521,10 +437,10 @@ export function InboxPage() {
             <span>Admin console</span>
           </button>
           <div className="user-chip">
-            <div className="user-avatar">AS</div>
+            <div className="user-avatar">?</div>
             <div>
-              <strong>Alex Spencer</strong>
-              <small>Agency owner</small>
+              <strong>Profile not selected</strong>
+              <small>Select a profile to personalize this view</small>
             </div>
             <Icon name="more" />
           </div>
@@ -630,15 +546,12 @@ export function InboxPage() {
               <Icon name="health" />
             </div>
             <div>
-              <strong>All systems operational</strong>
-              <span>Last event received 24s ago · 1,284 events today</span>
+              <strong>Waiting for synced events</strong>
+              <span>Connect a data source to populate system activity.</span>
             </div>
             <div className="health-bars">
-              {[
-                3, 5, 4, 8, 6, 8, 10, 8, 11, 10, 13, 12, 15, 13, 16, 15, 17, 14,
-                19, 18, 22, 20, 23, 22,
-              ].map((h, i) => (
-                <i key={i} style={{ height: `${h * 2}px` }} />
+              {(analytics?.trend ?? []).map((h, i) => (
+                <i key={i} style={{ height: `${Math.max(2, h)}px` }} />
               ))}
             </div>
             <button
@@ -735,7 +648,7 @@ export function InboxPage() {
                 </button>
               ))}
               <div className="queue-footer">
-                <span>Showing {filtered.length} of 12 conversations</span>
+                <span>Showing {filtered.length} conversations</span>
                 <button>
                   View all <Icon name="arrow" />
                 </button>
@@ -782,28 +695,7 @@ export function InboxPage() {
                 </div>
               </div>
               <div className="thread">
-                <div className="thread-date">TUE, AUG 05</div>
-                <div className="bubble inbound">
-                  <span>JM</span>
-                  <p>{current.preview}</p>
-                  <time>11:42 AM</time>
-                </div>
-                <div className="bubble outbound">
-                  <p>
-                    Great question — let me pull together the right context for
-                    your team and send it over.
-                  </p>
-                  <time>11:46 AM · You</time>
-                </div>
-                <div className="thread-date today">TODAY</div>
-                <div className="bubble inbound">
-                  <span>JM</span>
-                  <p>
-                    That would be great. We are looking at a few options right
-                    now.
-                  </p>
-                  <time>9:18 AM</time>
-                </div>
+                {current.preview ? <div className="bubble inbound"><span>{current.initials}</span><p>{current.preview}</p></div> : <p className="empty-state">No conversation messages are available yet.</p>}
               </div>
               <div className="composer">
                 <div className="composer-top">
@@ -814,11 +706,11 @@ export function InboxPage() {
                   defaultValue={
                     sent
                       ? "Sent — follow-up queued in HeyReach."
-                      : "Absolutely — I’ll send over a concise comparison with pricing tiers and a relevant case study. Would it be helpful to include implementation timelines for a 40-person team?"
+                      : ""
                   }
                 />
                 <div className="composer-foot">
-                  <span>134 / 300 characters</span>
+                  <span>{sent ? "Follow-up queued" : ""}</span>
                   <button className="send-button" onClick={() => setSent(true)}>
                     {sent ? "Sent ✓" : "Send reply"} <span>⌘↵</span>
                   </button>

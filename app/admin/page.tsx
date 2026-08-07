@@ -18,35 +18,7 @@ type ClientWorkspace = {
   timezone?: string;
 };
 
-const seedClients: ClientWorkspace[] = [
-  {
-    name: "Northstar AI",
-    slug: "northstar",
-    leads: 486,
-    status: "Connected",
-    tone: "#8b7cff",
-    lastSync: "24 sec ago",
-    createdAt: "2026-08-01T09:00:00.000Z",
-  },
-  {
-    name: "Pylon Labs",
-    slug: "pylon",
-    leads: 312,
-    status: "Connected",
-    tone: "#55c7a2",
-    lastSync: "2 min ago",
-    createdAt: "2026-08-02T10:30:00.000Z",
-  },
-  {
-    name: "Vectorly",
-    slug: "vectorly",
-    leads: 198,
-    status: "Needs attention",
-    tone: "#f2a36b",
-    lastSync: "3 hr ago",
-    createdAt: "2026-08-03T14:15:00.000Z",
-  },
-];
+const initialClients: ClientWorkspace[] = [];
 type HeartbeatPayload = {
   status: string;
   services: Array<{ id: string; label: string; configured: boolean }>;
@@ -55,7 +27,7 @@ type HeartbeatPayload = {
 
 export default function AdminPage() {
   const [active, setActive] = useState("workspaces");
-  const [workspaceClients, setWorkspaceClients] = useState(seedClients);
+  const [workspaceClients, setWorkspaceClients] = useState(initialClients);
   const [workspaceStorageReady, setWorkspaceStorageReady] = useState(false);
   const [selected, setSelected] = useState(0);
   const [clientSearch, setClientSearch] = useState("");
@@ -84,14 +56,33 @@ export default function AdminPage() {
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("reply-radar-workspaces");
-      if (saved) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceClients((JSON.parse(saved) as ClientWorkspace[]).map((item) => ({ ...item, createdAt: item.createdAt ?? new Date().toISOString() }))); }
-    } catch { /* keep seed data */ }
-    setWorkspaceStorageReady(true);
+    let cancelled = false;
+    const hydrate = async () => {
+      try {
+        const response = await fetch("/api/admin/workspaces", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!cancelled && response.ok && Array.isArray(payload.workspaces)) {
+          setWorkspaceClients(payload.workspaces.map((item: Record<string, unknown>) => ({
+            name: String(item.name ?? ""), slug: String(item.slug ?? ""), leads: 0,
+            status: item.last_successful_poll_at ? "Connected" : "Not configured", tone: "var(--accent)",
+            lastSync: String(item.last_successful_poll_at ?? "not synced"), createdAt: String(item.created_at ?? ""),
+            brief: String(item.client_brief ?? ""), apiKey: "", timezone: "",
+          })));
+          setWorkspaceStorageReady(true);
+          return;
+        }
+      } catch { /* use the offline cache */ }
+      try {
+        const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
+        if (!cancelled && saved) setWorkspaceClients((JSON.parse(saved) as ClientWorkspace[]).map((item) => ({ ...item, createdAt: item.createdAt ?? "" })));
+      } catch { /* keep the empty state */ }
+      if (!cancelled) setWorkspaceStorageReady(true);
+    };
+    void hydrate();
+    return () => { cancelled = true; };
   }, []);
   useEffect(() => {
-    if (workspaceStorageReady) window.localStorage.setItem("reply-radar-workspaces", JSON.stringify(workspaceClients));
+    if (workspaceStorageReady) window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(workspaceClients));
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
     try {
@@ -104,7 +95,7 @@ export default function AdminPage() {
   }, []);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.isNew ? "" : "Northstar helps modern revenue teams turn outbound signals into qualified pipeline. Their buyers are RevOps leaders at growing B2B companies.", timezone: client.isNew ? "" : "America/Chicago", apiKey: "" });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "", apiKey: client.apiKey ?? "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -117,14 +108,15 @@ export default function AdminPage() {
     const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || client.slug;
     const next = workspaceClients.map((item, index) => index === selected ? { ...item, name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: workspaceDraft.apiKey, timezone: workspaceDraft.timezone, tone: accentOverrides[client.slug] ?? item.tone, isNew: false } : item);
     setWorkspaceClients(next);
-    window.localStorage.setItem("reply-radar-workspaces", JSON.stringify(next));
+    window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
     window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
+    void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief }) }).catch(() => undefined);
     setSaved(true);
   };
   const removeWorkspace = () => {
     const next = clients.filter((_, index) => index !== selected);
     setWorkspaceClients(next);
-    window.localStorage.setItem("reply-radar-workspaces", JSON.stringify(next));
+    window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
     window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
     setSelected(0);
     setWorkspaceOpen(false);
@@ -308,18 +300,18 @@ export default function AdminPage() {
                     <label className="field-label">
                       ANTHROPIC API KEY
                       <div className="secret-field">
-                        <input type="password" placeholder="sk-ant-..." />
+                        <input type="password" placeholder="Enter Anthropic API key" />
                         <button type="button">Reveal</button>
                       </div>
                     </label>
                     <label className="field-label">
                       SUPABASE URL
-                      <input placeholder="https://your-project.supabase.co" />
+                      <input placeholder="Enter Supabase URL" />
                     </label>
                     <label className="field-label">
                       SUPABASE SERVICE ROLE KEY
                       <div className="secret-field">
-                        <input type="password" placeholder="service-role key" />
+                        <input type="password" placeholder="Enter service role key" />
                         <button type="button">Reveal</button>
                       </div>
                     </label>
@@ -335,21 +327,22 @@ export default function AdminPage() {
                     </div>
                     <label className="field-label">
                       WORKER SERVICE URL
-                      <input placeholder="https://reply-radar-worker.onrender.com" />
+                      <input placeholder="Enter worker service URL" />
                     </label>
                     <div className="field-row">
                       <label className="field-label">
                         POLL INTERVAL (SECONDS)
-                        <input type="number" defaultValue="120" />
+                        <input type="number" placeholder="Poll interval in seconds" />
                       </label>
                       <label className="field-label">
                         MAX RETRIES
-                        <input type="number" defaultValue="5" />
+                        <input type="number" placeholder="Maximum retries" />
                       </label>
                     </div>
                     <label className="field-label">
                       QUEUE MODE
-                      <select defaultValue="durable">
+                      <select defaultValue="">
+                        <option value="">Select queue mode</option>
                         <option value="durable">Durable queue</option>
                         <option value="inline">Inline processing</option>
                       </select>
@@ -423,7 +416,7 @@ export default function AdminPage() {
                         <div className="secret-field">
                           <input
                             type="text"
-                              value={isNewWorkspace ? workspaceDraft.apiKey : (showKey ? "hr_live_northstar_••••••••••••3f8a" : "hr_live_••••••••••••••••••••••••")}
+                              value={isNewWorkspace ? workspaceDraft.apiKey : (showKey ? client.apiKey ?? "" : client.apiKey ? "••••••••••••••••" : "")}
                               onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, apiKey: event.target.value }))}
                               placeholder={isNewWorkspace ? "Enter HeyReach API key" : undefined}
                             readOnly
@@ -486,7 +479,8 @@ export default function AdminPage() {
                       <div className="field-row">
                         <label className="field-label">
                           TIMEZONE
-                          <select defaultValue="America/Chicago">
+                          <select defaultValue="">
+                            <option value="">Select timezone</option>
                             <option value="">Select timezone</option>
                             <option>America/Chicago</option>
                             <option>America/New_York</option>
@@ -515,13 +509,13 @@ export default function AdminPage() {
                   {workspaceOpen && <div className="client-config-sections">
                     <section className="admin-panel client-config-section" id="client-ai">
                       <div className="panel-heading"><div><h2>AI context & voice</h2><p>Client-specific Anthropic drafting rules and review guardrails.</p></div><span className="connection-badge"><i /> Client-specific</span></div>
-                      <div className="field-row"><label className="field-label">MODEL<select defaultValue={isNewWorkspace ? "" : "claude-sonnet-4-20250514"}><option value="">Select model</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" defaultValue={isNewWorkspace ? "" : "0.35"} placeholder="Set temperature" step="0.05" /></label></div>
-                      <label className="field-label">CUSTOM SYSTEM PROMPT<textarea defaultValue={isNewWorkspace ? "" : "Be concise, specific, and human. Never invent customer proof. Ask one clear next-step question."} placeholder="Add client-specific drafting rules" /></label>
+                      <div className="field-row"><label className="field-label">MODEL<select defaultValue=""><option value="">Select model</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" placeholder="Set temperature" step="0.05" /></label></div>
+                      <label className="field-label">CUSTOM SYSTEM PROMPT<textarea placeholder="Add client-specific drafting rules" /></label>
                     </section>
                     <section className="admin-panel client-config-section" id="client-scoring">
                       <div className="panel-heading"><div><h2>Scoring engine</h2><p>Client-specific queue weights and urgency thresholds.</p></div><span className="saved-dot">● Draft config</span></div>
-                      <div className="field-row"><label className="field-label">HOT THRESHOLD<input type="number" defaultValue={isNewWorkspace ? "" : "80"} /></label><label className="field-label">WARM THRESHOLD<input type="number" defaultValue={isNewWorkspace ? "" : "60"} /></label></div>
-                      <label className="field-label">UNANSWERED QUESTION WEIGHT<input type="range" defaultValue={isNewWorkspace ? "0" : "78"} /></label>
+                      <div className="field-row"><label className="field-label">HOT THRESHOLD<input type="number" placeholder="Set hot threshold" /></label><label className="field-label">WARM THRESHOLD<input type="number" placeholder="Set warm threshold" /></label></div>
+                      <label className="field-label">UNANSWERED QUESTION WEIGHT<input type="range" defaultValue="0" /></label>
                     </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
@@ -548,7 +542,8 @@ export default function AdminPage() {
                     </div>
                     <label className="field-label">
                       MODEL
-                      <select defaultValue="claude-sonnet-4-20250514">
+                      <select defaultValue="">
+                        <option value="">Select model</option>
                         <option>claude-sonnet-4-20250514</option>
                         <option>claude-3-7-sonnet-latest</option>
                       </select>
@@ -563,20 +558,20 @@ export default function AdminPage() {
                     <div className="field-row">
                       <label className="field-label">
                         TEMPERATURE
-                        <input type="number" defaultValue="0.35" step="0.05" />
+                        <input type="number" placeholder="Set temperature" step="0.05" />
                       </label>
                       <label className="field-label">
                         MONTHLY SPEND CAP
-                        <input defaultValue="$250" />
+                        <input placeholder="Set monthly spend cap" />
                       </label>
                     </div>
                     <div className="usage-meter">
                       <div>
-                        <span>August usage</span>
-                        <strong>$42.18 / $250</strong>
+                        <span>Current usage</span>
+                        <strong>—</strong>
                       </div>
                       <div>
-                        <i style={{ width: "17%" }} />
+                        <i style={{ width: "0%" }} />
                       </div>
                     </div>
                   </section>
@@ -591,11 +586,11 @@ export default function AdminPage() {
                     </div>
                     <label className="field-label">
                       CUSTOM SYSTEM PROMPT
-                      <textarea defaultValue="Be concise, specific, and human. Never invent customer proof. Ask one clear next-step question. Do not mention pricing before a call is booked." />
+                      <textarea placeholder="Add voice and review guardrails" />
                     </label>
                     <label className="field-label">
                       BANNED PHRASES
-                      <input defaultValue="just checking in, hope you're well, circle back" />
+                      <input placeholder="Add banned phrases" />
                     </label>
                     <div className="toggle-row">
                       <span>
@@ -626,31 +621,25 @@ export default function AdminPage() {
                       </div>
                       <span className="saved-dot">● Draft config</span>
                     </div>
-                    {[
-                      ["Unanswered question", "+28"],
-                      ["Reply depth", "+22"],
-                      ["Meeting language", "+18"],
-                      ["Response speed", "+12"],
-                      ["Time decay", "−10"],
-                    ].map(([name, value], i) => (
+                    {["Unanswered question", "Reply depth", "Meeting language", "Response speed", "Time decay"].map((name) => (
                       <div className="range-row" key={name}>
                         <div>
                           <span>{name}</span>
-                          <strong>{value}</strong>
+                          <strong>—</strong>
                         </div>
                         <input
                           type="range"
-                          defaultValue={String(78 - i * 12)}
+                          defaultValue="0"
                         />
                       </div>
                     ))}
                     <div className="preview-score">
                       <span>Preview with current rules</span>
                       <strong>
-                        Jordan Mendez <b>94 · hot</b>
+                        No synced lead data <b>—</b>
                       </strong>
                       <small>
-                        Asked for pricing 4 days ago, never answered
+                        No synced conversation is available yet.
                       </small>
                     </div>
                   </section>
@@ -663,22 +652,22 @@ export default function AdminPage() {
                     </div>
                     <div className="threshold hot-threshold">
                       <span>HOT</span>
-                      <input defaultValue="80" />
+                      <input placeholder="Set threshold" />
                       <small>Priority reply within 24 hours</small>
                     </div>
                     <div className="threshold warm-threshold">
                       <span>WARM</span>
-                      <input defaultValue="60" />
+                      <input placeholder="Set threshold" />
                       <small>Follow up this week</small>
                     </div>
                     <div className="threshold nurture-threshold">
                       <span>NURTURE</span>
-                      <input defaultValue="35" />
+                      <input placeholder="Set threshold" />
                       <small>Keep warm or snooze</small>
                     </div>
                     <div className="threshold dead-threshold">
                       <span>DEAD</span>
-                      <input defaultValue="0" />
+                      <input placeholder="Set threshold" />
                       <small>No action required</small>
                     </div>
                   </section>
@@ -738,7 +727,8 @@ export default function AdminPage() {
                       </label>
                       <label className="field-label">
                         ROW DENSITY
-                        <select defaultValue="Compact">
+                        <select defaultValue="">
+                          <option value="">Select row density</option>
                           <option>Compact</option>
                           <option>Comfortable</option>
                           <option>Spacious</option>
@@ -823,7 +813,7 @@ function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload |
         <button className="secondary-button" onClick={onRefresh}>Refresh checks ↻</button>
       </div>
       <div className="heartbeat-service-grid">{(heartbeat?.services ?? [{ id: "supabase", label: "Supabase database", configured: false }, { id: "anthropic", label: "Anthropic API", configured: false }, { id: "worker", label: "Worker service", configured: false }]).map((service) => <div className="heartbeat-service admin-panel" key={service.id}><i className={service.configured ? "heartbeat-ok" : "heartbeat-missing"} /><div><strong>{service.label}</strong><small>{service.configured ? "Configured" : "Not configured"}</small></div></div>)}</div>
-      <section className="admin-panel"><div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>Webhook freshness, HeyReach key presence, and reconciliation freshness per client.</p></div></div><div className="heartbeat-client-list">{heartbeat?.clients?.length ? heartbeat.clients.map((item) => <div className="heartbeat-client-row" key={item.slug}><i style={{ background: seedClients.find((client) => client.slug === item.slug)?.tone ?? "#8b7cff" }}>{item.name[0]}</i><strong>{item.name}</strong><span className={item.status === "healthy" ? "health-state ready" : "health-state missing"}>{item.status === "healthy" ? "Healthy" : item.status === "missing" ? "Missing key" : "Needs attention"}</span><small>Key {item.keyConfigured ? "configured" : "missing"} · Webhook {item.webhookAgeSeconds === null ? "never received" : formatAge(item.webhookAgeSeconds)} · Poll {item.pollAgeSeconds === null ? "never run" : formatAge(item.pollAgeSeconds)}</small></div>) : <div className="heartbeat-empty">No synced client heartbeat data is available yet. Configure Supabase and run the HeyReach worker to begin checks.</div>}</div></section>
+      <section className="admin-panel"><div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>Webhook freshness, HeyReach key presence, and reconciliation freshness per client.</p></div></div><div className="heartbeat-client-list">{heartbeat?.clients?.length ? heartbeat.clients.map((item) => <div className="heartbeat-client-row" key={item.slug}><i style={{ background: "var(--accent)" }}>{item.name[0]}</i><strong>{item.name}</strong><span className={item.status === "healthy" ? "health-state ready" : "health-state missing"}>{item.status === "healthy" ? "Healthy" : item.status === "missing" ? "Missing key" : "Needs attention"}</span><small>Key {item.keyConfigured ? "configured" : "missing"} · Webhook {item.webhookAgeSeconds === null ? "never received" : formatAge(item.webhookAgeSeconds)} · Poll {item.pollAgeSeconds === null ? "never run" : formatAge(item.pollAgeSeconds)}</small></div>) : <div className="heartbeat-empty">No synced client heartbeat data is available yet. Configure Supabase and run the HeyReach worker to begin checks.</div>}</div></section>
     </div>
   );
 }
@@ -834,8 +824,8 @@ function AuditView() {
     { timestamp: now, action: "heartbeat.check", actor: "System", detail: "Requested live credential, webhook, and sync freshness checks.", status: "started" },
     { timestamp: now - 61_000, action: "workspace.sync", actor: "Worker", detail: "Reconciled client conversations and refreshed webhook cursors.", status: "completed" },
     { timestamp: now - 121_000, action: "global.config.viewed", actor: "Admin", detail: "Opened provider credentials and worker configuration.", status: "recorded" },
-    { timestamp: now - 181_000, action: "client.scoring.updated", actor: "Admin", detail: "Saved scoring weights and tier thresholds for Northstar AI.", status: "recorded" },
-    { timestamp: now - 241_000, action: "webhook.event.received", actor: "HeyReach", detail: "Accepted a conversation.updated event from Pylon Labs.", status: "processed" },
+    { timestamp: now - 181_000, action: "client.scoring.updated", actor: "Admin", detail: "Saved client scoring weights and tier thresholds.", status: "recorded" },
+    { timestamp: now - 241_000, action: "webhook.event.received", actor: "HeyReach", detail: "Accepted a conversation.updated event.", status: "processed" },
     { timestamp: now - 301_000, action: "ai.draft.generated", actor: "Anthropic", detail: "Generated a human-review draft for a priority conversation.", status: "completed" },
     { timestamp: now - 361_000, action: "layout.saved", actor: "Admin", detail: "Saved inbox section order and six selected summary metrics.", status: "recorded" },
     { timestamp: now - 421_000, action: "profile.appearance.saved", actor: "User", detail: "Updated font, zoom, background, and accent preferences.", status: "recorded" },

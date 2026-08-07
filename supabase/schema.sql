@@ -7,7 +7,7 @@ create table if not exists workspaces (
   slug text unique not null,
   heyreach_api_key_ciphertext text,
   webhook_secret_hash text,
-  anthropic_model text not null default 'claude-sonnet-4-20250514',
+  anthropic_model text,
   client_brief text,
   custom_system_prompt text,
   guardrails jsonb not null default '{}'::jsonb,

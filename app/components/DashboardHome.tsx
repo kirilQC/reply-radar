@@ -13,62 +13,36 @@ const defaultAppearance: AppearancePrefs = {
   accent: "#8b7cff",
 };
 
-const seedClients = [
-  {
-    name: "Northstar AI",
-    slug: "northstar",
-    tone: "#8b7cff",
-    leads: 486,
-    replies: 6,
-    status: "Connected",
-  },
-  {
-    name: "Pylon Labs",
-    slug: "pylon",
-    tone: "#55c7a2",
-    leads: 312,
-    replies: 3,
-    status: "Connected",
-  },
-  {
-    name: "Vectorly",
-    slug: "vectorly",
-    tone: "#f2a36b",
-    leads: 198,
-    replies: 2,
-    status: "Needs attention",
-  },
-];
-const seedProfiles = [
-  ["Alex Spencer", "Northstar AI · Pylon Labs", "#8b7cff", "AS"],
-  ["Jordan Lee", "Vectorly", "#55c7a2", "JL"],
-  ["Maya Patel", "Northstar AI · Vectorly", "#f2a36b", "MP"],
-];
+const initialClients: Array<{ name: string; slug: string; tone: string; leads: number; replies: number; status: string }> = [];
+const initialProfiles: string[][] = [];
+type DashboardAnalytics = { totalReplies?: number; trend?: number[]; queueMix?: { hot: number; warm: number; nurture: number } };
 
 export default function DashboardHome() {
-  const [clients, setClients] = useState(seedClients);
-  const [profiles, setProfiles] = useState(seedProfiles.map(([name, description, tone, initials]) => ({ name, description, tone, initials, slug: name.toLowerCase().replaceAll(" ", "-") })));
+  const [clients, setClients] = useState(initialClients);
+  const [profiles, setProfiles] = useState(initialProfiles.map(([name, description, tone, initials]) => ({ name, description, tone, initials, slug: name.toLowerCase().replaceAll(" ", "-") })));
   const [appearance, setAppearance] = useState<AppearancePrefs>(defaultAppearance);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [analytics, setAnalytics] = useState<DashboardAnalytics>({});
   useEffect(() => {
     try {
-      const savedClients = window.localStorage.getItem("reply-radar-workspaces");
+      const savedClients = window.localStorage.getItem("reply-radar-workspaces:v2");
       if (savedClients) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setClients(JSON.parse(savedClients)); }
-      const savedProfiles = window.localStorage.getItem("reply-radar-profiles");
+      const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
       if (savedProfiles) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients: string[]; color: string; initials: string; slug: string }) => ({ ...profile, description: profile.clients.join(" · "), tone: profile.color }))); }
       const savedPreferences = window.localStorage.getItem("reply-radar-prefs:general");
       if (savedPreferences) {
         const parsed = JSON.parse(savedPreferences);
         if (parsed.appearance) setAppearance({ ...defaultAppearance, ...parsed.appearance });
       }
-    } catch { /* keep seed data */ }
+    } catch { /* keep the empty state */ }
   }, []);
+  useEffect(() => { fetch("/api/analytics", { cache: "no-store" }).then((response) => response.json()).then(setAnalytics).catch(() => setAnalytics({})); }, []);
   useEffect(() => {
     const refresh = () => {
       try {
-        const savedClients = window.localStorage.getItem("reply-radar-workspaces");
+        const savedClients = window.localStorage.getItem("reply-radar-workspaces:v2");
         if (savedClients) setClients(JSON.parse(savedClients));
-        const savedProfiles = window.localStorage.getItem("reply-radar-profiles");
+        const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
         if (savedProfiles) setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients: string[]; color: string; initials: string; slug: string }) => ({ ...profile, description: profile.clients.join(" · "), tone: profile.color })));
       } catch { /* keep current data */ }
     };
@@ -162,24 +136,17 @@ export default function DashboardHome() {
             </div>
             <div className="dashboard-chart-grid">
               <article className="dashboard-chart-card dashboard-line-card">
-                <div className="dashboard-chart-heading"><div><span>REPLY VOLUME</span><strong>1,284 replies</strong></div><small>Last 7 days</small></div>
-                <svg className="reply-line-chart" viewBox="0 0 520 170" role="img" aria-label="Reply volume trend over the last seven days">
-                  <path className="chart-grid-line" d="M0 30H520M0 78H520M0 126H520" />
-                  <path className="chart-area" d="M0 130 L74 112 L148 119 L222 74 L296 92 L370 48 L444 63 L520 22 L520 150 L0 150Z" />
-                  <path className="chart-line" d="M0 130 L74 112 L148 119 L222 74 L296 92 L370 48 L444 63 L520 22" />
-                  <circle cx="520" cy="22" r="4" className="chart-point" />
-                </svg>
-                <div className="chart-axis"><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span></div>
+                <div className="dashboard-chart-heading"><div><span>REPLY VOLUME</span><strong>{analytics.totalReplies == null ? "—" : `${analytics.totalReplies} replies`}</strong></div><small>Live data</small></div>
+                {analytics.trend?.length ? <div className="dashboard-live-trend">{analytics.trend.map((value, index) => <i key={index} style={{ height: `${Math.max(4, value)}px` }} />)}</div> : <p className="empty-state">No synced analytics data is available yet.</p>}
               </article>
               <article className="dashboard-chart-card">
-                <div className="dashboard-chart-heading"><div><span>QUEUE MIX</span><strong>12 conversations</strong></div><small>Current</small></div>
-                <div className="queue-mix-visual"><div className="donut-chart"><div><strong>12</strong><small>leads</small></div></div><div className="queue-legend"><span><i className="legend-hot"/>Hot <b>4</b></span><span><i className="legend-warm"/>Warm <b>3</b></span><span><i className="legend-nurture"/>Nurture <b>5</b></span></div></div>
+                <div className="dashboard-chart-heading"><div><span>QUEUE MIX</span><strong>Live conversations</strong></div><small>Current</small></div>
+                <div className="queue-mix-visual"><div className="donut-chart"><div><strong>{analytics.queueMix ? analytics.queueMix.hot + analytics.queueMix.warm + analytics.queueMix.nurture : "—"}</strong><small>{analytics.queueMix ? "leads" : "no data"}</small></div></div><div className="queue-legend"><span><i className="legend-hot"/>Hot <b>{analytics.queueMix?.hot ?? "—"}</b></span><span><i className="legend-warm"/>Warm <b>{analytics.queueMix?.warm ?? "—"}</b></span><span><i className="legend-nurture"/>Nurture <b>{analytics.queueMix?.nurture ?? "—"}</b></span></div></div>
               </article>
               <article className="dashboard-chart-card client-performance-card">
                 <div className="dashboard-chart-heading"><div><span>CLIENT PERFORMANCE</span><strong>Positive reply rate</strong></div><small>30 days</small></div>
                 {clients.map((client, index) => {
-                  const values = ["72%", "64%", "51%", "—"];
-                  const value = values[index] ?? "—";
+                  const value = "—";
                   return <div className="client-performance-row" key={client.slug}><div><span>{client.name}</span><b>{value}</b></div><div className="performance-track"><i style={{ width: value === "—" ? "0%" : value, background: client.tone }} /></div></div>;
                 })}
               </article>

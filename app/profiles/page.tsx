@@ -3,32 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 
-const initialProfiles = [
-  {
-    slug: "alex-spencer",
-    name: "Alex Spencer",
-    role: "Agency owner",
-    clients: ["Northstar AI", "Pylon Labs"],
-    color: "#8b7cff",
-    initials: "AS",
-  },
-  {
-    slug: "jordan-lee",
-    name: "Jordan Lee",
-    role: "Sales teammate",
-    clients: ["Vectorly"],
-    color: "#55c7a2",
-    initials: "JL",
-  },
-  {
-    slug: "maya-patel",
-    name: "Maya Patel",
-    role: "Growth teammate",
-    clients: ["Northstar AI", "Vectorly"],
-    color: "#f2a36b",
-    initials: "MP",
-  },
-];
+const initialProfiles: Array<{ slug: string; name: string; role: string; clients: string[]; color: string; initials: string }> = [];
 type Profile = (typeof initialProfiles)[number] & { photo?: string };
 
 export default function ProfilesPage() {
@@ -42,12 +17,12 @@ export default function ProfilesPage() {
   useEffect(() => {
     const hydrate = () => {
       try {
-        const savedProfiles = window.localStorage.getItem("reply-radar-profiles");
+        const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
         if (savedProfiles) setProfiles(JSON.parse(savedProfiles));
-        const savedWorkspaces = window.localStorage.getItem("reply-radar-workspaces");
+        const savedWorkspaces = window.localStorage.getItem("reply-radar-workspaces:v2");
         if (savedWorkspaces) setWorkspaceNames((JSON.parse(savedWorkspaces) as Array<{ name?: string }>).map((item) => item.name ?? "").filter(Boolean));
       } catch {
-        // Keep seeded data when storage is unavailable or malformed.
+        // Keep the empty state when storage is unavailable or malformed.
       }
     };
     hydrate();
@@ -94,10 +69,10 @@ function ProfileIndex() {
   useEffect(() => {
     const hydrate = () => {
       try {
-        const saved = window.localStorage.getItem("reply-radar-profiles");
+        const saved = window.localStorage.getItem("reply-radar-profiles:v2");
         if (saved) setProfiles(JSON.parse(saved));
       } catch {
-        // Keep the seeded profiles if browser storage is unavailable.
+        // Keep the empty state if browser storage is unavailable.
       }
     };
     const timer = window.setTimeout(hydrate, 0);
@@ -112,7 +87,7 @@ function ProfileIndex() {
   const deleteProfile = () => {
     if (!deleteTarget) return;
     const next = profiles.filter((item) => item.slug !== deleteTarget.slug);
-    window.localStorage.setItem("reply-radar-profiles", JSON.stringify(next));
+    window.localStorage.setItem("reply-radar-profiles:v2", JSON.stringify(next));
     setProfiles(next);
     window.dispatchEvent(new Event("reply-radar-profiles-changed"));
     setDeleteTarget(null);
@@ -218,7 +193,7 @@ function ProfileEditor({
     const existing = (() => {
       try {
         return JSON.parse(
-          window.localStorage.getItem("reply-radar-profiles") || JSON.stringify(initialProfiles),
+          window.localStorage.getItem("reply-radar-profiles:v2") || JSON.stringify(initialProfiles),
         ) as Profile[];
       } catch {
         return [];
@@ -228,7 +203,7 @@ function ProfileEditor({
       ...existing.filter((item) => item.slug !== savedProfile.slug),
       savedProfile,
     ];
-    window.localStorage.setItem("reply-radar-profiles", JSON.stringify(next));
+        window.localStorage.setItem("reply-radar-profiles:v2", JSON.stringify(next));
     window.dispatchEvent(new Event("reply-radar-profiles-changed"));
     window.location.href = "/profiles";
   };

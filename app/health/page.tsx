@@ -43,8 +43,8 @@ export default function HealthPage() {
             }
             tone={health.status === "ready" ? "ok" : "warn"}
           />
-          <HealthCard label="Webhook events today" value="1,284" tone="ok" />
-          <HealthCard label="Failed jobs" value="3" tone="warn" />
+          <HealthCard label="Webhook events today" value="—" tone="warn" />
+          <HealthCard label="Failed jobs" value="—" tone="warn" />
         </div>
         <div className="admin-grid">
           <section className="admin-panel">
@@ -83,21 +83,7 @@ export default function HealthPage() {
                 <p>Last successful signals from the reliability layers.</p>
               </div>
             </div>
-            {[
-              ["Webhook receiver", "24 seconds ago", "green"],
-              ["Reconciliation poller", "2 minutes ago", "green"],
-              ["Nightly sweep", "Today, 02:00 AM", "green"],
-              ["Queue worker", "3 jobs retrying", "amber"],
-            ].map(([name, time, tone]) => (
-              <div className="timeline-row" key={name}>
-                <i className={tone} />
-                <span>
-                  <strong>{name}</strong>
-                  <small>{time}</small>
-                </span>
-                <b>View log →</b>
-              </div>
-            ))}
+            <p className="empty-state">No ingestion events have been recorded yet.</p>
           </section>
         </div>
       </section></main></section></div>
