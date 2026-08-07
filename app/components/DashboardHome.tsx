@@ -29,9 +29,9 @@ const clients = [
   },
 ];
 const profiles = [
-  ["Alex Spencer", "Northstar AI · Pylon Labs", "2 clients", "#8b7cff", "AS"],
-  ["Jordan Lee", "Vectorly", "1 client", "#55c7a2", "JL"],
-  ["Maya Patel", "Northstar AI · Vectorly", "2 clients", "#f2a36b", "MP"],
+  ["Alex Spencer", "Northstar AI · Pylon Labs", "#8b7cff", "AS"],
+  ["Jordan Lee", "Vectorly", "#55c7a2", "JL"],
+  ["Maya Patel", "Northstar AI · Vectorly", "#f2a36b", "MP"],
 ];
 
 export default function DashboardHome() {
@@ -101,7 +101,7 @@ export default function DashboardHome() {
               </a>
             </div>
             <div className="dashboard-profile-grid">
-              {profiles.map(([name, description, count, tone, initials]) => (
+              {profiles.map(([name, description, tone, initials]) => (
                 <a
                   href={`/inbox?profile=${name.toLowerCase().replaceAll(" ", "-")}`}
                   className="dashboard-profile-card"
@@ -111,7 +111,6 @@ export default function DashboardHome() {
                   <div>
                     <h3>{name}</h3>
                     <p>{description}</p>
-                    <small>{count}</small>
                   </div>
                   <span>→</span>
                 </a>
