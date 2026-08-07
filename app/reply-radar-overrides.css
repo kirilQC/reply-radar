@@ -1,6 +1,8 @@
 /* Minor presentation overrides kept separate so future visual adjustments stay easy to iterate. */
 .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .metrics .metric-card:nth-child(4) { display: none; }
+.app-sidebar a.nav-item { text-decoration: none; }
+.app-sidebar .brand-row { padding-bottom: 23px; }
 
 .admin-shell { min-height:100vh; background:var(--bg); color:var(--text); }
 .admin-topbar { height:64px; border-bottom:1px solid var(--border-soft); display:flex; align-items:center; padding:0 34px; gap:32px; }

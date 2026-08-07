@@ -22,7 +22,10 @@ export default function Home() {
     const routes = ["/", "/profiles", "/calendar", "/analytics", "/health"];
     const buttons = Array.from(document.querySelectorAll(".sidebar nav .nav-item"));
     const handlers = buttons.map((button, index) => { const handler = () => router.push(routes[index]); button.addEventListener("click", handler); return [button, handler] as const; });
-    return () => handlers.forEach(([button, handler]) => button.removeEventListener("click", handler));
+    const admin = document.querySelector(".sidebar-bottom .nav-item");
+    const adminHandler = () => router.push("/admin");
+    admin?.addEventListener("click", adminHandler);
+    return () => { handlers.forEach(([button, handler]) => button.removeEventListener("click", handler)); admin?.removeEventListener("click", adminHandler); };
   }, [router]);
   useEffect(() => {
     const toast = (message: string) => {
