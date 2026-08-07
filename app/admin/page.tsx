@@ -39,17 +39,26 @@ type HeartbeatPayload = {
 export default function AdminPage() {
   const [active, setActive] = useState("global");
   const [selected, setSelected] = useState(0);
+  const [clientSearch, setClientSearch] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
   const [themePreset, setThemePreset] = useState("midnight");
   const [logos, setLogos] = useState<Record<string, string>>({});
-  const [accentOverrides, setAccentOverrides] = useState<
-    Record<string, string>
-  >({});
+  const [accentOverrides, setAccentOverrides] = useState<Record<string, string>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const stored = window.localStorage.getItem("reply-radar-admin-accent-overrides");
+      return stored ? (JSON.parse(stored) as Record<string, string>) : {};
+    } catch { return {}; }
+  });
   const logoInput = useRef<HTMLInputElement>(null);
   const [heartbeat, setHeartbeat] = useState<HeartbeatPayload | null>(null);
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const client = clients[selected];
+  const visibleClients = clients.filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()));
+  useEffect(() => {
+    window.localStorage.setItem("reply-radar-admin-accent-overrides", JSON.stringify(accentOverrides));
+  }, [accentOverrides]);
   useEffect(() => {
     if (active !== "heartbeat") return;
     fetch("/api/heartbeat", { cache: "no-store" })
@@ -109,10 +118,6 @@ export default function AdminPage() {
                       : "Theme studio"}
             </div>
             <div className="admin-top-actions">
-              <span className="admin-live">
-                <i /> Internal workspace
-              </span>
-              <div className="top-avatar">AS</div>
             </div>
           </header>
           <div className="admin-layout">
@@ -303,8 +308,15 @@ export default function AdminPage() {
               {active === "audit" && <AuditView />}
               {active === "workspaces" && (
                 <>
-                  <div className="workspace-cards">
-                    {clients.map((item, index) => (
+                  <div className="workspace-directory">
+                    <div className="workspace-directory-heading">
+                      <div><strong>Client directory</strong><small>{clients.length} workspaces · Search and select a client to configure</small></div>
+                      <input aria-label="Search clients" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder="Search clients…" />
+                    </div>
+                    <div className="workspace-directory-list">
+                    {visibleClients.map((item) => {
+                      const index = clients.findIndex((candidate) => candidate.slug === item.slug);
+                      return (
                       <button
                         key={item.slug}
                         className={`workspace-card ${selected === index ? "selected" : ""}`}
@@ -335,7 +347,9 @@ export default function AdminPage() {
                           />
                         </div>
                       </button>
-                    ))}
+                    ); })}
+                    {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
+                    </div>
                   </div>
                   <div className="admin-grid">
                     <section className="admin-panel">
