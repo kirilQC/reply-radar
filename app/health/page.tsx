@@ -15,7 +15,7 @@ export default function HealthPage() {
       .catch(() => setHealth({ status: "offline" }));
   }, []);
   return (
-    <div className="app-shell"><AppSidebar/><section className="main-area"><header className="topbar"><div className="crumb"><span>All clients</span><strong>System health</strong></div></header><main className="admin-shell">
+    <div className="app-shell"><AppSidebar/><section className="main-area"><header className="topbar"><div className="crumb"><span>Reply Radar</span><strong>› System health</strong></div></header><main className="admin-shell">
       <section className="admin-content">
         <div className="admin-heading">
           <div>

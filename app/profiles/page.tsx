@@ -36,15 +36,25 @@ export default function ProfilesPage() {
       ? new URLSearchParams(window.location.search).get("profile")
       : null,
   );
-  const profile = initialProfiles.find((item) => item.slug === profileSlug);
+  const profile =
+    profileSlug === "new"
+      ? {
+          slug: "new",
+          name: "",
+          role: "",
+          clients: [] as string[],
+          color: "#8b7cff",
+          initials: "+",
+        }
+      : initialProfiles.find((item) => item.slug === profileSlug);
   return (
     <div className="app-shell">
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
           <div className="crumb">
-            <span>All clients</span>
-            <strong>{profile ? profile.name : "Profiles"}</strong>
+            <span>Reply Radar</span>
+            <strong>› {profile ? profile.name || "New profile" : "Profiles"}</strong>
           </div>
         </header>
         {profile ? <ProfileEditor profile={profile} /> : <ProfileIndex />}
@@ -65,7 +75,14 @@ function ProfileIndex() {
           <h1>Profiles</h1>
           <p>Choose a teammate to open their assigned client inbox.</p>
         </div>
-        <button className="primary-button">+ New profile</button>
+        <button
+          className="primary-button"
+          onClick={() => {
+            window.location.href = "/profiles?profile=new";
+          }}
+        >
+          + New profile
+        </button>
       </div>
       <div className="profile-card-grid">
         {initialProfiles.map((profile) => (

@@ -428,10 +428,10 @@ export function InboxPage() {
             ☰
           </button>
           <div className="crumb">
-            <span>All clients</span>
+            <span>Reply Radar</span>
             <Icon name="chevron" />
             <strong>
-              {profileName ?? (clientParam ? clientName : "All clients")}
+              {profileName ?? (clientParam ? clientName : "General inbox")}
             </strong>
           </div>
           <div className="top-actions">
@@ -453,7 +453,6 @@ export function InboxPage() {
             >
               ◐
             </button>
-            <div className="top-avatar">AS</div>
           </div>
         </header>
         <div className="content-wrap">
