@@ -76,13 +76,15 @@ export default function AdminPage() {
         </a>
         <div className="admin-breadcrumb">
           Admin console <span>/</span>{" "}
-          {active === "workspaces"
-            ? "Client workspaces"
-            : active === "ai"
-              ? "AI context"
-              : active === "scoring"
-                ? "Scoring engine"
-                : "Theme studio"}
+          {active === "global"
+            ? "Global config"
+            : active === "workspaces"
+              ? "Client workspaces"
+              : active === "ai"
+                ? "AI context"
+                : active === "scoring"
+                  ? "Scoring engine"
+                  : "Theme studio"}
         </div>
         <div className="admin-top-actions">
           <span className="admin-live">
@@ -93,23 +95,13 @@ export default function AdminPage() {
       </header>
       <div className="admin-layout">
         <aside className="admin-nav">
-          <div className="admin-nav-caption">CONFIGURATION</div>
-          {[
-            ["workspaces", "Client workspaces", "▦"],
-            ["ai", "AI context & voice", "✦"],
-            ["scoring", "Scoring engine", "◒"],
-            ["theme", "Theme studio", "◐"],
-          ].map(([id, label, icon]) => (
-            <button
-              key={id}
-              className={active === id ? "active" : ""}
-              onClick={() => setActive(id)}
-            >
-              <span>{icon}</span>
-              {label}
-              {id === "workspaces" && <b>3</b>}
-            </button>
-          ))}
+          <div className="admin-nav-caption">GLOBAL CONFIG</div>
+          <button
+            className={active === "global" ? "active" : ""}
+            onClick={() => setActive("global")}
+          >
+            <span>◈</span>Global config
+          </button>
           <div className="admin-nav-caption client-caption">CLIENTS</div>
           <div className="admin-client-list">
             {clients.map((item, index) => (
@@ -173,26 +165,30 @@ export default function AdminPage() {
                 ADMIN CONSOLE
               </div>
               <h1>
-                {active === "workspaces"
-                  ? "Client workspaces"
-                  : active === "ai"
-                    ? "AI context & voice"
-                    : active === "scoring"
-                      ? "Scoring engine"
-                      : active === "theme"
-                        ? "Theme studio"
-                        : "System health"}
+                {active === "global"
+                  ? "Global config"
+                  : active === "workspaces"
+                    ? "Client workspaces"
+                    : active === "ai"
+                      ? "AI context & voice"
+                      : active === "scoring"
+                        ? "Scoring engine"
+                        : active === "theme"
+                          ? "Theme studio"
+                          : "System health"}
               </h1>
               <p>
-                {active === "workspaces"
-                  ? "Manage HeyReach connections, client context, and workspace isolation."
-                  : active === "ai"
-                    ? "Tune the Anthropic drafting context for every client."
-                    : active === "scoring"
-                      ? "Make follow-up urgency explainable and client-specific."
-                      : active === "theme"
-                        ? "Customize the interface without touching code."
-                        : "Verify ingestion and worker reliability across every workspace."}
+                {active === "global"
+                  ? "Shared runtime credentials and worker settings for Reply Radar."
+                  : active === "workspaces"
+                    ? "Manage each client's HeyReach connection, context, and isolation."
+                    : active === "ai"
+                      ? "Tune the Anthropic drafting context for every client."
+                      : active === "scoring"
+                        ? "Make follow-up urgency explainable and client-specific."
+                        : active === "theme"
+                          ? "Customize the interface without touching code."
+                          : "Verify ingestion and worker reliability across every workspace."}
               </p>
             </div>
             <button className="primary-button" onClick={() => setSaved(true)}>
@@ -203,6 +199,71 @@ export default function AdminPage() {
                   : "Save changes"}
             </button>
           </div>
+          {active === "global" && (
+            <div className="admin-grid">
+              <section className="admin-panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>Provider credentials</h2>
+                    <p>
+                      Shared infrastructure keys. Client keys stay in each
+                      client profile.
+                    </p>
+                  </div>
+                  <span className="connection-badge">
+                    <i /> Internal only
+                  </span>
+                </div>
+                <label className="field-label">
+                  ANTHROPIC API KEY
+                  <div className="secret-field">
+                    <input type="password" placeholder="sk-ant-..." />
+                    <button type="button">Reveal</button>
+                  </div>
+                </label>
+                <label className="field-label">
+                  SUPABASE URL
+                  <input placeholder="https://your-project.supabase.co" />
+                </label>
+                <label className="field-label">
+                  SUPABASE SERVICE ROLE KEY
+                  <div className="secret-field">
+                    <input type="password" placeholder="service-role key" />
+                    <button type="button">Reveal</button>
+                  </div>
+                </label>
+              </section>
+              <section className="admin-panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>Worker configuration</h2>
+                    <p>Queue, reconciliation, and watchdog runtime settings.</p>
+                  </div>
+                </div>
+                <label className="field-label">
+                  WORKER SERVICE URL
+                  <input placeholder="https://reply-radar-worker.onrender.com" />
+                </label>
+                <div className="field-row">
+                  <label className="field-label">
+                    POLL INTERVAL (SECONDS)
+                    <input type="number" defaultValue="120" />
+                  </label>
+                  <label className="field-label">
+                    MAX RETRIES
+                    <input type="number" defaultValue="5" />
+                  </label>
+                </div>
+                <label className="field-label">
+                  QUEUE MODE
+                  <select defaultValue="durable">
+                    <option value="durable">Durable queue</option>
+                    <option value="inline">Inline processing</option>
+                  </select>
+                </label>
+              </section>
+            </div>
+          )}
           {active === "workspaces" && (
             <>
               <div className="workspace-cards">
