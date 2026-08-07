@@ -76,28 +76,9 @@ export default function DashboardHome() {
                 >
                   <div className="dashboard-card-top">
                     <i style={{ background: client.tone }}>{client.name[0]}</i>
-                    <span
-                      className={
-                        client.status === "Connected"
-                          ? "status-ok"
-                          : "status-warn"
-                      }
-                    >
-                      {client.status}
-                    </span>
                   </div>
                   <h3>{client.name}</h3>
-                  <p>
-                    {client.leads} active leads · {client.replies} need action
-                  </p>
-                  <div className="dashboard-progress">
-                    <span
-                      style={{
-                        width: `${Math.min(92, 48 + client.replies * 8)}%`,
-                        background: client.tone,
-                      }}
-                    />
-                  </div>
+                  <p>{client.leads} active leads</p>
                   <strong>Open workspace →</strong>
                 </a>
               ))}

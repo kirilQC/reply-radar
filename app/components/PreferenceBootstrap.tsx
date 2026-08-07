@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 
 export default function PreferenceBootstrap() {
+  useLayoutEffect(() => {
+    document.documentElement.classList.add("hydrated");
+  }, []);
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("reply-radar-prefs:general");

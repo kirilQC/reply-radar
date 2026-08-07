@@ -28,3 +28,4 @@
 @media(max-width:900px){.workspace-directory-list{grid-template-columns:repeat(2,minmax(0,1fr))}.workspace-directory-heading{align-items:flex-start;flex-direction:column}.workspace-directory-heading input{width:100%}}@media(max-width:620px){.workspace-directory-list{grid-template-columns:1fr}}
 body{zoom:var(--reply-radar-zoom,1)}
 .global-caption{margin-top:24px}
+html:not(.hydrated) body{visibility:hidden}
