@@ -275,7 +275,7 @@ export function InboxPage() {
         const parsed = JSON.parse(saved || fallback || (cookieValue ? decodeURIComponent(cookieValue) : "null"));
         if (parsed?.layout) {
           const nextLayout = { ...defaultLayout, ...parsed.layout };
-          nextLayout.order = Array.from(new Set([...nextLayout.order, "analytics"])).filter((item) => ["metrics", "analytics", "queue"].includes(item)) as LayoutPrefs["order"];
+          nextLayout.order = Array.from(new Set([...nextLayout.order, "metrics", "analytics", "queue"])).filter((item) => ["metrics", "analytics", "queue"].includes(item)) as LayoutPrefs["order"];
           setLayoutPrefs(nextLayout);
         }
         if (parsed?.appearance) {
