@@ -307,6 +307,14 @@ export function InboxPage() {
     window.localStorage.setItem(preferenceKey, JSON.stringify(payload));
     // Also retain the device-level fallback for the general inbox.
     window.localStorage.setItem("reply-radar-prefs:general", JSON.stringify(payload));
+    // Apply the same settings to the document immediately so they remain global
+    // while navigating between routes (not just on the inbox's local <main>).
+    const root = document.documentElement;
+    root.style.setProperty("--accent", nextAppearance.accent);
+    root.style.setProperty("--bg", nextAppearance.background);
+    root.style.setProperty("--font", nextAppearance.font);
+    root.style.setProperty("--reply-radar-zoom", `${nextAppearance.zoom / 100}`);
+    document.body.classList.toggle("light-mode", nextAppearance.mode === "light");
     void fetch("/api/preferences", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -429,7 +437,6 @@ export function InboxPage() {
         "--accent": appearance.accent,
         "--bg": appearance.background,
         "--font": appearance.font,
-        zoom: appearance.zoom / 100,
         fontFamily: appearance.font,
       } as React.CSSProperties}
     >

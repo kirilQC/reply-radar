@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 
-const clients = [
+const seedClients = [
   {
     name: "Northstar AI",
     slug: "northstar",
@@ -38,6 +38,7 @@ type HeartbeatPayload = {
 
 export default function AdminPage() {
   const [active, setActive] = useState("workspaces");
+  const [workspaceClients, setWorkspaceClients] = useState(seedClients);
   const [selected, setSelected] = useState(0);
   const [clientSearch, setClientSearch] = useState("");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -55,7 +56,17 @@ export default function AdminPage() {
   const logoInput = useRef<HTMLInputElement>(null);
   const [heartbeat, setHeartbeat] = useState<HeartbeatPayload | null>(null);
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
-  const client = clients[selected];
+  const clients = workspaceClients;
+  const client = clients[Math.min(selected, Math.max(0, clients.length - 1))];
+  const addWorkspace = () => {
+    const name = window.prompt("Workspace name", "New client");
+    if (!name?.trim()) return;
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || `workspace-${Date.now()}`;
+    const next = { name: name.trim(), slug, leads: 0, status: "Needs attention", tone: "#8b7cff", lastSync: "not synced" };
+    setWorkspaceClients((current) => [...current, next]);
+    setSelected(clients.length);
+    setWorkspaceOpen(true);
+  };
   const visibleClients = clients.filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()));
   useEffect(() => {
     window.localStorage.setItem("reply-radar-admin-accent-overrides", JSON.stringify(accentOverrides));
@@ -165,10 +176,6 @@ export default function AdminPage() {
                   {label}
                 </button>
               ))}
-              <div className="admin-nav-bottom">
-                <a href="/">← Back to inbox</a>
-                <small>Reply Radar · Internal build</small>
-              </div>
             </aside>
             <section className="admin-content">
               <div className="admin-heading">
@@ -214,7 +221,7 @@ export default function AdminPage() {
                 </div>
                 {active !== "heartbeat" && active !== "audit" && <button
                   className="primary-button"
-                  onClick={() => active === "workspaces" ? setWorkspaceOpen(true) : setSaved(true)}
+                  onClick={() => active === "workspaces" ? addWorkspace() : setSaved(true)}
                 >
                   {saved
                     ? "Saved ✓"
@@ -755,7 +762,7 @@ function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload |
         <button className="secondary-button" onClick={onRefresh}>Refresh checks ↻</button>
       </div>
       <div className="heartbeat-service-grid">{(heartbeat?.services ?? [{ id: "supabase", label: "Supabase database", configured: false }, { id: "anthropic", label: "Anthropic API", configured: false }, { id: "worker", label: "Worker service", configured: false }]).map((service) => <div className="heartbeat-service admin-panel" key={service.id}><i className={service.configured ? "heartbeat-ok" : "heartbeat-missing"} /><div><strong>{service.label}</strong><small>{service.configured ? "Configured" : "Not configured"}</small></div></div>)}</div>
-      <section className="admin-panel"><div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>Webhook freshness, HeyReach key presence, and reconciliation freshness per client.</p></div></div><div className="heartbeat-client-list">{heartbeat?.clients?.length ? heartbeat.clients.map((item) => <div className="heartbeat-client-row" key={item.slug}><i style={{ background: clients.find((client) => client.slug === item.slug)?.tone ?? "#8b7cff" }}>{item.name[0]}</i><strong>{item.name}</strong><span className={item.status === "healthy" ? "health-state ready" : "health-state missing"}>{item.status === "healthy" ? "Healthy" : item.status === "missing" ? "Missing key" : "Needs attention"}</span><small>Key {item.keyConfigured ? "configured" : "missing"} · Webhook {item.webhookAgeSeconds === null ? "never received" : formatAge(item.webhookAgeSeconds)} · Poll {item.pollAgeSeconds === null ? "never run" : formatAge(item.pollAgeSeconds)}</small></div>) : <div className="heartbeat-empty">No synced client heartbeat data is available yet. Configure Supabase and run the HeyReach worker to begin checks.</div>}</div></section>
+      <section className="admin-panel"><div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>Webhook freshness, HeyReach key presence, and reconciliation freshness per client.</p></div></div><div className="heartbeat-client-list">{heartbeat?.clients?.length ? heartbeat.clients.map((item) => <div className="heartbeat-client-row" key={item.slug}><i style={{ background: seedClients.find((client) => client.slug === item.slug)?.tone ?? "#8b7cff" }}>{item.name[0]}</i><strong>{item.name}</strong><span className={item.status === "healthy" ? "health-state ready" : "health-state missing"}>{item.status === "healthy" ? "Healthy" : item.status === "missing" ? "Missing key" : "Needs attention"}</span><small>Key {item.keyConfigured ? "configured" : "missing"} · Webhook {item.webhookAgeSeconds === null ? "never received" : formatAge(item.webhookAgeSeconds)} · Poll {item.pollAgeSeconds === null ? "never run" : formatAge(item.pollAgeSeconds)}</small></div>) : <div className="heartbeat-empty">No synced client heartbeat data is available yet. Configure Supabase and run the HeyReach worker to begin checks.</div>}</div></section>
     </div>
   );
 }
