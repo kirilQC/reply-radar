@@ -37,7 +37,7 @@ type HeartbeatPayload = {
 };
 
 export default function AdminPage() {
-  const [active, setActive] = useState("global");
+  const [active, setActive] = useState("workspaces");
   const [selected, setSelected] = useState(0);
   const [clientSearch, setClientSearch] = useState("");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -51,13 +51,6 @@ export default function AdminPage() {
       const stored = window.localStorage.getItem("reply-radar-admin-accent-overrides");
       return stored ? (JSON.parse(stored) as Record<string, string>) : {};
     } catch { return {}; }
-  });
-  const [globalAccent] = useState(() => {
-    if (typeof window === "undefined") return "#8b7cff";
-    try {
-      const raw = window.localStorage.getItem("reply-radar-prefs:general");
-      return JSON.parse(raw || "null")?.appearance?.accent || "#8b7cff";
-    } catch { return "#8b7cff"; }
   });
   const logoInput = useRef<HTMLInputElement>(null);
   const [heartbeat, setHeartbeat] = useState<HeartbeatPayload | null>(null);
@@ -74,7 +67,7 @@ export default function AdminPage() {
       .then((payload: HeartbeatPayload) => setHeartbeat(payload))
       .catch(() => setHeartbeat({ status: "error", services: [], clients: [] }));
   }, [active, heartbeatRefresh]);
-  const accentColor = accentOverrides[client.slug] ?? globalAccent;
+  const accentColor = accentOverrides[client.slug] ?? client.tone;
   const setAccentColor = (value: string) =>
     setAccentOverrides((current) => ({ ...current, [client.slug]: value }));
   const chooseLogo = () => logoInput.current?.click();
@@ -95,7 +88,7 @@ export default function AdminPage() {
       <section className="main-area">
         <main
           className={`admin-shell admin-theme-${themePreset}`}
-          style={{ "--accent": accentColor } as React.CSSProperties}
+          style={(accentOverrides[client.slug] ? { "--accent": accentColor } : undefined) as unknown as React.CSSProperties}
         >
           <header className="admin-topbar">
             <a className="admin-brand" href="/">
@@ -155,7 +148,7 @@ export default function AdminPage() {
                       <i style={{ background: item.tone }}>{item.name[0]}</i>
                       <span>{item.name}</span>
                     </button>
-                    {selected === index && (
+                    {selected === index && workspaceOpen && (
                       <div className="admin-client-configs">
                         <button onClick={() => setActive("workspaces")}>
                           Connection & profile
