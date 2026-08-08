@@ -16,6 +16,7 @@ type ClientWorkspace = {
   brief?: string;
   apiKey?: string;
   timezone?: string;
+  keyConfigured?: boolean;
 };
 
 const initialClients: ClientWorkspace[] = [];
@@ -65,9 +66,9 @@ export default function AdminPage() {
         if (!cancelled && response.ok && Array.isArray(payload.workspaces)) {
           setWorkspaceClients(payload.workspaces.map((item: Record<string, unknown>) => ({
             name: String(item.name ?? ""), slug: String(item.slug ?? ""), leads: 0,
-            status: item.last_successful_poll_at ? "Connected" : "Not configured", tone: "var(--accent)",
+            status: item.last_successful_poll_at ? "Connected" : "Not configured", tone: String(item.accent_color ?? "var(--accent)"),
             lastSync: String(item.last_successful_poll_at ?? "not synced"), createdAt: String(item.created_at ?? ""),
-            brief: String(item.client_brief ?? ""), apiKey: "", timezone: "",
+            brief: String(item.client_brief ?? ""), apiKey: "", timezone: "", keyConfigured: Boolean(item.key_configured),
           })));
           setWorkspaceStorageReady(true);
           return;
@@ -96,7 +97,7 @@ export default function AdminPage() {
   }, []);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "", apiKey: client.apiKey ?? "" });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "", apiKey: "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -111,7 +112,7 @@ export default function AdminPage() {
     setWorkspaceClients(next);
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
     window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
-    void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, heyreachApiKey: workspaceDraft.apiKey, accentColor: accentOverrides[client.slug] ?? client.tone }) }).catch(() => undefined);
+    void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), accentColor: accentOverrides[client.slug] ?? client.tone }) }).catch(() => undefined);
     setSaved(true);
   };
   const removeWorkspace = () => {
@@ -416,11 +417,10 @@ export default function AdminPage() {
                         HEYREACH API KEY
                         <div className="secret-field">
                           <input
-                            type="text"
-                              value={isNewWorkspace ? workspaceDraft.apiKey : (showKey ? client.apiKey ?? "" : client.apiKey ? "••••••••••••••••" : "")}
+                              value={workspaceDraft.apiKey}
                               onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, apiKey: event.target.value }))}
-                              placeholder={isNewWorkspace ? "Enter HeyReach API key" : undefined}
-                            readOnly
+                              placeholder={client.keyConfigured ? "Enter a new HeyReach API key to replace the saved key" : "Enter HeyReach API key"}
+                              type={showKey ? "text" : "password"}
                           />
                           <button onClick={() => setShowKey(!showKey)}>
                             {showKey ? "Hide" : "Reveal"}
@@ -452,10 +452,6 @@ export default function AdminPage() {
                         <button onClick={copyWebhook}>Copy</button>
                       </div>
                       <div className="panel-actions">
-                        <button className="secondary-button" onClick={() => setSaved(true)}>Rotate key</button>
-                        <button className="secondary-button" onClick={() => setSaved(true)}>
-                          Run backfill
-                        </button>
                         <button className="text-button" onClick={() => setActive("audit")}>
                           View event log →
                         </button>
@@ -510,7 +506,7 @@ export default function AdminPage() {
                   {workspaceOpen && <div className="client-config-sections">
                     <section className="admin-panel client-config-section" id="client-ai">
                       <div className="panel-heading"><div><h2>AI context & voice</h2><p>Client-specific Anthropic drafting rules and review guardrails.</p></div><span className="connection-badge"><i /> Client-specific</span></div>
-                      <div className="field-row"><label className="field-label">MODEL<select defaultValue=""><option value="">Select model</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" placeholder="Set temperature" step="0.05" /></label></div>
+                      <div className="field-row"><label className="field-label">MODEL<select defaultValue=""><option value="">Select model</option><option>claude-opus-4-1-20250805</option><option>claude-opus-4-20250514</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option><option>claude-3-5-haiku-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" placeholder="Set temperature (0–1)" min="0" max="1" step="0.05" /><small>Lower values are more consistent; higher values are more varied.</small></label></div>
                       <label className="field-label">CUSTOM SYSTEM PROMPT<textarea placeholder="Add client-specific drafting rules" /></label>
                     </section>
                     <section className="admin-panel client-config-section" id="client-scoring">
@@ -545,8 +541,11 @@ export default function AdminPage() {
                       MODEL
                       <select defaultValue="">
                         <option value="">Select model</option>
+                        <option>claude-opus-4-1-20250805</option>
+                        <option>claude-opus-4-20250514</option>
                         <option>claude-sonnet-4-20250514</option>
                         <option>claude-3-7-sonnet-latest</option>
+                        <option>claude-3-5-haiku-latest</option>
                       </select>
                     </label>
                     <label className="field-label">
