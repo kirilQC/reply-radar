@@ -19,8 +19,10 @@ const headers = { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKe
 
 async function supabase(path, options = {}) {
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, { ...options, headers: { ...headers, ...(options.headers || {}) } });
-  if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
-  return response.status === 204 ? null : response.json();
+  const body = await response.text();
+  if (!response.ok) throw new Error(`Supabase ${response.status}: ${body}`);
+  if (!body.trim()) return null;
+  try { return JSON.parse(body); } catch { return body; }
 }
 
 async function checkHeyReach(apiKey) {
