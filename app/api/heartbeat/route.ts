@@ -9,13 +9,18 @@ export async function GET() {
   const services = [
     { id: "supabase", label: "Supabase database", configured: Boolean(url && key) },
     { id: "anthropic", label: "Anthropic API", configured: Boolean(process.env.ANTHROPIC_API_KEY) },
-    { id: "worker", label: "Worker service", configured: Boolean(process.env.WORKER_SERVICE_URL) },
+    { id: "worker", label: "Worker service", configured: false },
   ];
   if (!url || !key) return NextResponse.json({ status: "not_configured", services, clients: [] });
   try {
     const response = await fetch(`${url}/rest/v1/rr_workspaces?select=name,slug,heyreach_api_key_ciphertext,last_webhook_received_at,last_successful_poll_at&order=created_at.asc`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" });
     if (!response.ok) throw new Error("Unable to read workspace heartbeat data");
     const rows = (await response.json()) as Row[];
+    const workerResponse = await fetch(`${url}/rest/v1/rr_sync_runs?source=eq.render-worker-heartbeat&select=status,started_at,finished_at,records_seen,error_text&order=started_at.desc&limit=1`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" });
+    const workerRuns = workerResponse.ok ? await workerResponse.json() as Row[] : [];
+    const workerRun = workerRuns[0];
+    const workerAgeSeconds = ageSeconds(workerRun?.started_at);
+    services[2].configured = workerAgeSeconds !== null && workerAgeSeconds <= 5 * 60;
     const clients = rows.map((row) => {
       const webhookAgeSeconds = ageSeconds(row.last_webhook_received_at);
       const pollAgeSeconds = ageSeconds(row.last_successful_poll_at);
@@ -24,7 +29,7 @@ export async function GET() {
       const pollHealthy = pollAgeSeconds !== null && pollAgeSeconds <= 60 * 60;
       return { name: row.name, slug: row.slug, keyConfigured, webhookAgeSeconds, pollAgeSeconds, status: keyConfigured && webhookHealthy && pollHealthy ? "healthy" : keyConfigured ? "attention" : "missing" };
     });
-    return NextResponse.json({ status: "live", services, clients, checkedAt: new Date().toISOString() });
+    return NextResponse.json({ status: "live", services, clients, worker: workerRun ? { status: workerRun.status, ageSeconds: workerAgeSeconds, startedAt: workerRun.started_at, finishedAt: workerRun.finished_at, workspacesSeen: workerRun.records_seen ?? 0, error: workerRun.error_text ?? null } : null, checkedAt: new Date().toISOString() });
   } catch {
     return NextResponse.json({ status: "error", services, clients: [] }, { status: 502 });
   }

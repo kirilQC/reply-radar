@@ -48,8 +48,11 @@ async function syncWorkspace(workspace) {
 }
 
 async function runOnce() {
+  const cycleStarted = new Date().toISOString();
+  await supabase("rr_sync_runs", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ workspace_id: null, source: "render-worker-heartbeat", status: "running", started_at: cycleStarted, records_seen: 0, records_written: 0 }) });
   const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&order=created_at.asc");
   for (const workspace of workspaces) await syncWorkspace(workspace);
+  await supabase("rr_sync_runs", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ workspace_id: null, source: "render-worker-heartbeat", status: "success", started_at: cycleStarted, finished_at: new Date().toISOString(), records_seen: workspaces.length, records_written: 0 }) });
 }
 
 async function main() {
