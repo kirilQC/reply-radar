@@ -8,6 +8,7 @@ import AppSidebar from "./components/AppSidebar";
 import AppearancePanel, { type AppearancePrefs } from "./components/AppearancePanel";
 
 type Lead = {
+  id: string;
   initials: string;
   name: string;
   role: string;
@@ -21,6 +22,8 @@ type Lead = {
   age: string;
   replies: number;
   avatar: string;
+  profileUrl?: string | null;
+  messages: Array<{ id: string; body: string; direction: string; sentAt: string }>;
 };
 type LayoutPrefs = {
   order: Array<"metrics" | "analytics" | "queue">;
@@ -69,7 +72,6 @@ const metricCatalog = [
   { id: "positiveRate", label: "Positive reply rate", value: "—", delta: "", tone: "green", sub: "Awaiting synced data" },
   { id: "avgRepliesCampaign", label: "Replies / campaign", value: "—", delta: "", tone: "coral", sub: "Awaiting synced data" },
 ];
-const leads: Lead[] = [];
 const nav = [
   ["inbox", "General inbox", "⌘1"],
   ["profiles", "Profiles", "⌘2"],
@@ -122,6 +124,9 @@ export function InboxPage() {
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(true);
+  const [inboxError, setInboxError] = useState("");
   const [queryString, setQueryString] = useState("");
   const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string; tone?: string; logoUrl?: string }>>([]);
   const [liveProfiles, setLiveProfiles] = useState<Array<{ slug: string; name: string; clients: string[] }>>([]);
@@ -220,6 +225,21 @@ export function InboxPage() {
       .catch(() => { if (!cancelled) setAnalytics({ status: "error", totalReplies: 0, replies7d: 0, trend: [], queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] }); });
     return () => { cancelled = true; };
   }, [trackedClients.join(",")]);
+  useEffect(() => {
+    let cancelled = false;
+    setInboxLoading(true);
+    setInboxError("");
+    fetch(`/api/inbox?workspaces=${encodeURIComponent(trackedWorkspaceSlugs.join(","))}`, { cache: "no-store" })
+      .then(async (response) => ({ response, payload: await response.json().catch(() => ({})) }))
+      .then(({ response, payload }) => {
+        if (cancelled) return;
+        if (!response.ok) throw new Error(String(payload.error ?? "Inbox could not be loaded."));
+        setLeads(Array.isArray(payload.conversations) ? payload.conversations : []);
+      })
+      .catch((error) => { if (!cancelled) { setLeads([]); setInboxError(error instanceof Error ? error.message : "Inbox could not be loaded."); } })
+      .finally(() => { if (!cancelled) setInboxLoading(false); });
+    return () => { cancelled = true; };
+  }, [trackedWorkspaceSlugs.join(",")]);
   const savePreferences = (nextLayout = layoutPrefs, nextAppearance = appearance) => {
     const payload = { layout: nextLayout, appearance: nextAppearance };
     window.localStorage.setItem(preferenceKey, JSON.stringify(payload));
@@ -332,8 +352,23 @@ export function InboxPage() {
       exportButton?.removeEventListener("click", exportHandler);
       addButton?.removeEventListener("click", addHandler);
     };
-  }, []);
-  const current: Lead = leads[selected] ?? {
+  }, [leads]);
+  const filtered = useMemo(
+    () =>
+      leads.filter(
+        (lead) =>
+          (!search ||
+            `${lead.name} ${lead.company} ${lead.client}`
+              .toLowerCase()
+              .includes(search.toLowerCase())) &&
+          (!assignedClients || assignedClients.includes(lead.client)) &&
+          (filter === "All follow-ups" ||
+            (filter === "Hot" ? lead.tier === "hot" : lead.tier !== "hot")),
+      ),
+    [leads, search, filter, assignedClients],
+  );
+  const current: Lead = filtered[selected] ?? {
+    id: "empty",
     initials: "?",
     name: "No conversation selected",
     role: "",
@@ -347,21 +382,8 @@ export function InboxPage() {
     age: "",
     replies: 0,
     avatar: "var(--panel-2)",
+    messages: [],
   };
-  const filtered = useMemo(
-    () =>
-      leads.filter(
-        (lead) =>
-          (!search ||
-            `${lead.name} ${lead.company} ${lead.client}`
-              .toLowerCase()
-              .includes(search.toLowerCase())) &&
-          (!assignedClients || assignedClients.includes(lead.client)) &&
-          (filter === "All follow-ups" ||
-            (filter === "Hot" ? lead.tier === "hot" : lead.tier !== "hot")),
-      ),
-    [search, filter, assignedClients],
-  );
   return (
     <main
       className={`app-shell ${theme === "light" ? "light-mode" : ""} ${layoutPrefs.compact ? "compact-inbox" : ""}`}
@@ -605,10 +627,13 @@ export function InboxPage() {
                 <span>LAST MESSAGE</span>
                 <span />
               </div>
+              {inboxLoading && <p className="empty-state">Loading conversations…</p>}
+              {!inboxLoading && inboxError && <p className="empty-state error-text">{inboxError}</p>}
+              {!inboxLoading && !inboxError && filtered.length === 0 && <p className="empty-state">No conversations have arrived for this inbox yet.</p>}
               {filtered.map((lead, index) => (
                 <button
                   className={`lead-row ${selected === index ? "row-selected" : ""}`}
-                  key={lead.name}
+                  key={lead.id}
                   onClick={() => setSelected(index)}
                 >
                   <div className="lead-main">
@@ -675,9 +700,7 @@ export function InboxPage() {
                     <p>
                       {current.role} at {current.company}
                     </p>
-                    <span className="linkedin">
-                      in&nbsp; LinkedIn profile ↗
-                    </span>
+                    {current.profileUrl && <a className="linkedin" href={current.profileUrl} target="_blank" rel="noreferrer">in&nbsp; LinkedIn profile ↗</a>}
                   </div>
                 </div>
                 <div className="detail-tags">
@@ -696,7 +719,7 @@ export function InboxPage() {
                 </div>
               </div>
               <div className="thread">
-                {current.preview ? <div className="bubble inbound"><span>{current.initials}</span><p>{current.preview}</p></div> : <p className="empty-state">No conversation messages are available yet.</p>}
+                {current.messages.length ? current.messages.map((message) => <div className={`bubble ${message.direction === "outbound" ? "outbound" : "inbound"}`} key={message.id}>{message.direction !== "outbound" && <span>{current.initials}</span>}<p>{message.body}</p><time>{new Date(message.sentAt).toLocaleString()}</time></div>) : <p className="empty-state">No conversation messages are available yet.</p>}
               </div>
               <div className="composer">
                 <div className="composer-top">
