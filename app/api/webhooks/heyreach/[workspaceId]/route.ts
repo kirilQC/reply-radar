@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 const ready = (workspaceId: string) => NextResponse.json({ ok: true, webhook: "ready", workspace: workspaceId });
+const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 export async function GET(_request: Request, context: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = await context.params;
@@ -25,8 +26,9 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" };
   try {
-    const lookup = await fetch(`${url}/rest/v1/rr_workspaces?select=id,slug&or=(id.eq.${encodeURIComponent(workspaceId)},slug.eq.${encodeURIComponent(workspaceId)})&limit=1`, { headers, cache: "no-store" });
-    if (!lookup.ok) return NextResponse.json({ ok: false }, { status: 502 });
+    const lookupColumn = isUuid(workspaceId) ? "id" : "slug";
+    const lookup = await fetch(`${url}/rest/v1/rr_workspaces?select=id,slug&${lookupColumn}=eq.${encodeURIComponent(workspaceId)}&limit=1`, { headers, cache: "no-store" });
+    if (!lookup.ok) return NextResponse.json({ ok: false, stage: "workspace_lookup", error: (await lookup.text()).slice(0, 1_000) }, { status: 502 });
     const rows = await lookup.json() as Array<{ id: string }>;
     const workspace = rows[0];
     if (!workspace) return NextResponse.json({ ok: false, error: "Workspace not found." }, { status: 404 });
@@ -34,9 +36,10 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     const eventKey = `${String(body.conversationId ?? "unknown")}:${String(body.messageId ?? "unknown")}:${String(body.timestamp ?? "unknown")}`;
     const eventType = typeof body.eventType === "string" ? body.eventType : "UNKNOWN";
     const eventResponse = await fetch(`${url}/rest/v1/rr_webhook_events`, { method: "POST", headers: { ...headers, Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ workspace_id: workspace.id, event_key: eventKey, event_type: eventType, raw: payload, status: "pending" }) });
-    if (!eventResponse.ok && eventResponse.status !== 409) return NextResponse.json({ ok: false }, { status: 502 });
-    await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(workspace.id)}`, { method: "PATCH", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify({ last_webhook_received_at: new Date().toISOString() }) });
+    if (!eventResponse.ok && eventResponse.status !== 409) return NextResponse.json({ ok: false, stage: "event_insert", error: (await eventResponse.text()).slice(0, 1_000) }, { status: 502 });
+    const heartbeatResponse = await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(workspace.id)}`, { method: "PATCH", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify({ last_webhook_received_at: new Date().toISOString() }) });
+    if (!heartbeatResponse.ok) return NextResponse.json({ ok: false, stage: "heartbeat_update", error: (await heartbeatResponse.text()).slice(0, 1_000) }, { status: 502 });
     console.info("heyreach_webhook_received", { workspaceId, eventType, eventKey });
     return NextResponse.json({ ok: true }, { status: 200 });
-  } catch { return NextResponse.json({ ok: false }, { status: 502 }); }
+  } catch (error) { return NextResponse.json({ ok: false, stage: "unexpected", error: error instanceof Error ? error.message : "Webhook processing failed" }, { status: 502 }); }
 }
