@@ -1,0 +1,44 @@
+import { NextResponse } from "next/server";
+type Row = Record<string, unknown>;
+
+async function get(url: string, key: string, path: string) {
+  const response = await fetch(`${url}/rest/v1/${path}`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" });
+  const data = await response.json().catch(() => []);
+  if (!response.ok) throw new Error(`Supabase ${response.status}: ${JSON.stringify(data)}`);
+  return Array.isArray(data) ? data as Row[] : [];
+}
+const encodeCursor = (createdAt: unknown) => Buffer.from(String(createdAt)).toString("base64url");
+const decodeCursor = (cursor: string | null) => { try { return cursor ? Buffer.from(cursor, "base64url").toString("utf8") : ""; } catch { return ""; } };
+
+export async function GET(request: Request) {
+  const url = process.env.SUPABASE_URL; const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return NextResponse.json({ ok: false, leads: [], error: "Supabase is not configured." }, { status: 503 });
+  try {
+    const params = new URL(request.url).searchParams;
+    const workspaceSlug = params.get("workspace")?.trim() ?? "";
+    const search = (params.get("search") ?? "").trim().slice(0, 100).replace(/[,*.()]/g, " ");
+    const limit = Math.min(100, Math.max(10, Number(params.get("limit") || 50)));
+    const cursor = decodeCursor(params.get("cursor"));
+    const workspaces = await get(url, key, "rr_workspaces?select=id,name,slug,logo_url,accent_color&order=name.asc");
+    const selectedWorkspace = workspaceSlug ? workspaces.find((workspace) => workspace.slug === workspaceSlug) : null;
+    if (workspaceSlug && !selectedWorkspace) return NextResponse.json({ ok: true, leads: [], workspaces, hasMore: false, nextCursor: null });
+    const filters = [selectedWorkspace ? `workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}` : "", cursor ? `created_at=lt.${encodeURIComponent(cursor)}` : "", search ? `or=(name.ilike.*${encodeURIComponent(search)}*,company.ilike.*${encodeURIComponent(search)}*,role.ilike.*${encodeURIComponent(search)}*,linkedin_id.ilike.*${encodeURIComponent(search)}*)` : ""].filter(Boolean).join("&");
+    const rows = await get(url, key, `rr_leads?select=*&${filters ? `${filters}&` : ""}order=created_at.desc&limit=${limit + 1}`);
+    const page = rows.slice(0, limit);
+    const leadIds = page.map((lead) => String(lead.id));
+    const conversations = leadIds.length ? await get(url, key, `rr_conversations?select=id,lead_id,last_message_at,last_message_direction,score,tier&lead_id=in.(${leadIds.join(",")})&order=last_message_at.desc`) : [];
+    const conversationIds = conversations.map((conversation) => String(conversation.id));
+    const messages = conversationIds.length ? await get(url, key, `rr_messages?select=conversation_id,direction,body,sent_at&conversation_id=in.(${conversationIds.join(",")})&order=sent_at.desc&limit=1000`) : [];
+    const workspaceById = new Map(workspaces.map((workspace) => [String(workspace.id), workspace]));
+    const leads = page.map((lead) => {
+      const raw = lead.raw_data && typeof lead.raw_data === "object" ? lead.raw_data as Row : {};
+      const leadConversations = conversations.filter((conversation) => conversation.lead_id === lead.id);
+      const ids = new Set(leadConversations.map((conversation) => conversation.id));
+      const leadMessages = messages.filter((message) => ids.has(message.conversation_id));
+      const latestMessage = leadMessages[0];
+      const workspace = workspaceById.get(String(lead.workspace_id)) ?? {};
+      return { id: lead.id, name: lead.name || "Unknown lead", role: lead.role || "", company: lead.company || "", linkedinId: lead.linkedin_id ?? null, profileUrl: lead.linkedin_profile_url ?? null, photoUrl: raw.profile_picture_url ?? raw.profile_image_url ?? raw.avatar_url ?? raw.image_url ?? null, email: raw.email_address ?? raw.custom_email ?? raw.enriched_email ?? null, location: raw.location ?? null, tags: Array.isArray(raw.tags) ? raw.tags : [], workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug, logoUrl: workspace.logo_url, accentColor: workspace.accent_color }, createdAt: lead.created_at, conversationCount: leadConversations.length, replyCount: leadMessages.filter((message) => message.direction === "inbound").length, lastReplyAt: leadConversations[0]?.last_message_at ?? null, lastMessage: latestMessage?.body ?? "", rawData: raw };
+    });
+    return NextResponse.json({ ok: true, leads, workspaces: workspaces.map((workspace) => ({ id: workspace.id, name: workspace.name, slug: workspace.slug, logoUrl: workspace.logo_url })), hasMore: rows.length > limit, nextCursor: rows.length > limit && page.length ? encodeCursor(page.at(-1)?.created_at) : null, pageSize: limit });
+  } catch (error) { return NextResponse.json({ ok: false, leads: [], error: error instanceof Error ? error.message : "Database unavailable" }, { status: 502 }); }
+}
