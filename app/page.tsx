@@ -211,7 +211,6 @@ export function InboxPage() {
       : new Date().getHours() < 18
         ? "Good afternoon"
         : "Good evening";
-  const todayLabel = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "2-digit" }).format(new Date()).toUpperCase();
   const activeWorkspace = clientParam ? workspaceDirectory.find((item) => item.slug === clientParam) : undefined;
   const clientName = activeWorkspace?.name || clientParam || "All clients";
   const clientTone = activeWorkspace?.tone || "var(--accent)";
@@ -579,15 +578,11 @@ export function InboxPage() {
         <div className="content-wrap inbox-page-content">
           <div className="page-heading">
             <div>
-              <div className="eyebrow">
-                <span className="live-dot" />
-                LIVE QUEUE <span className="eyebrow-separator">/</span> {todayLabel}
-              </div>
               <h1>
                 {clientParam && <span className="inbox-heading-logo" style={{ background: clientTone }}>{clientLogo ? <img src={clientLogo} alt="" /> : clientName[0]}</span>}
                 {profileName ? `${greeting}, ${profileName}` : clientParam ? clientName : "General inbox"}
               </h1>
-              {!clientParam && <><p>{filtered.length} leads across {trackedClients.length} clients</p><div className="tracked-clients">{trackedClients.map((client) => <span key={client}>{client}</span>)}</div></>}
+              {!clientParam && <div className="tracked-clients">{trackedClients.map((client) => <span key={client}>{client}</span>)}</div>}
             </div>
           </div>
           <div className="inbox-layout">
