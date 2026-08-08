@@ -110,7 +110,7 @@ export default function AdminPage() {
     setWorkspaceClients(next);
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
     window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
-    void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief }) }).catch(() => undefined);
+    void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, heyreachApiKey: workspaceDraft.apiKey, accentColor: accentOverrides[client.slug] ?? client.tone }) }).catch(() => undefined);
     setSaved(true);
   };
   const removeWorkspace = () => {
