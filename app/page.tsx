@@ -9,6 +9,7 @@ import AppearancePanel, { type AppearancePrefs } from "./components/AppearancePa
 
 type Lead = {
   id: string;
+  leadId?: string;
   initials: string;
   name: string;
   role: string;
@@ -46,6 +47,7 @@ type LayoutPrefs = {
   compact: boolean;
   metrics: string[];
   graphs: GraphConfig[];
+  paneSplit: number;
 };
 type GraphConfig = { id: string; title: string; metric: string; kind: "line" | "bars" | "donut" };
 type AnalyticsSnapshot = {
@@ -67,6 +69,7 @@ const defaultLayout: LayoutPrefs = {
     { id: "reply-volume", title: "Reply volume", metric: "Replies · 7 days", kind: "line" },
     { id: "queue-mix", title: "Queue mix", metric: "Lead status", kind: "donut" },
   ],
+  paneSplit: 62,
 };
 const defaultAppearance: AppearancePrefs = {
   mode: "midnight",
@@ -77,21 +80,16 @@ const defaultAppearance: AppearancePrefs = {
   timeZone: "America/New_York",
 };
 const timeZoneSuffix: Record<string, string> = { "America/New_York": "EST", "America/Chicago": "CST", "America/Denver": "MST", "America/Los_Angeles": "PST", UTC: "UTC" };
-const formatDashboardDate = (value: string | null | undefined, timeZone: string) => {
-  if (!value) return "—";
+const formatDashboardDateParts = (value: string | null | undefined, timeZone: string) => {
+  if (!value) return { date: "—", time: "" };
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  const formatted = new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(date);
+  if (Number.isNaN(date.getTime())) return { date: "—", time: "" };
+  const dateText = new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric", year: "numeric" }).format(date);
+  const timeText = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit", hour12: true }).format(date);
   const fallbackSuffix = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value ?? timeZone;
-  return `${formatted} ${timeZoneSuffix[timeZone] ?? fallbackSuffix}`;
+  return { date: dateText, time: `${timeText} ${timeZoneSuffix[timeZone] ?? fallbackSuffix}` };
 };
-const replyTurn = (count: number) => {
-  const words = ["Zero", "First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
-  if (words[count]) return `${words[count]} reply`;
-  const mod100 = count % 100; const mod10 = count % 10;
-  const suffix = mod100 >= 11 && mod100 <= 13 ? "th" : mod10 === 1 ? "st" : mod10 === 2 ? "nd" : mod10 === 3 ? "rd" : "th";
-  return `${count}${suffix} reply`;
-};
+const formatDashboardDate = (value: string | null | undefined, timeZone: string) => { const parts = formatDashboardDateParts(value, timeZone); return [parts.date, parts.time].filter(Boolean).join(", "); };
 const metricCatalog = [
   { id: "needsAction", label: "Needs action", value: "—", delta: "", tone: "coral", sub: "Awaiting synced data" },
   { id: "hotConversations", label: "Hot conversations", value: "—", delta: "", tone: "purple", sub: "Awaiting synced data" },
@@ -161,6 +159,12 @@ export function InboxPage() {
   const [queryString, setQueryString] = useState("");
   const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string; tone?: string; logoUrl?: string }>>([]);
   const [liveProfiles, setLiveProfiles] = useState<Array<{ slug: string; name: string; clients: string[] }>>([]);
+  useEffect(() => {
+    const scale = appearance.zoom / 100;
+    const root = document.documentElement;
+    root.style.setProperty("--reply-radar-zoom", String(scale));
+    root.style.setProperty("--reply-radar-zoom-inverse", `${100 / scale}%`);
+  }, [appearance.zoom]);
   useEffect(() => {
     // URL search params are client-only state on this static route.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -283,6 +287,7 @@ export function InboxPage() {
     root.style.setProperty("--bg", nextAppearance.background);
     root.style.setProperty("--font", nextAppearance.font);
     root.style.setProperty("--reply-radar-zoom", `${nextAppearance.zoom / 100}`);
+    root.style.setProperty("--reply-radar-zoom-inverse", `${100 / (nextAppearance.zoom / 100)}%`);
     document.body.classList.toggle("light-mode", nextAppearance.mode === "light");
     void fetch("/api/preferences", {
       method: "POST",
@@ -628,7 +633,8 @@ export function InboxPage() {
               <select className="filter-button" aria-label="Sort conversations" value={sort} onChange={(event) => { setSort(event.target.value); setSelected(0); }}><option value="score-desc">Sort: Score</option><option value="newest">Sort: Newest</option><option value="oldest">Sort: Oldest</option><option value="name">Sort: Name</option></select>
             </div>
           </div>
-          <div className="dashboard-grid operational-grid">
+          <div className="pane-resizer" aria-label="Resize Inbox and Chat panels"><span>Inbox {layoutPrefs.paneSplit}%</span><input type="range" min="40" max="75" value={layoutPrefs.paneSplit} onChange={(event) => setLayoutPrefs({ ...layoutPrefs, paneSplit: Number(event.target.value) })} onPointerUp={() => savePreferences(layoutPrefs, appearance)} onKeyUp={() => savePreferences(layoutPrefs, appearance)} /><span>Chat {100 - layoutPrefs.paneSplit}%</span></div>
+          <div className="dashboard-grid operational-grid" style={{ "--inbox-pane": `${layoutPrefs.paneSplit}fr`, "--chat-pane": `${100 - layoutPrefs.paneSplit}fr` } as React.CSSProperties}>
             <section className="queue-card inbox-operational-table">
               <div className="table-head">
                 <span>LEAD</span>
@@ -670,9 +676,9 @@ export function InboxPage() {
                     <span>{lead.client}</span>
                   </div>
                   <div className="inbox-meta-cell campaign-cell"><strong>{lead.campaignName || "No campaign"}</strong></div>
-                  <div className="inbox-meta-cell date-cell"><strong>{formatDashboardDate(lead.latestReplyAt, appearance.timeZone)}</strong></div>
+                  <div className="inbox-meta-cell date-cell"><strong>{formatDashboardDateParts(lead.latestReplyAt, appearance.timeZone).date}</strong><span>{formatDashboardDateParts(lead.latestReplyAt, appearance.timeZone).time}</span></div>
                   <div className="inbox-meta-cell sender-cell"><strong>{lead.senderName}</strong></div>
-                  <div className="inbox-meta-cell turn-cell"><strong>{replyTurn(lead.replies)}</strong></div>
+                  <div className="inbox-meta-cell turn-cell"><strong>{lead.replies}</strong></div>
                   <div className="inbox-meta-cell lead-score-cell"><span className="coming-soon">Coming soon</span></div>
                   <div className="score-cell follow-up-score-cell"><span className={`score-pill ${lead.tier}`}>{lead.followUpScore ?? lead.score}</span><span className="tier-label">{lead.tier}</span></div>
                 </button>
@@ -702,6 +708,7 @@ export function InboxPage() {
                       {current.role} at {current.company}
                     </p>
                     {current.profileUrl && <a className="linkedin" href={current.profileUrl} target="_blank" rel="noreferrer">in&nbsp; LinkedIn profile ↗</a>}
+                    {current.leadId && <a className="lead-database-link" href={`/database?lead=${encodeURIComponent(current.leadId)}`}>View full lead record →</a>}
                   </div>
                   {current.companyPhotoUrl && <img className="enriched-company-logo" src={current.companyPhotoUrl} alt={`${current.company} logo`} />}
                 </div>

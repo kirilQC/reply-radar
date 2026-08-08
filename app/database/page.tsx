@@ -71,6 +71,13 @@ export default function DatabasePage() {
     finally { setDetailLoading(false); }
   };
 
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("lead");
+    if (/^[0-9a-f-]{36}$/i.test(requested || "")) window.setTimeout(() => { void openLead(String(requested)); }, 0);
+  // A URL deep link should open once on arrival, not refetch whenever local drawer state changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const loadOlderMessages = async () => {
     if (!selectedId || detail?.nextMessageOffset == null) return;
     const response = await fetch(`/api/database/leads/${selectedId}?messageOffset=${detail.nextMessageOffset}`, { cache: "no-store" });
