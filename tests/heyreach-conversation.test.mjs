@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeConversationMessages, normalizeHeyReachMessages } from "../app/lib/heyreach-conversation.ts";
+import { isHeyReachValidationPayload, mergeConversationMessages, normalizeHeyReachMessages } from "../app/lib/heyreach-conversation.ts";
 
 const sender = { id: "321", name: "Alex Sender" };
 const fallback = "2026-08-08T18:14:09.000Z";
+
+test("recognizes HeyReach's synthetic webhook validation lead without matching real events", () => {
+  assert.equal(isHeyReachValidationPayload({ lead: { id: "TestId", full_name: "John Doe" }, sender: { id: 123 } }), true);
+  assert.equal(isHeyReachValidationPayload({ lead: { id: "real-lead-id", full_name: "John Doe" }, sender: { id: 123 } }), false);
+  assert.equal(isHeyReachValidationPayload({ lead: { profile_url: "https://linkedin.com/in/testid" } }), false);
+});
 
 test("normalizes webhook and API history messages with sender metadata", () => {
   const messages = normalizeHeyReachMessages([

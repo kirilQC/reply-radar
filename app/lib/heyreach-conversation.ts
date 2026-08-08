@@ -36,6 +36,15 @@ function senderFromPayload(payload: JsonObject): Sender {
   };
 }
 
+export function isHeyReachValidationPayload(payload: JsonObject) {
+  const lead = object(payload.lead);
+  const leadId = text(lead.id).toLowerCase();
+  // HeyReach's "Test Webhook" button sends a synthetic lead whose account and
+  // conversation do not exist in the customer's inbox. It is only an endpoint
+  // reachability check, so attempting GetConversationsV2 will always return 400.
+  return leadId === "testid";
+}
+
 function messageArrays(root: unknown) {
   const candidates: JsonObject[][] = [];
   const seen = new Set<unknown>();
