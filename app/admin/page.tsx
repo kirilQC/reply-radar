@@ -211,7 +211,7 @@ export default function AdminPage() {
     event.target.value = "";
   };
   const copyWebhook = () => {
-    void navigator.clipboard?.writeText(client.webhookUrl || `https://replyradar.app/api/webhooks/heyreach/${client.slug}`);
+    void navigator.clipboard?.writeText(client.webhookUrl || `https://reply-radar-mauve.vercel.app/api/webhooks/heyreach/${client.slug}`);
     showSavedConfirmation();
   };
   return (
@@ -409,7 +409,7 @@ export default function AdminPage() {
                         <div>
                           <small>WEBHOOK ENDPOINT</small>
                           <code>
-                            {client.webhookUrl || `https://replyradar.app/api/webhooks/heyreach/${client.slug || ""}`}
+                            {client.webhookUrl || `https://reply-radar-mauve.vercel.app/api/webhooks/heyreach/${client.slug || ""}`}
                           </code>
                         </div>
                         <button onClick={copyWebhook}>Copy</button>
