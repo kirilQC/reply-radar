@@ -600,9 +600,9 @@ export function InboxPage() {
             <div>
               <h1>
                 {clientParam ? clientWebsite
-                  ? <a className="inbox-client-heading-link" href={clientWebsite} target="_blank" rel="noreferrer"><span className="inbox-heading-logo" style={{ background: clientTone }}>{clientLogo ? <img src={clientLogo} alt={`${clientName} logo`} /> : clientName[0]}</span><span>{clientName}</span></a>
-                  : <><span className="inbox-heading-logo" style={{ background: clientTone }}>{clientLogo ? <img src={clientLogo} alt={`${clientName} logo`} /> : clientName[0]}</span>{clientName}</>
-                  : <>{!profileName && <span className="inbox-heading-logo general-heading-logo"><img src="/qc-growth-logo.jpg" alt="QC Growth logo" /></span>}{profileName ? `${greeting}, ${profileName}` : "General inbox"}</>}
+                  ? <a className="inbox-client-heading-link" href={clientWebsite} target="_blank" rel="noreferrer"><span className="inbox-heading-logo" style={clientLogo ? undefined : { background: clientTone }}>{clientLogo ? <img src={clientLogo} alt={`${clientName} logo`} /> : clientName[0]}</span><span>{clientName}</span></a>
+                  : <><span className="inbox-heading-logo" style={clientLogo ? undefined : { background: clientTone }}>{clientLogo ? <img src={clientLogo} alt={`${clientName} logo`} /> : clientName[0]}</span>{clientName}</>
+                  : <>{!profileName && <span className="inbox-heading-logo general-heading-logo"><img src="/qc-growth-logo.png" alt="QC Growth logo" /></span>}{profileName ? `${greeting}, ${profileName}` : "General inbox"}</>}
               </h1>
               {!clientParam && <div className="tracked-clients">{trackedClients.map((client) => <span key={client}>{client}</span>)}</div>}
             </div>
@@ -706,7 +706,7 @@ export function InboxPage() {
                     </div>
                   </div>
                   <div className="client-cell">
-                    <i style={{ background: lead.clientTone }}>
+                    <i style={clientLogoFor(lead) ? undefined : { background: lead.clientTone }}>
                       {clientLogoFor(lead) ? <img src={String(clientLogoFor(lead))} alt="" /> : lead.client[0]}
                     </i>
                     <span>{lead.client}</span>

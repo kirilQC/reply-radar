@@ -82,7 +82,7 @@ export default function DashboardHome() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <div className="crumb dashboard-brand">QC Growth</div>
+          <a className="crumb dashboard-brand" href="https://www.qcgrowth.com/" target="_blank" rel="noreferrer">QC Growth</a>
           <div className="top-actions">
             <button className="icon-button theme-toggle" aria-label="Customize appearance" title="Customize appearance" onClick={() => setAppearanceOpen((open) => !open)}>◐</button>
             {appearanceOpen && <AppearancePanel prefs={appearance} onChange={setAppearance} onSave={saveAppearance} />}
@@ -106,7 +106,7 @@ export default function DashboardHome() {
                   key={client.slug}
                 >
                   <div className="dashboard-card-top">
-                    <i style={{ background: client.tone }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : client.name[0]}</i>
+                    <i style={client.logoUrl ? undefined : { background: client.tone }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : client.name[0]}</i>
                   </div>
                   <h3>{client.name}</h3>
                   <strong>Open workspace →</strong>

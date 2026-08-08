@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
+import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 
 type Workspace = { id: string; name: string; slug: string; logoUrl?: string | null; accentColor?: string | null };
 type Lead = { id: string; name: string; role: string; company: string; linkedinId?: string | null; profileUrl?: string | null; photoUrl?: string | null; companyPhotoUrl?: string | null; email?: string | null; location?: string | null; headline?: string | null; industry?: unknown; campaignName?: string | null; enriched?: boolean; tags: string[]; senderName: string; workspace: Workspace; createdAt: string; conversationCount: number; replyCount: number; lastReplyAt?: string | null; lastMessage: string; rawData: Record<string, unknown> };
@@ -91,7 +92,7 @@ export default function DatabasePage() {
     <div className="app-shell">
       <AppSidebar />
       <section className="main-area database-main">
-        <header className="topbar"><div className="crumb"><span>Reply Radar</span><strong>› Lead database</strong></div><div className="database-record-count">{leads.length} loaded</div></header>
+        <header className="topbar"><div className="crumb"><span>Reply Radar</span><strong>› Lead database</strong></div><div className="top-actions"><div className="database-record-count">{leads.length} loaded</div><GlobalAppearanceControl /></div></header>
         <main className="database-shell" aria-label="Lead database">
           <div className="database-heading"><div><div className="eyebrow"><span className="live-dot" /> REPLY ARCHIVE</div><h1>Lead database</h1><p>Every lead who has replied through HeyReach, with their complete history and original payload.</p></div><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
           <section className="database-toolbar">

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
+import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 
 const initialProfiles: Array<{ slug: string; name: string; role: string; clients: string[]; color: string; initials: string }> = [];
 type Profile = (typeof initialProfiles)[number] & { photo?: string };
@@ -71,6 +72,7 @@ export default function ProfilesPage() {
             <span className="crumb-chevron" aria-hidden="true">›</span>
             <strong>{profile ? profile.name || "New profile" : "Profiles"}</strong>
           </div>
+          <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         {profile ? <ProfileEditor profile={profile} liveClients={workspaceNames} /> : <ProfileIndex />}
       </section>
