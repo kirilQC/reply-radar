@@ -126,6 +126,8 @@ export default function AdminPage() {
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
+    setWorkspaceError("");
+    setSaved(false);
     setWorkspaceClients((current) => [...current, next]);
     setSelected(clients.length);
     setWorkspaceOpen(true);
@@ -137,7 +139,8 @@ export default function AdminPage() {
     const normalizedName = workspaceDraft.name.trim();
     const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || client.slug;
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
-    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, previousSlug: client.slug, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: client.guardrails ?? {}, aiArkEnrichmentEnabled: workspaceDraft.aiArkEnrichmentEnabled }) }).catch(() => null);
+    const mutationIdentity = isNewWorkspace ? { create: true } : { id: client.id, previousSlug: client.slug };
+    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: client.guardrails ?? {}, aiArkEnrichmentEnabled: workspaceDraft.aiArkEnrichmentEnabled }) }).catch(() => null);
     if (!response?.ok) {
       const detail = await response?.json().catch(() => ({}));
       setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
@@ -363,7 +366,7 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>}
-                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><button className="secondary-button" onClick={requestRemoveWorkspace}>Remove workspace</button></div>}
+                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => { setWorkspaceError(""); setWorkspaceOpen(false); }}>← Back to directory</button>{!isNewWorkspace && <button className="secondary-button" onClick={requestRemoveWorkspace}>Remove workspace</button>}</div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
                       <div className="panel-heading">

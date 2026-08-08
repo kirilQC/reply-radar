@@ -27,7 +27,8 @@ export async function POST(request: Request) {
   if (typeof payload.heyreachApiKey === "string" && payload.heyreachApiKey.trim()) record.heyreach_api_key_ciphertext = payload.heyreachApiKey.trim();
   const previousSlug = typeof payload.previousSlug === "string" ? payload.previousSlug.trim() : "";
   const id = typeof payload.id === "string" ? payload.id.trim() : "";
-  const patchFilter = id ? `id=eq.${encodeURIComponent(id)}` : previousSlug ? `slug=eq.${encodeURIComponent(previousSlug)}` : "";
+  const create = payload.create === true;
+  const patchFilter = create ? "" : id ? `id=eq.${encodeURIComponent(id)}` : previousSlug ? `slug=eq.${encodeURIComponent(previousSlug)}` : "";
   if (patchFilter) {
     let patched = await fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(record) });
     if (!patched.ok && (patched.status === 400 || patched.status === 422)) {
