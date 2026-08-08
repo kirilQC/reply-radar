@@ -14,6 +14,7 @@ type Lead = {
   role: string;
   company: string;
   client: string;
+  clientSlug?: string;
   clientTone: string;
   score: number;
   tier: "hot" | "warm" | "nurture";
@@ -23,6 +24,9 @@ type Lead = {
   replies: number;
   avatar: string;
   profileUrl?: string | null;
+  photoUrl?: string | null;
+  clientLogoUrl?: string | null;
+  lastMessageAt?: string | null;
   messages: Array<{ id: string; body: string; direction: string; sentAt: string }>;
 };
 type LayoutPrefs = {
@@ -115,6 +119,7 @@ export function InboxPage() {
   const [selected, setSelected] = useState(0),
     [activeNav, setActiveNav] = useState("inbox"),
     [filter, setFilter] = useState("All follow-ups"),
+    [sort, setSort] = useState("score-desc"),
     [search, setSearch] = useState(""),
     [theme, setTheme] = useState("midnight"),
     [sent, setSent] = useState(false),
@@ -285,12 +290,6 @@ export function InboxPage() {
     const clientButtons = Array.from(
       document.querySelectorAll<HTMLButtonElement>(".client-list button"),
     );
-    const filterButton = document.querySelector<HTMLButtonElement>(
-      ".queue-tools .filter-button",
-    );
-    const sortButton = document.querySelector<HTMLButtonElement>(
-      ".queue-tools .filter-button + .filter-button",
-    );
     const exportButton = document.querySelector<HTMLButtonElement>(
       ".heading-actions .secondary-button",
     );
@@ -313,9 +312,6 @@ export function InboxPage() {
       button.addEventListener("click", handler);
       return [button, handler] as const;
     });
-    const filterHandler = () =>
-      toast("Filter menu ready — use All follow-ups, Hot, or Snoozed above.");
-    const sortHandler = () => toast("Sorted by urgency score (highest first).");
     const exportHandler = () => {
       const csv = [
         "Lead,Client,Score,Tier",
@@ -338,8 +334,6 @@ export function InboxPage() {
       if (name) toast(`Follow-up draft created for ${name}.`);
     };
     workspace?.addEventListener("click", workspaceHandler);
-    filterButton?.addEventListener("click", filterHandler);
-    sortButton?.addEventListener("click", sortHandler);
     exportButton?.addEventListener("click", exportHandler);
     addButton?.addEventListener("click", addHandler);
     return () => {
@@ -347,8 +341,6 @@ export function InboxPage() {
       clientHandlers.forEach(([button, handler]) =>
         button.removeEventListener("click", handler),
       );
-      filterButton?.removeEventListener("click", filterHandler);
-      sortButton?.removeEventListener("click", sortHandler);
       exportButton?.removeEventListener("click", exportHandler);
       addButton?.removeEventListener("click", addHandler);
     };
@@ -362,10 +354,9 @@ export function InboxPage() {
               .toLowerCase()
               .includes(search.toLowerCase())) &&
           (!assignedClients || assignedClients.includes(lead.client)) &&
-          (filter === "All follow-ups" ||
-            (filter === "Hot" ? lead.tier === "hot" : lead.tier !== "hot")),
-      ),
-    [leads, search, filter, assignedClients],
+          (filter === "All follow-ups" || lead.tier === filter.toLowerCase()),
+      ).sort((a, b) => sort === "newest" ? new Date(String(b.lastMessageAt)).getTime() - new Date(String(a.lastMessageAt)).getTime() : sort === "oldest" ? new Date(String(a.lastMessageAt)).getTime() - new Date(String(b.lastMessageAt)).getTime() : sort === "name" ? a.name.localeCompare(b.name) : b.score - a.score),
+    [leads, search, filter, sort, assignedClients],
   );
   const current: Lead = filtered[selected] ?? {
     id: "empty",
@@ -384,6 +375,7 @@ export function InboxPage() {
     avatar: "var(--panel-2)",
     messages: [],
   };
+  const clientLogoFor = (lead: Lead) => lead.clientLogoUrl || workspaceDirectory.find((workspace) => workspace.slug === lead.clientSlug || workspace.name === lead.client)?.logoUrl || null;
   return (
     <main
       className={`app-shell ${theme === "light" ? "light-mode" : ""} ${layoutPrefs.compact ? "compact-inbox" : ""}`}
@@ -483,15 +475,6 @@ export function InboxPage() {
             </strong>
           </div>
           <div className="top-actions">
-            <label className="search">
-              <Icon name="search" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search leads, companies..."
-              />
-              <kbd>⌘ K</kbd>
-            </label>
             <button
               className="icon-button layout-button"
               aria-label="Customize inbox layout"
@@ -592,6 +575,10 @@ export function InboxPage() {
               <p>Ranked by urgency and conversation intent</p>
             </div>
             <div className="queue-tools">
+              <label className="search queue-search">
+                <Icon name="search" />
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search leads, companies…" />
+              </label>
               <div className="heading-actions inbox-actions">
                 <button className="secondary-button">
                   Export <span>↓</span>
@@ -599,7 +586,7 @@ export function InboxPage() {
                 <button className="primary-button">+ Add follow-up</button>
               </div>
               <div className="segmented">
-                {["All follow-ups", "Hot", "Snoozed"].map((f) => (
+                {["All follow-ups", "Hot", "Warm", "Nurture"].map((f) => (
                   <button
                     key={f}
                     className={filter === f ? "selected" : ""}
@@ -610,12 +597,8 @@ export function InboxPage() {
                   </button>
                 ))}
               </div>
-              <button className="filter-button">
-                Filter <span>⌄</span>
-              </button>
-              <button className="filter-button">
-                Sort: Score <span>⌄</span>
-              </button>
+              <select className="filter-button" aria-label="Filter conversations" value={filter} onChange={(event) => { setFilter(event.target.value); setSelected(0); }}><option>All follow-ups</option><option>Hot</option><option>Warm</option><option>Nurture</option></select>
+              <select className="filter-button" aria-label="Sort conversations" value={sort} onChange={(event) => { setSort(event.target.value); setSelected(0); }}><option value="score-desc">Sort: Score</option><option value="newest">Sort: Newest</option><option value="oldest">Sort: Oldest</option><option value="name">Sort: Name</option></select>
             </div>
           </div>
           <div className="dashboard-grid">
@@ -641,7 +624,7 @@ export function InboxPage() {
                       className="lead-avatar"
                       style={{ background: lead.avatar }}
                     >
-                      {lead.initials}
+                      {lead.photoUrl ? <img src={lead.photoUrl} alt="" /> : lead.initials}
                     </div>
                     <div>
                       <strong>{lead.name}</strong>
@@ -652,7 +635,7 @@ export function InboxPage() {
                   </div>
                   <div className="client-cell">
                     <i style={{ background: lead.clientTone }}>
-                      {lead.client[0]}
+                      {clientLogoFor(lead) ? <img src={String(clientLogoFor(lead))} alt="" /> : lead.client[0]}
                     </i>
                     <span>{lead.client}</span>
                   </div>
@@ -693,7 +676,7 @@ export function InboxPage() {
                     className="large-avatar"
                     style={{ background: current.avatar }}
                   >
-                    {current.initials}
+                    {current.photoUrl ? <img src={current.photoUrl} alt="" /> : current.initials}
                   </div>
                   <div>
                     <h3>{current.name}</h3>

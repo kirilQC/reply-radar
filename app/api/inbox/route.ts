@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   if (!url || !key) return NextResponse.json({ ok: false, conversations: [], error: "Supabase is not configured." }, { status: 503 });
   try {
     const requested = new URL(request.url).searchParams.get("workspaces")?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
-    const workspaces = await query(url, key, "rr_workspaces?select=id,name,slug,accent_color");
+    const workspaces = await query(url, key, "rr_workspaces?select=id,name,slug,accent_color,logo_url");
     const selected = requested.length ? workspaces.filter((workspace) => requested.includes(String(workspace.slug))) : workspaces;
     const workspaceIds = selected.map((workspace) => String(workspace.id));
     if (!workspaceIds.length) return NextResponse.json({ ok: true, conversations: [] });
@@ -36,11 +36,12 @@ export async function GET(request: Request) {
     const leadById = new Map(leads.map((row) => [String(row.id), row]));
     const result = conversations.map((conversation) => {
       const lead = leadById.get(String(conversation.lead_id)) ?? {};
+      const leadRaw = lead.raw_data && typeof lead.raw_data === "object" ? lead.raw_data as Row : {};
       const workspace = workspaceById.get(String(conversation.workspace_id)) ?? {};
       const thread = messages.filter((message) => message.conversation_id === conversation.id).map((message) => ({ id: message.id, body: message.body, direction: message.direction, sentAt: message.sent_at }));
       const latest = thread.at(-1);
       const name = String(lead.name || "Unknown lead");
-      return { id: conversation.id, initials: initials(name), name, role: String(lead.role || lead.title || ""), company: String(lead.company || ""), profileUrl: lead.linkedin_profile_url ?? lead.profile_url ?? null, client: String(workspace.name || workspace.slug || "Unknown client"), clientSlug: workspace.slug, clientTone: String(workspace.accent_color || "#8b7cff"), score: Number(conversation.score || 0), tier: ["hot", "warm", "nurture"].includes(String(conversation.tier)) ? conversation.tier : "nurture", reason: String(conversation.score_reason || "New reply received from HeyReach."), preview: String(latest?.body || ""), age: age(conversation.last_message_at), replies: thread.filter((message) => message.direction === "inbound").length, avatar: "#3c365e", messages: thread };
+      return { id: conversation.id, initials: initials(name), name, role: String(lead.role || lead.title || ""), company: String(lead.company || ""), profileUrl: lead.linkedin_profile_url ?? lead.profile_url ?? null, photoUrl: leadRaw.profile_picture_url ?? leadRaw.profile_image_url ?? leadRaw.avatar_url ?? leadRaw.image_url ?? null, client: String(workspace.name || workspace.slug || "Unknown client"), clientSlug: workspace.slug, clientTone: String(workspace.accent_color || "#8b7cff"), clientLogoUrl: workspace.logo_url ?? null, score: Number(conversation.score || 0), tier: ["hot", "warm", "nurture"].includes(String(conversation.tier)) ? conversation.tier : "nurture", reason: String(conversation.score_reason || "New reply received from HeyReach."), preview: String(latest?.body || ""), age: age(conversation.last_message_at), lastMessageAt: conversation.last_message_at, replies: thread.filter((message) => message.direction === "inbound").length, avatar: "#3c365e", messages: thread };
     });
     return NextResponse.json({ ok: true, conversations: result });
   } catch (error) { return NextResponse.json({ ok: false, conversations: [], error: error instanceof Error ? error.message : "Inbox unavailable" }, { status: 502 }); }
