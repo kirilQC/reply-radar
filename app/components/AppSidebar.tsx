@@ -70,10 +70,23 @@ export default function AppSidebar() {
     } catch { setProfileName(""); }
   }, [profileParam]);
   useEffect(() => {
-    try {
+    const hydrate = async () => {
+      try {
+        const response = await fetch("/api/admin/workspaces", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (response.ok && Array.isArray(payload.workspaces)) {
+          const fresh = payload.workspaces.map((item: Record<string, unknown>) => ({ name: String(item.name ?? ""), slug: String(item.slug ?? ""), tone: String(item.accent_color ?? "var(--accent)"), logoUrl: String(item.logo_url ?? "") }));
+          setSidebarClients(fresh);
+          window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(fresh));
+          return;
+        }
+      } catch { /* use the offline cache */ }
+      try {
         const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
-      if (saved) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setSidebarClients(JSON.parse(saved)); }
-    } catch { /* keep defaults */ }
+        if (saved) setSidebarClients(JSON.parse(saved));
+      } catch { /* keep empty state */ }
+    };
+    void hydrate();
     const onStorage = () => {
       try { const saved = window.localStorage.getItem("reply-radar-workspaces:v2"); if (saved) setSidebarClients(JSON.parse(saved)); } catch { /* ignore */ }
     };

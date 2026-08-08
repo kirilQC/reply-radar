@@ -26,6 +26,21 @@ export default function ProfilesPage() {
       }
     };
     hydrate();
+    void fetch("/api/admin/profiles", { cache: "no-store" }).then(async (response) => {
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && Array.isArray(payload.profiles)) {
+        window.localStorage.setItem("reply-radar-profiles:v2", JSON.stringify(payload.profiles));
+        setProfiles(payload.profiles);
+      }
+    }).catch(() => undefined);
+    void fetch("/api/admin/workspaces", { cache: "no-store" }).then(async (response) => {
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && Array.isArray(payload.workspaces)) {
+        const names = payload.workspaces.map((item: { name?: string }) => item.name ?? "").filter(Boolean);
+        setWorkspaceNames(names);
+        window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(payload.workspaces));
+      }
+    }).catch(() => undefined);
     window.addEventListener("storage", hydrate);
     window.addEventListener("reply-radar-profiles-changed", hydrate);
     window.addEventListener("reply-radar-workspaces-changed", hydrate);
@@ -87,10 +102,13 @@ function ProfileIndex() {
   const deleteProfile = () => {
     if (!deleteTarget) return;
     const next = profiles.filter((item) => item.slug !== deleteTarget.slug);
-    window.localStorage.setItem("reply-radar-profiles:v2", JSON.stringify(next));
-    setProfiles(next);
-    window.dispatchEvent(new Event("reply-radar-profiles-changed"));
-    setDeleteTarget(null);
+    void fetch("/api/admin/profiles", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: deleteTarget.slug }) }).then(async (response) => {
+      if (!response.ok) return;
+      window.localStorage.setItem("reply-radar-profiles:v2", JSON.stringify(next));
+      setProfiles(next);
+      window.dispatchEvent(new Event("reply-radar-profiles-changed"));
+      setDeleteTarget(null);
+    });
   };
   return (
     <main className="profiles-page">
@@ -156,6 +174,7 @@ function ProfileEditor({
   const [name, setName] = useState(profile.name);
   const [photo, setPhoto] = useState<string | null>(profile.photo ?? null);
   const [assigned, setAssigned] = useState(profile.clients);
+  const [saveError, setSaveError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const allClients = liveClients.length ? liveClients : profile.clients;
   useEffect(() => {
@@ -175,6 +194,7 @@ function ProfileEditor({
       : [...current, client],
     );
   const saveProfile = () => {
+    setSaveError("");
     const normalizedName = name.trim() || "Unnamed teammate";
     const initials = normalizedName
       .split(/\s+/)
@@ -199,13 +219,16 @@ function ProfileEditor({
         return [];
       }
     })();
-    const next = [
-      ...existing.filter((item) => item.slug !== savedProfile.slug),
-      savedProfile,
-    ];
-        window.localStorage.setItem("reply-radar-profiles:v2", JSON.stringify(next));
-    window.dispatchEvent(new Event("reply-radar-profiles-changed"));
-    window.location.href = "/profiles";
+    void fetch("/api/admin/profiles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.slug === "new" ? undefined : profile.slug, name: normalizedName, photo, clients: assigned }) }).then(async (response) => {
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) { setSaveError(String(payload.error ?? "Could not save this profile.")); return; }
+      const savedId = String(payload.profile?.id ?? savedProfile.slug);
+      const persisted = { ...savedProfile, slug: savedId };
+      const persistedProfiles = [...existing.filter((item) => item.slug !== profile.slug && item.slug !== savedId), persisted];
+      window.localStorage.setItem("reply-radar-profiles:v2", JSON.stringify(persistedProfiles));
+      window.dispatchEvent(new Event("reply-radar-profiles-changed"));
+      window.location.href = "/profiles";
+    });
   };
   return (
     <main className="profile-editor-page">
@@ -225,6 +248,7 @@ function ProfileEditor({
           Save profile
         </button>
       </div>
+      {saveError && <p className="form-error" role="alert">{saveError}</p>}
       <div className="profile-editor-grid">
         <section className="profile-editor-panel">
           <div className="profile-photo-row">

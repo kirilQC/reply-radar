@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 
 type ClientWorkspace = {
+  id?: string;
   name: string;
   slug: string;
   leads: number;
@@ -18,6 +19,10 @@ type ClientWorkspace = {
   timezone?: string;
   keyConfigured?: boolean;
   logoUrl?: string;
+  website?: string;
+  anthropicModel?: string;
+  webhookUrl?: string;
+  apiKeyMasked?: string;
 };
 
 const initialClients: ClientWorkspace[] = [];
@@ -37,6 +42,7 @@ export default function AdminPage() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState("");
   const [themePreset, setThemePreset] = useState("midnight");
   const [consoleAccent, setConsoleAccent] = useState("#f0cf00");
   const [logos, setLogos] = useState<Record<string, string>>({});
@@ -54,7 +60,7 @@ export default function AdminPage() {
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))] ?? { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced" };
-  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "", apiKey: "" });
+  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", anthropicModel: "", apiKey: "" });
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -66,10 +72,10 @@ export default function AdminPage() {
         const payload = await response.json().catch(() => ({}));
         if (!cancelled && response.ok && Array.isArray(payload.workspaces)) {
           setWorkspaceClients(payload.workspaces.map((item: Record<string, unknown>) => ({
-            name: String(item.name ?? ""), slug: String(item.slug ?? ""), leads: 0,
+            id: String(item.id ?? ""), name: String(item.name ?? ""), slug: String(item.slug ?? ""), leads: 0,
             status: item.last_successful_poll_at ? "Connected" : "Not configured", tone: String(item.accent_color ?? "var(--accent)"),
             lastSync: String(item.last_successful_poll_at ?? "not synced"), createdAt: String(item.created_at ?? ""),
-            brief: String(item.client_brief ?? ""), apiKey: "", timezone: "", keyConfigured: Boolean(item.key_configured),
+            brief: String(item.client_brief ?? ""), apiKey: "", apiKeyMasked: String(item.heyreach_api_key_masked ?? ""), timezone: String(item.timezone ?? "America/New_York"), website: String(item.website_url ?? ""), anthropicModel: String(item.anthropic_model ?? ""), webhookUrl: String(item.webhook_url ?? ""), keyConfigured: Boolean(item.key_configured),
             logoUrl: String(item.logo_url ?? ""),
           })));
           setWorkspaceStorageReady(true);
@@ -99,7 +105,7 @@ export default function AdminPage() {
   }, []);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "", apiKey: "" });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", anthropicModel: client.anthropicModel ?? "", apiKey: "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -108,19 +114,25 @@ export default function AdminPage() {
     setWorkspaceOpen(true);
   };
   const saveWorkspaceChanges = async () => {
+    setWorkspaceError("");
     const normalizedName = workspaceDraft.name.trim();
     const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || client.slug;
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: workspaceDraft.apiKey, timezone: workspaceDraft.timezone, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, isNew: false } : item);
-    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) }).catch(() => null);
-    if (!response?.ok) { setSaved(false); return; }
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: workspaceDraft.apiKey, timezone: workspaceDraft.timezone, website: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, isNew: false } : item);
+    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, previousSlug: client.slug, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) }).catch(() => null);
+    if (!response?.ok) {
+      const detail = await response?.json().catch(() => ({}));
+      setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
+      setSaved(false);
+      return;
+    }
     setWorkspaceClients(next);
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
     window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
     setSaved(true);
   };
   const removeWorkspace = async () => {
-    const response = await fetch("/api/admin/workspaces", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: client.slug }) }).catch(() => null);
+    const response = await fetch("/api/admin/workspaces", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, slug: client.slug }) }).catch(() => null);
     if (!response?.ok) { setPasswordError("Could not delete this workspace from Supabase."); return; }
     const next = clients.filter((_, index) => index !== selected);
     setWorkspaceClients(next);
@@ -165,7 +177,7 @@ export default function AdminPage() {
       setWorkspaceClients(next);
       window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
       window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
-      void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: client.name, slug: client.slug, clientBrief: client.brief ?? "", logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) });
+      void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, previousSlug: client.slug, name: client.name, slug: client.slug, clientBrief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", websiteUrl: client.website ?? "", anthropicModel: client.anthropicModel ?? null, logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) });
     };
     reader.readAsDataURL(file);
   };
@@ -179,7 +191,7 @@ export default function AdminPage() {
     event.target.value = "";
   };
   const copyWebhook = () => {
-    void navigator.clipboard?.writeText(`https://replyradar.app/api/webhooks/heyreach/${client.slug}`);
+    void navigator.clipboard?.writeText(client.webhookUrl || `https://replyradar.app/api/webhooks/heyreach/${client.slug}`);
     setSaved(true);
   };
   return (
@@ -295,6 +307,7 @@ export default function AdminPage() {
                       : "Save changes"}
                 </button>}
               </div>
+              {workspaceError && active === "workspaces" && <p className="form-error" role="alert">{workspaceError}</p>}
               {active === "global" && (
                 <div className="admin-grid">
                   <section className="admin-panel">
@@ -430,7 +443,7 @@ export default function AdminPage() {
                           <input
                               value={workspaceDraft.apiKey}
                               onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, apiKey: event.target.value }))}
-                              placeholder={client.keyConfigured ? "Enter a new HeyReach API key to replace the saved key" : "Enter HeyReach API key"}
+                              placeholder={client.keyConfigured ? (client.apiKeyMasked || "Saved HeyReach API key · enter a new key to replace") : "Enter HeyReach API key"}
                               type={showKey ? "text" : "password"}
                           />
                           <button onClick={() => setShowKey(!showKey)}>
@@ -456,8 +469,7 @@ export default function AdminPage() {
                         <div>
                           <small>WEBHOOK ENDPOINT</small>
                           <code>
-                            replyradar.app/api/webhooks/heyreach/{client.slug || ""}
-                            /••••••••
+                            {client.webhookUrl || `https://replyradar.app/api/webhooks/heyreach/${client.slug || ""}`}
                           </code>
                         </div>
                         <button onClick={copyWebhook}>Copy</button>
@@ -487,14 +499,18 @@ export default function AdminPage() {
                       <div className="field-row">
                         <label className="field-label">
                           TIMEZONE
-                          <select defaultValue="">
-                            <option value="">Select timezone</option>
-                            <option value="">Select timezone</option>
-                            <option>America/Chicago</option>
-                            <option>America/New_York</option>
-                            <option>Europe/London</option>
+                          <select value={workspaceDraft.timezone} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, timezone: event.target.value }))}>
+                            <option value="America/New_York">Eastern Time — America/New_York (default)</option>
+                            <option value="America/Chicago">Central Time — America/Chicago</option>
+                            <option value="Europe/London">London — Europe/London</option>
                           </select>
                         </label>
+                        <label className="field-label">
+                          CLIENT WEBSITE
+                          <input value={workspaceDraft.website} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, website: event.target.value }))} placeholder="https://client.example" type="url" />
+                        </label>
+                      </div>
+                      <div className="field-row">
                         <label className="field-label">
                           WORKSPACE SLUG
                           <input value={workspaceDraft.slug} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slug: event.target.value }))} placeholder="Enter workspace slug" />
@@ -517,7 +533,7 @@ export default function AdminPage() {
                     {workspaceOpen && <div className="client-config-sections">
                     <section className="admin-panel client-config-section" id="client-ai">
                       <div className="panel-heading"><div><h2>AI context & voice</h2><p>Client-specific Anthropic drafting rules and review guardrails.</p></div><span className="connection-badge"><i /> Client-specific</span></div>
-                      <div className="field-row"><label className="field-label">MODEL<select defaultValue=""><option value="">Select model</option><option>claude-opus-4-1-20250805</option><option>claude-opus-4-20250514</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option><option>claude-3-5-haiku-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" placeholder="Set temperature (0–1)" min="0" max="1" step="0.05" /><small>Lower values are more consistent; higher values are more varied.</small></label></div>
+                      <div className="field-row"><label className="field-label">MODEL<select value={workspaceDraft.anthropicModel} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, anthropicModel: event.target.value }))}><option value="">Select model</option><option>claude-opus-4-1-20250805</option><option>claude-opus-4-20250514</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option><option>claude-3-5-haiku-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" placeholder="Set temperature (0–1)" min="0" max="1" step="0.05" /><small>Lower values are more consistent; higher values are more varied.</small></label></div>
                       <label className="field-label">CUSTOM SYSTEM PROMPT<textarea placeholder="Add client-specific drafting rules" /></label>
                     </section>
                     <section className="admin-panel client-config-section" id="client-scoring">
