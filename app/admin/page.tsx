@@ -46,6 +46,8 @@ export default function AdminPage() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
   const [themePreset, setThemePreset] = useState("midnight");
   const [consoleAccent, setConsoleAccent] = useState("#f0cf00");
@@ -68,6 +70,12 @@ export default function AdminPage() {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const showSavedConfirmation = () => {
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+    setSaved(true);
+    savedTimer.current = setTimeout(() => setSaved(false), 3_000);
+  };
+  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
   useEffect(() => {
     let cancelled = false;
     const hydrate = async () => {
@@ -118,22 +126,30 @@ export default function AdminPage() {
     setWorkspaceOpen(true);
   };
   const saveWorkspaceChanges = async () => {
+    setSaving(true);
+    setSaved(false);
     setWorkspaceError("");
     const normalizedName = workspaceDraft.name.trim();
     const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || client.slug;
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: workspaceDraft.apiKey, timezone: workspaceDraft.timezone, website: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, isNew: false } : item);
     const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, previousSlug: client.slug, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) }).catch(() => null);
     if (!response?.ok) {
       const detail = await response?.json().catch(() => ({}));
       setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
       setSaved(false);
+      setSaving(false);
       return;
     }
+    const payload = await response.json().catch(() => ({}));
+    const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] : null;
+    const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, isNew: false } : item);
     setWorkspaceClients(next);
+    setWorkspaceDraft((draft) => ({ ...draft, apiKey: "" }));
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
     window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
-    setSaved(true);
+    setSaving(false);
+    showSavedConfirmation();
   };
   const removeWorkspace = async () => {
     const response = await fetch("/api/admin/workspaces", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, slug: client.slug }) }).catch(() => null);
@@ -196,7 +212,7 @@ export default function AdminPage() {
   };
   const copyWebhook = () => {
     void navigator.clipboard?.writeText(client.webhookUrl || `https://replyradar.app/api/webhooks/heyreach/${client.slug}`);
-    setSaved(true);
+    showSavedConfirmation();
   };
   return (
     <div className="app-shell">
@@ -212,9 +228,7 @@ export default function AdminPage() {
               Admin Console <span>/</span>{" "}
               {active === "workspaces"
                 ? <>Client Directory {workspaceOpen && <><span>/</span> {client.name || "New workspace"}</>}</>
-                : active === "global"
-                ? "Global config"
-                  : active === "ai"
+                : active === "ai"
                     ? "AI context"
                     : active === "scoring"
                       ? "Scoring engine"
@@ -235,13 +249,6 @@ export default function AdminPage() {
                 onClick={() => { setActive("workspaces"); setWorkspaceOpen(false); }}
               >
                 <span>▦</span>Client directory
-              </button>
-              <div className="admin-nav-caption global-caption">GLOBAL CONFIG</div>
-              <button
-                className={active === "global" ? "active" : ""}
-                onClick={() => setActive("global")}
-              >
-                <span>◈</span>Global config
               </button>
               <div className="admin-nav-caption system-caption">SYSTEM</div>
               {[
@@ -266,9 +273,7 @@ export default function AdminPage() {
                     ADMIN CONSOLE
                   </div>
                   <h1 className={active === "workspaces" && workspaceOpen ? "client-config-heading" : undefined}>
-                    {active === "workspaces" && workspaceOpen ? <>{workspaceLogo ? <img className="admin-client-heading-logo" src={workspaceLogo} alt="" /> : <span className="admin-client-heading-logo" style={{ background: accentColor }}>{client.name[0] || "?"}</span>}{client.name || "New workspace"}</> : active === "global"
-                      ? "Global config"
-                      : active === "workspaces"
+                    {active === "workspaces" && workspaceOpen ? <>{workspaceLogo ? <img className="admin-client-heading-logo" src={workspaceLogo} alt="" /> : <span className="admin-client-heading-logo" style={{ background: accentColor }}>{client.name[0] || "?"}</span>}{client.name || "New workspace"}</> : active === "workspaces"
                         ? "Client workspaces"
                         : active === "ai"
                           ? "AI context & voice"
@@ -283,9 +288,7 @@ export default function AdminPage() {
                                   : "System health"}
                   </h1>
                   {!(active === "workspaces" && workspaceOpen) && <p>
-                    {active === "global"
-                      ? "Shared runtime credentials and worker settings for Reply Radar."
-                      : active === "workspaces"
+                    {active === "workspaces"
                         ? "Manage each client's HeyReach connection, context, and isolation."
                         : active === "ai"
                           ? "Tune the Anthropic drafting context for every client."
@@ -300,86 +303,19 @@ export default function AdminPage() {
                               : "Verify ingestion and worker reliability across every workspace."}
                   </p>}
                 </div>
-                {active !== "heartbeat" && active !== "audit" && <button
+                {active === "workspaces" && <button
                   className="primary-button"
-                  onClick={() => active === "workspaces" ? (workspaceOpen ? saveWorkspaceChanges() : addWorkspace()) : setSaved(true)}
+                  onClick={() => workspaceOpen ? saveWorkspaceChanges() : addWorkspace()}
+                  disabled={saving}
                 >
-                  {saved
+                  {saving
+                    ? "Saving…"
+                    : saved
                     ? "Saved ✓"
-                    : active === "workspaces"
-                      ? workspaceOpen ? "Save changes" : "+ Add workspace"
-                      : "Save changes"}
+                    : workspaceOpen ? "Save changes" : "+ Add workspace"}
                 </button>}
               </div>
               {workspaceError && active === "workspaces" && <p className="form-error" role="alert">{workspaceError}</p>}
-              {active === "global" && (
-                <div className="admin-grid">
-                  <section className="admin-panel">
-                    <div className="panel-heading">
-                      <div>
-                        <h2>Provider credentials</h2>
-                        <p>
-                          Shared infrastructure keys. Client keys stay in each
-                          client profile.
-                        </p>
-                      </div>
-                      <span className="connection-badge">
-                        <i /> Internal only
-                      </span>
-                    </div>
-                    <label className="field-label">
-                      ANTHROPIC API KEY
-                      <div className="secret-field">
-                        <input type="password" placeholder="Enter Anthropic API key" />
-                        <button type="button">Reveal</button>
-                      </div>
-                    </label>
-                    <label className="field-label">
-                      SUPABASE URL
-                      <input placeholder="Enter Supabase URL" />
-                    </label>
-                    <label className="field-label">
-                      SUPABASE SERVICE ROLE KEY
-                      <div className="secret-field">
-                        <input type="password" placeholder="Enter service role key" />
-                        <button type="button">Reveal</button>
-                      </div>
-                    </label>
-                  </section>
-                  <section className="admin-panel">
-                    <div className="panel-heading">
-                      <div>
-                        <h2>Worker configuration</h2>
-                        <p>
-                          Queue, reconciliation, and watchdog runtime settings.
-                        </p>
-                      </div>
-                    </div>
-                    <label className="field-label">
-                      WORKER SERVICE URL
-                      <input placeholder="Enter worker service URL" />
-                    </label>
-                    <div className="field-row">
-                      <label className="field-label">
-                        POLL INTERVAL (SECONDS)
-                        <input type="number" placeholder="Poll interval in seconds" />
-                      </label>
-                      <label className="field-label">
-                        MAX RETRIES
-                        <input type="number" placeholder="Maximum retries" />
-                      </label>
-                    </div>
-                    <label className="field-label">
-                      QUEUE MODE
-                      <select defaultValue="">
-                        <option value="">Select queue mode</option>
-                        <option value="durable">Durable queue</option>
-                        <option value="inline">Inline processing</option>
-                      </select>
-                    </label>
-                  </section>
-                </div>
-              )}
               {active === "heartbeat" && <HeartbeatView heartbeat={heartbeat} onRefresh={() => { setHeartbeat(null); setHeartbeatRefresh((value) => value + 1); }} />}
               {active === "audit" && <AuditView />}
               {active === "workspaces" && (

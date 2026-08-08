@@ -23,9 +23,23 @@ export async function POST(request: Request) {
   const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ?? null, logo_url: payload.logoUrl ?? null, accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null };
   if (typeof payload.heyreachApiKey === "string" && payload.heyreachApiKey.trim()) record.heyreach_api_key_ciphertext = payload.heyreachApiKey.trim();
   const previousSlug = typeof payload.previousSlug === "string" ? payload.previousSlug.trim() : "";
-  if (previousSlug && previousSlug !== String(payload.slug ?? "").trim()) {
-    const renamed = await fetch(`${url}/rest/v1/rr_workspaces?slug=eq.${encodeURIComponent(previousSlug)}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(record) });
-    if (renamed.ok) return NextResponse.json({ ok: true, workspaces: await renamed.json() }, { status: 200 });
+  const id = typeof payload.id === "string" ? payload.id.trim() : "";
+  const patchFilter = id ? `id=eq.${encodeURIComponent(id)}` : previousSlug ? `slug=eq.${encodeURIComponent(previousSlug)}` : "";
+  if (patchFilter) {
+    let patched = await fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(record) });
+    if (!patched.ok && (patched.status === 400 || patched.status === 422)) {
+      const legacyRecord = { ...record };
+      delete legacyRecord.timezone;
+      delete legacyRecord.website_url;
+      patched = await fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(legacyRecord) });
+    }
+    const patchText = await patched.text();
+    let patchData: unknown = null; try { patchData = patchText ? JSON.parse(patchText) : null; } catch { patchData = patchText; }
+    if (!patched.ok) return NextResponse.json({ ok: false, error: patchData || "Workspace update failed." }, { status: patched.status });
+    const rows = Array.isArray(patchData) ? patchData : [];
+    if (!rows.length) return NextResponse.json({ ok: false, error: "The workspace no longer exists. Refresh and try again." }, { status: 404 });
+    const workspaces = rows.map((row: Record<string, unknown>) => ({ ...row, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined }));
+    return NextResponse.json({ ok: true, workspaces }, { status: 200 });
   }
   let response = await fetch(`${url}/rest/v1/rr_workspaces?on_conflict=slug`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(record) });
   if (!response.ok && (response.status === 400 || response.status === 422)) {
@@ -36,7 +50,8 @@ export async function POST(request: Request) {
   }
   const body = await response.text();
   let data: unknown = null; try { data = body ? JSON.parse(body) : null; } catch { data = body; }
-  return NextResponse.json({ ok: response.ok, workspaces: data }, { status: response.ok ? 201 : response.status });
+  const workspaces = Array.isArray(data) ? data.map((row: Record<string, unknown>) => ({ ...row, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined })) : data;
+  return NextResponse.json({ ok: response.ok, workspaces, error: response.ok ? undefined : data }, { status: response.ok ? 201 : response.status });
 }
 
 export async function DELETE(request: Request) {

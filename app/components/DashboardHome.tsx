@@ -108,7 +108,6 @@ export default function DashboardHome() {
                     <i style={{ background: client.tone }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : client.name[0]}</i>
                   </div>
                   <h3>{client.name}</h3>
-                  <p>{client.leads} active leads</p>
                   <strong>Open workspace →</strong>
                 </a>
               ))}
