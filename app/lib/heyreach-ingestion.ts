@@ -17,6 +17,16 @@ async function db(config: SupabaseConfig, path: string, options: RequestInit = {
   return data;
 }
 
+async function upsertOne(config: SupabaseConfig, table: string, filter: string, record: JsonObject) {
+  const existing = await db(config, `${table}?select=id&${filter}&limit=1`) as JsonObject[];
+  if (existing[0]?.id) {
+    const rows = await db(config, `${table}?id=eq.${encodeURIComponent(String(existing[0].id))}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(record) }) as JsonObject[];
+    return rows[0];
+  }
+  const rows = await db(config, table, { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(record) }) as JsonObject[];
+  return rows[0];
+}
+
 export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string }, payload: JsonObject) {
   const lead = object(payload.lead);
   const campaign = object(payload.campaign);
@@ -35,29 +45,23 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
   const eventId = eventRows?.[0]?.id;
 
   try {
-    const leadRows = await db(config, "rr_leads?on_conflict=workspace_id,external_id", {
-      method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-      body: JSON.stringify({ workspace_id: workspace.id, external_id: leadExternalId, name: text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || "Unknown lead", title: text(lead.position), company: text(lead.company_name), profile_url: text(lead.profile_url) || null, raw_data: { ...lead, campaign } }),
-    }) as JsonObject[];
-    const leadId = String(leadRows[0]?.id ?? "");
+    const leadRow = await upsertOne(config, "rr_leads", `workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(leadExternalId)}`, { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: text(lead.profile_url) || null, name: text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || "Unknown lead", role: text(lead.position), company: text(lead.company_name), raw_data: { ...lead, campaign } });
+    const leadId = String(leadRow?.id ?? "");
     if (!leadId) throw new Error("Lead upsert returned no id.");
 
     const latestMessage = recentMessages.reduce<JsonObject | null>((latest, message) => !latest || text(message.creation_time) > text(latest.creation_time) ? message : latest, null);
     const lastMessageAt = text(latestMessage?.creation_time) || eventTimestamp;
-    const conversationRows = await db(config, "rr_conversations?on_conflict=workspace_id,external_id", {
-      method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-      body: JSON.stringify({ workspace_id: workspace.id, lead_id: leadId, external_id: conversationExternalId, last_message_at: lastMessageAt, last_message_direction: "inbound" }),
-    }) as JsonObject[];
-    const conversationId = String(conversationRows[0]?.id ?? "");
+    const conversationRow = await upsertOne(config, "rr_conversations", `workspace_id=eq.${encodeURIComponent(workspace.id)}&heyreach_conversation_id=eq.${encodeURIComponent(conversationExternalId)}`, { workspace_id: workspace.id, lead_id: leadId, heyreach_conversation_id: conversationExternalId, account_id: payload.sender && typeof payload.sender === "object" ? String((payload.sender as JsonObject).id ?? "") || null : null, last_message_at: lastMessageAt, last_message_direction: "inbound" });
+    const conversationId = String(conversationRow?.id ?? "");
     if (!conversationId) throw new Error("Conversation upsert returned no id.");
 
     if (recentMessages.length) {
       const messages = recentMessages.map((message, index) => {
         const sentAt = text(message.creation_time) || eventTimestamp;
         const messageType = text(message.message_type);
-        return { conversation_id: conversationId, external_id: `${eventKey}:${index}:${sentAt}`, direction: message.is_reply === false ? "outbound" : "inbound", body: text(message.message) || (messageType ? `[${messageType}]` : "[Empty message]"), sent_at: sentAt, raw_data: message };
+        return { conversation_id: conversationId, heyreach_message_id: `${eventKey}:${index}:${sentAt}`, direction: message.is_reply === false ? "outbound" : "inbound", body: text(message.message) || (messageType ? `[${messageType}]` : "[Empty message]"), sent_at: sentAt, raw_data: message };
       });
-      await db(config, "rr_messages?on_conflict=conversation_id,external_id", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify(messages) });
+      for (const message of messages) await upsertOne(config, "rr_messages", `conversation_id=eq.${encodeURIComponent(conversationId)}&heyreach_message_id=eq.${encodeURIComponent(message.heyreach_message_id)}`, message);
     }
 
     if (eventId) await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "processed", processed_at: new Date().toISOString(), error_text: null }) });
