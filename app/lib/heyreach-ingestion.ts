@@ -1,4 +1,5 @@
 import { fetchFullConversation, type ConversationMessage, type JsonObject } from "./heyreach-conversation";
+import { enrichLeadWithAiArk } from "./ai-ark-enrichment";
 
 type SupabaseConfig = { url: string; key: string };
 
@@ -40,7 +41,7 @@ async function writeMessageChunks(config: SupabaseConfig, records: JsonObject[])
 
 const fingerprint = (message: { direction: unknown; sent_at: unknown; body: unknown }) => `${String(message.direction)}|${new Date(String(message.sent_at)).toISOString()}|${String(message.body)}`;
 
-export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; heyreach_api_key_ciphertext?: string | null }, payload: JsonObject) {
+export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; heyreach_api_key_ciphertext?: string | null; guardrails?: JsonObject | null }, payload: JsonObject) {
   const lead = object(payload.lead);
   const campaign = object(payload.campaign);
   // Enrichment deliberately happens before the webhook event, lead, conversation,
@@ -53,6 +54,18 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
   const eventKey = text(payload.correlation_id) || `${conversationExternalId || leadExternalId}:${eventTimestamp}`;
   if (!conversationExternalId || !leadExternalId) throw new Error("HeyReach payload is missing conversation_id and lead identity fields.");
 
+  const existingLeads = await db(config, `rr_leads?select=id,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(leadExternalId)}&limit=1`) as JsonObject[];
+  const existingRaw = object(existingLeads[0]?.raw_data);
+  const existingMetadata = object(existingRaw.reply_radar);
+  const cachedEnrichment = object(existingMetadata.ai_ark);
+  const enrichmentEnabled = workspace.guardrails?.ai_ark_enrichment_enabled === true;
+  const profileUrl = text(lead.profile_url);
+  const aiArk = Object.keys(cachedEnrichment).length
+    ? cachedEnrichment
+    : enrichmentEnabled && profileUrl
+      ? await enrichLeadWithAiArk(config, workspace.id, profileUrl, text(lead.company_name))
+      : null;
+
   const eventRows = await db(config, "rr_webhook_events?on_conflict=workspace_id,event_key", {
     method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({ workspace_id: workspace.id, event_key: eventKey, event_type: eventType, raw: payload, status: "processing", error_text: null }),
@@ -60,7 +73,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
   const eventId = eventRows?.[0]?.id;
 
   try {
-    const leadRow = await upsertOne(config, "rr_leads", `workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(leadExternalId)}`, { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: text(lead.profile_url) || null, name: text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || "Unknown lead", role: text(lead.position), company: text(lead.company_name), raw_data: { ...lead, campaign, reply_radar: { sender: history.sender, history_fetched_at: history.fetchedAt, conversation: history.conversationSummary } } });
+    const leadRow = await upsertOne(config, "rr_leads", `workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(leadExternalId)}`, { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: text(lead.profile_url) || null, name: text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || "Unknown lead", role: text(lead.position), company: text(lead.company_name), raw_data: { ...existingRaw, ...lead, campaign, reply_radar: { ...existingMetadata, sender: history.sender, campaign, history_fetched_at: history.fetchedAt, conversation: history.conversationSummary, ...(aiArk ? { ai_ark: aiArk } : {}) } } });
     const leadId = String(leadRow?.id ?? "");
     if (!leadId) throw new Error("Lead upsert returned no id.");
 
@@ -84,7 +97,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
 
     if (eventId) await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "processed", processed_at: new Date().toISOString(), error_text: null }) });
     await db(config, `rr_workspaces?id=eq.${encodeURIComponent(workspace.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_webhook_received_at: new Date().toISOString() }) });
-    return { eventId, leadId, conversationId, messagesWritten: messages.length, senderName: history.sender.name, historyFetchedAt: history.fetchedAt };
+    return { eventId, leadId, conversationId, messagesWritten: messages.length, senderName: history.sender.name, campaignName: text(campaign.name) || null, aiArk: aiArk ? (Object.keys(cachedEnrichment).length ? "cached" : "enriched") : enrichmentEnabled ? "no_profile_url" : "disabled", historyFetchedAt: history.fetchedAt };
   } catch (error) {
     if (eventId) await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "failed", processed_at: new Date().toISOString(), error_text: error instanceof Error ? error.message.slice(0, 2_000) : "Ingestion failed" }) }).catch(() => null);
     throw error;

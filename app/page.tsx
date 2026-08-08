@@ -27,6 +27,11 @@ type Lead = {
   photoUrl?: string | null;
   clientLogoUrl?: string | null;
   senderName: string;
+  campaignName?: string | null;
+  headline?: string | null;
+  companyPhotoUrl?: string | null;
+  industry?: unknown;
+  enrichedLocation?: unknown;
   lastMessageAt?: string | null;
   messages: Array<{ id: string; body: string; direction: string; sentAt: string; authorName: string }>;
 };
@@ -687,6 +692,7 @@ export function InboxPage() {
                     </p>
                     {current.profileUrl && <a className="linkedin" href={current.profileUrl} target="_blank" rel="noreferrer">in&nbsp; LinkedIn profile ↗</a>}
                   </div>
+                  {current.companyPhotoUrl && <img className="enriched-company-logo" src={current.companyPhotoUrl} alt={`${current.company} logo`} />}
                 </div>
                 <div className="detail-tags">
                   <span className={`score-pill ${current.tier}`}>
@@ -694,8 +700,10 @@ export function InboxPage() {
                   </span>
                   <span className="tag-outline">{current.client}</span>
                   <span className="tag-outline">Sender: {current.senderName}</span>
+                  {current.campaignName && <span className="tag-outline">Campaign: {current.campaignName}</span>}
                   <span className="tag-outline">{current.replies} replies</span>
                 </div>
+                {Boolean(current.headline || current.industry) && <p className="enrichment-summary">{[current.headline, typeof current.industry === "string" ? current.industry : null].filter(Boolean).join(" · ")}</p>}
               </div>
               <div className="reason-box">
                 <span className="reason-icon">✦</span>

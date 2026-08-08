@@ -18,6 +18,8 @@ const senderNameFrom = (...values: unknown[]) => {
   }
   return "Unknown sender";
 };
+const nested = (value: unknown, key: string) => value && typeof value === "object" && !Array.isArray(value) && (value as Row)[key] && typeof (value as Row)[key] === "object" ? (value as Row)[key] as Row : {};
+const locationLabel = (value: unknown) => typeof value === "string" ? value : value && typeof value === "object" ? String((value as Row).default || (value as Row).short || [(value as Row).city, (value as Row).state, (value as Row).country].filter(Boolean).join(", ") || "") : "";
 
 export async function GET(request: Request) {
   const url = process.env.SUPABASE_URL; const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -41,12 +43,15 @@ export async function GET(request: Request) {
     const workspaceById = new Map(workspaces.map((workspace) => [String(workspace.id), workspace]));
     const leads = page.map((lead) => {
       const raw = lead.raw_data && typeof lead.raw_data === "object" ? lead.raw_data as Row : {};
+      const metadata = nested(raw, "reply_radar");
+      const enrichment = nested(metadata, "ai_ark");
+      const campaign = Object.keys(nested(metadata, "campaign")).length ? nested(metadata, "campaign") : nested(raw, "campaign");
       const leadConversations = conversations.filter((conversation) => conversation.lead_id === lead.id);
       const ids = new Set(leadConversations.map((conversation) => conversation.id));
       const leadMessages = messages.filter((message) => ids.has(message.conversation_id));
       const latestMessage = leadMessages[0];
       const workspace = workspaceById.get(String(lead.workspace_id)) ?? {};
-      return { id: lead.id, name: lead.name || "Unknown lead", role: lead.role || "", company: lead.company || "", linkedinId: lead.linkedin_id ?? null, profileUrl: lead.linkedin_profile_url ?? null, photoUrl: raw.profile_picture_url ?? raw.profile_image_url ?? raw.avatar_url ?? raw.image_url ?? null, email: raw.email_address ?? raw.custom_email ?? raw.enriched_email ?? null, location: raw.location ?? null, tags: Array.isArray(raw.tags) ? raw.tags : [], senderName: senderNameFrom(...leadMessages.map((message) => message.raw_data), raw), workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug, logoUrl: workspace.logo_url, accentColor: workspace.accent_color }, createdAt: lead.created_at, conversationCount: leadConversations.length, replyCount: leadMessages.filter((message) => message.direction === "inbound").length, lastReplyAt: leadConversations[0]?.last_message_at ?? null, lastMessage: latestMessage?.body ?? "", rawData: raw };
+      return { id: lead.id, name: lead.name || "Unknown lead", role: lead.role || enrichment.title || "", company: lead.company || "", linkedinId: lead.linkedin_id ?? null, profileUrl: lead.linkedin_profile_url ?? null, photoUrl: enrichment.profilePhotoUrl ?? raw.profile_picture_url ?? raw.profile_image_url ?? raw.avatar_url ?? raw.image_url ?? null, companyPhotoUrl: enrichment.companyPhotoUrl ?? null, email: raw.email_address ?? raw.custom_email ?? raw.enriched_email ?? null, location: locationLabel(raw.location || enrichment.location), headline: enrichment.headline ?? null, industry: enrichment.industry ?? null, campaignName: campaign.name ?? null, enriched: Object.keys(enrichment).length > 0, tags: Array.isArray(raw.tags) ? raw.tags : [], senderName: senderNameFrom(...leadMessages.map((message) => message.raw_data), raw), workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug, logoUrl: workspace.logo_url, accentColor: workspace.accent_color }, createdAt: lead.created_at, conversationCount: leadConversations.length, replyCount: leadMessages.filter((message) => message.direction === "inbound").length, lastReplyAt: leadConversations[0]?.last_message_at ?? null, lastMessage: latestMessage?.body ?? "", rawData: raw };
     });
     return NextResponse.json({ ok: true, leads, workspaces: workspaces.map((workspace) => ({ id: workspace.id, name: workspace.name, slug: workspace.slug, logoUrl: workspace.logo_url })), hasMore: rows.length > limit, nextCursor: rows.length > limit && page.length ? encodeCursor(page.at(-1)?.created_at) : null, pageSize: limit });
   } catch (error) { return NextResponse.json({ ok: false, leads: [], error: error instanceof Error ? error.message : "Database unavailable" }, { status: 502 }); }
