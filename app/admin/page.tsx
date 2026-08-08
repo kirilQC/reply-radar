@@ -17,6 +17,7 @@ type ClientWorkspace = {
   apiKey?: string;
   timezone?: string;
   keyConfigured?: boolean;
+  logoUrl?: string;
 };
 
 const initialClients: ClientWorkspace[] = [];
@@ -69,6 +70,7 @@ export default function AdminPage() {
             status: item.last_successful_poll_at ? "Connected" : "Not configured", tone: String(item.accent_color ?? "var(--accent)"),
             lastSync: String(item.last_successful_poll_at ?? "not synced"), createdAt: String(item.created_at ?? ""),
             brief: String(item.client_brief ?? ""), apiKey: "", timezone: "", keyConfigured: Boolean(item.key_configured),
+            logoUrl: String(item.logo_url ?? ""),
           })));
           setWorkspaceStorageReady(true);
           return;
@@ -105,17 +107,21 @@ export default function AdminPage() {
     setSelected(clients.length);
     setWorkspaceOpen(true);
   };
-  const saveWorkspaceChanges = () => {
+  const saveWorkspaceChanges = async () => {
     const normalizedName = workspaceDraft.name.trim();
     const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || client.slug;
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: workspaceDraft.apiKey, timezone: workspaceDraft.timezone, tone: accentOverrides[client.slug] ?? item.tone, isNew: false } : item);
+    const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: workspaceDraft.apiKey, timezone: workspaceDraft.timezone, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, isNew: false } : item);
+    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) }).catch(() => null);
+    if (!response?.ok) { setSaved(false); return; }
     setWorkspaceClients(next);
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
     window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
-    void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), accentColor: accentOverrides[client.slug] ?? client.tone }) }).catch(() => undefined);
     setSaved(true);
   };
-  const removeWorkspace = () => {
+  const removeWorkspace = async () => {
+    const response = await fetch("/api/admin/workspaces", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: client.slug }) }).catch(() => null);
+    if (!response?.ok) { setPasswordError("Could not delete this workspace from Supabase."); return; }
     const next = clients.filter((_, index) => index !== selected);
     setWorkspaceClients(next);
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
@@ -127,9 +133,9 @@ export default function AdminPage() {
     setWorkspacePassword("");
   };
   const requestRemoveWorkspace = () => { setPasswordError(""); setWorkspacePassword(""); setPasswordOpen(true); };
-  const confirmRemoveWorkspace = () => {
+  const confirmRemoveWorkspace = async () => {
     if (workspacePassword !== "QueenCity@2026") { setPasswordError("Incorrect password."); return; }
-    removeWorkspace();
+    await removeWorkspace();
   };
   const isNewWorkspace = Boolean(client.isNew);
   const visibleClients = clients.filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()));
@@ -144,6 +150,7 @@ export default function AdminPage() {
       .catch(() => setHeartbeat({ status: "error", services: [], clients: [] }));
   }, [active, heartbeatRefresh]);
   const accentColor = accentOverrides[client.slug] ?? client.tone;
+  const workspaceLogo = logos[client.slug] ?? client.logoUrl ?? "";
   const setAccentColor = (value: string) =>
     setAccentOverrides((current) => ({ ...current, [client.slug]: value }));
   const chooseLogo = () => logoInput.current?.click();
@@ -151,11 +158,15 @@ export default function AdminPage() {
     const file = event.target.files?.[0];
     if (!file || file.size > 2 * 1024 * 1024) return;
     const reader = new FileReader();
-    reader.onload = () =>
-      setLogos((current) => ({
-        ...current,
-        [client.slug]: String(reader.result),
-      }));
+    reader.onload = () => {
+      const logoUrl = String(reader.result);
+      setLogos((current) => ({ ...current, [client.slug]: logoUrl }));
+      const next = workspaceClients.map((item, index) => index === selected ? { ...item, logoUrl } : item);
+      setWorkspaceClients(next);
+      window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
+      window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
+      void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: client.name, slug: client.slug, clientBrief: client.brief ?? "", logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) });
+    };
     reader.readAsDataURL(file);
   };
   const handleDocuments = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -239,7 +250,7 @@ export default function AdminPage() {
                     ADMIN CONSOLE
                   </div>
                   <h1 className={active === "workspaces" && workspaceOpen ? "client-config-heading" : undefined}>
-                    {active === "workspaces" && workspaceOpen ? <><span className="admin-client-heading-logo" style={{ background: accentColor }}>{client.name[0] || "?"}</span>{client.name || "New workspace"}</> : active === "global"
+                    {active === "workspaces" && workspaceOpen ? <>{workspaceLogo ? <img className="admin-client-heading-logo" src={workspaceLogo} alt="" /> : <span className="admin-client-heading-logo" style={{ background: accentColor }}>{client.name[0] || "?"}</span>}{client.name || "New workspace"}</> : active === "global"
                       ? "Global config"
                       : active === "workspaces"
                         ? "Client workspaces"
@@ -394,7 +405,7 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>}
-                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><span>Created {client.createdAt ? new Date(client.createdAt).toLocaleDateString() : "—"}</span><button className="secondary-button" onClick={requestRemoveWorkspace}>Remove workspace</button></div>}
+                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => setWorkspaceOpen(false)}>← Back to directory</button><button className="secondary-button" onClick={requestRemoveWorkspace}>Remove workspace</button></div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
                       <div className="panel-heading">
@@ -503,7 +514,7 @@ export default function AdminPage() {
                       <input ref={docsInput} type="file" accept=".pdf,.doc,.docx,.txt,.md" multiple hidden onChange={handleDocuments} />
                     </section>
                   </div>}
-                  {workspaceOpen && <div className="client-config-sections">
+                    {workspaceOpen && <div className="client-config-sections">
                     <section className="admin-panel client-config-section" id="client-ai">
                       <div className="panel-heading"><div><h2>AI context & voice</h2><p>Client-specific Anthropic drafting rules and review guardrails.</p></div><span className="connection-badge"><i /> Client-specific</span></div>
                       <div className="field-row"><label className="field-label">MODEL<select defaultValue=""><option value="">Select model</option><option>claude-opus-4-1-20250805</option><option>claude-opus-4-20250514</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option><option>claude-3-5-haiku-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" placeholder="Set temperature (0–1)" min="0" max="1" step="0.05" /><small>Lower values are more consistent; higher values are more varied.</small></label></div>
@@ -516,10 +527,11 @@ export default function AdminPage() {
                     </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
-                      <div className="logo-drop"><div className="logo-sample" style={{ background: accentColor }}>{client.name[0] || "?"}</div><div><strong>Upload client logo</strong><small>SVG, PNG, JPG · max 2MB</small></div><button className="secondary-button" onClick={chooseLogo}>Choose file</button><input ref={logoInput} type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={handleLogo} /></div>
+                      <div className="logo-drop">{workspaceLogo ? <img className="logo-sample" src={workspaceLogo} alt={`${client.name} logo`} /> : <div className="logo-sample" style={{ background: accentColor }}>{client.name[0] || "?"}</div>}<div><strong>Upload client logo</strong><small>SVG, PNG, JPG · max 2MB</small></div><button className="secondary-button" type="button" onClick={chooseLogo}>Choose file</button><input ref={logoInput} type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={handleLogo} /></div>
                       <label className="field-label">CLIENT ACCENT<input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} /></label>
                     </section>
                   </div>}
+                  {workspaceOpen && <div className="workspace-created-meta">Created {client.createdAt ? new Date(client.createdAt).toLocaleDateString() : "—"}</div>}
                 </>
               )}
               {active === "ai" && (
@@ -744,10 +756,10 @@ export default function AdminPage() {
                       </div>
                     </div>
                     <div className="logo-drop">
-                      {logos[client.slug] ? (
+                      {workspaceLogo ? (
                         <img
                           className="logo-sample"
-                          src={logos[client.slug]}
+                          src={workspaceLogo}
                           alt={`${client.name} logo`}
                         />
                       ) : (
@@ -769,7 +781,7 @@ export default function AdminPage() {
                         onChange={handleLogo}
                         hidden
                       />
-                      <button className="secondary-button" onClick={chooseLogo}>
+                      <button className="secondary-button" type="button" onClick={chooseLogo}>
                         Choose file
                       </button>
                     </div>

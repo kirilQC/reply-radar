@@ -24,3 +24,21 @@ export async function POST(request: Request) {
   let data: unknown = null; try { data = body ? JSON.parse(body) : null; } catch { data = body; }
   return NextResponse.json({ ok: response.ok, workspaces: data }, { status: response.ok ? 201 : response.status });
 }
+
+export async function DELETE(request: Request) {
+  const { url, key } = supabaseConfig();
+  if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
+  const payload = await request.json().catch(() => ({}));
+  const slug = typeof payload.slug === "string" ? payload.slug.trim() : "";
+  if (!slug) return NextResponse.json({ ok: false, error: "Workspace slug is required." }, { status: 400 });
+  const response = await fetch(`${url}/rest/v1/rr_workspaces?slug=eq.${encodeURIComponent(slug)}`, {
+    method: "DELETE",
+    headers: { apikey: key, Authorization: `Bearer ${key}`, Prefer: "return=representation" },
+  });
+  const body = await response.text();
+  let deleted: unknown = null;
+  try { deleted = body ? JSON.parse(body) : null; } catch { deleted = null; }
+  if (!response.ok) return NextResponse.json({ ok: false, error: body || "Workspace deletion failed." }, { status: response.status });
+  if (!Array.isArray(deleted) || deleted.length === 0) return NextResponse.json({ ok: false, error: "No workspace matched that slug." }, { status: 404 });
+  return NextResponse.json({ ok: true, deletedCount: deleted.length });
+}

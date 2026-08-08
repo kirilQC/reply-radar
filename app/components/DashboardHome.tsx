@@ -13,7 +13,7 @@ const defaultAppearance: AppearancePrefs = {
   accent: "#8b7cff",
 };
 
-const initialClients: Array<{ name: string; slug: string; tone: string; leads: number; replies: number; status: string }> = [];
+const initialClients: Array<{ name: string; slug: string; tone: string; leads: number; replies: number; status: string; logoUrl?: string }> = [];
 const initialProfiles: string[][] = [];
 type DashboardAnalytics = { totalReplies?: number; trend?: number[]; queueMix?: { hot: number; warm: number; nurture: number } };
 
@@ -92,7 +92,7 @@ export default function DashboardHome() {
                   key={client.slug}
                 >
                   <div className="dashboard-card-top">
-                    <i style={{ background: client.tone }}>{client.name[0]}</i>
+                    <i style={{ background: client.tone }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : client.name[0]}</i>
                   </div>
                   <h3>{client.name}</h3>
                   <p>{client.leads} active leads</p>

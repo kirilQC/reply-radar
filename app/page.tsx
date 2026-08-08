@@ -123,7 +123,7 @@ export function InboxPage() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
   const [queryString, setQueryString] = useState("");
-  const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string; tone?: string }>>([]);
+  const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string; tone?: string; logoUrl?: string }>>([]);
   const [liveProfiles, setLiveProfiles] = useState<Array<{ slug: string; name: string; clients: string[] }>>([]);
   useEffect(() => {
     // URL search params are client-only state on this static route.
@@ -172,6 +172,7 @@ export function InboxPage() {
   const activeWorkspace = clientParam ? workspaceDirectory.find((item) => item.slug === clientParam) : undefined;
   const clientName = activeWorkspace?.name || clientParam || "All clients";
   const clientTone = activeWorkspace?.tone || "var(--accent)";
+  const clientLogo = activeWorkspace?.logoUrl || "";
   useEffect(() => {
     if (!clientParam) return;
     const root = document.documentElement;
@@ -524,7 +525,7 @@ export function InboxPage() {
                 06
               </div>
               <h1>
-                {clientParam && <span className="inbox-heading-logo" style={{ background: clientTone }}>{clientName[0]}</span>}
+                {clientParam && <span className="inbox-heading-logo" style={{ background: clientTone }}>{clientLogo ? <img src={clientLogo} alt="" /> : clientName[0]}</span>}
                 {profileName ? `${greeting}, ${profileName}` : clientParam ? clientName : "General inbox"}
               </h1>
               {!clientParam && <><p>{filtered.length} leads across {trackedClients.length} clients</p><div className="tracked-clients">{trackedClients.map((client) => <span key={client}>{client}</span>)}</div></>}
@@ -564,7 +565,7 @@ export function InboxPage() {
           <div className="queue-header">
             <div>
               <h2>
-                Priority queue <span>12</span>
+                Priority queue {filtered.length > 0 && <span>{filtered.length}</span>}
               </h2>
               <p>Ranked by urgency and conversation intent</p>
             </div>
@@ -583,7 +584,7 @@ export function InboxPage() {
                     onClick={() => setFilter(f)}
                   >
                     {f}
-                    {f === "Hot" && <b>4</b>}
+                    {f === "Hot" && analytics?.queueMix?.hot ? <b>{analytics.queueMix.hot}</b> : null}
                   </button>
                 ))}
               </div>

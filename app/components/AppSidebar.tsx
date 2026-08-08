@@ -44,7 +44,7 @@ function SidebarIcon({ name }: { name: string }) {
 export default function AppSidebar() {
   const pathname = usePathname();
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
-  const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string }>>([]);
+  const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string; logoUrl?: string }>>([]);
   const [profileParam] = useState(() =>
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("profile")
@@ -133,7 +133,7 @@ export default function AppSidebar() {
       <div className="client-list">
         {sidebarClients.filter((client) => client.name).map((client) => (
           <a className={`client-directory-item ${selectedClient === client.slug ? "selected" : ""}`} href={`/inbox?client=${client.slug}`} key={client.slug}>
-            <i style={{ background: client.tone }}>{client.name[0]}</i>{client.name}
+            <i style={{ background: client.tone }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : client.name[0]}</i>{client.name}
           </a>
         ))}
       </div>
