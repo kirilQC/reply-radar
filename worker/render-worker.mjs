@@ -27,7 +27,30 @@ async function supabase(path, options = {}) {
 
 async function checkHeyReach(apiKey) {
   const response = await fetch(`${heyreachBase}/auth/CheckApiKey`, { headers: { "X-API-KEY": apiKey, accept: "application/json" } });
-  if (!response.ok) throw new Error(`HeyReach ${response.status}`);
+  const body = await response.text();
+  const contentType = response.headers.get("content-type") || "unknown content type";
+  if (!response.ok) throw new Error(`HeyReach ${response.status} (${contentType}): ${body.slice(0, 500) || "empty response"}`);
+  if (body.trim() && !contentType.toLowerCase().includes("application/json")) throw new Error(`HeyReach returned ${contentType}: ${body.slice(0, 500)}`);
+  if (body.trim()) {
+    try { JSON.parse(body); } catch { throw new Error(`HeyReach returned invalid JSON: ${body.slice(0, 500)}`); }
+  }
+}
+
+async function writeSyncRun(payload) {
+  try {
+    return await supabase("rr_sync_runs", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(payload) });
+  } catch (error) {
+    // Installations created from the original schema have no run_type column;
+    // a later production variant made it required. Retry only when PostgREST
+    // explicitly reports that this optional compatibility column is absent.
+    if ("run_type" in payload && error instanceof Error && /run_type.*(column|schema cache)|column.*run_type/i.test(error.message)) {
+      const legacyPayload = { ...payload };
+      delete legacyPayload.run_type;
+      console.warn("reply_radar_sync_run_legacy_schema", { omittedColumn: "run_type", error: error.message });
+      return supabase("rr_sync_runs", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(legacyPayload) });
+    }
+    throw error;
+  }
 }
 
 async function syncWorkspace(workspace) {
@@ -45,16 +68,16 @@ async function syncWorkspace(workspace) {
     status = "failed";
     errorText = error instanceof Error ? error.message : "Workspace sync failed";
   }
-  await supabase("rr_sync_runs", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ workspace_id: workspace.id, run_type: "workspace-sync", source: "render-worker", status, started_at: startedAt, finished_at: new Date().toISOString(), records_seen: recordsSeen, records_written: 0, error_text: errorText }) });
+  await writeSyncRun({ workspace_id: workspace.id, run_type: "workspace-sync", source: "render-worker", status, started_at: startedAt, finished_at: new Date().toISOString(), records_seen: recordsSeen, records_written: 0, error_text: errorText });
   console.info("reply_radar_workspace_sync", { workspace: workspace.slug, status, error: errorText });
 }
 
 async function runOnce() {
   const cycleStarted = new Date().toISOString();
-  await supabase("rr_sync_runs", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "running", started_at: cycleStarted, records_seen: 0, records_written: 0 }) });
+  await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "running", started_at: cycleStarted, records_seen: 0, records_written: 0 });
   const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&order=created_at.asc");
   for (const workspace of workspaces) await syncWorkspace(workspace);
-  await supabase("rr_sync_runs", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "success", started_at: cycleStarted, finished_at: new Date().toISOString(), records_seen: workspaces.length, records_written: 0 }) });
+  await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "success", started_at: cycleStarted, finished_at: new Date().toISOString(), records_seen: workspaces.length, records_written: 0 });
 }
 
 async function main() {

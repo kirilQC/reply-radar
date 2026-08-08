@@ -19,7 +19,7 @@ type DashboardAnalytics = { totalReplies?: number; trend?: number[]; queueMix?: 
 
 export default function DashboardHome() {
   const [clients, setClients] = useState(initialClients);
-  const [profiles, setProfiles] = useState(initialProfiles.map(([name, description, tone, initials]) => ({ name, description, tone, initials, slug: name.toLowerCase().replaceAll(" ", "-") })));
+  const [profiles, setProfiles] = useState<Array<{ name: string; description: string; tone: string; initials: string; slug: string; photo?: string | null }>>(initialProfiles.map(([name, description, tone, initials]) => ({ name, description, tone, initials, slug: name.toLowerCase().replaceAll(" ", "-") })));
   const [appearance, setAppearance] = useState<AppearancePrefs>(defaultAppearance);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [analytics, setAnalytics] = useState<DashboardAnalytics>({});
@@ -28,7 +28,7 @@ export default function DashboardHome() {
       const savedClients = window.localStorage.getItem("reply-radar-workspaces:v2");
       if (savedClients) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setClients(JSON.parse(savedClients)); }
       const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
-      if (savedProfiles) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients: string[]; color: string; initials: string; slug: string }) => ({ ...profile, description: profile.clients.join(" · "), tone: profile.color }))); }
+      if (savedProfiles) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients?: string[]; color?: string; initials?: string; slug?: string; photo?: string | null }) => ({ ...profile, description: (profile.clients ?? []).join(" · "), tone: profile.color ?? "#8b7cff", initials: profile.initials ?? profile.name.slice(0, 2).toUpperCase(), slug: profile.slug ?? profile.name.toLowerCase().replaceAll(" ", "-"), photo: profile.photo ?? null }))); }
       const savedPreferences = window.localStorage.getItem("reply-radar-prefs:general");
       if (savedPreferences) {
         const parsed = JSON.parse(savedPreferences);
@@ -36,6 +36,18 @@ export default function DashboardHome() {
       }
     } catch { /* keep the empty state */ }
   }, []);
+  const loadProfiles = () => fetch("/api/admin/profiles", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).then((payload) => {
+    if (!payload?.profiles) return;
+    setProfiles(payload.profiles.map((profile: { name: string; clients?: string[]; photo?: string | null; slug: string; color?: string }) => ({
+      name: profile.name,
+      description: (profile.clients ?? []).join(" · "),
+      tone: profile.color ?? "#8b7cff",
+      initials: profile.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(),
+      slug: profile.slug,
+      photo: profile.photo ?? null,
+    })));
+  }).catch(() => undefined);
+  useEffect(() => { loadProfiles(); }, []);
   useEffect(() => { fetch("/api/analytics", { cache: "no-store" }).then((response) => response.json()).then(setAnalytics).catch(() => setAnalytics({})); }, []);
   useEffect(() => {
     const refresh = () => {
@@ -44,6 +56,7 @@ export default function DashboardHome() {
         if (savedClients) setClients(JSON.parse(savedClients));
         const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
         if (savedProfiles) setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients: string[]; color: string; initials: string; slug: string }) => ({ ...profile, description: profile.clients.join(" · "), tone: profile.color })));
+        loadProfiles();
       } catch { /* keep current data */ }
     };
     window.addEventListener("reply-radar-workspaces-changed", refresh);
@@ -111,13 +124,13 @@ export default function DashboardHome() {
               </a>
             </div>
             <div className="dashboard-profile-grid">
-              {profiles.map(({ name, description, tone, initials, slug }) => (
+              {profiles.map(({ name, description, tone, initials, slug, photo }) => (
                 <a
                   href={`/inbox?profile=${slug}`}
                   className="dashboard-profile-card"
                   key={name}
                 >
-                  <i style={{ background: tone }}>{initials}</i>
+                  <i style={{ background: tone }}>{photo ? <img src={photo} alt="" /> : initials}</i>
                   <div>
                     <h3>{name}</h3>
                     <p>{description}</p>
@@ -145,7 +158,7 @@ export default function DashboardHome() {
               </article>
               <article className="dashboard-chart-card client-performance-card">
                 <div className="dashboard-chart-heading"><div><span>CLIENT PERFORMANCE</span><strong>Positive reply rate</strong></div><small>30 days</small></div>
-                {clients.map((client, index) => {
+                {clients.map((client) => {
                   const value = "—";
                   return <div className="client-performance-row" key={client.slug}><div><span>{client.name}</span><b>{value}</b></div><div className="performance-track"><i style={{ width: value === "—" ? "0%" : value, background: client.tone }} /></div></div>;
                 })}

@@ -51,6 +51,7 @@ export default function AppSidebar() {
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
+  const [clientsLoading, setClientsLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -70,6 +71,7 @@ export default function AppSidebar() {
           const fresh = payload.workspaces.map((item: Record<string, unknown>) => ({ name: String(item.name ?? ""), slug: String(item.slug ?? ""), tone: String(item.accent_color ?? "var(--accent)"), logoUrl: String(item.logo_url ?? "") }));
           setSidebarClients(fresh);
           window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(fresh));
+          setClientsLoading(false);
           return;
         }
       } catch { /* use the offline cache */ }
@@ -77,6 +79,7 @@ export default function AppSidebar() {
         const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
         if (saved) setSidebarClients(JSON.parse(saved));
       } catch { /* keep empty state */ }
+      setClientsLoading(false);
     };
     void hydrate();
     const onStorage = () => {
@@ -136,6 +139,7 @@ export default function AppSidebar() {
       </nav>
       <div className="nav-label clients-label">Clients</div>
       <div className="client-list">
+        {clientsLoading && sidebarClients.length === 0 && <div className="sidebar-client-skeleton" aria-label="Loading clients"><i /><span /><i /><span /><i /><span /></div>}
         {sidebarClients.filter((client) => client.name).map((client) => (
           <a className={`client-directory-item ${selectedClient === client.slug ? "selected" : ""}`} href={`/inbox?client=${client.slug}`} key={client.slug}>
             <i style={{ background: client.tone }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : client.name[0]}</i>{client.name}

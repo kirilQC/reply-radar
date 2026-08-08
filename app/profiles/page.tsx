@@ -178,7 +178,11 @@ function ProfileEditor({
   const fileRef = useRef<HTMLInputElement>(null);
   const allClients = liveClients.length ? liveClients : profile.clients;
   useEffect(() => {
+    // Keep removed workspaces out of an open profile editor.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAssigned((current) => current.filter((client) => allClients.includes(client)));
+    // The joined list is the stable identity of the workspace options.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveClients.join("|")]);
   const onPhoto = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];

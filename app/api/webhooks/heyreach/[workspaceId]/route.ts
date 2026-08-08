@@ -1,5 +1,17 @@
 import { NextResponse } from "next/server";
 
+const ready = (workspaceId: string) => NextResponse.json({ ok: true, webhook: "ready", workspace: workspaceId });
+
+export async function GET(_request: Request, context: { params: Promise<{ workspaceId: string }> }) {
+  const { workspaceId } = await context.params;
+  return workspaceId ? ready(workspaceId) : NextResponse.json({ ok: false }, { status: 400 });
+}
+
+export async function HEAD(_request: Request, context: { params: Promise<{ workspaceId: string }> }) {
+  const { workspaceId } = await context.params;
+  return new Response(null, { status: workspaceId ? 200 : 400, headers: { "content-type": "application/json" } });
+}
+
 // Compatibility endpoint for HeyReach webhook URLs configured without a secret
 // segment (…/api/webhooks/heyreach/{workspace}). The secret-bearing route remains
 // available for installations that use signed URLs.
@@ -7,7 +19,7 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
   const { workspaceId } = await context.params;
   if (!workspaceId) return NextResponse.json({ ok: false }, { status: 400 });
   const payload = await request.json().catch(() => null);
-  if (!payload || typeof payload !== "object") return NextResponse.json({ ok: true });
+  if (!payload || typeof payload !== "object") return ready(workspaceId);
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });

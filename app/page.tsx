@@ -71,7 +71,7 @@ const metricCatalog = [
 ];
 const leads: Lead[] = [];
 const nav = [
-  ["inbox", "Priority inbox", "⌘1"],
+  ["inbox", "General inbox", "⌘1"],
   ["profiles", "Profiles", "⌘2"],
   ["calendar", "Follow-up calendar", "⌘3"],
   ["analytics", "Analytics", "⌘4"],
@@ -169,6 +169,7 @@ export function InboxPage() {
       : new Date().getHours() < 18
         ? "Good afternoon"
         : "Good evening";
+  const todayLabel = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "2-digit" }).format(new Date()).toUpperCase();
   const activeWorkspace = clientParam ? workspaceDirectory.find((item) => item.slug === clientParam) : undefined;
   const clientName = activeWorkspace?.name || clientParam || "All clients";
   const clientTone = activeWorkspace?.tone || "var(--accent)";
@@ -521,8 +522,7 @@ export function InboxPage() {
             <div>
               <div className="eyebrow">
                 <span className="live-dot" />
-                LIVE QUEUE <span className="eyebrow-separator">/</span> WED, AUG
-                06
+                LIVE QUEUE <span className="eyebrow-separator">/</span> {todayLabel}
               </div>
               <h1>
                 {clientParam && <span className="inbox-heading-logo" style={{ background: clientTone }}>{clientLogo ? <img src={clientLogo} alt="" /> : clientName[0]}</span>}
@@ -565,7 +565,7 @@ export function InboxPage() {
           <div className="queue-header">
             <div>
               <h2>
-                Priority queue {filtered.length > 0 && <span>{filtered.length}</span>}
+                Reply queue {filtered.length > 0 && <span>{filtered.length}</span>}
               </h2>
               <p>Ranked by urgency and conversation intent</p>
             </div>

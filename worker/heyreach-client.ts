@@ -13,9 +13,16 @@ export class HeyReachClient {
     const response = await fetch(`${this.base}/${path.replace(/^\//, "")}`, { ...options, headers: { ...options.headers, "X-API-KEY": this.apiKey, "content-type": "application/json" } });
     console.info("heyreach_api_call", { path, status: response.status, latencyMs: Date.now() - started });
     if ((response.status === 429 || response.status >= 500) && (options.retryCount ?? 0) < 4) { this.failureCount++; await new Promise((resolve) => setTimeout(resolve, 400 * 2 ** (options.retryCount ?? 0) + Math.random() * 250)); return this.request<T>(path, { ...options, retryCount: (options.retryCount ?? 0) + 1 }); }
-    if (!response.ok) throw new Error(`HeyReach request failed (${response.status})`);
+    const responseText = await response.text();
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.ok) throw new Error(`HeyReach request failed (${response.status}): ${responseText.slice(0, 500) || "empty response"}`);
     this.failureCount = 0;
-    return response.json() as Promise<T>;
+    if (!responseText.trim()) return undefined as T;
+    if (!contentType.toLowerCase().includes("application/json")) {
+      throw new Error(`HeyReach returned ${contentType || "an unknown content type"}: ${responseText.slice(0, 500)}`);
+    }
+    try { return JSON.parse(responseText) as T; }
+    catch { throw new Error(`HeyReach returned invalid JSON: ${responseText.slice(0, 500)}`); }
   }
   async checkApiKey() { await this.request("auth/CheckApiKey"); return true; }
 }
