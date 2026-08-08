@@ -51,7 +51,7 @@ export async function GET() {
       const recentRuns = syncRuns.filter((run) => run.workspace_id === row.id).slice(0, 10);
       const recentEvents = webhookEvents.filter((event) => event.workspace_id === row.id).slice(0, 10);
       return {
-        id: row.id, name: row.name, slug: row.slug, keyConfigured, webhookAgeSeconds, pollAgeSeconds,
+        id: row.id, name: row.name, slug: row.slug, logoUrl: row.logo_url ?? null, websiteUrl: row.website_url ?? null, keyConfigured, webhookAgeSeconds, pollAgeSeconds,
         lastWebhookReceivedAt: row.last_webhook_received_at ?? null, lastSuccessfulPollAt: row.last_successful_poll_at ?? null, lastReconciledAt: row.last_reconciled_at ?? null,
         webhookStatus: !keyConfigured ? "Add a HeyReach API key first." : webhookHealthy ? "Replies are reaching Reply Radar." : webhookAgeSeconds === null ? "No webhook has arrived yet." : "No webhook has arrived recently.",
         pollStatus: pollHealthy ? "The background check ran recently." : pollAgeSeconds === null ? "The background check has never finished." : "The background check is late.",

@@ -157,7 +157,7 @@ export function InboxPage() {
   const [inboxLoading, setInboxLoading] = useState(true);
   const [inboxError, setInboxError] = useState("");
   const [queryString, setQueryString] = useState("");
-  const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string; tone?: string; logoUrl?: string }>>([]);
+  const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string; tone?: string; logoUrl?: string; website?: string }>>([]);
   const [liveProfiles, setLiveProfiles] = useState<Array<{ slug: string; name: string; clients: string[] }>>([]);
   const paneGridRef = useRef<HTMLDivElement>(null);
   const paneSplitRef = useRef(defaultLayout.paneSplit);
@@ -215,6 +215,9 @@ export function InboxPage() {
   const clientName = activeWorkspace?.name || clientParam || "All clients";
   const clientTone = activeWorkspace?.tone || "var(--accent)";
   const clientLogo = activeWorkspace?.logoUrl || "";
+  const clientWebsite = activeWorkspace?.website?.trim()
+    ? (/^https?:\/\//i.test(activeWorkspace.website.trim()) ? activeWorkspace.website.trim() : `https://${activeWorkspace.website.trim()}`)
+    : "";
   useEffect(() => {
     if (!clientParam) return;
     const root = document.documentElement;
@@ -579,8 +582,10 @@ export function InboxPage() {
           <div className="page-heading">
             <div>
               <h1>
-                {clientParam && <span className="inbox-heading-logo" style={{ background: clientTone }}>{clientLogo ? <img src={clientLogo} alt="" /> : clientName[0]}</span>}
-                {profileName ? `${greeting}, ${profileName}` : clientParam ? clientName : "General inbox"}
+                {clientParam ? clientWebsite
+                  ? <a className="inbox-client-heading-link" href={clientWebsite} target="_blank" rel="noreferrer"><span className="inbox-heading-logo" style={{ background: clientTone }}>{clientLogo ? <img src={clientLogo} alt={`${clientName} logo`} /> : clientName[0]}</span><span>{clientName}</span></a>
+                  : <><span className="inbox-heading-logo" style={{ background: clientTone }}>{clientLogo ? <img src={clientLogo} alt={`${clientName} logo`} /> : clientName[0]}</span>{clientName}</>
+                  : <>{!profileName && <span className="inbox-heading-logo general-heading-logo"><img src="/qc-growth-logo.jpg" alt="QC Growth logo" /></span>}{profileName ? `${greeting}, ${profileName}` : "General inbox"}</>}
               </h1>
               {!clientParam && <div className="tracked-clients">{trackedClients.map((client) => <span key={client}>{client}</span>)}</div>}
             </div>
@@ -621,7 +626,6 @@ export function InboxPage() {
               <h2>
                 Reply queue {filtered.length > 0 && <span>{filtered.length}</span>}
               </h2>
-              <p>Ranked by urgency and conversation intent</p>
             </div>
             <div className="queue-tools">
               <label className="search queue-search">
@@ -632,7 +636,6 @@ export function InboxPage() {
                 <button className="secondary-button">
                   Export <span>↓</span>
                 </button>
-                <button className="primary-button">+ Add follow-up</button>
               </div>
               <div className="segmented">
                 {["All follow-ups", "Hot", "Warm", "Nurture"].map((f) => (

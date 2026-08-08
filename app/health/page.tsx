@@ -11,6 +11,7 @@ type Heartbeat = {
   clients?: Array<{
     name: string;
     slug: string;
+    logoUrl?: string | null;
     keyConfigured: boolean;
     webhookAgeSeconds: number | null;
     pollAgeSeconds: number | null;
@@ -118,7 +119,7 @@ export default function HealthPage() {
 
             <section className="admin-panel">
               <div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>For each client, we check that its HeyReach key exists, webhook events are arriving, and polling is fresh.</p></div></div>
-              {clientCount === 0 ? <p className="empty-state">No client heartbeat data is available yet.</p> : <div className="heartbeat-client-list">{heartbeat.clients?.map((client) => <div className="heartbeat-client" key={client.slug}><div className="heartbeat-client-title"><strong>{client.name}</strong><span className={`health-state ${client.status === "healthy" ? "ready" : "missing"}`}>{client.status === "healthy" ? "HEALTHY" : client.status === "missing" ? "NOT CONFIGURED" : "NEEDS ATTENTION"}</span></div><div className="heartbeat-client-meta"><span>API key: {client.keyConfigured ? "ready" : "missing"}</span><span>Webhook: {client.webhookStatus ?? formatAge(client.webhookAgeSeconds)}</span><span>Polling: {client.pollStatus ?? formatAge(client.pollAgeSeconds)}</span></div>{mode === "advanced" && <details className="diagnostic-details"><summary>Technical details</summary><pre>{JSON.stringify({ ...client, lastWebhookReceivedAt: formatTime(client.lastWebhookReceivedAt), lastSuccessfulPollAt: formatTime(client.lastSuccessfulPollAt) }, null, 2)}</pre></details>}</div>)}</div>}
+              {clientCount === 0 ? <p className="empty-state">No client heartbeat data is available yet.</p> : <div className="heartbeat-client-list">{heartbeat.clients?.map((client) => <div className="heartbeat-client" key={client.slug}><div className="heartbeat-client-title"><div className="heartbeat-client-name"><i>{client.logoUrl ? <img src={client.logoUrl} alt={`${client.name} logo`} /> : client.name[0]}</i><strong>{client.name}</strong></div><span className={`health-state ${client.status === "healthy" ? "ready" : "missing"}`}>{client.status === "healthy" ? "HEALTHY" : client.status === "missing" ? "NOT CONFIGURED" : "NEEDS ATTENTION"}</span></div><div className="heartbeat-client-meta"><span>API key: {client.keyConfigured ? "ready" : "missing"}</span><span>Webhook: {client.webhookStatus ?? formatAge(client.webhookAgeSeconds)}</span><span>Polling: {client.pollStatus ?? formatAge(client.pollAgeSeconds)}</span></div>{mode === "advanced" && <details className="diagnostic-details"><summary>Technical details</summary><pre>{JSON.stringify({ ...client, lastWebhookReceivedAt: formatTime(client.lastWebhookReceivedAt), lastSuccessfulPollAt: formatTime(client.lastSuccessfulPollAt) }, null, 2)}</pre></details>}</div>)}</div>}
             </section>
 
             <p className="heartbeat-last-checked">Last checked: {lastChecked} · Checks refresh automatically every 30 seconds.</p>
