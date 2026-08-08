@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardHome from "./components/DashboardHome";
 import AppSidebar from "./components/AppSidebar";
@@ -159,12 +159,14 @@ export function InboxPage() {
   const [queryString, setQueryString] = useState("");
   const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string; tone?: string; logoUrl?: string }>>([]);
   const [liveProfiles, setLiveProfiles] = useState<Array<{ slug: string; name: string; clients: string[] }>>([]);
+  const paneGridRef = useRef<HTMLDivElement>(null);
+  const paneSplitRef = useRef(defaultLayout.paneSplit);
   useEffect(() => {
     const scale = appearance.zoom / 100;
     const root = document.documentElement;
     root.style.setProperty("--reply-radar-zoom", String(scale));
-    root.style.setProperty("--reply-radar-zoom-inverse", `${100 / scale}%`);
   }, [appearance.zoom]);
+  useEffect(() => { paneSplitRef.current = layoutPrefs.paneSplit; }, [layoutPrefs.paneSplit]);
   useEffect(() => {
     // URL search params are client-only state on this static route.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -287,7 +289,6 @@ export function InboxPage() {
     root.style.setProperty("--bg", nextAppearance.background);
     root.style.setProperty("--font", nextAppearance.font);
     root.style.setProperty("--reply-radar-zoom", `${nextAppearance.zoom / 100}`);
-    root.style.setProperty("--reply-radar-zoom-inverse", `${100 / (nextAppearance.zoom / 100)}%`);
     document.body.classList.toggle("light-mode", nextAppearance.mode === "light");
     void fetch("/api/preferences", {
       method: "POST",
@@ -408,6 +409,27 @@ export function InboxPage() {
     messages: [],
   };
   const clientLogoFor = (lead: Lead) => lead.clientLogoUrl || workspaceDirectory.find((workspace) => workspace.slug === lead.clientSlug || workspace.name === lead.client)?.logoUrl || null;
+  const beginPaneResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const grid = paneGridRef.current;
+    if (!grid) return;
+    event.preventDefault();
+    const rect = grid.getBoundingClientRect();
+    const update = (clientX: number) => {
+      const next = Math.max(40, Math.min(75, Math.round(((clientX - rect.left) / rect.width) * 100)));
+      paneSplitRef.current = next;
+      setLayoutPrefs((currentPrefs) => ({ ...currentPrefs, paneSplit: next }));
+    };
+    const move = (moveEvent: PointerEvent) => update(moveEvent.clientX);
+    const finish = () => {
+      document.body.classList.remove("resizing-panes");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      savePreferences({ ...layoutPrefs, paneSplit: paneSplitRef.current }, appearance);
+    };
+    document.body.classList.add("resizing-panes");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish, { once: true });
+  };
   return (
     <main
       className={`app-shell ${theme === "light" ? "light-mode" : ""} ${layoutPrefs.compact ? "compact-inbox" : ""}`}
@@ -633,8 +655,7 @@ export function InboxPage() {
               <select className="filter-button" aria-label="Sort conversations" value={sort} onChange={(event) => { setSort(event.target.value); setSelected(0); }}><option value="score-desc">Sort: Score</option><option value="newest">Sort: Newest</option><option value="oldest">Sort: Oldest</option><option value="name">Sort: Name</option></select>
             </div>
           </div>
-          <div className="pane-resizer" aria-label="Resize Inbox and Chat panels"><span>Inbox {layoutPrefs.paneSplit}%</span><input type="range" min="40" max="75" value={layoutPrefs.paneSplit} onChange={(event) => setLayoutPrefs({ ...layoutPrefs, paneSplit: Number(event.target.value) })} onPointerUp={() => savePreferences(layoutPrefs, appearance)} onKeyUp={() => savePreferences(layoutPrefs, appearance)} /><span>Chat {100 - layoutPrefs.paneSplit}%</span></div>
-          <div className="dashboard-grid operational-grid" style={{ "--inbox-pane": `${layoutPrefs.paneSplit}fr`, "--chat-pane": `${100 - layoutPrefs.paneSplit}fr` } as React.CSSProperties}>
+          <div ref={paneGridRef} className="dashboard-grid operational-grid" style={{ "--inbox-pane": `${layoutPrefs.paneSplit}fr`, "--chat-pane": `${100 - layoutPrefs.paneSplit}fr` } as React.CSSProperties}>
             <section className="queue-card inbox-operational-table">
               <div className="table-head">
                 <span>LEAD</span>
@@ -690,6 +711,7 @@ export function InboxPage() {
                 </button>
               </div>
             </section>
+            <div className="pane-divider" role="separator" aria-label="Resize Inbox and Chat" aria-orientation="vertical" aria-valuemin={40} aria-valuemax={75} aria-valuenow={layoutPrefs.paneSplit} onPointerDown={beginPaneResize}><span /></div>
             <aside className={`detail-card ${layoutPrefs.showDetail ? "" : "layout-hidden"}`}>
               <div className="detail-top">
                 <div className="detail-context">
@@ -708,7 +730,7 @@ export function InboxPage() {
                       {current.role} at {current.company}
                     </p>
                     {current.profileUrl && <a className="linkedin" href={current.profileUrl} target="_blank" rel="noreferrer">in&nbsp; LinkedIn profile ↗</a>}
-                    {current.leadId && <a className="lead-database-link" href={`/database?lead=${encodeURIComponent(current.leadId)}`}>View full lead record →</a>}
+                    {current.leadId && <a className="lead-database-link" href={`/database?lead=${encodeURIComponent(current.leadId)}`}>View more →</a>}
                   </div>
                   {current.companyPhotoUrl && <img className="enriched-company-logo" src={current.companyPhotoUrl} alt={`${current.company} logo`} />}
                 </div>

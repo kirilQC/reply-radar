@@ -70,7 +70,6 @@ export default function DashboardHome() {
     root.style.setProperty("--bg", appearance.background);
     root.style.setProperty("--font", appearance.font);
     root.style.setProperty("--reply-radar-zoom", `${appearance.zoom / 100}`);
-    root.style.setProperty("--reply-radar-zoom-inverse", `${100 / (appearance.zoom / 100)}%`);
     document.body.classList.toggle("light-mode", appearance.mode === "light");
   }, [appearance]);
   const saveAppearance = () => {

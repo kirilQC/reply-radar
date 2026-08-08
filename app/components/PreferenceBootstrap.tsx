@@ -20,7 +20,6 @@ export default function PreferenceBootstrap() {
       );
       const scale = (appearance.zoom || 100) / 100;
       root.style.setProperty("--reply-radar-zoom", String(scale));
-      root.style.setProperty("--reply-radar-zoom-inverse", `${100 / scale}%`);
       root.dataset.appearanceMode = appearance.mode || "midnight";
       document.body.classList.toggle("light-mode", appearance.mode === "light");
     } catch {
