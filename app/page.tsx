@@ -178,6 +178,23 @@ export function InboxPage() {
         const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
         if (savedProfiles) setLiveProfiles(JSON.parse(savedProfiles));
       } catch { /* keep the empty live state */ }
+      void fetch("/api/admin/workspaces", { cache: "no-store" })
+        .then((response) => response.ok ? response.json() : null)
+        .then((payload) => {
+          if (!Array.isArray(payload?.workspaces)) return;
+          setWorkspaceDirectory(payload.workspaces.map((item: Record<string, unknown>) => ({
+            name: String(item.name ?? ""),
+            slug: String(item.slug ?? ""),
+            tone: String(item.accent_color ?? "var(--accent)"),
+            logoUrl: String(item.logo_url ?? ""),
+            website: String(item.website_url ?? ""),
+          })));
+        })
+        .catch(() => null);
+      void fetch("/api/admin/profiles", { cache: "no-store" })
+        .then((response) => response.ok ? response.json() : null)
+        .then((payload) => { if (Array.isArray(payload?.profiles)) setLiveProfiles(payload.profiles); })
+        .catch(() => null);
     };
     refreshWorkspaces();
     window.addEventListener("reply-radar-workspaces-changed", refreshWorkspaces);
