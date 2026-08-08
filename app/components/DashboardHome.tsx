@@ -11,6 +11,7 @@ const defaultAppearance: AppearancePrefs = {
   font: "Inter, ui-sans-serif, system-ui, sans-serif",
   background: "#0b0c10",
   accent: "#8b7cff",
+  timeZone: "America/New_York",
 };
 
 const initialClients: Array<{ name: string; slug: string; tone: string; leads: number; replies: number; status: string; logoUrl?: string }> = [];

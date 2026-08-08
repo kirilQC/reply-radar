@@ -17,6 +17,8 @@ type Lead = {
   clientSlug?: string;
   clientTone: string;
   score: number;
+  leadScore?: number | null;
+  followUpScore?: number;
   tier: "hot" | "warm" | "nurture";
   reason: string;
   preview: string;
@@ -33,6 +35,7 @@ type Lead = {
   industry?: unknown;
   enrichedLocation?: unknown;
   lastMessageAt?: string | null;
+  latestReplyAt?: string | null;
   messages: Array<{ id: string; body: string; direction: string; sentAt: string; authorName: string }>;
 };
 type LayoutPrefs = {
@@ -71,6 +74,23 @@ const defaultAppearance: AppearancePrefs = {
   font: "Inter, ui-sans-serif, system-ui, sans-serif",
   background: "#0b0c10",
   accent: "#8b7cff",
+  timeZone: "America/New_York",
+};
+const timeZoneSuffix: Record<string, string> = { "America/New_York": "EST", "America/Chicago": "CST", "America/Denver": "MST", "America/Los_Angeles": "PST", UTC: "UTC" };
+const formatDashboardDate = (value: string | null | undefined, timeZone: string) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const formatted = new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(date);
+  const fallbackSuffix = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value ?? timeZone;
+  return `${formatted} ${timeZoneSuffix[timeZone] ?? fallbackSuffix}`;
+};
+const replyTurn = (count: number) => {
+  const words = ["Zero", "First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
+  if (words[count]) return `${words[count]} reply`;
+  const mod100 = count % 100; const mod10 = count % 10;
+  const suffix = mod100 >= 11 && mod100 <= 13 ? "th" : mod10 === 1 ? "st" : mod10 === 2 ? "nd" : mod10 === 3 ? "rd" : "th";
+  return `${count}${suffix} reply`;
 };
 const metricCatalog = [
   { id: "needsAction", label: "Needs action", value: "—", delta: "", tone: "coral", sub: "Awaiting synced data" },
@@ -529,7 +549,7 @@ export function InboxPage() {
             )}
           </div>
         </header>
-        <div className="content-wrap">
+        <div className="content-wrap inbox-page-content">
           <div className="page-heading">
             <div>
               <div className="eyebrow">
@@ -608,14 +628,17 @@ export function InboxPage() {
               <select className="filter-button" aria-label="Sort conversations" value={sort} onChange={(event) => { setSort(event.target.value); setSelected(0); }}><option value="score-desc">Sort: Score</option><option value="newest">Sort: Newest</option><option value="oldest">Sort: Oldest</option><option value="name">Sort: Name</option></select>
             </div>
           </div>
-          <div className="dashboard-grid">
-            <section className="queue-card">
+          <div className="dashboard-grid operational-grid">
+            <section className="queue-card inbox-operational-table">
               <div className="table-head">
                 <span>LEAD</span>
                 <span>CLIENT</span>
-                <span>URGENCY</span>
-                <span>LAST MESSAGE</span>
-                <span />
+                <span>CAMPAIGN</span>
+                <span>LATEST REPLY</span>
+                <span>SENDER</span>
+                <span>REPLY TURN</span>
+                <span>LEAD SCORE</span>
+                <span>FOLLOW-UP SCORE</span>
               </div>
               {inboxLoading && <p className="empty-state">Loading conversations…</p>}
               {!inboxLoading && inboxError && <p className="empty-state error-text">{inboxError}</p>}
@@ -636,7 +659,7 @@ export function InboxPage() {
                     <div>
                       <strong>{lead.name}</strong>
                       <span>
-                        {lead.role} · {lead.company}
+                        {lead.role} @ {lead.company}
                       </span>
                     </div>
                   </div>
@@ -646,21 +669,12 @@ export function InboxPage() {
                     </i>
                     <span>{lead.client}</span>
                   </div>
-                  <div className="score-cell">
-                    <span className={`score-pill ${lead.tier}`}>
-                      {lead.score}
-                    </span>
-                    <span className="tier-label">{lead.tier}</span>
-                  </div>
-                  <div className="message-cell">
-                    <span>{lead.preview}</span>
-                    <small>
-                      {lead.age} · {lead.replies} replies
-                    </small>
-                  </div>
-                  <div className="row-more">
-                    <Icon name="more" />
-                  </div>
+                  <div className="inbox-meta-cell campaign-cell"><strong>{lead.campaignName || "No campaign"}</strong></div>
+                  <div className="inbox-meta-cell date-cell"><strong>{formatDashboardDate(lead.latestReplyAt, appearance.timeZone)}</strong></div>
+                  <div className="inbox-meta-cell sender-cell"><strong>{lead.senderName}</strong></div>
+                  <div className="inbox-meta-cell turn-cell"><strong>{replyTurn(lead.replies)}</strong></div>
+                  <div className="inbox-meta-cell lead-score-cell"><span className="coming-soon">Coming soon</span></div>
+                  <div className="score-cell follow-up-score-cell"><span className={`score-pill ${lead.tier}`}>{lead.followUpScore ?? lead.score}</span><span className="tier-label">{lead.tier}</span></div>
                 </button>
               ))}
               <div className="queue-footer">
@@ -674,9 +688,6 @@ export function InboxPage() {
               <div className="detail-top">
                 <div className="detail-context">
                   <span className="detail-label">SELECTED CONVERSATION</span>
-                  <button>
-                    <Icon name="more" />
-                  </button>
                 </div>
                 <div className="detail-person">
                   <div
@@ -713,7 +724,7 @@ export function InboxPage() {
                 </div>
               </div>
               <div className="thread">
-                {current.messages.length ? current.messages.map((message) => <div className={`bubble ${message.direction === "outbound" ? "outbound" : "inbound"}`} key={message.id}>{message.direction !== "outbound" && <span>{current.initials}</span>}<small className="message-author">{message.authorName}</small><p>{message.body}</p><time>{new Date(message.sentAt).toLocaleString()}</time></div>) : <p className="empty-state">No conversation messages are available yet.</p>}
+                {current.messages.length ? current.messages.map((message) => <div className={`bubble ${message.direction === "outbound" ? "outbound" : "inbound"}`} key={message.id}>{message.direction !== "outbound" && <span>{current.initials}</span>}<small className="message-author">{message.authorName}</small><p>{message.body}</p><time>{formatDashboardDate(message.sentAt, appearance.timeZone)}</time></div>) : <p className="empty-state">No conversation messages are available yet.</p>}
               </div>
               <div className="composer">
                 <div className="composer-top">
