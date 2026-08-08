@@ -1,4 +1,5 @@
-type JsonObject = Record<string, unknown>;
+import { fetchFullConversation, type ConversationMessage, type JsonObject } from "./heyreach-conversation";
+
 type SupabaseConfig = { url: string; key: string };
 
 const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
@@ -27,11 +28,25 @@ async function upsertOne(config: SupabaseConfig, table: string, filter: string, 
   return rows[0];
 }
 
-export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string }, payload: JsonObject) {
+async function writeMessageChunks(config: SupabaseConfig, records: JsonObject[]) {
+  for (let index = 0; index < records.length; index += 200) {
+    await db(config, "rr_messages?on_conflict=conversation_id,heyreach_message_id", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(records.slice(index, index + 200)),
+    });
+  }
+}
+
+const fingerprint = (message: { direction: unknown; sent_at: unknown; body: unknown }) => `${String(message.direction)}|${new Date(String(message.sent_at)).toISOString()}|${String(message.body)}`;
+
+export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; heyreach_api_key_ciphertext?: string | null }, payload: JsonObject) {
   const lead = object(payload.lead);
   const campaign = object(payload.campaign);
-  const recentMessages = Array.isArray(payload.recent_messages) ? payload.recent_messages.map(object) : [];
-  const conversationExternalId = text(payload.conversation_id) || text(payload.correlation_id);
+  // Enrichment deliberately happens before the webhook event, lead, conversation,
+  // or messages are persisted. A failed history lookup cannot create a partial inbox row.
+  const history = await fetchFullConversation(text(workspace.heyreach_api_key_ciphertext), payload);
+  const conversationExternalId = history.conversationExternalId || text(payload.conversation_id) || text(payload.correlation_id);
   const leadExternalId = text(lead.id) || text(lead.profile_url) || text(lead.email_address) || conversationExternalId;
   const eventType = text(payload.event_type) || text(payload.eventType) || "unknown";
   const eventTimestamp = text(payload.timestamp) || new Date().toISOString();
@@ -45,28 +60,31 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
   const eventId = eventRows?.[0]?.id;
 
   try {
-    const leadRow = await upsertOne(config, "rr_leads", `workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(leadExternalId)}`, { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: text(lead.profile_url) || null, name: text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || "Unknown lead", role: text(lead.position), company: text(lead.company_name), raw_data: { ...lead, campaign } });
+    const leadRow = await upsertOne(config, "rr_leads", `workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(leadExternalId)}`, { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: text(lead.profile_url) || null, name: text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || "Unknown lead", role: text(lead.position), company: text(lead.company_name), raw_data: { ...lead, campaign, reply_radar: { sender: history.sender, history_fetched_at: history.fetchedAt, conversation: history.conversationSummary } } });
     const leadId = String(leadRow?.id ?? "");
     if (!leadId) throw new Error("Lead upsert returned no id.");
 
-    const latestMessage = recentMessages.reduce<JsonObject | null>((latest, message) => !latest || text(message.creation_time) > text(latest.creation_time) ? message : latest, null);
-    const lastMessageAt = text(latestMessage?.creation_time) || eventTimestamp;
-    const conversationRow = await upsertOne(config, "rr_conversations", `workspace_id=eq.${encodeURIComponent(workspace.id)}&heyreach_conversation_id=eq.${encodeURIComponent(conversationExternalId)}`, { workspace_id: workspace.id, lead_id: leadId, heyreach_conversation_id: conversationExternalId, account_id: payload.sender && typeof payload.sender === "object" ? String((payload.sender as JsonObject).id ?? "") || null : null, last_message_at: lastMessageAt, last_message_direction: "inbound" });
+    const latestMessage = history.messages.at(-1);
+    const lastMessageAt = latestMessage?.sentAt || eventTimestamp;
+    const conversationRow = await upsertOne(config, "rr_conversations", `workspace_id=eq.${encodeURIComponent(workspace.id)}&heyreach_conversation_id=eq.${encodeURIComponent(conversationExternalId)}`, { workspace_id: workspace.id, lead_id: leadId, heyreach_conversation_id: conversationExternalId, account_id: history.sender.id || null, last_message_at: lastMessageAt, last_message_direction: latestMessage?.direction || "inbound" });
     const conversationId = String(conversationRow?.id ?? "");
     if (!conversationId) throw new Error("Conversation upsert returned no id.");
 
-    if (recentMessages.length) {
-      const messages = recentMessages.map((message, index) => {
-        const sentAt = text(message.creation_time) || eventTimestamp;
-        const messageType = text(message.message_type);
-        return { conversation_id: conversationId, heyreach_message_id: `${eventKey}:${index}:${sentAt}`, direction: message.is_reply === false ? "outbound" : "inbound", body: text(message.message) || (messageType ? `[${messageType}]` : "[Empty message]"), sent_at: sentAt, raw_data: message };
-      });
-      for (const message of messages) await upsertOne(config, "rr_messages", `conversation_id=eq.${encodeURIComponent(conversationId)}&heyreach_message_id=eq.${encodeURIComponent(message.heyreach_message_id)}`, message);
-    }
+    const existing = await db(config, `rr_messages?select=heyreach_message_id,direction,body,sent_at&conversation_id=eq.${encodeURIComponent(conversationId)}`) as JsonObject[];
+    const existingByFingerprint = new Map(existing.map((message) => [fingerprint(message as { direction: unknown; sent_at: unknown; body: unknown }), text(message.heyreach_message_id)]));
+    const messages = history.messages.map((message: ConversationMessage) => ({
+      conversation_id: conversationId,
+      heyreach_message_id: existingByFingerprint.get(fingerprint({ direction: message.direction, sent_at: message.sentAt, body: message.body })) || message.externalId,
+      direction: message.direction,
+      body: message.body,
+      sent_at: message.sentAt,
+      raw_data: message.raw,
+    }));
+    await writeMessageChunks(config, messages);
 
     if (eventId) await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "processed", processed_at: new Date().toISOString(), error_text: null }) });
     await db(config, `rr_workspaces?id=eq.${encodeURIComponent(workspace.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_webhook_received_at: new Date().toISOString() }) });
-    return { eventId, leadId, conversationId, messagesWritten: recentMessages.length };
+    return { eventId, leadId, conversationId, messagesWritten: messages.length, senderName: history.sender.name, historyFetchedAt: history.fetchedAt };
   } catch (error) {
     if (eventId) await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "failed", processed_at: new Date().toISOString(), error_text: error instanceof Error ? error.message.slice(0, 2_000) : "Ingestion failed" }) }).catch(() => null);
     throw error;

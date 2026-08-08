@@ -8,6 +8,15 @@ async function query(url: string, key: string, path: string) {
   return Array.isArray(data) ? data as Row[] : [];
 }
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "?";
+const senderNameFrom = (...values: unknown[]) => {
+  for (const value of values) {
+    const raw = value && typeof value === "object" ? value as Row : {};
+    const metadata = raw.reply_radar && typeof raw.reply_radar === "object" ? raw.reply_radar as Row : {};
+    const sender = metadata.sender && typeof metadata.sender === "object" ? metadata.sender as Row : {};
+    if (sender.name) return String(sender.name);
+  }
+  return "Unknown sender";
+};
 const age = (value: unknown) => {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(String(value)).getTime()) / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -38,10 +47,12 @@ export async function GET(request: Request) {
       const lead = leadById.get(String(conversation.lead_id)) ?? {};
       const leadRaw = lead.raw_data && typeof lead.raw_data === "object" ? lead.raw_data as Row : {};
       const workspace = workspaceById.get(String(conversation.workspace_id)) ?? {};
-      const thread = messages.filter((message) => message.conversation_id === conversation.id).map((message) => ({ id: message.id, body: message.body, direction: message.direction, sentAt: message.sent_at }));
+      const messageRows = messages.filter((message) => message.conversation_id === conversation.id);
+      const senderName = senderNameFrom(...messageRows.map((message) => message.raw_data), leadRaw);
+      const thread = messageRows.map((message) => ({ id: message.id, body: message.body, direction: message.direction, sentAt: message.sent_at, authorName: message.direction === "outbound" ? senderName : String(lead.name || "Unknown lead") }));
       const latest = thread.at(-1);
       const name = String(lead.name || "Unknown lead");
-      return { id: conversation.id, initials: initials(name), name, role: String(lead.role || lead.title || ""), company: String(lead.company || ""), profileUrl: lead.linkedin_profile_url ?? lead.profile_url ?? null, photoUrl: leadRaw.profile_picture_url ?? leadRaw.profile_image_url ?? leadRaw.avatar_url ?? leadRaw.image_url ?? null, client: String(workspace.name || workspace.slug || "Unknown client"), clientSlug: workspace.slug, clientTone: String(workspace.accent_color || "#8b7cff"), clientLogoUrl: workspace.logo_url ?? null, score: Number(conversation.score || 0), tier: ["hot", "warm", "nurture"].includes(String(conversation.tier)) ? conversation.tier : "nurture", reason: String(conversation.score_reason || "New reply received from HeyReach."), preview: String(latest?.body || ""), age: age(conversation.last_message_at), lastMessageAt: conversation.last_message_at, replies: thread.filter((message) => message.direction === "inbound").length, avatar: "#3c365e", messages: thread };
+      return { id: conversation.id, initials: initials(name), name, role: String(lead.role || lead.title || ""), company: String(lead.company || ""), profileUrl: lead.linkedin_profile_url ?? lead.profile_url ?? null, photoUrl: leadRaw.profile_picture_url ?? leadRaw.profile_image_url ?? leadRaw.avatar_url ?? leadRaw.image_url ?? null, client: String(workspace.name || workspace.slug || "Unknown client"), clientSlug: workspace.slug, clientTone: String(workspace.accent_color || "#8b7cff"), clientLogoUrl: workspace.logo_url ?? null, senderName, score: Number(conversation.score || 0), tier: ["hot", "warm", "nurture"].includes(String(conversation.tier)) ? conversation.tier : "nurture", reason: String(conversation.score_reason || "New reply received from HeyReach."), preview: String(latest?.body || ""), age: age(conversation.last_message_at), lastMessageAt: conversation.last_message_at, replies: thread.filter((message) => message.direction === "inbound").length, avatar: "#3c365e", messages: thread };
     });
     return NextResponse.json({ ok: true, conversations: result });
   } catch (error) { return NextResponse.json({ ok: false, conversations: [], error: error instanceof Error ? error.message : "Inbox unavailable" }, { status: 502 }); }

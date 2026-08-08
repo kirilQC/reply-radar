@@ -28,9 +28,9 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" };
   try {
     const lookupColumn = isUuid(workspaceId) ? "id" : "slug";
-    const lookup = await fetch(`${url}/rest/v1/rr_workspaces?select=id,slug&${lookupColumn}=eq.${encodeURIComponent(workspaceId)}&limit=1`, { headers, cache: "no-store" });
+    const lookup = await fetch(`${url}/rest/v1/rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&${lookupColumn}=eq.${encodeURIComponent(workspaceId)}&limit=1`, { headers, cache: "no-store" });
     if (!lookup.ok) return NextResponse.json({ ok: false, stage: "workspace_lookup", error: (await lookup.text()).slice(0, 1_000) }, { status: 502 });
-    const rows = await lookup.json() as Array<{ id: string }>;
+    const rows = await lookup.json() as Array<{ id: string; heyreach_api_key_ciphertext?: string | null }>;
     const workspace = rows[0];
     if (!workspace) return NextResponse.json({ ok: false, error: "Workspace not found." }, { status: 404 });
     const result = await ingestHeyReachWebhook({ url, key }, workspace, payload as Record<string, unknown>);

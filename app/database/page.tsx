@@ -4,12 +4,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 
 type Workspace = { id: string; name: string; slug: string; logoUrl?: string | null; accentColor?: string | null };
-type Lead = { id: string; name: string; role: string; company: string; linkedinId?: string | null; profileUrl?: string | null; photoUrl?: string | null; email?: string | null; location?: string | null; tags: string[]; workspace: Workspace; createdAt: string; conversationCount: number; replyCount: number; lastReplyAt?: string | null; lastMessage: string; rawData: Record<string, unknown> };
+type Lead = { id: string; name: string; role: string; company: string; linkedinId?: string | null; profileUrl?: string | null; photoUrl?: string | null; email?: string | null; location?: string | null; tags: string[]; senderName: string; workspace: Workspace; createdAt: string; conversationCount: number; replyCount: number; lastReplyAt?: string | null; lastMessage: string; rawData: Record<string, unknown> };
 type Detail = { lead: Record<string, unknown>; workspace: Record<string, unknown> | null; conversations: Array<Record<string, unknown>>; messages: Array<Record<string, unknown>>; hasMoreMessages: boolean; nextMessageOffset: number | null };
 
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "?";
 const when = (value: unknown) => value ? new Date(String(value)).toLocaleString() : "—";
 const display = (value: unknown) => value == null || value === "" ? "—" : String(value);
+const senderNameFrom = (...values: unknown[]) => {
+  for (const value of values) {
+    const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+    const metadata = raw.reply_radar && typeof raw.reply_radar === "object" ? raw.reply_radar as Record<string, unknown> : {};
+    const sender = metadata.sender && typeof metadata.sender === "object" ? metadata.sender as Record<string, unknown> : {};
+    if (sender.name) return String(sender.name);
+  }
+  return "Unknown sender";
+};
 
 export default function DatabasePage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -83,10 +92,11 @@ export default function DatabasePage() {
           </section>
           {error && <div className="database-error">{error}</div>}
           <section className="database-table-card">
-            <div className="database-table-head"><span>Lead</span><span>Client</span><span>Replies</span><span>Last reply</span><span>Latest message</span><span /></div>
+            <div className="database-table-head"><span>Lead</span><span>Client</span><span>Sender</span><span>Replies</span><span>Last reply</span><span>Latest message</span><span /></div>
             {loading ? <DatabaseSkeleton /> : leads.length ? leads.map((lead) => <button className="database-row" key={lead.id} onClick={() => openLead(lead.id)}>
               <span className="database-person"><i style={{ background: lead.workspace?.accentColor || "var(--accent)" }}>{lead.photoUrl ? <img src={lead.photoUrl} alt="" /> : initials(lead.name)}</i><span><strong>{lead.name}</strong><small>{[lead.role, lead.company].filter(Boolean).join(" · ") || "No title or company"}</small><em>{lead.email || lead.location || ""}</em></span></span>
               <span className="database-client">{lead.workspace?.logoUrl ? <i><img src={lead.workspace.logoUrl} alt="" /></i> : <i style={{ background: lead.workspace?.accentColor || "var(--accent)" }}>{lead.workspace?.name?.[0] || "?"}</i>}<b>{lead.workspace?.name || "Unknown"}</b></span>
+              <span className="database-sender"><b>{lead.senderName}</b><small>LinkedIn sender</small></span>
               <span><b>{lead.replyCount}</b><small>{lead.conversationCount} conversation{lead.conversationCount === 1 ? "" : "s"}</small></span>
               <time>{when(lead.lastReplyAt)}</time><span className="database-preview">{lead.lastMessage || "—"}</span><span className="database-arrow">→</span>
             </button>) : <div className="database-empty"><strong>No matching leads</strong><span>New replies will appear here automatically after webhook processing.</span></div>}
@@ -105,11 +115,13 @@ export default function DatabasePage() {
 
 function LeadOverview({ detail }: { detail: Detail }) {
   const raw = detail.lead.raw_data && typeof detail.lead.raw_data === "object" ? detail.lead.raw_data as Record<string, unknown> : {};
-  const fields = [["Full name", detail.lead.name], ["Role", detail.lead.role], ["Company", detail.lead.company], ["Location", raw.location], ["Email", raw.email_address || raw.custom_email || raw.enriched_email], ["LinkedIn ID", detail.lead.linkedin_id], ["Profile", detail.lead.linkedin_profile_url], ["First reply stored", detail.lead.created_at], ["Client", detail.workspace?.name]];
+  const fields = [["Full name", detail.lead.name], ["Role", detail.lead.role], ["Company", detail.lead.company], ["Sender", senderNameFrom(raw)], ["Location", raw.location], ["Email", raw.email_address || raw.custom_email || raw.enriched_email], ["LinkedIn ID", detail.lead.linkedin_id], ["Profile", detail.lead.linkedin_profile_url], ["First reply stored", detail.lead.created_at], ["Client", detail.workspace?.name]];
   return <div className="database-overview"><section><h3>Contact information</h3><div className="database-field-grid">{fields.map(([label, value]) => <div key={String(label)}><small>{String(label)}</small>{String(label) === "Profile" && value ? <a href={String(value)} target="_blank" rel="noreferrer">Open LinkedIn ↗</a> : <strong>{String(label).includes("reply") ? when(value) : display(value)}</strong>}</div>)}</div></section><section><h3>HeyReach context</h3><div className="database-field-grid"><div><small>About</small><strong>{display(raw.about)}</strong></div><div><small>Summary</small><strong>{display(raw.summary)}</strong></div><div><small>Tags</small><strong>{Array.isArray(raw.tags) ? raw.tags.join(", ") || "—" : "—"}</strong></div><div><small>Campaign</small><strong>{display(raw.campaign && typeof raw.campaign === "object" ? (raw.campaign as Record<string, unknown>).name : null)}</strong></div></div></section>{Array.isArray(raw.lists) && <section><h3>Lists and custom fields</h3>{raw.lists.map((list, index) => <pre className="database-json compact" key={index}>{JSON.stringify(list, null, 2)}</pre>)}</section>}</div>;
 }
 
 function LeadActivity({ detail, onLoadOlder }: { detail: Detail; onLoadOlder: () => void }) {
-  return <div className="database-activity"><div className="database-activity-summary"><span><b>{detail.conversations.length}</b> conversations</span><span><b>{detail.messages.length}</b> messages loaded</span></div>{detail.conversations.map((conversation) => <section key={String(conversation.id)}><h3>Conversation <code>{String(conversation.heyreach_conversation_id || conversation.id)}</code></h3><small>Last activity {when(conversation.last_message_at)} · Score {display(conversation.score)} · Tier {display(conversation.tier)}</small></section>)}<div className="database-message-list">{detail.messages.map((message) => <article key={String(message.id)}><div><span className={`database-direction ${message.direction}`}>{String(message.direction)}</span><time>{when(message.sent_at)}</time></div><p>{display(message.body)}</p>{Boolean(message.raw_data) && <details><summary>Raw message</summary><pre className="database-json compact">{JSON.stringify(message.raw_data, null, 2)}</pre></details>}</article>)}</div>{detail.hasMoreMessages && <button className="database-load-more" onClick={onLoadOlder}>Load 100 older messages</button>}</div>;
+  const leadRaw = detail.lead.raw_data && typeof detail.lead.raw_data === "object" ? detail.lead.raw_data : {};
+  const senderName = senderNameFrom(...detail.messages.map((message) => message.raw_data), leadRaw);
+  return <div className="database-activity"><div className="database-activity-summary"><span><b>{detail.conversations.length}</b> conversations</span><span><b>{detail.messages.length}</b> messages loaded</span><span><b>{senderName}</b> sender</span></div>{detail.conversations.map((conversation) => <section key={String(conversation.id)}><h3>Conversation <code>{String(conversation.heyreach_conversation_id || conversation.id)}</code></h3><small>Sender {senderName} · Last activity {when(conversation.last_message_at)} · Score {display(conversation.score)} · Tier {display(conversation.tier)}</small></section>)}<div className="database-message-list">{detail.messages.map((message) => <article key={String(message.id)}><div><span className={`database-direction ${message.direction}`}>{String(message.direction)} · {message.direction === "outbound" ? senderNameFrom(message.raw_data, leadRaw) : display(detail.lead.name)}</span><time>{when(message.sent_at)}</time></div><p>{display(message.body)}</p>{Boolean(message.raw_data) && <details><summary>Raw message</summary><pre className="database-json compact">{JSON.stringify(message.raw_data, null, 2)}</pre></details>}</article>)}</div>{detail.hasMoreMessages && <button className="database-load-more" onClick={onLoadOlder}>Load 100 older messages</button>}</div>;
 }
 function DatabaseSkeleton() { return <div className="database-skeleton" aria-label="Loading database"><i /><i /><i /><i /><i /></div>; }

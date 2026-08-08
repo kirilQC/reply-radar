@@ -26,8 +26,9 @@ type Lead = {
   profileUrl?: string | null;
   photoUrl?: string | null;
   clientLogoUrl?: string | null;
+  senderName: string;
   lastMessageAt?: string | null;
-  messages: Array<{ id: string; body: string; direction: string; sentAt: string }>;
+  messages: Array<{ id: string; body: string; direction: string; sentAt: string; authorName: string }>;
 };
 type LayoutPrefs = {
   order: Array<"metrics" | "analytics" | "queue">;
@@ -365,6 +366,7 @@ export function InboxPage() {
     role: "",
     company: "",
     client: "",
+    senderName: "Unknown sender",
     clientTone: "var(--accent)",
     score: 0,
     tier: "nurture",
@@ -691,6 +693,7 @@ export function InboxPage() {
                     {current.score} · {current.tier}
                   </span>
                   <span className="tag-outline">{current.client}</span>
+                  <span className="tag-outline">Sender: {current.senderName}</span>
                   <span className="tag-outline">{current.replies} replies</span>
                 </div>
               </div>
@@ -702,7 +705,7 @@ export function InboxPage() {
                 </div>
               </div>
               <div className="thread">
-                {current.messages.length ? current.messages.map((message) => <div className={`bubble ${message.direction === "outbound" ? "outbound" : "inbound"}`} key={message.id}>{message.direction !== "outbound" && <span>{current.initials}</span>}<p>{message.body}</p><time>{new Date(message.sentAt).toLocaleString()}</time></div>) : <p className="empty-state">No conversation messages are available yet.</p>}
+                {current.messages.length ? current.messages.map((message) => <div className={`bubble ${message.direction === "outbound" ? "outbound" : "inbound"}`} key={message.id}>{message.direction !== "outbound" && <span>{current.initials}</span>}<small className="message-author">{message.authorName}</small><p>{message.body}</p><time>{new Date(message.sentAt).toLocaleString()}</time></div>) : <p className="empty-state">No conversation messages are available yet.</p>}
               </div>
               <div className="composer">
                 <div className="composer-top">
