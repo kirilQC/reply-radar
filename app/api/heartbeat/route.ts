@@ -13,7 +13,7 @@ export async function GET() {
   ];
   if (!url || !key) return NextResponse.json({ status: "not_configured", services, clients: [] });
   try {
-    const response = await fetch(`${url}/rest/v1/workspaces?select=name,slug,heyreach_api_key_ciphertext,last_webhook_received_at,last_successful_poll_at&order=created_at.asc`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" });
+    const response = await fetch(`${url}/rest/v1/rr_workspaces?select=name,slug,heyreach_api_key_ciphertext,last_webhook_received_at,last_successful_poll_at&order=created_at.asc`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" });
     if (!response.ok) throw new Error("Unable to read workspace heartbeat data");
     const rows = (await response.json()) as Row[];
     const clients = rows.map((row) => {

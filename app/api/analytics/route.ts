@@ -22,15 +22,15 @@ export async function GET(request: Request) {
   if (!url || !key) return NextResponse.json({ ok: false, status: "not_configured" }, { status: 503 });
   const requested = new URL(request.url).searchParams.get("workspaces")?.split(",").filter(Boolean) ?? [];
   try {
-    const workspaces = await supabase("workspaces?select=id,name,slug") ?? [];
+    const workspaces = await supabase("rr_workspaces?select=id,name,slug") ?? [];
     const selected = requested.length ? workspaces.filter((row) => requested.includes(String(row.slug))) : workspaces;
     const ids = selected.map((row) => String(row.id));
     if (!ids.length) return NextResponse.json({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });
     const idFilter = ids.join(",");
-    const conversations = await supabase(`conversations?select=id,workspace_id,score,tier,last_message_at,created_at&workspace_id=in.(${idFilter})`) ?? [];
+    const conversations = await supabase(`rr_conversations?select=id,workspace_id,score,tier,last_message_at,created_at&workspace_id=in.(${idFilter})`) ?? [];
     const conversationIdList = conversations.map((row) => String(row.id)).filter(Boolean);
     const messages = conversationIdList.length
-      ? (await supabase(`messages?select=conversation_id,direction,sent_at&conversation_id=in.(${conversationIdList.join(",")})`) ?? [])
+      ? (await supabase(`rr_messages?select=conversation_id,direction,sent_at&conversation_id=in.(${conversationIdList.join(",")})`) ?? [])
       : [];
     const now = Date.now();
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
