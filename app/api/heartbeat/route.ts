@@ -28,10 +28,11 @@ export async function GET() {
   };
 
   try {
-    const [workspaceResult, syncResult, eventResult] = await Promise.all([
+    const [workspaceResult, syncResult, eventResult, schemaResult] = await Promise.all([
       request("rr_workspaces?select=*&order=created_at.asc"),
       request("rr_sync_runs?select=*&order=started_at.desc&limit=25"),
       request("rr_webhook_events?select=*&order=received_at.desc&limit=25"),
+      request(""),
     ]);
     if (!workspaceResult.response.ok) throw new Error(`Workspace query failed (${workspaceResult.response.status})`);
     const rows = Array.isArray(workspaceResult.body) ? workspaceResult.body as Row[] : [];
@@ -66,13 +67,19 @@ export async function GET() {
       workspacesSeen: workerRun.records_seen ?? 0, recordsWritten: workerRun.records_written ?? 0, source: workerRun.source ?? null, runType: workerRun.run_type ?? null,
       error: workerRun.error_text ?? null, recentRuns: syncRuns.slice(0, 15), raw: workerRun,
     } : null;
+    const definitions = schemaResult.body && typeof schemaResult.body === "object" && "definitions" in schemaResult.body ? (schemaResult.body as { definitions?: Record<string, { properties?: Record<string, unknown>; required?: string[] }> }).definitions ?? {} : {};
+    const schemaTables = ["rr_workspaces", "rr_leads", "rr_conversations", "rr_messages", "rr_webhook_events", "rr_sync_runs"].reduce<Record<string, unknown>>((result, table) => {
+      result[table] = { columns: Object.keys(definitions[table]?.properties ?? {}), required: definitions[table]?.required ?? [] };
+      return result;
+    }, {});
     return NextResponse.json({ status: "live", services, clients, worker, checkedAt, thresholds, diagnostics: {
       runtime: { node: process.version, supabaseUrlConfigured: true, serviceRoleKeyConfigured: true, anthropicKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY), workerServiceUrlConfigured: Boolean(process.env.WORKER_SERVICE_URL), pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS || 120) },
       queries: {
         workspaces: { status: workspaceResult.response.status, ok: workspaceResult.response.ok, durationMs: workspaceResult.durationMs, rowCount: rows.length },
         syncRuns: { status: syncResult.response.status, ok: syncResult.response.ok, durationMs: syncResult.durationMs, rowCount: syncRuns.length, error: syncResult.response.ok ? null : syncResult.body },
         webhookEvents: { status: eventResult.response.status, ok: eventResult.response.ok, durationMs: eventResult.durationMs, rowCount: webhookEvents.length, error: eventResult.response.ok ? null : eventResult.body },
-      }, recentSyncRuns: syncRuns, recentWebhookEvents: webhookEvents,
+        schema: { status: schemaResult.response.status, ok: schemaResult.response.ok, durationMs: schemaResult.durationMs },
+      }, schemaTables, recentSyncRuns: syncRuns, recentWebhookEvents: webhookEvents,
     } });
   } catch (error) {
     return NextResponse.json({ status: "error", services, clients: [], checkedAt, thresholds, error: error instanceof Error ? error.message : "Heartbeat check failed" }, { status: 502 });
