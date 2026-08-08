@@ -6,6 +6,7 @@ alter table if exists rr_sync_runs add column if not exists finished_at timestam
 alter table if exists rr_sync_runs add column if not exists records_seen integer;
 alter table if exists rr_sync_runs add column if not exists records_written integer;
 alter table if exists rr_sync_runs add column if not exists error_text text;
+alter table if exists rr_sync_runs alter column workspace_id drop not null;
 
 update rr_sync_runs set source = coalesce(source, 'legacy') where source is null;
 update rr_sync_runs set started_at = coalesce(started_at, now()) where started_at is null;
