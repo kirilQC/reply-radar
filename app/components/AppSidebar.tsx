@@ -44,13 +44,13 @@ function SidebarIcon({ name }: { name: string }) {
 export default function AppSidebar() {
   const pathname = usePathname();
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
-  const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string; logoUrl?: string }>>([]);
-  const [profileParam] = useState(() =>
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("profile")
-      : null,
-  );
-  const [profileName, setProfileName] = useState("");
+  const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string; logoUrl?: string }>>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [collapsed, setCollapsed] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -61,14 +61,6 @@ export default function AppSidebar() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedClient(new URLSearchParams(window.location.search).get("client"));
   }, [pathname]);
-  useEffect(() => {
-    if (!profileParam) return;
-    try {
-      const saved = window.localStorage.getItem("reply-radar-profiles:v2");
-      const profile = saved ? (JSON.parse(saved) as Array<{ slug: string; name?: string }>).find((item) => item.slug === profileParam) : undefined;
-      setProfileName(profile?.name ?? "");
-    } catch { setProfileName(""); }
-  }, [profileParam]);
   useEffect(() => {
     const hydrate = async () => {
       try {
@@ -150,17 +142,6 @@ export default function AppSidebar() {
           </a>
         ))}
       </div>
-      {profileParam && (
-        <div className="sidebar-bottom">
-          <div className="user-chip">
-            <div className="user-avatar">AS</div>
-            <div>
-              <strong>{profileName}</strong>
-              <small>Agency owner</small>
-            </div>
-          </div>
-        </div>
-      )}
     </aside>
   );
 }

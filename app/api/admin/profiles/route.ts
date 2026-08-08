@@ -7,8 +7,15 @@ export async function GET() {
   const { url, key } = config();
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const h = headers(key);
-  const [profilesResponse, linksResponse, workspacesResponse] = await Promise.all([
-    fetch(`${url}/rest/v1/rr_profiles?select=id,name,avatar_url,created_at,updated_at&order=created_at.asc`, { headers: h, cache: "no-store" }),
+  let profilesResponse = await fetch(`${url}/rest/v1/rr_profiles?select=id,name,avatar_url,created_at,updated_at&order=created_at.asc`, { headers: h, cache: "no-store" });
+  // Existing projects may predate avatar_url. Keep profile/name management live
+  // while the additive migration is pending; photos can be enabled by running it.
+  let profilesIncludePhoto = profilesResponse.ok;
+  if (!profilesResponse.ok) {
+    profilesResponse = await fetch(`${url}/rest/v1/rr_profiles?select=id,name,created_at,updated_at&order=created_at.asc`, { headers: h, cache: "no-store" });
+    profilesIncludePhoto = false;
+  }
+  const [linksResponse, workspacesResponse] = await Promise.all([
     fetch(`${url}/rest/v1/rr_profile_workspaces?select=profile_id,workspace_id`, { headers: h, cache: "no-store" }),
     fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug`, { headers: h, cache: "no-store" }),
   ]);
@@ -17,7 +24,7 @@ export async function GET() {
   const workspaceById = new Map((Array.isArray(workspaces) ? workspaces : []).map((item: { id: string; name: string; slug: string }) => [item.id, item]));
   const byProfile = new Map<string, string[]>();
   for (const link of Array.isArray(links) ? links : []) { const workspace = workspaceById.get(link.workspace_id); if (workspace) byProfile.set(link.profile_id, [...(byProfile.get(link.profile_id) ?? []), workspace.name || workspace.slug]); }
-  return NextResponse.json({ ok: true, profiles: (Array.isArray(profiles) ? profiles : []).map((item: { id: string; name: string; avatar_url?: string; created_at: string }) => ({ slug: item.id, name: item.name, photo: item.avatar_url ?? null, role: "Teammate", clients: byProfile.get(item.id) ?? [], createdAt: item.created_at })) });
+  return NextResponse.json({ ok: true, photoColumnAvailable: profilesIncludePhoto, profiles: (Array.isArray(profiles) ? profiles : []).map((item: { id: string; name: string; avatar_url?: string; created_at: string }) => ({ slug: item.id, name: item.name, photo: item.avatar_url ?? null, role: "Teammate", clients: byProfile.get(item.id) ?? [], createdAt: item.created_at })) });
 }
 
 export async function POST(request: Request) {
@@ -29,7 +36,16 @@ export async function POST(request: Request) {
   // 22P02 UUID error and makes profile edits persist after a cache refresh.
   const id = typeof payload.id === "string" && /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(payload.id) ? payload.id : undefined;
   const profile = { ...(id ? { id } : {}), name: String(payload.name ?? ""), avatar_url: payload.photo || null };
-  const saved = await fetch(`${url}/rest/v1/rr_profiles${id ? `?id=eq.${encodeURIComponent(id)}` : ""}`, { method: id ? "PATCH" : "POST", headers: { ...headers(key), Prefer: id ? "return=representation" : "return=representation" }, body: JSON.stringify(profile) });
+  let photoColumnAvailable = true;
+  let saved = await fetch(`${url}/rest/v1/rr_profiles${id ? `?id=eq.${encodeURIComponent(id)}` : ""}`, { method: id ? "PATCH" : "POST", headers: { ...headers(key), Prefer: "return=representation" }, body: JSON.stringify(profile) });
+  if (!saved.ok) {
+    const errorText = await saved.clone().text();
+    if (/avatar_url|PGRST204|schema cache/i.test(errorText)) {
+      photoColumnAvailable = false;
+      const legacyProfile = { ...(id ? { id } : {}), name: profile.name };
+      saved = await fetch(`${url}/rest/v1/rr_profiles${id ? `?id=eq.${encodeURIComponent(id)}` : ""}`, { method: id ? "PATCH" : "POST", headers: { ...headers(key), Prefer: "return=representation" }, body: JSON.stringify(legacyProfile) });
+    }
+  }
   const rows = await saved.json().catch(() => []);
   if (!saved.ok) return NextResponse.json({ ok: false, error: JSON.stringify(rows) }, { status: saved.status });
   const savedProfile = Array.isArray(rows) ? rows[0] : rows;
@@ -44,7 +60,7 @@ export async function POST(request: Request) {
       if (!linkResponse.ok) return NextResponse.json({ ok: false, error: await linkResponse.text() }, { status: linkResponse.status });
     }
   }
-  return NextResponse.json({ ok: true, profile: savedProfile }, { status: 200 });
+  return NextResponse.json({ ok: true, profile: savedProfile, photoColumnAvailable }, { status: 200 });
 }
 
 export async function DELETE(request: Request) {
