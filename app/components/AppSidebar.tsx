@@ -141,7 +141,7 @@ export default function AppSidebar() {
       <div className="client-list">
         {clientsLoading && sidebarClients.length === 0 && <div className="sidebar-client-skeleton" aria-label="Loading clients"><i /><span /><i /><span /><i /><span /></div>}
         {[...sidebarClients].filter((client) => client.name).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((client) => (
-          <a className={`client-directory-item ${selectedClient === client.slug ? "selected" : ""}`} href={`/inbox?client=${client.slug}`} key={client.slug}>
+          <a className={`client-directory-item ${selectedClient === client.slug ? "selected" : ""}`} href={`/inbox?client=${client.slug}`} key={client.slug} title={client.name} aria-label={`Open ${client.name} inbox`}>
             <i style={client.logoUrl ? undefined : { background: client.tone }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : client.name[0]}</i>{client.name}
           </a>
         ))}

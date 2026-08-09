@@ -94,9 +94,6 @@ export default function DashboardHome() {
               <div>
                 <h2>Client workspaces</h2>
               </div>
-              <a href="/admin" className="text-button">
-                Manage clients →
-              </a>
             </div>
             <div className="dashboard-client-grid">
               {[...clients].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((client) => (
@@ -109,7 +106,6 @@ export default function DashboardHome() {
                     <i style={client.logoUrl ? undefined : { background: client.tone }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : client.name[0]}</i>
                   </div>
                   <h3>{client.name}</h3>
-                  <strong>Open workspace →</strong>
                 </a>
               ))}
             </div>
@@ -119,9 +115,6 @@ export default function DashboardHome() {
               <div>
                 <h2>Profiles</h2>
               </div>
-              <a href="/profiles" className="text-button">
-                Manage profiles →
-              </a>
             </div>
             <div className="dashboard-profile-grid">
               {profiles.map(({ name, description, tone, initials, slug, photo }) => (
@@ -145,7 +138,6 @@ export default function DashboardHome() {
               <div>
                 <h2>Performance overview</h2>
               </div>
-              <a href="/analytics" className="text-button">View full analytics →</a>
             </div>
             <div className="dashboard-chart-grid">
               <article className="dashboard-chart-card dashboard-line-card">
@@ -156,12 +148,9 @@ export default function DashboardHome() {
                 <div className="dashboard-chart-heading"><div><span>QUEUE MIX</span><strong>Live conversations</strong></div><small>Current</small></div>
                 <div className="queue-mix-visual"><div className="donut-chart"><div><strong>{analytics.queueMix ? analytics.queueMix.hot + analytics.queueMix.warm + analytics.queueMix.nurture : "—"}</strong><small>{analytics.queueMix ? "leads" : "no data"}</small></div></div><div className="queue-legend"><span><i className="legend-hot"/>Hot <b>{analytics.queueMix?.hot ?? "—"}</b></span><span><i className="legend-warm"/>Warm <b>{analytics.queueMix?.warm ?? "—"}</b></span><span><i className="legend-nurture"/>Nurture <b>{analytics.queueMix?.nurture ?? "—"}</b></span></div></div>
               </article>
-              <article className="dashboard-chart-card client-performance-card">
-                <div className="dashboard-chart-heading"><div><span>CLIENT PERFORMANCE</span><strong>Positive reply rate</strong></div><small>30 days</small></div>
-                {[...clients].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((client) => {
-                  const value = "—";
-                  return <div className="client-performance-row" key={client.slug}><div><span>{client.name}</span><b>{value}</b></div><div className="performance-track"><i style={{ width: value === "—" ? "0%" : value, background: client.tone }} /></div></div>;
-                })}
+              <article className="dashboard-chart-card dashboard-snapshot-card">
+                <div className="dashboard-chart-heading"><div><span>WORKSPACE SNAPSHOT</span><strong>At a glance</strong></div><small>Live</small></div>
+                <div className="dashboard-snapshot-list"><div><span>Client workspaces</span><b>{clients.length}</b></div><div><span>Profiles</span><b>{profiles.length}</b></div><div><span>Total replies stored</span><b>{analytics.totalReplies ?? "—"}</b></div></div>
               </article>
             </div>
           </section>

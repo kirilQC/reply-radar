@@ -157,6 +157,7 @@ export function InboxPage() {
   const [inboxLoading, setInboxLoading] = useState(true);
   const [inboxError, setInboxError] = useState("");
   const [queryString, setQueryString] = useState("");
+  const [excludedClients, setExcludedClients] = useState<string[]>([]);
   const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string; tone?: string; logoUrl?: string; website?: string }>>([]);
   const [liveProfiles, setLiveProfiles] = useState<Array<{ slug: string; name: string; clients: string[] }>>([]);
   const paneGridRef = useRef<HTMLDivElement>(null);
@@ -405,9 +406,10 @@ export function InboxPage() {
               .toLowerCase()
               .includes(search.toLowerCase())) &&
           (!assignedClients || assignedClients.includes(lead.client)) &&
+          !excludedClients.includes(lead.client) &&
           (filter === "All follow-ups" || lead.tier === filter.toLowerCase()),
       ).sort((a, b) => sort === "newest" ? new Date(String(b.lastMessageAt)).getTime() - new Date(String(a.lastMessageAt)).getTime() : sort === "oldest" ? new Date(String(a.lastMessageAt)).getTime() - new Date(String(b.lastMessageAt)).getTime() : sort === "name" ? a.name.localeCompare(b.name) : b.score - a.score),
-    [leads, search, filter, sort, assignedClients],
+    [leads, search, filter, sort, assignedClients, excludedClients],
   );
   const current: Lead = filtered[selected] ?? {
     id: "empty",
@@ -604,7 +606,10 @@ export function InboxPage() {
                   : <><span className="inbox-heading-logo" style={clientLogo ? undefined : { background: clientTone }}>{clientLogo ? <img src={clientLogo} alt={`${clientName} logo`} /> : clientName[0]}</span>{clientName}</>
                   : <>{!profileName && <span className="inbox-heading-logo general-heading-logo"><img src="/qc-growth-logo.png" alt="QC Growth logo" /></span>}{profileName ? `${greeting}, ${profileName}` : "General inbox"}</>}
               </h1>
-              {!clientParam && <div className="tracked-clients">{trackedClients.map((client) => <span key={client}>{client}</span>)}</div>}
+              {!clientParam && <div className="tracked-clients" aria-label="Temporarily hide client replies">{trackedClients.map((client) => {
+                const excluded = excludedClients.includes(client);
+                return <button key={client} className={excluded ? "excluded" : ""} aria-pressed={excluded} title={excluded ? `Show ${client} replies` : `Hide ${client} replies until refresh`} onClick={() => { setExcludedClients((current) => current.includes(client) ? current.filter((name) => name !== client) : [...current, client]); setSelected(0); }}>{client}</button>;
+              })}</div>}
             </div>
           </div>
           <div className="inbox-layout">

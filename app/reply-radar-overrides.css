@@ -68,3 +68,12 @@ html:not(.hydrated) body{visibility:hidden}
 .inbox-operational-table .client-cell{justify-content:center}
 .inbox-operational-table .inbox-meta-cell{display:flex;flex-direction:column;align-items:center;justify-content:center}
 .inbox-operational-table .score-cell{align-items:center;justify-content:center}
+
+/* Collapsed navigation keeps every client logo available as an inbox shortcut. */
+.sidebar-collapsed .client-list{display:grid;gap:5px;margin-top:17px}.sidebar-collapsed .client-directory-item{justify-content:center;padding:5px 0;font-size:0}.sidebar-collapsed .client-directory-item i{width:34px;height:34px;border-radius:9px}.sidebar-collapsed .sidebar-client-skeleton{grid-template-columns:1fr;justify-items:center;padding:5px 0}.sidebar-collapsed .sidebar-client-skeleton span{display:none}
+
+/* Compact, temporary client exclusions in the general inbox. */
+.tracked-clients{display:flex;max-width:min(760px,80vw);max-height:62px;flex-wrap:wrap;gap:4px;margin-top:9px;overflow:auto}.tracked-clients button{height:24px;padding:0 8px;border:1px solid var(--border);border-radius:999px;background:var(--panel);color:var(--muted);font-size:9px;white-space:nowrap}.tracked-clients button:hover{border-color:var(--coral);color:var(--text)}.tracked-clients button.excluded{border-color:#d85765;background:#421d24;color:#ff9aa5;box-shadow:0 0 0 1px #d8576544}
+
+/* Heartbeat failures use red so broken checks are visible immediately. */
+.heartbeat-kid-grid>div.bad{border-color:#71323b;background:#25151a}.heartbeat-kid-grid>div.bad b{background:#4a2028;color:#ff7180}.heartbeat-kid-grid>div.ok b{background:color-mix(in srgb,var(--green) 20%,transparent);color:var(--green)}
