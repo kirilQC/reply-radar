@@ -79,7 +79,7 @@ async function syncIdentityRollup(config: SupabaseConfig, profileUrl: string) {
     await db(config, `rr_leads?id=eq.${encodeURIComponent(text(row.id))}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ raw_data: { ...raw, reply_radar: { ...metadata, attributions: deduped, rollup } } }),
+      body: JSON.stringify({ raw_data: { ...raw, client_names: rollup.client_names, campaign_names: rollup.campaign_names, sender_names: rollup.sender_names, conversation_count: rollup.conversation_count, reply_radar: { ...metadata, attributions: deduped, rollup } } }),
     });
   }
 }
