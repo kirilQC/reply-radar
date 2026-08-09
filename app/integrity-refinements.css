@@ -1,0 +1,233 @@
+/* Lead record readability and complete conversation history */
+.database-overview > section > h3 {
+  font-size: 18px !important;
+  letter-spacing: -0.02em;
+  margin-bottom: 24px !important;
+}
+.database-field-grid > div {
+  gap: 7px !important;
+}
+.database-field-label {
+  display: block;
+  color: var(--text) !important;
+  font-size: 12px !important;
+  font-weight: 760 !important;
+  letter-spacing: 0.02em !important;
+  text-transform: none !important;
+}
+.database-field-value {
+  display: block;
+  color: var(--muted) !important;
+  font-size: 12px !important;
+  font-weight: 430 !important;
+  line-height: 1.55;
+}
+.database-field-grid a.database-field-value {
+  color: var(--accent) !important;
+}
+.database-about small {
+  font-size: 12px !important;
+  font-weight: 760 !important;
+  color: var(--text) !important;
+  letter-spacing: 0.02em !important;
+  text-transform: none !important;
+}
+.database-about p {
+  font-weight: 430 !important;
+  color: #c8ccd7 !important;
+}
+.database-company-heading img {
+  width: 96px !important;
+  height: 96px !important;
+  border-radius: 16px !important;
+  padding: 7px !important;
+}
+.database-company-heading {
+  gap: 20px !important;
+}
+.database-conversation-history {
+  padding: 0 !important;
+  overflow: hidden;
+}
+.database-conversation-history > header {
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--border);
+}
+.database-conversation-history > header h3 {
+  margin: 0 0 7px !important;
+  font-size: 17px !important;
+}
+.database-conversation-history > header small {
+  font-size: 11px !important;
+}
+.database-conversation-history .database-message-list {
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+.database-conversation-history .database-message-list article {
+  margin: 0 !important;
+}
+
+/* Inbox starring, pagination, and selected conversation clarity */
+.lead-main {
+  position: relative;
+}
+.lead-star {
+  display: inline-grid !important;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0 !important;
+  color: #555d6c !important;
+  font-size: 14px !important;
+  line-height: 1 !important;
+  overflow: visible !important;
+}
+.lead-star:hover,
+.lead-star.is-starred,
+.detail-star.is-starred {
+  color: #f0ce00 !important;
+}
+.detail-context {
+  justify-content: flex-end;
+  min-height: 22px;
+}
+.detail-star {
+  background: transparent !important;
+  color: #596170 !important;
+  font-size: 20px;
+  line-height: 1;
+}
+.inbox-see-more {
+  width: 100%;
+  min-height: 44px;
+  background: transparent;
+  border-top: 1px solid var(--border);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 11px;
+}
+.inbox-see-more:hover {
+  background: var(--panel-2);
+}
+.detail-profile-links {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.lead-database-link {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  font-size: 10px !important;
+}
+.detail-card .detail-person {
+  align-items: flex-start;
+}
+.detail-card .detail-person h3 {
+  font-size: 19px !important;
+}
+.detail-card .detail-person p {
+  font-size: 11px !important;
+  line-height: 1.45;
+}
+.detail-card .large-avatar {
+  width: 72px;
+  height: 72px;
+}
+.detail-card .enriched-company-logo {
+  width: 68px;
+  height: 68px;
+}
+.bubble .message-author {
+  display: block;
+  font-size: 10px;
+  font-weight: 760;
+  margin-bottom: 5px;
+}
+.bubble.inbound > span {
+  overflow: hidden;
+}
+.bubble.inbound > span img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.bubble.latest-inbound {
+  border: 1px solid var(--accent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 8px 24px #0003;
+}
+.bubble.latest-inbound:after {
+  content: "LATEST REPLY";
+  position: absolute;
+  right: 8px;
+  top: 7px;
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+}
+
+/* System health: client checks first, then deeper diagnostics. */
+.health-shell .admin-content {
+  display: flex;
+  flex-direction: column;
+}
+.health-shell .admin-heading {
+  order: 0;
+}
+.health-shell .heartbeat-summary {
+  order: 1;
+}
+.health-shell .heartbeat-explainer {
+  order: 2;
+}
+.health-shell .client-heartbeat-panel {
+  order: 3;
+}
+.health-shell .worker-heartbeat-panel {
+  order: 4;
+}
+.health-shell .ai-ark-health {
+  order: 5;
+}
+.health-shell .heartbeat-last-checked {
+  order: 6;
+}
+.health-actions {
+  gap: 22px !important;
+}
+.heartbeat-service {
+  min-height: 82px;
+  justify-content: flex-start !important;
+}
+.heartbeat-service strong {
+  font-size: 14px !important;
+}
+.heartbeat-service.service-ok {
+  border-color: color-mix(in srgb, var(--green) 45%, var(--border)) !important;
+  background: color-mix(in srgb, var(--green) 7%, var(--panel)) !important;
+}
+.heartbeat-service.service-down {
+  border-color: #843943 !important;
+  background: #2a151a !important;
+}
+.heartbeat-service.service-down .status-dot {
+  background: #ef5264 !important;
+  box-shadow: 0 0 12px #ef526488 !important;
+}
+.client-heartbeat-panel > .panel-heading h2 {
+  font-size: 22px !important;
+}
+.client-heartbeat-panel,
+.worker-heartbeat-panel,
+.ai-ark-health {
+  margin-top: 22px !important;
+}

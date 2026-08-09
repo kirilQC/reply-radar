@@ -3,6 +3,7 @@ import "./globals.css";
 import "./dashboard.css";
 import "./inbox-analytics.css";
 import "./reply-radar-overrides.css";
+import "./integrity-refinements.css";
 import PreferenceBootstrap from "./components/PreferenceBootstrap";
 
 export const metadata: Metadata = {

@@ -5,7 +5,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardHome from "./components/DashboardHome";
 import AppSidebar from "./components/AppSidebar";
-import AppearancePanel, { type AppearancePrefs } from "./components/AppearancePanel";
+import AppearancePanel, {
+  type AppearancePrefs,
+} from "./components/AppearancePanel";
 
 type Lead = {
   id: string;
@@ -33,11 +35,18 @@ type Lead = {
   campaignName?: string | null;
   headline?: string | null;
   companyPhotoUrl?: string | null;
+  companyWebsite?: string | null;
   industry?: unknown;
   enrichedLocation?: unknown;
   lastMessageAt?: string | null;
   latestReplyAt?: string | null;
-  messages: Array<{ id: string; body: string; direction: string; sentAt: string; authorName: string }>;
+  messages: Array<{
+    id: string;
+    body: string;
+    direction: string;
+    sentAt: string;
+    authorName: string;
+  }>;
 };
 type LayoutPrefs = {
   order: Array<"metrics" | "analytics" | "queue">;
@@ -48,8 +57,14 @@ type LayoutPrefs = {
   metrics: string[];
   graphs: GraphConfig[];
   paneSplit: number;
+  starredLeadIds: string[];
 };
-type GraphConfig = { id: string; title: string; metric: string; kind: "line" | "bars" | "donut" };
+type GraphConfig = {
+  id: string;
+  title: string;
+  metric: string;
+  kind: "line" | "bars" | "donut";
+};
 type AnalyticsSnapshot = {
   status: "live" | "no_data" | "not_configured" | "error";
   totalReplies: number;
@@ -66,10 +81,21 @@ const defaultLayout: LayoutPrefs = {
   compact: false,
   metrics: ["needsAction", "hotConversations", "avgReplyTime", "pipelineSaved"],
   graphs: [
-    { id: "reply-volume", title: "Reply volume", metric: "Replies · 7 days", kind: "line" },
-    { id: "queue-mix", title: "Queue mix", metric: "Lead status", kind: "donut" },
+    {
+      id: "reply-volume",
+      title: "Reply volume",
+      metric: "Replies · 7 days",
+      kind: "line",
+    },
+    {
+      id: "queue-mix",
+      title: "Queue mix",
+      metric: "Lead status",
+      kind: "donut",
+    },
   ],
   paneSplit: 62,
+  starredLeadIds: [],
 };
 const defaultAppearance: AppearancePrefs = {
   mode: "midnight",
@@ -79,26 +105,114 @@ const defaultAppearance: AppearancePrefs = {
   accent: "#8b7cff",
   timeZone: "America/New_York",
 };
-const timeZoneSuffix: Record<string, string> = { "America/New_York": "EST", "America/Chicago": "CST", "America/Denver": "MST", "America/Los_Angeles": "PST", "Pacific/Honolulu": "HST", UTC: "UTC" };
-const formatDashboardDateParts = (value: string | null | undefined, timeZone: string) => {
+const timeZoneSuffix: Record<string, string> = {
+  "America/New_York": "EST",
+  "America/Chicago": "CST",
+  "America/Denver": "MST",
+  "America/Los_Angeles": "PST",
+  "Pacific/Honolulu": "HST",
+  UTC: "UTC",
+};
+const formatDashboardDateParts = (
+  value: string | null | undefined,
+  timeZone: string,
+) => {
   if (!value) return { date: "—", time: "" };
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return { date: "—", time: "" };
-  const dateText = new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric", year: "numeric" }).format(date);
-  const timeText = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit", hour12: true }).format(date);
-  const fallbackSuffix = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value ?? timeZone;
-  return { date: dateText, time: `${timeText} ${timeZoneSuffix[timeZone] ?? fallbackSuffix}` };
+  const dateText = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+  const timeText = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+  const fallbackSuffix =
+    new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" })
+      .formatToParts(date)
+      .find((part) => part.type === "timeZoneName")?.value ?? timeZone;
+  return {
+    date: dateText,
+    time: `${timeText} ${timeZoneSuffix[timeZone] ?? fallbackSuffix}`,
+  };
 };
-const formatDashboardDate = (value: string | null | undefined, timeZone: string) => { const parts = formatDashboardDateParts(value, timeZone); return [parts.date, parts.time].filter(Boolean).join(", "); };
+const formatDashboardDate = (
+  value: string | null | undefined,
+  timeZone: string,
+) => {
+  const parts = formatDashboardDateParts(value, timeZone);
+  return [parts.date, parts.time].filter(Boolean).join(", ");
+};
 const metricCatalog = [
-  { id: "needsAction", label: "Needs action", value: "—", delta: "", tone: "coral", sub: "Awaiting synced data" },
-  { id: "hotConversations", label: "Hot conversations", value: "—", delta: "", tone: "purple", sub: "Awaiting synced data" },
-  { id: "avgReplyTime", label: "Avg. reply time", value: "—", delta: "", tone: "green", sub: "Awaiting synced data" },
-  { id: "pipelineSaved", label: "Follow-ups saved", value: "—", delta: "", tone: "amber", sub: "Awaiting synced data" },
-  { id: "replyCount7d", label: "Replies · 7 days", value: "—", delta: "", tone: "purple", sub: "Awaiting synced data" },
-  { id: "totalReplies", label: "Total replies", value: "—", delta: "", tone: "green", sub: "Awaiting synced data" },
-  { id: "positiveRate", label: "Positive reply rate", value: "—", delta: "", tone: "green", sub: "Awaiting synced data" },
-  { id: "avgRepliesCampaign", label: "Replies / campaign", value: "—", delta: "", tone: "coral", sub: "Awaiting synced data" },
+  {
+    id: "needsAction",
+    label: "Needs action",
+    value: "—",
+    delta: "",
+    tone: "coral",
+    sub: "Awaiting synced data",
+  },
+  {
+    id: "hotConversations",
+    label: "Hot conversations",
+    value: "—",
+    delta: "",
+    tone: "purple",
+    sub: "Awaiting synced data",
+  },
+  {
+    id: "avgReplyTime",
+    label: "Avg. reply time",
+    value: "—",
+    delta: "",
+    tone: "green",
+    sub: "Awaiting synced data",
+  },
+  {
+    id: "pipelineSaved",
+    label: "Follow-ups saved",
+    value: "—",
+    delta: "",
+    tone: "amber",
+    sub: "Awaiting synced data",
+  },
+  {
+    id: "replyCount7d",
+    label: "Replies · 7 days",
+    value: "—",
+    delta: "",
+    tone: "purple",
+    sub: "Awaiting synced data",
+  },
+  {
+    id: "totalReplies",
+    label: "Total replies",
+    value: "—",
+    delta: "",
+    tone: "green",
+    sub: "Awaiting synced data",
+  },
+  {
+    id: "positiveRate",
+    label: "Positive reply rate",
+    value: "—",
+    delta: "",
+    tone: "green",
+    sub: "Awaiting synced data",
+  },
+  {
+    id: "avgRepliesCampaign",
+    label: "Replies / campaign",
+    value: "—",
+    delta: "",
+    tone: "coral",
+    sub: "Awaiting synced data",
+  },
 ];
 const nav = [
   ["inbox", "General inbox", "⌘1"],
@@ -158,8 +272,19 @@ export function InboxPage() {
   const [inboxError, setInboxError] = useState("");
   const [queryString, setQueryString] = useState("");
   const [excludedClients, setExcludedClients] = useState<string[]>([]);
-  const [workspaceDirectory, setWorkspaceDirectory] = useState<Array<{ name: string; slug: string; tone?: string; logoUrl?: string; website?: string }>>([]);
-  const [liveProfiles, setLiveProfiles] = useState<Array<{ slug: string; name: string; clients: string[] }>>([]);
+  const [visibleLeadCount, setVisibleLeadCount] = useState(10);
+  const [workspaceDirectory, setWorkspaceDirectory] = useState<
+    Array<{
+      name: string;
+      slug: string;
+      tone?: string;
+      logoUrl?: string;
+      website?: string;
+    }>
+  >([]);
+  const [liveProfiles, setLiveProfiles] = useState<
+    Array<{ slug: string; name: string; clients: string[] }>
+  >([]);
   const paneGridRef = useRef<HTMLDivElement>(null);
   const paneSplitRef = useRef(defaultLayout.paneSplit);
   useEffect(() => {
@@ -167,7 +292,9 @@ export function InboxPage() {
     const root = document.documentElement;
     root.style.setProperty("--reply-radar-zoom", String(scale));
   }, [appearance.zoom]);
-  useEffect(() => { paneSplitRef.current = layoutPrefs.paneSplit; }, [layoutPrefs.paneSplit]);
+  useEffect(() => {
+    paneSplitRef.current = layoutPrefs.paneSplit;
+  }, [layoutPrefs.paneSplit]);
   useEffect(() => {
     // URL search params are client-only state on this static route.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -175,66 +302,123 @@ export function InboxPage() {
     const refreshWorkspaces = () => {
       try {
         const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
-        if (saved) setWorkspaceDirectory((JSON.parse(saved) as Array<{ name: string; slug: string; tone?: string; logoUrl?: string; website?: string }>).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })));
-        const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
+        if (saved)
+          setWorkspaceDirectory(
+            (
+              JSON.parse(saved) as Array<{
+                name: string;
+                slug: string;
+                tone?: string;
+                logoUrl?: string;
+                website?: string;
+              }>
+            ).sort((a, b) =>
+              a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+            ),
+          );
+        const savedProfiles = window.localStorage.getItem(
+          "reply-radar-profiles:v2",
+        );
         if (savedProfiles) setLiveProfiles(JSON.parse(savedProfiles));
-      } catch { /* keep the empty live state */ }
+      } catch {
+        /* keep the empty live state */
+      }
       void fetch("/api/admin/workspaces", { cache: "no-store" })
-        .then((response) => response.ok ? response.json() : null)
+        .then((response) => (response.ok ? response.json() : null))
         .then((payload) => {
           if (!Array.isArray(payload?.workspaces)) return;
-          setWorkspaceDirectory(payload.workspaces.map((item: Record<string, unknown>) => ({
-            name: String(item.name ?? ""),
-            slug: String(item.slug ?? ""),
-            tone: String(item.accent_color ?? "var(--accent)"),
-            logoUrl: String(item.logo_url ?? ""),
-            website: String(item.website_url ?? ""),
-          })).sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })));
+          setWorkspaceDirectory(
+            payload.workspaces
+              .map((item: Record<string, unknown>) => ({
+                name: String(item.name ?? ""),
+                slug: String(item.slug ?? ""),
+                tone: String(item.accent_color ?? "var(--accent)"),
+                logoUrl: String(item.logo_url ?? ""),
+                website: String(item.website_url ?? ""),
+              }))
+              .sort((a: { name: string }, b: { name: string }) =>
+                a.name.localeCompare(b.name, undefined, {
+                  sensitivity: "base",
+                }),
+              ),
+          );
         })
         .catch(() => null);
       void fetch("/api/admin/profiles", { cache: "no-store" })
-        .then((response) => response.ok ? response.json() : null)
-        .then((payload) => { if (Array.isArray(payload?.profiles)) setLiveProfiles(payload.profiles); })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          if (Array.isArray(payload?.profiles))
+            setLiveProfiles(payload.profiles);
+        })
         .catch(() => null);
     };
     refreshWorkspaces();
-    window.addEventListener("reply-radar-workspaces-changed", refreshWorkspaces);
+    window.addEventListener(
+      "reply-radar-workspaces-changed",
+      refreshWorkspaces,
+    );
     window.addEventListener("reply-radar-profiles-changed", refreshWorkspaces);
     window.addEventListener("storage", refreshWorkspaces);
-    return () => { window.removeEventListener("reply-radar-workspaces-changed", refreshWorkspaces); window.removeEventListener("reply-radar-profiles-changed", refreshWorkspaces); window.removeEventListener("storage", refreshWorkspaces); };
+    return () => {
+      window.removeEventListener(
+        "reply-radar-workspaces-changed",
+        refreshWorkspaces,
+      );
+      window.removeEventListener(
+        "reply-radar-profiles-changed",
+        refreshWorkspaces,
+      );
+      window.removeEventListener("storage", refreshWorkspaces);
+    };
   }, []);
   useEffect(() => {
-    if (new URLSearchParams(queryString).get("appearance") === "1") setAppearanceOpen(true);
+    if (new URLSearchParams(queryString).get("appearance") === "1")
+      setAppearanceOpen(true);
   }, [queryString]);
   const query = new URLSearchParams(queryString);
   const clientParam = query.get("client");
   const profileParam = query.get("profile");
-  const liveProfile = liveProfiles.find((profile) => profile.slug === profileParam);
+  const liveProfile = liveProfiles.find(
+    (profile) => profile.slug === profileParam,
+  );
   const clientLabel = (name: string) => {
     const workspace = workspaceDirectory.find((item) => item.name === name);
     return workspace?.name || name;
   };
   const assignedClients = liveProfile
-      ? liveProfile.clients.map(clientLabel)
-        : clientParam
-          ? [workspaceDirectory.find((item) => item.slug === clientParam)?.name || clientParam]
-          : null;
+    ? liveProfile.clients.map(clientLabel)
+    : clientParam
+      ? [
+          workspaceDirectory.find((item) => item.slug === clientParam)?.name ||
+            clientParam,
+        ]
+      : null;
   const profileName = liveProfile?.name ?? null;
-  const allWorkspaceNames = workspaceDirectory.map((item) => item.name).filter(Boolean);
+  const allWorkspaceNames = workspaceDirectory
+    .map((item) => item.name)
+    .filter(Boolean);
   const trackedClients = assignedClients ?? allWorkspaceNames;
-  const trackedWorkspaceSlugs = trackedClients.map((client) => workspaceDirectory.find((item) => item.name === client)?.slug || client.toLowerCase());
+  const trackedWorkspaceSlugs = trackedClients.map(
+    (client) =>
+      workspaceDirectory.find((item) => item.name === client)?.slug ||
+      client.toLowerCase(),
+  );
   const greeting =
     new Date().getHours() < 12
       ? "Good morning"
       : new Date().getHours() < 18
         ? "Good afternoon"
         : "Good evening";
-  const activeWorkspace = clientParam ? workspaceDirectory.find((item) => item.slug === clientParam) : undefined;
+  const activeWorkspace = clientParam
+    ? workspaceDirectory.find((item) => item.slug === clientParam)
+    : undefined;
   const clientName = activeWorkspace?.name || clientParam || "All clients";
   const clientTone = activeWorkspace?.tone || "var(--accent)";
   const clientLogo = activeWorkspace?.logoUrl || "";
   const clientWebsite = activeWorkspace?.website?.trim()
-    ? (/^https?:\/\//i.test(activeWorkspace.website.trim()) ? activeWorkspace.website.trim() : `https://${activeWorkspace.website.trim()}`)
+    ? /^https?:\/\//i.test(activeWorkspace.website.trim())
+      ? activeWorkspace.website.trim()
+      : `https://${activeWorkspace.website.trim()}`
     : "";
   useEffect(() => {
     if (!clientParam) return;
@@ -246,21 +430,38 @@ export function InboxPage() {
       else root.style.removeProperty("--accent");
     };
   }, [clientParam, clientTone]);
-  const preferenceScope = profileParam || "general";
+  const preferenceScope = profileParam
+    ? `profile:${profileParam}`
+    : clientParam
+      ? `client:${clientParam}`
+      : "general";
   const preferenceKey = `reply-radar-prefs:${preferenceScope}`;
   useEffect(() => {
-      const timer = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       try {
         const saved = window.localStorage.getItem(preferenceKey);
-        const fallback = window.localStorage.getItem("reply-radar-prefs:general");
+        const fallback = window.localStorage.getItem(
+          "reply-radar-prefs:general",
+        );
         const cookieValue = document.cookie
           .split("; ")
           .find((item) => item.startsWith("reply-radar-preferences="))
           ?.split("=")[1];
-        const parsed = JSON.parse(saved || fallback || (cookieValue ? decodeURIComponent(cookieValue) : "null"));
+        const parsed = JSON.parse(
+          saved ||
+            fallback ||
+            (cookieValue ? decodeURIComponent(cookieValue) : "null"),
+        );
         if (parsed?.layout) {
           const nextLayout = { ...defaultLayout, ...parsed.layout };
-          nextLayout.order = Array.from(new Set([...nextLayout.order, "metrics", "analytics", "queue"])).filter((item) => ["metrics", "analytics", "queue"].includes(item)) as LayoutPrefs["order"];
+          nextLayout.starredLeadIds = Array.isArray(nextLayout.starredLeadIds)
+            ? nextLayout.starredLeadIds.map(String)
+            : [];
+          nextLayout.order = Array.from(
+            new Set([...nextLayout.order, "metrics", "analytics", "queue"]),
+          ).filter((item) =>
+            ["metrics", "analytics", "queue"].includes(item),
+          ) as LayoutPrefs["order"];
           setLayoutPrefs(nextLayout);
         }
         if (parsed?.appearance) {
@@ -276,40 +477,121 @@ export function InboxPage() {
   }, [preferenceKey]);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/analytics?workspaces=${trackedWorkspaceSlugs.join(",")}`, { cache: "no-store" })
+    fetch(`/api/preferences?scope=${encodeURIComponent(preferenceScope)}`, {
+      cache: "no-store",
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (cancelled || !payload?.preferences) return;
+        if (payload.preferences.layout)
+          setLayoutPrefs((current) => ({
+            ...current,
+            ...payload.preferences.layout,
+            starredLeadIds: Array.isArray(
+              payload.preferences.layout.starredLeadIds,
+            )
+              ? payload.preferences.layout.starredLeadIds.map(String)
+              : current.starredLeadIds,
+          }));
+        if (payload.preferences.appearance)
+          setAppearance((current) => ({
+            ...current,
+            ...payload.preferences.appearance,
+          }));
+      })
+      .catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, [preferenceScope]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/analytics?workspaces=${trackedWorkspaceSlugs.join(",")}`, {
+      cache: "no-store",
+    })
       .then((response) => response.json())
-      .then((payload: AnalyticsSnapshot) => { if (!cancelled) setAnalytics(payload); })
-      .catch(() => { if (!cancelled) setAnalytics({ status: "error", totalReplies: 0, replies7d: 0, trend: [], queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] }); });
-    return () => { cancelled = true; };
+      .then((payload: AnalyticsSnapshot) => {
+        if (!cancelled) setAnalytics(payload);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setAnalytics({
+            status: "error",
+            totalReplies: 0,
+            replies7d: 0,
+            trend: [],
+            queueMix: { hot: 0, warm: 0, nurture: 0 },
+            clientLoad: [],
+          });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [trackedClients.join(",")]);
   useEffect(() => {
     let cancelled = false;
     setInboxLoading(true);
     setInboxError("");
-    fetch(`/api/inbox?workspaces=${encodeURIComponent(trackedWorkspaceSlugs.join(","))}`, { cache: "no-store" })
-      .then(async (response) => ({ response, payload: await response.json().catch(() => ({})) }))
+    fetch(
+      `/api/inbox?workspaces=${encodeURIComponent(trackedWorkspaceSlugs.join(","))}`,
+      { cache: "no-store" },
+    )
+      .then(async (response) => ({
+        response,
+        payload: await response.json().catch(() => ({})),
+      }))
       .then(({ response, payload }) => {
         if (cancelled) return;
-        if (!response.ok) throw new Error(String(payload.error ?? "Inbox could not be loaded."));
-        setLeads(Array.isArray(payload.conversations) ? payload.conversations : []);
+        if (!response.ok)
+          throw new Error(
+            String(payload.error ?? "Inbox could not be loaded."),
+          );
+        setLeads(
+          Array.isArray(payload.conversations) ? payload.conversations : [],
+        );
       })
-      .catch((error) => { if (!cancelled) { setLeads([]); setInboxError(error instanceof Error ? error.message : "Inbox could not be loaded."); } })
-      .finally(() => { if (!cancelled) setInboxLoading(false); });
-    return () => { cancelled = true; };
+      .catch((error) => {
+        if (!cancelled) {
+          setLeads([]);
+          setInboxError(
+            error instanceof Error
+              ? error.message
+              : "Inbox could not be loaded.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setInboxLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [trackedWorkspaceSlugs.join(",")]);
-  const savePreferences = (nextLayout = layoutPrefs, nextAppearance = appearance) => {
+  const savePreferences = (
+    nextLayout = layoutPrefs,
+    nextAppearance = appearance,
+  ) => {
     const payload = { layout: nextLayout, appearance: nextAppearance };
     window.localStorage.setItem(preferenceKey, JSON.stringify(payload));
     // Also retain the device-level fallback for the general inbox.
-    window.localStorage.setItem("reply-radar-prefs:general", JSON.stringify(payload));
+    window.localStorage.setItem(
+      "reply-radar-prefs:general",
+      JSON.stringify(payload),
+    );
     // Apply the same settings to the document immediately so they remain global
     // while navigating between routes (not just on the inbox's local <main>).
     const root = document.documentElement;
     root.style.setProperty("--accent", nextAppearance.accent);
     root.style.setProperty("--bg", nextAppearance.background);
     root.style.setProperty("--font", nextAppearance.font);
-    root.style.setProperty("--reply-radar-zoom", `${nextAppearance.zoom / 100}`);
-    document.body.classList.toggle("light-mode", nextAppearance.mode === "light");
+    root.style.setProperty(
+      "--reply-radar-zoom",
+      `${nextAppearance.zoom / 100}`,
+    );
+    document.body.classList.toggle(
+      "light-mode",
+      nextAppearance.mode === "light",
+    );
     void fetch("/api/preferences", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -399,18 +681,57 @@ export function InboxPage() {
   }, [leads]);
   const filtered = useMemo(
     () =>
-      leads.filter(
-        (lead) =>
-          (!search ||
-            `${lead.name} ${lead.company} ${lead.client}`
-              .toLowerCase()
-              .includes(search.toLowerCase())) &&
-          (!assignedClients || assignedClients.includes(lead.client)) &&
-          !excludedClients.includes(lead.client) &&
-          (filter === "All follow-ups" || lead.tier === filter.toLowerCase()),
-      ).sort((a, b) => sort === "newest" ? new Date(String(b.lastMessageAt)).getTime() - new Date(String(a.lastMessageAt)).getTime() : sort === "oldest" ? new Date(String(a.lastMessageAt)).getTime() - new Date(String(b.lastMessageAt)).getTime() : sort === "name" ? a.name.localeCompare(b.name) : b.score - a.score),
-    [leads, search, filter, sort, assignedClients, excludedClients],
+      leads
+        .filter(
+          (lead) =>
+            (!search ||
+              `${lead.name} ${lead.company} ${lead.client}`
+                .toLowerCase()
+                .includes(search.toLowerCase())) &&
+            (!assignedClients || assignedClients.includes(lead.client)) &&
+            !excludedClients.includes(lead.client) &&
+            (filter === "All follow-ups" ||
+              (filter === "Starred"
+                ? layoutPrefs.starredLeadIds.includes(
+                    String(lead.leadId || lead.id),
+                  )
+                : lead.tier === filter.toLowerCase())),
+        )
+        .sort((a, b) =>
+          sort === "newest"
+            ? new Date(String(b.lastMessageAt)).getTime() -
+              new Date(String(a.lastMessageAt)).getTime()
+            : sort === "oldest"
+              ? new Date(String(a.lastMessageAt)).getTime() -
+                new Date(String(b.lastMessageAt)).getTime()
+              : sort === "name"
+                ? a.name.localeCompare(b.name)
+                : b.score - a.score,
+        ),
+    [
+      leads,
+      search,
+      filter,
+      sort,
+      assignedClients,
+      excludedClients,
+      layoutPrefs.starredLeadIds,
+    ],
   );
+  useEffect(() => {
+    setVisibleLeadCount(10);
+    setSelected(0);
+  }, [filter, search, sort, clientParam, profileParam]);
+  const visibleLeads = filtered.slice(0, visibleLeadCount);
+  const toggleStar = (lead: Lead) => {
+    const id = String(lead.leadId || lead.id);
+    const starredLeadIds = layoutPrefs.starredLeadIds.includes(id)
+      ? layoutPrefs.starredLeadIds.filter((item) => item !== id)
+      : [...layoutPrefs.starredLeadIds, id];
+    const next = { ...layoutPrefs, starredLeadIds };
+    setLayoutPrefs(next);
+    savePreferences(next, appearance);
+  };
   const current: Lead = filtered[selected] ?? {
     id: "empty",
     initials: "?",
@@ -429,14 +750,26 @@ export function InboxPage() {
     avatar: "var(--panel-2)",
     messages: [],
   };
-  const clientLogoFor = (lead: Lead) => lead.clientLogoUrl || workspaceDirectory.find((workspace) => workspace.slug === lead.clientSlug || workspace.name === lead.client)?.logoUrl || null;
+  const latestInboundMessageId = [...current.messages]
+    .reverse()
+    .find((message) => message.direction !== "outbound")?.id;
+  const clientLogoFor = (lead: Lead) =>
+    lead.clientLogoUrl ||
+    workspaceDirectory.find(
+      (workspace) =>
+        workspace.slug === lead.clientSlug || workspace.name === lead.client,
+    )?.logoUrl ||
+    null;
   const beginPaneResize = (event: React.PointerEvent<HTMLDivElement>) => {
     const grid = paneGridRef.current;
     if (!grid) return;
     event.preventDefault();
     const rect = grid.getBoundingClientRect();
     const update = (clientX: number) => {
-      const next = Math.max(40, Math.min(75, Math.round(((clientX - rect.left) / rect.width) * 100)));
+      const next = Math.max(
+        40,
+        Math.min(75, Math.round(((clientX - rect.left) / rect.width) * 100)),
+      );
       paneSplitRef.current = next;
       setLayoutPrefs((currentPrefs) => ({ ...currentPrefs, paneSplit: next }));
     };
@@ -445,7 +778,10 @@ export function InboxPage() {
       document.body.classList.remove("resizing-panes");
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
-      savePreferences({ ...layoutPrefs, paneSplit: paneSplitRef.current }, appearance);
+      savePreferences(
+        { ...layoutPrefs, paneSplit: paneSplitRef.current },
+        appearance,
+      );
     };
     document.body.classList.add("resizing-panes");
     window.addEventListener("pointermove", move);
@@ -454,12 +790,14 @@ export function InboxPage() {
   return (
     <main
       className={`app-shell ${theme === "light" ? "light-mode" : ""} ${layoutPrefs.compact ? "compact-inbox" : ""}`}
-      style={{
-        "--accent": appearance.accent,
-        "--bg": appearance.background,
-        "--font": appearance.font,
-        fontFamily: appearance.font,
-      } as React.CSSProperties}
+      style={
+        {
+          "--accent": appearance.accent,
+          "--bg": appearance.background,
+          "--font": appearance.font,
+          fontFamily: appearance.font,
+        } as React.CSSProperties
+      }
     >
       <AppSidebar />
       <aside
@@ -517,7 +855,9 @@ export function InboxPage() {
               className={`client-directory-item ${clientParam === workspace.slug ? "selected" : ""}`}
               key={workspace.slug}
             >
-              <i style={{ background: workspace.tone ?? "var(--accent)" }}>{workspace.name?.[0] ?? "?"}</i>
+              <i style={{ background: workspace.tone ?? "var(--accent)" }}>
+                {workspace.name?.[0] ?? "?"}
+              </i>
               {workspace.name || "Unnamed client"}
             </a>
           ))}
@@ -550,7 +890,16 @@ export function InboxPage() {
             </strong>
           </div>
           <div className="top-actions">
-            {clientParam && <a className="icon-button client-config-shortcut" href={`/admin?client=${encodeURIComponent(clientParam)}`} aria-label={`Configure ${clientName}`} title={`Configure ${clientName}`}>↗</a>}
+            {clientParam && (
+              <a
+                className="icon-button client-config-shortcut"
+                href={`/admin?client=${encodeURIComponent(clientParam)}`}
+                aria-label={`Configure ${clientName}`}
+                title={`Configure ${clientName}`}
+              >
+                ↗
+              </a>
+            )}
             <button
               className="icon-button layout-button"
               aria-label="Customize inbox layout"
@@ -602,203 +951,576 @@ export function InboxPage() {
           <div className="page-heading">
             <div>
               <h1>
-                {clientParam ? clientWebsite
-                  ? <a className="inbox-client-heading-link" href={clientWebsite} target="_blank" rel="noreferrer"><span className="inbox-heading-logo" style={clientLogo ? undefined : { background: clientTone }}>{clientLogo ? <img src={clientLogo} alt={`${clientName} logo`} /> : clientName[0]}</span><span>{clientName}</span></a>
-                  : <><span className="inbox-heading-logo" style={clientLogo ? undefined : { background: clientTone }}>{clientLogo ? <img src={clientLogo} alt={`${clientName} logo`} /> : clientName[0]}</span>{clientName}</>
-                  : <>{!profileName && <span className="inbox-heading-logo general-heading-logo"><img src="/qc-growth-logo.png" alt="QC Growth logo" /></span>}{profileName ? `${greeting}, ${profileName}` : "General inbox"}</>}
+                {clientParam ? (
+                  clientWebsite ? (
+                    <a
+                      className="inbox-client-heading-link"
+                      href={clientWebsite}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <span
+                        className="inbox-heading-logo"
+                        style={
+                          clientLogo ? undefined : { background: clientTone }
+                        }
+                      >
+                        {clientLogo ? (
+                          <img src={clientLogo} alt={`${clientName} logo`} />
+                        ) : (
+                          clientName[0]
+                        )}
+                      </span>
+                      <span>{clientName}</span>
+                    </a>
+                  ) : (
+                    <>
+                      <span
+                        className="inbox-heading-logo"
+                        style={
+                          clientLogo ? undefined : { background: clientTone }
+                        }
+                      >
+                        {clientLogo ? (
+                          <img src={clientLogo} alt={`${clientName} logo`} />
+                        ) : (
+                          clientName[0]
+                        )}
+                      </span>
+                      {clientName}
+                    </>
+                  )
+                ) : (
+                  <>
+                    {!profileName && (
+                      <span className="inbox-heading-logo general-heading-logo">
+                        <img src="/qc-growth-logo.png" alt="QC Growth logo" />
+                      </span>
+                    )}
+                    {profileName
+                      ? `${greeting}, ${profileName}`
+                      : "General inbox"}
+                  </>
+                )}
               </h1>
-              {!clientParam && <div className="tracked-clients" aria-label="Temporarily hide client replies">{trackedClients.map((client) => {
-                const excluded = excludedClients.includes(client);
-                const workspace = workspaceDirectory.find((item) => item.name === client);
-                return <button key={client} className={excluded ? "excluded" : ""} aria-label={excluded ? `Show ${client} replies` : `Hide ${client} replies until refresh`} aria-pressed={excluded} title={excluded ? `Show ${client} replies` : `Hide ${client} replies until refresh`} onClick={() => { setExcludedClients((current) => current.includes(client) ? current.filter((name) => name !== client) : [...current, client]); setSelected(0); }}><i style={workspace?.logoUrl ? undefined : { background: workspace?.tone || "var(--accent)" }}>{workspace?.logoUrl ? <img src={workspace.logoUrl} alt="" /> : client.slice(0, 1).toUpperCase()}</i></button>;
-              })}</div>}
+              {!clientParam && (
+                <div
+                  className="tracked-clients"
+                  aria-label="Temporarily hide client replies"
+                >
+                  {trackedClients.map((client) => {
+                    const excluded = excludedClients.includes(client);
+                    const workspace = workspaceDirectory.find(
+                      (item) => item.name === client,
+                    );
+                    return (
+                      <button
+                        key={client}
+                        className={excluded ? "excluded" : ""}
+                        aria-label={
+                          excluded
+                            ? `Show ${client} replies`
+                            : `Hide ${client} replies until refresh`
+                        }
+                        aria-pressed={excluded}
+                        title={
+                          excluded
+                            ? `Show ${client} replies`
+                            : `Hide ${client} replies until refresh`
+                        }
+                        onClick={() => {
+                          setExcludedClients((current) =>
+                            current.includes(client)
+                              ? current.filter((name) => name !== client)
+                              : [...current, client],
+                          );
+                          setSelected(0);
+                        }}
+                      >
+                        <i
+                          style={
+                            workspace?.logoUrl
+                              ? undefined
+                              : {
+                                  background:
+                                    workspace?.tone || "var(--accent)",
+                                }
+                          }
+                        >
+                          {workspace?.logoUrl ? (
+                            <img src={workspace.logoUrl} alt="" />
+                          ) : (
+                            client.slice(0, 1).toUpperCase()
+                          )}
+                        </i>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
           <div className="inbox-layout">
-          <div className="layout-section metrics metrics-section" style={{ order: layoutPrefs.order.indexOf("metrics"), "--metric-count": layoutPrefs.metrics.length } as React.CSSProperties} hidden={!layoutPrefs.showMetrics}>
-            {layoutPrefs.metrics.map((metricId) => {
-              const metric = metricCatalog.find((item) => item.id === metricId);
-              return metric ? <Metric key={metric.id} {...metric} /> : null;
-            })}
-          </div>
-          <div className="layout-section" style={{ order: layoutPrefs.order.indexOf("analytics") }} hidden={!layoutPrefs.showAnalytics}>
-            <InboxAnalytics graphs={layoutPrefs.graphs} analytics={analytics} onChange={(graphs) => setLayoutPrefs({ ...layoutPrefs, graphs })} />
-          </div>
-          <div className="layout-section queue-section" style={{ order: layoutPrefs.order.indexOf("queue") }}>
-          <div className="health-strip">
-            <div className="health-icon">
-              <Icon name="health" />
-            </div>
-            <div>
-              <strong>Waiting for synced events</strong>
-              <span>Connect a data source to populate system activity.</span>
-            </div>
-            <div className="health-bars">
-              {(analytics?.trend ?? []).map((h, i) => (
-                <i key={i} style={{ height: `${Math.max(2, h)}px` }} />
-              ))}
-            </div>
-            <button
-              className="text-button"
-              onClick={() => setActiveNav("health")}
+            <div
+              className="layout-section metrics metrics-section"
+              style={
+                {
+                  order: layoutPrefs.order.indexOf("metrics"),
+                  "--metric-count": layoutPrefs.metrics.length,
+                } as React.CSSProperties
+              }
+              hidden={!layoutPrefs.showMetrics}
             >
-              View health <Icon name="arrow" />
-            </button>
-          </div>
-          <div className="queue-header">
-            <div>
-              <h2>
-                Reply queue {filtered.length > 0 && <span>{filtered.length}</span>}
-              </h2>
+              {layoutPrefs.metrics.map((metricId) => {
+                const metric = metricCatalog.find(
+                  (item) => item.id === metricId,
+                );
+                return metric ? <Metric key={metric.id} {...metric} /> : null;
+              })}
             </div>
-            <div className="queue-tools">
-              <label className="search queue-search">
-                <Icon name="search" />
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search leads, companies…" />
-              </label>
-              <div className="heading-actions inbox-actions">
-                <button className="secondary-button">
-                  Export <span>↓</span>
+            <div
+              className="layout-section"
+              style={{ order: layoutPrefs.order.indexOf("analytics") }}
+              hidden={!layoutPrefs.showAnalytics}
+            >
+              <InboxAnalytics
+                graphs={layoutPrefs.graphs}
+                analytics={analytics}
+                onChange={(graphs) =>
+                  setLayoutPrefs({ ...layoutPrefs, graphs })
+                }
+              />
+            </div>
+            <div
+              className="layout-section queue-section"
+              style={{ order: layoutPrefs.order.indexOf("queue") }}
+            >
+              <div className="health-strip">
+                <div className="health-icon">
+                  <Icon name="health" />
+                </div>
+                <div>
+                  <strong>Waiting for synced events</strong>
+                  <span>
+                    Connect a data source to populate system activity.
+                  </span>
+                </div>
+                <div className="health-bars">
+                  {(analytics?.trend ?? []).map((h, i) => (
+                    <i key={i} style={{ height: `${Math.max(2, h)}px` }} />
+                  ))}
+                </div>
+                <button
+                  className="text-button"
+                  onClick={() => setActiveNav("health")}
+                >
+                  View health <Icon name="arrow" />
                 </button>
               </div>
-              <div className="segmented">
-                {["All follow-ups", "Hot", "Warm", "Nurture"].map((f) => (
-                  <button
-                    key={f}
-                    className={filter === f ? "selected" : ""}
-                    onClick={() => setFilter(f)}
+              <div className="queue-header">
+                <div>
+                  <h2>
+                    Reply queue{" "}
+                    {filtered.length > 0 && <span>{filtered.length}</span>}
+                  </h2>
+                </div>
+                <div className="queue-tools">
+                  <label className="search queue-search">
+                    <Icon name="search" />
+                    <input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Search leads, companies…"
+                    />
+                  </label>
+                  <div className="heading-actions inbox-actions">
+                    <button className="secondary-button">
+                      Export <span>↓</span>
+                    </button>
+                  </div>
+                  <div className="segmented">
+                    {[
+                      "All follow-ups",
+                      "Starred",
+                      "Hot",
+                      "Warm",
+                      "Nurture",
+                    ].map((f) => (
+                      <button
+                        key={f}
+                        className={filter === f ? "selected" : ""}
+                        onClick={() => setFilter(f)}
+                      >
+                        {f}
+                        {f === "Hot" && analytics?.queueMix?.hot ? (
+                          <b>{analytics.queueMix.hot}</b>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                  <select
+                    className="filter-button"
+                    aria-label="Filter conversations"
+                    value={filter}
+                    onChange={(event) => {
+                      setFilter(event.target.value);
+                      setSelected(0);
+                    }}
                   >
-                    {f}
-                    {f === "Hot" && analytics?.queueMix?.hot ? <b>{analytics.queueMix.hot}</b> : null}
-                  </button>
-                ))}
+                    <option>All follow-ups</option>
+                    <option>Starred</option>
+                    <option>Hot</option>
+                    <option>Warm</option>
+                    <option>Nurture</option>
+                  </select>
+                  <select
+                    className="filter-button"
+                    aria-label="Sort conversations"
+                    value={sort}
+                    onChange={(event) => {
+                      setSort(event.target.value);
+                      setSelected(0);
+                    }}
+                  >
+                    <option value="score-desc">Sort: Score</option>
+                    <option value="newest">Sort: Newest</option>
+                    <option value="oldest">Sort: Oldest</option>
+                    <option value="name">Sort: Name</option>
+                  </select>
+                </div>
               </div>
-              <select className="filter-button" aria-label="Filter conversations" value={filter} onChange={(event) => { setFilter(event.target.value); setSelected(0); }}><option>All follow-ups</option><option>Hot</option><option>Warm</option><option>Nurture</option></select>
-              <select className="filter-button" aria-label="Sort conversations" value={sort} onChange={(event) => { setSort(event.target.value); setSelected(0); }}><option value="score-desc">Sort: Score</option><option value="newest">Sort: Newest</option><option value="oldest">Sort: Oldest</option><option value="name">Sort: Name</option></select>
-            </div>
-          </div>
-          <div ref={paneGridRef} className="dashboard-grid operational-grid" style={{ "--inbox-pane": `${layoutPrefs.paneSplit}fr`, "--chat-pane": `${100 - layoutPrefs.paneSplit}fr` } as React.CSSProperties}>
-            <section className="queue-card inbox-operational-table">
-              <div className="table-head">
-                <span>LEAD</span>
-                <span>CLIENT</span>
-                <span>CAMPAIGN</span>
-                <span>LATEST REPLY</span>
-                <span>SENDER</span>
-                <span>REPLY TURN</span>
-                <span>LEAD SCORE</span>
-                <span>FOLLOW-UP SCORE</span>
-              </div>
-              {inboxLoading && <p className="empty-state">Loading conversations…</p>}
-              {!inboxLoading && inboxError && <p className="empty-state error-text">{inboxError}</p>}
-              {!inboxLoading && !inboxError && filtered.length === 0 && <p className="empty-state">No conversations have arrived for this inbox yet.</p>}
-              {filtered.map((lead, index) => (
-                <button
-                  className={`lead-row ${selected === index ? "row-selected" : ""}`}
-                  key={lead.id}
-                  onClick={() => setSelected(index)}
-                >
-                  <div className="lead-main">
+              <div
+                ref={paneGridRef}
+                className="dashboard-grid operational-grid"
+                style={
+                  {
+                    "--inbox-pane": `${layoutPrefs.paneSplit}fr`,
+                    "--chat-pane": `${100 - layoutPrefs.paneSplit}fr`,
+                  } as React.CSSProperties
+                }
+              >
+                <section className="queue-card inbox-operational-table">
+                  <div className="table-head">
+                    <span>LEAD</span>
+                    <span>CLIENT</span>
+                    <span>CAMPAIGN</span>
+                    <span>LATEST REPLY</span>
+                    <span>SENDER</span>
+                    <span>REPLY TURN</span>
+                    <span>LEAD SCORE</span>
+                    <span>FOLLOW-UP SCORE</span>
+                  </div>
+                  {inboxLoading && (
+                    <p className="empty-state">Loading conversations…</p>
+                  )}
+                  {!inboxLoading && inboxError && (
+                    <p className="empty-state error-text">{inboxError}</p>
+                  )}
+                  {!inboxLoading && !inboxError && filtered.length === 0 && (
+                    <p className="empty-state">
+                      No conversations have arrived for this inbox yet.
+                    </p>
+                  )}
+                  {visibleLeads.map((lead, index) => (
                     <div
-                      className="lead-avatar"
-                      style={{ background: lead.avatar }}
+                      className={`lead-row ${selected === index ? "row-selected" : ""}`}
+                      key={lead.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelected(index)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelected(index);
+                        }
+                      }}
                     >
-                      {lead.photoUrl ? <img src={lead.photoUrl} alt="" /> : lead.initials}
+                      <div className="lead-main">
+                        <button
+                          type="button"
+                          className={`lead-star ${layoutPrefs.starredLeadIds.includes(String(lead.leadId || lead.id)) ? "is-starred" : ""}`}
+                          aria-label={
+                            layoutPrefs.starredLeadIds.includes(
+                              String(lead.leadId || lead.id),
+                            )
+                              ? `Unstar ${lead.name}`
+                              : `Star ${lead.name}`
+                          }
+                          title={
+                            layoutPrefs.starredLeadIds.includes(
+                              String(lead.leadId || lead.id),
+                            )
+                              ? "Remove star"
+                              : "Star lead"
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleStar(lead);
+                          }}
+                        >
+                          ★
+                        </button>
+                        <div
+                          className="lead-avatar"
+                          style={{ background: lead.avatar }}
+                        >
+                          {lead.photoUrl ? (
+                            <img src={lead.photoUrl} alt="" />
+                          ) : (
+                            lead.initials
+                          )}
+                        </div>
+                        <div>
+                          <strong>{lead.name}</strong>
+                          <span>
+                            {lead.role} @ {lead.company}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="client-cell">
+                        <i
+                          style={
+                            clientLogoFor(lead)
+                              ? undefined
+                              : { background: lead.clientTone }
+                          }
+                        >
+                          {clientLogoFor(lead) ? (
+                            <img src={String(clientLogoFor(lead))} alt="" />
+                          ) : (
+                            lead.client[0]
+                          )}
+                        </i>
+                        <span>{lead.client}</span>
+                      </div>
+                      <div className="inbox-meta-cell campaign-cell">
+                        <strong>{lead.campaignName || "No campaign"}</strong>
+                      </div>
+                      <div className="inbox-meta-cell date-cell">
+                        <strong>
+                          {
+                            formatDashboardDateParts(
+                              lead.latestReplyAt,
+                              appearance.timeZone,
+                            ).date
+                          }
+                        </strong>
+                        <span>
+                          {
+                            formatDashboardDateParts(
+                              lead.latestReplyAt,
+                              appearance.timeZone,
+                            ).time
+                          }
+                        </span>
+                      </div>
+                      <div className="inbox-meta-cell sender-cell">
+                        <strong>{lead.senderName}</strong>
+                      </div>
+                      <div className="inbox-meta-cell turn-cell">
+                        <strong>{lead.replies}</strong>
+                      </div>
+                      <div className="inbox-meta-cell lead-score-cell">
+                        <span className="coming-soon">Coming soon</span>
+                      </div>
+                      <div className="score-cell follow-up-score-cell">
+                        <span className={`score-pill ${lead.tier}`}>
+                          {lead.followUpScore ?? lead.score}
+                        </span>
+                        <span className="tier-label">{lead.tier}</span>
+                      </div>
                     </div>
-                    <div>
-                      <strong>{lead.name}</strong>
-                      <span>
-                        {lead.role} @ {lead.company}
+                  ))}
+                  {filtered.length > visibleLeadCount && (
+                    <button
+                      className="inbox-see-more"
+                      onClick={() => setVisibleLeadCount((count) => count + 10)}
+                    >
+                      See 10 more
+                    </button>
+                  )}
+                </section>
+                <div
+                  className="pane-divider"
+                  role="separator"
+                  aria-label="Resize Inbox and Chat"
+                  aria-orientation="vertical"
+                  aria-valuemin={40}
+                  aria-valuemax={75}
+                  aria-valuenow={layoutPrefs.paneSplit}
+                  onPointerDown={beginPaneResize}
+                >
+                  <span />
+                </div>
+                <aside
+                  className={`detail-card ${layoutPrefs.showDetail ? "" : "layout-hidden"}`}
+                >
+                  <div className="detail-top">
+                    <div className="detail-context">
+                      <button
+                        className={`detail-star ${layoutPrefs.starredLeadIds.includes(String(current.leadId || current.id)) ? "is-starred" : ""}`}
+                        onClick={() => toggleStar(current)}
+                        aria-label={
+                          layoutPrefs.starredLeadIds.includes(
+                            String(current.leadId || current.id),
+                          )
+                            ? `Unstar ${current.name}`
+                            : `Star ${current.name}`
+                        }
+                      >
+                        ★
+                      </button>
+                    </div>
+                    <div className="detail-person">
+                      <div
+                        className="large-avatar"
+                        style={{ background: current.avatar }}
+                      >
+                        {current.photoUrl ? (
+                          <img src={current.photoUrl} alt="" />
+                        ) : (
+                          current.initials
+                        )}
+                      </div>
+                      <div>
+                        <h3>{current.name}</h3>
+                        <p>
+                          {current.role} at {current.company}
+                        </p>
+                        <div className="detail-profile-links">
+                          {current.profileUrl && (
+                            <a
+                              className="linkedin"
+                              href={current.profileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              in&nbsp; LinkedIn profile ↗
+                            </a>
+                          )}
+                          {current.leadId && (
+                            <a
+                              className="lead-database-link"
+                              href={`/database?lead=${encodeURIComponent(current.leadId)}`}
+                            >
+                              View more →
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      {(current.companyWebsite || current.companyPhotoUrl) && (
+                        <img
+                          className="enriched-company-logo"
+                          src={
+                            current.companyWebsite
+                              ? `/api/media/company-logo?website=${encodeURIComponent(current.companyWebsite)}&company=${encodeURIComponent(current.company)}`
+                              : current.companyPhotoUrl || ""
+                          }
+                          alt={`${current.company} logo`}
+                          onError={(event) => {
+                            if (
+                              current.companyPhotoUrl &&
+                              event.currentTarget.src !==
+                                current.companyPhotoUrl
+                            ) {
+                              event.currentTarget.src = current.companyPhotoUrl;
+                            }
+                          }}
+                        />
+                      )}
+                    </div>
+                    <div className="detail-tags">
+                      <span className={`score-pill ${current.tier}`}>
+                        {current.score} · {current.tier}
+                      </span>
+                      <span className="tag-outline">{current.client}</span>
+                      <span className="tag-outline">{current.senderName}</span>
+                      {current.campaignName && (
+                        <span className="tag-outline">
+                          {current.campaignName}
+                        </span>
+                      )}
+                      <span className="tag-outline">
+                        {current.replies} replies
                       </span>
                     </div>
+                    {Boolean(current.headline || current.industry) && (
+                      <p className="enrichment-summary">
+                        {[
+                          current.headline,
+                          typeof current.industry === "string"
+                            ? current.industry
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    )}
                   </div>
-                  <div className="client-cell">
-                    <i style={clientLogoFor(lead) ? undefined : { background: lead.clientTone }}>
-                      {clientLogoFor(lead) ? <img src={String(clientLogoFor(lead))} alt="" /> : lead.client[0]}
-                    </i>
-                    <span>{lead.client}</span>
+                  <div className="reason-box">
+                    <span className="reason-icon">✦</span>
+                    <div>
+                      <small>WHY THIS IS FLAGGED</small>
+                      <p>{current.reason}</p>
+                    </div>
                   </div>
-                  <div className="inbox-meta-cell campaign-cell"><strong>{lead.campaignName || "No campaign"}</strong></div>
-                  <div className="inbox-meta-cell date-cell"><strong>{formatDashboardDateParts(lead.latestReplyAt, appearance.timeZone).date}</strong><span>{formatDashboardDateParts(lead.latestReplyAt, appearance.timeZone).time}</span></div>
-                  <div className="inbox-meta-cell sender-cell"><strong>{lead.senderName}</strong></div>
-                  <div className="inbox-meta-cell turn-cell"><strong>{lead.replies}</strong></div>
-                  <div className="inbox-meta-cell lead-score-cell"><span className="coming-soon">Coming soon</span></div>
-                  <div className="score-cell follow-up-score-cell"><span className={`score-pill ${lead.tier}`}>{lead.followUpScore ?? lead.score}</span><span className="tier-label">{lead.tier}</span></div>
-                </button>
-              ))}
-              <div className="queue-footer">
-                <span>Showing {filtered.length} conversations</span>
-                <button>
-                  View all <Icon name="arrow" />
-                </button>
-              </div>
-            </section>
-            <div className="pane-divider" role="separator" aria-label="Resize Inbox and Chat" aria-orientation="vertical" aria-valuemin={40} aria-valuemax={75} aria-valuenow={layoutPrefs.paneSplit} onPointerDown={beginPaneResize}><span /></div>
-            <aside className={`detail-card ${layoutPrefs.showDetail ? "" : "layout-hidden"}`}>
-              <div className="detail-top">
-                <div className="detail-context">
-                  <span className="detail-label">SELECTED CONVERSATION</span>
-                </div>
-                <div className="detail-person">
-                  <div
-                    className="large-avatar"
-                    style={{ background: current.avatar }}
-                  >
-                    {current.photoUrl ? <img src={current.photoUrl} alt="" /> : current.initials}
+                  <div className="thread">
+                    {current.messages.length ? (
+                      current.messages.map((message) => (
+                        <div
+                          className={`bubble ${message.direction === "outbound" ? "outbound" : "inbound"} ${message.id === latestInboundMessageId ? "latest-inbound" : ""}`}
+                          key={message.id}
+                        >
+                          {message.direction !== "outbound" && (
+                            <span>
+                              {current.photoUrl ? (
+                                <img src={current.photoUrl} alt="" />
+                              ) : (
+                                current.initials
+                              )}
+                            </span>
+                          )}
+                          <small className="message-author">
+                            {message.authorName}
+                          </small>
+                          <p>{message.body}</p>
+                          <time>
+                            {formatDashboardDate(
+                              message.sentAt,
+                              appearance.timeZone,
+                            )}
+                          </time>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="empty-state">
+                        No conversation messages are available yet.
+                      </p>
+                    )}
                   </div>
-                  <div>
-                    <h3>{current.name}</h3>
-                    <p>
-                      {current.role} at {current.company}
-                    </p>
-                    {current.profileUrl && <a className="linkedin" href={current.profileUrl} target="_blank" rel="noreferrer">in&nbsp; LinkedIn profile ↗</a>}
-                    {current.leadId && <a className="lead-database-link" href={`/database?lead=${encodeURIComponent(current.leadId)}`}>View more →</a>}
+                  <div className="composer">
+                    <div className="composer-top">
+                      <span>AI DRAFT</span>
+                      <button>Regenerate ↻</button>
+                    </div>
+                    <textarea
+                      defaultValue={
+                        sent ? "Sent — follow-up queued in HeyReach." : ""
+                      }
+                    />
+                    <div className="composer-foot">
+                      <span>{sent ? "Follow-up queued" : ""}</span>
+                      <button
+                        className="send-button"
+                        onClick={() => setSent(true)}
+                      >
+                        {sent ? "Sent ✓" : "Send reply"} <span>⌘↵</span>
+                      </button>
+                    </div>
                   </div>
-                  {current.companyPhotoUrl && <img className="enriched-company-logo" src={current.companyPhotoUrl} alt={`${current.company} logo`} />}
-                </div>
-                <div className="detail-tags">
-                  <span className={`score-pill ${current.tier}`}>
-                    {current.score} · {current.tier}
-                  </span>
-                  <span className="tag-outline">{current.client}</span>
-                  <span className="tag-outline">Sender: {current.senderName}</span>
-                  {current.campaignName && <span className="tag-outline">Campaign: {current.campaignName}</span>}
-                  <span className="tag-outline">{current.replies} replies</span>
-                </div>
-                {Boolean(current.headline || current.industry) && <p className="enrichment-summary">{[current.headline, typeof current.industry === "string" ? current.industry : null].filter(Boolean).join(" · ")}</p>}
+                </aside>
               </div>
-              <div className="reason-box">
-                <span className="reason-icon">✦</span>
-                <div>
-                  <small>WHY THIS IS FLAGGED</small>
-                  <p>{current.reason}</p>
-                </div>
-              </div>
-              <div className="thread">
-                {current.messages.length ? current.messages.map((message) => <div className={`bubble ${message.direction === "outbound" ? "outbound" : "inbound"}`} key={message.id}>{message.direction !== "outbound" && <span>{current.initials}</span>}<small className="message-author">{message.authorName}</small><p>{message.body}</p><time>{formatDashboardDate(message.sentAt, appearance.timeZone)}</time></div>) : <p className="empty-state">No conversation messages are available yet.</p>}
-              </div>
-              <div className="composer">
-                <div className="composer-top">
-                  <span>AI DRAFT</span>
-                  <button>Regenerate ↻</button>
-                </div>
-                <textarea
-                  defaultValue={
-                    sent
-                      ? "Sent — follow-up queued in HeyReach."
-                      : ""
-                  }
-                />
-                <div className="composer-foot">
-                  <span>{sent ? "Follow-up queued" : ""}</span>
-                  <button className="send-button" onClick={() => setSent(true)}>
-                    {sent ? "Sent ✓" : "Send reply"} <span>⌘↵</span>
-                  </button>
-                </div>
-              </div>
-            </aside>
-          </div>
-          </div>
+            </div>
           </div>
         </div>
       </section>
@@ -866,30 +1588,148 @@ function InboxAnalytics({
   return (
     <section className="inbox-analytics-section">
       <div className="inbox-analytics-heading">
-        <div><span>INBOX ANALYTICS</span><h2>Conversation trends</h2><p>{analytics?.status === "live" ? "Live aggregates from synced conversations and messages." : "Analytics will populate after Supabase receives synced HeyReach data."}</p></div>
-        <div className="graph-builder"><select value={newPreset} onChange={(event) => setNewPreset(Number(event.target.value))}>{graphPresets.map((preset, index) => <option key={preset.title} value={index}>{preset.title}</option>)}</select><select value={newKind} onChange={(event) => setNewKind(event.target.value as GraphConfig["kind"])}><option value="line">Line</option><option value="bars">Bars</option><option value="donut">Donut</option></select><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Custom title"/><button onClick={addGraph} disabled={graphs.length >= 4}>+ Add graph</button></div>
+        <div>
+          <span>INBOX ANALYTICS</span>
+          <h2>Conversation trends</h2>
+          <p>
+            {analytics?.status === "live"
+              ? "Live aggregates from synced conversations and messages."
+              : "Analytics will populate after Supabase receives synced HeyReach data."}
+          </p>
+        </div>
+        <div className="graph-builder">
+          <select
+            value={newPreset}
+            onChange={(event) => setNewPreset(Number(event.target.value))}
+          >
+            {graphPresets.map((preset, index) => (
+              <option key={preset.title} value={index}>
+                {preset.title}
+              </option>
+            ))}
+          </select>
+          <select
+            value={newKind}
+            onChange={(event) =>
+              setNewKind(event.target.value as GraphConfig["kind"])
+            }
+          >
+            <option value="line">Line</option>
+            <option value="bars">Bars</option>
+            <option value="donut">Donut</option>
+          </select>
+          <input
+            value={newTitle}
+            onChange={(event) => setNewTitle(event.target.value)}
+            placeholder="Custom title"
+          />
+          <button onClick={addGraph} disabled={graphs.length >= 4}>
+            + Add graph
+          </button>
+        </div>
       </div>
-      <div className="inbox-graph-grid">{graphs.map((graph) => <article className="inbox-graph-card" key={graph.id}><div className="inbox-graph-card-heading"><div><span>{graph.metric}</span><strong>{graph.title}</strong></div><button aria-label={`Remove ${graph.title}`} onClick={() => onChange(graphs.filter((item) => item.id !== graph.id))}>×</button></div><GraphVisual kind={graph.kind} metric={graph.metric} analytics={analytics} /></article>)}</div>
+      <div className="inbox-graph-grid">
+        {graphs.map((graph) => (
+          <article className="inbox-graph-card" key={graph.id}>
+            <div className="inbox-graph-card-heading">
+              <div>
+                <span>{graph.metric}</span>
+                <strong>{graph.title}</strong>
+              </div>
+              <button
+                aria-label={`Remove ${graph.title}`}
+                onClick={() =>
+                  onChange(graphs.filter((item) => item.id !== graph.id))
+                }
+              >
+                ×
+              </button>
+            </div>
+            <GraphVisual
+              kind={graph.kind}
+              metric={graph.metric}
+              analytics={analytics}
+            />
+          </article>
+        ))}
+      </div>
     </section>
   );
 }
 
-function GraphVisual({ kind, metric, analytics }: { kind: GraphConfig["kind"]; metric: string; analytics: AnalyticsSnapshot | null }) {
-  if (!analytics || analytics.status !== "live") return <div className="analytics-empty">No synced data yet</div>;
+function GraphVisual({
+  kind,
+  metric,
+  analytics,
+}: {
+  kind: GraphConfig["kind"];
+  metric: string;
+  analytics: AnalyticsSnapshot | null;
+}) {
+  if (!analytics || analytics.status !== "live")
+    return <div className="analytics-empty">No synced data yet</div>;
   if (kind === "donut") {
-    const total = analytics.queueMix.hot + analytics.queueMix.warm + analytics.queueMix.nurture;
+    const total =
+      analytics.queueMix.hot +
+      analytics.queueMix.warm +
+      analytics.queueMix.nurture;
     const hot = total ? (analytics.queueMix.hot / total) * 100 : 0;
     const warm = total ? hot + (analytics.queueMix.warm / total) * 100 : 0;
-    return <div className="inbox-donut" style={{ background: `conic-gradient(var(--coral) 0 ${hot}%,var(--amber) ${hot}% ${warm}%,#687080 ${warm}% 100%)` }}><div><strong>{total}</strong><small>leads</small></div></div>;
+    return (
+      <div
+        className="inbox-donut"
+        style={{
+          background: `conic-gradient(var(--coral) 0 ${hot}%,var(--amber) ${hot}% ${warm}%,#687080 ${warm}% 100%)`,
+        }}
+      >
+        <div>
+          <strong>{total}</strong>
+          <small>leads</small>
+        </div>
+      </div>
+    );
   }
-  const values = metric === "Leads by client" ? analytics.clientLoad.map((item) => item.leads) : analytics.trend;
+  const values =
+    metric === "Leads by client"
+      ? analytics.clientLoad.map((item) => item.leads)
+      : analytics.trend;
   if (kind === "bars") {
     const max = Math.max(...values, 1);
-    return <div className="inbox-bars">{values.map((value, index) => <i key={index} style={{ height: `${Math.max(5, (value / max) * 100)}%` }} />)}</div>;
+    return (
+      <div className="inbox-bars">
+        {values.map((value, index) => (
+          <i
+            key={index}
+            style={{ height: `${Math.max(5, (value / max) * 100)}%` }}
+          />
+        ))}
+      </div>
+    );
   }
   const max = Math.max(...values, 1);
-  const points = values.map((value, index) => `${values.length === 1 ? 210 : (index / (values.length - 1)) * 420} ${96 - (value / max) * 82}`).join(" L");
-  return values.length ? <svg className="inbox-line" viewBox="0 0 420 110" role="img" aria-label="Live trend graph"><path d={`M${points}`} /><circle cx={values.length === 1 ? 210 : 420} cy={96 - ((values[values.length - 1] / max) * 82)} r="4" /></svg> : <div className="analytics-empty">No synced data yet</div>;
+  const points = values
+    .map(
+      (value, index) =>
+        `${values.length === 1 ? 210 : (index / (values.length - 1)) * 420} ${96 - (value / max) * 82}`,
+    )
+    .join(" L");
+  return values.length ? (
+    <svg
+      className="inbox-line"
+      viewBox="0 0 420 110"
+      role="img"
+      aria-label="Live trend graph"
+    >
+      <path d={`M${points}`} />
+      <circle
+        cx={values.length === 1 ? 210 : 420}
+        cy={96 - (values[values.length - 1] / max) * 82}
+        r="4"
+      />
+    </svg>
+  ) : (
+    <div className="analytics-empty">No synced data yet</div>
+  );
 }
 
 function LayoutPanel({
@@ -901,9 +1741,15 @@ function LayoutPanel({
   onChange: (prefs: LayoutPrefs) => void;
   onSave: () => void;
 }) {
-  const [dragged, setDragged] = useState<"metrics" | "analytics" | "queue" | null>(null);
+  const [dragged, setDragged] = useState<
+    "metrics" | "analytics" | "queue" | null
+  >(null);
   const [draggedMetric, setDraggedMetric] = useState<string | null>(null);
-  const labels = { metrics: "Summary metrics", analytics: "Inbox analytics", queue: "Conversation queue" };
+  const labels = {
+    metrics: "Summary metrics",
+    analytics: "Inbox analytics",
+    queue: "Conversation queue",
+  };
   const move = (target: "metrics" | "analytics" | "queue") => {
     if (!dragged || dragged === target) return;
     const order = [...prefs.order];
@@ -931,7 +1777,10 @@ function LayoutPanel({
   return (
     <div className="customize-popover layout-popover">
       <div className="customize-popover-heading">
-        <div><strong>Inbox layout</strong><small>Drag sections into your preferred order.</small></div>
+        <div>
+          <strong>Inbox layout</strong>
+          <small>Drag sections into your preferred order.</small>
+        </div>
         <span>⌗</span>
       </div>
       <div className="layout-sort-list">
@@ -944,23 +1793,98 @@ function LayoutPanel({
             onDragOver={(event) => event.preventDefault()}
             onDrop={() => move(section)}
           >
-            <span className="drag-handle">⠿</span><strong>{labels[section]}</strong><span className="drag-hint">drag</span>
+            <span className="drag-handle">⠿</span>
+            <strong>{labels[section]}</strong>
+            <span className="drag-hint">drag</span>
           </div>
         ))}
       </div>
-      <label className="customize-check"><input type="checkbox" checked={prefs.showMetrics} onChange={(event) => onChange({ ...prefs, showMetrics: event.target.checked })} /> Show summary metrics</label>
-      <label className="customize-check"><input type="checkbox" checked={prefs.showAnalytics} onChange={(event) => onChange({ ...prefs, showAnalytics: event.target.checked })} /> Show inbox analytics</label>
-      <label className="customize-check"><input type="checkbox" checked={prefs.showDetail} onChange={(event) => onChange({ ...prefs, showDetail: event.target.checked })} /> Show conversation detail</label>
-      <label className="customize-check"><input type="checkbox" checked={prefs.compact} onChange={(event) => onChange({ ...prefs, compact: event.target.checked })} /> Compact spacing</label>
-      <div className="metric-picker-heading"><strong>Summary metrics</strong><small>{prefs.metrics.length}/6 selected</small></div>
+      <label className="customize-check">
+        <input
+          type="checkbox"
+          checked={prefs.showMetrics}
+          onChange={(event) =>
+            onChange({ ...prefs, showMetrics: event.target.checked })
+          }
+        />{" "}
+        Show summary metrics
+      </label>
+      <label className="customize-check">
+        <input
+          type="checkbox"
+          checked={prefs.showAnalytics}
+          onChange={(event) =>
+            onChange({ ...prefs, showAnalytics: event.target.checked })
+          }
+        />{" "}
+        Show inbox analytics
+      </label>
+      <label className="customize-check">
+        <input
+          type="checkbox"
+          checked={prefs.showDetail}
+          onChange={(event) =>
+            onChange({ ...prefs, showDetail: event.target.checked })
+          }
+        />{" "}
+        Show conversation detail
+      </label>
+      <label className="customize-check">
+        <input
+          type="checkbox"
+          checked={prefs.compact}
+          onChange={(event) =>
+            onChange({ ...prefs, compact: event.target.checked })
+          }
+        />{" "}
+        Compact spacing
+      </label>
+      <div className="metric-picker-heading">
+        <strong>Summary metrics</strong>
+        <small>{prefs.metrics.length}/6 selected</small>
+      </div>
       <div className="metric-picker">
-        {[...prefs.metrics, ...metricCatalog.map((metric) => metric.id).filter((id) => !prefs.metrics.includes(id))].map((metricId) => {
+        {[
+          ...prefs.metrics,
+          ...metricCatalog
+            .map((metric) => metric.id)
+            .filter((id) => !prefs.metrics.includes(id)),
+        ].map((metricId) => {
           const metric = metricCatalog.find((item) => item.id === metricId)!;
           const checked = prefs.metrics.includes(metric.id);
-          return <div className="metric-picker-row" key={metric.id} draggable={checked} onDragStart={() => checked && setDraggedMetric(metric.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveMetric(metric.id)}><span className="drag-handle">⠿</span><label className="customize-check"><input type="checkbox" checked={checked} disabled={!checked && prefs.metrics.length >= 6} onChange={() => onChange({ ...prefs, metrics: checked ? prefs.metrics.filter((id) => id !== metric.id) : [...prefs.metrics, metric.id] })} /> {metric.label}</label></div>;
+          return (
+            <div
+              className="metric-picker-row"
+              key={metric.id}
+              draggable={checked}
+              onDragStart={() => checked && setDraggedMetric(metric.id)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={() => moveMetric(metric.id)}
+            >
+              <span className="drag-handle">⠿</span>
+              <label className="customize-check">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={!checked && prefs.metrics.length >= 6}
+                  onChange={() =>
+                    onChange({
+                      ...prefs,
+                      metrics: checked
+                        ? prefs.metrics.filter((id) => id !== metric.id)
+                        : [...prefs.metrics, metric.id],
+                    })
+                  }
+                />{" "}
+                {metric.label}
+              </label>
+            </div>
+          );
         })}
       </div>
-      <button className="customize-save" onClick={onSave}>Save layout</button>
+      <button className="customize-save" onClick={onSave}>
+        Save layout
+      </button>
     </div>
   );
 }
