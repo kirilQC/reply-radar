@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import "./reply-radar-overrides.css";
 import "./dashboard.css";
 import "./inbox-analytics.css";
+import "./reply-radar-overrides.css";
 import PreferenceBootstrap from "./components/PreferenceBootstrap";
 
 export const metadata: Metadata = {
