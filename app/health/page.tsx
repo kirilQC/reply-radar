@@ -9,6 +9,7 @@ type Heartbeat = {
   status?: string;
   services?: Service[];
   checkedAt?: string;
+  thresholds?: { webhookFreshSeconds?: number; pollFreshSeconds?: number };
   clients?: Array<{
     name: string;
     slug: string;
@@ -121,7 +122,12 @@ export default function HealthPage() {
 
             <section className="admin-panel">
               <div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>For each client, we check that its HeyReach key exists, webhook events are arriving, and polling is fresh.</p></div></div>
-              {clientCount === 0 ? <p className="empty-state">No client heartbeat data is available yet.</p> : <div className="heartbeat-client-list">{heartbeat.clients?.map((client) => <div className="heartbeat-client" key={client.slug}><div className="heartbeat-client-title"><div className="heartbeat-client-name"><i>{client.logoUrl ? <img src={client.logoUrl} alt={`${client.name} logo`} /> : client.name[0]}</i><strong>{client.name}</strong></div><span className={`health-state ${client.status === "healthy" ? "ready" : "missing"}`}>{client.status === "healthy" ? "HEALTHY" : client.status === "missing" ? "NOT CONFIGURED" : "NEEDS ATTENTION"}</span></div><div className="heartbeat-client-meta"><span>API key: {client.keyConfigured ? "ready" : "missing"}</span><span>Webhook: {client.webhookStatus ?? formatAge(client.webhookAgeSeconds)}</span><span>Polling: {client.pollStatus ?? formatAge(client.pollAgeSeconds)}</span></div>{mode === "advanced" && <details className="diagnostic-details"><summary>Technical details</summary><pre>{JSON.stringify({ ...client, lastWebhookReceivedAt: formatTime(client.lastWebhookReceivedAt), lastSuccessfulPollAt: formatTime(client.lastSuccessfulPollAt) }, null, 2)}</pre></details>}</div>)}</div>}
+              {clientCount === 0 ? <p className="empty-state">No client heartbeat data is available yet.</p> : <div className="heartbeat-client-list">{heartbeat.clients?.map((client) => {
+                const keyHealthy = client.keyConfigured;
+                const webhookHealthy = client.webhookAgeSeconds !== null && client.webhookAgeSeconds <= Number(heartbeat.thresholds?.webhookFreshSeconds ?? 1800);
+                const pollHealthy = client.pollAgeSeconds !== null && client.pollAgeSeconds <= Number(heartbeat.thresholds?.pollFreshSeconds ?? 3600);
+                return <div className="heartbeat-client" key={client.slug}><div className="heartbeat-client-title"><div className="heartbeat-client-name"><i>{client.logoUrl ? <img src={client.logoUrl} alt={`${client.name} logo`} /> : client.name[0]}</i><strong>{client.name}</strong></div><span className={`health-state ${client.status === "healthy" ? "ready" : "missing"}`}>{client.status === "healthy" ? "HEALTHY" : client.status === "missing" ? "NOT CONFIGURED" : "NEEDS ATTENTION"}</span></div><div className="heartbeat-kid-grid"><div className={keyHealthy ? "ok" : "bad"}><b>{keyHealthy ? "✓" : "!"}</b><span><strong>Door key</strong><small>{keyHealthy ? "HeyReach API key is ready." : "The HeyReach API key is missing."}</small></span></div><div className={webhookHealthy ? "ok" : "bad"}><b>{webhookHealthy ? "✓" : "!"}</b><span><strong>Incoming replies</strong><small>{client.webhookStatus ?? formatAge(client.webhookAgeSeconds)}</small></span></div><div className={pollHealthy ? "ok" : "bad"}><b>{pollHealthy ? "✓" : "!"}</b><span><strong>Background check</strong><small>{client.pollStatus ?? formatAge(client.pollAgeSeconds)}</small></span></div></div>{mode === "advanced" && <details className="diagnostic-details"><summary>Technical details</summary><pre>{JSON.stringify({ ...client, lastWebhookReceivedAt: formatTime(client.lastWebhookReceivedAt), lastSuccessfulPollAt: formatTime(client.lastSuccessfulPollAt) }, null, 2)}</pre></details>}</div>;
+              })}</div>}
             </section>
 
             <p className="heartbeat-last-checked">Last checked: {lastChecked} · Checks refresh automatically every 30 seconds.</p>
