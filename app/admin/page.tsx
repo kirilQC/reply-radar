@@ -53,6 +53,7 @@ export default function AdminPage() {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
   const [aiArkConfigured, setAiArkConfigured] = useState(false);
+  const [aiArkEnrichmentEnabled, setAiArkEnrichmentEnabled] = useState(false);
   const [themePreset, setThemePreset] = useState("midnight");
   const [consoleAccent, setConsoleAccent] = useState("#f0cf00");
   const [logos, setLogos] = useState<Record<string, string>>({});
@@ -88,6 +89,7 @@ export default function AdminPage() {
         const payload = await response.json().catch(() => ({}));
         if (!cancelled && response.ok && Array.isArray(payload.workspaces)) {
           setAiArkConfigured(Boolean(payload.aiArkConfigured));
+          setAiArkEnrichmentEnabled(Boolean(payload.aiArkEnrichmentEnabled));
           const hydratedClients = payload.workspaces.map((item: Record<string, unknown>) => ({
             id: String(item.id ?? ""), name: String(item.name ?? ""), slug: String(item.slug ?? ""), leads: 0,
             status: item.last_successful_poll_at ? "Connected" : "Not configured", tone: String(item.accent_color ?? "var(--accent)"),
@@ -145,7 +147,7 @@ export default function AdminPage() {
     const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || client.slug;
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
     const mutationIdentity = isNewWorkspace ? { create: true } : { id: client.id, previousSlug: client.slug };
-    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: client.guardrails ?? {}, aiArkEnrichmentEnabled: workspaceDraft.aiArkEnrichmentEnabled }) }).catch(() => null);
+    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: client.guardrails ?? {} }) }).catch(() => null);
     if (!response?.ok) {
       const detail = await response?.json().catch(() => ({}));
       setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
@@ -432,9 +434,11 @@ export default function AdminPage() {
                         <label className="field-label">
                           TIMEZONE
                           <select value={workspaceDraft.timezone} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, timezone: event.target.value }))}>
-                            <option value="America/New_York">Eastern Time — America/New_York (default)</option>
-                            <option value="America/Chicago">Central Time — America/Chicago</option>
-                            <option value="Europe/London">London — Europe/London</option>
+                            <option value="America/New_York">Eastern Time — New York (default)</option>
+                            <option value="America/Chicago">Central Time — Chicago</option>
+                            <option value="America/Los_Angeles">Pacific Time — Los Angeles</option>
+                            <option value="Pacific/Honolulu">Hawaii Time — Honolulu</option>
+                            <option value="Europe/London">London</option>
                           </select>
                         </label>
                         <label className="field-label">
@@ -468,8 +472,8 @@ export default function AdminPage() {
                       <div className="field-row"><label className="field-label">MODEL<select value={workspaceDraft.anthropicModel} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, anthropicModel: event.target.value }))}><option value="">Select model</option><option>claude-opus-4-1-20250805</option><option>claude-opus-4-20250514</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option><option>claude-3-5-haiku-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" placeholder="Set temperature (0–1)" min="0" max="1" step="0.05" /><small>Lower values are more consistent; higher values are more varied.</small></label></div>
                       <label className="field-label">CUSTOM SYSTEM PROMPT<textarea placeholder="Add client-specific drafting rules" /></label>
                       <div className="logo-drop">
-                        <div><strong>AI Ark lead enrichment</strong><small>{aiArkConfigured ? "API key is configured. New leads are enriched once, then served from Supabase." : "Add AI_ARK_API_KEY in Vercel before turning this on."}</small></div>
-                        <button className={workspaceDraft.aiArkEnrichmentEnabled ? "primary-button" : "secondary-button"} type="button" aria-pressed={workspaceDraft.aiArkEnrichmentEnabled} disabled={!aiArkConfigured && !workspaceDraft.aiArkEnrichmentEnabled} onClick={() => setWorkspaceDraft((draft) => ({ ...draft, aiArkEnrichmentEnabled: !draft.aiArkEnrichmentEnabled }))}>{workspaceDraft.aiArkEnrichmentEnabled ? "Enrichment on" : "Enrichment off"}</button>
+                        <div><strong>AI Ark lead enrichment · global</strong><small>{!aiArkConfigured ? "AI_ARK_API_KEY is missing in Vercel." : aiArkEnrichmentEnabled ? "Enabled for every client. Previously enriched LinkedIn profiles are served from Supabase without another API call." : "Disabled for every client by AI_ARK_ENRICHMENT_ENABLED in Vercel."}</small></div>
+                        <span className={aiArkConfigured && aiArkEnrichmentEnabled ? "connection-badge" : "saved-dot"}>{aiArkConfigured && aiArkEnrichmentEnabled ? "● Globally on" : "● Globally off"}</span>
                       </div>
                     </section>
                     <section className="admin-panel client-config-section" id="client-scoring">

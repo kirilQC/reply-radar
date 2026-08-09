@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { extractAiArkEnrichment } from "../app/lib/ai-ark-enrichment.ts";
+import { isAiArkEnrichmentEnabled, mergeLeadAttributions } from "../app/lib/lead-identity.ts";
 
 const person = {
   id: "person-1",
@@ -25,4 +26,22 @@ test("extracts AI Ark profile data and exact matching company logo", () => {
 test("falls back to partial company-name matching", () => {
   const result = extractAiArkEnrichment({ ...person, position_groups: [{ company: { name: "Acme Holdings", logo: "https://images.example/acme.png" } }] }, "Acme Holdings LLC");
   assert.equal(result.companyPhotoUrl, "https://images.example/acme.png");
+});
+
+test("global AI Ark switch only enables explicit truthy values", () => {
+  assert.equal(isAiArkEnrichmentEnabled("true"), true);
+  assert.equal(isAiArkEnrichmentEnabled("1"), true);
+  assert.equal(isAiArkEnrichmentEnabled("false"), false);
+  assert.equal(isAiArkEnrichmentEnabled(undefined), false);
+});
+
+test("lead attribution keeps distinct campaigns and senders without duplicating a conversation attribution", () => {
+  const first = { workspaceId: "client-a", conversationId: "conversation-1", campaignId: "campaign-1", senderId: "sender-1", senderName: "Alex", lastSeenAt: "2026-08-08T10:00:00Z" };
+  const secondCampaign = { workspaceId: "client-a", conversationId: "conversation-2", campaignId: "campaign-2", senderId: "sender-2", senderName: "Sam", lastSeenAt: "2026-08-08T11:00:00Z" };
+  const refreshed = { ...first, senderName: "Alex Sender", lastSeenAt: "2026-08-08T12:00:00Z" };
+  const result = mergeLeadAttributions(mergeLeadAttributions([], first), secondCampaign);
+  const updated = mergeLeadAttributions(result, refreshed);
+  assert.equal(updated.length, 2);
+  assert.equal(updated.find((row) => row.conversationId === "conversation-1").senderName, "Alex Sender");
+  assert.equal(updated.find((row) => row.conversationId === "conversation-2").campaignId, "campaign-2");
 });

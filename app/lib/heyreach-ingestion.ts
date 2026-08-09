@@ -1,10 +1,12 @@
 import { fetchFullConversation, type ConversationMessage, type JsonObject } from "./heyreach-conversation";
 import { enrichLeadWithAiArk } from "./ai-ark-enrichment";
+import { isAiArkEnrichmentEnabled, mergeLeadAttributions } from "./lead-identity";
 
 type SupabaseConfig = { url: string; key: string };
 
 const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
 const object = (value: unknown): JsonObject => value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
+const normalizedProfileUrl = (value: unknown) => text(value).toLowerCase().replace(/\?.*$/, "").replace(/\/$/, "");
 
 async function db(config: SupabaseConfig, path: string, options: RequestInit = {}) {
   const response = await fetch(`${config.url}/rest/v1/${path}`, {
@@ -19,13 +21,12 @@ async function db(config: SupabaseConfig, path: string, options: RequestInit = {
   return data;
 }
 
-async function upsertOne(config: SupabaseConfig, table: string, filter: string, record: JsonObject) {
-  const existing = await db(config, `${table}?select=id&${filter}&limit=1`) as JsonObject[];
-  if (existing[0]?.id) {
-    const rows = await db(config, `${table}?id=eq.${encodeURIComponent(String(existing[0].id))}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(record) }) as JsonObject[];
-    return rows[0];
-  }
-  const rows = await db(config, table, { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(record) }) as JsonObject[];
+async function upsertByConflict(config: SupabaseConfig, table: string, conflict: string, record: JsonObject) {
+  const rows = await db(config, `${table}?on_conflict=${encodeURIComponent(conflict)}`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify(record),
+  }) as JsonObject[];
   return rows[0];
 }
 
@@ -39,28 +40,48 @@ async function writeMessageChunks(config: SupabaseConfig, records: JsonObject[])
   }
 }
 
+async function findCachedEnrichment(config: SupabaseConfig, profileUrl: string, currentRaw: JsonObject) {
+  const current = object(object(currentRaw.reply_radar).ai_ark);
+  if (Object.keys(current).length) return current;
+  const normalized = normalizedProfileUrl(profileUrl);
+  if (!normalized) return null;
+  // AI Ark data describes the person, not a client's campaign. Reuse only that
+  // enrichment fragment across tenant-scoped lead rows; never copy client data.
+  const candidates = await db(config, `rr_leads?select=raw_data&linkedin_profile_url=eq.${encodeURIComponent(normalized)}&limit=10`) as JsonObject[];
+  for (const candidate of candidates) {
+    const enrichment = object(object(object(candidate.raw_data).reply_radar).ai_ark);
+    if (Object.keys(enrichment).length) return enrichment;
+  }
+  return null;
+}
+
 const fingerprint = (message: { direction: unknown; sent_at: unknown; body: unknown }) => `${String(message.direction)}|${new Date(String(message.sent_at)).toISOString()}|${String(message.body)}`;
 
-export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; heyreach_api_key_ciphertext?: string | null; guardrails?: JsonObject | null }, payload: JsonObject) {
+export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; heyreach_api_key_ciphertext?: string | null }, payload: JsonObject) {
   const lead = object(payload.lead);
   const campaign = object(payload.campaign);
   // Enrichment deliberately happens before the webhook event, lead, conversation,
   // or messages are persisted. A failed history lookup cannot create a partial inbox row.
   const history = await fetchFullConversation(text(workspace.heyreach_api_key_ciphertext), payload);
   const conversationExternalId = history.conversationExternalId || text(payload.conversation_id) || text(payload.correlation_id);
-  const leadExternalId = text(lead.id) || text(lead.profile_url) || text(lead.email_address) || conversationExternalId;
+  const profileUrl = normalizedProfileUrl(lead.profile_url);
+  const suppliedLeadId = text(lead.id);
+  const existingByProfile = profileUrl ? await db(config, `rr_leads?select=id,linkedin_id,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_profile_url=eq.${encodeURIComponent(profileUrl)}&limit=1`) as JsonObject[] : [];
+  const existingByLeadId = !existingByProfile[0] && suppliedLeadId ? await db(config, `rr_leads?select=id,linkedin_id,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(suppliedLeadId)}&limit=1`) as JsonObject[] : [];
+  const existingLead = existingByProfile[0] ?? existingByLeadId[0];
+  // A profile URL is stable across HeyReach lists/campaigns. Preserve a legacy
+  // linkedin_id when the row already exists so this migration cannot fork it.
+  const leadExternalId = text(existingLead?.linkedin_id) || profileUrl || suppliedLeadId || text(lead.email_address) || conversationExternalId;
   const eventType = text(payload.event_type) || text(payload.eventType) || "unknown";
   const eventTimestamp = text(payload.timestamp) || new Date().toISOString();
   const eventKey = text(payload.correlation_id) || `${conversationExternalId || leadExternalId}:${eventTimestamp}`;
   if (!conversationExternalId || !leadExternalId) throw new Error("HeyReach payload is missing conversation_id and lead identity fields.");
 
-  const existingLeads = await db(config, `rr_leads?select=id,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(leadExternalId)}&limit=1`) as JsonObject[];
-  const existingRaw = object(existingLeads[0]?.raw_data);
+  const existingRaw = object(existingLead?.raw_data);
   const existingMetadata = object(existingRaw.reply_radar);
-  const cachedEnrichment = object(existingMetadata.ai_ark);
-  const enrichmentEnabled = workspace.guardrails?.ai_ark_enrichment_enabled === true;
-  const profileUrl = text(lead.profile_url);
-  const aiArk = Object.keys(cachedEnrichment).length
+  const cachedEnrichment = await findCachedEnrichment(config, profileUrl, existingRaw);
+  const enrichmentEnabled = isAiArkEnrichmentEnabled();
+  const aiArk = cachedEnrichment
     ? cachedEnrichment
     : enrichmentEnabled && profileUrl
       ? await enrichLeadWithAiArk(config, workspace.id, profileUrl, text(lead.company_name))
@@ -73,13 +94,20 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
   const eventId = eventRows?.[0]?.id;
 
   try {
-    const leadRow = await upsertOne(config, "rr_leads", `workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(leadExternalId)}`, { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: text(lead.profile_url) || null, name: text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || "Unknown lead", role: text(lead.position), company: text(lead.company_name), raw_data: { ...existingRaw, ...lead, campaign, reply_radar: { ...existingMetadata, sender: history.sender, campaign, history_fetched_at: history.fetchedAt, conversation: history.conversationSummary, ...(aiArk ? { ai_ark: aiArk } : {}) } } });
+    const attribution = { workspaceId: workspace.id, conversationId: conversationExternalId, campaignId: text(campaign.id) || null, campaignName: text(campaign.name) || null, senderId: history.sender.id || null, senderName: history.sender.name, lastSeenAt: eventTimestamp };
+    const stableMetadata = { ...existingMetadata };
+    delete stableMetadata.sender;
+    delete stableMetadata.campaign;
+    delete stableMetadata.conversation;
+    const stableRaw = { ...existingRaw };
+    delete stableRaw.campaign;
+    const leadRow = await upsertByConflict(config, "rr_leads", "workspace_id,linkedin_id", { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: profileUrl || null, name: text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || "Unknown lead", role: text(lead.position), company: text(lead.company_name), raw_data: { ...stableRaw, ...lead, profile_url: profileUrl || text(lead.profile_url) || null, reply_radar: { ...stableMetadata, history_fetched_at: history.fetchedAt, attributions: mergeLeadAttributions(existingMetadata.attributions, attribution), ...(aiArk ? { ai_ark: aiArk } : {}) } } });
     const leadId = String(leadRow?.id ?? "");
     if (!leadId) throw new Error("Lead upsert returned no id.");
 
     const latestMessage = history.messages.at(-1);
     const lastMessageAt = latestMessage?.sentAt || eventTimestamp;
-    const conversationRow = await upsertOne(config, "rr_conversations", `workspace_id=eq.${encodeURIComponent(workspace.id)}&heyreach_conversation_id=eq.${encodeURIComponent(conversationExternalId)}`, { workspace_id: workspace.id, lead_id: leadId, heyreach_conversation_id: conversationExternalId, account_id: history.sender.id || null, last_message_at: lastMessageAt, last_message_direction: latestMessage?.direction || "inbound" });
+    const conversationRow = await upsertByConflict(config, "rr_conversations", "workspace_id,heyreach_conversation_id", { workspace_id: workspace.id, lead_id: leadId, heyreach_conversation_id: conversationExternalId, account_id: history.sender.id || null, last_message_at: lastMessageAt, last_message_direction: latestMessage?.direction || "inbound" });
     const conversationId = String(conversationRow?.id ?? "");
     if (!conversationId) throw new Error("Conversation upsert returned no id.");
 
@@ -91,13 +119,13 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
       direction: message.direction,
       body: message.body,
       sent_at: message.sentAt,
-      raw_data: message.raw,
+      raw_data: { ...message.raw, reply_radar: { ...object(message.raw.reply_radar), sender: history.sender, campaign, conversation: { id: conversationExternalId, accountId: history.sender.id } } },
     }));
     await writeMessageChunks(config, messages);
 
     if (eventId) await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "processed", processed_at: new Date().toISOString(), error_text: null }) });
     await db(config, `rr_workspaces?id=eq.${encodeURIComponent(workspace.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_webhook_received_at: new Date().toISOString() }) });
-    return { eventId, leadId, conversationId, messagesWritten: messages.length, senderName: history.sender.name, campaignName: text(campaign.name) || null, aiArk: aiArk ? (Object.keys(cachedEnrichment).length ? "cached" : "enriched") : enrichmentEnabled ? "no_profile_url" : "disabled", historyFetchedAt: history.fetchedAt };
+    return { eventId, leadId, conversationId, messagesWritten: messages.length, senderName: history.sender.name, campaignName: text(campaign.name) || null, aiArk: aiArk ? (cachedEnrichment ? "cached" : "enriched") : enrichmentEnabled ? "no_profile_url" : "disabled", historyFetchedAt: history.fetchedAt };
   } catch (error) {
     if (eventId) await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "failed", processed_at: new Date().toISOString(), error_text: error instanceof Error ? error.message.slice(0, 2_000) : "Ingestion failed" }) }).catch(() => null);
     throw error;

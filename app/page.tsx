@@ -79,7 +79,7 @@ const defaultAppearance: AppearancePrefs = {
   accent: "#8b7cff",
   timeZone: "America/New_York",
 };
-const timeZoneSuffix: Record<string, string> = { "America/New_York": "EST", "America/Chicago": "CST", "America/Denver": "MST", "America/Los_Angeles": "PST", UTC: "UTC" };
+const timeZoneSuffix: Record<string, string> = { "America/New_York": "EST", "America/Chicago": "CST", "America/Denver": "MST", "America/Los_Angeles": "PST", "Pacific/Honolulu": "HST", UTC: "UTC" };
 const formatDashboardDateParts = (value: string | null | undefined, timeZone: string) => {
   if (!value) return { date: "—", time: "" };
   const date = new Date(value);
@@ -609,7 +609,8 @@ export function InboxPage() {
               </h1>
               {!clientParam && <div className="tracked-clients" aria-label="Temporarily hide client replies">{trackedClients.map((client) => {
                 const excluded = excludedClients.includes(client);
-                return <button key={client} className={excluded ? "excluded" : ""} aria-pressed={excluded} title={excluded ? `Show ${client} replies` : `Hide ${client} replies until refresh`} onClick={() => { setExcludedClients((current) => current.includes(client) ? current.filter((name) => name !== client) : [...current, client]); setSelected(0); }}>{client}</button>;
+                const workspace = workspaceDirectory.find((item) => item.name === client);
+                return <button key={client} className={excluded ? "excluded" : ""} aria-label={excluded ? `Show ${client} replies` : `Hide ${client} replies until refresh`} aria-pressed={excluded} title={excluded ? `Show ${client} replies` : `Hide ${client} replies until refresh`} onClick={() => { setExcludedClients((current) => current.includes(client) ? current.filter((name) => name !== client) : [...current, client]); setSelected(0); }}><i style={workspace?.logoUrl ? undefined : { background: workspace?.tone || "var(--accent)" }}>{workspace?.logoUrl ? <img src={workspace.logoUrl} alt="" /> : client.slice(0, 1).toUpperCase()}</i></button>;
               })}</div>}
             </div>
           </div>

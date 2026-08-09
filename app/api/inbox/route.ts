@@ -18,6 +18,15 @@ const senderNameFrom = (...values: unknown[]) => {
   }
   return "Unknown sender";
 };
+const campaignFrom = (...values: unknown[]) => {
+  for (const value of values) {
+    const raw = value && typeof value === "object" ? value as Row : {};
+    const metadata = raw.reply_radar && typeof raw.reply_radar === "object" ? raw.reply_radar as Row : {};
+    const campaign = metadata.campaign && typeof metadata.campaign === "object" ? metadata.campaign as Row : {};
+    if (campaign.name || campaign.id) return campaign;
+  }
+  return {};
+};
 const age = (value: unknown) => {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(String(value)).getTime()) / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -49,10 +58,11 @@ export async function GET(request: Request) {
       const leadRaw = lead.raw_data && typeof lead.raw_data === "object" ? lead.raw_data as Row : {};
       const metadata = nested(leadRaw, "reply_radar");
       const enrichment = nested(metadata, "ai_ark");
-      const campaign = Object.keys(nested(metadata, "campaign")).length ? nested(metadata, "campaign") : nested(leadRaw, "campaign");
       const workspace = workspaceById.get(String(conversation.workspace_id)) ?? {};
       const messageRows = messages.filter((message) => message.conversation_id === conversation.id);
-      const senderName = senderNameFrom(...messageRows.map((message) => message.raw_data), leadRaw);
+      const newestRawMessages = [...messageRows].reverse().map((message) => message.raw_data);
+      const senderName = senderNameFrom(...newestRawMessages, leadRaw);
+      const campaign = campaignFrom(...newestRawMessages, leadRaw);
       const thread = messageRows.map((message) => ({ id: message.id, body: message.body, direction: message.direction, sentAt: message.sent_at, authorName: message.direction === "outbound" ? senderName : String(lead.name || "Unknown lead") }));
       const latest = thread.at(-1);
       const latestReply = thread.filter((message) => message.direction === "inbound").at(-1);
