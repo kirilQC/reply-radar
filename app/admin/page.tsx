@@ -265,7 +265,6 @@ export default function AdminPage() {
               </button>
               <div className="admin-nav-caption system-caption">SYSTEM</div>
               {[
-                ["heartbeat", "Heartbeat", "⌁"],
                 ["audit", "Audit log", "≡"],
               ].map(([id, label, icon]) => (
                 <button
@@ -789,13 +788,15 @@ function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload |
 }
 
 function AuditView() {
-  type AuditEvent = { id: string; timestamp: string; source: string; sourceKey: string; action: string; status: string; severity: "success" | "info" | "warning" | "error"; workspace?: string | null; summary: string; details?: Record<string, unknown> };
+  type AuditEvent = { id: string; timestamp: string; source: string; sourceKey: string; action: string; status: string; severity: "success" | "info" | "warning" | "error"; workspace?: string | null; workspaceLogo?: string | null; summary: string; details?: Record<string, unknown> };
   const pageSize = 24;
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [visibleCount, setVisibleCount] = useState(pageSize);
   const [source, setSource] = useState("");
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -808,6 +809,8 @@ function AuditView() {
       if (source) query.set("source", source);
       if (status) query.set("status", status);
       if (search.trim()) query.set("search", search.trim());
+      if (from) query.set("from", new Date(from).toISOString());
+      if (to) query.set("to", new Date(to).toISOString());
       try {
         const response = await fetch(`/api/admin/audit?${query}`, { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
@@ -820,15 +823,15 @@ function AuditView() {
     void load();
     const timer = window.setInterval(() => void load(true), 5_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [visibleCount, source, status, search]);
+  }, [visibleCount, source, status, search, from, to]);
   const exportAudit = () => {
     const csv = ["Timestamp,Source,Workspace,Action,Explanation,Status", ...events.map((event) => [new Date(event.timestamp).toISOString(), event.source, event.workspace ?? "", event.action, event.summary, event.status].map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","))].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `reply-radar-audit-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
   };
   return <section className="audit-view">
-    <div className="audit-toolbar"><div className="audit-live"><i />Live · refreshes every 5 seconds{updatedAt ? <small>Updated {new Date(updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</small> : null}</div><label><span>Search events</span><input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleCount(pageSize); }} placeholder="Client, system, or event…" /></label><label><span>Source</span><select value={source} onChange={(event) => { setSource(event.target.value); setVisibleCount(pageSize); }}><option value="">All sources</option><option value="worker">Background worker</option><option value="heyreach">HeyReach webhook</option><option value="ai_ark">AI Ark</option><option value="supabase">Supabase</option><option value="anthropic">Anthropic</option><option value="admin">Admin console</option><option value="user">Dashboard user</option></select></label><label><span>Status</span><select value={status} onChange={(event) => { setStatus(event.target.value); setVisibleCount(pageSize); }}><option value="">All statuses</option><option value="success">Successful</option><option value="warning">In progress / warning</option><option value="error">Failed</option><option value="info">Recorded</option></select></label><button className="secondary-button" onClick={exportAudit} disabled={!events.length}>Export CSV ↓</button></div>
+    <div className="audit-toolbar"><div className="audit-filters"><label><span>Search events</span><input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleCount(pageSize); }} placeholder="Client, system, or event…" /></label><label><span>Source</span><select value={source} onChange={(event) => { setSource(event.target.value); setVisibleCount(pageSize); }}><option value="">All sources</option><option value="worker">Background worker</option><option value="heyreach">HeyReach webhook</option><option value="ai_ark">AI Ark</option><option value="supabase">Supabase</option><option value="anthropic">Anthropic</option><option value="admin">Admin console</option><option value="user">Dashboard user</option></select></label><label><span>Status</span><select value={status} onChange={(event) => { setStatus(event.target.value); setVisibleCount(pageSize); }}><option value="">All statuses</option><option value="success">Successful</option><option value="warning">In progress / warning</option><option value="error">Failed</option><option value="info">Recorded</option></select></label><label><span>From</span><input type="datetime-local" value={from} onChange={(event) => { setFrom(event.target.value); setVisibleCount(pageSize); }} /></label><label><span>To</span><input type="datetime-local" value={to} onChange={(event) => { setTo(event.target.value); setVisibleCount(pageSize); }} /></label></div><div className="audit-actions"><div className="audit-live"><i /><span>Live · refreshes every 5 seconds{updatedAt ? <small>Updated {new Date(updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</small> : null}</span></div><button className="secondary-button" onClick={exportAudit} disabled={!events.length}>Export CSV ↓</button></div></div>
     {error && <p className="audit-error">{error}</p>}
-    <div className="audit-table"><div className="audit-table-head"><span>When</span><span>Source</span><span>What happened</span><span>Status</span></div>{loading && !events.length ? <p className="audit-empty">Loading the live audit feed…</p> : events.map((event) => <article className={`audit-row ${event.severity}`} key={event.id}><time>{new Date(event.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" })}</time><div className="audit-source"><i /><span><strong>{event.source}</strong>{event.workspace && <small>{event.workspace}</small>}</span></div><div className="audit-description"><strong>{event.action.replaceAll("_", " ").replaceAll(".", " · ")}</strong><p>{event.summary}</p><details><summary>Technical details</summary><pre>{JSON.stringify(event.details ?? {}, null, 2)}</pre></details></div><span className={`audit-status ${event.severity}`}>{event.status}</span></article>)}{!loading && !events.length && !error && <p className="audit-empty">No real events match these filters yet.</p>}{hasMore && <button className="audit-see-more" onClick={() => setVisibleCount((count) => count + pageSize)}>See 24 more events ↓</button>}</div>
+    <div className="audit-table"><div className="audit-table-head"><span>When</span><span>Source</span><span>What happened</span><span>Status</span></div>{loading && !events.length ? <p className="audit-empty">Loading the live audit feed…</p> : events.map((event) => <article className={`audit-row ${event.severity}`} key={event.id}><time>{new Date(event.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" })}</time><div className="audit-source">{event.workspaceLogo ? <img src={event.workspaceLogo} alt={`${event.workspace ?? "Client"} logo`} /> : <i />}<span><strong>{event.source}</strong>{event.workspace && <small>{event.workspace}</small>}</span></div><div className="audit-description"><strong>{event.action.replaceAll("_", " ").replaceAll(".", " · ")}</strong><p>{event.summary}</p><details><summary>Technical details</summary><pre>{JSON.stringify(event.details ?? {}, null, 2)}</pre></details></div><span className={`audit-status ${event.severity}`}>{event.status}</span></article>)}{!loading && !events.length && !error && <p className="audit-empty">No real events match these filters yet.</p>}{hasMore && <button className="audit-see-more" onClick={() => setVisibleCount((count) => count + pageSize)}>See 24 more events ↓</button>}</div>
   </section>;
 }

@@ -116,10 +116,6 @@ function ProfileIndex() {
     <main className="profiles-page">
       <div className="profiles-heading">
         <div>
-          <div className="eyebrow">
-            <span className="live-dot" />
-            TEAM PROFILES
-          </div>
           <h1>Profiles</h1>
         </div>
         <button
@@ -238,18 +234,11 @@ function ProfileEditor({
   };
   return (
     <main className="profile-editor-page">
-      <a className="back-link" href="/profiles">
-        ← All profiles
-      </a>
       <div className="profile-editor-heading">
-        <div>
-          <div className="eyebrow">
-            <span className="live-dot" />
-            PROFILE SETTINGS
-          </div>
-          <h1>{name}</h1>
-          <p>Configure this teammate’s identity and assigned client view.</p>
-        </div>
+        <h1>{name || "New profile"}</h1>
+      </div>
+      <div className="profile-editor-toolbar">
+        <a className="secondary-button" href="/profiles">← Back to profiles</a>
         <button className="primary-button" onClick={saveProfile}>
           Save profile
         </button>

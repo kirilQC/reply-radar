@@ -10,6 +10,7 @@ type AuditEvent = {
   status: string;
   severity: "success" | "info" | "warning" | "error";
   workspace: string | null;
+  workspaceLogo: string | null;
   summary: string;
   details: Row;
 };
@@ -74,38 +75,47 @@ export async function GET(request: NextRequest) {
   const sourceFilter = text(params.get("source")).toLowerCase();
   const statusFilter = text(params.get("status")).toLowerCase();
   const search = text(params.get("search")).toLowerCase();
+  const from = text(params.get("from"));
+  const to = text(params.get("to"));
+  const fromTime = from ? new Date(from).getTime() : null;
+  const toTime = to ? new Date(to).getTime() : null;
   const fetchLimit = Math.min(5_000, offset + limit + 100);
 
   try {
     const [workspaces, workerRuns, aiArkRuns, webhookEvents, storedAudit] = await Promise.all([
-      getJson(url, key, "rr_workspaces?select=id,name,slug"),
+      getJson(url, key, "rr_workspaces?select=id,name,slug,logo_url"),
       getJson(url, key, `rr_sync_runs?select=*&source=neq.ai_ark&order=started_at.desc&limit=${fetchLimit}`),
       getJson(url, key, `rr_sync_runs?select=*&source=eq.ai_ark&order=started_at.desc&limit=${fetchLimit}`),
       getJson(url, key, `rr_webhook_events?select=*&order=received_at.desc&limit=${fetchLimit}`),
       getJson(url, key, `rr_audit_log?select=*&order=created_at.desc&limit=${fetchLimit}`),
     ]);
     const workspaceById = new Map(workspaces.map((row) => [text(row.id), text(row.name) || text(row.slug)]));
+    const workspaceLogoById = new Map(workspaces.map((row) => [text(row.id), text(row.logo_url) || null]));
+    const workspaceLogoByName = new Map(workspaces.map((row) => [(text(row.name) || text(row.slug)).toLowerCase(), text(row.logo_url) || null]));
     const events: AuditEvent[] = [];
     for (const row of [...workerRuns, ...aiArkRuns]) {
       const sourceKey = text(row.source) === "ai_ark" ? "ai_ark" : "worker";
       const workspace = workspaceById.get(text(row.workspace_id)) ?? null;
-      events.push({ id: `sync:${text(row.id)}`, timestamp: text(row.started_at), source: sourceKey === "ai_ark" ? "AI Ark" : "Background worker", sourceKey, action: text(row.run_type) || text(row.source) || "sync", status: text(row.status) || "unknown", severity: statusSeverity(row.status), workspace, summary: syncSummary(row, workspace), details: row });
+      events.push({ id: `sync:${text(row.id)}`, timestamp: text(row.started_at), source: sourceKey === "ai_ark" ? "AI Ark" : "Background worker", sourceKey, action: text(row.run_type) || text(row.source) || "sync", status: text(row.status) || "unknown", severity: statusSeverity(row.status), workspace, workspaceLogo: workspaceLogoById.get(text(row.workspace_id)) ?? null, summary: syncSummary(row, workspace), details: row });
     }
     for (const row of webhookEvents) {
       const workspace = workspaceById.get(text(row.workspace_id)) ?? null;
-      events.push({ id: `webhook:${text(row.id)}`, timestamp: text(row.received_at), source: "HeyReach webhook", sourceKey: "heyreach", action: text(row.event_type) || "webhook event", status: text(row.status) || "unknown", severity: statusSeverity(row.status), workspace, summary: webhookSummary(row, workspace), details: { ...row, raw: "[payload stored in rr_webhook_events]" } });
+      events.push({ id: `webhook:${text(row.id)}`, timestamp: text(row.received_at), source: "HeyReach webhook", sourceKey: "heyreach", action: text(row.event_type) || "webhook event", status: text(row.status) || "unknown", severity: statusSeverity(row.status), workspace, workspaceLogo: workspaceLogoById.get(text(row.workspace_id)) ?? null, summary: webhookSummary(row, workspace), details: { ...row, raw: "[payload stored in rr_webhook_events]" } });
     }
     for (const row of storedAudit) {
       const details = object(row.details);
       const sourceKey = text(details.source) || text(row.actor).toLowerCase().replace(/[^a-z0-9]+/g, "_") || "reply_radar";
       const status = text(details.status) || "recorded";
       const workspace = text(details.workspaceName) || workspaceById.get(text(details.workspaceId)) || null;
-      events.push({ id: `audit:${text(row.id)}`, timestamp: text(row.created_at), source: text(row.actor) || "Reply Radar", sourceKey, action: text(row.action), status, severity: statusSeverity(status), workspace, summary: text(details.summary) || `${text(row.actor) || "Reply Radar"} recorded ${text(row.action).replaceAll(".", " ")}.`, details: { ...details, entityType: row.entity_type, entityId: row.entity_id } });
+      const workspaceId = text(details.workspaceId);
+      events.push({ id: `audit:${text(row.id)}`, timestamp: text(row.created_at), source: text(row.actor) || "Reply Radar", sourceKey, action: text(row.action), status, severity: statusSeverity(status), workspace, workspaceLogo: workspaceLogoById.get(workspaceId) ?? workspaceLogoByName.get((workspace ?? "").toLowerCase()) ?? null, summary: text(details.summary) || `${text(row.actor) || "Reply Radar"} recorded ${text(row.action).replaceAll(".", " ")}.`, details: { ...details, entityType: row.entity_type, entityId: row.entity_id } });
     }
     const filtered = events
       .filter((event) => !sourceFilter || event.sourceKey === sourceFilter)
       .filter((event) => !statusFilter || event.severity === statusFilter || event.status.toLowerCase() === statusFilter)
       .filter((event) => !search || [event.source, event.action, event.status, event.workspace, event.summary].some((value) => text(value).toLowerCase().includes(search)))
+      .filter((event) => fromTime === null || new Date(event.timestamp).getTime() >= fromTime)
+      .filter((event) => toTime === null || new Date(event.timestamp).getTime() <= toTime)
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     const page = filtered.slice(offset, offset + limit);
     return NextResponse.json({ ok: true, events: page, hasMore: filtered.length > offset + limit, nextOffset: offset + page.length, generatedAt: new Date().toISOString(), filters: { sources: ["worker", "heyreach", "ai_ark", "supabase", "anthropic", "admin", "user"], statuses: ["success", "info", "warning", "error"] } });

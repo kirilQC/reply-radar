@@ -85,9 +85,9 @@ export default function HealthPage() {
 
   const services = heartbeat.services ?? [];
   const aiArkHealthy = !heartbeat.aiArk || ["healthy", "disabled"].includes(heartbeat.aiArk.status);
-  const healthy = heartbeat.status === "live" && services.every((service) => service.configured) && aiArkHealthy;
   const clientCount = heartbeat.clients?.length ?? 0;
   const attentionCount = (heartbeat.clients ?? []).filter((client) => client.status !== "healthy").length;
+  const healthy = heartbeat.status === "live" && services.every((service) => service.configured) && aiArkHealthy && heartbeat.worker?.status === "running" && attentionCount === 0;
   const lastChecked = useMemo(() => formatTime(heartbeat.checkedAt), [heartbeat.checkedAt]);
 
   return (
