@@ -283,12 +283,15 @@
   order: 6;
 }
 .health-actions {
-  gap: 22px !important;
-  align-items: flex-start !important;
+  display: grid !important;
+  justify-items: end;
+  gap: 16px !important;
+  align-items: start !important;
 }
-.health-view-controls {
-  display: grid;
-  gap: 12px;
+.health-action-row {
+  display: flex;
+  align-items: center;
+  gap: 22px;
 }
 .health-refresh-meta {
   display: grid;
@@ -317,7 +320,7 @@
   font-variant-numeric: tabular-nums;
 }
 .health-summary-card.summary-warn > strong {
-  color: var(--amber);
+  color: var(--text);
 }
 .heartbeat-service {
   min-height: 82px;
@@ -350,4 +353,20 @@
 .worker-heartbeat-panel,
 .ai-ark-health {
   margin-top: 22px !important;
+}
+@media (max-width: 700px) {
+  .health-actions,
+  .health-action-row {
+    width: 100%;
+  }
+  .health-actions {
+    justify-items: stretch;
+  }
+  .health-action-row {
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  .health-refresh-meta {
+    text-align: left;
+  }
 }

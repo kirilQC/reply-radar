@@ -25,6 +25,8 @@ export function leadRollup(attributions: unknown) {
     clients,
     campaigns,
     senders,
+    client_count: clients.length,
+    campaign_count: campaigns.length,
     client_names: clients.join("; "),
     campaign_names: campaigns.join("; "),
     sender_names: senders.join("; "),

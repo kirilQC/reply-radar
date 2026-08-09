@@ -218,8 +218,8 @@ export async function GET(request: Request) {
         company: lead.company || "",
         linkedinId: lead.linkedin_id ?? null,
         profileUrl: lead.linkedin_profile_url ?? null,
-        photoUrl: enrichment.profilePhotoUrl ?? null,
-        companyPhotoUrl: enrichment.companyPhotoUrl ?? null,
+        photoUrl: enrichment.profilePhotoSource ?? enrichment.profilePhotoUrl ?? null,
+        companyPhotoUrl: enrichment.companyPhotoSource ?? enrichment.companyPhotoUrl ?? null,
         email:
           raw.email_address ?? raw.custom_email ?? raw.enriched_email ?? null,
         location: locationLabel(raw.location || enrichment.location),

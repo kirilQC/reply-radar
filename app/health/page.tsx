@@ -157,7 +157,13 @@ export default function HealthPage() {
                 <h1>System Health</h1>
               </div>
               <div className="health-actions">
-                <div className="health-view-controls">
+                <div className="health-refresh-meta" aria-live="polite">
+                  <strong>
+                    Time since last check: {formatElapsed(checkAgeSeconds)}
+                  </strong>
+                  <span>Checks refresh automatically every 30 seconds.</span>
+                </div>
+                <div className="health-action-row">
                   <div
                     className="segmented-control"
                     role="tablist"
@@ -176,20 +182,14 @@ export default function HealthPage() {
                       Advanced view
                     </button>
                   </div>
-                  <div className="health-refresh-meta" aria-live="polite">
-                    <strong>
-                      Time since last check: {formatElapsed(checkAgeSeconds)}
-                    </strong>
-                    <span>Checks refresh automatically every 30 seconds.</span>
-                  </div>
+                  <button
+                    className="primary-button"
+                    onClick={refresh}
+                    disabled={loading}
+                  >
+                    {loading ? "Checking…" : "Refresh checks ↻"}
+                  </button>
                 </div>
-                <button
-                  className="primary-button"
-                  onClick={refresh}
-                  disabled={loading}
-                >
-                  {loading ? "Checking…" : "Refresh checks ↻"}
-                </button>
               </div>
             </div>
 
@@ -395,7 +395,7 @@ export default function HealthPage() {
                       client.webhookAgeSeconds !== null &&
                       client.webhookAgeSeconds <=
                         Number(
-                          heartbeat.thresholds?.webhookFreshSeconds ?? 1800,
+                          heartbeat.thresholds?.webhookFreshSeconds ?? 604800,
                         );
                     const pollHealthy =
                       client.pollAgeSeconds !== null &&

@@ -630,7 +630,9 @@ function LeadOverview({ detail }: { detail: Detail }) {
     ["Location", locationText(raw.location || enrichment.location)],
     ["Industry", enrichment.industry],
     ["Clients", clients.join("; ")],
+    ["Client count", rollup.client_count || clients.length],
     ["Campaigns", campaigns.join("; ")],
+    ["Campaign count", rollup.campaign_count || campaigns.length],
     ["Senders", senders.join("; ")],
     ["First reply stored", detail.lead.created_at],
     ["Last enriched", enrichment.enrichedAt],
@@ -700,9 +702,9 @@ function LeadOverview({ detail }: { detail: Detail }) {
           <h3>Current company</h3>
           <div className="database-company-card">
             <div className="database-company-heading">
-              {Boolean(enrichment.companyPhotoUrl) && (
+              {Boolean(enrichment.companyPhotoSource || enrichment.companyPhotoUrl) && (
                 <img
-                  src={String(enrichment.companyPhotoUrl)}
+                  src={String(enrichment.companyPhotoSource || enrichment.companyPhotoUrl)}
                   alt={`${currentCompanyName || "Company"} logo`}
                 />
               )}
@@ -942,7 +944,7 @@ function LeadActivity({
       : {};
   const enrichment = asObject(asObject(asObject(leadRaw).reply_radar).ai_ark);
   const leadName = display(detail.lead.name);
-  const leadPhoto = text(enrichment.profilePhotoUrl);
+  const leadPhoto = text(enrichment.profilePhotoSource || enrichment.profilePhotoUrl);
   const clientById = new Map(
     (detail.workspaces ?? []).map((workspace) => [
       String(workspace.id),

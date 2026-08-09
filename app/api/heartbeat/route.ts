@@ -24,7 +24,7 @@ export async function GET() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const thresholds = {
     workerFreshSeconds: 300,
-    webhookFreshSeconds: 1800,
+    webhookFreshSeconds: 7 * 24 * 60 * 60,
     pollFreshSeconds: 3600,
   };
   const aiArkEnabled = ["1", "true", "yes", "on"].includes(
@@ -284,8 +284,8 @@ export async function GET() {
           : webhookHealthy
             ? "Replies are reaching Reply Radar."
             : webhookAgeSeconds === null
-              ? "No webhook has arrived yet."
-              : "No webhook has arrived recently.",
+              ? "Webhook down — no reply has ever arrived."
+              : "Webhook down — no reply has arrived for more than one week.",
         pollStatus: pollHealthy
           ? "The background check ran recently."
           : pollAgeSeconds === null

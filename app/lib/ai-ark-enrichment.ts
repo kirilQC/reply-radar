@@ -91,8 +91,10 @@ export function extractAiArkEnrichment(
     text(topCompanySummary.logo) ||
     text(object(topCompanySummary.logo).source);
   return {
+    schemaVersion: 2,
     provider: "ai_ark",
     providerPersonId: person.id ?? person.identifier ?? null,
+    profileLinkedInUrl: personLinkedIn(person) || null,
     enrichedAt: new Date().toISOString(),
     profilePhotoSource: text(picture.source) || null,
     profilePhotoUrl: text(picture.source) || null,

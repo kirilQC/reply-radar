@@ -161,5 +161,7 @@ test("lead rollup produces readable semicolon summaries across clients, campaign
   assert.equal(result.client_names, "Client One; Client Two");
   assert.equal(result.campaign_names, "Campaign 1; Campaign 2");
   assert.equal(result.sender_names, "Adam; James");
+  assert.equal(result.client_count, 2);
+  assert.equal(result.campaign_count, 2);
   assert.equal(result.conversation_count, 2);
 });
