@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizePersonName } from "../../../../lib/person-name";
 type Row = Record<string, unknown>;
 async function get(url: string, key: string, path: string) {
   const response = await fetch(`${url}/rest/v1/${path}`, {
@@ -82,10 +83,12 @@ export async function GET(
           `rr_messages?select=*&conversation_id=in.(${ids.join(",")})&order=sent_at.desc&offset=${offset}&limit=${batchSize + 1}`,
         )
       : [];
+    const normalizedLead = { ...lead, name: normalizePersonName(lead.name) };
+    const normalizedRelatedLeads = relatedLeads.map((row) => ({ ...row, name: normalizePersonName(row.name) }));
     return NextResponse.json({
       ok: true,
-      lead,
-      relatedLeads,
+      lead: normalizedLead,
+      relatedLeads: normalizedRelatedLeads,
       workspace: workspace ?? null,
       workspaces,
       conversations,

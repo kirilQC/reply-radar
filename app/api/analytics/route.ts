@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
 type Row = Record<string, unknown>;
+const object = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
+const attribution = (row: Row) => {
+  const radar = object(object(row.raw_data).reply_radar);
+  return { campaign: String(object(radar.campaign).name ?? "Unattributed campaign"), sender: String(object(radar.sender).name ?? "Unknown sender") };
+};
 
 function config() {
   return { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
@@ -30,18 +35,20 @@ export async function GET(request: Request) {
     const conversations = await supabase(`rr_conversations?select=id,workspace_id,score,tier,last_message_at,created_at&workspace_id=in.(${idFilter})`) ?? [];
     const conversationIdList = conversations.map((row) => String(row.id)).filter(Boolean);
     const messages = conversationIdList.length
-      ? (await supabase(`rr_messages?select=conversation_id,direction,sent_at&conversation_id=in.(${conversationIdList.join(",")})`) ?? [])
+      ? (await supabase(`rr_messages?select=conversation_id,direction,sent_at,raw_data&conversation_id=in.(${conversationIdList.join(",")})&order=sent_at.asc`) ?? [])
       : [];
     const aiArkRuns = await supabase(`rr_sync_runs?select=id,workspace_id,status,started_at,finished_at,error_text&workspace_id=in.(${idFilter})&source=eq.ai_ark&run_type=eq.lead_enrichment&order=started_at.asc`) ?? [];
     const now = Date.now();
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-    const recentMessages = messages.filter((row) => new Date(String(row.sent_at)).getTime() >= weekAgo);
+    const inbound = messages.filter((row) => row.direction === "inbound");
+    const outbound = messages.filter((row) => row.direction === "outbound");
+    const recentMessages = inbound.filter((row) => new Date(String(row.sent_at)).getTime() >= weekAgo);
     const trend = Array.from({ length: 7 }, (_, index) => {
       const dayStart = new Date(now - (6 - index) * 24 * 60 * 60 * 1000);
       dayStart.setHours(0, 0, 0, 0);
       const dayEnd = new Date(dayStart);
       dayEnd.setDate(dayStart.getDate() + 1);
-      return recentMessages.filter((row) => {
+      return inbound.filter((row) => {
         const timestamp = new Date(String(row.sent_at)).getTime();
         return timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
       }).length;
@@ -52,6 +59,37 @@ export async function GET(request: Request) {
       return result;
     }, { hot: 0, warm: 0, nurture: 0 });
     const clientLoad = selected.map((workspace) => ({ name: workspace.name, leads: conversations.filter((row) => row.workspace_id === workspace.id).length }));
+    const conversationWorkspace = new Map(conversations.map((row) => [String(row.id), String(row.workspace_id)]));
+    const workspaceName = new Map(selected.map((row) => [String(row.id), String(row.name)]));
+    const clientPerformance = selected.map((workspace) => {
+      const conversationIds = new Set(conversations.filter((row) => row.workspace_id === workspace.id).map((row) => String(row.id)));
+      const clientMessages = messages.filter((row) => conversationIds.has(String(row.conversation_id)));
+      return { name: workspace.name, conversations: conversationIds.size, replies: clientMessages.filter((row) => row.direction === "inbound").length, outbound: clientMessages.filter((row) => row.direction === "outbound").length };
+    }).sort((a, b) => b.replies - a.replies);
+    const groupPerformance = (key: "campaign" | "sender") => {
+      const groups = new Map<string, { name: string; replies: number; messages: number; clients: Set<string> }>();
+      for (const message of messages) {
+        const name = attribution(message)[key];
+        const group = groups.get(name) ?? { name, replies: 0, messages: 0, clients: new Set<string>() };
+        group.messages += 1;
+        if (message.direction === "inbound") group.replies += 1;
+        group.clients.add(workspaceName.get(conversationWorkspace.get(String(message.conversation_id)) ?? "") ?? "Unknown client");
+        groups.set(name, group);
+      }
+      return [...groups.values()].map((group) => ({ ...group, clients: [...group.clients] })).sort((a, b) => b.replies - a.replies).slice(0, 12);
+    };
+    const responseTimes: number[] = [];
+    const byConversation = new Map<string, Row[]>();
+    for (const message of messages) byConversation.set(String(message.conversation_id), [...(byConversation.get(String(message.conversation_id)) ?? []), message]);
+    for (const thread of byConversation.values()) {
+      let lastOutbound = 0;
+      for (const message of thread) {
+        const timestamp = new Date(String(message.sent_at)).getTime();
+        if (message.direction === "outbound") lastOutbound = timestamp;
+        else if (message.direction === "inbound" && lastOutbound && timestamp >= lastOutbound) { responseTimes.push(timestamp - lastOutbound); lastOutbound = 0; }
+      }
+    }
+    const averageResponseMinutes = responseTimes.length ? Math.round(responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length / 60_000) : null;
     const aiArkDays = Array.from({ length: 14 }, (_, index) => {
       const day = new Date(now - (13 - index) * 24 * 60 * 60 * 1000); day.setHours(0, 0, 0, 0); return day;
     });
@@ -60,7 +98,7 @@ export async function GET(request: Request) {
       const runs = aiArkRuns.filter((run) => run.workspace_id === workspace.id);
       return { workspaceId: workspace.id, name: workspace.name, slug: workspace.slug, calls: runs.length, successes: runs.filter((run) => run.status === "success").length, failures: runs.filter((run) => run.status === "failed").length };
     });
-    return NextResponse.json({ ok: true, status: "live", totalReplies: messages.length, replies7d: recentMessages.length, trend, aiArkCalls: aiArkRuns.length, aiArkSuccesses: aiArkRuns.filter((run) => run.status === "success").length, aiArkFailures: aiArkRuns.filter((run) => run.status === "failed").length, aiArkTrend, aiArkTrendLabels: aiArkDays.map((day) => day.toLocaleDateString("en-US", { month: "short", day: "numeric" })), aiArkByClient, queueMix, clientLoad, workspaces: selected.map((row) => row.name) });
+    return NextResponse.json({ ok: true, status: "live", totalReplies: inbound.length, outboundMessages: outbound.length, activeConversations: conversations.length, replies7d: recentMessages.length, trend, averageResponseMinutes, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, aiArkCalls: aiArkRuns.length, aiArkSuccesses: aiArkRuns.filter((run) => run.status === "success").length, aiArkFailures: aiArkRuns.filter((run) => run.status === "failed").length, aiArkTrend, aiArkTrendLabels: aiArkDays.map((day) => day.toLocaleDateString("en-US", { month: "short", day: "numeric" })), aiArkByClient, queueMix, clientLoad, workspaces: selected.map((row) => row.name) });
   } catch (error) {
     return NextResponse.json({ ok: false, status: "error", error: error instanceof Error ? error.message : "Analytics unavailable" }, { status: 502 });
   }

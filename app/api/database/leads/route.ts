@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
+import { normalizePersonName } from "../../../lib/person-name";
 type Row = Record<string, unknown>;
+const field = (value: unknown, key: string) =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Row)[key]
+    : undefined;
 
 async function get(url: string, key: string, path: string) {
   const response = await fetch(`${url}/rest/v1/${path}`, {
@@ -211,11 +216,16 @@ export async function GET(request: Request) {
         ]),
       ];
       const workspace = workspaceById.get(String(lead.workspace_id)) ?? {};
+      const enrichmentCompany = nested(enrichment, "company");
+      const companySummary = nested(enrichmentCompany, "summary");
+      const positionGroups = Array.isArray(enrichment.positionGroups) ? enrichment.positionGroups : [];
+      const currentPosition = positionGroups.find((value) => !field(nested(value, "date"), "end"));
+      const currentPositionCompany = field(nested(currentPosition, "company"), "name");
       return {
         id: lead.id,
-        name: lead.name || "Unknown lead",
+        name: normalizePersonName(lead.name),
         role: lead.role || enrichment.title || "",
-        company: lead.company || "",
+        company: lead.company || companySummary.name || enrichmentCompany.name || currentPositionCompany || "",
         linkedinId: lead.linkedin_id ?? null,
         profileUrl: lead.linkedin_profile_url ?? null,
         photoUrl: enrichment.profilePhotoSource ?? enrichment.profilePhotoUrl ?? null,

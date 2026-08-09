@@ -627,12 +627,11 @@ function LeadOverview({ detail }: { detail: Detail }) {
   const contactFields = [
     ["Full name", detail.lead.name],
     ["Current role", detail.lead.role || enrichment.title],
-    ["Company", detail.lead.company],
+    ["Company", currentCompanyName],
     ["Email", raw.email_address || raw.custom_email || raw.enriched_email],
     ["Location", locationText(raw.location || enrichment.location)],
     ["Industry", enrichment.industry],
     ["Clients", clients.join("; ")],
-    ["Client count", rollup.client_count || clients.length],
     ["Campaigns", campaigns.join("; ")],
     ["Campaign count", rollup.campaign_count || campaigns.length],
     ["Senders", senders.join("; ")],

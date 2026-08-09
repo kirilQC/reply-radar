@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizePersonName } from "../../lib/person-name";
 type Row = Record<string, unknown>;
 
 async function query(url: string, key: string, path: string) {
@@ -27,6 +28,10 @@ const nested = (value: unknown, key: string) =>
   typeof (value as Row)[key] === "object"
     ? ((value as Row)[key] as Row)
     : {};
+const field = (value: unknown, key: string) =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Row)[key]
+    : undefined;
 const senderNameFrom = (...values: unknown[]) => {
   for (const value of values) {
     const raw = value && typeof value === "object" ? (value as Row) : {};
@@ -153,14 +158,19 @@ export async function GET(request: Request) {
       const latestReply = thread
         .filter((message) => message.direction === "inbound")
         .at(-1);
-      const name = String(lead.name || "Unknown lead");
+      const name = normalizePersonName(lead.name);
+      const enrichmentCompany = nested(enrichment, "company");
+      const companySummary = nested(enrichmentCompany, "summary");
+      const positionGroups = Array.isArray(enrichment.positionGroups) ? enrichment.positionGroups : [];
+      const currentGroup = positionGroups.find((value) => !field(nested(value, "date"), "end"));
+      const currentGroupCompany = field(nested(currentGroup, "company"), "name");
       return {
         id: conversation.id,
         leadId: lead.id,
         initials: initials(name),
         name,
         role: String(lead.role || lead.title || enrichment.title || ""),
-        company: String(lead.company || ""),
+        company: String(lead.company || companySummary.name || enrichmentCompany.name || currentGroupCompany || ""),
         profileUrl: lead.linkedin_profile_url ?? lead.profile_url ?? null,
         photoUrl: enrichment.profilePhotoSource ?? enrichment.profilePhotoUrl ?? null,
         companyPhotoUrl: enrichment.companyPhotoSource ?? enrichment.companyPhotoUrl ?? null,

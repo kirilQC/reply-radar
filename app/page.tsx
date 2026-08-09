@@ -72,6 +72,7 @@ type AnalyticsSnapshot = {
   queueMix: { hot: number; warm: number; nurture: number };
   clientLoad: Array<{ name: string; leads: number }>;
 };
+type QuickTemplate = { id: string; name: string; value: string };
 const defaultLayout: LayoutPrefs = {
   order: ["metrics", "analytics", "queue"],
   showMetrics: true,
@@ -259,7 +260,6 @@ export function InboxPage() {
     [sort, setSort] = useState("score-desc"),
     [search, setSearch] = useState(""),
     [theme, setTheme] = useState("midnight"),
-    [sent, setSent] = useState(false),
     [sidebarOpen, setSidebarOpen] = useState(false);
   const [layoutPrefs, setLayoutPrefs] = useState(defaultLayout);
   const [appearance, setAppearance] = useState(defaultAppearance);
@@ -272,6 +272,13 @@ export function InboxPage() {
   const [queryString, setQueryString] = useState("");
   const [excludedClients, setExcludedClients] = useState<string[]>([]);
   const [visibleLeadCount, setVisibleLeadCount] = useState(10);
+  const [messagingDocUrl, setMessagingDocUrl] = useState("");
+  const [quickTemplates, setQuickTemplates] = useState<QuickTemplate[]>([]);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templateDraft, setTemplateDraft] = useState({ name: "", value: "" });
+  const [aiDraft, setAiDraft] = useState("");
+  const [aiReason, setAiReason] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
   const [workspaceDirectory, setWorkspaceDirectory] = useState<
     Array<{
       name: string;
@@ -279,6 +286,7 @@ export function InboxPage() {
       tone?: string;
       logoUrl?: string;
       website?: string;
+      messagingDocUrl?: string;
     }>
   >([]);
   const [liveProfiles, setLiveProfiles] = useState<
@@ -334,6 +342,7 @@ export function InboxPage() {
                 tone: String(item.accent_color ?? "var(--accent)"),
                 logoUrl: String(item.logo_url ?? ""),
                 website: String(item.website_url ?? ""),
+                messagingDocUrl: String((item.guardrails as Record<string, unknown> | undefined)?.messaging_doc_url ?? ""),
               }))
               .sort((a: { name: string }, b: { name: string }) =>
                 a.name.localeCompare(b.name, undefined, {
@@ -752,6 +761,48 @@ export function InboxPage() {
   const latestInboundMessageId = [...current.messages]
     .reverse()
     .find((message) => message.direction !== "outbound")?.id;
+  const selectedWorkspaceSlug = current.clientSlug || clientParam || "";
+  const generateAiReview = async () => {
+    if (!current.messages.length || current.id === "empty") return;
+    setAiLoading(true);
+    const response = await fetch("/api/ai/draft", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "analyze", conversationId: current.id, workspaceId: selectedWorkspaceSlug, workspaceName: current.client, thread: current.messages, instruction: "Use the entire conversation. Write in a natural, concise business tone. Do not invent facts, promises, links, or meeting times." }),
+    }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    if (response?.ok) {
+      setAiDraft(String(payload.draft ?? ""));
+      setAiReason(String(payload.reason ?? "This lead sent a new reply that is ready for review."));
+    } else {
+      setAiDraft("");
+      setAiReason("AI review is temporarily unavailable. The new reply is still ready for manual review.");
+    }
+    setAiLoading(false);
+  };
+  useEffect(() => {
+    setAiDraft("");
+    setAiReason("");
+    setTemplatesOpen(false);
+    if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); return; }
+    let cancelled = false;
+    fetch(`/api/client-resources?workspace=${encodeURIComponent(selectedWorkspaceSlug)}`, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => {
+        if (cancelled || !payload?.workspace) return;
+        setMessagingDocUrl(String(payload.workspace.messagingDocUrl ?? ""));
+        setQuickTemplates(Array.isArray(payload.workspace.quickTemplates) ? payload.workspace.quickTemplates : []);
+      }).catch(() => null);
+    void generateAiReview();
+    return () => { cancelled = true; };
+    // The selected conversation is the intentional refresh boundary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current.id, selectedWorkspaceSlug]);
+  const syncTemplates = async (next: QuickTemplate[]) => {
+    setQuickTemplates(next);
+    if (!selectedWorkspaceSlug) return;
+    await fetch("/api/client-resources", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace: selectedWorkspaceSlug, quickTemplates: next }) }).catch(() => null);
+  };
   const clientLogoFor = (lead: Lead) =>
     lead.clientLogoUrl ||
     workspaceDirectory.find(
@@ -889,6 +940,9 @@ export function InboxPage() {
             </strong>
           </div>
           <div className="top-actions">
+            {messagingDocUrl && (
+              <a className="icon-button messaging-doc-shortcut" href={messagingDocUrl} target="_blank" rel="noreferrer" aria-label="Open client messaging document" title="Open client messaging document">▤</a>
+            )}
             {clientParam && (
               <a
                 className="icon-button client-config-shortcut"
@@ -1450,7 +1504,7 @@ export function InboxPage() {
                     <span className="reason-icon">✦</span>
                     <div>
                       <small>WHY THIS IS FLAGGED</small>
-                      <p>{current.reason}</p>
+                      <p>{aiLoading ? "Anthropic is reviewing this conversation…" : aiReason || current.reason}</p>
                     </div>
                   </div>
                   <div className="thread">
@@ -1490,20 +1544,31 @@ export function InboxPage() {
                   <div className="composer">
                     <div className="composer-top">
                       <span>AI DRAFT</span>
-                      <button>Regenerate ↻</button>
+                      <div className="composer-tools">
+                        <button type="button" onClick={() => setTemplatesOpen((open) => !open)}>Quick templates ▾</button>
+                        <button type="button" onClick={generateAiReview} disabled={aiLoading}>{aiLoading ? "Generating…" : "Regenerate ↻"}</button>
+                      </div>
                     </div>
+                    {templatesOpen && (
+                      <div className="quick-templates-panel">
+                        {quickTemplates.map((template) => <div className="quick-template-row" key={template.id}><button type="button" onClick={() => { setAiDraft((draft) => `${draft}${draft ? "\n\n" : ""}${template.value}`); setTemplatesOpen(false); }}><strong>{template.name}</strong><span>{template.value}</span></button><button type="button" className="template-remove" aria-label={`Remove ${template.name}`} onClick={() => void syncTemplates(quickTemplates.filter((item) => item.id !== template.id))}>×</button></div>)}
+                        <div className="quick-template-form"><input aria-label="Template name" placeholder="Template name" value={templateDraft.name} onChange={(event) => setTemplateDraft((draft) => ({ ...draft, name: event.target.value }))} /><textarea aria-label="Template value" placeholder="Link or reusable text" value={templateDraft.value} onChange={(event) => setTemplateDraft((draft) => ({ ...draft, value: event.target.value }))} /><button type="button" disabled={!templateDraft.name.trim() || !templateDraft.value.trim()} onClick={() => { const next = [...quickTemplates, { id: crypto.randomUUID(), name: templateDraft.name.trim(), value: templateDraft.value.trim() }]; setTemplateDraft({ name: "", value: "" }); void syncTemplates(next); }}>Save template</button></div>
+                      </div>
+                    )}
                     <textarea
-                      defaultValue={
-                        sent ? "Sent — follow-up queued in HeyReach." : ""
-                      }
+                      value={aiDraft}
+                      onChange={(event) => setAiDraft(event.target.value)}
+                      placeholder={aiLoading ? "Generating a draft…" : "Anthropic draft will appear here."}
                     />
                     <div className="composer-foot">
-                      <span>{sent ? "Follow-up queued" : ""}</span>
+                      <span>Beta safety mode · sending disabled</span>
                       <button
                         className="send-button"
-                        onClick={() => setSent(true)}
+                        type="button"
+                        disabled
+                        title="Sending is disabled during beta testing"
                       >
-                        {sent ? "Sent ✓" : "Send reply"} <span>⌘↵</span>
+                        Send reply <span>⌘↵</span>
                       </button>
                     </div>
                   </div>

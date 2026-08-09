@@ -2,6 +2,7 @@ import { fetchFullConversation, type ConversationMessage, type JsonObject } from
 import { enrichLeadWithAiArk } from "./ai-ark-enrichment";
 import { isAiArkEnrichmentEnabled, leadRollup, mergeLeadAttributions } from "./lead-identity";
 import { writeAuditEvent } from "./audit-log";
+import { normalizePersonName } from "./person-name";
 
 type SupabaseConfig = { url: string; key: string };
 
@@ -124,8 +125,8 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     const history = await fetchFullConversation(text(workspace.heyreach_api_key_ciphertext), payload);
     const conversationExternalId = history.conversationExternalId || suppliedConversationId;
     const profileUrl = normalizedProfileUrl(lead.profile_url);
-    const existingByProfile = profileUrl ? await db(config, `rr_leads?select=id,linkedin_id,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_profile_url=eq.${encodeURIComponent(profileUrl)}&limit=1`) as JsonObject[] : [];
-    const existingByLeadId = !existingByProfile[0] && suppliedLeadId ? await db(config, `rr_leads?select=id,linkedin_id,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(suppliedLeadId)}&limit=1`) as JsonObject[] : [];
+    const existingByProfile = profileUrl ? await db(config, `rr_leads?select=id,linkedin_id,role,company,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_profile_url=eq.${encodeURIComponent(profileUrl)}&limit=1`) as JsonObject[] : [];
+    const existingByLeadId = !existingByProfile[0] && suppliedLeadId ? await db(config, `rr_leads?select=id,linkedin_id,role,company,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_id=eq.${encodeURIComponent(suppliedLeadId)}&limit=1`) as JsonObject[] : [];
     const existingLead = existingByProfile[0] ?? existingByLeadId[0];
     const leadExternalId = text(existingLead?.linkedin_id) || profileUrl || suppliedLeadId || conversationExternalId;
     if (!conversationExternalId || !leadExternalId) throw new Error("HeyReach payload is missing conversation_id and lead identity fields.");
@@ -161,7 +162,12 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     delete stableMetadata.conversation;
     const stableRaw = { ...existingRaw };
     delete stableRaw.campaign;
-    const leadRow = await saveLead(config, text(existingLead?.id), { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: profileUrl || null, name: text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || "Unknown lead", role: text(lead.position), company: text(lead.company_name), raw_data: { ...stableRaw, ...lead, profile_url: profileUrl || text(lead.profile_url) || null, reply_radar: { ...stableMetadata, history_fetched_at: history.fetchedAt, attributions: mergeLeadAttributions(existingMetadata.attributions, attribution), ...(aiArk ? { ai_ark: aiArk } : {}) } } });
+    const aiArkCompany = object(object(aiArk?.company).summary);
+    const positionGroups = Array.isArray(aiArk?.positionGroups) ? aiArk.positionGroups.map(object) : [];
+    const currentPositionCompany = object(positionGroups.find((group) => !text(object(group.date).end))?.company);
+    const resolvedCompany = text(lead.company_name) || text(aiArkCompany.name) || text(currentPositionCompany.name) || text(existingLead?.company);
+    const suppliedName = text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ");
+    const leadRow = await saveLead(config, text(existingLead?.id), { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: profileUrl || null, name: normalizePersonName(suppliedName), role: text(lead.position) || text(existingLead?.role), company: resolvedCompany, raw_data: { ...stableRaw, ...lead, full_name: normalizePersonName(suppliedName), company_name: resolvedCompany || null, profile_url: profileUrl || text(lead.profile_url) || null, reply_radar: { ...stableMetadata, history_fetched_at: history.fetchedAt, attributions: mergeLeadAttributions(existingMetadata.attributions, attribution), ...(aiArk ? { ai_ark: aiArk } : {}) } } });
     const leadId = String(leadRow?.id ?? "");
     if (!leadId) throw new Error("Lead upsert returned no id.");
     await syncIdentityRollup(config, profileUrl);
