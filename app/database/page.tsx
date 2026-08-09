@@ -17,6 +17,25 @@ const asList = (value: unknown) => Array.isArray(value) ? value : [];
 const text = (value: unknown) => typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
 const humanize = (value: unknown) => text(value).replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const uniqueText = (values: unknown[]) => [...new Set(values.map(text).filter(Boolean))];
+const externalUrl = (value: unknown) => {
+  const candidate = text(value);
+  if (!candidate) return "";
+  return /^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`;
+};
+const monthYear = (value: unknown) => {
+  const candidate = text(value);
+  if (!candidate) return "Present";
+  const parsed = new Date(`${candidate.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? candidate : parsed.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+};
+const durationBetween = (startValue: unknown, endValue: unknown) => {
+  const start = new Date(`${text(startValue).slice(0, 10)}T00:00:00Z`);
+  const end = text(endValue) ? new Date(`${text(endValue).slice(0, 10)}T00:00:00Z`) : new Date();
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "";
+  const months = Math.max(0, (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth());
+  const years = Math.floor(months / 12); const remainder = months % 12;
+  return [years ? `${years} yr${years === 1 ? "" : "s"}` : "", remainder ? `${remainder} mo${remainder === 1 ? "" : "s"}` : ""].filter(Boolean).join(" ") || "Less than 1 mo";
+};
 const locationText = (value: unknown) => {
   if (typeof value === "string") return value;
   const row = asObject(value);
@@ -160,38 +179,56 @@ function LeadOverview({ detail }: { detail: Detail }) {
   const metadata = nested(raw, "reply_radar");
   const enrichment = nested(metadata, "ai_ark");
   const rollup = nested(metadata, "rollup");
-  const attributions = asList(metadata.attributions).map(asObject);
+  const relatedRaws = (detail.relatedLeads ?? []).map((item) => asObject(item.raw_data));
+  const relatedMetadata = [raw, ...relatedRaws].map((item) => nested(item, "reply_radar"));
+  const attributions = relatedMetadata.flatMap((item) => asList(item.attributions).map(asObject));
+  const messageMetadata = detail.messages.map((message) => nested(asObject(message.raw_data), "reply_radar"));
   const clients = Array.isArray(rollup.clients) ? rollup.clients.map(String) : uniqueText([...(detail.workspaces ?? []).map((item) => item.name), ...attributions.map((item) => item.workspaceName)]);
-  const campaigns = Array.isArray(rollup.campaigns) ? rollup.campaigns.map(String) : uniqueText(attributions.map((item) => item.campaignName));
-  const senders = Array.isArray(rollup.senders) ? rollup.senders.map(String) : uniqueText(attributions.map((item) => item.senderName));
+  const campaigns = uniqueText([...(Array.isArray(rollup.campaigns) ? rollup.campaigns : []), ...attributions.map((item) => item.campaignName), ...relatedMetadata.map((item) => asObject(item.campaign).name), ...[raw, ...relatedRaws].map((item) => asObject(item.campaign).name), ...messageMetadata.map((item) => asObject(item.campaign).name)]);
+  const senders = uniqueText([...(Array.isArray(rollup.senders) ? rollup.senders : []), ...attributions.map((item) => item.senderName), ...relatedMetadata.map((item) => asObject(item.sender).name), ...messageMetadata.map((item) => asObject(item.sender).name)]);
   const department = asObject(enrichment.department);
   const departmentLabels = uniqueText([department.seniority, ...asList(department.functions), ...asList(department.departments), ...asList(department.sub_departments)]).map(humanize);
   const statistics = asObject(enrichment.statistics);
   const network = asObject(statistics.network);
   const networkLabels = [network.followers_count ? `${Number(network.followers_count).toLocaleString()} followers` : "", network.connections_count ? `${Number(network.connections_count).toLocaleString()} connections` : ""].filter(Boolean);
-  const skills = asList(enrichment.skills).map((item) => typeof item === "string" ? item : text(asObject(item).name || asObject(item).title)).filter(Boolean);
-  const languages = languageLabels(enrichment.languages);
   const education = recordLabels(enrichment.educations, ["school_name", "school", "name", "degree_name", "degree", "field_of_study"]);
-  const certifications = recordLabels(enrichment.certifications, ["name", "title", "authority", "organization"]);
-  const positions = positionLabels(enrichment.positionGroups);
   const company = asObject(enrichment.company);
   const companySummary = asObject(company.summary);
-  const companyLabels = uniqueText([company.name, companySummary.name, company.industry, companySummary.industry, company.website, companySummary.website, company.domain, companySummary.domain]);
+  const companyLinks = asObject(company.link);
+  const currentCompanyName = text(companySummary.name || company.name || detail.lead.company);
+  const companyWebsite = externalUrl(companyLinks.website || raw.company_url);
+  const companyLinkedIn = externalUrl(companyLinks.linkedin);
+  const companyIndustry = text(companySummary.industry || company.industry || enrichment.industry);
+  const companyLocation = locationText(asObject(company.location).headquarter);
+  const staff = asObject(companySummary.staff); const staffRange = asObject(staff.range);
+  const companySize = staffRange.start || staffRange.end ? `${display(staffRange.start || "?")}–${display(staffRange.end || "?")} employees` : staff.total ? `${Number(staff.total).toLocaleString()} known employees` : "";
   const contactFields = [["Full name", detail.lead.name], ["Current role", detail.lead.role || enrichment.title], ["Company", detail.lead.company], ["Email", raw.email_address || raw.custom_email || raw.enriched_email], ["Location", locationText(raw.location || enrichment.location)], ["Industry", enrichment.industry], ["Clients", clients.join("; ")], ["Campaigns", campaigns.join("; ")], ["Senders", senders.join("; ")], ["First reply stored", detail.lead.created_at], ["Last enriched", enrichment.enrichedAt]];
   return <div className="database-overview">
-    <section><h3>Contact information</h3><div className="database-field-grid">{contactFields.map(([label, value]) => <ReadableField label={String(label)} value={String(label).includes("reply") || String(label).includes("enriched") ? when(value) : display(value)} key={String(label)} />)}<div><small>LinkedIn profile</small>{detail.lead.linkedin_profile_url ? <a href={String(detail.lead.linkedin_profile_url)} target="_blank" rel="noreferrer">Open LinkedIn ↗</a> : <strong>—</strong>}</div></div></section>
-    {Object.keys(enrichment).length > 0 && <section><h3>Professional profile</h3><div className="database-enrichment-images">{Boolean(enrichment.profilePhotoUrl) && <figure><img src={String(enrichment.profilePhotoUrl)} alt="Lead profile" /><figcaption>Lead photo</figcaption></figure>}{Boolean(enrichment.companyPhotoUrl) && <figure><img src={String(enrichment.companyPhotoUrl)} alt="Lead company" /><figcaption>Company logo</figcaption></figure>}</div><div className="database-field-grid"><ReadableField label="Headline" value={display(enrichment.headline)} /><ReadableField label="Seniority and department" value={departmentLabels.join(" · ") || "—"} /><ReadableField label="Network" value={networkLabels.join(" · ") || "—"} /><ReadableField label="Languages" value={languages.join(" · ") || "—"} /><ReadableField label="Company details" value={companyLabels.join(" · ") || "—"} /></div>{skills.length > 0 && <ReadableTags title="Skills" items={skills} />}{positions.length > 0 && <ReadableList title="Experience" items={positions} />}{education.length > 0 && <ReadableList title="Education" items={education} />}{certifications.length > 0 && <ReadableList title="Certifications" items={certifications} />}</section>}
-    <section><h3>HeyReach context</h3><div className="database-field-grid"><ReadableField label="About" value={display(raw.about)} /><ReadableField label="Summary" value={display(raw.summary)} /><ReadableField label="Tags" value={Array.isArray(raw.tags) ? raw.tags.join(", ") || "—" : "—"} /></div></section>
-    {Array.isArray(raw.lists) && raw.lists.length > 0 && <section><h3>Lists and custom fields</h3><div className="database-readable-list">{raw.lists.map((item, index) => { const row = asObject(item); const custom = asObject(row.custom_fields); return <article key={index}><strong>{display(row.name || `List ${index + 1}`)}</strong>{Object.keys(custom).length > 0 && <dl>{Object.entries(custom).map(([key, value]) => <div key={key}><dt>{humanize(key)}</dt><dd>{display(value)}</dd></div>)}</dl>}</article>; })}</div></section>}
+    <section><h3>Contact information</h3><div className="database-field-grid">{contactFields.map(([label, value]) => <ReadableField label={String(label)} value={String(label).includes("reply") || String(label).includes("enriched") ? when(value) : display(value)} key={String(label)} />)}<LinkField label="LinkedIn profile" href={externalUrl(detail.lead.linkedin_profile_url)} text="Open LinkedIn ↗" /><LinkField label="Company website" href={companyWebsite} text="Open website ↗" /><LinkField label="Company LinkedIn page" href={companyLinkedIn} text="Open company on LinkedIn ↗" /></div>{Array.isArray(raw.tags) && raw.tags.length > 0 && <ReadableTags title="HeyReach tags" items={raw.tags.map(String)} />}{Array.isArray(raw.lists) && raw.lists.length > 0 && <div className="database-readable-group"><small>HeyReach lists and custom fields</small><div className="database-readable-list">{raw.lists.map((item, index) => { const row = asObject(item); const custom = asObject(row.custom_fields); return <article key={index}><strong>{display(row.name || `List ${index + 1}`)}</strong>{Object.keys(custom).length > 0 && <dl>{Object.entries(custom).map(([key, value]) => <div key={key}><dt>{humanize(key)}</dt><dd>{display(value)}</dd></div>)}</dl>}</article>; })}</div></div>}</section>
+    {Object.keys(enrichment).length > 0 && <section><h3>Professional profile</h3><div className="database-field-grid"><ReadableField label="Headline" value={display(enrichment.headline || raw.summary)} /><ReadableField label="Seniority and department" value={departmentLabels.join(" · ") || "—"} /><ReadableField label="Network" value={networkLabels.join(" · ") || "—"} /></div><div className="database-about"><small>About</small><p>{display(enrichment.summary || raw.about)}</p></div></section>}
+    {Object.keys(company).length > 0 && <section><h3>Current company</h3><div className="database-company-card"><div className="database-company-heading">{Boolean(enrichment.companyPhotoUrl) && <img src={String(enrichment.companyPhotoUrl)} alt="" />}<div>{companyLinkedIn || companyWebsite ? <a href={companyLinkedIn || companyWebsite} target="_blank" rel="noreferrer">{currentCompanyName || "Company"} ↗</a> : <strong>{currentCompanyName || "Company"}</strong>}<span>{companyIndustry || "Industry not provided"}</span></div></div><div className="database-field-grid"><ReadableField label="Company size" value={companySize || "—"} /><ReadableField label="Founded" value={display(companySummary.founded_year)} /><ReadableField label="Headquarters" value={companyLocation || "—"} /><LinkField label="Website" href={companyWebsite} text="Visit website ↗" /></div>{Boolean(companySummary.description) && <p className="database-company-description">{String(companySummary.description)}</p>}</div></section>}
+    {asList(enrichment.positionGroups).length > 0 && <ExperienceTimeline groups={asList(enrichment.positionGroups)} currentCompany={company} />}
+    {education.length > 0 && <section><h3>Education</h3><ReadableList title="Education history" items={education} /></section>}
   </div>;
 }
 
 function ReadableField({ label, value }: { label: string; value: string }) { return <div><small>{label}</small><strong>{value}</strong></div>; }
+function LinkField({ label, href, text: linkText }: { label: string; href: string; text: string }) { return <div><small>{label}</small>{href ? <a href={href} target="_blank" rel="noreferrer">{linkText}</a> : <strong>—</strong>}</div>; }
 function ReadableTags({ title, items }: { title: string; items: string[] }) { return <div className="database-readable-group"><small>{title}</small><div className="database-tag-list">{items.map((item) => <span key={item}>{humanize(item)}</span>)}</div></div>; }
 function ReadableList({ title, items }: { title: string; items: string[] }) { return <div className="database-readable-group"><small>{title}</small><ul>{items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></div>; }
 function recordLabels(value: unknown, keys: string[]) { return asList(value).map((item) => { const row = asObject(item); return uniqueText(keys.map((key) => { const candidate = row[key]; return typeof candidate === "object" ? text(asObject(candidate).name || asObject(candidate).title) : candidate; })).join(" · "); }).filter(Boolean); }
-function languageLabels(value: unknown) { if (Array.isArray(value)) return value.map((item) => typeof item === "string" ? humanize(item) : uniqueText([asObject(item).language, asObject(item).country, asObject(item).name]).join(" · ")).filter(Boolean); const row = asObject(value); const primary = asObject(row.primary_locale); return uniqueText([primary.language && primary.country ? `${humanize(primary.language)} (${text(primary.country)})` : primary.language, ...asList(row.supported_locales).map((item) => { const locale = asObject(item); return locale.language && locale.country ? `${humanize(locale.language)} (${text(locale.country)})` : humanize(locale.language); })]); }
-function positionLabels(value: unknown) { return asList(value).flatMap((item) => { const group = asObject(item); const company = asObject(group.company); const companyName = text(company.name || group.company_name); const positions = asList(group.positions || group.position).map(asObject); if (!positions.length) return companyName ? [companyName] : []; return positions.map((position) => uniqueText([position.title || position.name, companyName, position.location]).join(" · ")).filter(Boolean); }); }
+
+function ExperienceTimeline({ groups, currentCompany }: { groups: unknown[]; currentCompany: Record<string, unknown> }) {
+  const currentSummary = asObject(currentCompany.summary); const currentLinks = asObject(currentCompany.link); const currentName = text(currentSummary.name || currentCompany.name).toLowerCase();
+  return <section><h3>Experience</h3><div className="database-experience-list">{groups.map((item, index) => {
+    const group = asObject(item); const company = asObject(group.company); const companyName = text(company.name || group.company_name) || "Unknown company"; const groupDate = asObject(group.date);
+    const roles = asList(group.profile_positions || group.positions || group.position).map(asObject); const employees = asObject(company.employees); const isCurrentCompany = Boolean(currentName && companyName.toLowerCase() === currentName);
+    const linkedIn = externalUrl(company.url); const website = isCurrentCompany ? externalUrl(currentLinks.website) : ""; const destination = linkedIn || website;
+    const industry = isCurrentCompany ? text(currentSummary.industry || currentCompany.industry) : "";
+    const size = employees.start || employees.end ? `${display(employees.start || "?")}–${display(employees.end || "?")} employees` : "";
+    return <article key={`${companyName}-${index}`}><header>{Boolean(company.logo) && <img src={String(company.logo)} alt="" />}<div>{destination ? <a href={destination} target="_blank" rel="noreferrer">{companyName} ↗</a> : <strong>{companyName}</strong>}<span>{[industry || "Industry not supplied by AI Ark", size].filter(Boolean).join(" · ")}</span></div></header>{roles.length ? roles.map((role, roleIndex) => { const dates = asObject(role.date); const start = dates.start || groupDate.start; const end = dates.end || groupDate.end; return <div className="database-role" key={`${text(role.title)}-${roleIndex}`}><h4>{display(role.title || role.name)}</h4><p className="database-role-dates">{monthYear(start)} – {monthYear(end)}{start ? ` · ${durationBetween(start, end)}` : ""}</p>{Boolean(role.location) && <p className="database-role-location">{String(role.location)}</p>}{Boolean(role.description) && <p className="database-role-description">{String(role.description)}</p>}</div>; }) : <div className="database-role"><p className="database-role-dates">{monthYear(groupDate.start)} – {monthYear(groupDate.end)}{groupDate.start ? ` · ${durationBetween(groupDate.start, groupDate.end)}` : ""}</p></div>}</article>;
+  })}</div></section>;
+}
 
 function LeadActivity({ detail, onLoadOlder }: { detail: Detail; onLoadOlder: () => void }) {
   const leadRaw = detail.lead.raw_data && typeof detail.lead.raw_data === "object" ? detail.lead.raw_data : {};

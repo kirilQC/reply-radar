@@ -22,7 +22,9 @@ const campaignFrom = (...values: unknown[]) => {
   for (const value of values) {
     const raw = value && typeof value === "object" ? value as Row : {};
     const metadata = raw.reply_radar && typeof raw.reply_radar === "object" ? raw.reply_radar as Row : {};
-    const campaign = metadata.campaign && typeof metadata.campaign === "object" ? metadata.campaign as Row : {};
+    const campaign = metadata.campaign && typeof metadata.campaign === "object"
+      ? metadata.campaign as Row
+      : raw.campaign && typeof raw.campaign === "object" ? raw.campaign as Row : {};
     if (campaign.name || campaign.id) return campaign;
   }
   return {};
@@ -30,7 +32,9 @@ const campaignFrom = (...values: unknown[]) => {
 const uniqueNames = (values: unknown[], kind: "sender" | "campaign") => [...new Set(values.map((value) => {
   const raw = value && typeof value === "object" ? value as Row : {};
   const metadata = raw.reply_radar && typeof raw.reply_radar === "object" ? raw.reply_radar as Row : {};
-  const record = metadata[kind] && typeof metadata[kind] === "object" ? metadata[kind] as Row : {};
+  const record = metadata[kind] && typeof metadata[kind] === "object"
+    ? metadata[kind] as Row
+    : raw[kind] && typeof raw[kind] === "object" ? raw[kind] as Row : {};
   return String(record.name ?? "").trim();
 }).filter(Boolean))];
 const nested = (value: unknown, key: string) => value && typeof value === "object" && !Array.isArray(value) && (value as Row)[key] && typeof (value as Row)[key] === "object" ? (value as Row)[key] as Row : {};
@@ -66,8 +70,8 @@ export async function GET(request: Request) {
       const latestMessage = leadMessages[0];
       const campaign = campaignFrom(...leadMessages.map((message) => message.raw_data), raw);
       const rollup = nested(metadata, "rollup");
-      const campaignNames = Array.isArray(rollup.campaigns) ? rollup.campaigns.map(String) : uniqueNames(leadMessages.map((message) => message.raw_data), "campaign");
-      const senderNames = Array.isArray(rollup.senders) ? rollup.senders.map(String) : uniqueNames(leadMessages.map((message) => message.raw_data), "sender");
+      const campaignNames = [...new Set([...(Array.isArray(rollup.campaigns) ? rollup.campaigns.map(String) : []), ...uniqueNames([...leadMessages.map((message) => message.raw_data), raw], "campaign")])];
+      const senderNames = [...new Set([...(Array.isArray(rollup.senders) ? rollup.senders.map(String) : []), ...uniqueNames([...leadMessages.map((message) => message.raw_data), raw], "sender")])];
       const workspace = workspaceById.get(String(lead.workspace_id)) ?? {};
       return { id: lead.id, name: lead.name || "Unknown lead", role: lead.role || enrichment.title || "", company: lead.company || "", linkedinId: lead.linkedin_id ?? null, profileUrl: lead.linkedin_profile_url ?? null, photoUrl: enrichment.profilePhotoUrl ?? raw.profile_picture_url ?? raw.profile_image_url ?? raw.avatar_url ?? raw.image_url ?? null, companyPhotoUrl: enrichment.companyPhotoUrl ?? null, email: raw.email_address ?? raw.custom_email ?? raw.enriched_email ?? null, location: locationLabel(raw.location || enrichment.location), headline: enrichment.headline ?? null, industry: enrichment.industry ?? null, campaignName: campaign.name ?? null, campaignNames, enriched: Object.keys(enrichment).length > 0, tags: Array.isArray(raw.tags) ? raw.tags : [], senderName: senderNameFrom(...leadMessages.map((message) => message.raw_data), raw), senderNames, workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug, logoUrl: workspace.logo_url, accentColor: workspace.accent_color }, createdAt: lead.created_at, conversationCount: leadConversations.length, replyCount: leadMessages.filter((message) => message.direction === "inbound").length, lastReplyAt: leadConversations[0]?.last_message_at ?? null, lastMessage: latestMessage?.body ?? "", rawData: raw };
     });
