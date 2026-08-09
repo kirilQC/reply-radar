@@ -101,8 +101,11 @@ export default function HealthPage() {
   const aiArkHealthy =
     !heartbeat.aiArk ||
     ["healthy", "disabled"].includes(heartbeat.aiArk.status);
-  const clientCount = heartbeat.clients?.length ?? 0;
-  const attentionCount = (heartbeat.clients ?? []).filter(
+  const connectedClients = (heartbeat.clients ?? []).filter(
+    (client) => client.status !== "missing",
+  );
+  const clientCount = connectedClients.length;
+  const attentionCount = connectedClients.filter(
     (client) => client.status !== "healthy",
   ).length;
   const successfulCount = clientCount - attentionCount;
