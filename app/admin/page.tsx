@@ -88,14 +88,18 @@ export default function AdminPage() {
         const payload = await response.json().catch(() => ({}));
         if (!cancelled && response.ok && Array.isArray(payload.workspaces)) {
           setAiArkConfigured(Boolean(payload.aiArkConfigured));
-          setWorkspaceClients(payload.workspaces.map((item: Record<string, unknown>) => ({
+          const hydratedClients = payload.workspaces.map((item: Record<string, unknown>) => ({
             id: String(item.id ?? ""), name: String(item.name ?? ""), slug: String(item.slug ?? ""), leads: 0,
             status: item.last_successful_poll_at ? "Connected" : "Not configured", tone: String(item.accent_color ?? "var(--accent)"),
             lastSync: String(item.last_successful_poll_at ?? "not synced"), createdAt: String(item.created_at ?? ""),
             brief: String(item.client_brief ?? ""), apiKey: "", apiKeyMasked: String(item.heyreach_api_key_masked ?? ""), timezone: String(item.timezone ?? "America/New_York"), website: String(item.website_url ?? ""), anthropicModel: String(item.anthropic_model ?? ""), webhookUrl: String(item.webhook_url ?? ""), keyConfigured: Boolean(item.key_configured),
             logoUrl: String(item.logo_url ?? ""),
             guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {}, aiArkEnrichmentEnabled: Boolean(item.ai_ark_enrichment_enabled),
-          })));
+          }));
+          setWorkspaceClients(hydratedClients);
+          const requestedClient = new URLSearchParams(window.location.search).get("client");
+          const requestedIndex = requestedClient ? hydratedClients.findIndex((item: ClientWorkspace) => item.slug === requestedClient) : -1;
+          if (requestedIndex >= 0) { setSelected(requestedIndex); setWorkspaceOpen(true); }
           setWorkspaceStorageReady(true);
           return;
         }
@@ -308,16 +312,11 @@ export default function AdminPage() {
                               : "Verify ingestion and worker reliability across every workspace."}
                   </p>}
                 </div>
-                {active === "workspaces" && <button
+                {active === "workspaces" && !workspaceOpen && <button
                   className="primary-button"
-                  onClick={() => workspaceOpen ? saveWorkspaceChanges() : addWorkspace()}
-                  disabled={saving}
+                  onClick={addWorkspace}
                 >
-                  {saving
-                    ? "Saving…"
-                    : saved
-                    ? "Saved ✓"
-                    : workspaceOpen ? "Save changes" : "+ Add workspace"}
+                  + Add workspace
                 </button>}
               </div>
               {workspaceError && active === "workspaces" && <p className="form-error" role="alert">{workspaceError}</p>}
@@ -351,7 +350,7 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>}
-                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => { setWorkspaceError(""); setWorkspaceOpen(false); }}>← Back to directory</button></div>}
+                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => { setWorkspaceError(""); setWorkspaceOpen(false); }}>← Back to directory</button><button className="primary-button" onClick={saveWorkspaceChanges} disabled={saving}>{saving ? "Saving…" : saved ? "Saved ✓" : "Save changes"}</button></div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
                       <div className="panel-heading">

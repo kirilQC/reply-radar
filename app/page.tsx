@@ -550,6 +550,7 @@ export function InboxPage() {
             </strong>
           </div>
           <div className="top-actions">
+            {clientParam && <a className="icon-button client-config-shortcut" href={`/admin?client=${encodeURIComponent(clientParam)}`} aria-label={`Configure ${clientName}`} title={`Configure ${clientName}`}>↗</a>}
             <button
               className="icon-button layout-button"
               aria-label="Customize inbox layout"
