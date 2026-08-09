@@ -125,7 +125,7 @@ export default function DatabasePage() {
       <section className="main-area database-main">
         <header className="topbar"><div className="crumb"><span>Reply Radar</span><strong>› Lead database</strong></div><div className="top-actions"><div className="database-record-count">{leads.length} loaded</div><GlobalAppearanceControl /></div></header>
         <main className="database-shell" aria-label="Lead database">
-          <div className="database-heading"><div><div className="eyebrow"><span className="live-dot" /> REPLY ARCHIVE</div><h1>Lead database</h1><p>Every lead who has replied through HeyReach, with their complete history and original payload.</p></div><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
+          <div className="database-heading"><div><h1>Lead Database</h1></div><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
           <section className="database-toolbar">
             <label className="database-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, company, role, or LinkedIn ID…" /></label>
             <label><span>Client</span><select value={workspace} onChange={(event) => setWorkspace(event.target.value)}><option value="">All clients</option>{workspaces.map((item) => <option value={item.slug} key={item.id}>{item.name}</option>)}</select></label>

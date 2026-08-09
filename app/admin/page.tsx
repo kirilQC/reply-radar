@@ -25,7 +25,6 @@ type ClientWorkspace = {
   webhookUrl?: string;
   apiKeyMasked?: string;
   guardrails?: Record<string, unknown>;
-  aiArkEnrichmentEnabled?: boolean;
 };
 
 const initialClients: ClientWorkspace[] = [];
@@ -37,6 +36,7 @@ type HeartbeatPayload = {
   worker?: { status: string; recordedStatus?: unknown; ageSeconds: number | null; startedAt?: string; finishedAt?: string; durationSeconds?: number | null; workspacesSeen: number; recordsWritten?: unknown; source?: unknown; runType?: unknown; error: string | null; recentRuns?: unknown[]; raw?: Record<string, unknown> } | null;
   thresholds?: Record<string, number>;
   diagnostics?: Record<string, unknown>;
+  aiArk?: { status: string; enabled: boolean; configured: boolean; failureThreshold: number; failures24h: number; successes24h: number; calls24h: number; unenrichedLeads24h: number; explanation: string; recentFailures?: unknown[]; recentRuns?: unknown[] };
   error?: string;
 };
 
@@ -52,8 +52,6 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
-  const [aiArkConfigured, setAiArkConfigured] = useState(false);
-  const [aiArkEnrichmentEnabled, setAiArkEnrichmentEnabled] = useState(false);
   const [themePreset, setThemePreset] = useState("midnight");
   const [consoleAccent, setConsoleAccent] = useState("#f0cf00");
   const [logos, setLogos] = useState<Record<string, string>>({});
@@ -71,7 +69,7 @@ export default function AdminPage() {
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))] ?? { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced" };
-  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", anthropicModel: "", apiKey: "", aiArkEnrichmentEnabled: false });
+  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", anthropicModel: "", apiKey: "" });
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -88,15 +86,13 @@ export default function AdminPage() {
         const response = await fetch("/api/admin/workspaces", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
         if (!cancelled && response.ok && Array.isArray(payload.workspaces)) {
-          setAiArkConfigured(Boolean(payload.aiArkConfigured));
-          setAiArkEnrichmentEnabled(Boolean(payload.aiArkEnrichmentEnabled));
           const hydratedClients = payload.workspaces.map((item: Record<string, unknown>) => ({
             id: String(item.id ?? ""), name: String(item.name ?? ""), slug: String(item.slug ?? ""), leads: 0,
             status: item.last_successful_poll_at ? "Connected" : "Not configured", tone: String(item.accent_color ?? "var(--accent)"),
             lastSync: String(item.last_successful_poll_at ?? "not synced"), createdAt: String(item.created_at ?? ""),
             brief: String(item.client_brief ?? ""), apiKey: "", apiKeyMasked: String(item.heyreach_api_key_masked ?? ""), timezone: String(item.timezone ?? "America/New_York"), website: String(item.website_url ?? ""), anthropicModel: String(item.anthropic_model ?? ""), webhookUrl: String(item.webhook_url ?? ""), keyConfigured: Boolean(item.key_configured),
             logoUrl: String(item.logo_url ?? ""),
-            guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {}, aiArkEnrichmentEnabled: Boolean(item.ai_ark_enrichment_enabled),
+            guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {},
           }));
           setWorkspaceClients(hydratedClients);
           const requestedClient = new URLSearchParams(window.location.search).get("client");
@@ -129,7 +125,7 @@ export default function AdminPage() {
   }, []);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", anthropicModel: client.anthropicModel ?? "", apiKey: "", aiArkEnrichmentEnabled: Boolean(client.aiArkEnrichmentEnabled) });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", anthropicModel: client.anthropicModel ?? "", apiKey: "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -158,7 +154,7 @@ export default function AdminPage() {
     const payload = await response.json().catch(() => ({}));
     const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] : null;
     const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: { ...(item.guardrails ?? {}), ai_ark_enrichment_enabled: workspaceDraft.aiArkEnrichmentEnabled }, aiArkEnrichmentEnabled: workspaceDraft.aiArkEnrichmentEnabled, isNew: false } : item);
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: item.guardrails ?? {}, isNew: false } : item);
     setWorkspaceClients(next);
     setWorkspaceDraft((draft) => ({ ...draft, apiKey: "" }));
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
@@ -282,7 +278,7 @@ export default function AdminPage() {
                 </button>
               ))}
             </aside>
-            <section className="admin-content">
+            <section className={`admin-content ${active === "audit" ? "audit-content" : ""}`}>
               <div className="admin-heading">
                 <div>
                   <h1 className={active === "workspaces" ? (workspaceOpen ? "client-config-heading" : "workspace-directory-page-title") : undefined}>
@@ -300,7 +296,7 @@ export default function AdminPage() {
                                   ? "Audit log"
                                   : "System health"}
                   </h1>
-                  {!(active === "workspaces" && workspaceOpen) && active !== "workspaces" && <p>
+                  {!(active === "workspaces" && workspaceOpen) && active !== "workspaces" && active !== "audit" && <p>
                     {active === "ai"
                           ? "Tune the Anthropic drafting context for every client."
                           : active === "scoring"
@@ -308,7 +304,7 @@ export default function AdminPage() {
                             : active === "heartbeat"
                               ? "Live pulse checks for credentials, webhooks, and sync freshness."
                               : active === "audit"
-                                ? "A chronological record of configuration and ingestion events."
+                                ? ""
                             : active === "theme"
                               ? "Customize the interface without touching code."
                               : "Verify ingestion and worker reliability across every workspace."}
@@ -471,10 +467,6 @@ export default function AdminPage() {
                       <div className="panel-heading"><div><h2>AI context & voice</h2><p>Client-specific Anthropic drafting rules and review guardrails.</p></div><span className="connection-badge"><i /> Client-specific</span></div>
                       <div className="field-row"><label className="field-label">MODEL<select value={workspaceDraft.anthropicModel} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, anthropicModel: event.target.value }))}><option value="">Select model</option><option>claude-opus-4-1-20250805</option><option>claude-opus-4-20250514</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option><option>claude-3-5-haiku-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" placeholder="Set temperature (0–1)" min="0" max="1" step="0.05" /><small>Lower values are more consistent; higher values are more varied.</small></label></div>
                       <label className="field-label">CUSTOM SYSTEM PROMPT<textarea placeholder="Add client-specific drafting rules" /></label>
-                      <div className="logo-drop">
-                        <div><strong>AI Ark lead enrichment · global</strong><small>{!aiArkConfigured ? "AI_ARK_API_KEY is missing in Vercel." : aiArkEnrichmentEnabled ? "Enabled for every client. Previously enriched LinkedIn profiles are served from Supabase without another API call." : "Disabled for every client by AI_ARK_ENRICHMENT_ENABLED in Vercel."}</small></div>
-                        <span className={aiArkConfigured && aiArkEnrichmentEnabled ? "connection-badge" : "saved-dot"}>{aiArkConfigured && aiArkEnrichmentEnabled ? "● Globally on" : "● Globally off"}</span>
-                      </div>
                     </section>
                     <section className="admin-panel client-config-section" id="client-scoring">
                       <div className="panel-heading"><div><h2>Scoring engine</h2><p>Client-specific queue weights and urgency thresholds.</p></div><span className="saved-dot">● Draft config</span></div>
@@ -783,6 +775,7 @@ function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload |
       </div>
       <div className="heartbeat-service-grid">{(heartbeat?.services ?? []).map((service) => <div className="heartbeat-service admin-panel" key={service.id}><i className={service.configured ? "heartbeat-ok" : "heartbeat-missing"} /><div><strong>{service.label}</strong><small>{service.configured ? "Ready to use" : "Needs setup"}</small><small>{service.explanation}</small></div></div>)}</div>
       <section className="admin-panel"><div className="panel-heading"><div><h2>Worker heartbeat</h2><p>The worker is a robot helper that wakes up, checks every client, and reports what happened.</p></div><span className={`health-state ${heartbeat?.worker?.status === "running" ? "ready" : "missing"}`}>{heartbeat?.worker?.status === "running" ? "Running" : "Needs attention"}</span></div><div className="heartbeat-log-list"><div><strong>Did the helper check in?</strong><span>{heartbeat?.worker ? `Yes — ${formatAge(heartbeat.worker.ageSeconds)}` : "No check-in found yet"}</span></div><div><strong>How many clients did it check?</strong><span>{heartbeat?.worker?.workspacesSeen ?? 0}</span></div><div><strong>Did it finish normally?</strong><span>{heartbeat?.worker?.error ? `No — ${heartbeat.worker.error}` : heartbeat?.worker ? "No error was reported" : "Waiting for the first run"}</span></div></div>{detail === "advanced" && <details className="diagnostic-details" open><summary>Worker timestamps, counters, recent runs, and raw row</summary><pre>{JSON.stringify(heartbeat?.worker ?? null, null, 2)}</pre></details>}</section>
+      <section className={`admin-panel ai-ark-health ${heartbeat?.aiArk?.status === "attention" || heartbeat?.aiArk?.status === "not_configured" ? "has-alert" : ""}`}><div className="panel-heading"><div><h2>AI Ark enrichment</h2><p>We compare real API calls with recently stored LinkedIn leads. More than five failures triggers an alert.</p></div><span className={`health-state ${heartbeat?.aiArk?.status === "healthy" ? "ready" : heartbeat?.aiArk?.status === "disabled" ? "neutral" : "missing"}`}>{heartbeat?.aiArk?.status === "healthy" ? "Healthy" : heartbeat?.aiArk?.status === "disabled" ? "Globally disabled" : "Needs attention"}</span></div><p className="ai-ark-health-explanation">{heartbeat?.aiArk?.explanation ?? "Waiting for the first check."}</p><div className="heartbeat-kid-grid ai-ark-health-grid"><div className={heartbeat?.aiArk?.configured || !heartbeat?.aiArk?.enabled ? "ok" : "bad"}><b>{heartbeat?.aiArk?.configured || !heartbeat?.aiArk?.enabled ? "✓" : "!"}</b><span><strong>Global switch and key</strong><small>{heartbeat?.aiArk?.enabled ? heartbeat?.aiArk?.configured ? "Enabled and configured." : "Enabled, but the API key is missing." : "Disabled in Vercel."}</small></span></div><div className={(heartbeat?.aiArk?.failures24h ?? 0) > 5 ? "bad" : "ok"}><b>{(heartbeat?.aiArk?.failures24h ?? 0) > 5 ? "!" : "✓"}</b><span><strong>Calls · last 24 hours</strong><small>{heartbeat?.aiArk?.successes24h ?? 0} successful · {heartbeat?.aiArk?.failures24h ?? 0} failed</small></span></div><div className={(heartbeat?.aiArk?.unenrichedLeads24h ?? 0) > 5 ? "bad" : "ok"}><b>{(heartbeat?.aiArk?.unenrichedLeads24h ?? 0) > 5 ? "!" : "✓"}</b><span><strong>Missing enrichment</strong><small>{heartbeat?.aiArk?.unenrichedLeads24h ?? 0} recent LinkedIn lead(s)</small></span></div></div>{detail === "advanced" && <details className="diagnostic-details" open><summary>AI Ark failures, counts, and raw run records</summary><pre>{JSON.stringify(heartbeat?.aiArk ?? null, null, 2)}</pre></details>}</section>
       <section className="admin-panel"><div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>Each client needs three things: a key, incoming webhook replies, and a recent background poll.</p></div></div><div className="heartbeat-client-list">{heartbeat?.clients?.length ? heartbeat.clients.map((item) => {
         const keyHealthy = item.keyConfigured;
         const webhookHealthy = item.webhookAgeSeconds !== null && item.webhookAgeSeconds <= Number(heartbeat?.thresholds?.webhookFreshSeconds ?? 1800);
@@ -796,21 +789,46 @@ function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload |
 }
 
 function AuditView() {
-  const [now] = useState(() => Date.now());
-  const events = [
-    { timestamp: now, action: "heartbeat.check", actor: "System", detail: "Requested live credential, webhook, and sync freshness checks.", status: "started" },
-    { timestamp: now - 61_000, action: "workspace.sync", actor: "Worker", detail: "Reconciled client conversations and refreshed webhook cursors.", status: "completed" },
-    { timestamp: now - 121_000, action: "global.config.viewed", actor: "Admin", detail: "Opened provider credentials and worker configuration.", status: "recorded" },
-    { timestamp: now - 181_000, action: "client.scoring.updated", actor: "Admin", detail: "Saved client scoring weights and tier thresholds.", status: "recorded" },
-    { timestamp: now - 241_000, action: "webhook.event.received", actor: "HeyReach", detail: "Accepted a conversation.updated event.", status: "processed" },
-    { timestamp: now - 301_000, action: "ai.draft.generated", actor: "Anthropic", detail: "Generated a human-review draft for a priority conversation.", status: "completed" },
-    { timestamp: now - 361_000, action: "layout.saved", actor: "Admin", detail: "Saved inbox section order and six selected summary metrics.", status: "recorded" },
-    { timestamp: now - 421_000, action: "profile.appearance.saved", actor: "User", detail: "Updated font, zoom, background, and accent preferences.", status: "recorded" },
-  ];
+  type AuditEvent = { id: string; timestamp: string; source: string; sourceKey: string; action: string; status: string; severity: "success" | "info" | "warning" | "error"; workspace?: string | null; summary: string; details?: Record<string, unknown> };
+  const pageSize = 24;
+  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [visibleCount, setVisibleCount] = useState(pageSize);
+  const [source, setSource] = useState("");
+  const [status, setStatus] = useState("");
+  const [search, setSearch] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async (quiet = false) => {
+      if (!quiet) setLoading(true);
+      const query = new URLSearchParams({ limit: String(visibleCount) });
+      if (source) query.set("source", source);
+      if (status) query.set("status", status);
+      if (search.trim()) query.set("search", search.trim());
+      try {
+        const response = await fetch(`/api/admin/audit?${query}`, { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(String(payload.error || "The audit feed could not be loaded."));
+        if (!cancelled) { setEvents(Array.isArray(payload.events) ? payload.events : []); setHasMore(Boolean(payload.hasMore)); setUpdatedAt(String(payload.generatedAt ?? new Date().toISOString())); setError(""); }
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The audit feed could not be loaded.");
+      } finally { if (!cancelled && !quiet) setLoading(false); }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(true), 5_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [visibleCount, source, status, search]);
   const exportAudit = () => {
-    const csv = ["Timestamp,Actor,Action,Detail,Status", ...events.map((event) => [new Date(event.timestamp).toISOString(), event.actor, event.action, event.detail, event.status].map((value) => `"${value.replaceAll('"', '""')}"`).join(","))].join("\n");
+    const csv = ["Timestamp,Source,Workspace,Action,Explanation,Status", ...events.map((event) => [new Date(event.timestamp).toISOString(), event.source, event.workspace ?? "", event.action, event.summary, event.status].map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","))].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `reply-radar-audit-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
   };
-  return <section className="admin-panel audit-view"><div className="panel-heading"><div><h2>Audit log</h2><p>Detailed configuration, ingestion, and infrastructure events.</p></div><button className="secondary-button" onClick={exportAudit}>Export CSV ↓</button></div>{events.map((event) => <div className="audit-row" key={`${event.timestamp}-${event.action}`}><time>{new Date(event.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" })}</time><div><strong>{event.action}</strong><small>{event.actor} · {event.detail}</small></div><span>{event.status}</span></div>)}</section>;
+  return <section className="audit-view">
+    <div className="audit-toolbar"><div className="audit-live"><i />Live · refreshes every 5 seconds{updatedAt ? <small>Updated {new Date(updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</small> : null}</div><label><span>Search events</span><input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleCount(pageSize); }} placeholder="Client, system, or event…" /></label><label><span>Source</span><select value={source} onChange={(event) => { setSource(event.target.value); setVisibleCount(pageSize); }}><option value="">All sources</option><option value="worker">Background worker</option><option value="heyreach">HeyReach webhook</option><option value="ai_ark">AI Ark</option><option value="supabase">Supabase</option><option value="anthropic">Anthropic</option><option value="admin">Admin console</option><option value="user">Dashboard user</option></select></label><label><span>Status</span><select value={status} onChange={(event) => { setStatus(event.target.value); setVisibleCount(pageSize); }}><option value="">All statuses</option><option value="success">Successful</option><option value="warning">In progress / warning</option><option value="error">Failed</option><option value="info">Recorded</option></select></label><button className="secondary-button" onClick={exportAudit} disabled={!events.length}>Export CSV ↓</button></div>
+    {error && <p className="audit-error">{error}</p>}
+    <div className="audit-table"><div className="audit-table-head"><span>When</span><span>Source</span><span>What happened</span><span>Status</span></div>{loading && !events.length ? <p className="audit-empty">Loading the live audit feed…</p> : events.map((event) => <article className={`audit-row ${event.severity}`} key={event.id}><time>{new Date(event.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" })}</time><div className="audit-source"><i /><span><strong>{event.source}</strong>{event.workspace && <small>{event.workspace}</small>}</span></div><div className="audit-description"><strong>{event.action.replaceAll("_", " ").replaceAll(".", " · ")}</strong><p>{event.summary}</p><details><summary>Technical details</summary><pre>{JSON.stringify(event.details ?? {}, null, 2)}</pre></details></div><span className={`audit-status ${event.severity}`}>{event.status}</span></article>)}{!loading && !events.length && !error && <p className="audit-empty">No real events match these filters yet.</p>}{hasMore && <button className="audit-see-more" onClick={() => setVisibleCount((count) => count + pageSize)}>See 24 more events ↓</button>}</div>
+  </section>;
 }

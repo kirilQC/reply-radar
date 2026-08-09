@@ -1,6 +1,7 @@
 import { fetchFullConversation, type ConversationMessage, type JsonObject } from "./heyreach-conversation";
 import { enrichLeadWithAiArk } from "./ai-ark-enrichment";
 import { isAiArkEnrichmentEnabled, leadRollup, mergeLeadAttributions } from "./lead-identity";
+import { writeAuditEvent } from "./audit-log";
 
 type SupabaseConfig = { url: string; key: string };
 
@@ -155,6 +156,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
 
     if (eventId) await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "processed", processed_at: new Date().toISOString(), error_text: null }) });
     await db(config, `rr_workspaces?id=eq.${encodeURIComponent(workspace.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_webhook_received_at: new Date().toISOString() }) });
+    await writeAuditEvent(config, { actor: "Supabase", action: "conversation.stored", entityType: "conversation", entityId: conversationId, details: { source: "supabase", status: "success", workspaceId: workspace.id, workspaceName: text(workspace.name) || text(workspace.slug), leadId, eventId, messagesWritten: messages.length, summary: `Supabase updated the lead and saved ${messages.length} message${messages.length === 1 ? "" : "s"} with the full conversation context.` } });
     return { eventId, leadId, conversationId, messagesWritten: messages.length, senderName: history.sender.name, campaignName: text(campaign.name) || null, aiArk: aiArk ? (cachedEnrichment ? "cached" : "enriched") : enrichmentEnabled ? "no_profile_url" : "disabled", historyFetchedAt: history.fetchedAt };
   } catch (error) {
     if (eventId) await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "failed", processed_at: new Date().toISOString(), error_text: error instanceof Error ? error.message.slice(0, 2_000) : "Ingestion failed" }) }).catch(() => null);

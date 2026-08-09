@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { writeAuditEvent } from "../../../lib/audit-log";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
@@ -15,8 +16,10 @@ export async function POST(request: Request) {
     });
     const payload = await response.json().catch(() => ({}));
     const text = payload?.content?.find((item: { type?: string }) => item.type === "text")?.text ?? "";
+    await writeAuditEvent({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }, { actor: "Anthropic", action: response.ok ? "draft.generated" : "draft.failed", entityType: "conversation", entityId: typeof body.conversationId === "string" ? body.conversationId : undefined, details: { source: "anthropic", status: response.ok ? "success" : "failed", model, summary: response.ok ? `Anthropic generated a reply draft with ${model}.` : `Anthropic could not generate a reply draft with ${model}.` } });
     return NextResponse.json({ ok: response.ok, draft: text, usage: payload?.usage ?? null }, { status: response.ok ? 200 : response.status });
   } catch {
+    await writeAuditEvent({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }, { actor: "Anthropic", action: "draft.failed", entityType: "conversation", details: { source: "anthropic", status: "failed", model, summary: "Reply Radar could not reach Anthropic to generate the requested draft." } });
     return NextResponse.json({ ok: false, error: "Unable to reach Anthropic from the server." }, { status: 502 });
   }
 }

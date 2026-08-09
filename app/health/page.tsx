@@ -34,6 +34,19 @@ type Heartbeat = {
     pollIntervalSeconds?: number;
     raw?: Record<string, unknown>;
   } | null;
+  aiArk?: {
+    status: "healthy" | "attention" | "disabled" | "not_configured";
+    enabled: boolean;
+    configured: boolean;
+    failureThreshold: number;
+    failures24h: number;
+    successes24h: number;
+    calls24h: number;
+    unenrichedLeads24h: number;
+    explanation: string;
+    recentFailures?: Array<{ startedAt?: string; workspaceId?: string; error?: string }>;
+    recentRuns?: Array<Record<string, unknown>>;
+  };
 };
 
 const formatAge = (seconds: number | null | undefined) => {
@@ -71,7 +84,8 @@ export default function HealthPage() {
   }, [refresh]);
 
   const services = heartbeat.services ?? [];
-  const healthy = heartbeat.status === "live" && services.every((service) => service.configured);
+  const aiArkHealthy = !heartbeat.aiArk || ["healthy", "disabled"].includes(heartbeat.aiArk.status);
+  const healthy = heartbeat.status === "live" && services.every((service) => service.configured) && aiArkHealthy;
   const clientCount = heartbeat.clients?.length ?? 0;
   const attentionCount = (heartbeat.clients ?? []).filter((client) => client.status !== "healthy").length;
   const lastChecked = useMemo(() => formatTime(heartbeat.checkedAt), [heartbeat.checkedAt]);
@@ -88,9 +102,7 @@ export default function HealthPage() {
           <section className="admin-content">
             <div className="admin-heading">
               <div>
-                <div className="eyebrow"><span className="live-dot" /> RELIABILITY MONITOR</div>
-                <h1>Heartbeat</h1>
-                <p>Live checks for the worker, database, AI provider, and every client connection.</p>
+                <h1>System Health</h1>
               </div>
               <div className="health-actions">
                 <div className="segmented-control" role="tablist" aria-label="Heartbeat detail level">
@@ -118,6 +130,17 @@ export default function HealthPage() {
               <div className="panel-heading"><div><h2>Worker heartbeat</h2><p>The worker is the background helper that checks client connections and writes its results to Supabase.</p></div><span className={`health-state ${heartbeat.worker?.status === "running" ? "ready" : "missing"}`}>{heartbeat.worker?.status === "running" ? "RUNNING" : "WAITING"}</span></div>
               {heartbeat.worker ? <div className="heartbeat-log-list"><div><strong>Latest check</strong><span>{formatAge(heartbeat.worker.ageSeconds)} · {heartbeat.worker.workspacesSeen ?? 0} client(s) checked</span></div><div><strong>Started</strong><span>{formatTime(heartbeat.worker.startedAt)}</span></div><div><strong>Finished</strong><span>{formatTime(heartbeat.worker.finishedAt)}</span></div>{heartbeat.worker.error && <div><strong>Last error</strong><span className="error-text">{heartbeat.worker.error}</span></div>}</div> : <p className="empty-state">No worker check has been recorded yet. Deploy the Render worker and wait for its first cycle.</p>}
               {mode === "advanced" && heartbeat.worker && <details className="diagnostic-details" open><summary>Raw worker record</summary><pre>{JSON.stringify(heartbeat.worker.raw ?? heartbeat.worker, null, 2)}</pre></details>}
+            </section>
+
+            <section className={`admin-panel ai-ark-health ${heartbeat.aiArk?.status === "attention" || heartbeat.aiArk?.status === "not_configured" ? "has-alert" : ""}`}>
+              <div className="panel-heading"><div><h2>AI Ark enrichment</h2><p>Checks real enrichment calls and recently stored LinkedIn leads for missing enriched data.</p></div><span className={`health-state ${heartbeat.aiArk?.status === "healthy" ? "ready" : heartbeat.aiArk?.status === "disabled" ? "neutral" : "missing"}`}>{heartbeat.aiArk?.status === "healthy" ? "HEALTHY" : heartbeat.aiArk?.status === "disabled" ? "DISABLED" : "NEEDS ATTENTION"}</span></div>
+              <p className="ai-ark-health-explanation">{heartbeat.aiArk?.explanation ?? "Waiting for the first system check."}</p>
+              <div className="heartbeat-kid-grid ai-ark-health-grid">
+                <div className={heartbeat.aiArk?.configured || !heartbeat.aiArk?.enabled ? "ok" : "bad"}><b>{heartbeat.aiArk?.configured || !heartbeat.aiArk?.enabled ? "✓" : "!"}</b><span><strong>API connection</strong><small>{heartbeat.aiArk?.enabled ? heartbeat.aiArk?.configured ? "The AI Ark key is configured." : "The AI Ark key is missing." : "Calls are disabled globally."}</small></span></div>
+                <div className={(heartbeat.aiArk?.failures24h ?? 0) > 5 ? "bad" : "ok"}><b>{(heartbeat.aiArk?.failures24h ?? 0) > 5 ? "!" : "✓"}</b><span><strong>API results · 24 hours</strong><small>{heartbeat.aiArk?.successes24h ?? 0} succeeded · {heartbeat.aiArk?.failures24h ?? 0} failed</small></span></div>
+                <div className={(heartbeat.aiArk?.unenrichedLeads24h ?? 0) > 5 ? "bad" : "ok"}><b>{(heartbeat.aiArk?.unenrichedLeads24h ?? 0) > 5 ? "!" : "✓"}</b><span><strong>Stored lead check</strong><small>{heartbeat.aiArk?.unenrichedLeads24h ?? 0} recent LinkedIn lead(s) are missing enrichment.</small></span></div>
+              </div>
+              {mode === "advanced" && <details className="diagnostic-details" open><summary>AI Ark calls, failures, thresholds, and sanitized run records</summary><pre>{JSON.stringify(heartbeat.aiArk ?? null, null, 2)}</pre></details>}
             </section>
 
             <section className="admin-panel">

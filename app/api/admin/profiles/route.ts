@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { writeAuditEvent } from "../../../lib/audit-log";
 
 const config = () => ({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY });
 const headers = (key: string) => ({ apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" });
@@ -60,6 +61,7 @@ export async function POST(request: Request) {
       if (!linkResponse.ok) return NextResponse.json({ ok: false, error: await linkResponse.text() }, { status: linkResponse.status });
     }
   }
+  await writeAuditEvent({ url, key }, { actor: "Admin console", action: id ? "profile.updated" : "profile.created", entityType: "profile", entityId: String(profileId ?? ""), details: { source: "admin", status: "success", summary: `${profile.name || "The teammate profile"} was ${id ? "updated" : "created"}, including its client access.` } });
   return NextResponse.json({ ok: true, profile: savedProfile, photoColumnAvailable }, { status: 200 });
 }
 
@@ -70,5 +72,6 @@ export async function DELETE(request: Request) {
   if (!id) return NextResponse.json({ ok: false, error: "Profile id is required." }, { status: 400 });
   const response = await fetch(`${url}/rest/v1/rr_profiles?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: { ...headers(key), Prefer: "return=representation" } });
   const rows = await response.json().catch(() => []);
+  if (response.ok && Array.isArray(rows) && rows.length > 0) await writeAuditEvent({ url, key }, { actor: "Admin console", action: "profile.deleted", entityType: "profile", entityId: id, details: { source: "admin", status: "success", summary: "A teammate profile and its client assignments were removed." } });
   return NextResponse.json({ ok: response.ok && Array.isArray(rows) && rows.length > 0, deletedCount: Array.isArray(rows) ? rows.length : 0, error: response.ok ? undefined : JSON.stringify(rows) }, { status: response.ok ? 200 : response.status });
 }
