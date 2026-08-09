@@ -23,6 +23,7 @@
 .workspace-directory{margin-bottom:14px;padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--panel)}
 .workspace-directory-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:13px}.workspace-directory-heading div{display:flex;flex-direction:column;gap:4px}.workspace-directory-heading strong{font-size:12px}.workspace-directory-heading small{color:var(--muted-2);font-size:9px}.workspace-directory-heading input{width:220px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);outline:0;font-size:10px}.workspace-directory-heading input:focus{border-color:var(--accent)}
 .workspace-directory-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.workspace-directory-list .workspace-card{min-width:0}.workspace-directory-empty{grid-column:1/-1;padding:22px 4px;color:var(--muted);font-size:11px}.admin-top-actions:empty{display:none}
+.workspace-directory-list .workspace-card{display:flex;align-items:center;gap:12px;min-height:78px;padding:16px 18px}.workspace-directory-list .workspace-card>strong{margin:0;font-size:14px}.workspace-directory-logo{display:grid;place-items:center;flex:0 0 auto;width:40px;height:40px;border-radius:10px;color:#fff;font-size:13px;font-style:normal;font-weight:750;overflow:hidden}.workspace-directory-logo img{width:100%;height:100%;object-fit:contain}.workspace-directory-logo:has(img){background:transparent!important}
 .workspace-editor-toolbar{display:flex;align-items:center;gap:12px;margin:3px 0 13px;color:var(--muted);font-size:10px}.workspace-editor-toolbar .secondary-button{height:29px}
 .client-config-sections{display:grid;gap:14px;margin-top:14px}.client-config-section{scroll-margin-top:24px}.client-config-section .panel-heading{margin-bottom:15px}
 @media(max-width:900px){.workspace-directory-list{grid-template-columns:repeat(2,minmax(0,1fr))}.workspace-directory-heading{align-items:flex-start;flex-direction:column}.workspace-directory-heading input{width:100%}}@media(max-width:620px){.workspace-directory-list{grid-template-columns:1fr}}
@@ -57,3 +58,10 @@ html:not(.hydrated) body{visibility:hidden}
 
 /* Shared navigation and inbox readability refinements. */
 .app-sidebar .client-directory-item{gap:11px;padding:8px 10px;font-size:14px}.app-sidebar .client-directory-item i{width:28px;height:28px;border-radius:7px;font-size:11px}.queue-header h2{font-size:19px;margin-bottom:0}.queue-header h2 span{font-size:12px;padding:3px 7px;vertical-align:2px}.inbox-operational-table>.empty-state{display:flex;align-items:center;min-height:92px;margin:0;padding:24px;color:var(--muted);font-size:12px;line-height:1.5}.admin-top-actions{position:relative}.dashboard-brand{text-decoration:none}.client-directory-item i:has(img),.dashboard-card-top i:has(img),.client-cell i:has(img),.inbox-heading-logo:has(img),.heartbeat-client-name>i:has(img){background:transparent!important}.client-directory-item i img,.dashboard-card-top i img,.client-cell i img,.inbox-heading-logo img,.heartbeat-client-name>i img{object-fit:contain!important}.general-heading-logo{background:#fff!important}
+
+/* Keep inbox headings centered over their data at every responsive zoom level. */
+.inbox-operational-table .table-head>span:not(:first-child){text-align:center}
+.inbox-operational-table .lead-row>div:not(:first-child){text-align:center}
+.inbox-operational-table .client-cell{justify-content:center}
+.inbox-operational-table .inbox-meta-cell{display:flex;flex-direction:column;align-items:center;justify-content:center}
+.inbox-operational-table .score-cell{align-items:center;justify-content:center}

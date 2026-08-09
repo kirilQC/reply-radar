@@ -344,25 +344,13 @@ export default function AdminPage() {
                         className="workspace-card"
                         onClick={() => { setSelected(index); setWorkspaceOpen(true); }}
                       >
-                        <div className="workspace-card-top">
-                          <span
-                            className={
-                              item.status === "Connected" ? "ok" : "warn"
-                            }
-                          >
-                            {item.status}
-                          </span>
-                        </div>
+                        <i
+                          className="workspace-directory-logo"
+                          style={item.logoUrl ? undefined : { background: item.tone }}
+                        >
+                          {item.logoUrl ? <img src={item.logoUrl} alt={`${item.name} logo`} /> : (item.name || "?")[0]}
+                        </i>
                         <strong>{item.name || "Unnamed workspace"}</strong>
-                        <small>{item.leads} leads</small>
-                        <div className="workspace-progress">
-                          <span
-                            style={{
-                              width: `${65 + index * 11}%`,
-                              background: item.tone,
-                            }}
-                          />
-                        </div>
                       </button>
                     ); })}
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
