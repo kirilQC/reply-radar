@@ -31,7 +31,7 @@ export async function GET(request: Request) {
   if (!url || !key) return NextResponse.json({ ok: false, conversations: [], error: "Supabase is not configured." }, { status: 503 });
   try {
     const requested = new URL(request.url).searchParams.get("workspaces")?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
-    const workspaces = await query(url, key, "rr_workspaces?select=id,name,slug,accent_color,logo_url");
+    const workspaces = await query(url, key, "rr_workspaces?select=id,name,slug,accent_color,logo_url&order=name.asc");
     const selected = requested.length ? workspaces.filter((workspace) => requested.includes(String(workspace.slug))) : workspaces;
     const workspaceIds = selected.map((workspace) => String(workspace.id));
     if (!workspaceIds.length) return NextResponse.json({ ok: true, conversations: [] });

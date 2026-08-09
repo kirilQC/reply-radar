@@ -174,7 +174,7 @@ export function InboxPage() {
     const refreshWorkspaces = () => {
       try {
         const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
-        if (saved) setWorkspaceDirectory(JSON.parse(saved));
+        if (saved) setWorkspaceDirectory((JSON.parse(saved) as Array<{ name: string; slug: string; tone?: string; logoUrl?: string; website?: string }>).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })));
         const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
         if (savedProfiles) setLiveProfiles(JSON.parse(savedProfiles));
       } catch { /* keep the empty live state */ }
@@ -188,7 +188,7 @@ export function InboxPage() {
             tone: String(item.accent_color ?? "var(--accent)"),
             logoUrl: String(item.logo_url ?? ""),
             website: String(item.website_url ?? ""),
-          })));
+          })).sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })));
         })
         .catch(() => null);
       void fetch("/api/admin/profiles", { cache: "no-store" })

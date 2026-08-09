@@ -29,7 +29,7 @@ export async function GET() {
 
   try {
     const [workspaceResult, syncResult, eventResult, schemaResult] = await Promise.all([
-      request("rr_workspaces?select=*&order=created_at.asc"),
+      request("rr_workspaces?select=*&order=name.asc"),
       request("rr_sync_runs?select=*&order=started_at.desc&limit=25"),
       request("rr_webhook_events?select=*&order=received_at.desc&limit=25"),
       request(""),

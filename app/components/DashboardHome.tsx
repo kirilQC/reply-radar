@@ -99,7 +99,7 @@ export default function DashboardHome() {
               </a>
             </div>
             <div className="dashboard-client-grid">
-              {clients.map((client) => (
+              {[...clients].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((client) => (
                 <a
                   href={`/inbox?client=${client.slug}`}
                   className="dashboard-client-card"
@@ -158,7 +158,7 @@ export default function DashboardHome() {
               </article>
               <article className="dashboard-chart-card client-performance-card">
                 <div className="dashboard-chart-heading"><div><span>CLIENT PERFORMANCE</span><strong>Positive reply rate</strong></div><small>30 days</small></div>
-                {clients.map((client) => {
+                {[...clients].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((client) => {
                   const value = "—";
                   return <div className="client-performance-row" key={client.slug}><div><span>{client.name}</span><b>{value}</b></div><div className="performance-track"><i style={{ width: value === "—" ? "0%" : value, background: client.tone }} /></div></div>;
                 })}

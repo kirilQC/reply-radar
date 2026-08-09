@@ -179,7 +179,9 @@ export default function AdminPage() {
     await removeWorkspace();
   };
   const isNewWorkspace = Boolean(client.isNew);
-  const visibleClients = clients.filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()));
+  const visibleClients = clients
+    .filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   useEffect(() => {
     window.localStorage.setItem("reply-radar-admin-accent-overrides", JSON.stringify(accentOverrides));
   }, [accentOverrides]);
@@ -234,7 +236,6 @@ export default function AdminPage() {
           <header className="admin-topbar">
             <a className="admin-brand admin-back-link" href="/" aria-label="Back to dashboard">←</a>
             <div className="admin-breadcrumb">
-              Admin Console <span>/</span>{" "}
               {active === "workspaces"
                 ? <>Client Directory {workspaceOpen && <><span>/</span> {client.name || "New workspace"}</>}</>
                 : active === "ai"
@@ -278,11 +279,7 @@ export default function AdminPage() {
             <section className="admin-content">
               <div className="admin-heading">
                 <div>
-                  <div className="eyebrow">
-                    <span className="live-dot" />
-                    ADMIN CONSOLE
-                  </div>
-                  <h1 className={active === "workspaces" && workspaceOpen ? "client-config-heading" : undefined}>
+                  <h1 className={active === "workspaces" ? (workspaceOpen ? "client-config-heading" : "workspace-directory-page-title") : undefined}>
                     {active === "workspaces" && workspaceOpen ? <>{workspaceLogo ? <img className="admin-client-heading-logo" src={workspaceLogo} alt="" /> : <span className="admin-client-heading-logo" style={{ background: accentColor }}>{client.name[0] || "?"}</span>}{client.name || "New workspace"}</> : active === "workspaces"
                         ? "Client workspaces"
                         : active === "ai"
@@ -297,10 +294,8 @@ export default function AdminPage() {
                                   ? "Audit log"
                                   : "System health"}
                   </h1>
-                  {!(active === "workspaces" && workspaceOpen) && <p>
-                    {active === "workspaces"
-                        ? "Manage each client's HeyReach connection, context, and isolation."
-                        : active === "ai"
+                  {!(active === "workspaces" && workspaceOpen) && active !== "workspaces" && <p>
+                    {active === "ai"
                           ? "Tune the Anthropic drafting context for every client."
                           : active === "scoring"
                             ? "Make follow-up urgency explainable and client-specific."
@@ -332,7 +327,7 @@ export default function AdminPage() {
                 <>
                   {!workspaceOpen && <div className="workspace-directory">
                     <div className="workspace-directory-heading">
-                      <div><strong>Client directory</strong><small>{clients.length} workspaces · Search and select a client to configure</small></div>
+                      <div><strong>Client directory</strong></div>
                       <input aria-label="Search clients" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder="Search clients…" />
                     </div>
                     <div className="workspace-directory-list">
@@ -356,7 +351,7 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>}
-                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => { setWorkspaceError(""); setWorkspaceOpen(false); }}>← Back to directory</button>{!isNewWorkspace && <button className="secondary-button" onClick={requestRemoveWorkspace}>Remove workspace</button>}</div>}
+                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => { setWorkspaceError(""); setWorkspaceOpen(false); }}>← Back to directory</button></div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
                       <div className="panel-heading">
@@ -489,7 +484,7 @@ export default function AdminPage() {
                       <label className="field-label">CLIENT ACCENT<input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} /></label>
                     </section>
                   </div>}
-                  {workspaceOpen && <div className="workspace-created-meta">Created {client.createdAt ? new Date(client.createdAt).toLocaleDateString() : "—"}</div>}
+                  {workspaceOpen && <div className="workspace-config-footer"><div className="workspace-created-meta">Created {client.createdAt ? new Date(client.createdAt).toLocaleDateString() : "—"}</div>{!isNewWorkspace && <button className="remove-workspace-button" onClick={requestRemoveWorkspace}>Remove workspace</button>}</div>}
                 </>
               )}
               {active === "ai" && (

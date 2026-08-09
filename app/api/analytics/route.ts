@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   if (!url || !key) return NextResponse.json({ ok: false, status: "not_configured" }, { status: 503 });
   const requested = new URL(request.url).searchParams.get("workspaces")?.split(",").filter(Boolean) ?? [];
   try {
-    const workspaces = await supabase("rr_workspaces?select=id,name,slug") ?? [];
+    const workspaces = await supabase("rr_workspaces?select=id,name,slug&order=name.asc") ?? [];
     const selected = requested.length ? workspaces.filter((row) => requested.includes(String(row.slug))) : workspaces;
     const ids = selected.map((row) => String(row.id));
     if (!ids.length) return NextResponse.json({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], aiArkCalls: 0, aiArkSuccesses: 0, aiArkFailures: 0, aiArkTrend: [], aiArkTrendLabels: [], queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });
