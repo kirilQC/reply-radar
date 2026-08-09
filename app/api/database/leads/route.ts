@@ -227,6 +227,8 @@ export async function GET(request: Request) {
         industry: enrichment.industry ?? null,
         campaignName: campaign.name ?? null,
         campaignNames,
+        clientCount: Number(rollup.client_count || 0),
+        campaignCount: Number(rollup.campaign_count || campaignNames.length),
         enriched: Object.keys(enrichment).length > 0,
         tags: Array.isArray(raw.tags) ? raw.tags : [],
         senderName: senderNameFrom(

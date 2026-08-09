@@ -26,6 +26,8 @@ type Lead = {
   industry?: unknown;
   campaignName?: string | null;
   campaignNames?: string[];
+  clientCount?: number;
+  campaignCount?: number;
   enriched?: boolean;
   tags: string[];
   senderName: string;
