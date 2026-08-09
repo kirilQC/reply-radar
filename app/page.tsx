@@ -279,6 +279,7 @@ export function InboxPage() {
   const [aiDraft, setAiDraft] = useState("");
   const [aiReason, setAiReason] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "" });
   const [workspaceDirectory, setWorkspaceDirectory] = useState<
     Array<{
       name: string;
@@ -762,13 +763,13 @@ export function InboxPage() {
     .reverse()
     .find((message) => message.direction !== "outbound")?.id;
   const selectedWorkspaceSlug = current.clientSlug || clientParam || "";
-  const generateAiReview = async () => {
+  const generateAiReview = async (ai = workspaceAi) => {
     if (!current.messages.length || current.id === "empty") return;
     setAiLoading(true);
     const response = await fetch("/api/ai/draft", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "analyze", conversationId: current.id, workspaceId: selectedWorkspaceSlug, workspaceName: current.client, thread: current.messages, instruction: "Use the entire conversation. Write in a natural, concise business tone. Do not invent facts, promises, links, or meeting times." }),
+      body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId: current.id, workspaceId: selectedWorkspaceSlug, workspaceName: current.client, thread: current.messages, instruction: `Use the entire conversation. Write in a natural, concise business tone. Do not invent facts, promises, links, or meeting times.${ai.brief ? ` Client context: ${ai.brief}` : ""}` }),
     }).catch(() => null);
     const payload = await response?.json().catch(() => ({}));
     if (response?.ok) {
@@ -784,7 +785,7 @@ export function InboxPage() {
     setAiDraft("");
     setAiReason("");
     setTemplatesOpen(false);
-    if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); return; }
+    if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "" }); return; }
     let cancelled = false;
     fetch(`/api/client-resources?workspace=${encodeURIComponent(selectedWorkspaceSlug)}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
@@ -792,8 +793,10 @@ export function InboxPage() {
         if (cancelled || !payload?.workspace) return;
         setMessagingDocUrl(String(payload.workspace.messagingDocUrl ?? ""));
         setQuickTemplates(Array.isArray(payload.workspace.quickTemplates) ? payload.workspace.quickTemplates : []);
+        const ai = { model: String(payload.workspace.model ?? ""), brief: String(payload.workspace.brief ?? ""), systemPrompt: String(payload.workspace.systemPrompt ?? "") };
+        setWorkspaceAi(ai);
+        void generateAiReview(ai);
       }).catch(() => null);
-    void generateAiReview();
     return () => { cancelled = true; };
     // The selected conversation is the intentional refresh boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1546,7 +1549,7 @@ export function InboxPage() {
                       <span>AI DRAFT</span>
                       <div className="composer-tools">
                         <button type="button" onClick={() => setTemplatesOpen((open) => !open)}>Quick templates ▾</button>
-                        <button type="button" onClick={generateAiReview} disabled={aiLoading}>{aiLoading ? "Generating…" : "Regenerate ↻"}</button>
+                        <button type="button" onClick={() => void generateAiReview()} disabled={aiLoading}>{aiLoading ? "Generating…" : "Regenerate ↻"}</button>
                       </div>
                     </div>
                     {templatesOpen && (
