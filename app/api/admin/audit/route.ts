@@ -77,15 +77,16 @@ export async function GET(request: NextRequest) {
   const fetchLimit = Math.min(5_000, offset + limit + 100);
 
   try {
-    const [workspaces, syncRuns, webhookEvents, storedAudit] = await Promise.all([
+    const [workspaces, workerRuns, aiArkRuns, webhookEvents, storedAudit] = await Promise.all([
       getJson(url, key, "rr_workspaces?select=id,name,slug"),
-      getJson(url, key, `rr_sync_runs?select=*&order=started_at.desc&limit=${fetchLimit}`),
+      getJson(url, key, `rr_sync_runs?select=*&source=neq.ai_ark&order=started_at.desc&limit=${fetchLimit}`),
+      getJson(url, key, `rr_sync_runs?select=*&source=eq.ai_ark&order=started_at.desc&limit=${fetchLimit}`),
       getJson(url, key, `rr_webhook_events?select=*&order=received_at.desc&limit=${fetchLimit}`),
       getJson(url, key, `rr_audit_log?select=*&order=created_at.desc&limit=${fetchLimit}`),
     ]);
     const workspaceById = new Map(workspaces.map((row) => [text(row.id), text(row.name) || text(row.slug)]));
     const events: AuditEvent[] = [];
-    for (const row of syncRuns) {
+    for (const row of [...workerRuns, ...aiArkRuns]) {
       const sourceKey = text(row.source) === "ai_ark" ? "ai_ark" : "worker";
       const workspace = workspaceById.get(text(row.workspace_id)) ?? null;
       events.push({ id: `sync:${text(row.id)}`, timestamp: text(row.started_at), source: sourceKey === "ai_ark" ? "AI Ark" : "Background worker", sourceKey, action: text(row.run_type) || text(row.source) || "sync", status: text(row.status) || "unknown", severity: statusSeverity(row.status), workspace, summary: syncSummary(row, workspace), details: row });
