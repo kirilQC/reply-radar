@@ -1,6 +1,6 @@
 import { fetchFullConversation, type ConversationMessage, type JsonObject } from "./heyreach-conversation";
 import { enrichLeadWithAiArk } from "./ai-ark-enrichment";
-import { isAiArkEnrichmentEnabled, mergeLeadAttributions } from "./lead-identity";
+import { isAiArkEnrichmentEnabled, leadRollup, mergeLeadAttributions } from "./lead-identity";
 
 type SupabaseConfig = { url: string; key: string };
 
@@ -55,9 +55,38 @@ async function findCachedEnrichment(config: SupabaseConfig, profileUrl: string, 
   return null;
 }
 
+async function syncIdentityRollup(config: SupabaseConfig, profileUrl: string) {
+  if (!profileUrl) return;
+  const rows = await db(config, `rr_leads?select=id,workspace_id,raw_data&linkedin_profile_url=eq.${encodeURIComponent(profileUrl)}&limit=100`) as JsonObject[];
+  const workspaceIds = [...new Set(rows.map((row) => text(row.workspace_id)).filter(Boolean))];
+  const workspaces = workspaceIds.length ? await db(config, `rr_workspaces?select=id,name,slug&id=in.(${workspaceIds.join(",")})`) as JsonObject[] : [];
+  const workspaceById = new Map(workspaces.map((row) => [text(row.id), text(row.name) || text(row.slug)]));
+  const allAttributions = rows.flatMap((row) => {
+    const metadata = object(object(row.raw_data).reply_radar);
+    const stored = Array.isArray(metadata.attributions) ? metadata.attributions.map(object) : [];
+    const workspaceId = text(row.workspace_id);
+    if (stored.some((item) => text(item.workspaceId) === workspaceId)) return stored;
+    const legacySender = object(metadata.sender);
+    const legacyCampaign = object(metadata.campaign);
+    const legacyConversation = object(metadata.conversation);
+    return [...stored, { workspaceId, workspaceName: workspaceById.get(workspaceId) || workspaceId, conversationId: text(legacyConversation.id) || null, campaignId: text(legacyCampaign.id) || null, campaignName: text(legacyCampaign.name) || null, senderId: text(legacySender.id) || null, senderName: text(legacySender.name) || null }];
+  });
+  const deduped = allAttributions.reduce<JsonObject[]>((result, attribution) => mergeLeadAttributions(result, attribution), []);
+  const rollup = leadRollup(deduped);
+  for (const row of rows) {
+    const raw = object(row.raw_data);
+    const metadata = object(raw.reply_radar);
+    await db(config, `rr_leads?id=eq.${encodeURIComponent(text(row.id))}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ raw_data: { ...raw, reply_radar: { ...metadata, attributions: deduped, rollup } } }),
+    });
+  }
+}
+
 const fingerprint = (message: { direction: unknown; sent_at: unknown; body: unknown }) => `${String(message.direction)}|${new Date(String(message.sent_at)).toISOString()}|${String(message.body)}`;
 
-export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; heyreach_api_key_ciphertext?: string | null }, payload: JsonObject) {
+export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; name?: string | null; slug?: string | null; heyreach_api_key_ciphertext?: string | null }, payload: JsonObject) {
   const lead = object(payload.lead);
   const campaign = object(payload.campaign);
   // Enrichment deliberately happens before the webhook event, lead, conversation,
@@ -94,7 +123,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
   const eventId = eventRows?.[0]?.id;
 
   try {
-    const attribution = { workspaceId: workspace.id, conversationId: conversationExternalId, campaignId: text(campaign.id) || null, campaignName: text(campaign.name) || null, senderId: history.sender.id || null, senderName: history.sender.name, lastSeenAt: eventTimestamp };
+    const attribution = { workspaceId: workspace.id, workspaceName: text(workspace.name) || text(workspace.slug) || workspace.id, conversationId: conversationExternalId, campaignId: text(campaign.id) || null, campaignName: text(campaign.name) || null, senderId: history.sender.id || null, senderName: history.sender.name, lastSeenAt: eventTimestamp };
     const stableMetadata = { ...existingMetadata };
     delete stableMetadata.sender;
     delete stableMetadata.campaign;
@@ -104,6 +133,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     const leadRow = await upsertByConflict(config, "rr_leads", "workspace_id,linkedin_id", { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: profileUrl || null, name: text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || "Unknown lead", role: text(lead.position), company: text(lead.company_name), raw_data: { ...stableRaw, ...lead, profile_url: profileUrl || text(lead.profile_url) || null, reply_radar: { ...stableMetadata, history_fetched_at: history.fetchedAt, attributions: mergeLeadAttributions(existingMetadata.attributions, attribution), ...(aiArk ? { ai_ark: aiArk } : {}) } } });
     const leadId = String(leadRow?.id ?? "");
     if (!leadId) throw new Error("Lead upsert returned no id.");
+    await syncIdentityRollup(config, profileUrl);
 
     const latestMessage = history.messages.at(-1);
     const lastMessageAt = latestMessage?.sentAt || eventTimestamp;

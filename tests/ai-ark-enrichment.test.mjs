@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { extractAiArkEnrichment } from "../app/lib/ai-ark-enrichment.ts";
-import { isAiArkEnrichmentEnabled, mergeLeadAttributions } from "../app/lib/lead-identity.ts";
+import { isAiArkEnrichmentEnabled, leadRollup, mergeLeadAttributions } from "../app/lib/lead-identity.ts";
 
 const person = {
   id: "person-1",
@@ -44,4 +44,16 @@ test("lead attribution keeps distinct campaigns and senders without duplicating 
   assert.equal(updated.length, 2);
   assert.equal(updated.find((row) => row.conversationId === "conversation-1").senderName, "Alex Sender");
   assert.equal(updated.find((row) => row.conversationId === "conversation-2").campaignId, "campaign-2");
+});
+
+test("lead rollup produces readable semicolon summaries across clients, campaigns, and senders", () => {
+  const result = leadRollup([
+    { workspaceId: "a", workspaceName: "Client One", conversationId: "c1", campaignName: "Campaign 1", senderName: "Adam" },
+    { workspaceId: "b", workspaceName: "Client Two", conversationId: "c2", campaignName: "Campaign 2", senderName: "James" },
+    { workspaceId: "a", workspaceName: "Client One", conversationId: "c1", campaignName: "Campaign 1", senderName: "Adam" },
+  ]);
+  assert.equal(result.client_names, "Client One; Client Two");
+  assert.equal(result.campaign_names, "Campaign 1; Campaign 2");
+  assert.equal(result.sender_names, "Adam; James");
+  assert.equal(result.conversation_count, 2);
 });

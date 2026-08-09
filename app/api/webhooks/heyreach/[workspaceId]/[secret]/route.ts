@@ -15,9 +15,9 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" };
   try {
     const lookupColumn = isUuid(workspaceId) ? "id" : "slug";
-    const lookup = await fetch(`${url}/rest/v1/rr_workspaces?select=id,slug,webhook_secret_hash,heyreach_api_key_ciphertext,guardrails&${lookupColumn}=eq.${encodeURIComponent(workspaceId)}&limit=1`, { headers, cache: "no-store" });
+    const lookup = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,webhook_secret_hash,heyreach_api_key_ciphertext&${lookupColumn}=eq.${encodeURIComponent(workspaceId)}&limit=1`, { headers, cache: "no-store" });
     if (!lookup.ok) return NextResponse.json({ ok: false, stage: "workspace_lookup", error: (await lookup.text()).slice(0, 1_000) }, { status: 502 });
-    const rows = await lookup.json() as Array<{ id: string; webhook_secret_hash?: string | null; heyreach_api_key_ciphertext?: string | null; guardrails?: Record<string, unknown> | null }>;
+    const rows = await lookup.json() as Array<{ id: string; name?: string | null; slug?: string | null; webhook_secret_hash?: string | null; heyreach_api_key_ciphertext?: string | null }>;
     const workspace = rows[0];
     if (!workspace) return NextResponse.json({ ok: false }, { status: 404 });
     // Secret verification is intentionally kept server-side. Existing installations may

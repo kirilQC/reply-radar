@@ -15,11 +15,16 @@ export async function GET(request: Request, context: { params: Promise<{ leadId:
     const offset = Math.max(0, Number(new URL(request.url).searchParams.get("messageOffset") || 0));
     const [lead] = await get(url, key, `rr_leads?select=*&id=eq.${encodeURIComponent(leadId)}&limit=1`);
     if (!lead) return NextResponse.json({ ok: false, error: "Lead not found." }, { status: 404 });
-    const [workspace] = await get(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&id=eq.${encodeURIComponent(String(lead.workspace_id))}&limit=1`);
-    const conversations = await get(url, key, `rr_conversations?select=*&lead_id=eq.${encodeURIComponent(leadId)}&order=last_message_at.desc`);
+    const profileUrl = String(lead.linkedin_profile_url ?? "").trim();
+    const relatedLeads = profileUrl ? await get(url, key, `rr_leads?select=*&linkedin_profile_url=eq.${encodeURIComponent(profileUrl)}&order=created_at.asc`) : [lead];
+    const leadIds = relatedLeads.map((row) => String(row.id));
+    const workspaceIds = [...new Set(relatedLeads.map((row) => String(row.workspace_id)).filter(Boolean))];
+    const workspaces = workspaceIds.length ? await get(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&id=in.(${workspaceIds.join(",")})&order=name.asc`) : [];
+    const workspace = workspaces.find((row) => row.id === lead.workspace_id) ?? workspaces[0];
+    const conversations = await get(url, key, `rr_conversations?select=*&lead_id=in.(${leadIds.join(",")})&order=last_message_at.desc`);
     const ids = conversations.map((conversation) => String(conversation.id));
     const batchSize = 100;
     const messages = ids.length ? await get(url, key, `rr_messages?select=*&conversation_id=in.(${ids.join(",")})&order=sent_at.desc&offset=${offset}&limit=${batchSize + 1}`) : [];
-    return NextResponse.json({ ok: true, lead, workspace: workspace ?? null, conversations, messages: messages.slice(0, batchSize), hasMoreMessages: messages.length > batchSize, nextMessageOffset: messages.length > batchSize ? offset + batchSize : null });
+    return NextResponse.json({ ok: true, lead, relatedLeads, workspace: workspace ?? null, workspaces, conversations, messages: messages.slice(0, batchSize), hasMoreMessages: messages.length > batchSize, nextMessageOffset: messages.length > batchSize ? offset + batchSize : null });
   } catch (error) { return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Lead details unavailable" }, { status: 502 }); }
 }
