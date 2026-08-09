@@ -129,10 +129,6 @@ export async function GET(request: Request) {
           : {};
       const metadata = nested(leadRaw, "reply_radar");
       const enrichment = nested(metadata, "ai_ark");
-      const correspondent = nested(
-        nested(metadata, "conversation"),
-        "correspondentProfile",
-      );
       const workspace =
         workspaceById.get(String(conversation.workspace_id)) ?? {};
       const messageRows = messages.filter(
@@ -166,17 +162,8 @@ export async function GET(request: Request) {
         role: String(lead.role || lead.title || enrichment.title || ""),
         company: String(lead.company || ""),
         profileUrl: lead.linkedin_profile_url ?? lead.profile_url ?? null,
-        photoUrl:
-          correspondent.imageUrl ??
-          enrichment.profilePhotoUrl ??
-          leadRaw.profile_picture_url ??
-          leadRaw.profile_image_url ??
-          leadRaw.avatar_url ??
-          leadRaw.image_url ??
-          null,
+        photoUrl: enrichment.profilePhotoUrl ?? null,
         companyPhotoUrl: enrichment.companyPhotoUrl ?? null,
-        companyWebsite:
-          nested(nested(enrichment, "company"), "link").website ?? null,
         headline: enrichment.headline ?? null,
         enrichedLocation: enrichment.location ?? null,
         industry: enrichment.industry ?? null,

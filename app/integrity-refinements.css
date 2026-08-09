@@ -73,6 +73,53 @@
 .lead-main {
   position: relative;
 }
+.inbox-operational-table .table-head,
+.inbox-operational-table .lead-row {
+  grid-template-columns:
+    minmax(190px, 1.6fr) minmax(0, 0.72fr) minmax(0, 1.12fr)
+    minmax(0, 0.92fr) minmax(0, 0.86fr) minmax(0, 0.48fr)
+    minmax(0, 0.58fr) minmax(0, 0.62fr) 24px !important;
+}
+.inbox-operational-table .campaign-cell strong,
+.inbox-operational-table .sender-cell strong {
+  color: var(--text) !important;
+  font-weight: 760 !important;
+}
+.row-star-cell {
+  display: grid;
+  place-items: center;
+}
+.pane-density-no-followup
+  .inbox-operational-table
+  .table-head
+  > span:nth-child(8),
+.pane-density-no-followup
+  .inbox-operational-table
+  .lead-row
+  > div:nth-child(8) {
+  display: none;
+}
+.pane-density-no-followup .inbox-operational-table .table-head,
+.pane-density-no-followup .inbox-operational-table .lead-row {
+  grid-template-columns:
+    minmax(190px, 1.65fr) minmax(0, 0.72fr) minmax(0, 1.08fr)
+    minmax(0, 0.88fr) minmax(0, 0.82fr) minmax(0, 0.45fr)
+    minmax(0, 0.55fr) 24px !important;
+}
+.pane-density-no-replies
+  .inbox-operational-table
+  .table-head
+  > span:nth-child(6),
+.pane-density-no-replies .inbox-operational-table .lead-row > div:nth-child(6) {
+  display: none;
+}
+.pane-density-no-replies .inbox-operational-table .table-head,
+.pane-density-no-replies .inbox-operational-table .lead-row {
+  grid-template-columns:
+    minmax(190px, 1.7fr) minmax(0, 0.7fr) minmax(0, 1.04fr)
+    minmax(0, 0.84fr) minmax(0, 0.78fr) minmax(0, 0.52fr)
+    24px !important;
+}
 .lead-star {
   display: inline-grid !important;
   place-items: center;
@@ -90,15 +137,19 @@
 .detail-star.is-starred {
   color: #f0ce00 !important;
 }
-.detail-context {
-  justify-content: flex-end;
-  min-height: 22px;
-}
 .detail-star {
   background: transparent !important;
   color: #596170 !important;
   font-size: 20px;
   line-height: 1;
+}
+.detail-name-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.detail-name-line h3 {
+  margin: 0 !important;
 }
 .inbox-see-more {
   width: 100%;
@@ -152,6 +203,12 @@
 }
 .bubble.inbound > span {
   overflow: hidden;
+  left: -30px !important;
+  width: 24px !important;
+  height: 24px !important;
+}
+.bubble.inbound {
+  margin-left: 30px !important;
 }
 .bubble.inbound > span img {
   width: 100%;
@@ -173,6 +230,30 @@
   font-size: 7px;
   font-weight: 800;
   letter-spacing: 0.11em;
+}
+
+.database-activity-thread {
+  display: grid;
+  gap: 10px;
+  padding: 18px 22px;
+}
+.database-activity-thread .bubble {
+  width: fit-content;
+  min-width: min(320px, 80%);
+  max-width: 84%;
+  margin-bottom: 0;
+  font-size: 12px;
+}
+.database-activity-thread .bubble.outbound {
+  justify-self: end;
+}
+.database-activity-thread .bubble.inbound > span {
+  overflow: hidden;
+}
+.database-activity-thread .bubble.inbound > span img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* System health: client checks first, then deeper diagnostics. */
@@ -203,6 +284,40 @@
 }
 .health-actions {
   gap: 22px !important;
+  align-items: flex-start !important;
+}
+.health-view-controls {
+  display: grid;
+  gap: 12px;
+}
+.health-refresh-meta {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.health-refresh-meta strong {
+  color: var(--text);
+  font-size: 12px;
+}
+.health-summary-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.health-summary-label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.health-summary-card > strong {
+  font-size: 38px !important;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.health-summary-card.summary-warn > strong {
+  color: var(--amber);
 }
 .heartbeat-service {
   min-height: 82px;
@@ -224,6 +339,11 @@
   box-shadow: 0 0 12px #ef526488 !important;
 }
 .client-heartbeat-panel > .panel-heading h2 {
+  font-size: 22px !important;
+}
+.heartbeat-explainer > .panel-heading h2,
+.worker-heartbeat-panel > .panel-heading h2,
+.ai-ark-health > .panel-heading h2 {
   font-size: 22px !important;
 }
 .client-heartbeat-panel,

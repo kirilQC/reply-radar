@@ -175,10 +175,6 @@ export async function GET(request: Request) {
           : {};
       const metadata = nested(raw, "reply_radar");
       const enrichment = nested(metadata, "ai_ark");
-      const correspondent = nested(
-        nested(metadata, "conversation"),
-        "correspondentProfile",
-      );
       const leadConversations = conversations.filter(
         (conversation) => conversation.lead_id === lead.id,
       );
@@ -222,14 +218,7 @@ export async function GET(request: Request) {
         company: lead.company || "",
         linkedinId: lead.linkedin_id ?? null,
         profileUrl: lead.linkedin_profile_url ?? null,
-        photoUrl:
-          correspondent.imageUrl ??
-          enrichment.profilePhotoUrl ??
-          raw.profile_picture_url ??
-          raw.profile_image_url ??
-          raw.avatar_url ??
-          raw.image_url ??
-          null,
+        photoUrl: enrichment.profilePhotoUrl ?? null,
         companyPhotoUrl: enrichment.companyPhotoUrl ?? null,
         email:
           raw.email_address ?? raw.custom_email ?? raw.enriched_email ?? null,

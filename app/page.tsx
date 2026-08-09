@@ -35,7 +35,6 @@ type Lead = {
   campaignName?: string | null;
   headline?: string | null;
   companyPhotoUrl?: string | null;
-  companyWebsite?: string | null;
   industry?: unknown;
   enrichedLocation?: unknown;
   lastMessageAt?: string | null;
@@ -1191,7 +1190,7 @@ export function InboxPage() {
               </div>
               <div
                 ref={paneGridRef}
-                className="dashboard-grid operational-grid"
+                className={`dashboard-grid operational-grid ${layoutPrefs.paneSplit < 58 ? "pane-density-no-followup" : ""} ${layoutPrefs.paneSplit < 50 ? "pane-density-no-replies" : ""}`}
                 style={
                   {
                     "--inbox-pane": `${layoutPrefs.paneSplit}fr`,
@@ -1209,6 +1208,7 @@ export function InboxPage() {
                     <span>REPLY TURN</span>
                     <span>LEAD SCORE</span>
                     <span>FOLLOW-UP SCORE</span>
+                    <span aria-hidden="true" />
                   </div>
                   {inboxLoading && (
                     <p className="empty-state">Loading conversations…</p>
@@ -1236,30 +1236,6 @@ export function InboxPage() {
                       }}
                     >
                       <div className="lead-main">
-                        <button
-                          type="button"
-                          className={`lead-star ${layoutPrefs.starredLeadIds.includes(String(lead.leadId || lead.id)) ? "is-starred" : ""}`}
-                          aria-label={
-                            layoutPrefs.starredLeadIds.includes(
-                              String(lead.leadId || lead.id),
-                            )
-                              ? `Unstar ${lead.name}`
-                              : `Star ${lead.name}`
-                          }
-                          title={
-                            layoutPrefs.starredLeadIds.includes(
-                              String(lead.leadId || lead.id),
-                            )
-                              ? "Remove star"
-                              : "Star lead"
-                          }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toggleStar(lead);
-                          }}
-                        >
-                          ★
-                        </button>
                         <div
                           className="lead-avatar"
                           style={{ background: lead.avatar }}
@@ -1329,6 +1305,32 @@ export function InboxPage() {
                         </span>
                         <span className="tier-label">{lead.tier}</span>
                       </div>
+                      <div className="row-star-cell">
+                        <button
+                          type="button"
+                          className={`lead-star ${layoutPrefs.starredLeadIds.includes(String(lead.leadId || lead.id)) ? "is-starred" : ""}`}
+                          aria-label={
+                            layoutPrefs.starredLeadIds.includes(
+                              String(lead.leadId || lead.id),
+                            )
+                              ? `Unstar ${lead.name}`
+                              : `Star ${lead.name}`
+                          }
+                          title={
+                            layoutPrefs.starredLeadIds.includes(
+                              String(lead.leadId || lead.id),
+                            )
+                              ? "Remove star"
+                              : "Star lead"
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleStar(lead);
+                          }}
+                        >
+                          ★
+                        </button>
+                      </div>
                     </div>
                   ))}
                   {filtered.length > visibleLeadCount && (
@@ -1356,21 +1358,6 @@ export function InboxPage() {
                   className={`detail-card ${layoutPrefs.showDetail ? "" : "layout-hidden"}`}
                 >
                   <div className="detail-top">
-                    <div className="detail-context">
-                      <button
-                        className={`detail-star ${layoutPrefs.starredLeadIds.includes(String(current.leadId || current.id)) ? "is-starred" : ""}`}
-                        onClick={() => toggleStar(current)}
-                        aria-label={
-                          layoutPrefs.starredLeadIds.includes(
-                            String(current.leadId || current.id),
-                          )
-                            ? `Unstar ${current.name}`
-                            : `Star ${current.name}`
-                        }
-                      >
-                        ★
-                      </button>
-                    </div>
                     <div className="detail-person">
                       <div
                         className="large-avatar"
@@ -1383,7 +1370,22 @@ export function InboxPage() {
                         )}
                       </div>
                       <div>
-                        <h3>{current.name}</h3>
+                        <div className="detail-name-line">
+                          <h3>{current.name}</h3>
+                          <button
+                            className={`detail-star ${layoutPrefs.starredLeadIds.includes(String(current.leadId || current.id)) ? "is-starred" : ""}`}
+                            onClick={() => toggleStar(current)}
+                            aria-label={
+                              layoutPrefs.starredLeadIds.includes(
+                                String(current.leadId || current.id),
+                              )
+                                ? `Unstar ${current.name}`
+                                : `Star ${current.name}`
+                            }
+                          >
+                            ★
+                          </button>
+                        </div>
                         <p>
                           {current.role} at {current.company}
                         </p>
@@ -1408,24 +1410,11 @@ export function InboxPage() {
                           )}
                         </div>
                       </div>
-                      {(current.companyWebsite || current.companyPhotoUrl) && (
+                      {current.companyPhotoUrl && (
                         <img
                           className="enriched-company-logo"
-                          src={
-                            current.companyWebsite
-                              ? `/api/media/company-logo?website=${encodeURIComponent(current.companyWebsite)}&company=${encodeURIComponent(current.company)}`
-                              : current.companyPhotoUrl || ""
-                          }
+                          src={current.companyPhotoUrl}
                           alt={`${current.company} logo`}
-                          onError={(event) => {
-                            if (
-                              current.companyPhotoUrl &&
-                              event.currentTarget.src !==
-                                current.companyPhotoUrl
-                            ) {
-                              event.currentTarget.src = current.companyPhotoUrl;
-                            }
-                          }}
                         />
                       )}
                     </div>

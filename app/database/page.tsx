@@ -610,9 +610,6 @@ function LeadOverview({ detail }: { detail: Detail }) {
   );
   const companyWebsite = externalUrl(companyLinks.website || raw.company_url);
   const companyLinkedIn = externalUrl(companyLinks.linkedin);
-  const officialCompanyLogo = companyWebsite
-    ? `/api/media/company-logo?website=${encodeURIComponent(companyWebsite)}&company=${encodeURIComponent(String(currentCompanyName || detail.lead.company || "company"))}`
-    : "";
   const companyIndustry = text(
     companySummary.industry || company.industry || enrichment.industry,
   );
@@ -703,23 +700,10 @@ function LeadOverview({ detail }: { detail: Detail }) {
           <h3>Current company</h3>
           <div className="database-company-card">
             <div className="database-company-heading">
-              {Boolean(officialCompanyLogo || enrichment.companyPhotoUrl) && (
+              {Boolean(enrichment.companyPhotoUrl) && (
                 <img
-                  src={
-                    officialCompanyLogo || String(enrichment.companyPhotoUrl)
-                  }
+                  src={String(enrichment.companyPhotoUrl)}
                   alt={`${currentCompanyName || "Company"} logo`}
-                  onError={(event) => {
-                    if (
-                      enrichment.companyPhotoUrl &&
-                      event.currentTarget.src !==
-                        String(enrichment.companyPhotoUrl)
-                    ) {
-                      event.currentTarget.src = String(
-                        enrichment.companyPhotoUrl,
-                      );
-                    }
-                  }}
                 />
               )}
               <div>
@@ -956,6 +940,9 @@ function LeadActivity({
     detail.lead.raw_data && typeof detail.lead.raw_data === "object"
       ? detail.lead.raw_data
       : {};
+  const enrichment = asObject(asObject(asObject(leadRaw).reply_radar).ai_ark);
+  const leadName = display(detail.lead.name);
+  const leadPhoto = text(enrichment.profilePhotoUrl);
   const clientById = new Map(
     (detail.workspaces ?? []).map((workspace) => [
       String(workspace.id),
@@ -980,6 +967,9 @@ function LeadActivity({
           ...conversationMessages.map((message) => message.raw_data),
           leadRaw,
         );
+        const latestInboundId = [...conversationMessages]
+          .reverse()
+          .find((message) => message.direction === "inbound")?.id;
         return (
           <section
             className="database-conversation-history"
@@ -992,21 +982,33 @@ function LeadActivity({
                 · {sender} · {when(conversation.last_message_at)}
               </small>
             </header>
-            <div className="database-message-list">
-              {conversationMessages.map((message) => (
-                <article key={String(message.id)}>
-                  <div>
-                    <span className={`database-direction ${message.direction}`}>
-                      {String(message.direction)} ·{" "}
-                      {message.direction === "outbound"
-                        ? senderNameFrom(message.raw_data, leadRaw)
-                        : display(detail.lead.name)}
-                    </span>
+            <div className="database-activity-thread">
+              {conversationMessages.map((message) => {
+                const inbound = message.direction === "inbound";
+                return (
+                  <div
+                    className={`bubble ${inbound ? "inbound" : "outbound"} ${message.id === latestInboundId ? "latest-inbound" : ""}`}
+                    key={String(message.id)}
+                  >
+                    {inbound && (
+                      <span>
+                        {leadPhoto ? (
+                          <img src={leadPhoto} alt="" />
+                        ) : (
+                          initials(leadName)
+                        )}
+                      </span>
+                    )}
+                    <small className="message-author">
+                      {inbound
+                        ? leadName
+                        : senderNameFrom(message.raw_data, leadRaw)}
+                    </small>
+                    <p>{display(message.body)}</p>
                     <time>{when(message.sent_at)}</time>
                   </div>
-                  <p>{display(message.body)}</p>
-                </article>
-              ))}
+                );
+              })}
             </div>
           </section>
         );

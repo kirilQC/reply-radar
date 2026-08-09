@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 
@@ -71,10 +71,19 @@ const formatAge = (seconds: number | null | undefined) => {
 const formatTime = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleString() : "Not recorded";
 
+const formatElapsed = (seconds: number | null) => {
+  if (seconds == null) return "Waiting for the first check";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${seconds % 60}s`;
+};
+
 export default function HealthPage() {
   const [mode, setMode] = useState<"basic" | "advanced">("basic");
   const [heartbeat, setHeartbeat] = useState<Heartbeat>({});
   const [loading, setLoading] = useState(true);
+  const [clock, setClock] = useState(() => Date.now());
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -97,15 +106,18 @@ export default function HealthPage() {
     };
   }, [refresh]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const services = heartbeat.services ?? [];
   const aiArkHealthy =
     !heartbeat.aiArk ||
     ["healthy", "disabled"].includes(heartbeat.aiArk.status);
-  const connectedClients = (heartbeat.clients ?? []).filter(
-    (client) => client.status !== "missing",
-  );
-  const clientCount = connectedClients.length;
-  const attentionCount = connectedClients.filter(
+  const clients = heartbeat.clients ?? [];
+  const clientCount = clients.length;
+  const attentionCount = clients.filter(
     (client) => client.status !== "healthy",
   ).length;
   const successfulCount = clientCount - attentionCount;
@@ -118,10 +130,12 @@ export default function HealthPage() {
     aiArkHealthy &&
     heartbeat.worker?.status === "running" &&
     attentionCount === 0;
-  const lastChecked = useMemo(
-    () => formatTime(heartbeat.checkedAt),
-    [heartbeat.checkedAt],
-  );
+  const checkedAtMs = heartbeat.checkedAt
+    ? new Date(heartbeat.checkedAt).getTime()
+    : Number.NaN;
+  const checkAgeSeconds = Number.isFinite(checkedAtMs)
+    ? Math.max(0, Math.floor((clock - checkedAtMs) / 1_000))
+    : null;
 
   return (
     <div className="app-shell">
@@ -143,23 +157,31 @@ export default function HealthPage() {
                 <h1>System Health</h1>
               </div>
               <div className="health-actions">
-                <div
-                  className="segmented-control"
-                  role="tablist"
-                  aria-label="Heartbeat detail level"
-                >
-                  <button
-                    className={mode === "basic" ? "active" : ""}
-                    onClick={() => setMode("basic")}
+                <div className="health-view-controls">
+                  <div
+                    className="segmented-control"
+                    role="tablist"
+                    aria-label="Heartbeat detail level"
                   >
-                    Basic view
-                  </button>
-                  <button
-                    className={mode === "advanced" ? "active" : ""}
-                    onClick={() => setMode("advanced")}
-                  >
-                    Advanced view
-                  </button>
+                    <button
+                      className={mode === "basic" ? "active" : ""}
+                      onClick={() => setMode("basic")}
+                    >
+                      Basic view
+                    </button>
+                    <button
+                      className={mode === "advanced" ? "active" : ""}
+                      onClick={() => setMode("advanced")}
+                    >
+                      Advanced view
+                    </button>
+                  </div>
+                  <div className="health-refresh-meta" aria-live="polite">
+                    <strong>
+                      Time since last check: {formatElapsed(checkAgeSeconds)}
+                    </strong>
+                    <span>Checks refresh automatically every 30 seconds.</span>
+                  </div>
                 </div>
                 <button
                   className="primary-button"
@@ -215,10 +237,6 @@ export default function HealthPage() {
               <div className="panel-heading">
                 <div>
                   <h2>Worker heartbeat</h2>
-                  <p>
-                    The worker is the background helper that checks client
-                    connections and writes its results to Supabase.
-                  </p>
                 </div>
                 <span
                   className={`health-state ${heartbeat.worker?.status === "running" ? "ready" : "missing"}`}
@@ -291,10 +309,6 @@ export default function HealthPage() {
                       : "NEEDS ATTENTION"}
                 </span>
               </div>
-              <p className="ai-ark-health-explanation">
-                {heartbeat.aiArk?.explanation ??
-                  "Waiting for the first system check."}
-              </p>
               <div className="heartbeat-kid-grid ai-ark-health-grid">
                 <div
                   className={
@@ -472,11 +486,6 @@ export default function HealthPage() {
                 </div>
               )}
             </section>
-
-            <p className="heartbeat-last-checked">
-              Last checked: {lastChecked} · Checks refresh automatically every
-              30 seconds.
-            </p>
           </section>
         </main>
       </section>
@@ -494,14 +503,9 @@ function HealthCard({
   tone: "ok" | "warn";
 }) {
   return (
-    <div className="workspace-card">
-      <div className="workspace-card-top">
-        <span className={`health-state ${tone === "ok" ? "ready" : "missing"}`}>
-          {tone === "ok" ? "HEALTHY" : "ACTION"}
-        </span>
-      </div>
+    <div className={`workspace-card health-summary-card summary-${tone}`}>
+      <span className="health-summary-label">{label}</span>
       <strong>{value}</strong>
-      <small>{label}</small>
     </div>
   );
 }
