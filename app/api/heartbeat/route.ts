@@ -37,7 +37,7 @@ export async function GET() {
       request("rr_webhook_events?select=*&order=received_at.desc&limit=25"),
       request(""),
       request("rr_sync_runs?select=*&source=eq.ai_ark&run_type=eq.lead_enrichment&order=started_at.desc&limit=100"),
-      request(`rr_leads?select=id,workspace_id,linkedin_profile_url,raw_data,updated_at&linkedin_profile_url=not.is.null&updated_at=gte.${encodeURIComponent(since)}&order=updated_at.desc&limit=1000`),
+      request(`rr_leads?select=id,workspace_id,linkedin_profile_url,raw_data,created_at&linkedin_profile_url=not.is.null&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=1000`),
     ]);
     if (!workspaceResult.response.ok) throw new Error(`Workspace query failed (${workspaceResult.response.status})`);
     const rows = Array.isArray(workspaceResult.body) ? workspaceResult.body as Row[] : [];
