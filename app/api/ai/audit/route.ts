@@ -11,15 +11,19 @@ export async function GET(request: Request) {
   const limit = Math.min(Number(params.get("limit") || 50), 200);
 
   try {
-    // Query audit log for anthropic-related events
+    // Query audit log for anthropic-related events (ilike catches both "anthropic" and "Anthropic")
     const response = await fetch(
-      `${url}/rest/v1/rr_audit_log?select=*&actor=eq.anthropic&order=created_at.desc&limit=${limit}`,
+      `${url}/rest/v1/rr_audit_log?select=*&actor=ilike.anthropic&order=created_at.desc&limit=${limit}`,
       {
         headers: { apikey: key, Authorization: `Bearer ${key}` },
         cache: "no-store",
       },
     );
-    if (!response.ok) throw new Error(`Supabase ${response.status}`);
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      console.error(`[ai-audit] Supabase query failed: ${response.status} ${body}`);
+      throw new Error(`Supabase ${response.status}: ${body.slice(0, 200)}`);
+    }
     const rows = (await response.json()) as Row[];
 
     const events = rows.map((row) => {

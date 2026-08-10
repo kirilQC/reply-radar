@@ -24,6 +24,10 @@ export async function writeAuditEvent(
         details: event.details ?? {},
       }),
     });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      console.error(`[audit-log] write failed: ${response.status} ${text}`);
+    }
     return response.ok;
   } catch {
     // Audit logging must never turn a successful user or ingestion action into a failure.
