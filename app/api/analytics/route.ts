@@ -152,11 +152,20 @@ export async function GET(request: Request) {
       const replies = Number(row.totalMessageReplies ?? 0) + Number(row.totalInmailReplies ?? 0);
       const name = String(row.campaignName ?? `Campaign ${row.campaignId ?? ""}`).trim();
       const positiveReplies = positiveByCampaign.get(`${String(workspace.id)}:${name}`) ?? 0;
+      const hasProviderAcceptanceRate = row.connectionAcceptanceRate !== null && row.connectionAcceptanceRate !== undefined && String(row.connectionAcceptanceRate).trim() !== "";
+      const providerAcceptanceRate = Number(row.connectionAcceptanceRate);
+      const acceptanceRate = hasProviderAcceptanceRate && Number.isFinite(providerAcceptanceRate)
+        ? providerAcceptanceRate <= 1
+          ? providerAcceptanceRate * 100
+          : providerAcceptanceRate
+        : Number(row.connectionsSent)
+          ? (accepted / Number(row.connectionsSent)) * 100
+          : 0;
       return {
         workspaceId: String(workspace.id), client: String(workspace.name), campaignId: String(row.campaignId ?? ""), name,
         connectionsSent: Number(row.connectionsSent ?? 0), connectionsAccepted: accepted,
         replies, messagesStarted: Number(row.totalMessageStarted ?? 0) + Number(row.totalInmailStarted ?? 0),
-        acceptanceRate: Number(row.connectionAcceptanceRate ?? (Number(row.connectionsSent) ? accepted / Number(row.connectionsSent) * 100 : 0)),
+        acceptanceRate,
         replyRate: accepted ? replies / accepted * 100 : 0,
         positiveReplies, positiveReplyRate: accepted ? positiveReplies / accepted * 100 : 0,
       };
