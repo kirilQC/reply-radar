@@ -114,6 +114,7 @@ export async function POST(request: Request) {
 
   const anthropicHeaders = { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" };
   try {
+    const t0 = Date.now();
     let response = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: anthropicHeaders, body: requestBody(model) });
     if (response.status === 404 && model !== FALLBACK_MODEL) {
       console.log(`[ai-draft] Model ${model} returned 404, retrying with ${FALLBACK_MODEL}`);
@@ -121,6 +122,7 @@ export async function POST(request: Request) {
       response = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: anthropicHeaders, body: requestBody(model) });
     }
     const payload = await response.json().catch(() => ({}));
+    const durationMs = Date.now() - t0;
     console.log(`[ai-draft] model=${model} status=${response.status} pastReplies=${pastReplies.length}`);
     const text = payload?.content?.find((item: { type?: string }) => item.type === "text")?.text ?? "";
     let analysis: { draft?: string; reason?: string; sentiment?: string } = {};
@@ -136,11 +138,11 @@ export async function POST(request: Request) {
         await fetch(`${process.env.SUPABASE_URL}/rest/v1/rr_messages?id=eq.${encodeURIComponent(latest[0].id)}`, { method: "PATCH", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify({ raw_data: { ...raw, reply_radar: { ...radar, sentiment: String(analysis.sentiment).toLowerCase(), analyzed_at: new Date().toISOString() } } }) }).catch(() => null);
       }
     }
-    await writeAuditEvent({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }, { actor: "Anthropic", action: response.ok ? (mode === "analyze" ? "conversation.analyzed" : "draft.generated") : "draft.failed", entityType: "conversation", entityId: typeof body.conversationId === "string" ? body.conversationId : undefined, details: { source: "anthropic", status: response.ok ? "success" : "failed", model, workspaceId: body.workspaceId, workspaceName: body.workspaceName, pastRepliesUsed: pastReplies.length, summary: response.ok ? `Anthropic generated a reply draft with ${model} using ${pastReplies.length} past replies as tone reference.` : `Anthropic could not generate a reply draft with ${model}.` } });
+    await writeAuditEvent({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }, { actor: "anthropic", action: response.ok ? (mode === "analyze" ? "conversation.analyzed" : "draft.generated") : "draft.failed", entityType: "conversation", entityId: typeof body.conversationId === "string" ? body.conversationId : undefined, details: { source: "anthropic", status: response.ok ? "success" : "failed", model, inputTokens: payload?.usage?.input_tokens ?? 0, outputTokens: payload?.usage?.output_tokens ?? 0, durationMs, workspaceId: body.workspaceId, workspaceName: body.workspaceName, pastRepliesUsed: pastReplies.length, summary: response.ok ? `Anthropic generated a reply draft with ${model} using ${pastReplies.length} past replies as tone reference.` : `Anthropic could not generate a reply draft with ${model}.` } });
     const providerMessage = typeof payload?.error?.message === "string" ? payload.error.message : "Anthropic rejected the draft request.";
     return NextResponse.json({ ok: response.ok, ...(response.ok ? {} : { error: providerMessage }), draft: mode === "analyze" ? String(analysis.draft ?? "") : text, reason: mode === "analyze" ? String(analysis.reason ?? "") : undefined, sentiment: mode === "analyze" ? String(analysis.sentiment ?? "") : undefined, usage: payload?.usage ?? null }, { status: response.ok ? 200 : response.status });
   } catch {
-    await writeAuditEvent({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }, { actor: "Anthropic", action: "draft.failed", entityType: "conversation", details: { source: "anthropic", status: "failed", model, summary: "Reply Radar could not reach Anthropic to generate the requested draft." } });
+    await writeAuditEvent({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }, { actor: "anthropic", action: "draft.failed", entityType: "conversation", details: { source: "anthropic", status: "failed", model, summary: "Reply Radar could not reach Anthropic to generate the requested draft." } });
     return NextResponse.json({ ok: false, error: "Unable to reach Anthropic from the server." }, { status: 502 });
   }
 }

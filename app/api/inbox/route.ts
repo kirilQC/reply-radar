@@ -182,19 +182,22 @@ export async function GET(request: Request) {
         : [],
     ]);
     // Deduplicate messages: the refresh endpoint may have created duplicates with
-    // wrong direction. Keep the original (richer raw_data) and discard refresh dupes.
+    // wrong direction. Always prefer the original (non-refresh) message.
+    const isRefresh = (raw: unknown) => {
+      if (!raw || typeof raw !== "object") return false;
+      const rr = (raw as Row).reply_radar;
+      return rr && typeof rr === "object" && (rr as Row).source === "refresh";
+    };
     const deduped: Row[] = [];
     const seen = new Map<string, number>();
     for (const msg of messages) {
       const fp = `${msg.conversation_id}|${new Date(String(msg.sent_at)).toISOString()}|${String(msg.body).trim()}`;
       const existing = seen.get(fp);
       if (existing !== undefined) {
-        // Keep the one whose raw_data has more content (original vs refresh stub)
-        const existingRaw = deduped[existing].raw_data;
-        const existingKeys = existingRaw && typeof existingRaw === "object" ? Object.keys(existingRaw) : [];
-        const currentRaw = msg.raw_data;
-        const currentKeys = currentRaw && typeof currentRaw === "object" ? Object.keys(currentRaw) : [];
-        if (currentKeys.length > existingKeys.length) deduped[existing] = msg;
+        // Always prefer the non-refresh message (original has correct direction)
+        const existingIsRefresh = isRefresh(deduped[existing].raw_data);
+        const currentIsRefresh = isRefresh(msg.raw_data);
+        if (existingIsRefresh && !currentIsRefresh) deduped[existing] = msg;
         continue;
       }
       seen.set(fp, deduped.length);

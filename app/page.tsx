@@ -628,6 +628,35 @@ export function InboxPage() {
       cancelled = true;
     };
   }, [trackedWorkspaceSlugs.join(",")]);
+  // Poll for sentiment updates every 15s — keeps the UI feeling alive
+  useEffect(() => {
+    if (!leads.length) return;
+    const poll = async () => {
+      const idsWithout = leads.filter((l) => !l.sentiment).map((l) => l.id);
+      if (!idsWithout.length) return;
+      try {
+        const res = await fetch("/api/conversations/sentiment", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ conversationIds: idsWithout }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!data.ok || !data.sentiments) return;
+        const updates = data.sentiments as Record<string, string | null>;
+        const hasUpdates = Object.values(updates).some(Boolean);
+        if (hasUpdates) {
+          setLeads((prev) => prev.map((lead) => {
+            const s = updates[lead.id];
+            return s && !lead.sentiment ? { ...lead, sentiment: s } : lead;
+          }));
+        }
+      } catch { /* ignore */ }
+    };
+    const interval = setInterval(poll, 15_000);
+    // Run once immediately for fast first paint
+    void poll();
+    return () => clearInterval(interval);
+  }, [leads.length > 0 ? leads.map((l) => l.id).join(",") : ""]);
   const savePreferences = (
     nextLayout = layoutPrefs,
     nextAppearance = appearance,
@@ -885,6 +914,13 @@ export function InboxPage() {
     if (response?.ok) {
       setAiDraft(String(payload.draft ?? ""));
       setAiReason(String(payload.reason ?? "This lead sent a new reply that is ready for review."));
+      // Update sentiment live on the current lead
+      const newSentiment = String(payload.sentiment ?? "").toLowerCase();
+      if (["positive", "neutral", "negative"].includes(newSentiment)) {
+        setLeads((prev) => prev.map((lead) =>
+          lead.id === current.id ? { ...lead, sentiment: newSentiment } : lead,
+        ));
+      }
     } else {
       setAiDraft("");
       setAiReason("AI review is temporarily unavailable. The new reply is still ready for manual review.");
