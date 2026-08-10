@@ -1005,10 +1005,6 @@ function AiHubView() {
                 <div className="panel-heading"><div><h2>Follow-up scoring prompt</h2><p>How should the AI determine follow-up urgency?</p></div></div>
                 <label className="field-label">FOLLOW-UP PROMPT<textarea value={followUpPrompt} onChange={(event) => setFollowUpPrompt(event.target.value)} placeholder="Analyze the conversation and score the follow-up urgency from 0 to 100. Consider: whether the lead asked a question, expressed interest, mentioned a timeline, or requested a meeting. Return a JSON object with 'score' (number), 'tier' ('hot' | 'warm' | 'nurture'), and 'reason' (string)." rows={5} style={{ minHeight: 120 }} /></label>
               </section>
-              <section className="admin-panel client-config-section">
-                <div className="panel-heading"><div><h2>Suggested reply prompt</h2><p>How should the AI draft a reply for this client&apos;s leads?</p></div></div>
-                <label className="field-label">REPLY PROMPT<textarea value={replyPrompt} onChange={(event) => setReplyPrompt(event.target.value)} placeholder="Draft a concise, natural follow-up reply on behalf of the sender. Match the client's tone of voice. Do not invent facts, meetings, or promises. Keep it under 3 sentences unless more context is needed." rows={5} style={{ minHeight: 120 }} /></label>
-              </section>
             </div>
           </>}
         </div>
