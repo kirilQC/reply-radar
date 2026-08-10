@@ -17,11 +17,10 @@ export async function writeAuditEvent(
         Prefer: "return=minimal",
       },
       body: JSON.stringify({
-        actor: event.actor,
         action: event.action,
         entity_type: event.entityType ?? null,
         entity_id: event.entityId ?? null,
-        details: event.details ?? {},
+        details: { ...event.details, actor: event.actor },
       }),
     });
     if (!response.ok) {

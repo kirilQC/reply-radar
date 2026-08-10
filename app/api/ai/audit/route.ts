@@ -11,9 +11,9 @@ export async function GET(request: Request) {
   const limit = Math.min(Number(params.get("limit") || 50), 200);
 
   try {
-    // Query audit log for anthropic-related events (ilike catches both "anthropic" and "Anthropic")
+    // Query audit log — filter by details->source since the actor column may not exist
     const response = await fetch(
-      `${url}/rest/v1/rr_audit_log?select=*&actor=ilike.anthropic&order=created_at.desc&limit=${limit}`,
+      `${url}/rest/v1/rr_audit_log?select=*&details->>source=eq.anthropic&order=created_at.desc&limit=${limit}`,
       {
         headers: { apikey: key, Authorization: `Bearer ${key}` },
         cache: "no-store",
@@ -42,6 +42,7 @@ export async function GET(request: Request) {
         durationMs: details.durationMs ?? null,
         reason: details.reason ?? null,
         workspaceId: details.workspaceId ?? null,
+        workspaceName: details.workspaceName ?? null,
         note: details.note ?? null,
       };
     });
