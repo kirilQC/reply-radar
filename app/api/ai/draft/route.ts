@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   const thread = Array.isArray(body.thread) ? body.thread : [];
   const instruction = typeof body.instruction === "string" ? body.instruction : "";
   const mode = body.mode === "analyze" ? "analyze" : "draft";
-  const model = typeof body.model === "string" && body.model ? body.model : process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-latest";
+  const model = typeof body.model === "string" && body.model ? body.model : process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-latest";
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

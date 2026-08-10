@@ -490,10 +490,9 @@ export default function AdminPage() {
                       <select defaultValue="">
                         <option value="">Select model</option>
                         <option>claude-opus-4-1-20250805</option>
-                        <option>claude-opus-4-20250514</option>
-                        <option>claude-sonnet-4-20250514</option>
-                        <option>claude-3-7-sonnet-latest</option>
-                        <option>claude-3-5-haiku-latest</option>
+                        <option>claude-opus-4-6</option>
+                        <option>claude-sonnet-4-6</option>
+                        <option>claude-haiku-4-5-latest</option>
                       </select>
                     </label>
                     <label className="field-label">

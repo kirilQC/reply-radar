@@ -96,7 +96,7 @@ export async function classifyLatestReply(
   if (["positive", "neutral", "negative"].includes(String(latestRadar.sentiment).toLowerCase())) { console.log(`[sentiment] Already classified as ${latestRadar.sentiment} for ${conversationId}`); return; }
 
   const systemPrompt = await getConfiguredPrompt(config, workspaceId);
-  const model = process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-latest";
+  const model = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-latest";
   const userContent = rows.map((row) => `${row.direction}: ${String(row.body ?? "")}`).join("\n");
   const startTime = Date.now();
 
