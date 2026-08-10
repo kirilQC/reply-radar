@@ -161,31 +161,49 @@ async function heyReach(apiKey: string, path: string, init: RequestInit) {
   return response.json().catch(() => null) as Promise<unknown>;
 }
 
-async function campaignForLead(apiKey: string, lead: JsonObject, eventTimestamp: string) {
+function newestEligibleCampaign(rows: JsonObject[], eventTimestamp: string) {
+  const eventTime = new Date(eventTimestamp).getTime();
+  const eligible = rows.filter((row) => {
+    const created = new Date(text(first(row, ["creationTime", "createdAt", "creation_time"]))).getTime();
+    return Number.isNaN(created) || Number.isNaN(eventTime) || created <= eventTime;
+  });
+  return (eligible.length ? eligible : rows).sort((a, b) => {
+    const aTime = new Date(text(first(a, ["creationTime", "createdAt", "creation_time"]))).getTime() || 0;
+    const bTime = new Date(text(first(b, ["creationTime", "createdAt", "creation_time"]))).getTime() || 0;
+    return bTime - aTime;
+  })[0];
+}
+
+async function campaignForLead(apiKey: string, lead: JsonObject, senderId: string, eventTimestamp: string) {
   try {
+    const identity = {
+      email: text(lead.email_address ?? lead.emailAddress),
+      linkedinId: text(lead.id ?? lead.linkedinId ?? lead.linkedin_id),
+      profileUrl: text(lead.profile_url ?? lead.profileUrl),
+    };
     const response = await heyReach(apiKey, "campaign/GetCampaignsForLead", {
       method: "POST",
-      body: JSON.stringify({
-        email: text(lead.email_address ?? lead.emailAddress),
-        linkedinId: text(lead.id ?? lead.linkedinId ?? lead.linkedin_id),
-        profileUrl: text(lead.profile_url ?? lead.profileUrl),
-        offset: 0,
-        limit: 100,
-      }),
+      body: JSON.stringify({ ...Object.fromEntries(Object.entries(identity).filter(([, value]) => value)), offset: 0, limit: 100 }),
     });
     const root = object(response);
     const rows = Array.isArray(root.items) ? root.items.map(object) : Array.isArray(response) ? response.map(object) : [];
-    const eventTime = new Date(eventTimestamp).getTime();
-    const eligible = rows.filter((row) => {
-      const created = new Date(text(first(row, ["creationTime", "createdAt", "creation_time"]))).getTime();
-      return Number.isNaN(created) || Number.isNaN(eventTime) || created <= eventTime;
+    const selected = newestEligibleCampaign(rows, eventTimestamp);
+    if (selected) return campaignFrom(selected);
+
+    // Some HeyReach workspaces return an empty GetCampaignsForLead result for
+    // replies that still originated in a campaign. In that case, use the
+    // sender's campaign roster and the reply timestamp as deterministic
+    // attribution rather than discarding campaign context.
+    const numericSenderId = Number(senderId);
+    if (!Number.isFinite(numericSenderId)) return { id: "", name: "" };
+    const senderCampaignResponse = await heyReach(apiKey, "campaign/GetAll", {
+      method: "POST",
+      body: JSON.stringify({ offset: 0, limit: 100, accountIds: [numericSenderId] }),
     });
-    const selected = (eligible.length ? eligible : rows).sort((a, b) => {
-      const aTime = new Date(text(first(a, ["creationTime", "createdAt", "creation_time"]))).getTime() || 0;
-      const bTime = new Date(text(first(b, ["creationTime", "createdAt", "creation_time"]))).getTime() || 0;
-      return bTime - aTime;
-    })[0];
-    return selected ? campaignFrom(selected) : { id: "", name: "" };
+    const senderCampaignRoot = object(senderCampaignResponse);
+    const senderCampaigns = Array.isArray(senderCampaignRoot.items) ? senderCampaignRoot.items.map(object) : [];
+    const senderCampaign = newestEligibleCampaign(senderCampaigns, eventTimestamp);
+    return senderCampaign ? campaignFrom(senderCampaign) : { id: "", name: "" };
   } catch {
     // Campaign attribution must never prevent a valid reply from being stored.
     return { id: "", name: "" };
@@ -238,6 +256,6 @@ export async function fetchFullConversation(apiKey: string, payload: JsonObject)
     ? webhookCampaign
     : embeddedCampaign.name
       ? embeddedCampaign
-      : await campaignForLead(apiKey, lead, eventTimestamp);
+      : await campaignForLead(apiKey, lead, resolvedSender.id, eventTimestamp);
   return { conversationExternalId, messages: mergeConversationMessages(history, recent), sender: resolvedSender, fetchedAt: new Date().toISOString(), conversationSummary: conversation, campaign: resolvedCampaign };
 }
