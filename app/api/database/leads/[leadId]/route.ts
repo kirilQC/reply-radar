@@ -108,3 +108,32 @@ export async function GET(
     );
   }
 }
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ leadId: string }> },
+) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
+  const { leadId } = await context.params;
+  if (!/^[0-9a-f-]{36}$/i.test(leadId)) return NextResponse.json({ ok: false, error: "Invalid lead id." }, { status: 400 });
+  const headers = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" };
+  try {
+    // Find conversations for this lead
+    const convResponse = await fetch(`${url}/rest/v1/rr_conversations?select=id&lead_id=eq.${encodeURIComponent(leadId)}`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" });
+    const conversations = convResponse.ok ? ((await convResponse.json()) as Row[]) : [];
+    const convIds = conversations.map((c) => String(c.id)).filter(Boolean);
+    // Delete messages for those conversations
+    if (convIds.length) {
+      await fetch(`${url}/rest/v1/rr_messages?conversation_id=in.(${convIds.join(",")})`, { method: "DELETE", headers, cache: "no-store" });
+    }
+    // Delete conversations
+    await fetch(`${url}/rest/v1/rr_conversations?lead_id=eq.${encodeURIComponent(leadId)}`, { method: "DELETE", headers, cache: "no-store" });
+    // Delete the lead
+    await fetch(`${url}/rest/v1/rr_leads?id=eq.${encodeURIComponent(leadId)}`, { method: "DELETE", headers, cache: "no-store" });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Delete failed" }, { status: 502 });
+  }
+}

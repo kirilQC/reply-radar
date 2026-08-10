@@ -767,14 +767,20 @@ export function InboxPage() {
   const visibleLeads = filtered.slice(0, visibleLeadCount);
   const liveMetric = (metric: (typeof metricCatalog)[number]) => {
     const averages = analytics?.campaignAverages;
+    const filterLabel = filter === "today" ? "today" : filter === "week" ? "this week" : filter === "follow-ups" ? "needing follow-up" : "total";
+    const positiveCount = filtered.filter((l) => l.sentiment === "positive").length;
+    const neutralCount = filtered.filter((l) => l.sentiment === "neutral").length;
+    const negativeCount = filtered.filter((l) => l.sentiment === "negative").length;
+    const totalReplies = filtered.reduce((sum, l) => sum + l.replies, 0);
+    const positiveRate = filtered.length ? ((positiveCount / filtered.length) * 100).toFixed(1) : "0.0";
     const values: Record<string, { value: string; sub: string }> = {
-      needsAction: { value: String(filtered.length), sub: "Live conversations in this queue" },
-      hotConversations: { value: String(analytics?.queueMix?.hot ?? 0), sub: "Currently marked hot" },
-      avgReplyTime: { value: analytics?.averageResponseMinutes == null ? "—" : `${analytics.averageResponseMinutes}m`, sub: "From outbound message to reply" },
-      pipelineSaved: { value: String(layoutPrefs.starredLeadIds.length), sub: "Starred leads saved" },
-      replyCount7d: { value: String(analytics?.replies7d ?? 0), sub: "Live inbound replies" },
+      needsAction: { value: String(filtered.length), sub: `Conversations ${filterLabel}` },
+      hotConversations: { value: String(positiveCount), sub: `Positive replies ${filterLabel}` },
+      avgReplyTime: { value: String(neutralCount), sub: `Neutral replies ${filterLabel}` },
+      pipelineSaved: { value: String(negativeCount), sub: `Negative replies ${filterLabel}` },
+      replyCount7d: { value: String(totalReplies), sub: `Inbound replies ${filterLabel}` },
       totalReplies: { value: String(analytics?.totalReplies ?? 0), sub: "All stored inbound replies" },
-      positiveRate: { value: averages ? `${averages.positiveReplyRate.toFixed(1)}%` : "—", sub: "Positive replies ÷ accepted connections" },
+      positiveRate: { value: `${positiveRate}%`, sub: `Positive rate ${filterLabel}` },
       avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", sub: "Average campaign reply rate" },
       acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", sub: "Accepted connections ÷ requests sent" },
     };
@@ -1004,6 +1010,41 @@ export function InboxPage() {
             {messagingDocUrl && (
               <a className="icon-button messaging-doc-shortcut" href={messagingDocUrl} target="_blank" rel="noreferrer" aria-label="Open client messaging document" title="Open client messaging document">▤</a>
             )}
+            <div className="notepad-dropdown-wrap">
+              <button
+                className="icon-button notepad-toggle"
+                aria-label="Quick templates notepad"
+                title="Quick templates notepad"
+                onClick={() => setTemplatesOpen((open) => !open)}
+              >
+                📋
+              </button>
+              {templatesOpen && (
+                <div className="notepad-dropdown">
+                  <div className="notepad-header">
+                    <strong>Quick Templates</strong>
+                    <button type="button" onClick={() => setTemplatesOpen(false)}>×</button>
+                  </div>
+                  <div className="notepad-body">
+                    {quickTemplates.map((template) => (
+                      <div className="notepad-entry" key={template.id}>
+                        <div className="notepad-entry-content" onClick={() => { navigator.clipboard.writeText(template.value).catch(() => null); }}>
+                          <small>{template.name}</small>
+                          <span>{template.value}</span>
+                        </div>
+                        <button type="button" className="notepad-entry-remove" onClick={() => void syncTemplates(quickTemplates.filter((item) => item.id !== template.id))}>×</button>
+                      </div>
+                    ))}
+                    {!quickTemplates.length && <p className="notepad-empty">No templates saved yet.</p>}
+                  </div>
+                  <div className="notepad-form">
+                    <input placeholder="Variable name" value={templateDraft.name} onChange={(event) => setTemplateDraft((draft) => ({ ...draft, name: event.target.value }))} />
+                    <textarea placeholder="Value or reusable text" value={templateDraft.value} onChange={(event) => setTemplateDraft((draft) => ({ ...draft, value: event.target.value }))} />
+                    <button type="button" disabled={!templateDraft.name.trim() || !templateDraft.value.trim()} onClick={() => { const next = [...quickTemplates, { id: crypto.randomUUID(), name: templateDraft.name.trim(), value: templateDraft.value.trim() }]; setTemplateDraft({ name: "", value: "" }); void syncTemplates(next); }}>Save</button>
+                  </div>
+                </div>
+              )}
+            </div>
             {clientParam && (
               <a
                 className="icon-button client-config-shortcut"
@@ -1310,16 +1351,15 @@ export function InboxPage() {
                 }
               >
                 <section className="queue-card inbox-operational-table">
-                  <div className="table-head">
+                  <div className={`table-head ${filter === "follow-ups" ? "table-head-followups" : ""}`}>
                     <span>LEAD</span>
                     <span>CLIENT</span>
                     <span>CAMPAIGN</span>
                     <span>LATEST REPLY</span>
                     <span>SENDER</span>
-                    <span>REPLY TURN</span>
+                    <span>REPLIES</span>
                     <span>LEAD SCORE</span>
-                    <span>FOLLOW-UP SCORE</span>
-                    <span aria-hidden="true" />
+                    {filter === "follow-ups" && <span>URGENCY</span>}
                   </div>
                   {inboxLoading && (
                     <p className="empty-state">Loading conversations…</p>
@@ -1334,7 +1374,7 @@ export function InboxPage() {
                   )}
                   {visibleLeads.map((lead, index) => (
                     <div
-                      className={`lead-row ${selected === index ? "row-selected" : ""}`}
+                      className={`lead-row ${selected === index ? "row-selected" : ""} ${lead.sentiment ? `row-sentiment-${lead.sentiment}` : ""}`}
                       key={lead.id}
                       role="button"
                       tabIndex={0}
@@ -1349,7 +1389,7 @@ export function InboxPage() {
                       <div className="lead-main">
                         <div
                           className="lead-avatar"
-                          style={{ background: lead.avatar }}
+                          style={{ background: lead.photoUrl ? lead.avatar : lead.clientTone }}
                         >
                           <SafeAvatar src={lead.photoUrl} alt={lead.name} fallback={lead.initials} />
                         </div>
@@ -1410,38 +1450,14 @@ export function InboxPage() {
                       <div className="inbox-meta-cell lead-score-cell">
                         <strong>0</strong>
                       </div>
-                      <div className="score-cell follow-up-score-cell">
-                        <span className={`score-pill ${filter === "follow-ups" && lead.followUpUrgency ? "hot" : lead.tier}`}>
-                          {filter === "follow-ups" ? (lead.followUpUrgency ?? 0) : (lead.followUpScore ?? lead.score)}
-                        </span>
-                        <span className="tier-label">{filter === "follow-ups" ? "urgency" : lead.tier}</span>
-                      </div>
-                      <div className="row-star-cell">
-                        <button
-                          type="button"
-                          className={`lead-star ${layoutPrefs.starredLeadIds.includes(String(lead.leadId || lead.id)) ? "is-starred" : ""}`}
-                          aria-label={
-                            layoutPrefs.starredLeadIds.includes(
-                              String(lead.leadId || lead.id),
-                            )
-                              ? `Unstar ${lead.name}`
-                              : `Star ${lead.name}`
-                          }
-                          title={
-                            layoutPrefs.starredLeadIds.includes(
-                              String(lead.leadId || lead.id),
-                            )
-                              ? "Remove star"
-                              : "Star lead"
-                          }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toggleStar(lead);
-                          }}
-                        >
-                          ★
-                        </button>
-                      </div>
+                      {filter === "follow-ups" && (
+                        <div className="score-cell follow-up-score-cell">
+                          <span className={`score-pill ${(lead.followUpUrgency ?? 0) >= 60 ? "hot" : "warm"}`}>
+                            {lead.followUpUrgency ?? 0}
+                          </span>
+                          <span className="tier-label">urgency</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                   {filtered.length > visibleLeadCount && (
@@ -1606,16 +1622,9 @@ export function InboxPage() {
                     <div className="composer-top">
                       <span>AI DRAFT</span>
                       <div className="composer-tools">
-                        <button type="button" onClick={() => setTemplatesOpen((open) => !open)}>Quick templates ▾</button>
                         <button type="button" onClick={() => void generateAiReview()} disabled={aiLoading}>{aiLoading ? "Generating…" : "Regenerate ↻"}</button>
                       </div>
                     </div>
-                    {templatesOpen && (
-                      <div className="quick-templates-panel">
-                        {quickTemplates.map((template) => <div className="quick-template-row" key={template.id}><button type="button" onClick={() => { setAiDraft((draft) => `${draft}${draft ? "\n\n" : ""}${template.value}`); setTemplatesOpen(false); }}><strong>{template.name}</strong><span>{template.value}</span></button><button type="button" className="template-remove" aria-label={`Remove ${template.name}`} onClick={() => void syncTemplates(quickTemplates.filter((item) => item.id !== template.id))}>×</button></div>)}
-                        <div className="quick-template-form"><input aria-label="Template name" placeholder="Template name" value={templateDraft.name} onChange={(event) => setTemplateDraft((draft) => ({ ...draft, name: event.target.value }))} /><textarea aria-label="Template value" placeholder="Link or reusable text" value={templateDraft.value} onChange={(event) => setTemplateDraft((draft) => ({ ...draft, value: event.target.value }))} /><button type="button" disabled={!templateDraft.name.trim() || !templateDraft.value.trim()} onClick={() => { const next = [...quickTemplates, { id: crypto.randomUUID(), name: templateDraft.name.trim(), value: templateDraft.value.trim() }]; setTemplateDraft({ name: "", value: "" }); void syncTemplates(next); }}>Save template</button></div>
-                      </div>
-                    )}
                     <textarea
                       value={aiDraft}
                       onChange={(event) => setAiDraft(event.target.value)}

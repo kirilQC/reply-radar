@@ -351,6 +351,17 @@ export default function DatabasePage() {
     }
   };
 
+  const deleteLead = async (leadId: string) => {
+    if (!window.confirm("Permanently delete this lead and all their conversations? This cannot be undone.")) return;
+    try {
+      const response = await fetch(`/api/database/leads/${leadId}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Delete failed");
+      setSelectedId(null);
+      setDetail(null);
+      void load(false);
+    } catch { setError("Could not delete lead."); }
+  };
+
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("lead");
     if (/^[0-9a-f-]{36}$/i.test(requested || ""))
@@ -548,12 +559,22 @@ export default function DatabasePage() {
                   <h2>{selectedSummary?.name || "Loading…"}</h2>
                 </span>
               </div>
-              <button
-                onClick={() => setSelectedId(null)}
-                aria-label="Close lead details"
-              >
-                ×
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="database-delete-button"
+                  onClick={() => selectedId && deleteLead(selectedId)}
+                  aria-label="Delete lead"
+                  title="Delete lead"
+                >
+                  🗑
+                </button>
+                <button
+                  onClick={() => setSelectedId(null)}
+                  aria-label="Close lead details"
+                >
+                  ×
+                </button>
+              </div>
             </div>
             <nav className="database-tabs">
               {(["overview", "activity"] as const).map((tab) => (
