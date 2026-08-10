@@ -908,7 +908,7 @@ export function InboxPage() {
     const response = await fetch("/api/ai/draft", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId: current.id, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, campaignName: current.campaignName || undefined, thread: current.messages, instruction: ai.brief ? `Client context: ${ai.brief}` : "" }),
+      body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId: current.id, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, campaignName: current.campaignName || undefined, thread: current.messages, instruction: ai.brief ? `Client context: ${ai.brief}` : "" }),
     }).catch(() => null);
     const payload = await response?.json().catch(() => ({}));
     if (response?.ok) {

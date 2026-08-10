@@ -841,8 +841,8 @@ type AiConfig = {
   workspaceAi: { name: string; slug: string; brief: string; model: string; icpPrompt: string; followUpPrompt: string; replyPrompt: string; sentimentPrompt: string } | null;
   workspaces: Array<{ id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; hasBrief: boolean }>;
 };
-type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; model: string | null; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; reason: string | null; workspaceId: string | null; note: string | null };
-type AiAuditData = { events: AiAuditEvent[]; summary: { totalCalls: number; successful: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
+type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; model: string | null; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; leadName: string | null };
+type AiAuditData = { ok?: boolean; events: AiAuditEvent[]; summary: { totalCalls: number; successful: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
 
 function AiHubView() {
   const [config, setConfig] = useState<AiConfig | null>(null);
@@ -876,11 +876,15 @@ function AiHubView() {
   };
 
   useEffect(() => { loadConfig(); }, []);
+  const [auditVisible, setAuditVisible] = useState(25);
   useEffect(() => {
-    fetch("/api/ai/audit", { cache: "no-store" })
+    const load = () => fetch("/api/ai/audit", { cache: "no-store" })
       .then((r) => r.json())
-      .then((payload: AiAuditData) => setAudit(payload))
+      .then((payload: AiAuditData) => { if (payload?.ok !== false) setAudit(payload); })
       .catch(() => null);
+    load();
+    const interval = setInterval(load, 10_000);
+    return () => clearInterval(interval);
   }, []);
   useEffect(() => {
     if (selectedClient) loadConfig(selectedClient);
@@ -943,20 +947,34 @@ function AiHubView() {
       </div>
 
       <section className="admin-panel ai-audit-section">
-        <div className="panel-heading"><div><h2>AI audit log</h2><p>Every Anthropic API call with token costs and results.</p></div></div>
+        <div className="panel-heading"><div><h2 style={{ fontSize: 22 }}>AI audit log</h2></div>
+          <button className="secondary-button" onClick={() => {
+            if (!audit?.events?.length) return;
+            const csv = ["When,Client,Lead,Action,Result,Model,Input Tokens,Output Tokens,Duration (ms),Status",
+              ...audit.events.map((e) => `"${e.timestamp}","${e.workspaceName ?? ""}","${e.leadName ?? ""}","${e.action ?? ""}","${e.sentiment ?? ""}","${e.model ?? ""}",${e.inputTokens},${e.outputTokens},${e.durationMs ?? ""},${e.status}`)
+            ].join("\n");
+            const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = `ai-audit-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(link.href);
+          }}>Export CSV ↓</button>
+        </div>
         <div className="ai-audit-table">
-          <div className="ai-audit-head"><span>When</span><span>Action</span><span>Result</span><span>Model</span><span>Tokens</span><span>Duration</span><span>Status</span></div>
-          {audit?.events?.length ? audit.events.slice(0, 50).map((event) => (
-            <div className="ai-audit-row" key={event.id}>
-              <time>{new Date(event.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</time>
-              <span><strong>{event.action?.replaceAll("_", " ")}</strong>{event.workspaceId && <small>{event.workspaceId}</small>}</span>
-              <span>{event.sentiment ? <span className={`sentiment-badge sentiment-${event.sentiment}`}>{event.sentiment}</span> : event.note || "—"}</span>
+          <div className="ai-audit-head"><span>When</span><span>Client</span><span>Lead</span><span>Action</span><span>Result</span><span>Model</span><span>Tokens</span><span>Duration</span><span>Status</span></div>
+          {audit?.events?.length ? audit.events.slice(0, auditVisible).map((event) => {
+            const d = event.timestamp ? new Date(event.timestamp) : null;
+            const when = d && !isNaN(d.getTime()) ? `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true })}` : "—";
+            const actionLabel: Record<string, string> = { "conversation.analyzed": "Sentiment analysis", "draft.generated": "Suggested reply", "draft.failed": "Suggested reply", "sentiment_analysis": "Sentiment analysis", "icp.scored": "ICP scoring", "followup.scored": "Follow-up score" };
+            return <div className="ai-audit-row" key={event.id}>
+              <time>{when}</time>
+              <span>{event.workspaceName || "—"}</span>
+              <span>{event.leadName || "—"}</span>
+              <span><strong>{actionLabel[event.action ?? ""] ?? event.action?.replaceAll(".", " ") ?? "—"}</strong></span>
+              <span>{event.sentiment ? <span className={`sentiment-badge sentiment-${event.sentiment}`}>{event.sentiment}</span> : "—"}</span>
               <span>{event.model ?? "—"}</span>
               <span>{event.inputTokens || event.outputTokens ? `${event.inputTokens} in · ${event.outputTokens} out` : "—"}</span>
               <span>{event.durationMs ? `${event.durationMs}ms` : "—"}</span>
-              <span className={`audit-status ${event.status === "success" ? "success" : event.status === "error" ? "error" : "warning"}`}>{event.status}</span>
-            </div>
-          )) : <p className="audit-empty">No AI audit events yet. Events will appear after the first reply is analyzed.</p>}
+              <span className={`audit-status ${event.status === "success" ? "success" : event.status === "error" || event.status === "failed" ? "error" : "warning"}`}>{event.status}</span>
+            </div>;
+          }) : <p className="audit-empty">No AI audit events yet. Events will appear after the first reply is analyzed.</p>}
+          {audit?.events && audit.events.length > auditVisible && <button className="audit-see-more" onClick={() => setAuditVisible((v) => v + 25)}>See 25 more</button>}
         </div>
       </section>
     </>}

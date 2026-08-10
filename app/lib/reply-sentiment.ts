@@ -67,6 +67,7 @@ export async function classifyLatestReply(
   config: SupabaseConfig,
   conversationId: string,
   workspaceId?: string,
+  meta?: { leadName?: string; workspaceName?: string },
 ) {
   if (!process.env.ANTHROPIC_API_KEY || !conversationId) {
     console.log(`[sentiment] Skipping: API key present=${!!process.env.ANTHROPIC_API_KEY}, conversationId=${conversationId}`);
@@ -132,6 +133,8 @@ export async function classifyLatestReply(
         durationMs,
         reason: "sentiment_classification",
         workspaceId: workspaceId ?? null,
+        workspaceName: meta?.workspaceName ?? null,
+        leadName: meta?.leadName ?? null,
       },
     });
     return;
@@ -159,6 +162,8 @@ export async function classifyLatestReply(
         reason: "sentiment_classification",
         note: "Model returned unexpected value",
         workspaceId: workspaceId ?? null,
+        workspaceName: meta?.workspaceName ?? null,
+        leadName: meta?.leadName ?? null,
       },
     });
     return;
@@ -201,6 +206,8 @@ export async function classifyLatestReply(
       durationMs,
       reason: "sentiment_classification",
       workspaceId: workspaceId ?? null,
+      workspaceName: meta?.workspaceName ?? null,
+      leadName: meta?.leadName ?? null,
     },
   });
 }
