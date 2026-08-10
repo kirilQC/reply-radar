@@ -11,6 +11,7 @@ export async function POST(request: Request) {
   const DEPRECATED = new Set(["claude-3-5-haiku-latest", "claude-3-5-haiku-20241022", "claude-3-haiku-20240307", "claude-3-5-sonnet-latest", "claude-3-5-sonnet-20241022"]);
   const requestedModel = typeof body.model === "string" && body.model ? body.model : process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
   const model = DEPRECATED.has(requestedModel) ? DEFAULT_MODEL : requestedModel;
+  console.log(`[ai-draft] mode=${mode} requestedModel=${requestedModel} resolvedModel=${model}`);
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -18,6 +19,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({ model, max_tokens: body.maxTokens ?? 500, temperature: body.temperature ?? 0, ...(body.system ? { system: body.system } : {}), messages: [{ role: "user", content: `${mode === "analyze" ? "Return ONLY valid JSON with three string fields: draft (a concise, professional reply the sender could use), reason (one plain-English sentence explaining why this latest inbound reply deserves attention), and sentiment (exactly positive, neutral, or negative). Do not use markdown. " : ""}${instruction}\n\nConversation:\n${thread.map((item: { direction?: string; body?: string }) => `${item.direction ?? "message"}: ${item.body ?? ""}`).join("\n")}` }] }),
     });
     const payload = await response.json().catch(() => ({}));
+    console.log(`[ai-draft] Anthropic status=${response.status} ok=${response.ok}`, response.ok ? "" : JSON.stringify(payload?.error ?? {}));
     const text = payload?.content?.find((item: { type?: string }) => item.type === "text")?.text ?? "";
     let analysis: { draft?: string; reason?: string; sentiment?: string } = {};
     if (mode === "analyze") {
