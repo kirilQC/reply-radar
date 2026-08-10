@@ -337,14 +337,21 @@ export function InboxPage() {
     try {
       const res = await fetch("/api/conversations/refresh", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: convId }) });
       const data = await res.json().catch(() => ({}));
-      if (data.ok) {
-        // Re-fetch inbox to get updated messages
-        const inboxRes = await fetch(`/api/inbox${queryString}`, { cache: "no-store" });
-        const inbox = await inboxRes.json().catch(() => ({}));
-        if (inbox.ok && Array.isArray(inbox.conversations)) {
-          setLeads(inbox.conversations);
-          showToast("Conversation refreshed");
+      if (data.ok && data.results?.[0]) {
+        const result = data.results[0];
+        const thread = Array.isArray(result.thread) ? result.thread : null;
+        const newMessages = result.newMessages ?? 0;
+        // Update only this conversation's messages in-place
+        if (thread) {
+          setLeads((prev) => prev.map((lead) =>
+            lead.id === convId
+              ? { ...lead, messages: thread, lastRefreshedAt: result.lastRefreshedAt ?? new Date().toISOString() }
+              : lead,
+          ));
         }
+        showToast(newMessages > 0 ? `${newMessages} new message${newMessages === 1 ? "" : "s"} found` : "Conversation up to date");
+        // Re-analyze sentiment if new messages were found
+        if (newMessages > 0) void generateAiReview();
       }
     } catch { /* ignore */ }
     setRefreshing(false);
@@ -1709,22 +1716,6 @@ export function InboxPage() {
                       </div>
                     </div>
                   )}
-                  <div className="thread-refresh-bar">
-                    <small className="last-refreshed">
-                      {current.lastRefreshedAt
-                        ? `Last synced ${formatDashboardDate(current.lastRefreshedAt, appearance.timeZone)}`
-                        : "Not yet synced"}
-                    </small>
-                    <button
-                      type="button"
-                      className="refresh-btn"
-                      disabled={refreshing}
-                      onClick={() => void refreshConversation(current.id)}
-                      title="Refresh conversation from HeyReach"
-                    >
-                      <svg className={refreshing ? "spin" : ""} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
-                    </button>
-                  </div>
                   <div className="thread">
                     {current.messages.length ? (
                       current.messages.map((message) => (
@@ -1779,6 +1770,22 @@ export function InboxPage() {
                         Send reply <span>⌘↵</span>
                       </button>
                     </div>
+                  </div>
+                  <div className="thread-refresh-bar">
+                    <small className="last-refreshed">
+                      {current.lastRefreshedAt
+                        ? `Last synced ${new Date(current.lastRefreshedAt).toLocaleDateString("en-US", { month: "numeric", day: "numeric", timeZone: appearance.timeZone })} @ ${new Date(current.lastRefreshedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: appearance.timeZone })}`
+                        : "Not yet synced"}
+                    </small>
+                    <button
+                      type="button"
+                      className="refresh-btn"
+                      disabled={refreshing}
+                      onClick={() => void refreshConversation(current.id)}
+                      title="Refresh conversation from HeyReach"
+                    >
+                      <svg className={refreshing ? "spin" : ""} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+                    </button>
                   </div>
                 </aside>
               </div>

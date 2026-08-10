@@ -101,7 +101,7 @@ async function refreshConversation(
   url: string,
   key: string,
   conversationId: string,
-): Promise<{ messagesUpdated: number; error?: string }> {
+): Promise<{ messagesUpdated: number; newMessages?: number; thread?: { id: string; body: string; direction: string; sentAt: string; authorName: string }[]; lastRefreshedAt?: string; error?: string }> {
   // Load conversation + lead + workspace
   const conversations = (await db(url, key,
     `rr_conversations?select=id,workspace_id,lead_id,heyreach_conversation_id,account_id&id=eq.${encodeURIComponent(conversationId)}&limit=1`,
@@ -171,25 +171,27 @@ async function refreshConversation(
     ]),
   );
 
-  // Build upsert records
-  const records = messages.map((m) => {
-    const fp = fingerprint({ direction: m.direction, sent_at: m.sentAt, body: m.body });
-    return {
+  // Only insert genuinely NEW messages — never overwrite existing raw_data (which contains sentiment)
+  const newRecords = messages
+    .filter((m) => {
+      const fp = fingerprint({ direction: m.direction, sent_at: m.sentAt, body: m.body });
+      return !existingByFP.has(fp);
+    })
+    .map((m) => ({
       conversation_id: conversationId,
-      heyreach_message_id: existingByFP.get(fp) || m.externalId,
+      heyreach_message_id: m.externalId,
       direction: m.direction,
       body: m.body,
       sent_at: m.sentAt,
       raw_data: { reply_radar: { source: "refresh", refreshed_at: now } },
-    };
-  });
+    }));
 
-  if (records.length) {
-    for (let i = 0; i < records.length; i += 200) {
+  if (newRecords.length) {
+    for (let i = 0; i < newRecords.length; i += 200) {
       await db(url, key, "rr_messages?on_conflict=conversation_id,heyreach_message_id", {
         method: "POST",
         headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify(records.slice(i, i + 200)),
+        body: JSON.stringify(newRecords.slice(i, i + 200)),
       });
     }
   }
@@ -211,7 +213,37 @@ async function refreshConversation(
     );
   }
 
-  return { messagesUpdated: records.length };
+  // Return the full updated message list so the frontend can update in-place
+  const updatedMessages = (await db(url, key,
+    `rr_messages?select=id,body,direction,sent_at,raw_data&conversation_id=eq.${encodeURIComponent(conversationId)}&order=sent_at.asc`,
+  )) as Row[];
+
+  // Determine sender name from existing messages
+  const senderName = (() => {
+    for (const m of [...updatedMessages].reverse()) {
+      const raw = object(m.raw_data);
+      const radar = object(raw.reply_radar);
+      const sender = object(radar.sender);
+      if (sender.name) return text(sender.name);
+    }
+    return "Unknown sender";
+  })();
+
+  // Get lead name
+  const leadRows = (await db(url, key,
+    `rr_leads?select=name&id=eq.${encodeURIComponent(text(conv.lead_id))}&limit=1`,
+  )) as Row[];
+  const leadName = text(leadRows[0]?.name) || "Unknown lead";
+
+  const thread = updatedMessages.map((m) => ({
+    id: text(m.id),
+    body: text(m.body),
+    direction: text(m.direction),
+    sentAt: text(m.sent_at),
+    authorName: text(m.direction) === "outbound" ? senderName : leadName,
+  }));
+
+  return { messagesUpdated: newRecords.length, newMessages: newRecords.length, thread, lastRefreshedAt: now };
 }
 
 /** POST — refresh one or more conversations. */
@@ -229,7 +261,7 @@ export async function POST(request: Request) {
 
   if (!ids.length) return NextResponse.json({ ok: false, error: "conversationId or conversationIds required" }, { status: 400 });
 
-  const results: { id: string; messagesUpdated: number; error?: string }[] = [];
+  const results: { id: string; messagesUpdated: number; newMessages?: number; thread?: unknown[]; lastRefreshedAt?: string; error?: string }[] = [];
   for (const id of ids) {
     try {
       const result = await refreshConversation(url, key, id);

@@ -184,7 +184,7 @@ html:not(.hydrated) body{visibility:hidden}
 .crumb-link{color:var(--muted);text-decoration:none;font-weight:400}.crumb-link:hover{color:var(--accent);text-decoration:underline}
 
 /* Conversation refresh bar */
-.thread-refresh-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 0;margin:0 0 2px;border-bottom:1px solid var(--border-soft)}.last-refreshed{color:var(--muted-2);font-size:8px;letter-spacing:.03em}.refresh-btn{display:grid;place-items:center;width:26px;height:26px;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;border:1px solid transparent}.refresh-btn:hover{background:var(--panel-2);color:var(--text);border-color:var(--border)}.refresh-btn:disabled{opacity:.4;cursor:not-allowed}.refresh-btn svg.spin{animation:spin-refresh .8s linear infinite}@keyframes spin-refresh{to{transform:rotate(360deg)}}
+.thread-refresh-bar{display:flex;align-items:center;justify-content:space-between;padding:8px 0 4px;margin:0;border-top:1px solid var(--border-soft)}.last-refreshed{color:var(--muted-2);font-size:8px;letter-spacing:.03em}.refresh-btn{display:grid;place-items:center;width:26px;height:26px;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;border:1px solid transparent}.refresh-btn:hover{background:var(--panel-2);color:var(--text);border-color:var(--border)}.refresh-btn:disabled{opacity:.4;cursor:not-allowed}.refresh-btn svg.spin{animation:spin-refresh .8s linear infinite}@keyframes spin-refresh{to{transform:rotate(360deg)}}
 
 /* Bulk refresh overlay */
 .bulk-refresh-overlay{position:fixed;inset:0;z-index:100;background:rgba(20,22,30,.25);pointer-events:none;animation:fade-in-overlay .3s ease}@keyframes fade-in-overlay{from{opacity:0}to{opacity:1}}
