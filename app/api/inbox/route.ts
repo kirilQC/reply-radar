@@ -247,6 +247,9 @@ export async function GET(request: Request) {
       const latestInboundRaw = latestInboundRow?.raw_data && typeof latestInboundRow.raw_data === "object" ? latestInboundRow.raw_data as Row : {};
       const sentimentData = nested(latestInboundRaw, "reply_radar");
       const sentiment = ["positive", "neutral", "negative"].includes(String(sentimentData.sentiment).toLowerCase()) ? String(sentimentData.sentiment).toLowerCase() : null;
+      const cachedDraft = String(sentimentData.cached_draft ?? "");
+      const cachedReason = String(sentimentData.cached_reason ?? "");
+      const analyzedAt = String(sentimentData.analyzed_at ?? "");
       const name = normalizePersonName(lead.name);
       const { followUpUrgency, followUpReason } = computeFollowUp(
         thread.map((m) => ({ direction: String(m.direction), sentAt: m.sentAt, body: String(m.body) })),
@@ -294,6 +297,9 @@ export async function GET(request: Request) {
           .length,
         avatar: "#3c365e",
         sentiment,
+        cachedDraft: cachedDraft || null,
+        cachedReason: cachedReason || null,
+        analyzedAt: analyzedAt || null,
         followUpUrgency,
         followUpReason,
         lastRefreshedAt: conversation.last_refreshed_at ?? null,

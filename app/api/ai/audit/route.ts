@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 type Row = Record<string, unknown>;
 const text = (v: unknown) => (typeof v === "string" ? v : "");
+const object = (v: unknown): Row => v && typeof v === "object" && !Array.isArray(v) ? v as Row : {};
 
 export async function GET(request: Request) {
   const url = process.env.SUPABASE_URL;
@@ -10,11 +11,10 @@ export async function GET(request: Request) {
 
   const params = new URL(request.url).searchParams;
   const limit = Math.min(Number(params.get("limit") || 200), 500);
-
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
 
   try {
-    // Purge events older than 48 hours
+    // Purge events older than 48 hours (fire-and-forget)
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     void fetch(
       `${url}/rest/v1/rr_audit_log?actor_type=eq.anthropic&created_at=lt.${cutoff}`,
@@ -28,7 +28,6 @@ export async function GET(request: Request) {
     ]);
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      console.error(`[ai-audit] Supabase query failed: ${response.status} ${body}`);
       throw new Error(`Supabase ${response.status}: ${body.slice(0, 200)}`);
     }
     const rows = (await response.json()) as Row[];
@@ -36,45 +35,37 @@ export async function GET(request: Request) {
     const wsLogoByName = new Map(workspaces.map((ws) => [text(ws.name).toLowerCase(), text(ws.logo_url)]));
     const wsLogoById = new Map(workspaces.map((ws) => [text(ws.id), text(ws.logo_url)]));
 
-    // Collect conversation IDs to resolve lead photos
-    const conversationIds = [...new Set(rows.map((row) => text((row.details as Row)?.workspaceId ? row.actor_id : row.actor_id)).filter(Boolean))];
-    // actor_id = entityId = conversationId for these events
-    let leadPhotoByConvId = new Map<string, string>();
+    // Resolve lead name + photo from conversation → lead
+    // actor_id = conversationId for these events
+    const conversationIds = [...new Set(rows.map((r) => text(r.actor_id)).filter(Boolean))];
+    const leadNameByConvId = new Map<string, string>();
+    const leadPhotoByConvId = new Map<string, string>();
+
     if (conversationIds.length) {
-      const convResponse = await fetch(
-        `${url}/rest/v1/rr_conversations?select=id,lead_id&id=in.(${conversationIds.slice(0, 100).join(",")})`,
+      const convRes = await fetch(
+        `${url}/rest/v1/rr_conversations?select=id,lead_id&id=in.(${conversationIds.slice(0, 200).join(",")})`,
         { headers, cache: "no-store" },
       ).catch(() => null);
-      if (convResponse?.ok) {
-        const convRows = (await convResponse.json()) as Row[];
+      if (convRes?.ok) {
+        const convRows = (await convRes.json()) as Row[];
         const leadIds = [...new Set(convRows.map((c) => text(c.lead_id)).filter(Boolean))];
         if (leadIds.length) {
-          const leadResponse = await fetch(
-            `${url}/rest/v1/rr_leads?select=id,photo_url,first_name,last_name&id=in.(${leadIds.slice(0, 100).join(",")})`,
+          const leadRes = await fetch(
+            `${url}/rest/v1/rr_leads?select=id,name,raw_data&id=in.(${leadIds.slice(0, 200).join(",")})`,
             { headers, cache: "no-store" },
           ).catch(() => null);
-          if (leadResponse?.ok) {
-            const leadRows = (await leadResponse.json()) as Row[];
-            const leadPhotoById = new Map(leadRows.map((l) => [text(l.id), text(l.photo_url)]));
-            const leadNameById = new Map(leadRows.map((l) => [text(l.id), [text(l.first_name), text(l.last_name)].filter(Boolean).join(" ")]));
+          if (leadRes?.ok) {
+            const leadRows = (await leadRes.json()) as Row[];
+            const leadById = new Map(leadRows.map((l) => [text(l.id), l]));
             for (const conv of convRows) {
-              const lid = text(conv.lead_id);
-              leadPhotoByConvId.set(text(conv.id), leadPhotoById.get(lid) || "");
-              // Also store lead name fallback
-              if (!leadNameById.get(lid)) continue;
-            }
-            // Build a name fallback map too
-            const leadNameByConvId = new Map(convRows.map((c) => [text(c.id), leadNameById.get(text(c.lead_id)) || ""]));
-            // We'll use this below
-            leadPhotoByConvId = new Map(convRows.map((c) => [text(c.id), leadPhotoById.get(text(c.lead_id)) || ""]));
-            // Enrich events with lead names where details.leadName is missing
-            for (const row of rows) {
-              const details = row.details && typeof row.details === "object" ? row.details as Row : {};
-              if (!details.leadName) {
-                const convId = text(row.actor_id);
-                const name = leadNameByConvId.get(convId);
-                if (name) details.leadName = name;
-              }
+              const lead = leadById.get(text(conv.lead_id));
+              if (!lead) continue;
+              const cid = text(conv.id);
+              leadNameByConvId.set(cid, text(lead.name));
+              // Photo is in raw_data enrichment
+              const enrichment = object(object(lead.raw_data).enrichment);
+              const photo = text(enrichment.profilePhotoSource) || text(enrichment.profilePhotoUrl) || "";
+              if (photo) leadPhotoByConvId.set(cid, photo);
             }
           }
         }
@@ -82,10 +73,12 @@ export async function GET(request: Request) {
     }
 
     const events = rows.map((row) => {
-      const details = row.details && typeof row.details === "object" ? row.details as Row : {};
+      const details = object(row.details);
       const wsName = text(details.workspaceName);
       const wsId = text(details.workspaceId) || text(row.workspace_id);
       const convId = text(row.actor_id);
+      // Lead name: prefer details.leadName (set by frontend), fall back to DB lookup
+      const leadName = text(details.leadName) || leadNameByConvId.get(convId) || "";
       return {
         id: row.id,
         timestamp: row.created_at,
@@ -97,17 +90,16 @@ export async function GET(request: Request) {
         durationMs: details.durationMs ?? null,
         workspaceName: wsName || null,
         workspaceLogoUrl: wsLogoByName.get(wsName.toLowerCase()) || wsLogoById.get(wsId) || null,
-        leadName: details.leadName ?? null,
+        leadName: leadName || null,
         leadPhotoUrl: leadPhotoByConvId.get(convId) || null,
       };
     });
 
-    // Compute summary stats
     const totalCalls = events.length;
-    const successful = events.filter((event) => event.status === "success").length;
-    const failed = events.filter((event) => event.status === "error" || event.status === "failed").length;
-    const totalInputTokens = events.reduce((sum, event) => sum + Number(event.inputTokens || 0), 0);
-    const totalOutputTokens = events.reduce((sum, event) => sum + Number(event.outputTokens || 0), 0);
+    const successful = events.filter((e) => e.status === "success").length;
+    const failed = events.filter((e) => e.status === "error" || e.status === "failed").length;
+    const totalInputTokens = events.reduce((s, e) => s + Number(e.inputTokens || 0), 0);
+    const totalOutputTokens = events.reduce((s, e) => s + Number(e.outputTokens || 0), 0);
 
     return NextResponse.json({
       ok: true,

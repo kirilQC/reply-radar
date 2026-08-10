@@ -39,6 +39,9 @@ type Lead = {
   industry?: unknown;
   enrichedLocation?: unknown;
   sentiment?: string | null;
+  cachedDraft?: string | null;
+  cachedReason?: string | null;
+  analyzedAt?: string | null;
   followUpUrgency?: number;
   followUpReason?: string | null;
   lastMessageAt?: string | null;
@@ -309,7 +312,7 @@ export function InboxPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "", id: "" });
+  const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "", id: "", icpPrompt: "", followUpPrompt: "" });
   const [workspaceDirectory, setWorkspaceDirectory] = useState<
     Array<{
       name: string;
@@ -349,8 +352,8 @@ export function InboxPage() {
           ));
         }
         showToast(newMessages > 0 ? `${newMessages} new message${newMessages === 1 ? "" : "s"} found` : "Conversation up to date");
-        // Re-analyze sentiment if new messages were found
-        if (newMessages > 0) void generateAiReview();
+        // Re-analyze if new messages were found (force regeneration)
+        if (newMessages > 0) void generateAiReview(workspaceAi, true);
       }
     } catch { /* ignore */ }
     setRefreshing(false);
@@ -902,8 +905,19 @@ export function InboxPage() {
     });
   }, [current.id]);
   const selectedWorkspaceSlug = current.clientSlug || clientParam || "";
-  const generateAiReview = async (ai = workspaceAi) => {
+  const generateAiReview = async (ai = workspaceAi, forceRegenerate = false) => {
     if (!current.messages.length || current.id === "empty") return;
+    // Check for cached data: use it if the latest inbound message hasn't changed since analysis
+    if (!forceRegenerate && current.cachedDraft && current.analyzedAt) {
+      const latestInbound = [...current.messages].reverse().find((m) => m.direction !== "outbound");
+      const latestInboundTime = latestInbound ? new Date(latestInbound.sentAt).getTime() : 0;
+      const analyzedTime = new Date(current.analyzedAt).getTime();
+      if (analyzedTime > latestInboundTime) {
+        setAiDraft(current.cachedDraft);
+        setAiReason(current.cachedReason || "This lead sent a new reply that is ready for review.");
+        return;
+      }
+    }
     setAiLoading(true);
     const response = await fetch("/api/ai/draft", {
       method: "POST",
@@ -912,15 +926,16 @@ export function InboxPage() {
     }).catch(() => null);
     const payload = await response?.json().catch(() => ({}));
     if (response?.ok) {
-      setAiDraft(String(payload.draft ?? ""));
-      setAiReason(String(payload.reason ?? "This lead sent a new reply that is ready for review."));
-      // Update sentiment live on the current lead
+      const draft = String(payload.draft ?? "");
+      const reason = String(payload.reason ?? "This lead sent a new reply that is ready for review.");
+      setAiDraft(draft);
+      setAiReason(reason);
+      // Update sentiment + cached data live on the current lead
       const newSentiment = String(payload.sentiment ?? "").toLowerCase();
-      if (["positive", "neutral", "negative"].includes(newSentiment)) {
-        setLeads((prev) => prev.map((lead) =>
-          lead.id === current.id ? { ...lead, sentiment: newSentiment } : lead,
-        ));
-      }
+      const now = new Date().toISOString();
+      setLeads((prev) => prev.map((lead) =>
+        lead.id === current.id ? { ...lead, sentiment: ["positive", "neutral", "negative"].includes(newSentiment) ? newSentiment : lead.sentiment, cachedDraft: draft, cachedReason: reason, analyzedAt: now } : lead,
+      ));
     } else {
       setAiDraft("");
       setAiReason("AI review is temporarily unavailable. The new reply is still ready for manual review.");
@@ -931,7 +946,7 @@ export function InboxPage() {
     setAiDraft("");
     setAiReason("");
     setTemplatesOpen(false);
-    if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "", id: "" }); return; }
+    if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "", id: "", icpPrompt: "", followUpPrompt: "" }); return; }
     let cancelled = false;
     fetch(`/api/client-resources?workspace=${encodeURIComponent(selectedWorkspaceSlug)}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
@@ -939,9 +954,19 @@ export function InboxPage() {
         if (cancelled || !payload?.workspace) return;
         setMessagingDocUrl(String(payload.workspace.messagingDocUrl ?? ""));
         setQuickTemplates(Array.isArray(payload.workspace.quickTemplates) ? payload.workspace.quickTemplates : []);
-        const ai = { model: String(payload.workspace.model ?? ""), brief: String(payload.workspace.brief ?? ""), systemPrompt: String(payload.workspace.systemPrompt ?? ""), id: String(payload.workspace.id ?? "") };
+        const ai = { model: String(payload.workspace.model ?? ""), brief: String(payload.workspace.brief ?? ""), systemPrompt: String(payload.workspace.systemPrompt ?? ""), id: String(payload.workspace.id ?? ""), icpPrompt: String(payload.workspace.icpPrompt ?? ""), followUpPrompt: String(payload.workspace.followUpPrompt ?? "") };
         setWorkspaceAi(ai);
         void generateAiReview(ai);
+        // ICP score (once per lead, cached permanently)
+        if (current.leadId) {
+          void fetch("/api/ai/icp-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId: current.leadId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, icpPrompt: ai.icpPrompt }) })
+            .then((r) => r.json()).then((d) => { if (d.ok && !cancelled) setLeads((prev) => prev.map((l) => l.id === current.id ? { ...l, leadScore: d.icpScore } : l)); }).catch(() => null);
+        }
+        // Follow-up score (dynamic, every time)
+        if (current.messages.length) {
+          void fetch("/api/ai/follow-up-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: current.id, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, followUpPrompt: ai.followUpPrompt, sentiment: current.sentiment, thread: current.messages }) })
+            .then((r) => r.json()).then((d) => { if (d.ok && !cancelled) setLeads((prev) => prev.map((l) => l.id === current.id ? { ...l, followUpUrgency: d.urgency, followUpReason: d.reason } : l)); }).catch(() => null);
+        }
       }).catch(() => null);
     return () => { cancelled = true; };
     // The selected conversation is the intentional refresh boundary.
@@ -1587,7 +1612,7 @@ export function InboxPage() {
                         <strong>{lead.replies}</strong>
                       </div>
                       <div className="inbox-meta-cell lead-score-cell">
-                        <strong>0</strong>
+                        <strong>{lead.leadScore ?? 0}</strong>
                       </div>
                       {filter === "follow-ups" && (
                         <div className="score-cell follow-up-score-cell">
@@ -1756,7 +1781,7 @@ export function InboxPage() {
                     <div className="composer-top">
                       <span>AI DRAFT</span>
                       <div className="composer-tools">
-                        <button type="button" onClick={() => void generateAiReview()} disabled={aiLoading}>{aiLoading ? "Generating…" : "Regenerate ↻"}</button>
+                        <button type="button" onClick={() => void generateAiReview(workspaceAi, true)} disabled={aiLoading}>{aiLoading ? "Generating…" : "Regenerate ↻"}</button>
                       </div>
                     </div>
                     <textarea
