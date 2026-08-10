@@ -276,6 +276,7 @@ export async function GET(request: Request) {
         sentiment,
         followUpUrgency,
         followUpReason,
+        lastRefreshedAt: conversation.last_refreshed_at ?? null,
         messages: thread,
       };
     });

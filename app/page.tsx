@@ -43,6 +43,7 @@ type Lead = {
   followUpReason?: string | null;
   lastMessageAt?: string | null;
   latestReplyAt?: string | null;
+  lastRefreshedAt?: string | null;
   messages: Array<{
     id: string;
     body: string;
@@ -305,6 +306,10 @@ export function InboxPage() {
   const [aiDraft, setAiDraft] = useState("");
   const [aiReason, setAiReason] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [bulkRefreshing, setBulkRefreshing] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "", id: "" });
   const [workspaceDirectory, setWorkspaceDirectory] = useState<
     Array<{
@@ -322,6 +327,48 @@ export function InboxPage() {
   const paneGridRef = useRef<HTMLDivElement>(null);
   const paneSplitRef = useRef(defaultLayout.paneSplit);
   const threadEndRef = useRef<HTMLDivElement>(null);
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMessage(""), 4000);
+  };
+  const refreshConversation = async (convId: string) => {
+    setRefreshing(true);
+    try {
+      const res = await fetch("/api/conversations/refresh", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: convId }) });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) {
+        // Re-fetch inbox to get updated messages
+        const inboxRes = await fetch(`/api/inbox${queryString}`, { cache: "no-store" });
+        const inbox = await inboxRes.json().catch(() => ({}));
+        if (inbox.ok && Array.isArray(inbox.conversations)) {
+          setLeads(inbox.conversations);
+          showToast("Conversation refreshed");
+        }
+      }
+    } catch { /* ignore */ }
+    setRefreshing(false);
+  };
+  const bulkRefreshConversations = async (conversationIds: string[]) => {
+    if (!conversationIds.length || bulkRefreshing) return;
+    setBulkRefreshing(true);
+    try {
+      const batches: string[][] = [];
+      for (let i = 0; i < conversationIds.length; i += 10) batches.push(conversationIds.slice(i, i + 10));
+      let totalRefreshed = 0;
+      for (const batch of batches) {
+        const res = await fetch("/api/conversations/refresh", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationIds: batch }) });
+        const data = await res.json().catch(() => ({}));
+        if (data.ok) totalRefreshed += data.refreshed ?? 0;
+      }
+      // Re-fetch inbox
+      const inboxRes = await fetch(`/api/inbox${queryString}`, { cache: "no-store" });
+      const inbox = await inboxRes.json().catch(() => ({}));
+      if (inbox.ok && Array.isArray(inbox.conversations)) setLeads(inbox.conversations);
+      if (totalRefreshed > 0) showToast(`${totalRefreshed} conversation${totalRefreshed === 1 ? "" : "s"} refreshed`);
+    } catch { /* ignore */ }
+    setBulkRefreshing(false);
+  };
   useEffect(() => {
     const scale = appearance.zoom / 100;
     const root = document.documentElement;
@@ -595,6 +642,16 @@ export function InboxPage() {
       cancelled = true;
     };
   }, [trackedWorkspaceSlugs.join(",")]);
+  // Auto-refresh visible conversations when inbox loads or view switches
+  const lastRefreshTrigger = useRef("");
+  useEffect(() => {
+    const triggerKey = `${activeNav}:${trackedWorkspaceSlugs.join(",")}`;
+    if (triggerKey === lastRefreshTrigger.current || !leads.length || inboxLoading) return;
+    lastRefreshTrigger.current = triggerKey;
+    const visibleIds = leads.slice(0, visibleLeadCount).map((l) => l.id);
+    if (visibleIds.length) void bulkRefreshConversations(visibleIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeNav, inboxLoading, leads.length > 0]);
   const savePreferences = (
     nextLayout = layoutPrefs,
     nextAppearance = appearance,
@@ -1615,16 +1672,11 @@ export function InboxPage() {
                       <span className={`score-pill ${current.tier}`}>
                         {current.score} · {current.tier}
                       </span>
-                      <span className="tag-outline">{current.client}</span>
-                      <span className="tag-outline">{current.senderName}</span>
                       {current.campaignName && (
                         <span className="tag-outline">
                           {current.campaignName}
                         </span>
                       )}
-                      <span className="tag-outline">
-                        {current.replies} replies
-                      </span>
                       {current.sentiment && <span className={`sentiment-badge sentiment-${current.sentiment}`}>{current.sentiment}</span>}
                     </div>
                     {Boolean(current.headline || current.industry) && (
@@ -1657,6 +1709,22 @@ export function InboxPage() {
                       </div>
                     </div>
                   )}
+                  <div className="thread-refresh-bar">
+                    <small className="last-refreshed">
+                      {current.lastRefreshedAt
+                        ? `Last synced ${formatDashboardDate(current.lastRefreshedAt, appearance.timeZone)}`
+                        : "Not yet synced"}
+                    </small>
+                    <button
+                      type="button"
+                      className="refresh-btn"
+                      disabled={refreshing}
+                      onClick={() => void refreshConversation(current.id)}
+                      title="Refresh conversation from HeyReach"
+                    >
+                      <svg className={refreshing ? "spin" : ""} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+                    </button>
+                  </div>
                   <div className="thread">
                     {current.messages.length ? (
                       current.messages.map((message) => (
@@ -1718,6 +1786,8 @@ export function InboxPage() {
           </div>
         </div>
       </section>
+      {bulkRefreshing && <div className="bulk-refresh-overlay" />}
+      {toastMessage && <div className="refresh-toast">{toastMessage}</div>}
     </main>
   );
 }
