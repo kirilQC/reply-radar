@@ -151,7 +151,9 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     const matchingAttribution = priorAttributions.find((item) =>
       text(item.workspaceId) === workspace.id &&
       text(item.conversationId) === conversationExternalId &&
-      (campaignId ? text(item.campaignId) === campaignId : text(item.campaignName) === campaignName) &&
+      (campaignId
+        ? text(item.campaignId) === campaignId || (!text(item.campaignId) && !text(item.campaignName))
+        : text(item.campaignName) === campaignName || (!text(item.campaignId) && !text(item.campaignName))) &&
       text(item.senderId) === text(history.sender.id),
     );
     const conversationAlreadyAttributed = priorAttributions.some((item) => text(item.workspaceId) === workspace.id && text(item.conversationId) === conversationExternalId);
@@ -161,6 +163,14 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
         ? `${conversationExternalId}::${campaignId || campaignName || "no-campaign"}::${history.sender.id || "unknown-sender"}`
         : conversationExternalId;
     const attribution = { workspaceId: workspace.id, workspaceName: text(workspace.name) || text(workspace.slug) || workspace.id, conversationId: conversationExternalId, storageConversationId, campaignId: campaignId || null, campaignName: campaignName || null, senderId: history.sender.id || null, senderName: history.sender.name, lastSeenAt: eventTimestamp };
+    const priorAttributionsWithoutPlaceholder = priorAttributions.filter((item) => !(
+      text(item.workspaceId) === workspace.id &&
+      text(item.conversationId) === conversationExternalId &&
+      text(item.senderId) === text(history.sender.id) &&
+      !text(item.campaignId) &&
+      !text(item.campaignName) &&
+      (campaignId || campaignName)
+    ));
     const stableMetadata = { ...existingMetadata };
     delete stableMetadata.sender;
     delete stableMetadata.campaign;
@@ -172,7 +182,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     const currentPositionCompany = object(positionGroups.find((group) => !text(object(group.date).end))?.company);
     const resolvedCompany = text(lead.company_name) || text(aiArkCompany.name) || text(currentPositionCompany.name) || text(existingLead?.company);
     const suppliedName = text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ");
-    const leadRow = await saveLead(config, text(existingLead?.id), { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: profileUrl || null, name: normalizePersonName(suppliedName), role: text(lead.position) || text(existingLead?.role), company: resolvedCompany, raw_data: { ...stableRaw, ...lead, full_name: normalizePersonName(suppliedName), company_name: resolvedCompany || null, profile_url: profileUrl || text(lead.profile_url) || null, reply_radar: { ...stableMetadata, history_fetched_at: history.fetchedAt, attributions: mergeLeadAttributions(existingMetadata.attributions, attribution), ...(aiArk ? { ai_ark: aiArk } : {}) } } });
+    const leadRow = await saveLead(config, text(existingLead?.id), { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: profileUrl || null, name: normalizePersonName(suppliedName), role: text(lead.position) || text(existingLead?.role), company: resolvedCompany, raw_data: { ...stableRaw, ...lead, full_name: normalizePersonName(suppliedName), company_name: resolvedCompany || null, profile_url: profileUrl || text(lead.profile_url) || null, reply_radar: { ...stableMetadata, history_fetched_at: history.fetchedAt, attributions: mergeLeadAttributions(priorAttributionsWithoutPlaceholder, attribution), ...(aiArk ? { ai_ark: aiArk } : {}) } } });
     const leadId = String(leadRow?.id ?? "");
     if (!leadId) throw new Error("Lead upsert returned no id.");
     await syncIdentityRollup(config, profileUrl);

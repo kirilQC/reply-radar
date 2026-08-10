@@ -11,32 +11,20 @@ export async function POST(request: Request) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  const workspacesResponse = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext&slug=eq.bluevia&limit=1`, { headers, cache: "no-store" });
-  const eventsResponse = await fetch(`${url}/rest/v1/rr_webhook_events?select=id,raw&order=received_at.desc&limit=500`, { headers, cache: "no-store" });
+  const [workspacesResponse, eventsResponse, duplicateResponse] = await Promise.all([
+    fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext&slug=eq.bluevia&limit=1`, { headers, cache: "no-store" }),
+    fetch(`${url}/rest/v1/rr_webhook_events?select=id,raw&order=received_at.desc&limit=500`, { headers, cache: "no-store" }),
+    fetch(`${url}/rest/v1/rr_conversations?id=eq.e1bff623-c79b-4424-8348-d4f19f14c5ed&select=id,lead_id`, { headers, cache: "no-store" }),
+  ]);
   const workspaces = await workspacesResponse.json().catch(() => []);
   const events = await eventsResponse.json().catch(() => []);
+  const duplicates = await duplicateResponse.json().catch(() => []);
   const workspace = Array.isArray(workspaces) ? workspaces[0] : null;
-  const event = (Array.isArray(events) ? events : []).find((row) => {
-    const lead = object(object(row).raw && object(object(row).raw).lead);
-    return String(lead.full_name ?? lead.fullName ?? "").trim() === "Natalie Davis";
-  });
-  if (!workspace || !event) return NextResponse.json({ ok: false, error: "The exact Bluevia/Natalie webhook could not be found." }, { status: 404 });
-  const eventLead = object(object(event).raw && object(object(event).raw).lead);
-  const eventSender = object(object(event).raw && object(object(event).raw).sender);
-  const campaignResponse = await fetch("https://api.heyreach.io/api/public/campaign/GetCampaignsForLead", {
-    method: "POST",
-    headers: { "X-API-KEY": String(object(workspace).heyreach_api_key_ciphertext ?? ""), accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ profileUrl: eventLead.profile_url ?? eventLead.profileUrl, offset: 0, limit: 100 }),
-    cache: "no-store",
-  });
-  const campaignLookup = await campaignResponse.json().catch(() => null);
-  const allCampaignsResponse = await fetch("https://api.heyreach.io/api/public/campaign/GetAll", {
-    method: "POST",
-    headers: { "X-API-KEY": String(object(workspace).heyreach_api_key_ciphertext ?? ""), accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ offset: 0, limit: 100, accountIds: [Number(eventSender.id)] }),
-    cache: "no-store",
-  });
-  const allCampaigns = await allCampaignsResponse.json().catch(() => null);
+  const event = (Array.isArray(events) ? events : []).find((row) => String(object(object(row).raw).lead && object(object(object(row).raw).lead).full_name).trim() === "Natalie Davis");
+  const duplicate = Array.isArray(duplicates) ? duplicates[0] : null;
+  if (!workspace || !event || object(duplicate).lead_id !== "8765a482-e843-4020-ad67-816e607a178b") return NextResponse.json({ ok: false, error: "Repair targets did not match exactly." }, { status: 409 });
   const result = await ingestHeyReachWebhook({ url, key }, workspace, object(event).raw as Row);
-  return NextResponse.json({ ok: true, eventId: object(event).id, campaignLookupStatus: campaignResponse.status, campaignLookup, allCampaignsStatus: allCampaignsResponse.status, allCampaigns, result });
+  const deletion = await fetch(`${url}/rest/v1/rr_conversations?id=eq.e1bff623-c79b-4424-8348-d4f19f14c5ed`, { method: "DELETE", headers: { ...headers, Prefer: "return=representation" } });
+  if (!deletion.ok) return NextResponse.json({ ok: false, error: "Duplicate conversation cleanup failed." }, { status: 502 });
+  return NextResponse.json({ ok: true, result, removedDuplicate: true });
 }
