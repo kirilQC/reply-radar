@@ -32,7 +32,7 @@ export async function GET(request: Request) {
 
     // Anthropic API status
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    const anthropicModel = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-latest";
+    const anthropicModel = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001";
     const maskedKey = anthropicKey ? `sk-ant-...${anthropicKey.slice(-4)}` : null;
 
     // Get workspace-specific AI context if requested

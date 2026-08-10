@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   const thread = Array.isArray(body.thread) ? body.thread : [];
   const instruction = typeof body.instruction === "string" ? body.instruction : "";
   const mode = body.mode === "analyze" ? "analyze" : "draft";
-  const FALLBACK_MODEL = "claude-haiku-4-5-latest";
+  const FALLBACK_MODEL = "claude-haiku-4-5-20251001";
   const requestedModel = typeof body.model === "string" && body.model ? body.model : process.env.ANTHROPIC_MODEL || FALLBACK_MODEL;
   let model = requestedModel;
   const requestBody = (m: string) => JSON.stringify({ model: m, max_tokens: body.maxTokens ?? 500, temperature: body.temperature ?? 0, ...(body.system ? { system: body.system } : {}), messages: [{ role: "user", content: `${mode === "analyze" ? "Return ONLY valid JSON with three string fields: draft (a concise, professional reply the sender could use), reason (one plain-English sentence explaining why this latest inbound reply deserves attention), and sentiment (exactly positive, neutral, or negative). Do not use markdown. " : ""}${instruction}\n\nConversation:\n${thread.map((item: { direction?: string; body?: string }) => `${item.direction ?? "message"}: ${item.body ?? ""}`).join("\n")}` }] });

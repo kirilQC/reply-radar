@@ -492,7 +492,7 @@ export default function AdminPage() {
                         <option>claude-opus-4-1-20250805</option>
                         <option>claude-opus-4-6</option>
                         <option>claude-sonnet-4-6</option>
-                        <option>claude-haiku-4-5-latest</option>
+                        <option>claude-haiku-4-5-20251001</option>
                       </select>
                     </label>
                     <label className="field-label">

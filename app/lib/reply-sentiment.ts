@@ -96,7 +96,7 @@ export async function classifyLatestReply(
   if (["positive", "neutral", "negative"].includes(String(latestRadar.sentiment).toLowerCase())) { console.log(`[sentiment] Already classified as ${latestRadar.sentiment} for ${conversationId}`); return; }
 
   const systemPrompt = await getConfiguredPrompt(config, workspaceId);
-  const DEFAULT_MODEL = "claude-haiku-4-5-latest";
+  const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
   const DEPRECATED = new Set(["claude-3-5-haiku-latest", "claude-3-5-haiku-20241022", "claude-3-haiku-20240307"]);
   const configuredModel = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
   const model = DEPRECATED.has(configuredModel) ? DEFAULT_MODEL : configuredModel;
