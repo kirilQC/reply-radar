@@ -16,6 +16,7 @@ type HistoryResult = {
   sender: Sender;
   fetchedAt: string;
   conversationSummary: JsonObject;
+  campaign: { id: string; name: string };
 };
 
 const apiBase = process.env.HEYREACH_API_BASE ?? "https://api.heyreach.io/api/public";
@@ -27,6 +28,45 @@ const iso = (value: unknown, fallback: string) => {
   return Number.isNaN(parsed.getTime()) ? fallback : parsed.toISOString();
 };
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
+
+function campaignFrom(value: unknown) {
+  const seen = new Set<unknown>();
+  let fallback = { id: "", name: "" };
+  const visit = (current: unknown, depth: number): { id: string; name: string } | null => {
+    if (!current || depth > 7 || seen.has(current)) return null;
+    if (typeof current === "object") seen.add(current);
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        const found = visit(item, depth + 1);
+        if (found?.name) return found;
+        if (found?.id && !fallback.id) fallback = found;
+      }
+      return null;
+    }
+    if (typeof current !== "object") return null;
+    const row = current as JsonObject;
+    const directName = text(first(row, ["campaignName", "campaign_name", "campaignTitle", "campaign_title"]));
+    const directId = text(first(row, ["campaignId", "campaign_id"]));
+    if (directName) return { id: directId, name: directName };
+    if (directId && !fallback.id) fallback = { id: directId, name: "" };
+    for (const [key, child] of Object.entries(row)) {
+      if (/campaign/i.test(key) && child && typeof child === "object") {
+        const campaign = object(child);
+        const name = text(first(campaign, ["name", "title", "campaignName", "campaign_name"]));
+        const id = text(first(campaign, ["id", "campaignId", "campaign_id"]));
+        if (name) return { id, name };
+        if (id && !fallback.id) fallback = { id, name: "" };
+      }
+    }
+    for (const child of Object.values(row)) {
+      const found = visit(child, depth + 1);
+      if (found?.name) return found;
+      if (found?.id && !fallback.id) fallback = found;
+    }
+    return null;
+  };
+  return visit(value, 0) ?? fallback;
+}
 
 function senderFromPayload(payload: JsonObject): Sender {
   const sender = object(payload.sender);
@@ -147,5 +187,11 @@ export async function fetchFullConversation(apiKey: string, payload: JsonObject)
   const history = normalizeHeyReachMessages(messageArrays(historyPayload), resolvedSender.id, resolvedSender, eventTimestamp, "history");
   const recentRows = Array.isArray(payload.recent_messages) ? payload.recent_messages : Array.isArray(payload.recentMessages) ? payload.recentMessages : [];
   const recent = normalizeHeyReachMessages(recentRows, resolvedSender.id, resolvedSender, eventTimestamp, "webhook");
-  return { conversationExternalId, messages: mergeConversationMessages(history, recent), sender: resolvedSender, fetchedAt: new Date().toISOString(), conversationSummary: conversation };
+  const suppliedCampaign = object(payload.campaign);
+  const webhookCampaign = {
+    id: text(first(suppliedCampaign, ["id", "campaignId", "campaign_id"])),
+    name: text(first(suppliedCampaign, ["name", "title", "campaignName", "campaign_name"])),
+  };
+  const resolvedCampaign = webhookCampaign.name ? webhookCampaign : campaignFrom([conversation, historyPayload]);
+  return { conversationExternalId, messages: mergeConversationMessages(history, recent), sender: resolvedSender, fetchedAt: new Date().toISOString(), conversationSummary: conversation, campaign: resolvedCampaign };
 }

@@ -108,7 +108,7 @@ const fingerprint = (message: { direction: unknown; sent_at: unknown; body: unkn
 
 export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; name?: string | null; slug?: string | null; heyreach_api_key_ciphertext?: string | null }, payload: JsonObject) {
   const lead = object(payload.lead);
-  const campaign = object(payload.campaign);
+  const webhookCampaign = object(payload.campaign);
   const suppliedConversationId = text(payload.conversation_id) || text(payload.correlation_id);
   const suppliedLeadId = text(lead.id) || normalizedProfileUrl(lead.profile_url) || text(lead.email_address);
   const eventType = text(payload.event_type) || text(payload.eventType) || "unknown";
@@ -123,6 +123,11 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
 
   try {
     const history = await fetchFullConversation(text(workspace.heyreach_api_key_ciphertext), payload);
+    const campaign = {
+      ...webhookCampaign,
+      ...(history.campaign.id ? { id: history.campaign.id } : {}),
+      ...(history.campaign.name ? { name: history.campaign.name } : {}),
+    };
     const conversationExternalId = history.conversationExternalId || suppliedConversationId;
     const profileUrl = normalizedProfileUrl(lead.profile_url);
     const existingByProfile = profileUrl ? await db(config, `rr_leads?select=id,linkedin_id,role,company,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_profile_url=eq.${encodeURIComponent(profileUrl)}&limit=1`) as JsonObject[] : [];
@@ -161,7 +166,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     delete stableMetadata.campaign;
     delete stableMetadata.conversation;
     const stableRaw = { ...existingRaw };
-    delete stableRaw.campaign;
+    if (!text(object(stableRaw.campaign).name) && text(campaign.name)) stableRaw.campaign = campaign;
     const aiArkCompany = object(object(aiArk?.company).summary);
     const positionGroups = Array.isArray(aiArk?.positionGroups) ? aiArk.positionGroups.map(object) : [];
     const currentPositionCompany = object(positionGroups.find((group) => !text(object(group.date).end))?.company);

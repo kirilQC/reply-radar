@@ -146,7 +146,6 @@ function ProfileIndex() {
             )}
             <div className="profile-card-copy">
               <h2>{profile.name}</h2>
-              <p>{profile.role}</p>
               <div className="assigned-client-list">
                 {profile.clients.map((client) => (
                   <span key={client}>{client}</span>

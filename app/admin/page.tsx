@@ -53,7 +53,6 @@ export default function AdminPage() {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
   const [themePreset, setThemePreset] = useState("midnight");
-  const [consoleAccent, setConsoleAccent] = useState("#f0cf00");
   const [logos, setLogos] = useState<Record<string, string>>({});
   const [documents, setDocuments] = useState<Record<string, string[]>>({});
   const [accentOverrides, setAccentOverrides] = useState<Record<string, string>>(() => {
@@ -114,15 +113,6 @@ export default function AdminPage() {
   useEffect(() => {
     if (workspaceStorageReady) window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(workspaceClients));
   }, [workspaceClients, workspaceStorageReady]);
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("reply-radar-prefs:general");
-      if (saved) {
-        const parsed = JSON.parse(saved) as { appearance?: { accent?: string } };
-        if (parsed.appearance?.accent) setConsoleAccent(parsed.appearance.accent);
-      }
-    } catch { /* keep console default */ }
-  }, []);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
     /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", apiKey: "" });
@@ -232,10 +222,7 @@ export default function AdminPage() {
     <div className="app-shell">
       <AppSidebar />
       <section className="main-area">
-        <main
-          className={`admin-shell admin-theme-${themePreset}`}
-          style={{ "--accent": consoleAccent } as unknown as React.CSSProperties}
-        >
+        <main className={`admin-shell admin-theme-${themePreset}`}>
           <header className="admin-topbar">
             <a className="admin-brand admin-back-link" href="/" aria-label="Back to dashboard">←</a>
             <div className="admin-breadcrumb">

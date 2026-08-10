@@ -429,16 +429,6 @@ export function InboxPage() {
       ? activeWorkspace.website.trim()
       : `https://${activeWorkspace.website.trim()}`
     : "";
-  useEffect(() => {
-    if (!clientParam) return;
-    const root = document.documentElement;
-    const previous = root.style.getPropertyValue("--accent");
-    root.style.setProperty("--accent", clientTone);
-    return () => {
-      if (previous) root.style.setProperty("--accent", previous);
-      else root.style.removeProperty("--accent");
-    };
-  }, [clientParam, clientTone]);
   const preferenceScope = profileParam
     ? `profile:${profileParam}`
     : clientParam

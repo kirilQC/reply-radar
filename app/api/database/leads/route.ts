@@ -85,6 +85,13 @@ const nested = (value: unknown, key: string) =>
   typeof (value as Row)[key] === "object"
     ? ((value as Row)[key] as Row)
     : {};
+const rollupNames = (rawValue: unknown, key: "campaigns" | "senders") => {
+  const raw = rawValue && typeof rawValue === "object" ? rawValue as Row : {};
+  const rollup = nested(nested(raw, "reply_radar"), "rollup");
+  const values = Array.isArray(rollup[key]) ? rollup[key] : [];
+  return [...new Set(values.map(String).map((value) => value.trim()).filter(Boolean))];
+};
+const timeRangeDays: Record<string, number> = { "7d": 7, "14d": 14, "1m": 30, "3m": 90 };
 const locationLabel = (value: unknown) =>
   typeof value === "string"
     ? value
@@ -110,6 +117,9 @@ export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
     const workspaceSlug = params.get("workspace")?.trim() ?? "";
+    const senderFilter = (params.get("sender") ?? "").trim().slice(0, 160);
+    const campaignFilter = (params.get("campaign") ?? "").trim().slice(0, 200);
+    const timeRange = (params.get("timeRange") ?? "all").trim();
     const search = (params.get("search") ?? "")
       .trim()
       .slice(0, 100)
@@ -146,11 +156,27 @@ export async function GET(request: Request) {
     ]
       .filter(Boolean)
       .join("&");
-    const rows = await get(
+    const metadataFiltering = Boolean(selectedWorkspace && (senderFilter || campaignFilter || timeRangeDays[timeRange]));
+    let rows = await get(
       url,
       key,
-      `rr_leads?select=*&${filters ? `${filters}&` : ""}order=created_at.desc&limit=${limit + 1}`,
+      `rr_leads?select=*&${filters ? `${filters}&` : ""}order=created_at.desc&limit=${metadataFiltering ? 10000 : limit + 1}`,
     );
+    const optionRows = selectedWorkspace
+      ? await get(url, key, `rr_leads?select=raw_data&workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}&limit=10000`)
+      : [];
+    const filterOptions = {
+      senders: [...new Set(optionRows.flatMap((lead) => rollupNames(lead.raw_data, "senders")))].sort((a, b) => a.localeCompare(b)),
+      campaigns: [...new Set(optionRows.flatMap((lead) => rollupNames(lead.raw_data, "campaigns")))].sort((a, b) => a.localeCompare(b)),
+    };
+    if (senderFilter) rows = rows.filter((lead) => rollupNames(lead.raw_data, "senders").includes(senderFilter));
+    if (campaignFilter) rows = rows.filter((lead) => rollupNames(lead.raw_data, "campaigns").includes(campaignFilter));
+    if (selectedWorkspace && timeRangeDays[timeRange] && rows.length) {
+      const since = new Date(Date.now() - timeRangeDays[timeRange] * 86_400_000).toISOString();
+      const recentConversations = await get(url, key, `rr_conversations?select=lead_id&workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}&last_message_at=gte.${encodeURIComponent(since)}&limit=10000`);
+      const recentLeadIds = new Set(recentConversations.map((row) => String(row.lead_id)));
+      rows = rows.filter((lead) => recentLeadIds.has(String(lead.id)));
+    }
     const page = rows.slice(0, limit);
     const leadIds = page.map((lead) => String(lead.id));
     const conversations = leadIds.length
@@ -272,6 +298,7 @@ export async function GET(request: Request) {
         slug: workspace.slug,
         logoUrl: workspace.logo_url,
       })),
+      filterOptions,
       hasMore: rows.length > limit,
       nextCursor:
         rows.length > limit && page.length

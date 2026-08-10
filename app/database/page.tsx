@@ -50,6 +50,7 @@ type Detail = {
   hasMoreMessages: boolean;
   nextMessageOffset: number | null;
 };
+type FilterOptions = { senders: string[]; campaigns: string[] };
 
 const initials = (name: string) =>
   name
@@ -188,6 +189,11 @@ const campaignNameFrom = (...values: unknown[]) => {
 export default function DatabasePage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspace, setWorkspace] = useState("");
+  const [sender, setSender] = useState("");
+  const [campaign, setCampaign] = useState("");
+  const [timeRange, setTimeRange] = useState("all");
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({ senders: [], campaigns: [] });
+  const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -229,6 +235,9 @@ export default function DatabasePage() {
       try {
         const params = new URLSearchParams({ limit: "50" });
         if (workspace) params.set("workspace", workspace);
+        if (sender) params.set("sender", sender);
+        if (campaign) params.set("campaign", campaign);
+        if (timeRange !== "all") params.set("timeRange", timeRange);
         if (debouncedSearch) params.set("search", debouncedSearch);
         if (requestedCursor) params.set("cursor", requestedCursor);
         const response = await fetch(`/api/database/leads?${params}`, {
@@ -242,6 +251,7 @@ export default function DatabasePage() {
         setWorkspaces(
           Array.isArray(payload.workspaces) ? payload.workspaces : [],
         );
+        if (!append) setFilterOptions(payload.filterOptions ?? { senders: [], campaigns: [] });
         setLeads((current) =>
           append
             ? [...current, ...(payload.leads ?? [])]
@@ -260,8 +270,52 @@ export default function DatabasePage() {
         setLoadingMore(false);
       }
     },
-    [workspace, debouncedSearch],
+    [workspace, sender, campaign, timeRange, debouncedSearch],
   );
+
+  const chooseWorkspace = (value: string) => {
+    setWorkspace(value);
+    setSender("");
+    setCampaign("");
+    setTimeRange("all");
+    setFilterOptions({ senders: [], campaigns: [] });
+  };
+
+  const exportCsv = async () => {
+    setExporting(true);
+    setError("");
+    try {
+      const exported: Lead[] = [];
+      let nextCursor: string | null = null;
+      do {
+        const params = new URLSearchParams({ limit: "100" });
+        if (workspace) params.set("workspace", workspace);
+        if (sender) params.set("sender", sender);
+        if (campaign) params.set("campaign", campaign);
+        if (timeRange !== "all") params.set("timeRange", timeRange);
+        if (debouncedSearch) params.set("search", debouncedSearch);
+        if (nextCursor) params.set("cursor", nextCursor);
+        const response = await fetch(`/api/database/leads?${params}`, { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(String(payload.error ?? "Could not export leads."));
+        exported.push(...(Array.isArray(payload.leads) ? payload.leads : []));
+        nextCursor = payload.hasMore ? String(payload.nextCursor || "") : null;
+      } while (nextCursor && exported.length < 50_000);
+      const columns = ["Lead", "Title", "Company", "Client", "Campaigns", "Senders", "Replies", "Last reply", "LinkedIn"];
+      const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+      const rows = exported.map((lead) => [lead.name, lead.role, lead.company, lead.workspace?.name, lead.campaignNames?.join("; ") || lead.campaignName, lead.senderNames?.join("; ") || lead.senderName, lead.replyCount, lead.lastReplyAt, lead.profileUrl].map(quote).join(","));
+      const blob = new Blob([[columns.map(quote).join(","), ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `reply-radar-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Could not export leads.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -351,9 +405,7 @@ export default function DatabasePage() {
             <div>
               <h1>Lead Database</h1>
             </div>
-            <button className="secondary-button" onClick={() => load(false)}>
-              Refresh ↻
-            </button>
+            <div className="database-heading-actions"><button className="secondary-button" onClick={exportCsv} disabled={exporting}>{exporting ? "Exporting…" : "Export CSV ↓"}</button><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
           </div>
           <section className="database-toolbar">
             <label className="database-search">
@@ -364,25 +416,15 @@ export default function DatabasePage() {
                 placeholder="Search name, company, role, or LinkedIn ID…"
               />
             </label>
-            <label>
-              <span>Client</span>
-              <select
-                value={workspace}
-                onChange={(event) => setWorkspace(event.target.value)}
-              >
-                <option value="">All clients</option>
-                {workspaces.map((item) => (
-                  <option value={item.slug} key={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {(workspace || search) && (
+            <DatabaseDropdown label="Client" value={workspace} placeholder="All clients" options={workspaces.map((item) => ({ value: item.slug, label: item.name }))} onChange={chooseWorkspace} />
+            <DatabaseDropdown label="Sender" value={sender} placeholder={workspace ? "All senders" : "Choose a client first"} options={filterOptions.senders.map((name) => ({ value: name, label: name }))} onChange={setSender} disabled={!workspace} />
+            {workspace && <DatabaseDropdown label="Campaign" value={campaign} placeholder="All campaigns" options={filterOptions.campaigns.map((name) => ({ value: name, label: name }))} onChange={setCampaign} />}
+            {workspace && <DatabaseDropdown label="Time range" value={timeRange} placeholder="All time" options={[{ value: "7d", label: "Last 7 days" }, { value: "14d", label: "Last 14 days" }, { value: "1m", label: "Last month" }, { value: "3m", label: "Last 3 months" }]} onChange={setTimeRange} />}
+            {(workspace || search || sender || campaign || timeRange !== "all") && (
               <button
                 className="text-button"
                 onClick={() => {
-                  setWorkspace("");
+                  chooseWorkspace("");
                   setSearch("");
                 }}
               >
@@ -538,6 +580,19 @@ export default function DatabasePage() {
       )}
     </div>
   );
+}
+
+function DatabaseDropdown({ label, value, placeholder, options, onChange, disabled = false }: { label: string; value: string; placeholder: string; options: Array<{ value: string; label: string }>; onChange: (value: string) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value)?.label;
+  return <div className={`database-dropdown ${disabled ? "disabled" : ""}`} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
+    <span>{label}</span>
+    <button type="button" disabled={disabled} aria-expanded={open} onClick={() => setOpen((current) => !current)}>{selected || placeholder}<b>⌄</b></button>
+    {open && !disabled && <div className="database-dropdown-menu">
+      <button type="button" className={!value || value === "all" ? "selected" : ""} onClick={() => { onChange(label === "Time range" ? "all" : ""); setOpen(false); }}>{placeholder}</button>
+      {options.map((option) => <button type="button" className={value === option.value ? "selected" : ""} key={option.value} onClick={() => { onChange(option.value); setOpen(false); }}>{option.label}</button>)}
+    </div>}
+  </div>;
 }
 
 function LeadOverview({ detail }: { detail: Detail }) {

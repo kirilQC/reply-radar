@@ -75,6 +75,7 @@ export default function DashboardHome() {
   const saveAppearance = () => {
     const existing = JSON.parse(window.localStorage.getItem("reply-radar-prefs:general") || "{}");
     window.localStorage.setItem("reply-radar-prefs:general", JSON.stringify({ ...existing, appearance }));
+    window.dispatchEvent(new CustomEvent("reply-radar-appearance-changed", { detail: appearance }));
     setAppearanceOpen(false);
   };
   return (
