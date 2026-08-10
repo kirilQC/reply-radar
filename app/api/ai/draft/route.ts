@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
 
 type Row = Record<string, unknown>;
 const object = (v: unknown): Row => v && typeof v === "object" && !Array.isArray(v) ? v as Row : {};
@@ -130,13 +131,17 @@ export async function POST(request: Request) {
       try { analysis = JSON.parse(text.replace(/^```json\s*|\s*```$/g, "")); } catch { analysis = { draft: text, reason: "This lead sent a new reply that is ready for review." }; }
     }
     if (response.ok && mode === "analyze" && typeof body.conversationId === "string" && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      const headers = { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`, "content-type": "application/json" };
-      const latest = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rr_messages?select=id,raw_data&conversation_id=eq.${encodeURIComponent(body.conversationId)}&direction=eq.inbound&order=sent_at.desc&limit=1`, { headers, cache: "no-store" }).then((result) => result.ok ? result.json() : []).catch(() => []);
-      if (latest?.[0]?.id) {
-        const raw = latest[0].raw_data && typeof latest[0].raw_data === "object" ? latest[0].raw_data : {};
-        const radar = raw.reply_radar && typeof raw.reply_radar === "object" ? raw.reply_radar : {};
-        const sentimentValue = ["positive", "neutral", "negative"].includes(String(analysis.sentiment).toLowerCase()) ? String(analysis.sentiment).toLowerCase() : radar.sentiment;
-        await fetch(`${process.env.SUPABASE_URL}/rest/v1/rr_messages?id=eq.${encodeURIComponent(latest[0].id)}`, { method: "PATCH", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify({ raw_data: { ...raw, reply_radar: { ...radar, sentiment: sentimentValue, cached_draft: String(analysis.draft ?? ""), cached_reason: String(analysis.reason ?? ""), analyzed_at: new Date().toISOString() } } }) }).catch(() => null);
+      const store = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
+      const latest = await latestInboundMessage(store, body.conversationId);
+      if (latest) {
+        const parsed = String(analysis.sentiment ?? "").toLowerCase();
+        const sentimentValue = ["positive", "neutral", "negative"].includes(parsed) ? parsed : latest.radar.sentiment;
+        await mergeMessageRadar(store, latest.id, {
+          sentiment: sentimentValue,
+          cached_draft: String(analysis.draft ?? ""),
+          cached_reason: String(analysis.reason ?? ""),
+          analyzed_at: new Date().toISOString(),
+        });
       }
     }
     await writeAuditEvent({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }, { actor: "anthropic", action: response.ok ? (mode === "analyze" ? "conversation.analyzed" : "draft.generated") : "draft.failed", entityType: "conversation", entityId: typeof body.conversationId === "string" ? body.conversationId : undefined, details: { source: "anthropic", status: response.ok ? "success" : "failed", model, inputTokens: payload?.usage?.input_tokens ?? 0, outputTokens: payload?.usage?.output_tokens ?? 0, durationMs, sentiment: mode === "analyze" ? String(analysis.sentiment ?? "").toLowerCase() : undefined, workspaceId: body.workspaceId, workspaceName: body.workspaceName, leadName: typeof body.leadName === "string" ? body.leadName : undefined, pastRepliesUsed: pastReplies.length, summary: response.ok ? `Anthropic generated a reply draft with ${model} using ${pastReplies.length} past replies as tone reference.` : `Anthropic could not generate a reply draft with ${model}.` } });

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { queryByIds } from "../../../lib/chunk-query";
 
 type Row = Record<string, unknown>;
 const text = (v: unknown) => (typeof v === "string" ? v : "");
 const object = (v: unknown): Row => v && typeof v === "object" && !Array.isArray(v) ? v as Row : {};
+// actor_id is free-form text in the audit table, so only pass through real ids.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request: Request) {
   const url = process.env.SUPABASE_URL;
@@ -37,39 +40,35 @@ export async function GET(request: Request) {
 
     // Resolve lead name + photo from conversation → lead
     // actor_id = conversationId for these events
-    const conversationIds = [...new Set(rows.map((r) => text(r.actor_id)).filter(Boolean))];
+    const conversationIds = [...new Set(rows.map((r) => text(r.actor_id)).filter((id) => UUID.test(id)))];
     const leadNameByConvId = new Map<string, string>();
     const leadPhotoByConvId = new Map<string, string>();
 
-    if (conversationIds.length) {
-      const convRes = await fetch(
-        `${url}/rest/v1/rr_conversations?select=id,lead_id&id=in.(${conversationIds.slice(0, 200).join(",")})`,
+    const convRows = await queryByIds(conversationIds, 40, async (batch) => {
+      const res = await fetch(
+        `${url}/rest/v1/rr_conversations?select=id,lead_id&id=in.(${batch.join(",")})`,
         { headers, cache: "no-store" },
       ).catch(() => null);
-      if (convRes?.ok) {
-        const convRows = (await convRes.json()) as Row[];
-        const leadIds = [...new Set(convRows.map((c) => text(c.lead_id)).filter(Boolean))];
-        if (leadIds.length) {
-          const leadRes = await fetch(
-            `${url}/rest/v1/rr_leads?select=id,name,raw_data&id=in.(${leadIds.slice(0, 200).join(",")})`,
-            { headers, cache: "no-store" },
-          ).catch(() => null);
-          if (leadRes?.ok) {
-            const leadRows = (await leadRes.json()) as Row[];
-            const leadById = new Map(leadRows.map((l) => [text(l.id), l]));
-            for (const conv of convRows) {
-              const lead = leadById.get(text(conv.lead_id));
-              if (!lead) continue;
-              const cid = text(conv.id);
-              leadNameByConvId.set(cid, text(lead.name));
-              // Enrichment lives at raw_data.reply_radar.ai_ark
-              const enrichment = object(object(object(lead.raw_data).reply_radar).ai_ark);
-              const photo = text(enrichment.profilePhotoSource) || text(enrichment.profilePhotoUrl) || "";
-              if (photo) leadPhotoByConvId.set(cid, photo);
-            }
-          }
-        }
-      }
+      return res?.ok ? ((await res.json().catch(() => [])) as Row[]) : [];
+    });
+    const leadIds = [...new Set(convRows.map((c) => text(c.lead_id)).filter((id) => UUID.test(id)))];
+    const leadRows = await queryByIds(leadIds, 40, async (batch) => {
+      const res = await fetch(
+        `${url}/rest/v1/rr_leads?select=id,name,raw_data&id=in.(${batch.join(",")})`,
+        { headers, cache: "no-store" },
+      ).catch(() => null);
+      return res?.ok ? ((await res.json().catch(() => [])) as Row[]) : [];
+    });
+    const leadById = new Map(leadRows.map((l) => [text(l.id), l]));
+    for (const conv of convRows) {
+      const lead = leadById.get(text(conv.lead_id));
+      if (!lead) continue;
+      const cid = text(conv.id);
+      leadNameByConvId.set(cid, text(lead.name));
+      // Enrichment lives at raw_data.reply_radar.ai_ark
+      const enrichment = object(object(object(lead.raw_data).reply_radar).ai_ark);
+      const photo = text(enrichment.profilePhotoSource) || text(enrichment.profilePhotoUrl) || "";
+      if (photo) leadPhotoByConvId.set(cid, photo);
     }
 
     const events = rows.map((row) => {

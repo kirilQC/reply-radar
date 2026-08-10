@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../lib/person-name";
+import { queryByIds } from "../../lib/chunk-query";
 type Row = Record<string, unknown>;
 
 async function query(url: string, key: string, path: string) {
@@ -158,10 +159,19 @@ export async function GET(request: Request) {
     const workspaceIds = selected.map((workspace) => String(workspace.id));
     if (!workspaceIds.length)
       return NextResponse.json({ ok: true, conversations: [] });
-    const conversations = await query(
-      url,
-      key,
-      `rr_conversations?select=*&workspace_id=in.(${workspaceIds.join(",")})&order=last_message_at.desc`,
+    // Newest conversations first with an explicit ceiling — the inbox is a working queue,
+    // not an archive, and an unbounded fetch grows until PostgREST truncates it silently.
+    const conversations = await queryByIds(workspaceIds, 20, (batch) =>
+      query(
+        url,
+        key,
+        `rr_conversations?select=*&workspace_id=in.(${batch.map(encodeURIComponent).join(",")})&order=last_message_at.desc&limit=500`,
+      ),
+    );
+    conversations.sort(
+      (a, b) =>
+        new Date(String(b.last_message_at)).getTime() -
+        new Date(String(a.last_message_at)).getTime(),
     );
     const leadIds = [
       ...new Set(
@@ -170,16 +180,16 @@ export async function GET(request: Request) {
     ];
     const conversationIds = conversations.map((row) => String(row.id));
     const [leads, messages] = await Promise.all([
-      leadIds.length
-        ? query(url, key, `rr_leads?select=*&id=in.(${leadIds.join(",")})`)
-        : [],
-      conversationIds.length
-        ? query(
-            url,
-            key,
-            `rr_messages?select=*&conversation_id=in.(${conversationIds.join(",")})&order=sent_at.asc`,
-          )
-        : [],
+      queryByIds(leadIds, 40, (batch) =>
+        query(url, key, `rr_leads?select=*&id=in.(${batch.map(encodeURIComponent).join(",")})`),
+      ),
+      queryByIds(conversationIds, 20, (batch) =>
+        query(
+          url,
+          key,
+          `rr_messages?select=*&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc`,
+        ),
+      ),
     ]);
     // Deduplicate messages: the refresh endpoint may have created duplicates with
     // wrong direction. Always prefer the original (non-refresh) message.

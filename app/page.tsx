@@ -255,6 +255,37 @@ const followUpBand = (score: number): "hot" | "warm" | "cold" | "nurture" => {
   if (score >= 25) return "cold";
   return "nurture";
 };
+/**
+ * Fold a fresh inbox payload over the list already on screen.
+ *
+ * A plain replace would discard AI results that were merged in client-side but whose
+ * database write has not been read back yet, making scores and drafts appear to reset.
+ */
+const mergeInboxLeads = (previous: Lead[], incoming: Lead[]): Lead[] => {
+  if (!previous.length) return incoming;
+  const byId = new Map(previous.map((lead) => [lead.id, lead]));
+  return incoming.map((lead) => {
+    const old = byId.get(lead.id);
+    if (!old) return lead;
+    const merged: Lead = { ...lead };
+    if (!merged.sentiment && old.sentiment) merged.sentiment = old.sentiment;
+    if (!merged.analyzedAt && old.analyzedAt) {
+      merged.analyzedAt = old.analyzedAt;
+      merged.cachedDraft = old.cachedDraft;
+      merged.cachedReason = old.cachedReason;
+    }
+    if ((merged.leadScore === null || merged.leadScore === undefined) && old.leadScore !== null && old.leadScore !== undefined) {
+      merged.leadScore = old.leadScore;
+      merged.icpReason = old.icpReason;
+    }
+    if (!merged.followUpAnalyzedAt && old.followUpAnalyzedAt) {
+      merged.followUpAnalyzedAt = old.followUpAnalyzedAt;
+      merged.followUpUrgency = old.followUpUrgency;
+      merged.followUpReason = old.followUpReason;
+    }
+    return merged;
+  });
+};
 function Icon({ name }: { name: string }) {
   const paths: Record<string, string> = {
     inbox: "M4 5h16v14H4z M4 9h5l1.5 2h3L15 9h5",
@@ -288,7 +319,10 @@ export default function Home() {
 }
 export function InboxPage() {
   const router = useRouter();
-  const [selected, setSelected] = useState(0),
+  // Selection is tracked by conversation id, not list index: AI scores arriving in the
+  // background re-sort `filtered`, and an index would silently point at a different lead
+  // (which then triggered another round of paid AI calls, and another re-sort).
+  const [selectedId, setSelectedId] = useState(""),
     [activeNav, setActiveNav] = useState("inbox"),
     [filter, setFilter] = useState("All follow-ups"),
     [sort, setSort] = useState("score-desc"),
@@ -306,6 +340,8 @@ export function InboxPage() {
   const [sentimentFilter, setSentimentFilter] = useState("");
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const leadsRef = useRef<Lead[]>([]);
+  const [directoryLoaded, setDirectoryLoaded] = useState(false);
   const [inboxLoading, setInboxLoading] = useState(true);
   const [inboxError, setInboxError] = useState("");
   const [queryString, setQueryString] = useState("");
@@ -363,7 +399,14 @@ export function InboxPage() {
         }
         showToast(newMessages > 0 ? `${newMessages} new message${newMessages === 1 ? "" : "s"} found` : "Conversation up to date");
         // Re-analyze if new messages were found (force regeneration)
-        if (newMessages > 0) void generateAiReview(workspaceAi, true);
+        if (newMessages > 0) {
+          // A new reply invalidates the follow-up score, so let it be requested again.
+          scoredRef.current.followUp.delete(convId);
+          setLeads((prev) => prev.map((lead) =>
+            lead.id === convId ? { ...lead, followUpAnalyzedAt: null } : lead,
+          ));
+          void generateAiReview(workspaceAi, true);
+        }
       }
     } catch { /* ignore */ }
     setRefreshing(false);
@@ -425,7 +468,10 @@ export function InboxPage() {
               ),
           );
         })
-        .catch(() => null);
+        .catch(() => null)
+        // Flip this regardless of the outcome: the inbox waits for the directory to
+        // settle, and a failed lookup must not leave it waiting forever.
+        .finally(() => setDirectoryLoaded(true));
       void fetch("/api/admin/profiles", { cache: "no-store" })
         .then((response) => (response.ok ? response.json() : null))
         .then((payload) => {
@@ -579,8 +625,11 @@ export function InboxPage() {
     };
   }, [preferenceScope]);
   useEffect(() => {
+    // Wait for the workspace directory: firing early sends an empty slug list, which the
+    // API reads as "every client" and costs a full second round trip a moment later.
+    if (!directoryLoaded) return;
     let cancelled = false;
-    fetch(`/api/analytics?workspaces=${trackedWorkspaceSlugs.join(",")}`, {
+    fetch(`/api/analytics?workspaces=${encodeURIComponent(trackedWorkspaceSlugs.join(","))}`, {
       cache: "no-store",
     })
       .then((response) => response.json())
@@ -601,8 +650,9 @@ export function InboxPage() {
     return () => {
       cancelled = true;
     };
-  }, [trackedClients.join(",")]);
+  }, [directoryLoaded, trackedClients.join(",")]);
   useEffect(() => {
+    if (!directoryLoaded) return;
     let cancelled = false;
     setInboxLoading(true);
     setInboxError("");
@@ -620,9 +670,10 @@ export function InboxPage() {
           throw new Error(
             String(payload.error ?? "Inbox could not be loaded."),
           );
-        setLeads(
-          Array.isArray(payload.conversations) ? payload.conversations : [],
-        );
+        const incoming: Lead[] = Array.isArray(payload.conversations)
+          ? payload.conversations
+          : [];
+        setLeads((previous) => mergeInboxLeads(previous, incoming));
       })
       .catch((error) => {
         if (!cancelled) {
@@ -640,36 +691,42 @@ export function InboxPage() {
     return () => {
       cancelled = true;
     };
-  }, [trackedWorkspaceSlugs.join(",")]);
-  // Poll for sentiment updates every 15s — keeps the UI feeling alive
+  }, [directoryLoaded, trackedWorkspaceSlugs.join(",")]);
+  useEffect(() => {
+    leadsRef.current = leads;
+  }, [leads]);
+  // Poll for sentiment updates every 15s — keeps the UI feeling alive.
+  // Reads the live list through a ref: keying the effect on the joined id list meant the
+  // closure went stale the moment a sentiment landed, so it re-requested the same
+  // conversations forever instead of draining the queue.
   useEffect(() => {
     if (!leads.length) return;
+    let cancelled = false;
     const poll = async () => {
-      const idsWithout = leads.filter((l) => !l.sentiment).map((l) => l.id);
-      if (!idsWithout.length) return;
+      if (document.visibilityState !== "visible") return;
+      const pending = leadsRef.current.filter((lead) => !lead.sentiment).map((lead) => lead.id);
+      if (!pending.length) return;
       try {
         const res = await fetch("/api/conversations/sentiment", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ conversationIds: idsWithout }),
+          body: JSON.stringify({ conversationIds: pending }),
         });
         const data = await res.json().catch(() => ({}));
-        if (!data.ok || !data.sentiments) return;
+        if (cancelled || !data.ok || !data.sentiments) return;
         const updates = data.sentiments as Record<string, string | null>;
-        const hasUpdates = Object.values(updates).some(Boolean);
-        if (hasUpdates) {
-          setLeads((prev) => prev.map((lead) => {
-            const s = updates[lead.id];
-            return s && !lead.sentiment ? { ...lead, sentiment: s } : lead;
-          }));
-        }
+        if (!Object.values(updates).some(Boolean)) return;
+        setLeads((prev) => prev.map((lead) => {
+          const next = updates[lead.id];
+          return next && !lead.sentiment ? { ...lead, sentiment: next } : lead;
+        }));
       } catch { /* ignore */ }
     };
     const interval = setInterval(poll, 15_000);
     // Run once immediately for fast first paint
     void poll();
-    return () => clearInterval(interval);
-  }, [leads.length > 0 ? leads.map((l) => l.id).join(",") : ""]);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [leads.length > 0]);
   const savePreferences = (
     nextLayout = layoutPrefs,
     nextAppearance = appearance,
@@ -835,14 +892,18 @@ export function InboxPage() {
                 : b.score - a.score;
         });
     },
+    // assignedClients / excludedClients are rebuilt every render, so key on their
+    // contents — otherwise this memo never actually memoizes and the whole list
+    // re-sorts on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       leads,
       search,
       filter,
       sort,
-      assignedClients,
-      excludedClients,
-      layoutPrefs.starredLeadIds,
+      assignedClients?.join("|") ?? "",
+      excludedClients.join("|"),
+      layoutPrefs.starredLeadIds.join("|"),
       campaignFilter,
       senderFilter,
       sentimentFilter,
@@ -850,7 +911,7 @@ export function InboxPage() {
   );
   useEffect(() => {
     setVisibleLeadCount(10);
-    setSelected(0);
+    setSelectedId("");
   }, [filter, search, sort, clientParam, profileParam]);
   const visibleLeads = filtered.slice(0, visibleLeadCount);
   const liveMetric = (metric: (typeof metricCatalog)[number]) => {
@@ -883,7 +944,7 @@ export function InboxPage() {
     setLayoutPrefs(next);
     savePreferences(next, appearance);
   };
-  const current: Lead = filtered[selected] ?? {
+  const current: Lead = filtered.find((lead) => lead.id === selectedId) ?? filtered[0] ?? {
     id: "empty",
     initials: "?",
     name: "No conversation selected",
@@ -904,6 +965,14 @@ export function InboxPage() {
   const latestInboundMessageId = [...current.messages]
     .reverse()
     .find((message) => message.direction !== "outbound")?.id;
+  // The conversation currently on screen. In-flight AI calls compare against this before
+  // writing to the draft pane, so a slow response cannot land on a different lead.
+  const activeConversationRef = useRef(current.id);
+  // Ids already sent for scoring this session — see the ICP/follow-up effect below.
+  const scoredRef = useRef({ icp: new Set<string>(), followUp: new Set<string>() });
+  useEffect(() => {
+    activeConversationRef.current = current.id;
+  }, [current.id]);
   useEffect(() => {
     if (current.id === "empty") return;
     requestAnimationFrame(() => {
@@ -917,6 +986,7 @@ export function InboxPage() {
   const selectedWorkspaceSlug = current.clientSlug || clientParam || "";
   const generateAiReview = async (ai = workspaceAi, forceRegenerate = false) => {
     if (!current.messages.length || current.id === "empty") return;
+    const conversationId = current.id;
     // Check for cached data: use it if the latest inbound message hasn't changed since analysis
     if (!forceRegenerate && current.cachedDraft && current.analyzedAt) {
       const latestInbound = [...current.messages].reverse().find((m) => m.direction !== "outbound");
@@ -932,21 +1002,24 @@ export function InboxPage() {
     const response = await fetch("/api/ai/draft", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId: current.id, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, campaignName: current.campaignName || undefined, thread: current.messages, instruction: ai.brief ? `Client context: ${ai.brief}` : "" }),
+      body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, campaignName: current.campaignName || undefined, thread: current.messages, instruction: ai.brief ? `Client context: ${ai.brief}` : "" }),
     }).catch(() => null);
     const payload = await response?.json().catch(() => ({}));
     if (response?.ok) {
       const draft = String(payload.draft ?? "");
       const reason = String(payload.reason ?? "This lead sent a new reply that is ready for review.");
-      setAiDraft(draft);
-      setAiReason(reason);
-      // Update sentiment + cached data live on the current lead
+      // Cache against the lead this request was for, whatever is selected now.
       const newSentiment = String(payload.sentiment ?? "").toLowerCase();
       const now = new Date().toISOString();
       setLeads((prev) => prev.map((lead) =>
-        lead.id === current.id ? { ...lead, sentiment: ["positive", "neutral", "negative"].includes(newSentiment) ? newSentiment : lead.sentiment, cachedDraft: draft, cachedReason: reason, analyzedAt: now } : lead,
+        lead.id === conversationId ? { ...lead, sentiment: ["positive", "neutral", "negative"].includes(newSentiment) ? newSentiment : lead.sentiment, cachedDraft: draft, cachedReason: reason, analyzedAt: now } : lead,
       ));
+      // The user may have moved on while this was in flight; the newer request owns the pane.
+      if (activeConversationRef.current !== conversationId) return;
+      setAiDraft(draft);
+      setAiReason(reason);
     } else {
+      if (activeConversationRef.current !== conversationId) return;
       setAiDraft("");
       setAiReason("AI review is temporarily unavailable. The new reply is still ready for manual review.");
     }
@@ -958,6 +1031,8 @@ export function InboxPage() {
     setTemplatesOpen(false);
     if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "", id: "", icpPrompt: "", followUpPrompt: "", followUpThreshold: DEFAULT_FOLLOW_UP_THRESHOLD }); return; }
     let cancelled = false;
+    const conversationId = current.id;
+    const leadId = current.leadId;
     fetch(`/api/client-resources?workspace=${encodeURIComponent(selectedWorkspaceSlug)}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => {
@@ -968,14 +1043,30 @@ export function InboxPage() {
         setWorkspaceAi(ai);
         void generateAiReview(ai);
         // ICP score: scored once per lead and stored on the lead forever.
-        if (current.leadId && (current.leadScore === null || current.leadScore === undefined)) {
-          void fetch("/api/ai/icp-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId: current.leadId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, icpPrompt: ai.icpPrompt }) })
-            .then((r) => r.json()).then((d) => { if (d.ok && !cancelled) setLeads((prev) => prev.map((l) => l.id === current.id ? { ...l, leadScore: d.icpScore, icpReason: d.icpReason } : l)); }).catch(() => null);
+        // scoredRef is the hard stop — every one of these is a billed call, so a lead is
+        // never scored twice in a session even if the list re-sorts under the selection.
+        if (leadId && (current.leadScore === null || current.leadScore === undefined) && !scoredRef.current.icp.has(leadId)) {
+          scoredRef.current.icp.add(leadId);
+          void fetch("/api/ai/icp-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, icpPrompt: ai.icpPrompt }) })
+            .then((r) => r.json())
+            .then((d) => { if (d.ok) setLeads((prev) => prev.map((l) => l.id === conversationId ? { ...l, leadScore: d.icpScore, icpReason: d.icpReason } : l)); })
+            .catch(() => null);
         }
         // Follow-up score: cached against the latest reply, so it only recomputes on a new reply.
-        if (current.messages.length && !current.followUpAnalyzedAt) {
-          void fetch("/api/ai/follow-up-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: current.id, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, followUpPrompt: ai.followUpPrompt, sentiment: current.sentiment, thread: current.messages }) })
-            .then((r) => r.json()).then((d) => { if (d.ok && !cancelled) setLeads((prev) => prev.map((l) => l.id === current.id ? { ...l, followUpUrgency: d.urgency, followUpReason: d.reason, followUpAnalyzedAt: new Date().toISOString() } : l)); }).catch(() => null);
+        if (current.messages.length && !current.followUpAnalyzedAt && !scoredRef.current.followUp.has(conversationId)) {
+          scoredRef.current.followUp.add(conversationId);
+          void fetch("/api/ai/follow-up-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, followUpPrompt: ai.followUpPrompt, sentiment: current.sentiment, thread: current.messages }) })
+            .then((r) => r.json())
+            .then((d) => {
+              if (!d.ok) return;
+              // Only claim the score is cached when the database actually took the write,
+              // otherwise the UI hides a value that will not survive a reload.
+              const stored = d.cached === true || d.persisted === true;
+              setLeads((prev) => prev.map((l) => l.id === conversationId
+                ? { ...l, followUpUrgency: d.urgency, followUpReason: d.reason, followUpAnalyzedAt: stored ? new Date().toISOString() : l.followUpAnalyzedAt ?? null }
+                : l));
+            })
+            .catch(() => null);
         }
       }).catch(() => null);
     return () => { cancelled = true; };
@@ -1306,7 +1397,7 @@ export function InboxPage() {
                               ? current.filter((name) => name !== client)
                               : [...current, client],
                           );
-                          setSelected(0);
+                          setSelectedId("");
                         }}
                       >
                         <i
@@ -1415,7 +1506,7 @@ export function InboxPage() {
                       <button
                         key={value}
                         className={filter === value ? "selected" : ""}
-                        onClick={() => { setFilter(value); setSelected(0); }}
+                        onClick={() => { setFilter(value); setSelectedId(""); }}
                       >
                         {label}
                       </button>
@@ -1428,50 +1519,50 @@ export function InboxPage() {
                       </button>
                       {filterDropdownOpen && (
                         <div className="unified-filter-dropdown">
-                          <button className={`uf-item ${filter === "Starred" ? "uf-active" : ""}`} onMouseEnter={() => setFilterSub(null)} onClick={() => { setFilter(filter === "Starred" ? "All follow-ups" : "Starred"); setSelected(0); }}>Starred {filter === "Starred" ? "✓" : ""}</button>
+                          <button className={`uf-item ${filter === "Starred" ? "uf-active" : ""}`} onMouseEnter={() => setFilterSub(null)} onClick={() => { setFilter(filter === "Starred" ? "All follow-ups" : "Starred"); setSelectedId(""); }}>Starred {filter === "Starred" ? "✓" : ""}</button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("campaign")}>Campaign {campaignFilter ? `· ${campaignFilter.slice(0, 20)}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sender")}>Sender {senderFilter ? `· ${senderFilter.slice(0, 20)}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sentiment")}>Sentiment {sentimentFilter ? `· ${sentimentFilter}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("tier")}>Tier {["Hot", "Warm", "Nurture"].includes(filter) ? `· ${filter}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sort")}>Sort {sort !== "score-desc" ? `· ${sort}` : ""}<b>›</b></button>
                           <div className="uf-divider" />
-                          <button className="uf-item uf-clear" onClick={() => { setCampaignFilter(""); setSenderFilter(""); setSentimentFilter(""); setSort("score-desc"); setFilter("All follow-ups"); setFilterDropdownOpen(false); setSelected(0); }}>Clear all filters</button>
+                          <button className="uf-item uf-clear" onClick={() => { setCampaignFilter(""); setSenderFilter(""); setSentimentFilter(""); setSort("score-desc"); setFilter("All follow-ups"); setFilterDropdownOpen(false); setSelectedId(""); }}>Clear all filters</button>
                           {filterSub === "campaign" && (
                             <div className="unified-filter-sub">
-                              <button className={`uf-sub-item ${!campaignFilter ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(""); setSelected(0); }}>All campaigns</button>
+                              <button className={`uf-sub-item ${!campaignFilter ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(""); setSelectedId(""); }}>All campaigns</button>
                               {[...new Set(leads.filter((l) => !assignedClients || assignedClients.includes(l.client)).map((l) => l.campaignName).filter(Boolean))].sort().map((c) => (
-                                <button key={c!} className={`uf-sub-item ${campaignFilter === c ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(String(c)); setSelected(0); }}>{c}</button>
+                                <button key={c!} className={`uf-sub-item ${campaignFilter === c ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(String(c)); setSelectedId(""); }}>{c}</button>
                               ))}
                             </div>
                           )}
                           {filterSub === "sender" && (
                             <div className="unified-filter-sub">
-                              <button className={`uf-sub-item ${!senderFilter ? "uf-active" : ""}`} onClick={() => { setSenderFilter(""); setSelected(0); }}>All senders</button>
+                              <button className={`uf-sub-item ${!senderFilter ? "uf-active" : ""}`} onClick={() => { setSenderFilter(""); setSelectedId(""); }}>All senders</button>
                               {[...new Set(leads.filter((l) => !assignedClients || assignedClients.includes(l.client)).map((l) => l.senderName).filter(Boolean))].sort().map((s) => (
-                                <button key={s} className={`uf-sub-item ${senderFilter === s ? "uf-active" : ""}`} onClick={() => { setSenderFilter(s); setSelected(0); }}>{s}</button>
+                                <button key={s} className={`uf-sub-item ${senderFilter === s ? "uf-active" : ""}`} onClick={() => { setSenderFilter(s); setSelectedId(""); }}>{s}</button>
                               ))}
                             </div>
                           )}
                           {filterSub === "sentiment" && (
                             <div className="unified-filter-sub">
-                              <button className={`uf-sub-item ${!sentimentFilter ? "uf-active" : ""}`} onClick={() => { setSentimentFilter(""); setSelected(0); }}>All sentiments</button>
+                              <button className={`uf-sub-item ${!sentimentFilter ? "uf-active" : ""}`} onClick={() => { setSentimentFilter(""); setSelectedId(""); }}>All sentiments</button>
                               {["positive", "neutral", "negative"].map((s) => (
-                                <button key={s} className={`uf-sub-item ${sentimentFilter === s ? "uf-active" : ""}`} onClick={() => { setSentimentFilter(s); setSelected(0); }}>{s[0].toUpperCase() + s.slice(1)}</button>
+                                <button key={s} className={`uf-sub-item ${sentimentFilter === s ? "uf-active" : ""}`} onClick={() => { setSentimentFilter(s); setSelectedId(""); }}>{s[0].toUpperCase() + s.slice(1)}</button>
                               ))}
                             </div>
                           )}
                           {filterSub === "tier" && (
                             <div className="unified-filter-sub">
-                              <button className={`uf-sub-item ${!["Hot", "Warm", "Nurture"].includes(filter) ? "uf-active" : ""}`} onClick={() => { setFilter("All follow-ups"); setSelected(0); }}>All tiers</button>
+                              <button className={`uf-sub-item ${!["Hot", "Warm", "Nurture"].includes(filter) ? "uf-active" : ""}`} onClick={() => { setFilter("All follow-ups"); setSelectedId(""); }}>All tiers</button>
                               {["Hot", "Warm", "Nurture"].map((t) => (
-                                <button key={t} className={`uf-sub-item ${filter === t ? "uf-active" : ""}`} onClick={() => { setFilter(t); setSelected(0); }}>{t}</button>
+                                <button key={t} className={`uf-sub-item ${filter === t ? "uf-active" : ""}`} onClick={() => { setFilter(t); setSelectedId(""); }}>{t}</button>
                               ))}
                             </div>
                           )}
                           {filterSub === "sort" && (
                             <div className="unified-filter-sub">
                               {[["score-desc", "Score"], ["newest", "Newest"], ["oldest", "Oldest"], ["name", "Name"]].map(([v, l]) => (
-                                <button key={v} className={`uf-sub-item ${sort === v ? "uf-active" : ""}`} onClick={() => { setSort(v); setSelected(0); }}>{l}</button>
+                                <button key={v} className={`uf-sub-item ${sort === v ? "uf-active" : ""}`} onClick={() => { setSort(v); setSelectedId(""); }}>{l}</button>
                               ))}
                             </div>
                           )}
@@ -1486,7 +1577,7 @@ export function InboxPage() {
                         value={["Starred", "Hot", "Warm", "Nurture"].includes(filter) ? filter : ""}
                         onChange={(event) => {
                           setFilter(event.target.value || "All follow-ups");
-                          setSelected(0);
+                          setSelectedId("");
                         }}
                       >
                         <option value="">Tier filter</option>
@@ -1501,7 +1592,7 @@ export function InboxPage() {
                         value={sort}
                         onChange={(event) => {
                           setSort(event.target.value);
-                          setSelected(0);
+                          setSelectedId("");
                         }}
                       >
                         <option value="score-desc">Sort: Score</option>
@@ -1550,17 +1641,17 @@ export function InboxPage() {
                       No conversations have arrived for this inbox yet.
                     </p>
                   )}
-                  {visibleLeads.map((lead, index) => (
+                  {visibleLeads.map((lead) => (
                     <div
-                      className={`lead-row ${selected === index ? "row-selected" : ""} ${lead.sentiment ? `row-sentiment-${lead.sentiment}` : ""}`}
+                      className={`lead-row ${current.id === lead.id ? "row-selected" : ""} ${lead.sentiment ? `row-sentiment-${lead.sentiment}` : ""}`}
                       key={lead.id}
                       role="button"
                       tabIndex={0}
-                      onClick={() => setSelected(index)}
+                      onClick={() => setSelectedId(lead.id)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          setSelected(index);
+                          setSelectedId(lead.id);
                         }
                       }}
                     >

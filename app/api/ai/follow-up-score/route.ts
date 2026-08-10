@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
 
 export async function POST(request: Request) {
   const url = process.env.SUPABASE_URL;
@@ -17,26 +18,17 @@ export async function POST(request: Request) {
   const sentiment = typeof body.sentiment === "string" ? body.sentiment : "";
   if (!thread.length) return NextResponse.json({ ok: true, urgency: 0, reason: null });
 
-  const headers = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" };
   const force = body.force === true;
 
   // Cache lives on the latest inbound message — a new reply creates a fresh row, so
   // the score naturally regenerates when the conversation moves forward.
-  const latest = conversationId
-    ? await fetch(
-        `${url}/rest/v1/rr_messages?select=id,raw_data&conversation_id=eq.${encodeURIComponent(conversationId)}&direction=eq.inbound&order=sent_at.desc&limit=1`,
-        { headers, cache: "no-store" },
-      ).then((r) => (r.ok ? r.json() : [])).catch(() => [])
-    : [];
-  const latestId = latest?.[0]?.id;
-  const latestRaw = latest?.[0]?.raw_data && typeof latest[0].raw_data === "object" ? latest[0].raw_data : {};
-  const latestRadar = latestRaw.reply_radar && typeof latestRaw.reply_radar === "object" ? latestRaw.reply_radar : {};
-  if (!force && latestRadar.followup_analyzed_at && latestRadar.followup_urgency !== undefined) {
+  const latest = await latestInboundMessage({ url, key }, conversationId);
+  if (!force && latest?.radar.followup_analyzed_at && latest.radar.followup_urgency !== undefined) {
     return NextResponse.json({
       ok: true,
       cached: true,
-      urgency: Number(latestRadar.followup_urgency) || 0,
-      reason: String(latestRadar.followup_reason ?? ""),
+      urgency: Number(latest.radar.followup_urgency) || 0,
+      reason: String(latest.radar.followup_reason ?? ""),
     });
   }
 
@@ -76,17 +68,13 @@ export async function POST(request: Request) {
     reason = "";
   }
 
-  if (aiRes?.ok && latestId) {
-    await fetch(`${url}/rest/v1/rr_messages?id=eq.${encodeURIComponent(latestId)}`, {
-      method: "PATCH",
-      headers: { ...headers, Prefer: "return=minimal" },
-      body: JSON.stringify({
-        raw_data: {
-          ...latestRaw,
-          reply_radar: { ...latestRadar, followup_urgency: urgency, followup_reason: reason, followup_analyzed_at: new Date().toISOString() },
-        },
-      }),
-    }).catch(() => null);
+  let persisted = false;
+  if (aiRes?.ok && latest) {
+    persisted = await mergeMessageRadar({ url, key }, latest.id, {
+      followup_urgency: urgency,
+      followup_reason: reason,
+      followup_analyzed_at: new Date().toISOString(),
+    });
   }
 
   void writeAuditEvent({ url, key }, {
@@ -94,5 +82,7 @@ export async function POST(request: Request) {
     details: { source: "anthropic", status: aiRes?.ok ? "success" : "failed", model, inputTokens, outputTokens, durationMs, workspaceId, workspaceName, leadName, followUpUrgency: urgency, summary: `Follow-up scored ${leadName || "lead"} at ${urgency}/100: ${reason}` },
   });
 
-  return NextResponse.json({ ok: true, cached: false, urgency, reason });
+  // persisted=false means the client must not treat this as cached, or the score would
+  // look saved while the database has nothing and it silently recomputes on every load.
+  return NextResponse.json({ ok: true, cached: false, persisted, urgency, reason });
 }

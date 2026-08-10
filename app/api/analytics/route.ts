@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { queryByIds } from "../../lib/chunk-query";
 
 type Row = Record<string, unknown>;
 type CampaignMetric = {
@@ -75,13 +76,17 @@ export async function GET(request: Request) {
     const selected = requested.length ? workspaces.filter((row) => requested.includes(String(row.slug))) : workspaces;
     const ids = selected.map((row) => String(row.id));
     if (!ids.length) return NextResponse.json({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], aiArkCalls: 0, aiArkSuccesses: 0, aiArkFailures: 0, aiArkTrend: [], aiArkTrendLabels: [], aiArkByClient: [], queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });
-    const idFilter = ids.join(",");
-    const conversations = await supabase(`rr_conversations?select=id,workspace_id,score,tier,last_message_at,created_at&workspace_id=in.(${idFilter})`) ?? [];
+    const filter = (batch: string[]) => batch.map(encodeURIComponent).join(",");
+    const conversations = await queryByIds(ids, 20, async (batch) =>
+      (await supabase(`rr_conversations?select=id,workspace_id,score,tier,last_message_at,created_at&workspace_id=in.(${filter(batch)})&limit=1000`)) ?? [],
+    );
     const conversationIdList = conversations.map((row) => String(row.id)).filter(Boolean);
-    const messages = conversationIdList.length
-      ? (await supabase(`rr_messages?select=conversation_id,direction,sent_at,raw_data&conversation_id=in.(${conversationIdList.join(",")})&order=sent_at.asc`) ?? [])
-      : [];
-    const aiArkRuns = await supabase(`rr_sync_runs?select=id,workspace_id,status,started_at,finished_at,error_text&workspace_id=in.(${idFilter})&source=eq.ai_ark&run_type=eq.lead_enrichment&order=started_at.asc`) ?? [];
+    const messages = await queryByIds(conversationIdList, 20, async (batch) =>
+      (await supabase(`rr_messages?select=conversation_id,direction,sent_at,raw_data&conversation_id=in.(${filter(batch)})&order=sent_at.asc`)) ?? [],
+    );
+    const aiArkRuns = await queryByIds(ids, 20, async (batch) =>
+      (await supabase(`rr_sync_runs?select=id,workspace_id,status,started_at,finished_at,error_text&workspace_id=in.(${filter(batch)})&source=eq.ai_ark&run_type=eq.lead_enrichment&order=started_at.asc`)) ?? [],
+    );
     const campaignResponses = await Promise.all(selected.map(async (workspace) => {
       try { return { workspace, rows: await heyReachCampaignStats(workspace) }; }
       catch { return { workspace, rows: [] as Row[] }; }

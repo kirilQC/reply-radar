@@ -1,4 +1,5 @@
 import { writeAuditEvent } from "./audit-log";
+import { mergeMessageRadar } from "./message-radar";
 
 type SupabaseConfig = { url: string; key: string };
 type Row = Record<string, unknown>;
@@ -169,28 +170,16 @@ export async function classifyLatestReply(
     return;
   }
 
-  const patchResponse = await fetch(
-    `${config.url}/rest/v1/rr_messages?id=eq.${encodeURIComponent(String(latestInbound.id))}`,
-    {
-      method: "PATCH",
-      headers: { ...headers, Prefer: "return=minimal" },
-      body: JSON.stringify({
-        raw_data: {
-          ...latestRaw,
-          reply_radar: {
-            ...latestRadar,
-            sentiment,
-            analyzed_at: new Date().toISOString(),
-            model,
-            input_tokens: inputTokens,
-            output_tokens: outputTokens,
-          },
-        },
-      }),
-      cache: "no-store",
-    },
-  );
-  console.log(`[sentiment] PATCH message ${latestInbound.id} → ${sentiment}, status=${patchResponse.status}`);
+  // Merge through the shared writer so a concurrent draft or follow-up score does not
+  // get clobbered by this write (and vice versa).
+  const persisted = await mergeMessageRadar(config, String(latestInbound.id), {
+    sentiment,
+    analyzed_at: new Date().toISOString(),
+    model,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+  });
+  console.log(`[sentiment] merge message ${latestInbound.id} → ${sentiment}, persisted=${persisted}`);
 
   void writeAuditEvent(config, {
     actor: "anthropic",

@@ -153,20 +153,24 @@ async function refreshConversation(workspace, conv) {
   });
 
   // Get existing messages for fingerprint matching
-  const existing = await supabase(`rr_messages?select=heyreach_message_id,direction,body,sent_at&conversation_id=eq.${encodeURIComponent(conv.id)}`);
-  const fpMap = new Map((existing || []).map((m) => [`${m.direction}|${new Date(String(m.sent_at)).toISOString()}|${m.body}`, m.heyreach_message_id]));
+  const existing = await supabase(`rr_messages?select=heyreach_message_id,direction,body,sent_at&conversation_id=eq.${encodeURIComponent(conv.id)}&limit=5000`);
+  const existingFingerprints = new Set(
+    (existing || []).map((m) => `${m.direction}|${new Date(String(m.sent_at)).toISOString()}|${m.body}`),
+  );
 
-  const records = messages.map((m) => {
-    const fp = `${m.direction}|${new Date(m.sentAt).toISOString()}|${m.body}`;
-    return {
+  // Only insert genuinely NEW messages. Upserting an existing row would replace its
+  // raw_data wholesale, destroying sentiment, cached drafts, follow-up scores and
+  // sender/campaign attribution. Mirrors app/api/conversations/refresh/route.ts.
+  const records = messages
+    .filter((m) => !existingFingerprints.has(`${m.direction}|${new Date(m.sentAt).toISOString()}|${m.body}`))
+    .map((m) => ({
       conversation_id: conv.id,
-      heyreach_message_id: fpMap.get(fp) || m.externalId,
+      heyreach_message_id: m.externalId,
       direction: m.direction,
       body: m.body,
       sent_at: m.sentAt,
       raw_data: { reply_radar: { source: "refresh", refreshed_at: now } },
-    };
-  });
+    }));
 
   if (records.length) {
     for (let i = 0; i < records.length; i += 200) {
