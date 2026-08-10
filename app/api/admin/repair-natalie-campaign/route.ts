@@ -22,6 +22,7 @@ export async function POST(request: Request) {
   });
   if (!workspace || !event) return NextResponse.json({ ok: false, error: "The exact Bluevia/Natalie webhook could not be found." }, { status: 404 });
   const eventLead = object(object(event).raw && object(object(event).raw).lead);
+  const eventSender = object(object(event).raw && object(object(event).raw).sender);
   const campaignResponse = await fetch("https://api.heyreach.io/api/public/campaign/GetCampaignsForLead", {
     method: "POST",
     headers: { "X-API-KEY": String(object(workspace).heyreach_api_key_ciphertext ?? ""), accept: "application/json", "content-type": "application/json" },
@@ -29,6 +30,13 @@ export async function POST(request: Request) {
     cache: "no-store",
   });
   const campaignLookup = await campaignResponse.json().catch(() => null);
+  const allCampaignsResponse = await fetch("https://api.heyreach.io/api/public/campaign/GetAll", {
+    method: "POST",
+    headers: { "X-API-KEY": String(object(workspace).heyreach_api_key_ciphertext ?? ""), accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ offset: 0, limit: 100, accountIds: [Number(eventSender.id)] }),
+    cache: "no-store",
+  });
+  const allCampaigns = await allCampaignsResponse.json().catch(() => null);
   const result = await ingestHeyReachWebhook({ url, key }, workspace, object(event).raw as Row);
-  return NextResponse.json({ ok: true, eventId: object(event).id, campaignLookupStatus: campaignResponse.status, campaignLookup, result });
+  return NextResponse.json({ ok: true, eventId: object(event).id, campaignLookupStatus: campaignResponse.status, campaignLookup, allCampaignsStatus: allCampaignsResponse.status, allCampaigns, result });
 }
