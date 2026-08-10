@@ -307,7 +307,6 @@ export function InboxPage() {
   const [aiReason, setAiReason] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [bulkRefreshing, setBulkRefreshing] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "", id: "" });
@@ -355,26 +354,6 @@ export function InboxPage() {
       }
     } catch { /* ignore */ }
     setRefreshing(false);
-  };
-  const bulkRefreshConversations = async (conversationIds: string[]) => {
-    if (!conversationIds.length || bulkRefreshing) return;
-    setBulkRefreshing(true);
-    try {
-      const batches: string[][] = [];
-      for (let i = 0; i < conversationIds.length; i += 10) batches.push(conversationIds.slice(i, i + 10));
-      let totalRefreshed = 0;
-      for (const batch of batches) {
-        const res = await fetch("/api/conversations/refresh", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationIds: batch }) });
-        const data = await res.json().catch(() => ({}));
-        if (data.ok) totalRefreshed += data.refreshed ?? 0;
-      }
-      // Re-fetch inbox
-      const inboxRes = await fetch(`/api/inbox${queryString}`, { cache: "no-store" });
-      const inbox = await inboxRes.json().catch(() => ({}));
-      if (inbox.ok && Array.isArray(inbox.conversations)) setLeads(inbox.conversations);
-      if (totalRefreshed > 0) showToast(`${totalRefreshed} conversation${totalRefreshed === 1 ? "" : "s"} refreshed`);
-    } catch { /* ignore */ }
-    setBulkRefreshing(false);
   };
   useEffect(() => {
     const scale = appearance.zoom / 100;
@@ -649,16 +628,6 @@ export function InboxPage() {
       cancelled = true;
     };
   }, [trackedWorkspaceSlugs.join(",")]);
-  // Auto-refresh visible conversations when inbox loads or view switches
-  const lastRefreshTrigger = useRef("");
-  useEffect(() => {
-    const triggerKey = `${activeNav}:${trackedWorkspaceSlugs.join(",")}`;
-    if (triggerKey === lastRefreshTrigger.current || !leads.length || inboxLoading) return;
-    lastRefreshTrigger.current = triggerKey;
-    const visibleIds = leads.slice(0, visibleLeadCount).map((l) => l.id);
-    if (visibleIds.length) void bulkRefreshConversations(visibleIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeNav, inboxLoading, leads.length > 0]);
   const savePreferences = (
     nextLayout = layoutPrefs,
     nextAppearance = appearance,
@@ -1793,7 +1762,6 @@ export function InboxPage() {
           </div>
         </div>
       </section>
-      {bulkRefreshing && <div className="bulk-refresh-overlay" />}
       {toastMessage && <div className="refresh-toast">{toastMessage}</div>}
     </main>
   );

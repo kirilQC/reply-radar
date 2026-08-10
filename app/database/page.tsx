@@ -1069,16 +1069,20 @@ function LeadActivity({
           ...conversationMessages.map((message) => message.raw_data),
           leadRaw,
         );
-        const latestInboundId = [...conversationMessages]
+        const latestInbound = [...conversationMessages]
           .reverse()
-          .find((message) => message.direction === "inbound")?.id;
+          .find((message) => message.direction === "inbound");
+        const latestInboundId = latestInbound?.id;
+        const latestInboundRaw = asObject(latestInbound?.raw_data);
+        const sentimentData = asObject(asObject(latestInboundRaw).reply_radar);
+        const sentiment = ["positive", "neutral", "negative"].includes(String(sentimentData.sentiment).toLowerCase()) ? String(sentimentData.sentiment).toLowerCase() : null;
         return (
           <section
             className="database-conversation-history"
             key={String(conversation.id)}
           >
             <header>
-              <h3>{campaign}</h3>
+              <h3>{campaign}{sentiment && <span className={`sentiment-badge sentiment-${sentiment}`}>{sentiment}</span>}</h3>
               <small>
                 {clientById.get(String(conversation.workspace_id)) || "Client"}{" "}
                 · {sender} · {when(conversation.last_message_at)}

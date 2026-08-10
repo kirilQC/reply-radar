@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { after } from "next/server";
 import { normalizePersonName } from "../../lib/person-name";
-import { classifyLatestReply } from "../../lib/reply-sentiment";
 type Row = Record<string, unknown>;
 
 async function query(url: string, key: string, path: string) {
@@ -280,22 +278,6 @@ export async function GET(request: Request) {
         messages: thread,
       };
     });
-    // Fire-and-forget: classify sentiment for conversations missing it (max 5 per page load)
-    const unanalyzed = result.filter((c) => !c.sentiment && c.replies > 0).slice(0, 5);
-    if (unanalyzed.length && url && key) {
-      after(async () => {
-        console.log(`[sentiment-backfill] Starting backfill for ${unanalyzed.length} conversations, ANTHROPIC_API_KEY present: ${!!process.env.ANTHROPIC_API_KEY}`);
-        for (const conv of unanalyzed) {
-          try {
-            await classifyLatestReply({ url, key }, String(conv.id), String(conv.clientSlug ?? ""));
-            console.log(`[sentiment-backfill] Classified conversation ${conv.id}`);
-          } catch (err) {
-            console.error(`[sentiment-backfill] Failed for ${conv.id}:`, err);
-          }
-        }
-      });
-    }
-
     return NextResponse.json({ ok: true, conversations: result });
   } catch (error) {
     return NextResponse.json(
