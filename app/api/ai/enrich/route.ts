@@ -1,0 +1,59 @@
+import { NextResponse } from "next/server";
+import { enrichLeadWithAiArk } from "../../../lib/ai-ark-enrichment";
+
+type Row = Record<string, unknown>;
+
+export async function POST(request: Request) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return NextResponse.json({ error: "Supabase not configured" }, { status: 503 });
+
+  const body = await request.json().catch(() => ({}));
+  const leadId = String(body.leadId ?? "");
+  if (!leadId) return NextResponse.json({ error: "leadId is required" }, { status: 400 });
+
+  try {
+    const response = await fetch(`${url}/rest/v1/rr_leads?select=id,workspace_id,linkedin_profile_url,company,raw_data&id=eq.${encodeURIComponent(leadId)}&limit=1`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Lead lookup failed: ${response.status}`);
+    const rows = (await response.json()) as Row[];
+    const lead = rows[0];
+    if (!lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+
+    const profileUrl = String(lead.linkedin_profile_url ?? "").trim();
+    if (!profileUrl) return NextResponse.json({ error: "Lead has no LinkedIn profile URL — enrichment requires one" }, { status: 400 });
+
+    const enrichment = await enrichLeadWithAiArk(
+      { url, key },
+      String(lead.workspace_id),
+      profileUrl,
+      String(lead.company ?? ""),
+    );
+
+    // Write enrichment to lead raw_data
+    const existingRaw = lead.raw_data && typeof lead.raw_data === "object" ? lead.raw_data as Row : {};
+    const replyRadar = existingRaw.reply_radar && typeof existingRaw.reply_radar === "object" ? existingRaw.reply_radar as Row : {};
+    await fetch(`${url}/rest/v1/rr_leads?id=eq.${encodeURIComponent(leadId)}`, {
+      method: "PATCH",
+      headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({
+        raw_data: {
+          ...existingRaw,
+          reply_radar: {
+            ...replyRadar,
+            ai_ark: enrichment,
+            enrichment_status: "enriched",
+            enrichment_error: null,
+          },
+        },
+      }),
+      cache: "no-store",
+    });
+
+    return NextResponse.json({ ok: true, enrichment: { headline: enrichment.headline, title: enrichment.title, company: enrichment.company } });
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Enrichment failed" }, { status: 502 });
+  }
+}

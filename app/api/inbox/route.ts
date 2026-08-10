@@ -62,6 +62,63 @@ const campaignFrom = (...values: unknown[]) => {
   }
   return {};
 };
+const computeFollowUp = (thread: { direction: string; sentAt: unknown; body: string }[], sentiment: string | null) => {
+  if (!thread.length) return { followUpUrgency: 0, followUpReason: null };
+  const now = Date.now();
+  const latest = thread[thread.length - 1];
+  const latestAt = new Date(String(latest.sentAt)).getTime();
+  const ageDays = (now - latestAt) / (1000 * 60 * 60 * 24);
+  const inboundMessages = thread.filter((m) => m.direction === "inbound");
+  const latestInbound = inboundMessages[inboundMessages.length - 1];
+  const latestInboundAt = latestInbound ? new Date(String(latestInbound.sentAt)).getTime() : 0;
+  const inboundAgeDays = latestInbound ? (now - latestInboundAt) / (1000 * 60 * 60 * 24) : Infinity;
+  const latestBody = String(latest.body || "").toLowerCase();
+  const latestInboundBody = latestInbound ? String(latestInbound.body || "").toLowerCase() : "";
+
+  // Skip negative sentiment — lead doesn't want to hear from us
+  if (sentiment === "negative") return { followUpUrgency: 0, followUpReason: null };
+
+  let urgency = 0;
+  let reason = "";
+
+  // Pattern: Lead replied positively but we haven't followed up
+  if (latest.direction === "inbound" && sentiment === "positive" && ageDays >= 1) {
+    urgency = Math.min(100, 70 + ageDays * 3);
+    reason = `Positive reply ${Math.floor(ageDays)}d ago — awaiting your follow-up.`;
+  }
+  // Pattern: Lead asked to be contacted later
+  else if (latestInboundBody.match(/later|next (month|quarter|year)|few months|circle back|reach out.*(later|again)|not (right )?now|bad time|busy/)) {
+    const delayDays = latestInboundBody.match(/next year/) ? 180 : latestInboundBody.match(/next quarter/) ? 60 : latestInboundBody.match(/next month|few months/) ? 30 : 14;
+    if (inboundAgeDays >= delayDays) {
+      urgency = Math.min(100, 60 + (inboundAgeDays - delayDays) * 2);
+      reason = `Said "${latestInboundBody.length > 60 ? latestInboundBody.slice(0, 57) + "…" : latestInboundBody}" ${Math.floor(inboundAgeDays)}d ago — window to re-engage.`;
+    }
+  }
+  // Pattern: No-show — they agreed to meet but went silent
+  else if (latestInboundBody.match(/sure|sounds good|let'?s do it|book|schedule|set up|calendar/) && ageDays >= 3) {
+    urgency = Math.min(100, 65 + ageDays * 2);
+    reason = `Agreed to meet ${Math.floor(inboundAgeDays)}d ago but went silent — possible no-show.`;
+  }
+  // Pattern: Neutral reply sitting unanswered
+  else if (latest.direction === "inbound" && sentiment === "neutral" && ageDays >= 2) {
+    urgency = Math.min(100, 40 + ageDays * 2);
+    reason = `Neutral reply ${Math.floor(ageDays)}d ago — opportunity to re-engage.`;
+  }
+  // Pattern: We sent outbound, no reply in 7+ days
+  else if (latest.direction === "outbound" && ageDays >= 7 && inboundMessages.length > 0) {
+    urgency = Math.min(100, 30 + ageDays);
+    reason = `No reply in ${Math.floor(ageDays)}d after your last message — consider a nudge.`;
+  }
+  // Pattern: Stale conversation with prior engagement
+  else if (inboundMessages.length > 0 && ageDays >= 14) {
+    urgency = Math.min(100, 25 + ageDays * 0.5);
+    reason = `Conversation went cold ${Math.floor(ageDays)}d ago after ${inboundMessages.length} replies — worth revisiting.`;
+  }
+
+  if (!reason) return { followUpUrgency: 0, followUpReason: null };
+  return { followUpUrgency: Math.round(urgency), followUpReason: reason };
+};
+
 const age = (value: unknown) => {
   const seconds = Math.max(
     0,
@@ -126,7 +183,13 @@ export async function GET(request: Request) {
     ]);
     const workspaceById = new Map(selected.map((row) => [String(row.id), row]));
     const leadById = new Map(leads.map((row) => [String(row.id), row]));
-    const result = conversations.map((conversation) => {
+    const result = conversations.filter((conversation) => {
+      // Exclude conversations where the lead initiated contact (first message is inbound)
+      const convoMessages = messages.filter((m) => m.conversation_id === conversation.id);
+      if (!convoMessages.length) return true;
+      const firstMessage = convoMessages[0];
+      return firstMessage.direction !== "inbound";
+    }).map((conversation) => {
       const lead = leadById.get(String(conversation.lead_id)) ?? {};
       const leadRaw =
         lead.raw_data && typeof lead.raw_data === "object"
@@ -163,6 +226,10 @@ export async function GET(request: Request) {
       const sentimentData = nested(latestInboundRaw, "reply_radar");
       const sentiment = ["positive", "neutral", "negative"].includes(String(sentimentData.sentiment).toLowerCase()) ? String(sentimentData.sentiment).toLowerCase() : null;
       const name = normalizePersonName(lead.name);
+      const { followUpUrgency, followUpReason } = computeFollowUp(
+        thread.map((m) => ({ direction: String(m.direction), sentAt: m.sentAt, body: String(m.body) })),
+        sentiment,
+      );
       const enrichmentCompany = nested(enrichment, "company");
       const companySummary = nested(enrichmentCompany, "summary");
       const positionGroups = Array.isArray(enrichment.positionGroups) ? enrichment.positionGroups : [];
@@ -205,6 +272,8 @@ export async function GET(request: Request) {
           .length,
         avatar: "#3c365e",
         sentiment,
+        followUpUrgency,
+        followUpReason,
         messages: thread,
       };
     });

@@ -39,6 +39,8 @@ type Lead = {
   industry?: unknown;
   enrichedLocation?: unknown;
   sentiment?: string | null;
+  followUpUrgency?: number;
+  followUpReason?: string | null;
   lastMessageAt?: string | null;
   latestReplyAt?: string | null;
   messages: Array<{
@@ -78,7 +80,7 @@ type AnalyticsSnapshot = {
 };
 type QuickTemplate = { id: string; name: string; value: string };
 const defaultLayout: LayoutPrefs = {
-  order: ["metrics", "analytics", "queue"],
+  order: ["metrics", "queue", "analytics"],
   showMetrics: true,
   showAnalytics: true,
   showDetail: true,
@@ -298,6 +300,8 @@ export function InboxPage() {
   const [aiReason, setAiReason] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "" });
+  const [enriching, setEnriching] = useState(false);
+  const [enrichResult, setEnrichResult] = useState("");
   const [workspaceDirectory, setWorkspaceDirectory] = useState<
     Array<{
       name: string;
@@ -699,9 +703,13 @@ export function InboxPage() {
       addButton?.removeEventListener("click", addHandler);
     };
   }, [leads]);
-  const filtered = useMemo(
-    () =>
-      leads
+  const filtered = useMemo(() => {
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const dayOfWeek = now.getDay(); // 0 = Sunday
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(weekStart.getDate() - dayOfWeek); // back to Sunday
+      return leads
         .filter(
           (lead) =>
             (!search ||
@@ -710,15 +718,30 @@ export function InboxPage() {
                 .includes(search.toLowerCase())) &&
             (!assignedClients || assignedClients.includes(lead.client)) &&
             !excludedClients.includes(lead.client) &&
-            (filter === "All follow-ups" ||
-              (filter === "Starred"
-                ? layoutPrefs.starredLeadIds.includes(
-                    String(lead.leadId || lead.id),
-                  )
-                : lead.tier === filter.toLowerCase())),
+            (() => {
+              if (filter === "All follow-ups") return true;
+              if (filter === "Starred") return layoutPrefs.starredLeadIds.includes(String(lead.leadId || lead.id));
+              if (filter === "today") {
+                const replyAt = new Date(String(lead.latestReplyAt || lead.lastMessageAt));
+                return replyAt >= todayStart;
+              }
+              if (filter === "week") {
+                const replyAt = new Date(String(lead.latestReplyAt || lead.lastMessageAt));
+                return replyAt >= weekStart;
+              }
+              if (filter === "follow-ups") {
+                return (lead.followUpUrgency ?? 0) > 0;
+              }
+              if (["Hot", "Warm", "Nurture"].includes(filter)) return lead.tier === filter.toLowerCase();
+              return true;
+            })(),
         )
-        .sort((a, b) =>
-          sort === "newest"
+        .sort((a, b) => {
+          if (filter === "follow-ups") {
+            // Sort by urgency score descending — most urgent first
+            return (b.followUpUrgency ?? 0) - (a.followUpUrgency ?? 0);
+          }
+          return sort === "newest"
             ? new Date(String(b.lastMessageAt)).getTime() -
               new Date(String(a.lastMessageAt)).getTime()
             : sort === "oldest"
@@ -726,8 +749,9 @@ export function InboxPage() {
                 new Date(String(b.lastMessageAt)).getTime()
               : sort === "name"
                 ? a.name.localeCompare(b.name)
-                : b.score - a.score,
-        ),
+                : b.score - a.score;
+        });
+    },
     [
       leads,
       search,
@@ -810,10 +834,21 @@ export function InboxPage() {
     }
     setAiLoading(false);
   };
+  const retryEnrichment = async () => {
+    if (!current.leadId || enriching) return;
+    setEnriching(true);
+    setEnrichResult("");
+    const response = await fetch("/api/ai/enrich", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId: current.leadId }) }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    setEnriching(false);
+    setEnrichResult(response?.ok ? "Enriched successfully — reload to see updates" : String(payload?.error ?? "Enrichment failed"));
+    setTimeout(() => setEnrichResult(""), 5000);
+  };
   useEffect(() => {
     setAiDraft("");
     setAiReason("");
     setTemplatesOpen(false);
+    setEnrichResult("");
     if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "" }); return; }
     let cancelled = false;
     fetch(`/api/client-resources?workspace=${encodeURIComponent(selectedWorkspaceSlug)}`, { cache: "no-store" })
@@ -1210,53 +1245,44 @@ export function InboxPage() {
                   </h2>
                 </div>
                 <div className="queue-tools">
-                  <label className="search queue-search">
+                  <label className="search queue-search queue-search-wide">
                     <Icon name="search" />
                     <input
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
-                      placeholder="Search leads, companies…"
+                      placeholder="Search leads, companies, campaigns…"
                     />
                   </label>
-                  <div className="heading-actions inbox-actions">
-                    <button className="secondary-button">
-                      Export <span>↓</span>
-                    </button>
-                  </div>
                   <div className="segmented">
                     {[
-                      "All follow-ups",
-                      "Starred",
-                      "Hot",
-                      "Warm",
-                      "Nurture",
-                    ].map((f) => (
+                      ["Today", "today"],
+                      ["This week", "week"],
+                      ["All replies", "All follow-ups"],
+                      ["Follow-ups", "follow-ups"],
+                    ].map(([label, value]) => (
                       <button
-                        key={f}
-                        className={filter === f ? "selected" : ""}
-                        onClick={() => setFilter(f)}
+                        key={value}
+                        className={filter === value ? "selected" : ""}
+                        onClick={() => { setFilter(value); setSelected(0); }}
                       >
-                        {f}
-                        {f === "Hot" && analytics?.queueMix?.hot ? (
-                          <b>{analytics.queueMix.hot}</b>
-                        ) : null}
+                        {label}
                       </button>
                     ))}
                   </div>
                   <select
                     className="filter-button"
-                    aria-label="Filter conversations"
-                    value={filter}
+                    aria-label="Filter by tier"
+                    value={["Starred", "Hot", "Warm", "Nurture"].includes(filter) ? filter : ""}
                     onChange={(event) => {
-                      setFilter(event.target.value);
+                      setFilter(event.target.value || "All follow-ups");
                       setSelected(0);
                     }}
                   >
-                    <option>All follow-ups</option>
-                    <option>Starred</option>
-                    <option>Hot</option>
-                    <option>Warm</option>
-                    <option>Nurture</option>
+                    <option value="">Tier filter</option>
+                    <option value="Starred">Starred</option>
+                    <option value="Hot">Hot</option>
+                    <option value="Warm">Warm</option>
+                    <option value="Nurture">Nurture</option>
                   </select>
                   <select
                     className="filter-button"
@@ -1272,6 +1298,11 @@ export function InboxPage() {
                     <option value="oldest">Sort: Oldest</option>
                     <option value="name">Sort: Name</option>
                   </select>
+                  <div className="heading-actions inbox-actions">
+                    <button className="secondary-button">
+                      Export <span>↓</span>
+                    </button>
+                  </div>
                 </div>
               </div>
               <div
@@ -1372,6 +1403,9 @@ export function InboxPage() {
                           }
                         </span>
                         {lead.sentiment && <span className={`sentiment-badge sentiment-${lead.sentiment}`}>{lead.sentiment}</span>}
+                        {filter === "follow-ups" && lead.followUpReason && (
+                          <span className="follow-up-reason">{lead.followUpReason}</span>
+                        )}
                       </div>
                       <div className="inbox-meta-cell sender-cell">
                         <strong>{lead.senderName}</strong>
@@ -1383,10 +1417,10 @@ export function InboxPage() {
                         <strong>0</strong>
                       </div>
                       <div className="score-cell follow-up-score-cell">
-                        <span className={`score-pill ${lead.tier}`}>
-                          {lead.followUpScore ?? lead.score}
+                        <span className={`score-pill ${filter === "follow-ups" && lead.followUpUrgency ? "hot" : lead.tier}`}>
+                          {filter === "follow-ups" ? (lead.followUpUrgency ?? 0) : (lead.followUpScore ?? lead.score)}
                         </span>
-                        <span className="tier-label">{lead.tier}</span>
+                        <span className="tier-label">{filter === "follow-ups" ? "urgency" : lead.tier}</span>
                       </div>
                       <div className="row-star-cell">
                         <button
@@ -1512,7 +1546,8 @@ export function InboxPage() {
                         {current.replies} replies
                       </span>
                       {current.sentiment && <span className={`sentiment-badge sentiment-${current.sentiment}`}>{current.sentiment}</span>}
-                      {!current.enriched && <span className="tag-outline not-enriched">Not enriched</span>}
+                      {!current.enriched && <button className="tag-outline not-enriched retry-enrich-button" onClick={retryEnrichment} disabled={enriching}>{enriching ? "Enriching…" : "Not enriched · Retry"}</button>}
+                      {enrichResult && <span className="tag-outline">{enrichResult}</span>}
                     </div>
                     {Boolean(current.headline || current.industry) && (
                       <p className="enrichment-summary">
@@ -1534,6 +1569,16 @@ export function InboxPage() {
                       <p>{aiLoading ? "Anthropic is reviewing this conversation…" : aiReason || current.reason}</p>
                     </div>
                   </div>
+                  {current.followUpReason && (
+                    <div className="reason-box follow-up-reason-box">
+                      <span className="reason-icon">⏰</span>
+                      <div>
+                        <small>FOLLOW-UP RECOMMENDED</small>
+                        <p>{current.followUpReason}</p>
+                        <small className="follow-up-urgency">Urgency: {current.followUpUrgency ?? 0}/100</small>
+                      </div>
+                    </div>
+                  )}
                   <div className="thread">
                     {current.messages.length ? (
                       current.messages.map((message) => (
