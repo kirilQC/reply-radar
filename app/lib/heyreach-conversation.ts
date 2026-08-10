@@ -45,8 +45,18 @@ function campaignFrom(value: unknown) {
     }
     if (typeof current !== "object") return null;
     const row = current as JsonObject;
-    const directName = text(first(row, ["campaignName", "campaign_name", "campaignTitle", "campaign_title"]));
-    const directId = text(first(row, ["campaignId", "campaign_id"]));
+    const scalarEntries = Object.entries(row).filter(([, child]) => child == null || ["string", "number"].includes(typeof child));
+    const campaignScalar = (suffixes: string[]) => {
+      const match = scalarEntries.find(([key]) => {
+        const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+        return suffixes.some((suffix) => normalized.endsWith(suffix));
+      });
+      return text(match?.[1]);
+    };
+    // HeyReach also exposes attribution as autoTagCampaignName / auto-tag
+    // campaign fields, rather than only under a `campaign` object.
+    const directName = text(first(row, ["campaignName", "campaign_name", "campaignTitle", "campaign_title"])) || campaignScalar(["campaignname", "campaigntitle"]);
+    const directId = text(first(row, ["campaignId", "campaign_id"])) || campaignScalar(["campaignid"]);
     if (directName) return { id: directId, name: directName };
     if (directId && !fallback.id) fallback = { id: directId, name: "" };
     for (const [key, child] of Object.entries(row)) {
@@ -192,6 +202,6 @@ export async function fetchFullConversation(apiKey: string, payload: JsonObject)
     id: text(first(suppliedCampaign, ["id", "campaignId", "campaign_id"])),
     name: text(first(suppliedCampaign, ["name", "title", "campaignName", "campaign_name"])),
   };
-  const resolvedCampaign = webhookCampaign.name ? webhookCampaign : campaignFrom([conversation, historyPayload]);
+  const resolvedCampaign = webhookCampaign.name ? webhookCampaign : campaignFrom([payload, conversation, historyPayload]);
   return { conversationExternalId, messages: mergeConversationMessages(history, recent), sender: resolvedSender, fetchedAt: new Date().toISOString(), conversationSummary: conversation, campaign: resolvedCampaign };
 }
