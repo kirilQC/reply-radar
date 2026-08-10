@@ -300,8 +300,6 @@ export function InboxPage() {
   const [aiReason, setAiReason] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "" });
-  const [enriching, setEnriching] = useState(false);
-  const [enrichResult, setEnrichResult] = useState("");
   const [workspaceDirectory, setWorkspaceDirectory] = useState<
     Array<{
       name: string;
@@ -813,7 +811,14 @@ export function InboxPage() {
     .reverse()
     .find((message) => message.direction !== "outbound")?.id;
   useEffect(() => {
-    requestAnimationFrame(() => threadEndRef.current?.scrollIntoView({ behavior: "instant" }));
+    if (current.id === "empty") return;
+    requestAnimationFrame(() => {
+      const el = threadEndRef.current;
+      if (!el) return;
+      // Scroll only the thread container, not the whole page
+      const container = el.closest(".thread");
+      if (container) container.scrollTop = container.scrollHeight;
+    });
   }, [current.id]);
   const selectedWorkspaceSlug = current.clientSlug || clientParam || "";
   const generateAiReview = async (ai = workspaceAi) => {
@@ -834,21 +839,10 @@ export function InboxPage() {
     }
     setAiLoading(false);
   };
-  const retryEnrichment = async () => {
-    if (!current.leadId || enriching) return;
-    setEnriching(true);
-    setEnrichResult("");
-    const response = await fetch("/api/ai/enrich", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId: current.leadId }) }).catch(() => null);
-    const payload = await response?.json().catch(() => ({}));
-    setEnriching(false);
-    setEnrichResult(response?.ok ? "Enriched successfully — reload to see updates" : String(payload?.error ?? "Enrichment failed"));
-    setTimeout(() => setEnrichResult(""), 5000);
-  };
   useEffect(() => {
     setAiDraft("");
     setAiReason("");
     setTemplatesOpen(false);
-    setEnrichResult("");
     if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "" }); return; }
     let cancelled = false;
     fetch(`/api/client-resources?workspace=${encodeURIComponent(selectedWorkspaceSlug)}`, { cache: "no-store" })
@@ -1546,8 +1540,6 @@ export function InboxPage() {
                         {current.replies} replies
                       </span>
                       {current.sentiment && <span className={`sentiment-badge sentiment-${current.sentiment}`}>{current.sentiment}</span>}
-                      {!current.enriched && <button className="tag-outline not-enriched retry-enrich-button" onClick={retryEnrichment} disabled={enriching}>{enriching ? "Enriching…" : "Not enriched · Retry"}</button>}
-                      {enrichResult && <span className="tag-outline">{enrichResult}</span>}
                     </div>
                     {Boolean(current.headline || current.industry) && (
                       <p className="enrichment-summary">

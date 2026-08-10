@@ -792,7 +792,7 @@ function AuditView() {
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const isWorkspaceSync = (event: AuditEvent) => event.severity === "success" && (event.action.includes("workspace") || event.action.includes("heartbeat") || event.action.includes("sync")) && event.source === "worker";
+  const isWorkspaceSync = (event: AuditEvent) => event.severity === "success" && (event.action.includes("workspace") || event.action.includes("heartbeat") || event.action.includes("sync")) && event.sourceKey === "worker";
   const groupedEvents: GroupedItem[] = useMemo(() => {
     const items: GroupedItem[] = [];
     let syncBuffer: AuditEvent[] = [];

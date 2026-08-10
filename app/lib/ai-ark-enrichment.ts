@@ -223,7 +223,6 @@ export async function enrichLeadWithAiArk(
         started_at: startedAt,
         records_seen: 1,
         records_written: 0,
-        metadata: { attempt, max_attempts: 5, profile_url: profileUrl },
       }),
     })) as JsonObject[];
     const runId = text(rows?.[0]?.id);

@@ -730,6 +730,9 @@ function LeadOverview({ detail }: { detail: Detail }) {
           <ReadableTags title="HeyReach tags" items={raw.tags.map(String)} />
         )}
       </section>
+      {Object.keys(enrichment).length === 0 && String(detail.lead.id ?? "") !== "" && (
+        <RetryEnrichmentButton leadId={String(detail.lead.id)} />
+      )}
       {Object.keys(enrichment).length > 0 && (
         <section>
           <h3>Professional profile</h3>
@@ -816,6 +819,29 @@ function LeadOverview({ detail }: { detail: Detail }) {
         </section>
       )}
     </div>
+  );
+}
+
+function RetryEnrichmentButton({ leadId }: { leadId: string }) {
+  const [enriching, setEnriching] = useState(false);
+  const [result, setResult] = useState("");
+  const retry = async () => {
+    if (enriching) return;
+    setEnriching(true);
+    setResult("");
+    const response = await fetch("/api/ai/enrich", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId }) }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    setEnriching(false);
+    setResult(response?.ok ? "Enriched successfully — reload to see updates." : String(payload?.error ?? "Enrichment failed."));
+    if (response?.ok) setTimeout(() => setResult(""), 5000);
+  };
+  return (
+    <section>
+      <h3>Enrichment</h3>
+      <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: 11 }}>This lead has not been enriched yet. Click below to pull their LinkedIn profile data.</p>
+      <button className="retry-enrich-button" onClick={retry} disabled={enriching}>{enriching ? "Enriching…" : "Retry enrichment"}</button>
+      {result && <p style={{ marginTop: 8, fontSize: 10, color: result.includes("success") ? "var(--green)" : "var(--coral)" }}>{result}</p>}
+    </section>
   );
 }
 
