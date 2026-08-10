@@ -21,6 +21,14 @@ export async function POST(request: Request) {
     return String(lead.full_name ?? lead.fullName ?? "").trim() === "Natalie Davis";
   });
   if (!workspace || !event) return NextResponse.json({ ok: false, error: "The exact Bluevia/Natalie webhook could not be found." }, { status: 404 });
+  const eventLead = object(object(event).raw && object(object(event).raw).lead);
+  const campaignResponse = await fetch("https://api.heyreach.io/api/public/campaign/GetCampaignsForLead", {
+    method: "POST",
+    headers: { "X-API-KEY": String(object(workspace).heyreach_api_key_ciphertext ?? ""), accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ profileUrl: eventLead.profile_url ?? eventLead.profileUrl, offset: 0, limit: 100 }),
+    cache: "no-store",
+  });
+  const campaignLookup = await campaignResponse.json().catch(() => null);
   const result = await ingestHeyReachWebhook({ url, key }, workspace, object(event).raw as Row);
-  return NextResponse.json({ ok: true, eventId: object(event).id, result });
+  return NextResponse.json({ ok: true, eventId: object(event).id, campaignLookupStatus: campaignResponse.status, campaignLookup, result });
 }
