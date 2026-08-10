@@ -45,25 +45,19 @@ Reply with exactly one word: positive, neutral, or negative.`;
 
 async function getConfiguredPrompt(config: SupabaseConfig, workspaceId?: string): Promise<string> {
   try {
-    // Try workspace-specific prompt first
+    // Try workspace's custom_system_prompt first
     if (workspaceId) {
       const response = await fetch(
-        `${config.url}/rest/v1/rr_global_config?select=value&key=eq.sentiment_prompt_${encodeURIComponent(workspaceId)}&limit=1`,
+        `${config.url}/rest/v1/rr_workspaces?select=custom_system_prompt&slug=eq.${encodeURIComponent(workspaceId)}&limit=1`,
         { headers: { apikey: config.key, Authorization: `Bearer ${config.key}` }, cache: "no-store" },
       );
       if (response.ok) {
         const rows = await response.json().catch(() => []);
-        if (Array.isArray(rows) && rows.length && rows[0].value) return String(rows[0].value);
+        if (Array.isArray(rows) && rows.length && rows[0].custom_system_prompt) {
+          // Workspace has a custom prompt — prepend the sentiment classification rules
+          return `${DEFAULT_SENTIMENT_PROMPT}\n\nAdditional client-specific context:\n${String(rows[0].custom_system_prompt)}`;
+        }
       }
-    }
-    // Fall back to global prompt
-    const response = await fetch(
-      `${config.url}/rest/v1/rr_global_config?select=value&key=eq.sentiment_prompt&limit=1`,
-      { headers: { apikey: config.key, Authorization: `Bearer ${config.key}` }, cache: "no-store" },
-    );
-    if (response.ok) {
-      const rows = await response.json().catch(() => []);
-      if (Array.isArray(rows) && rows.length && rows[0].value) return String(rows[0].value);
     }
   } catch { /* use default */ }
   return DEFAULT_SENTIMENT_PROMPT;

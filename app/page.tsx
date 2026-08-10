@@ -305,7 +305,7 @@ export function InboxPage() {
   const [aiDraft, setAiDraft] = useState("");
   const [aiReason, setAiReason] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
-  const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "" });
+  const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "", id: "" });
   const [workspaceDirectory, setWorkspaceDirectory] = useState<
     Array<{
       name: string;
@@ -846,7 +846,7 @@ export function InboxPage() {
     const response = await fetch("/api/ai/draft", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId: current.id, workspaceId: selectedWorkspaceSlug, workspaceName: current.client, thread: current.messages, instruction: `Use the entire conversation. Write in a natural, concise business tone. Do not invent facts, promises, links, or meeting times.${ai.brief ? ` Client context: ${ai.brief}` : ""}` }),
+      body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId: current.id, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, campaignName: current.campaignName || undefined, thread: current.messages, instruction: ai.brief ? `Client context: ${ai.brief}` : "" }),
     }).catch(() => null);
     const payload = await response?.json().catch(() => ({}));
     if (response?.ok) {
@@ -862,7 +862,7 @@ export function InboxPage() {
     setAiDraft("");
     setAiReason("");
     setTemplatesOpen(false);
-    if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "" }); return; }
+    if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "", id: "" }); return; }
     let cancelled = false;
     fetch(`/api/client-resources?workspace=${encodeURIComponent(selectedWorkspaceSlug)}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
@@ -870,7 +870,7 @@ export function InboxPage() {
         if (cancelled || !payload?.workspace) return;
         setMessagingDocUrl(String(payload.workspace.messagingDocUrl ?? ""));
         setQuickTemplates(Array.isArray(payload.workspace.quickTemplates) ? payload.workspace.quickTemplates : []);
-        const ai = { model: String(payload.workspace.model ?? ""), brief: String(payload.workspace.brief ?? ""), systemPrompt: String(payload.workspace.systemPrompt ?? "") };
+        const ai = { model: String(payload.workspace.model ?? ""), brief: String(payload.workspace.brief ?? ""), systemPrompt: String(payload.workspace.systemPrompt ?? ""), id: String(payload.workspace.id ?? "") };
         setWorkspaceAi(ai);
         void generateAiReview(ai);
       }).catch(() => null);
@@ -1324,10 +1324,11 @@ export function InboxPage() {
                       </button>
                       {filterDropdownOpen && (
                         <div className="unified-filter-dropdown">
+                          <button className={`uf-item ${filter === "Starred" ? "uf-active" : ""}`} onMouseEnter={() => setFilterSub(null)} onClick={() => { setFilter(filter === "Starred" ? "All follow-ups" : "Starred"); setSelected(0); }}>Starred {filter === "Starred" ? "✓" : ""}</button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("campaign")}>Campaign {campaignFilter ? `· ${campaignFilter.slice(0, 20)}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sender")}>Sender {senderFilter ? `· ${senderFilter.slice(0, 20)}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sentiment")}>Sentiment {sentimentFilter ? `· ${sentimentFilter}` : ""}<b>›</b></button>
-                          <button className="uf-item" onMouseEnter={() => setFilterSub("tier")}>Tier {["Starred", "Hot", "Warm", "Nurture"].includes(filter) ? `· ${filter}` : ""}<b>›</b></button>
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("tier")}>Tier {["Hot", "Warm", "Nurture"].includes(filter) ? `· ${filter}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sort")}>Sort {sort !== "score-desc" ? `· ${sort}` : ""}<b>›</b></button>
                           <div className="uf-divider" />
                           <button className="uf-item uf-clear" onClick={() => { setCampaignFilter(""); setSenderFilter(""); setSentimentFilter(""); setSort("score-desc"); setFilter("All follow-ups"); setFilterDropdownOpen(false); setSelected(0); }}>Clear all filters</button>
@@ -1357,8 +1358,8 @@ export function InboxPage() {
                           )}
                           {filterSub === "tier" && (
                             <div className="unified-filter-sub">
-                              <button className={`uf-sub-item ${!["Starred", "Hot", "Warm", "Nurture"].includes(filter) ? "uf-active" : ""}`} onClick={() => { setFilter("All follow-ups"); setSelected(0); }}>All tiers</button>
-                              {["Starred", "Hot", "Warm", "Nurture"].map((t) => (
+                              <button className={`uf-sub-item ${!["Hot", "Warm", "Nurture"].includes(filter) ? "uf-active" : ""}`} onClick={() => { setFilter("All follow-ups"); setSelected(0); }}>All tiers</button>
+                              {["Hot", "Warm", "Nurture"].map((t) => (
                                 <button key={t} className={`uf-sub-item ${filter === t ? "uf-active" : ""}`} onClick={() => { setFilter(t); setSelected(0); }}>{t}</button>
                               ))}
                             </div>
