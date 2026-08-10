@@ -170,7 +170,7 @@ export async function classifyLatestReply(
     return;
   }
 
-  await fetch(
+  const patchResponse = await fetch(
     `${config.url}/rest/v1/rr_messages?id=eq.${encodeURIComponent(String(latestInbound.id))}`,
     {
       method: "PATCH",
@@ -191,6 +191,7 @@ export async function classifyLatestReply(
       cache: "no-store",
     },
   );
+  console.log(`[sentiment] PATCH message ${latestInbound.id} → ${sentiment}, status=${patchResponse.status}`);
 
   void writeAuditEvent(config, {
     actor: "anthropic",
