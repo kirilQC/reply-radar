@@ -7,7 +7,10 @@ export async function POST(request: Request) {
   const thread = Array.isArray(body.thread) ? body.thread : [];
   const instruction = typeof body.instruction === "string" ? body.instruction : "";
   const mode = body.mode === "analyze" ? "analyze" : "draft";
-  const model = typeof body.model === "string" && body.model ? body.model : process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-latest";
+  const DEFAULT_MODEL = "claude-haiku-4-5-latest";
+  const DEPRECATED = new Set(["claude-3-5-haiku-latest", "claude-3-5-haiku-20241022", "claude-3-haiku-20240307", "claude-3-5-sonnet-latest", "claude-3-5-sonnet-20241022"]);
+  const requestedModel = typeof body.model === "string" && body.model ? body.model : process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
+  const model = DEPRECATED.has(requestedModel) ? DEFAULT_MODEL : requestedModel;
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
