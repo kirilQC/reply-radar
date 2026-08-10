@@ -174,6 +174,7 @@ export async function GET(request: Request) {
         profileUrl: lead.linkedin_profile_url ?? lead.profile_url ?? null,
         photoUrl: enrichment.profilePhotoSource ?? enrichment.profilePhotoUrl ?? null,
         companyPhotoUrl: enrichment.companyPhotoSource ?? enrichment.companyPhotoUrl ?? null,
+        enriched: Object.keys(enrichment).length > 0,
         headline: enrichment.headline ?? null,
         enrichedLocation: enrichment.location ?? null,
         industry: enrichment.industry ?? null,
@@ -183,7 +184,7 @@ export async function GET(request: Request) {
         clientTone: String(workspace.accent_color || "#8b7cff"),
         clientLogoUrl: workspace.logo_url ?? null,
         senderName,
-        leadScore: null,
+        leadScore: 0,
         followUpScore: Number(conversation.score || 0),
         score: Number(conversation.score || 0),
         tier: ["hot", "warm", "nurture"].includes(String(conversation.tier))

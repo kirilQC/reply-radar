@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { ingestHeyReachWebhook } from "../../../../lib/heyreach-ingestion";
 import { isHeyReachValidationPayload } from "../../../../lib/heyreach-conversation";
+import { classifyLatestReply } from "../../../../lib/reply-sentiment";
 
 const ready = (workspaceId: string) => NextResponse.json({ ok: true, webhook: "ready", workspace: workspaceId });
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -39,6 +40,7 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
       return NextResponse.json({ ok: true, validation: true, workspace: workspaceId, history: "skipped_for_synthetic_test" }, { status: 200 });
     }
     const result = await ingestHeyReachWebhook({ url, key }, workspace, payload as Record<string, unknown>);
+    after(() => classifyLatestReply({ url, key }, result.conversationId).catch(() => undefined));
     console.info("heyreach_webhook_processed", { workspaceId, ...result });
     return NextResponse.json({ ok: true, ...result }, { status: 200 });
   } catch (error) { return NextResponse.json({ ok: false, stage: "unexpected", error: error instanceof Error ? error.message : "Webhook processing failed" }, { status: 502 }); }

@@ -11,6 +11,7 @@ const items = [
   ["/database", "Database", "database"],
   ["/profiles", "Profiles", "profiles"],
   ["/analytics", "Analytics", "analytics"],
+  ["/reports", "Reports", "reports"],
   ["/health", "System health", "health"],
   ["/admin", "Configuration", "settings"],
 ] as const;
@@ -19,6 +20,7 @@ const iconPaths: Record<string, string> = {
   profiles: "M16 20a4 4 0 0 0-8 0 M12 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6",
   calendar: "M5 4v3m14-3v3M4 9h16M6 6h12a2 2 0 0 1 2 2v10H4V8a2 2 0 0 1 2-2",
   analytics: "M5 19V9m5 10V5m5 14v-7m5 7V3",
+  reports: "M6 3h9l3 3v15H6z M15 3v4h4 M9 12h6 M9 16h6",
   health: "M4 12h3l2-6 4 12 2-6h5",
   inbox: "M4 5h16v14H4z M4 9h5l1.5 2h3L15 9h5",
   settings: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7",

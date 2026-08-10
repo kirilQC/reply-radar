@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./feature-overrides.css";
 import "./dashboard.css";
 import "./inbox-analytics.css";
 import "./reply-radar-overrides.css";

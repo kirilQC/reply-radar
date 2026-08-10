@@ -35,6 +35,7 @@ type Lead = {
   campaignName?: string | null;
   headline?: string | null;
   companyPhotoUrl?: string | null;
+  enriched?: boolean;
   industry?: unknown;
   enrichedLocation?: unknown;
   lastMessageAt?: string | null;
@@ -71,6 +72,8 @@ type AnalyticsSnapshot = {
   trend: number[];
   queueMix: { hot: number; warm: number; nurture: number };
   clientLoad: Array<{ name: string; leads: number }>;
+  averageResponseMinutes?: number | null;
+  campaignAverages?: { replyRate: number; acceptanceRate: number; positiveReplyRate: number };
 };
 type QuickTemplate = { id: string; name: string; value: string };
 const defaultLayout: LayoutPrefs = {
@@ -79,7 +82,7 @@ const defaultLayout: LayoutPrefs = {
   showAnalytics: true,
   showDetail: true,
   compact: false,
-  metrics: ["needsAction", "hotConversations", "avgReplyTime", "pipelineSaved"],
+  metrics: ["avgRepliesCampaign", "acceptanceRate", "positiveRate", "totalReplies"],
   graphs: [
     {
       id: "reply-volume",
@@ -97,6 +100,12 @@ const defaultLayout: LayoutPrefs = {
   paneSplit: 62,
   starredLeadIds: [],
 };
+const clientCampaignMetricIds = [
+  "avgRepliesCampaign",
+  "acceptanceRate",
+  "positiveRate",
+  "totalReplies",
+];
 const defaultAppearance: AppearancePrefs = {
   mode: "midnight",
   zoom: 100,
@@ -199,7 +208,7 @@ const metricCatalog = [
   },
   {
     id: "positiveRate",
-    label: "Positive reply rate",
+    label: "Average positive reply rate",
     value: "—",
     delta: "",
     tone: "green",
@@ -207,10 +216,18 @@ const metricCatalog = [
   },
   {
     id: "avgRepliesCampaign",
-    label: "Replies / campaign",
+    label: "Average reply rate",
     value: "—",
     delta: "",
     tone: "coral",
+    sub: "Awaiting synced data",
+  },
+  {
+    id: "acceptanceRate",
+    label: "Average acceptance rate",
+    value: "—",
+    delta: "",
+    tone: "amber",
     sub: "Awaiting synced data",
   },
 ];
@@ -461,6 +478,7 @@ export function InboxPage() {
           ).filter((item) =>
             ["metrics", "analytics", "queue"].includes(item),
           ) as LayoutPrefs["order"];
+          if (clientParam) nextLayout.metrics = clientCampaignMetricIds;
           setLayoutPrefs(nextLayout);
         }
         if (parsed?.appearance) {
@@ -486,6 +504,7 @@ export function InboxPage() {
           setLayoutPrefs((current) => ({
             ...current,
             ...payload.preferences.layout,
+            ...(clientParam ? { metrics: clientCampaignMetricIds } : {}),
             starredLeadIds: Array.isArray(
               payload.preferences.layout.starredLeadIds,
             )
@@ -722,6 +741,21 @@ export function InboxPage() {
     setSelected(0);
   }, [filter, search, sort, clientParam, profileParam]);
   const visibleLeads = filtered.slice(0, visibleLeadCount);
+  const liveMetric = (metric: (typeof metricCatalog)[number]) => {
+    const averages = analytics?.campaignAverages;
+    const values: Record<string, { value: string; sub: string }> = {
+      needsAction: { value: String(filtered.length), sub: "Live conversations in this queue" },
+      hotConversations: { value: String(analytics?.queueMix?.hot ?? 0), sub: "Currently marked hot" },
+      avgReplyTime: { value: analytics?.averageResponseMinutes == null ? "—" : `${analytics.averageResponseMinutes}m`, sub: "From outbound message to reply" },
+      pipelineSaved: { value: String(layoutPrefs.starredLeadIds.length), sub: "Starred leads saved" },
+      replyCount7d: { value: String(analytics?.replies7d ?? 0), sub: "Live inbound replies" },
+      totalReplies: { value: String(analytics?.totalReplies ?? 0), sub: "All stored inbound replies" },
+      positiveRate: { value: averages ? `${averages.positiveReplyRate.toFixed(1)}%` : "—", sub: "Positive replies ÷ accepted connections" },
+      avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", sub: "Average campaign reply rate" },
+      acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", sub: "Accepted connections ÷ requests sent" },
+    };
+    return { ...metric, ...(values[metric.id] ?? {}) };
+  };
   const toggleStar = (lead: Lead) => {
     const id = String(lead.leadId || lead.id);
     const starredLeadIds = layoutPrefs.starredLeadIds.includes(id)
@@ -1121,7 +1155,7 @@ export function InboxPage() {
                 const metric = metricCatalog.find(
                   (item) => item.id === metricId,
                 );
-                return metric ? <Metric key={metric.id} {...metric} /> : null;
+                return metric ? <Metric key={metric.id} {...liveMetric(metric)} /> : null;
               })}
             </div>
             <div
@@ -1287,11 +1321,7 @@ export function InboxPage() {
                           className="lead-avatar"
                           style={{ background: lead.avatar }}
                         >
-                          {lead.photoUrl ? (
-                            <img src={lead.photoUrl} alt="" />
-                          ) : (
-                            lead.initials
-                          )}
+                          <SafeAvatar src={lead.photoUrl} alt={lead.name} fallback={lead.initials} />
                         </div>
                         <div>
                           <strong>{lead.name}</strong>
@@ -1344,7 +1374,7 @@ export function InboxPage() {
                         <strong>{lead.replies}</strong>
                       </div>
                       <div className="inbox-meta-cell lead-score-cell">
-                        <span className="coming-soon">Coming soon</span>
+                        <strong>0</strong>
                       </div>
                       <div className="score-cell follow-up-score-cell">
                         <span className={`score-pill ${lead.tier}`}>
@@ -1410,11 +1440,7 @@ export function InboxPage() {
                         className="large-avatar"
                         style={{ background: current.avatar }}
                       >
-                        {current.photoUrl ? (
-                          <img src={current.photoUrl} alt="" />
-                        ) : (
-                          current.initials
-                        )}
+                        <SafeAvatar src={current.photoUrl} alt={current.name} fallback={current.initials} />
                       </div>
                       <div>
                         <div className="detail-name-line">
@@ -1479,6 +1505,7 @@ export function InboxPage() {
                       <span className="tag-outline">
                         {current.replies} replies
                       </span>
+                      {!current.enriched && <span className="tag-outline not-enriched">Not enriched</span>}
                     </div>
                     {Boolean(current.headline || current.industry) && (
                       <p className="enrichment-summary">
@@ -1509,11 +1536,7 @@ export function InboxPage() {
                         >
                           {message.direction !== "outbound" && (
                             <span>
-                              {current.photoUrl ? (
-                                <img src={current.photoUrl} alt="" />
-                              ) : (
-                                current.initials
-                              )}
+                              <SafeAvatar src={current.photoUrl} alt={current.name} fallback={current.initials} />
                             </span>
                           )}
                           <small className="message-author">
@@ -1573,6 +1596,11 @@ export function InboxPage() {
       </section>
     </main>
   );
+}
+function SafeAvatar({ src, alt, fallback }: { src?: string | null; alt: string; fallback: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  return src && !failed ? <img src={src} alt={alt} onError={() => setFailed(true)} /> : <>{fallback}</>;
 }
 function Metric({
   label,

@@ -396,7 +396,6 @@ export default function DatabasePage() {
             <strong>› Lead database</strong>
           </div>
           <div className="top-actions">
-            <div className="database-record-count">{leads.length} loaded</div>
             <GlobalAppearanceControl />
           </div>
         </header>
@@ -404,6 +403,7 @@ export default function DatabasePage() {
           <div className="database-heading">
             <div>
               <h1>Lead Database</h1>
+              <div className="database-record-count">{leads.length} loaded</div>
             </div>
             <div className="database-heading-actions"><button className="secondary-button" onClick={exportCsv} disabled={exporting}>{exporting ? "Exporting…" : "Export CSV ↓"}</button><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
           </div>
@@ -417,7 +417,7 @@ export default function DatabasePage() {
               />
             </label>
             <DatabaseDropdown label="Client" value={workspace} placeholder="All clients" options={workspaces.map((item) => ({ value: item.slug, label: item.name }))} onChange={chooseWorkspace} />
-            <DatabaseDropdown label="Sender" value={sender} placeholder={workspace ? "All senders" : "Choose a client first"} options={filterOptions.senders.map((name) => ({ value: name, label: name }))} onChange={setSender} disabled={!workspace} />
+            {workspace && <DatabaseDropdown label="Sender" value={sender} placeholder="All senders" options={filterOptions.senders.map((name) => ({ value: name, label: name }))} onChange={setSender} />}
             {workspace && <DatabaseDropdown label="Campaign" value={campaign} placeholder="All campaigns" options={filterOptions.campaigns.map((name) => ({ value: name, label: name }))} onChange={setCampaign} />}
             {workspace && <DatabaseDropdown label="Time range" value={timeRange} placeholder="All time" options={[{ value: "7d", label: "Last 7 days" }, { value: "14d", label: "Last 14 days" }, { value: "1m", label: "Last month" }, { value: "3m", label: "Last 3 months" }]} onChange={setTimeRange} />}
             {(workspace || search || sender || campaign || timeRange !== "all") && (

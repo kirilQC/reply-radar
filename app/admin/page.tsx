@@ -224,10 +224,9 @@ export default function AdminPage() {
       <section className="main-area">
         <main className={`admin-shell admin-theme-${themePreset}`}>
           <header className="admin-topbar">
-            <a className="admin-brand admin-back-link" href="/" aria-label="Back to dashboard">←</a>
-            <div className="admin-breadcrumb">
+            <div className="admin-breadcrumb admin-configuration-title">
               {active === "workspaces"
-                ? <>Client Directory {workspaceOpen && <><span>/</span> {client.name || "New workspace"}</>}</>
+                ? <>Configuration {workspaceOpen && <><span>/</span> {client.name || "New workspace"}</>}</>
                 : active === "ai"
                     ? "AI context"
                     : active === "scoring"

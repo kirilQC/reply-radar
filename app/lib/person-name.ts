@@ -39,7 +39,16 @@ export function normalizePersonName(value: unknown) {
     looksLikeCredential(suffix, true) ? "" : full,
   );
   const words = name.split(/\s+/).filter(Boolean);
-  while (words.length > 2 && looksLikeCredential(words.at(-1)!)) words.pop();
+  // Once a recognized credential starts a trailing suffix, discard the entire
+  // remaining credential chain. Providers frequently omit commas and include
+  // uncommon all-caps designations (for example "MD FACS FASMBS"). Keeping the
+  // first two words prevents a coincidental upper-case first or last name from
+  // ever being removed.
+  const credentialStart = words.findIndex(
+    (word, index) => index >= 2 && looksLikeCredential(word),
+  );
+  if (credentialStart >= 2) words.splice(credentialStart);
+  while (words.length > 2 && looksLikeCredential(words.at(-1)!, true)) words.pop();
   name = words.join(" ").replace(/\s+,/g, ",").trim();
 
   const letters = name.replace(/[^\p{L}]/gu, "");

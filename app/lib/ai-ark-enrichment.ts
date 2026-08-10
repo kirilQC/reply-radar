@@ -209,22 +209,25 @@ export async function enrichLeadWithAiArk(
     throw new Error(
       "AI Ark enrichment is enabled, but AI_ARK_API_KEY is not configured.",
     );
-  const startedAt = new Date().toISOString();
-  const rows = (await audit(config, "rr_sync_runs", {
-    method: "POST",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify({
-      workspace_id: workspaceId,
-      source: "ai_ark",
-      run_type: "lead_enrichment",
-      status: "running",
-      started_at: startedAt,
-      records_seen: 1,
-      records_written: 0,
-    }),
-  })) as JsonObject[];
-  const runId = text(rows?.[0]?.id);
-  try {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const startedAt = new Date().toISOString();
+    const rows = (await audit(config, "rr_sync_runs", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        source: "ai_ark",
+        run_type: "lead_enrichment",
+        status: "running",
+        started_at: startedAt,
+        records_seen: 1,
+        records_written: 0,
+        metadata: { attempt, max_attempts: 5, profile_url: profileUrl },
+      }),
+    })) as JsonObject[];
+    const runId = text(rows?.[0]?.id);
+    try {
     const response = await fetch(ENDPOINT, {
       method: "POST",
       headers: { "X-TOKEN": apiKey, "Content-Type": "application/json" },
@@ -233,7 +236,7 @@ export async function enrichLeadWithAiArk(
         page: 0,
         size: 10,
       }),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(4_000),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok)
@@ -277,21 +280,27 @@ export async function enrichLeadWithAiArk(
           records_written: 1,
         }),
       });
-    return result;
-  } catch (error) {
-    if (runId)
-      await audit(config, `rr_sync_runs?id=eq.${encodeURIComponent(runId)}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({
-          status: "failed",
-          finished_at: new Date().toISOString(),
-          error_text:
-            error instanceof Error
-              ? error.message.slice(0, 2_000)
-              : "AI Ark enrichment failed",
-        }),
-      }).catch(() => null);
-    throw error;
+      return result;
+    } catch (error) {
+      lastError = error;
+      if (runId)
+        await audit(config, `rr_sync_runs?id=eq.${encodeURIComponent(runId)}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({
+            status: "failed",
+            finished_at: new Date().toISOString(),
+            error_text:
+              error instanceof Error
+                ? error.message.slice(0, 2_000)
+                : "AI Ark enrichment failed",
+          }),
+        }).catch(() => null);
+      if (attempt < 5)
+        await new Promise((resolve) => setTimeout(resolve, attempt * 150));
+    }
   }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("AI Ark enrichment failed after five attempts.");
 }

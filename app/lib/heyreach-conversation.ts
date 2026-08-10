@@ -150,6 +150,40 @@ export function mergeConversationMessages(history: ConversationMessage[], recent
   return [...byFingerprint.values()].sort((a, b) => a.sentAt.localeCompare(b.sentAt));
 }
 
+export function conversationFromWebhook(payload: JsonObject): HistoryResult {
+  const sender = senderFromPayload(payload);
+  const lead = object(payload.lead);
+  const eventTimestamp = iso(payload.timestamp, new Date().toISOString());
+  const recentRows = Array.isArray(payload.recent_messages)
+    ? payload.recent_messages
+    : Array.isArray(payload.recentMessages)
+      ? payload.recentMessages
+      : [];
+  const suppliedCampaign = object(payload.campaign);
+  const campaign = {
+    id: text(first(suppliedCampaign, ["id", "campaignId", "campaign_id"])),
+    name: text(first(suppliedCampaign, ["name", "title", "campaignName", "campaign_name"])),
+  };
+  const conversationExternalId =
+    text(payload.conversation_id ?? payload.conversationId) ||
+    text(payload.correlation_id ?? payload.correlationId) ||
+    `webhook-${digest(`${text(lead.id)}|${text(lead.profile_url)}|${eventTimestamp}`)}`;
+  return {
+    conversationExternalId,
+    messages: normalizeHeyReachMessages(
+      recentRows,
+      sender.id,
+      sender,
+      eventTimestamp,
+      "webhook",
+    ),
+    sender,
+    fetchedAt: new Date().toISOString(),
+    conversationSummary: {},
+    campaign,
+  };
+}
+
 async function heyReach(apiKey: string, path: string, init: RequestInit) {
   const response = await fetch(`${apiBase.replace(/\/$/, "")}/${path.replace(/^\//, "")}`, {
     ...init,

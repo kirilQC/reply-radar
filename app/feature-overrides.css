@@ -1,0 +1,17 @@
+.not-enriched { color:#e7b96e; border-color:#7a5d30; background:#2b2318; }
+.admin-configuration-title { font-size:24px!important; font-weight:700!important; color:var(--text)!important; letter-spacing:-.03em; }
+.reports-shell { padding:48px; }
+.reports-shell h1 { font-size:44px; margin:0; }
+.database-heading .database-record-count { margin-top:5px; color:var(--muted); font-size:13px; font-weight:400; }
+.campaign-metrics-card { position:relative; margin-top:20px; }
+.campaign-metrics-list { display:grid; }
+.campaign-metrics-list>button { display:grid; grid-template-columns:minmax(240px,1fr) 140px 160px 24px; align-items:center; gap:16px; width:100%; padding:17px 4px; border-top:1px solid var(--border-soft); background:transparent; color:var(--text); text-align:left; }
+.campaign-metrics-list>button:hover { background:var(--panel-2); }
+.campaign-metrics-list span { display:flex; flex-direction:column; gap:4px; }
+.campaign-metrics-list small,.campaign-metrics-list data { color:var(--muted); font-size:12px; }
+.campaign-metrics-list b { color:var(--accent); font-size:20px; }
+.campaign-metric-detail { position:relative; margin-top:18px; padding:22px; border:1px solid var(--border); border-radius:10px; background:var(--panel-2); }
+.campaign-metric-detail h3 { font-size:24px; margin:0; }
+.campaign-metric-detail>p { color:var(--muted); margin:5px 0 18px; }
+.campaign-metric-detail>div { display:grid; grid-template-columns:repeat(4,minmax(130px,1fr)); gap:10px; }
+.campaign-detail-close { position:absolute; right:16px; top:12px; background:transparent; color:var(--muted); font-size:24px; }
