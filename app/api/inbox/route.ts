@@ -181,14 +181,33 @@ export async function GET(request: Request) {
           )
         : [],
     ]);
+    // Deduplicate messages: the refresh endpoint may have created duplicates with
+    // wrong direction. Keep the original (richer raw_data) and discard refresh dupes.
+    const deduped: Row[] = [];
+    const seen = new Map<string, number>();
+    for (const msg of messages) {
+      const fp = `${msg.conversation_id}|${new Date(String(msg.sent_at)).toISOString()}|${String(msg.body).trim()}`;
+      const existing = seen.get(fp);
+      if (existing !== undefined) {
+        // Keep the one whose raw_data has more content (original vs refresh stub)
+        const existingRaw = deduped[existing].raw_data;
+        const existingKeys = existingRaw && typeof existingRaw === "object" ? Object.keys(existingRaw) : [];
+        const currentRaw = msg.raw_data;
+        const currentKeys = currentRaw && typeof currentRaw === "object" ? Object.keys(currentRaw) : [];
+        if (currentKeys.length > existingKeys.length) deduped[existing] = msg;
+        continue;
+      }
+      seen.set(fp, deduped.length);
+      deduped.push(msg);
+    }
+
     const workspaceById = new Map(selected.map((row) => [String(row.id), row]));
     const leadById = new Map(leads.map((row) => [String(row.id), row]));
     const result = conversations.filter((conversation) => {
-      // Exclude conversations where the lead initiated contact (first message is inbound)
-      const convoMessages = messages.filter((m) => m.conversation_id === conversation.id);
+      // Exclude conversations where there are NO outbound messages at all (lead-initiated cold inbound)
+      const convoMessages = deduped.filter((m) => m.conversation_id === conversation.id);
       if (!convoMessages.length) return true;
-      const firstMessage = convoMessages[0];
-      return firstMessage.direction !== "inbound";
+      return convoMessages.some((m) => m.direction === "outbound");
     }).map((conversation) => {
       const lead = leadById.get(String(conversation.lead_id)) ?? {};
       const leadRaw =
@@ -199,7 +218,7 @@ export async function GET(request: Request) {
       const enrichment = nested(metadata, "ai_ark");
       const workspace =
         workspaceById.get(String(conversation.workspace_id)) ?? {};
-      const messageRows = messages.filter(
+      const messageRows = deduped.filter(
         (message) => message.conversation_id === conversation.id,
       );
       const newestRawMessages = [...messageRows]

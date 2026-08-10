@@ -1054,13 +1054,18 @@ function LeadActivity({
   return (
     <div className="database-activity">
       {detail.conversations.map((conversation) => {
-        const conversationMessages = detail.messages
+        const rawMessages = detail.messages
           .filter((message) => message.conversation_id === conversation.id)
           .sort(
             (a, b) =>
               new Date(String(a.sent_at)).getTime() -
               new Date(String(b.sent_at)).getTime(),
           );
+        // Deduplicate: collapse messages with identical body + timestamp
+        const conversationMessages = rawMessages.filter((message, index) => {
+          const fp = `${new Date(String(message.sent_at)).toISOString()}|${String(message.body).trim()}`;
+          return index === rawMessages.findIndex((m) => `${new Date(String(m.sent_at)).toISOString()}|${String(m.body).trim()}` === fp);
+        });
         const sender = senderNameFrom(
           ...conversationMessages.map((message) => message.raw_data),
           leadRaw,
