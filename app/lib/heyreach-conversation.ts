@@ -161,6 +161,37 @@ async function heyReach(apiKey: string, path: string, init: RequestInit) {
   return response.json().catch(() => null) as Promise<unknown>;
 }
 
+async function campaignForLead(apiKey: string, lead: JsonObject, eventTimestamp: string) {
+  try {
+    const response = await heyReach(apiKey, "campaign/GetCampaignsForLead", {
+      method: "POST",
+      body: JSON.stringify({
+        email: text(lead.email_address ?? lead.emailAddress),
+        linkedinId: text(lead.id ?? lead.linkedinId ?? lead.linkedin_id),
+        profileUrl: text(lead.profile_url ?? lead.profileUrl),
+        offset: 0,
+        limit: 100,
+      }),
+    });
+    const root = object(response);
+    const rows = Array.isArray(root.items) ? root.items.map(object) : Array.isArray(response) ? response.map(object) : [];
+    const eventTime = new Date(eventTimestamp).getTime();
+    const eligible = rows.filter((row) => {
+      const created = new Date(text(first(row, ["creationTime", "createdAt", "creation_time"]))).getTime();
+      return Number.isNaN(created) || Number.isNaN(eventTime) || created <= eventTime;
+    });
+    const selected = (eligible.length ? eligible : rows).sort((a, b) => {
+      const aTime = new Date(text(first(a, ["creationTime", "createdAt", "creation_time"]))).getTime() || 0;
+      const bTime = new Date(text(first(b, ["creationTime", "createdAt", "creation_time"]))).getTime() || 0;
+      return bTime - aTime;
+    })[0];
+    return selected ? campaignFrom(selected) : { id: "", name: "" };
+  } catch {
+    // Campaign attribution must never prevent a valid reply from being stored.
+    return { id: "", name: "" };
+  }
+}
+
 export async function fetchFullConversation(apiKey: string, payload: JsonObject): Promise<HistoryResult> {
   const sender = senderFromPayload(payload);
   const lead = object(payload.lead);
@@ -202,6 +233,11 @@ export async function fetchFullConversation(apiKey: string, payload: JsonObject)
     id: text(first(suppliedCampaign, ["id", "campaignId", "campaign_id"])),
     name: text(first(suppliedCampaign, ["name", "title", "campaignName", "campaign_name"])),
   };
-  const resolvedCampaign = webhookCampaign.name ? webhookCampaign : campaignFrom([payload, conversation, historyPayload]);
+  const embeddedCampaign = campaignFrom([payload, conversation, historyPayload]);
+  const resolvedCampaign = webhookCampaign.name
+    ? webhookCampaign
+    : embeddedCampaign.name
+      ? embeddedCampaign
+      : await campaignForLead(apiKey, lead, eventTimestamp);
   return { conversationExternalId, messages: mergeConversationMessages(history, recent), sender: resolvedSender, fetchedAt: new Date().toISOString(), conversationSummary: conversation, campaign: resolvedCampaign };
 }
