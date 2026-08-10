@@ -158,6 +158,10 @@ export async function GET(request: Request) {
       const latestReply = thread
         .filter((message) => message.direction === "inbound")
         .at(-1);
+      const latestInboundRow = [...messageRows].reverse().find((row) => row.direction === "inbound");
+      const latestInboundRaw = latestInboundRow?.raw_data && typeof latestInboundRow.raw_data === "object" ? latestInboundRow.raw_data as Row : {};
+      const sentimentData = nested(latestInboundRaw, "reply_radar");
+      const sentiment = ["positive", "neutral", "negative"].includes(String(sentimentData.sentiment).toLowerCase()) ? String(sentimentData.sentiment).toLowerCase() : null;
       const name = normalizePersonName(lead.name);
       const enrichmentCompany = nested(enrichment, "company");
       const companySummary = nested(enrichmentCompany, "summary");
@@ -200,6 +204,7 @@ export async function GET(request: Request) {
         replies: thread.filter((message) => message.direction === "inbound")
           .length,
         avatar: "#3c365e",
+        sentiment,
         messages: thread,
       };
     });

@@ -38,6 +38,7 @@ type Lead = {
   enriched?: boolean;
   industry?: unknown;
   enrichedLocation?: unknown;
+  sentiment?: string | null;
   lastMessageAt?: string | null;
   latestReplyAt?: string | null;
   messages: Array<{
@@ -312,6 +313,7 @@ export function InboxPage() {
   >([]);
   const paneGridRef = useRef<HTMLDivElement>(null);
   const paneSplitRef = useRef(defaultLayout.paneSplit);
+  const threadEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const scale = appearance.zoom / 100;
     const root = document.documentElement;
@@ -786,6 +788,9 @@ export function InboxPage() {
   const latestInboundMessageId = [...current.messages]
     .reverse()
     .find((message) => message.direction !== "outbound")?.id;
+  useEffect(() => {
+    requestAnimationFrame(() => threadEndRef.current?.scrollIntoView({ behavior: "instant" }));
+  }, [current.id]);
   const selectedWorkspaceSlug = current.clientSlug || clientParam || "";
   const generateAiReview = async (ai = workspaceAi) => {
     if (!current.messages.length || current.id === "empty") return;
@@ -1366,6 +1371,7 @@ export function InboxPage() {
                             ).time
                           }
                         </span>
+                        {lead.sentiment && <span className={`sentiment-badge sentiment-${lead.sentiment}`}>{lead.sentiment}</span>}
                       </div>
                       <div className="inbox-meta-cell sender-cell">
                         <strong>{lead.senderName}</strong>
@@ -1505,6 +1511,7 @@ export function InboxPage() {
                       <span className="tag-outline">
                         {current.replies} replies
                       </span>
+                      {current.sentiment && <span className={`sentiment-badge sentiment-${current.sentiment}`}>{current.sentiment}</span>}
                       {!current.enriched && <span className="tag-outline not-enriched">Not enriched</span>}
                     </div>
                     {Boolean(current.headline || current.industry) && (
@@ -1556,6 +1563,7 @@ export function InboxPage() {
                         No conversation messages are available yet.
                       </p>
                     )}
+                    <div ref={threadEndRef} />
                   </div>
                   <div className="composer">
                     <div className="composer-top">

@@ -28,7 +28,7 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
       return NextResponse.json({ ok: true, validation: true, workspace: workspaceId, history: "skipped_for_synthetic_test" }, { status: 200 });
     }
     const result = await ingestHeyReachWebhook({ url, key }, workspace, payload as Record<string, unknown>);
-    after(() => classifyLatestReply({ url, key }, result.conversationId).catch(() => undefined));
+    after(() => classifyLatestReply({ url, key }, result.conversationId, workspace.slug ?? workspaceId).catch(() => undefined));
     console.info("heyreach_webhook_processed", { workspaceId, ...result });
     return NextResponse.json({ ok: true, ...result }, { status: 200 });
   } catch (error) {
