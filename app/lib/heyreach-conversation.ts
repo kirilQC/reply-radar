@@ -175,6 +175,10 @@ function newestEligibleCampaign(rows: JsonObject[], eventTimestamp: string) {
 }
 
 async function campaignForLead(apiKey: string, lead: JsonObject, senderId: string, eventTimestamp: string) {
+  const campaignIdentity = (row: JsonObject) => ({
+    id: text(first(row, ["campaignId", "campaign_id", "id"])),
+    name: text(first(row, ["campaignName", "campaign_name", "name", "title"])),
+  });
   try {
     const identity = {
       email: text(lead.email_address ?? lead.emailAddress),
@@ -188,7 +192,7 @@ async function campaignForLead(apiKey: string, lead: JsonObject, senderId: strin
     const root = object(response);
     const rows = Array.isArray(root.items) ? root.items.map(object) : Array.isArray(response) ? response.map(object) : [];
     const selected = newestEligibleCampaign(rows, eventTimestamp);
-    if (selected) return campaignFrom(selected);
+    if (selected) return campaignIdentity(selected);
 
     // Some HeyReach workspaces return an empty GetCampaignsForLead result for
     // replies that still originated in a campaign. In that case, use the
@@ -203,7 +207,7 @@ async function campaignForLead(apiKey: string, lead: JsonObject, senderId: strin
     const senderCampaignRoot = object(senderCampaignResponse);
     const senderCampaigns = Array.isArray(senderCampaignRoot.items) ? senderCampaignRoot.items.map(object) : [];
     const senderCampaign = newestEligibleCampaign(senderCampaigns, eventTimestamp);
-    return senderCampaign ? campaignFrom(senderCampaign) : { id: "", name: "" };
+    return senderCampaign ? campaignIdentity(senderCampaign) : { id: "", name: "" };
   } catch {
     // Campaign attribution must never prevent a valid reply from being stored.
     return { id: "", name: "" };
