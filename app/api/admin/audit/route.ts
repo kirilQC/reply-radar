@@ -104,11 +104,13 @@ export async function GET(request: NextRequest) {
     }
     for (const row of storedAudit) {
       const details = object(row.details);
-      const sourceKey = text(details.source) || text(row.actor).toLowerCase().replace(/[^a-z0-9]+/g, "_") || "reply_radar";
+      const actorType = text(row.actor_type) || text(details.source) || text(details.actor) || "reply_radar";
+      const sourceKey = actorType.toLowerCase().replace(/[^a-z0-9]+/g, "_");
       const status = text(details.status) || "recorded";
-      const workspace = text(details.workspaceName) || workspaceById.get(text(details.workspaceId)) || null;
-      const workspaceId = text(details.workspaceId);
-      events.push({ id: `audit:${text(row.id)}`, timestamp: text(row.created_at), source: text(row.actor) || "Reply Radar", sourceKey, action: text(row.action), status, severity: statusSeverity(status), workspace, workspaceLogo: workspaceLogoById.get(workspaceId) ?? workspaceLogoByName.get((workspace ?? "").toLowerCase()) ?? null, summary: text(details.summary) || `${text(row.actor) || "Reply Radar"} recorded ${text(row.action).replaceAll(".", " ")}.`, details: { ...details, entityType: row.entity_type, entityId: row.entity_id } });
+      const eventType = text(row.event_type) || text(details.action) || "audit";
+      const workspace = text(details.workspaceName) || workspaceById.get(text(row.workspace_id)) || workspaceById.get(text(details.workspaceId)) || null;
+      const workspaceId = text(row.workspace_id) || text(details.workspaceId);
+      events.push({ id: `audit:${text(row.id)}`, timestamp: text(row.created_at), source: actorType, sourceKey, action: eventType, status, severity: statusSeverity(status), workspace, workspaceLogo: workspaceLogoById.get(workspaceId) ?? workspaceLogoByName.get((workspace ?? "").toLowerCase()) ?? null, summary: text(details.summary) || `${actorType} recorded ${eventType.replaceAll(".", " ")}.`, details: { ...details, entityType: row.actor_type, entityId: row.actor_id } });
     }
     const filtered = events
       .filter((event) => !sourceFilter || event.sourceKey === sourceFilter)

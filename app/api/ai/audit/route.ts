@@ -11,9 +11,9 @@ export async function GET(request: Request) {
   const limit = Math.min(Number(params.get("limit") || 50), 200);
 
   try {
-    // Query audit log — filter by details->source since the actor column may not exist
+    // Query audit log — filter by actor_type column
     const response = await fetch(
-      `${url}/rest/v1/rr_audit_log?select=*&details->>source=eq.anthropic&order=created_at.desc&limit=${limit}`,
+      `${url}/rest/v1/rr_audit_log?select=*&actor_type=eq.anthropic&order=created_at.desc&limit=${limit}`,
       {
         headers: { apikey: key, Authorization: `Bearer ${key}` },
         cache: "no-store",
@@ -31,9 +31,9 @@ export async function GET(request: Request) {
       return {
         id: row.id,
         timestamp: row.created_at,
-        action: row.action,
-        entityType: row.entity_type,
-        entityId: row.entity_id,
+        action: row.event_type,
+        entityType: row.actor_type,
+        entityId: row.actor_id,
         status: details.status ?? "unknown",
         model: details.model ?? null,
         sentiment: details.sentiment ?? null,
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
         outputTokens: details.outputTokens ?? 0,
         durationMs: details.durationMs ?? null,
         reason: details.reason ?? null,
-        workspaceId: details.workspaceId ?? null,
+        workspaceId: row.workspace_id ?? details.workspaceId ?? null,
         workspaceName: details.workspaceName ?? null,
         note: details.note ?? null,
       };

@@ -2,12 +2,16 @@ export type AuditDetails = Record<string, unknown>;
 
 type SupabaseConfig = { url?: string; key?: string };
 
+const isUUID = (v: unknown): v is string =>
+  typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
 export async function writeAuditEvent(
   config: SupabaseConfig,
   event: { actor: string; action: string; entityType?: string; entityId?: string; details?: AuditDetails },
 ) {
   if (!config.url || !config.key) return false;
   try {
+    const wsId = event.details?.workspaceId;
     const response = await fetch(`${config.url}/rest/v1/rr_audit_log`, {
       method: "POST",
       headers: {
@@ -17,10 +21,11 @@ export async function writeAuditEvent(
         Prefer: "return=minimal",
       },
       body: JSON.stringify({
-        action: event.action,
-        entity_type: event.entityType ?? null,
-        entity_id: event.entityId ?? null,
-        details: { ...event.details, actor: event.actor },
+        event_type: event.action,
+        actor_type: event.actor ?? "system",
+        actor_id: event.entityId ?? null,
+        ...(isUUID(wsId) ? { workspace_id: wsId } : {}),
+        details: { ...event.details, source: event.actor },
       }),
     });
     if (!response.ok) {
