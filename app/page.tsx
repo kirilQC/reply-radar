@@ -286,6 +286,11 @@ export function InboxPage() {
   const [appearance, setAppearance] = useState(defaultAppearance);
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
+  const [filterSub, setFilterSub] = useState<string | null>(null);
+  const [campaignFilter, setCampaignFilter] = useState("");
+  const [senderFilter, setSenderFilter] = useState("");
+  const [sentimentFilter, setSentimentFilter] = useState("");
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [inboxLoading, setInboxLoading] = useState(true);
@@ -718,6 +723,9 @@ export function InboxPage() {
                 .includes(search.toLowerCase())) &&
             (!assignedClients || assignedClients.includes(lead.client)) &&
             !excludedClients.includes(lead.client) &&
+            (!campaignFilter || lead.campaignName === campaignFilter) &&
+            (!senderFilter || lead.senderName === senderFilter) &&
+            (!sentimentFilter || lead.sentiment === sentimentFilter) &&
             (() => {
               if (filter === "All follow-ups") return true;
               if (filter === "Starred") return layoutPrefs.starredLeadIds.includes(String(lead.leadId || lead.id));
@@ -760,6 +768,9 @@ export function InboxPage() {
       assignedClients,
       excludedClients,
       layoutPrefs.starredLeadIds,
+      campaignFilter,
+      senderFilter,
+      sentimentFilter,
     ],
   );
   useEffect(() => {
@@ -783,7 +794,7 @@ export function InboxPage() {
       replyCount7d: { value: String(totalReplies), sub: `Inbound replies ${filterLabel}` },
       totalReplies: { value: String(totalReplies), sub: `Inbound replies ${filterLabel}` },
       positiveRate: { value: `${positiveRate}%`, sub: `Positive rate ${filterLabel}` },
-      avgRepliesCampaign: { value: filtered.length ? `${((filtered.filter((l) => l.replies > 0).length / filtered.length) * 100).toFixed(1)}%` : "—", sub: `Reply rate ${filterLabel}` },
+      avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", sub: "Campaign reply rate (replies ÷ accepted)" },
       acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", sub: "Campaign acceptance rate (all time)" },
     };
     return { ...metric, ...(values[metric.id] ?? {}) };
@@ -1306,35 +1317,95 @@ export function InboxPage() {
                       </button>
                     ))}
                   </div>
-                  <select
-                    className="filter-button"
-                    aria-label="Filter by tier"
-                    value={["Starred", "Hot", "Warm", "Nurture"].includes(filter) ? filter : ""}
-                    onChange={(event) => {
-                      setFilter(event.target.value || "All follow-ups");
-                      setSelected(0);
-                    }}
-                  >
-                    <option value="">Tier filter</option>
-                    <option value="Starred">Starred</option>
-                    <option value="Hot">Hot</option>
-                    <option value="Warm">Warm</option>
-                    <option value="Nurture">Nurture</option>
-                  </select>
-                  <select
-                    className="filter-button"
-                    aria-label="Sort conversations"
-                    value={sort}
-                    onChange={(event) => {
-                      setSort(event.target.value);
-                      setSelected(0);
-                    }}
-                  >
-                    <option value="score-desc">Sort: Score</option>
-                    <option value="newest">Sort: Newest</option>
-                    <option value="oldest">Sort: Oldest</option>
-                    <option value="name">Sort: Name</option>
-                  </select>
+                  {clientParam ? (
+                    <div className="unified-filter-wrap">
+                      <button className="filter-button unified-filter-toggle" onClick={() => { setFilterDropdownOpen((v) => !v); setFilterSub(null); }}>
+                        Filters{(campaignFilter || senderFilter || sentimentFilter || sort !== "score-desc" || ["Starred", "Hot", "Warm", "Nurture"].includes(filter)) ? " ●" : ""}
+                      </button>
+                      {filterDropdownOpen && (
+                        <div className="unified-filter-dropdown">
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("campaign")}>Campaign {campaignFilter ? `· ${campaignFilter.slice(0, 20)}` : ""}<b>›</b></button>
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("sender")}>Sender {senderFilter ? `· ${senderFilter.slice(0, 20)}` : ""}<b>›</b></button>
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("sentiment")}>Sentiment {sentimentFilter ? `· ${sentimentFilter}` : ""}<b>›</b></button>
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("tier")}>Tier {["Starred", "Hot", "Warm", "Nurture"].includes(filter) ? `· ${filter}` : ""}<b>›</b></button>
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("sort")}>Sort {sort !== "score-desc" ? `· ${sort}` : ""}<b>›</b></button>
+                          <div className="uf-divider" />
+                          <button className="uf-item uf-clear" onClick={() => { setCampaignFilter(""); setSenderFilter(""); setSentimentFilter(""); setSort("score-desc"); setFilter("All follow-ups"); setFilterDropdownOpen(false); setSelected(0); }}>Clear all filters</button>
+                          {filterSub === "campaign" && (
+                            <div className="unified-filter-sub">
+                              <button className={`uf-sub-item ${!campaignFilter ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(""); setSelected(0); }}>All campaigns</button>
+                              {[...new Set(leads.filter((l) => !assignedClients || assignedClients.includes(l.client)).map((l) => l.campaignName).filter(Boolean))].sort().map((c) => (
+                                <button key={c!} className={`uf-sub-item ${campaignFilter === c ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(String(c)); setSelected(0); }}>{c}</button>
+                              ))}
+                            </div>
+                          )}
+                          {filterSub === "sender" && (
+                            <div className="unified-filter-sub">
+                              <button className={`uf-sub-item ${!senderFilter ? "uf-active" : ""}`} onClick={() => { setSenderFilter(""); setSelected(0); }}>All senders</button>
+                              {[...new Set(leads.filter((l) => !assignedClients || assignedClients.includes(l.client)).map((l) => l.senderName).filter(Boolean))].sort().map((s) => (
+                                <button key={s} className={`uf-sub-item ${senderFilter === s ? "uf-active" : ""}`} onClick={() => { setSenderFilter(s); setSelected(0); }}>{s}</button>
+                              ))}
+                            </div>
+                          )}
+                          {filterSub === "sentiment" && (
+                            <div className="unified-filter-sub">
+                              <button className={`uf-sub-item ${!sentimentFilter ? "uf-active" : ""}`} onClick={() => { setSentimentFilter(""); setSelected(0); }}>All sentiments</button>
+                              {["positive", "neutral", "negative"].map((s) => (
+                                <button key={s} className={`uf-sub-item ${sentimentFilter === s ? "uf-active" : ""}`} onClick={() => { setSentimentFilter(s); setSelected(0); }}>{s[0].toUpperCase() + s.slice(1)}</button>
+                              ))}
+                            </div>
+                          )}
+                          {filterSub === "tier" && (
+                            <div className="unified-filter-sub">
+                              <button className={`uf-sub-item ${!["Starred", "Hot", "Warm", "Nurture"].includes(filter) ? "uf-active" : ""}`} onClick={() => { setFilter("All follow-ups"); setSelected(0); }}>All tiers</button>
+                              {["Starred", "Hot", "Warm", "Nurture"].map((t) => (
+                                <button key={t} className={`uf-sub-item ${filter === t ? "uf-active" : ""}`} onClick={() => { setFilter(t); setSelected(0); }}>{t}</button>
+                              ))}
+                            </div>
+                          )}
+                          {filterSub === "sort" && (
+                            <div className="unified-filter-sub">
+                              {[["score-desc", "Score"], ["newest", "Newest"], ["oldest", "Oldest"], ["name", "Name"]].map(([v, l]) => (
+                                <button key={v} className={`uf-sub-item ${sort === v ? "uf-active" : ""}`} onClick={() => { setSort(v); setSelected(0); }}>{l}</button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <select
+                        className="filter-button"
+                        aria-label="Filter by tier"
+                        value={["Starred", "Hot", "Warm", "Nurture"].includes(filter) ? filter : ""}
+                        onChange={(event) => {
+                          setFilter(event.target.value || "All follow-ups");
+                          setSelected(0);
+                        }}
+                      >
+                        <option value="">Tier filter</option>
+                        <option value="Starred">Starred</option>
+                        <option value="Hot">Hot</option>
+                        <option value="Warm">Warm</option>
+                        <option value="Nurture">Nurture</option>
+                      </select>
+                      <select
+                        className="filter-button"
+                        aria-label="Sort conversations"
+                        value={sort}
+                        onChange={(event) => {
+                          setSort(event.target.value);
+                          setSelected(0);
+                        }}
+                      >
+                        <option value="score-desc">Sort: Score</option>
+                        <option value="newest">Sort: Newest</option>
+                        <option value="oldest">Sort: Oldest</option>
+                        <option value="name">Sort: Name</option>
+                      </select>
+                    </>
+                  )}
                   <div className="heading-actions inbox-actions">
                     <button className="secondary-button">
                       Export <span>↓</span>
@@ -1438,10 +1509,6 @@ export function InboxPage() {
                             ).time
                           }
                         </span>
-                        {lead.sentiment && <span className={`sentiment-badge sentiment-${lead.sentiment}`}>{lead.sentiment}</span>}
-                        {filter === "follow-ups" && lead.followUpReason && (
-                          <span className="follow-up-reason">{lead.followUpReason}</span>
-                        )}
                       </div>
                       <div className="inbox-meta-cell sender-cell">
                         <strong>{lead.senderName}</strong>
