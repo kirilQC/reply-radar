@@ -51,6 +51,7 @@ export async function GET(request: Request) {
           icpPrompt: guardrails.icp_prompt ?? "",
           followUpPrompt: guardrails.follow_up_prompt ?? "",
           replyPrompt: guardrails.reply_prompt ?? "",
+          followUpThreshold: Number(guardrails.follow_up_threshold ?? 50),
           sentimentPrompt: workspacePrompt ?? "",
         };
       }
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "save_workspace_ai") {
-      const { brief, icpPrompt, followUpPrompt, replyPrompt, model } = body;
+      const { brief, icpPrompt, followUpPrompt, replyPrompt, model, followUpThreshold } = body;
       // Update workspace
       const wsResponse = await supabase(url, key, `rr_workspaces?slug=eq.${encodeURIComponent(workspace)}&limit=1`);
       const wsRows = wsResponse.ok ? ((await wsResponse.json()) as Row[]) : [];
@@ -115,6 +116,9 @@ export async function POST(request: Request) {
             icp_prompt: icpPrompt ?? guardrails.icp_prompt ?? "",
             follow_up_prompt: followUpPrompt ?? guardrails.follow_up_prompt ?? "",
             reply_prompt: replyPrompt ?? guardrails.reply_prompt ?? "",
+            follow_up_threshold: followUpThreshold !== undefined
+              ? Math.max(0, Math.min(100, Number(followUpThreshold) || 0))
+              : guardrails.follow_up_threshold ?? 50,
           },
         }),
       });

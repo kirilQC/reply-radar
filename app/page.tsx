@@ -21,7 +21,9 @@ type Lead = {
   clientTone: string;
   score: number;
   leadScore?: number | null;
+  icpReason?: string | null;
   followUpScore?: number;
+  followUpAnalyzedAt?: string | null;
   tier: "hot" | "warm" | "nurture";
   reason: string;
   preview: string;
@@ -246,6 +248,13 @@ const nav = [
   ["analytics", "Analytics", "⌘4"],
   ["health", "System health", ""],
 ];
+const DEFAULT_FOLLOW_UP_THRESHOLD = 50;
+const followUpBand = (score: number): "hot" | "warm" | "cold" | "nurture" => {
+  if (score >= 75) return "hot";
+  if (score >= 50) return "warm";
+  if (score >= 25) return "cold";
+  return "nurture";
+};
 function Icon({ name }: { name: string }) {
   const paths: Record<string, string> = {
     inbox: "M4 5h16v14H4z M4 9h5l1.5 2h3L15 9h5",
@@ -312,7 +321,8 @@ export function InboxPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "", id: "", icpPrompt: "", followUpPrompt: "" });
+  const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "", id: "", icpPrompt: "", followUpPrompt: "", followUpThreshold: DEFAULT_FOLLOW_UP_THRESHOLD });
+  const followUpThreshold = workspaceAi.followUpThreshold ?? DEFAULT_FOLLOW_UP_THRESHOLD;
   const [workspaceDirectory, setWorkspaceDirectory] = useState<
     Array<{
       name: string;
@@ -946,7 +956,7 @@ export function InboxPage() {
     setAiDraft("");
     setAiReason("");
     setTemplatesOpen(false);
-    if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "", id: "", icpPrompt: "", followUpPrompt: "" }); return; }
+    if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "", id: "", icpPrompt: "", followUpPrompt: "", followUpThreshold: DEFAULT_FOLLOW_UP_THRESHOLD }); return; }
     let cancelled = false;
     fetch(`/api/client-resources?workspace=${encodeURIComponent(selectedWorkspaceSlug)}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
@@ -954,18 +964,18 @@ export function InboxPage() {
         if (cancelled || !payload?.workspace) return;
         setMessagingDocUrl(String(payload.workspace.messagingDocUrl ?? ""));
         setQuickTemplates(Array.isArray(payload.workspace.quickTemplates) ? payload.workspace.quickTemplates : []);
-        const ai = { model: String(payload.workspace.model ?? ""), brief: String(payload.workspace.brief ?? ""), systemPrompt: String(payload.workspace.systemPrompt ?? ""), id: String(payload.workspace.id ?? ""), icpPrompt: String(payload.workspace.icpPrompt ?? ""), followUpPrompt: String(payload.workspace.followUpPrompt ?? "") };
+        const ai = { model: String(payload.workspace.model ?? ""), brief: String(payload.workspace.brief ?? ""), systemPrompt: String(payload.workspace.systemPrompt ?? ""), id: String(payload.workspace.id ?? ""), icpPrompt: String(payload.workspace.icpPrompt ?? ""), followUpPrompt: String(payload.workspace.followUpPrompt ?? ""), followUpThreshold: Number(payload.workspace.followUpThreshold ?? DEFAULT_FOLLOW_UP_THRESHOLD) };
         setWorkspaceAi(ai);
         void generateAiReview(ai);
-        // ICP score (once per lead, cached permanently)
-        if (current.leadId) {
+        // ICP score: scored once per lead and stored on the lead forever.
+        if (current.leadId && (current.leadScore === null || current.leadScore === undefined)) {
           void fetch("/api/ai/icp-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId: current.leadId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, icpPrompt: ai.icpPrompt }) })
-            .then((r) => r.json()).then((d) => { if (d.ok && !cancelled) setLeads((prev) => prev.map((l) => l.id === current.id ? { ...l, leadScore: d.icpScore } : l)); }).catch(() => null);
+            .then((r) => r.json()).then((d) => { if (d.ok && !cancelled) setLeads((prev) => prev.map((l) => l.id === current.id ? { ...l, leadScore: d.icpScore, icpReason: d.icpReason } : l)); }).catch(() => null);
         }
-        // Follow-up score (dynamic, every time)
-        if (current.messages.length) {
+        // Follow-up score: cached against the latest reply, so it only recomputes on a new reply.
+        if (current.messages.length && !current.followUpAnalyzedAt) {
           void fetch("/api/ai/follow-up-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: current.id, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, followUpPrompt: ai.followUpPrompt, sentiment: current.sentiment, thread: current.messages }) })
-            .then((r) => r.json()).then((d) => { if (d.ok && !cancelled) setLeads((prev) => prev.map((l) => l.id === current.id ? { ...l, followUpUrgency: d.urgency, followUpReason: d.reason } : l)); }).catch(() => null);
+            .then((r) => r.json()).then((d) => { if (d.ok && !cancelled) setLeads((prev) => prev.map((l) => l.id === current.id ? { ...l, followUpUrgency: d.urgency, followUpReason: d.reason, followUpAnalyzedAt: new Date().toISOString() } : l)); }).catch(() => null);
         }
       }).catch(() => null);
     return () => { cancelled = true; };
@@ -1612,11 +1622,11 @@ export function InboxPage() {
                         <strong>{lead.replies}</strong>
                       </div>
                       <div className="inbox-meta-cell lead-score-cell">
-                        <strong>{lead.leadScore ?? 0}</strong>
+                        <strong>{lead.leadScore ?? "—"}</strong>
                       </div>
                       {filter === "follow-ups" && (
                         <div className="score-cell follow-up-score-cell">
-                          <span className={`score-pill ${(lead.followUpUrgency ?? 0) >= 60 ? "hot" : "warm"}`}>
+                          <span className={`score-pill ${followUpBand(lead.followUpUrgency ?? 0)}`}>
                             {lead.followUpUrgency ?? 0}
                           </span>
                           <span className="tier-label">urgency</span>
@@ -1706,8 +1716,8 @@ export function InboxPage() {
                       )}
                     </div>
                     <div className="detail-tags">
-                      <span className={`score-pill ${current.tier}`}>
-                        {current.score} · {current.tier}
+                      <span className={`score-pill ${followUpBand(current.followUpUrgency ?? 0)}`}>
+                        {current.followUpUrgency ?? 0} · {followUpBand(current.followUpUrgency ?? 0)}
                       </span>
                       {current.campaignName && (
                         <span className="tag-outline">
@@ -1736,7 +1746,7 @@ export function InboxPage() {
                       <p>{aiLoading ? "Anthropic is reviewing this conversation…" : aiReason || current.reason}</p>
                     </div>
                   </div>
-                  {current.followUpReason && (
+                  {current.followUpReason && (current.followUpUrgency ?? 0) >= followUpThreshold && (
                     <div className="reason-box follow-up-reason-box">
                       <span className="reason-icon">⏰</span>
                       <div>

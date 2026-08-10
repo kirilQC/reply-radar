@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     const { row } = await workspace(slug);
     if (!row) return NextResponse.json({ ok: false, error: "Workspace not found." }, { status: 404 });
     const guardrails = row.guardrails && typeof row.guardrails === "object" ? row.guardrails as Json : {};
-    return NextResponse.json({ ok: true, workspace: { id: row.id, name: row.name, slug: row.slug, brief: row.client_brief ?? "", model: row.anthropic_model ?? "", systemPrompt: row.custom_system_prompt ?? "", messagingDocUrl: guardrails.messaging_doc_url ?? "", icpPrompt: guardrails.icp_prompt ?? "", followUpPrompt: guardrails.follow_up_prompt ?? "", quickTemplates: cleanTemplates(guardrails.quick_templates) } });
+    return NextResponse.json({ ok: true, workspace: { id: row.id, name: row.name, slug: row.slug, brief: row.client_brief ?? "", model: row.anthropic_model ?? "", systemPrompt: row.custom_system_prompt ?? "", messagingDocUrl: guardrails.messaging_doc_url ?? "", icpPrompt: guardrails.icp_prompt ?? "", followUpPrompt: guardrails.follow_up_prompt ?? "", followUpThreshold: Number(guardrails.follow_up_threshold ?? 50), quickTemplates: cleanTemplates(guardrails.quick_templates) } });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Resources unavailable." }, { status: 502 });
   }

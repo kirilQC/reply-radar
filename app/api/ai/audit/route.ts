@@ -62,8 +62,8 @@ export async function GET(request: Request) {
               if (!lead) continue;
               const cid = text(conv.id);
               leadNameByConvId.set(cid, text(lead.name));
-              // Photo is in raw_data enrichment
-              const enrichment = object(object(lead.raw_data).enrichment);
+              // Enrichment lives at raw_data.reply_radar.ai_ark
+              const enrichment = object(object(object(lead.raw_data).reply_radar).ai_ark);
               const photo = text(enrichment.profilePhotoSource) || text(enrichment.profilePhotoUrl) || "";
               if (photo) leadPhotoByConvId.set(cid, photo);
             }

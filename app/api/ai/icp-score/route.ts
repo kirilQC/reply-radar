@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   }
 
   // Build lead context for ICP scoring
-  const enrichment = object(rawData.enrichment);
+  const enrichment = object(rr.ai_ark);
   const company = object(enrichment.company);
   const leadContext = [
     `Name: ${lead.name ?? "Unknown"}`,

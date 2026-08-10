@@ -251,10 +251,14 @@ export async function GET(request: Request) {
       const cachedReason = String(sentimentData.cached_reason ?? "");
       const analyzedAt = String(sentimentData.analyzed_at ?? "");
       const name = normalizePersonName(lead.name);
-      const { followUpUrgency, followUpReason } = computeFollowUp(
+      // Prefer the cached AI follow-up score; fall back to the heuristic until it is scored.
+      const heuristic = computeFollowUp(
         thread.map((m) => ({ direction: String(m.direction), sentAt: m.sentAt, body: String(m.body) })),
         sentiment,
       );
+      const cachedFollowUpAt = String(sentimentData.followup_analyzed_at ?? "");
+      const followUpUrgency = cachedFollowUpAt ? Number(sentimentData.followup_urgency) || 0 : heuristic.followUpUrgency;
+      const followUpReason = cachedFollowUpAt ? String(sentimentData.followup_reason ?? "") || null : heuristic.followUpReason;
       const enrichmentCompany = nested(enrichment, "company");
       const companySummary = nested(enrichmentCompany, "summary");
       const positionGroups = Array.isArray(enrichment.positionGroups) ? enrichment.positionGroups : [];
@@ -280,7 +284,8 @@ export async function GET(request: Request) {
         clientTone: String(workspace.accent_color || "#8b7cff"),
         clientLogoUrl: workspace.logo_url ?? null,
         senderName,
-        leadScore: 0,
+        leadScore: metadata.icp_score !== undefined && metadata.icp_score !== null ? Number(metadata.icp_score) || 0 : null,
+        icpReason: String(metadata.icp_reason ?? "") || null,
         followUpScore: Number(conversation.score || 0),
         score: Number(conversation.score || 0),
         tier: ["hot", "warm", "nurture"].includes(String(conversation.tier))
@@ -302,6 +307,7 @@ export async function GET(request: Request) {
         analyzedAt: analyzedAt || null,
         followUpUrgency,
         followUpReason,
+        followUpAnalyzedAt: cachedFollowUpAt || null,
         lastRefreshedAt: conversation.last_refreshed_at ?? null,
         messages: thread,
       };

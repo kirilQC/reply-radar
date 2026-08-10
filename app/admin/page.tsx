@@ -838,7 +838,7 @@ type AiConfig = {
   anthropic: { configured: boolean; maskedKey: string | null; model: string };
   globalSentimentPrompt: string;
   defaultSentimentPrompt: string;
-  workspaceAi: { name: string; slug: string; brief: string; model: string; icpPrompt: string; followUpPrompt: string; replyPrompt: string; sentimentPrompt: string } | null;
+  workspaceAi: { name: string; slug: string; brief: string; model: string; icpPrompt: string; followUpPrompt: string; replyPrompt: string; sentimentPrompt: string; followUpThreshold?: number } | null;
   workspaces: Array<{ id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; hasBrief: boolean }>;
 };
 type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; workspaceLogoUrl: string | null; leadName: string | null; leadPhotoUrl: string | null };
@@ -853,6 +853,7 @@ function AiHubView() {
   const [clientBrief, setClientBrief] = useState("");
   const [icpPrompt, setIcpPrompt] = useState("");
   const [followUpPrompt, setFollowUpPrompt] = useState("");
+  const [followUpThreshold, setFollowUpThreshold] = useState(50);
   const [replyPrompt, setReplyPrompt] = useState("");
   const [clientSaving, setClientSaving] = useState(false);
   const [clientSaved, setClientSaved] = useState(false);
@@ -869,6 +870,7 @@ function AiHubView() {
           setClientBrief(payload.workspaceAi.brief);
           setIcpPrompt(payload.workspaceAi.icpPrompt);
           setFollowUpPrompt(payload.workspaceAi.followUpPrompt);
+          setFollowUpThreshold(Number(payload.workspaceAi.followUpThreshold ?? 50));
           setReplyPrompt(payload.workspaceAi.replyPrompt);
         }
       })
@@ -877,14 +879,30 @@ function AiHubView() {
 
   useEffect(() => { loadConfig(); }, []);
   const [auditVisible, setAuditVisible] = useState(25);
+  const [freshIds, setFreshIds] = useState<string[]>([]);
+  const seenIdsRef = useRef<Set<string> | null>(null);
   useEffect(() => {
     const load = () => fetch("/api/ai/audit", { cache: "no-store" })
       .then((r) => r.json())
-      .then((payload: AiAuditData) => { if (payload?.ok !== false) setAudit(payload); })
+      .then((payload: AiAuditData) => {
+        if (payload?.ok === false) return;
+        setAudit(payload);
+        const ids = (payload?.events ?? []).map((e) => String(e.id));
+        if (seenIdsRef.current === null) { seenIdsRef.current = new Set(ids); return; }
+        const seen = seenIdsRef.current;
+        const added = ids.filter((id) => !seen.has(id));
+        if (added.length) {
+          added.forEach((id) => seen.add(id));
+          setFreshIds(added);
+          setTimeout(() => setFreshIds((cur) => cur.filter((id) => !added.includes(id))), 2000);
+        }
+      })
       .catch(() => null);
     load();
-    const interval = setInterval(load, 10_000);
-    return () => clearInterval(interval);
+    const interval = setInterval(load, 3_000);
+    const onVisible = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { clearInterval(interval); document.removeEventListener("visibilitychange", onVisible); };
   }, []);
   useEffect(() => {
     if (selectedClient) loadConfig(selectedClient);
@@ -901,7 +919,7 @@ function AiHubView() {
     setClientSaving(true);
     await fetch("/api/ai/config", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "save_workspace_ai", workspace: selectedClient, brief: clientBrief, icpPrompt, followUpPrompt, replyPrompt }),
+      body: JSON.stringify({ action: "save_workspace_ai", workspace: selectedClient, brief: clientBrief, icpPrompt, followUpPrompt, replyPrompt, followUpThreshold }),
     });
     setClientSaving(false);
     setClientSaved(true);
@@ -947,27 +965,26 @@ function AiHubView() {
       </div>
 
       <section className="admin-panel ai-audit-section">
-        <div className="panel-heading"><div><h2 style={{ fontSize: 22 }}>AI audit log</h2></div>
+        <div className="panel-heading"><div className="ai-audit-title"><h2 style={{ fontSize: 22 }}>AI audit log</h2><span className="ai-audit-live"><i />live</span></div>
           <button className="secondary-button" onClick={() => {
             if (!audit?.events?.length) return;
-            const csv = ["When,Client,Lead,Action,Result,Input Tokens,Output Tokens,Duration (ms),Status",
-              ...audit.events.map((e) => `"${e.timestamp}","${e.workspaceName ?? ""}","${e.leadName ?? ""}","${e.action ?? ""}","${e.sentiment ?? ""}",${e.inputTokens},${e.outputTokens},${e.durationMs ?? ""},${e.status}`)
+            const csv = ["When,Client,Lead,Action,Input Tokens,Output Tokens,Duration (ms),Status",
+              ...audit.events.map((e) => `"${e.timestamp}","${e.workspaceName ?? ""}","${e.leadName ?? ""}","${e.action ?? ""}",${e.inputTokens},${e.outputTokens},${e.durationMs ?? ""},${e.status}`)
             ].join("\n");
             const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = `ai-audit-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(link.href);
           }}>Export CSV ↓</button>
         </div>
         <div className="ai-audit-table ai-audit-compact">
-          <div className="ai-audit-head"><span>When</span><span>Client</span><span>Lead</span><span>Action</span><span>Result</span><span>Tokens</span><span>Duration</span><span>Status</span></div>
+          <div className="ai-audit-head"><span>When</span><span>Client</span><span>Lead</span><span>Action</span><span>Tokens</span><span>Duration</span><span>Status</span></div>
           {audit?.events?.length ? audit.events.slice(0, auditVisible).map((event) => {
             const d = event.timestamp ? new Date(event.timestamp) : null;
             const when = d && !isNaN(d.getTime()) ? `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true })}` : "—";
             const actionLabel: Record<string, string> = { "conversation.analyzed": "Sentiment + Reply", "draft.generated": "Suggested reply", "draft.failed": "Reply failed", "sentiment_analysis": "Sentiment analysis", "icp.scored": "ICP scoring", "followup.scored": "Follow-up score" };
-            return <div className="ai-audit-row" key={event.id}>
+            return <div className={`ai-audit-row${freshIds.includes(String(event.id)) ? " ai-audit-row-fresh" : ""}`} key={event.id}>
               <time>{when}</time>
               <span className="ai-audit-client-cell">{event.workspaceLogoUrl ? <img className="ai-audit-logo" src={event.workspaceLogoUrl} alt="" /> : null}{event.workspaceName || "—"}</span>
               <span className="ai-audit-lead-cell">{event.leadPhotoUrl ? <img className="ai-audit-avatar" src={event.leadPhotoUrl} alt="" /> : null}{event.leadName || "—"}</span>
               <span><strong>{actionLabel[event.action ?? ""] ?? event.action?.replaceAll(".", " ") ?? "—"}</strong></span>
-              <span>{event.sentiment ? <span className={`sentiment-badge sentiment-${event.sentiment}`}>{event.sentiment}</span> : "—"}</span>
               <span>{event.inputTokens || event.outputTokens ? `${event.inputTokens} in · ${event.outputTokens} out` : "—"}</span>
               <span>{event.durationMs ? `${event.durationMs}ms` : "—"}</span>
               <span className={`audit-status ${event.status === "success" ? "success" : event.status === "error" || event.status === "failed" ? "error" : "warning"}`}>{event.status}</span>
@@ -1021,6 +1038,7 @@ function AiHubView() {
               <section className="admin-panel client-config-section">
                 <div className="panel-heading"><div><h2>Follow-up scoring prompt</h2><p>How should the AI determine follow-up urgency?</p></div></div>
                 <label className="field-label">FOLLOW-UP PROMPT<textarea value={followUpPrompt} onChange={(event) => setFollowUpPrompt(event.target.value)} placeholder="Analyze the conversation and score the follow-up urgency from 0 to 100. Consider: whether the lead asked a question, expressed interest, mentioned a timeline, or requested a meeting. Return a JSON object with 'score' (number), 'tier' ('hot' | 'warm' | 'nurture'), and 'reason' (string)." rows={5} style={{ minHeight: 120 }} /></label>
+                <label className="field-label">FOLLOW-UP ALERT THRESHOLD<span className="threshold-row"><input type="range" min={0} max={100} step={5} value={followUpThreshold} onChange={(event) => setFollowUpThreshold(Number(event.target.value))} /><b>{followUpThreshold}</b></span><small className="threshold-hint">Only show the &ldquo;follow-up recommended&rdquo; box when a lead scores at or above this. Higher = less noise.</small></label>
               </section>
             </div>
           </>}
