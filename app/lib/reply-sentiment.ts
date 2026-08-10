@@ -74,7 +74,10 @@ export async function classifyLatestReply(
   conversationId: string,
   workspaceId?: string,
 ) {
-  if (!process.env.ANTHROPIC_API_KEY || !conversationId) return;
+  if (!process.env.ANTHROPIC_API_KEY || !conversationId) {
+    console.log(`[sentiment] Skipping: API key present=${!!process.env.ANTHROPIC_API_KEY}, conversationId=${conversationId}`);
+    return;
+  }
   const headers = {
     apikey: config.key,
     Authorization: `Bearer ${config.key}`,
@@ -84,13 +87,13 @@ export async function classifyLatestReply(
     `${config.url}/rest/v1/rr_messages?select=id,direction,body,sent_at,raw_data&conversation_id=eq.${encodeURIComponent(conversationId)}&order=sent_at.desc&limit=20`,
     { headers, cache: "no-store" },
   );
-  if (!response.ok) return;
+  if (!response.ok) { console.log(`[sentiment] Messages fetch failed: ${response.status}`); return; }
   const rows = ((await response.json()) as Row[]).reverse();
   const latestInbound = [...rows].reverse().find((row) => row.direction === "inbound");
-  if (!latestInbound?.id) return;
+  if (!latestInbound?.id) { console.log(`[sentiment] No inbound message found for ${conversationId}`); return; }
   const latestRaw = object(latestInbound.raw_data);
   const latestRadar = object(latestRaw.reply_radar);
-  if (["positive", "neutral", "negative"].includes(String(latestRadar.sentiment).toLowerCase())) return;
+  if (["positive", "neutral", "negative"].includes(String(latestRadar.sentiment).toLowerCase())) { console.log(`[sentiment] Already classified as ${latestRadar.sentiment} for ${conversationId}`); return; }
 
   const systemPrompt = await getConfiguredPrompt(config, workspaceId);
   const model = process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-latest";

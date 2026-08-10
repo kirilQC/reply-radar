@@ -283,8 +283,14 @@ export async function GET(request: Request) {
     const unanalyzed = result.filter((c) => !c.sentiment && c.replies > 0).slice(0, 5);
     if (unanalyzed.length && url && key) {
       after(async () => {
+        console.log(`[sentiment-backfill] Starting backfill for ${unanalyzed.length} conversations, ANTHROPIC_API_KEY present: ${!!process.env.ANTHROPIC_API_KEY}`);
         for (const conv of unanalyzed) {
-          await classifyLatestReply({ url, key }, String(conv.id), String(conv.clientSlug ?? "")).catch(() => undefined);
+          try {
+            await classifyLatestReply({ url, key }, String(conv.id), String(conv.clientSlug ?? ""));
+            console.log(`[sentiment-backfill] Classified conversation ${conv.id}`);
+          } catch (err) {
+            console.error(`[sentiment-backfill] Failed for ${conv.id}:`, err);
+          }
         }
       });
     }
