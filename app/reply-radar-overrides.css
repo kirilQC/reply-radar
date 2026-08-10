@@ -155,11 +155,22 @@ html:not(.hydrated) body{visibility:hidden}
 .notepad-empty{padding:18px;color:var(--muted);font-size:10px;text-align:center}
 .notepad-form{display:grid;gap:7px;padding:10px 12px;border-top:1px solid var(--border-soft);background:var(--panel-2)}.notepad-form input,.notepad-form textarea{width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);font-size:10px;outline:0;resize:vertical}.notepad-form textarea{min-height:48px}.notepad-form input:focus,.notepad-form textarea:focus{border-color:var(--accent)}.notepad-form button{height:30px;border-radius:5px;background:var(--accent);color:#fff;font-size:10px;font-weight:700}.notepad-form button:disabled{opacity:.4}
 
-/* Database delete button */
-.database-delete-button{width:34px;height:34px;border:1px solid color-mix(in srgb,var(--coral) 40%,var(--border));border-radius:7px;background:var(--panel);color:var(--coral);font-size:15px;display:grid;place-items:center;cursor:pointer}.database-delete-button:hover{background:color-mix(in srgb,var(--coral) 12%,var(--panel));border-color:var(--coral)}
+/* Database delete lead button */
+.database-danger-zone{margin-top:24px;padding:20px;border:1px solid color-mix(in srgb,var(--coral) 30%,var(--border));border-radius:9px;background:color-mix(in srgb,var(--coral) 4%,var(--panel))}.database-danger-zone h3{margin:0 0 8px;font-size:12px;color:var(--coral)}.database-danger-zone p{margin:0 0 14px;color:var(--muted);font-size:10px;line-height:1.5}
+.database-delete-lead-button{height:36px;padding:0 18px;border:1px solid color-mix(in srgb,var(--coral) 55%,var(--border));border-radius:7px;background:color-mix(in srgb,var(--coral) 12%,var(--panel));color:var(--coral);font-size:11px;font-weight:650;cursor:pointer}.database-delete-lead-button:hover{background:color-mix(in srgb,var(--coral) 22%,var(--panel));border-color:var(--coral)}
 
 /* Hide star column and adjust grid when follow-up score not shown */
 .row-star-cell{display:none}
-.table-head-followups{grid-template-columns:minmax(200px,1.3fr) minmax(80px,.5fr) minmax(120px,.7fr) minmax(120px,.65fr) minmax(80px,.5fr) 60px 60px 70px!important}
+.table-head-followups,.table-head-followups+*~.lead-row{grid-template-columns:minmax(200px,1.6fr) minmax(0,.7fr) minmax(0,1fr) minmax(0,.85fr) minmax(0,.75fr) minmax(0,.45fr) minmax(0,.45fr) 70px!important}
+
+/* Analytics client grid */
+.analytics-clients-section{margin-top:8px}
+.analytics-client-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;margin-top:14px}
+.analytics-client-card{display:flex;flex-direction:column;align-items:center;gap:10px;padding:22px 16px 18px;border:1px solid var(--border-soft);border-radius:12px;background:var(--panel);cursor:pointer;transition:border-color .15s,background .15s}.analytics-client-card:hover{border-color:var(--accent);background:var(--panel-2)}
+.analytics-client-card-top i{display:grid;place-items:center;width:44px;height:44px;border-radius:10px;font-size:20px;font-weight:700;color:#fff;overflow:hidden}.analytics-client-card-top i img{width:100%;height:100%;object-fit:cover}
+.analytics-client-card h3{font-size:12px;font-weight:650;margin:0;text-align:center}
+.analytics-client-card-stats{display:flex;gap:10px;font-size:9px;color:var(--muted)}
+.analytics-back{background:none;border:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;margin-bottom:6px;font-weight:600}.analytics-back:hover{text-decoration:underline}
+.crumb-link{color:var(--muted);text-decoration:none;font-weight:400}.crumb-link:hover{color:var(--accent);text-decoration:underline}
 
 @media(max-width:800px){.ai-client-layout{grid-template-columns:1fr}.ai-client-sidebar{max-height:none;border-right:0;border-bottom:1px solid var(--border-soft);flex-direction:row;flex-wrap:wrap;padding:12px}.ai-audit-head{display:none}.ai-audit-row{grid-template-columns:1fr 1fr;gap:6px}}

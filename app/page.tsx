@@ -115,6 +115,7 @@ const defaultAppearance: AppearancePrefs = {
   font: "Inter, ui-sans-serif, system-ui, sans-serif",
   background: "#0b0c10",
   accent: "#8b7cff",
+  accent2: "",
   timeZone: "America/New_York",
 };
 const timeZoneSuffix: Record<string, string> = {
@@ -604,6 +605,7 @@ export function InboxPage() {
     // while navigating between routes (not just on the inbox's local <main>).
     const root = document.documentElement;
     root.style.setProperty("--accent", nextAppearance.accent);
+    if (nextAppearance.accent2) root.style.setProperty("--accent-2", `color-mix(in srgb, ${nextAppearance.accent2} 25%, var(--panel))`);
     root.style.setProperty("--bg", nextAppearance.background);
     root.style.setProperty("--font", nextAppearance.font);
     root.style.setProperty(
@@ -779,10 +781,10 @@ export function InboxPage() {
       avgReplyTime: { value: String(neutralCount), sub: `Neutral replies ${filterLabel}` },
       pipelineSaved: { value: String(negativeCount), sub: `Negative replies ${filterLabel}` },
       replyCount7d: { value: String(totalReplies), sub: `Inbound replies ${filterLabel}` },
-      totalReplies: { value: String(analytics?.totalReplies ?? 0), sub: "All stored inbound replies" },
+      totalReplies: { value: String(totalReplies), sub: `Inbound replies ${filterLabel}` },
       positiveRate: { value: `${positiveRate}%`, sub: `Positive rate ${filterLabel}` },
-      avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", sub: "Average campaign reply rate" },
-      acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", sub: "Accepted connections ÷ requests sent" },
+      avgRepliesCampaign: { value: filtered.length ? `${((filtered.filter((l) => l.replies > 0).length / filtered.length) * 100).toFixed(1)}%` : "—", sub: `Reply rate ${filterLabel}` },
+      acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", sub: "Campaign acceptance rate (all time)" },
     };
     return { ...metric, ...(values[metric.id] ?? {}) };
   };
@@ -1017,7 +1019,7 @@ export function InboxPage() {
                 title="Quick templates notepad"
                 onClick={() => setTemplatesOpen((open) => !open)}
               >
-                📋
+                ≡
               </button>
               {templatesOpen && (
                 <div className="notepad-dropdown">

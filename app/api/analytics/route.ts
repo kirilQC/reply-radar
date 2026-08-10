@@ -71,7 +71,7 @@ export async function GET(request: Request) {
   if (!url || !key) return NextResponse.json({ ok: false, status: "not_configured" }, { status: 503 });
   const requested = new URL(request.url).searchParams.get("workspaces")?.split(",").filter(Boolean) ?? [];
   try {
-    const workspaces = await supabase("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext&order=name.asc") ?? [];
+    const workspaces = await supabase("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,logo_url,accent_color&order=name.asc") ?? [];
     const selected = requested.length ? workspaces.filter((row) => requested.includes(String(row.slug))) : workspaces;
     const ids = selected.map((row) => String(row.id));
     if (!ids.length) return NextResponse.json({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], aiArkCalls: 0, aiArkSuccesses: 0, aiArkFailures: 0, aiArkTrend: [], aiArkTrendLabels: [], aiArkByClient: [], queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });
@@ -180,7 +180,8 @@ export async function GET(request: Request) {
       const runs = aiArkRuns.filter((run) => run.workspace_id === workspace.id);
       return { workspaceId: workspace.id, name: workspace.name, slug: workspace.slug, calls: runs.length, successes: runs.filter((run) => run.status === "success").length, failures: runs.filter((run) => run.status === "failed").length };
     });
-    return NextResponse.json({ ok: true, status: "live", totalReplies: inbound.length, outboundMessages: outbound.length, activeConversations: conversations.length, replies7d: recentMessages.length, trend, averageResponseMinutes, campaignMetrics, campaignAverages, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, aiArkCalls: aiArkRuns.length, aiArkSuccesses: aiArkRuns.filter((run) => run.status === "success").length, aiArkFailures: aiArkRuns.filter((run) => run.status === "failed").length, aiArkTrend, aiArkTrendLabels: aiArkDays.map((day) => day.toLocaleDateString("en-US", { month: "short", day: "numeric" })), aiArkByClient, queueMix, clientLoad, workspaces: selected.map((row) => row.name) });
+    const workspaceDetails = selected.map((row) => ({ id: String(row.id), name: String(row.name), slug: String(row.slug), logoUrl: row.logo_url ? String(row.logo_url) : null, accentColor: row.accent_color ? String(row.accent_color) : null }));
+    return NextResponse.json({ ok: true, status: "live", totalReplies: inbound.length, outboundMessages: outbound.length, activeConversations: conversations.length, replies7d: recentMessages.length, trend, averageResponseMinutes, campaignMetrics, campaignAverages, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, aiArkCalls: aiArkRuns.length, aiArkSuccesses: aiArkRuns.filter((run) => run.status === "success").length, aiArkFailures: aiArkRuns.filter((run) => run.status === "failed").length, aiArkTrend, aiArkTrendLabels: aiArkDays.map((day) => day.toLocaleDateString("en-US", { month: "short", day: "numeric" })), aiArkByClient, queueMix, clientLoad, workspaces: selected.map((row) => row.name), workspaceDetails });
   } catch (error) {
     return NextResponse.json({ ok: false, status: "error", error: error instanceof Error ? error.message : "Analytics unavailable" }, { status: 502 });
   }

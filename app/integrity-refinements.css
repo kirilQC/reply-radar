@@ -76,35 +76,14 @@
 .inbox-operational-table .table-head,
 .inbox-operational-table .lead-row {
   grid-template-columns:
-    minmax(190px, 1.6fr) minmax(0, 0.72fr) minmax(0, 1.12fr)
-    minmax(0, 0.92fr) minmax(0, 0.86fr) minmax(0, 0.48fr)
-    minmax(0, 0.58fr) minmax(0, 0.62fr) 24px !important;
+    minmax(220px, 1.8fr) minmax(0, 0.8fr) minmax(0, 1.2fr)
+    minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 0.5fr)
+    minmax(0, 0.55fr) !important;
 }
 .inbox-operational-table .campaign-cell strong,
 .inbox-operational-table .sender-cell strong {
   color: var(--text) !important;
   font-weight: 760 !important;
-}
-.row-star-cell {
-  display: grid;
-  place-items: center;
-}
-.pane-density-no-followup
-  .inbox-operational-table
-  .table-head
-  > span:nth-child(8),
-.pane-density-no-followup
-  .inbox-operational-table
-  .lead-row
-  > div:nth-child(8) {
-  display: none;
-}
-.pane-density-no-followup .inbox-operational-table .table-head,
-.pane-density-no-followup .inbox-operational-table .lead-row {
-  grid-template-columns:
-    minmax(190px, 1.65fr) minmax(0, 0.72fr) minmax(0, 1.08fr)
-    minmax(0, 0.88fr) minmax(0, 0.82fr) minmax(0, 0.45fr)
-    minmax(0, 0.55fr) 24px !important;
 }
 .pane-density-no-replies
   .inbox-operational-table
@@ -116,9 +95,8 @@
 .pane-density-no-replies .inbox-operational-table .table-head,
 .pane-density-no-replies .inbox-operational-table .lead-row {
   grid-template-columns:
-    minmax(190px, 1.7fr) minmax(0, 0.7fr) minmax(0, 1.04fr)
-    minmax(0, 0.84fr) minmax(0, 0.78fr) minmax(0, 0.52fr)
-    24px !important;
+    minmax(220px, 1.9fr) minmax(0, 0.8fr) minmax(0, 1.2fr)
+    minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 0.55fr) !important;
 }
 .lead-star {
   display: inline-grid !important;

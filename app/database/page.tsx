@@ -559,22 +559,12 @@ export default function DatabasePage() {
                   <h2>{selectedSummary?.name || "Loading…"}</h2>
                 </span>
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  className="database-delete-button"
-                  onClick={() => selectedId && deleteLead(selectedId)}
-                  aria-label="Delete lead"
-                  title="Delete lead"
-                >
-                  🗑
-                </button>
-                <button
-                  onClick={() => setSelectedId(null)}
-                  aria-label="Close lead details"
-                >
-                  ×
-                </button>
-              </div>
+              <button
+                onClick={() => setSelectedId(null)}
+                aria-label="Close lead details"
+              >
+                ×
+              </button>
             </div>
             <nav className="database-tabs">
               {(["overview", "activity"] as const).map((tab) => (
@@ -591,7 +581,7 @@ export default function DatabasePage() {
               {detailLoading ? (
                 <DatabaseSkeleton />
               ) : detail && detailTab === "overview" ? (
-                <LeadOverview detail={detail} />
+                <LeadOverview detail={detail} onDelete={() => selectedId && deleteLead(selectedId)} />
               ) : detail && detailTab === "activity" ? (
                 <LeadActivity detail={detail} onLoadOlder={loadOlderMessages} />
               ) : null}
@@ -616,7 +606,7 @@ function DatabaseDropdown({ label, value, placeholder, options, onChange, disabl
   </div>;
 }
 
-function LeadOverview({ detail }: { detail: Detail }) {
+function LeadOverview({ detail, onDelete }: { detail: Detail; onDelete?: () => void }) {
   const raw =
     detail.lead.raw_data && typeof detail.lead.raw_data === "object"
       ? (detail.lead.raw_data as Record<string, unknown>)
@@ -837,6 +827,13 @@ function LeadOverview({ detail }: { detail: Detail }) {
         <section>
           <h3>Education</h3>
           <ReadableList title="Education history" items={education} />
+        </section>
+      )}
+      {onDelete && (
+        <section className="database-danger-zone">
+          <h3>Danger zone</h3>
+          <p>Permanently delete this lead and all their conversations and messages. This action cannot be undone.</p>
+          <button className="database-delete-lead-button" onClick={onDelete}>Delete lead</button>
         </section>
       )}
     </div>
