@@ -140,8 +140,8 @@ export default function DashboardHome() {
                       : `${summary.repliesToday > summary.repliesYesterday ? "▲" : "▼"} ${Math.abs(summary.repliesToday - summary.repliesYesterday).toLocaleString()} vs yesterday`
                 }
               />
-              <StatTile label="This week" value={number(summary?.repliesThisWeek)} hint="Since Monday" />
-              <StatTile label="This month" value={number(summary?.repliesThisMonth)} hint={summary?.monthLabel ?? "Calendar month"} />
+              <StatTile label="Replies this week" value={number(summary?.repliesThisWeek)} hint="Since Monday" />
+              <StatTile label="Replies this month" value={number(summary?.repliesThisMonth)} hint={summary?.monthLabel ?? "Calendar month"} />
               <StatTile label="All-time replies" value={number(summary?.repliesAllTime)} hint={summary?.leads == null ? "Every reply stored" : `Across ${summary.leads.toLocaleString()} leads`} />
               {/* Counted from the workspaces table rather than from the browser's saved copy, which can
                   lag behind a client someone else added. */}

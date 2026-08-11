@@ -94,7 +94,7 @@ const defaultLayout: LayoutPrefs = {
   showAnalytics: true,
   showDetail: true,
   compact: false,
-  metrics: ["avgRepliesCampaign", "acceptanceRate", "positiveRate", "totalReplies"],
+  metrics: ["totalReplies", "acceptanceRate", "avgRepliesCampaign", "positiveRate", "needsReply"],
   graphs: [
     { id: "replies-by-day", title: "Replies per day", x: "day", y: "replies", kind: "area" },
     { id: "sentiment-mix", title: "Sentiment mix", x: "sentiment", y: "conversations", kind: "donut" },
@@ -104,10 +104,11 @@ const defaultLayout: LayoutPrefs = {
   starredLeadIds: [],
 };
 const clientCampaignMetricIds = [
-  "avgRepliesCampaign",
-  "acceptanceRate",
-  "positiveRate",
   "totalReplies",
+  "acceptanceRate",
+  "avgRepliesCampaign",
+  "positiveRate",
+  "needsReply",
 ];
 const defaultAppearance: AppearancePrefs = {
   mode: "midnight",
@@ -179,11 +180,11 @@ const metricCatalog = [
     sub: "Awaiting synced data",
   },
   {
-    id: "avgReplyTime",
-    label: "Avg. reply time",
+    id: "needsReply",
+    label: "Needs reply",
     value: "—",
     delta: "",
-    tone: "green",
+    tone: "coral",
     sub: "Awaiting synced data",
   },
   {
@@ -204,7 +205,7 @@ const metricCatalog = [
   },
   {
     id: "totalReplies",
-    label: "Total replies",
+    label: "Replies",
     value: "—",
     delta: "",
     tone: "green",
@@ -212,7 +213,7 @@ const metricCatalog = [
   },
   {
     id: "positiveRate",
-    label: "Average positive reply rate",
+    label: "Positive reply rate",
     value: "—",
     delta: "",
     tone: "green",
@@ -220,7 +221,7 @@ const metricCatalog = [
   },
   {
     id: "avgRepliesCampaign",
-    label: "Average reply rate",
+    label: "Reply rate",
     value: "—",
     delta: "",
     tone: "coral",
@@ -228,7 +229,7 @@ const metricCatalog = [
   },
   {
     id: "acceptanceRate",
-    label: "Average acceptance rate",
+    label: "Acceptance rate",
     value: "—",
     delta: "",
     tone: "amber",
@@ -995,20 +996,22 @@ export function InboxPage() {
     const averages = analytics?.campaignAverages;
     const filterLabel = filter === "today" ? "today" : filter === "week" ? "this week" : filter === "follow-ups" ? "needing follow-up" : "total";
     const positiveCount = filtered.filter((l) => l.sentiment === "positive").length;
-    const neutralCount = filtered.filter((l) => l.sentiment === "neutral").length;
     const negativeCount = filtered.filter((l) => l.sentiment === "negative").length;
     const totalReplies = filtered.reduce((sum, l) => sum + l.replies, 0);
     const positiveRate = filtered.length ? ((positiveCount / filtered.length) * 100).toFixed(1) : "0.0";
-    const values: Record<string, { value: string; sub: string }> = {
+    // Leads awaiting our reply — last message from them, not from us. Uses `filtered`
+    // so the count matches the inbox view the user is currently looking at.
+    const needsReplyCount = filtered.filter((l) => l.messages.at(-1)?.direction === "inbound").length;
+    const values: Record<string, { value: string; sub: string; label?: string }> = {
       needsAction: { value: String(filtered.length), sub: `Conversations ${filterLabel}` },
       hotConversations: { value: String(positiveCount), sub: `Positive replies ${filterLabel}` },
-      avgReplyTime: { value: String(neutralCount), sub: `Neutral replies ${filterLabel}` },
       pipelineSaved: { value: String(negativeCount), sub: `Negative replies ${filterLabel}` },
       replyCount7d: { value: String(totalReplies), sub: `Replies ${filterLabel}` },
-      totalReplies: { value: String(totalReplies), sub: `Replies ${filterLabel}` },
-      positiveRate: { value: `${positiveRate}%`, sub: `Positive rate ${filterLabel}` },
-      avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", sub: "Campaign reply rate (replies ÷ accepted)" },
-      acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", sub: "Campaign acceptance rate (all time)" },
+      totalReplies: { value: String(totalReplies), label: `Replies ${filterLabel === "total" ? "· all time" : filterLabel}`, sub: `Replies ${filterLabel}` },
+      positiveRate: { value: `${positiveRate}%`, sub: `From our sentiment analysis · ${filterLabel}` },
+      avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", sub: "Average across campaigns" },
+      acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", sub: "Average across campaigns" },
+      needsReply: { value: String(needsReplyCount), sub: `Leads waiting on us · ${filterLabel}`, label: `${needsReplyCount === 1 ? "1 lead needs" : `${needsReplyCount} leads need`} to be replied to` },
     };
     return { ...metric, ...(values[metric.id] ?? {}) };
   };
@@ -1850,7 +1853,18 @@ export function InboxPage() {
                       </div>
                       <div>
                         <div className="detail-name-line">
-                          <h3>{current.name}</h3>
+                          <h3>
+                            {current.name}
+                            {current.messages.at(-1)?.direction === "outbound" && (
+                              <span
+                                className="responded-check detail-responded-check"
+                                title="You've already replied to this thread"
+                                aria-label="Replied"
+                              >
+                                ✓
+                              </span>
+                            )}
+                          </h3>
                           <button
                             className={`detail-star ${layoutPrefs.starredLeadIds.includes(String(current.leadId || current.id)) ? "is-starred" : ""}`}
                             onClick={() => toggleStar(current)}
@@ -1976,11 +1990,19 @@ export function InboxPage() {
                         <button type="button" onClick={() => void generateAiReview(workspaceAi, true)} disabled={aiLoading}>{aiLoading ? "Generating…" : "Regenerate ↻"}</button>
                       </div>
                     </div>
-                    <textarea
-                      value={aiDraft}
-                      onChange={(event) => setAiDraft(event.target.value)}
-                      placeholder={aiLoading ? "Generating a draft…" : "Anthropic draft will appear here."}
-                    />
+                    {current.messages.at(-1)?.direction === "outbound" ? (
+                      <div className="composer-replied-state" role="status" aria-live="polite">
+                        <span className="responded-check composer-responded-check" aria-hidden="true">✓</span>
+                        <p>Lead has been replied to!</p>
+                        <small>Waiting on the lead. If they respond, a fresh draft will appear here.</small>
+                      </div>
+                    ) : (
+                      <textarea
+                        value={aiDraft}
+                        onChange={(event) => setAiDraft(event.target.value)}
+                        placeholder={aiLoading ? "Generating a draft…" : "Anthropic draft will appear here."}
+                      />
+                    )}
                     <div className="composer-foot">
                       <span>Beta safety mode · sending disabled</span>
                       <button
