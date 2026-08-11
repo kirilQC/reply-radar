@@ -910,6 +910,87 @@ export function InboxPage() {
     setSelectedId("");
   }, [filter, search, sort, clientParam, profileParam]);
   const visibleLeads = filtered.slice(0, visibleLeadCount);
+  // Keep the rows on the screen — and the "already-replied" check next to each
+  // name — accurate against HeyReach. Scoped to what the user can actually see
+  // (up to /api/conversations/refresh's cap of 50 IDs) and gated by a 60 s
+  // staleness window so filter juggling and see-more clicks don't re-hit
+  // HeyReach for conversations we just synced. A global inbox poll was
+  // rejected because this page will run at high volume across dozens of
+  // clients; the freshness signal lives per-conversation ("Last synced X @ Y"
+  // in the drawer) rather than as a background refetch loop.
+  const visibleIdsKey = visibleLeads.map((lead) => lead.id).join(",");
+  useEffect(() => {
+    if (!visibleIdsKey) return;
+    const cutoff = Date.now() - 60_000;
+    const staleIds = visibleLeads
+      .filter((lead) => {
+        const stampedAt = lead.lastRefreshedAt
+          ? Date.parse(lead.lastRefreshedAt)
+          : 0;
+        return !stampedAt || stampedAt < cutoff;
+      })
+      .map((lead) => lead.id)
+      .slice(0, 50);
+    if (!staleIds.length) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/conversations/refresh", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ conversationIds: staleIds }),
+        });
+        const data = (await response.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              results?: Array<{
+                id?: string;
+                thread?: unknown;
+                lastRefreshedAt?: string;
+              }>;
+            }
+          | null;
+        if (cancelled || !data?.ok || !Array.isArray(data.results)) return;
+        const nowIso = new Date().toISOString();
+        const updates = new Map<
+          string,
+          { thread: Lead["messages"]; lastRefreshedAt: string }
+        >();
+        for (const result of data.results) {
+          if (
+            result &&
+            typeof result.id === "string" &&
+            Array.isArray(result.thread)
+          ) {
+            updates.set(result.id, {
+              thread: result.thread as Lead["messages"],
+              lastRefreshedAt: result.lastRefreshedAt ?? nowIso,
+            });
+          }
+        }
+        if (!updates.size) return;
+        setLeads((prev) =>
+          prev.map((lead) => {
+            const update = updates.get(lead.id);
+            if (!update) return lead;
+            return {
+              ...lead,
+              messages: update.thread,
+              lastRefreshedAt: update.lastRefreshedAt,
+            };
+          }),
+        );
+      } catch {
+        /* network hiccups shouldn't crash the inbox */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // visibleIdsKey stands in for the visible-lead set; including visibleLeads
+    // itself would refire on every setLeads and cause an inbox-wide loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleIdsKey]);
   const liveMetric = (metric: (typeof metricCatalog)[number]) => {
     const averages = analytics?.campaignAverages;
     const filterLabel = filter === "today" ? "today" : filter === "week" ? "this week" : filter === "follow-ups" ? "needing follow-up" : "total";
