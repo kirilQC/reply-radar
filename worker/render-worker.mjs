@@ -71,7 +71,9 @@ async function syncWorkspace(workspace) {
     errorText = error instanceof Error ? error.message : "Workspace sync failed";
   }
   await writeSyncRun({ workspace_id: workspace.id, run_type: "workspace-sync", source: "render-worker", status, started_at: startedAt, finished_at: new Date().toISOString(), records_seen: recordsSeen, records_written: 0, error_text: errorText });
-  console.info("reply_radar_workspace_sync", { workspace: workspace.slug, status, error: errorText });
+  // The error key is omitted when there is nothing wrong: Render's log viewer flags any line
+  // containing "error" as a failure, so `error: null` painted every healthy sync run red.
+  console.info("reply_radar_workspace_sync", { workspace: workspace.slug, status, ...(errorText ? { error: errorText } : {}) });
 }
 
 // ── Conversation refresh ────────────────────────────────────────────
@@ -242,6 +244,9 @@ const appBaseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
 const AI_BATCH_SIZE = Math.max(1, Number(process.env.AI_BATCH_SIZE || 10));
 // How far back to look for replies that still need work, newest reply first.
 const AI_CANDIDATE_LIMIT = 200;
+// A lead AI Ark could not match is left alone for a week. AI Ark bills five attempts per call,
+// so retrying every cycle would spend real money re-learning the same answer.
+const ENRICHMENT_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
 let missingBaseUrlWarned = false;
 
 const radarOf = (rawData) => {
@@ -270,12 +275,25 @@ async function chunked(ids, size, run) {
   return rows;
 }
 
-/** Replies whose draft, sentiment, ICP score or follow-up score has not been produced yet. */
+/**
+ * A lead is worth enriching once, if AI Ark can identify them at all. Enrichment supplies the
+ * headline, industry, company size and profile photo, so it runs before ICP scoring — and the
+ * ICP score is kept forever, which makes it worth scoring against the fuller picture.
+ */
+function needsEnrichment(lead) {
+  if (!lead || !String(lead.linkedin_profile_url || "").trim()) return false;
+  const radar = radarOf(lead.raw_data);
+  if (radar.ai_ark) return false;
+  const attemptedAt = Date.parse(String(radar.enrichment_attempted_at || ""));
+  return Number.isNaN(attemptedAt) || Date.now() - attemptedAt > ENRICHMENT_RETRY_MS;
+}
+
+/** Replies whose enrichment, draft, sentiment, ICP score or follow-up score is still missing. */
 async function conversationsNeedingAi(workspace) {
   const candidates = await supabase(
     `rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&last_message_direction=eq.inbound&order=last_message_at.desc.nullslast&limit=${AI_CANDIDATE_LIMIT}`,
   );
-  if (!candidates || !candidates.length) return { work: [], leadNames: new Map() };
+  if (!candidates || !candidates.length) return { work: [], leadsById: new Map() };
 
   // Per-reply AI state lives on the latest inbound message of each conversation.
   const inbound = await chunked(candidates.map((c) => c.id), 40, (batch) =>
@@ -287,31 +305,30 @@ async function conversationsNeedingAi(workspace) {
     if (!latestInbound.has(id)) latestInbound.set(id, row);
   }
 
-  // The ICP score is stored on the lead and kept forever, so a lead is scored at most once.
+  // Enrichment and the ICP score are both stored on the lead and kept, so each happens once.
   const leadIds = [...new Set(candidates.map((c) => String(c.lead_id || "")).filter(Boolean))];
   const leads = await chunked(leadIds, 40, (batch) =>
-    supabase(`rr_leads?select=id,name,raw_data&id=in.(${batch.join(",")})`),
+    supabase(`rr_leads?select=id,name,linkedin_profile_url,raw_data&id=in.(${batch.join(",")})`),
   );
-  const leadNames = new Map(leads.map((lead) => [String(lead.id), String(lead.name || "")]));
-  const scoredLeads = new Set(
-    leads.filter((lead) => radarOf(lead.raw_data).icp_score != null).map((lead) => String(lead.id)),
-  );
+  const leadsById = new Map(leads.map((lead) => [String(lead.id), lead]));
 
   const work = [];
   for (const conv of candidates) {
     const latest = latestInbound.get(String(conv.id));
     if (!latest) continue;
     const radar = radarOf(latest.raw_data);
+    const lead = leadsById.get(String(conv.lead_id || ""));
     // A draft is stale once it predates the reply it was supposed to answer.
     const analyzedAt = Date.parse(String(radar.analyzed_at || ""));
     const needsReview = !radar.cached_draft || Number.isNaN(analyzedAt) || analyzedAt <= Date.parse(String(latest.sent_at));
     const needsFollowUp = !radar.followup_analyzed_at;
-    const needsIcp = Boolean(conv.lead_id) && !scoredLeads.has(String(conv.lead_id));
-    if (!needsReview && !needsFollowUp && !needsIcp) continue;
-    work.push({ conv, needsReview, needsFollowUp, needsIcp, sentiment: String(radar.sentiment || "") });
+    const needsIcp = Boolean(lead) && radarOf(lead.raw_data).icp_score == null;
+    const needsEnrich = needsEnrichment(lead);
+    if (!needsReview && !needsFollowUp && !needsIcp && !needsEnrich) continue;
+    work.push({ conv, needsReview, needsFollowUp, needsIcp, needsEnrich, sentiment: String(radar.sentiment || "") });
     if (work.length >= AI_BATCH_SIZE) break;
   }
-  return { work, leadNames };
+  return { work, leadsById };
 }
 
 async function runAiForConversation(workspace, item, leadName) {
@@ -328,6 +345,14 @@ async function runAiForConversation(workspace, item, leadName) {
   const shared = { workspaceId: workspace.id, workspaceName: String(workspace.name || workspace.slug || ""), leadName };
   let steps = 0;
   let sentiment = item.sentiment;
+
+  // Enrichment first, and tolerated when it fails: AI Ark simply has no record of some people,
+  // and that must not stop the reply from being drafted and scored.
+  if (item.needsEnrich) {
+    await appPost("/api/ai/enrich", { leadId: item.conv.lead_id })
+      .then(() => { steps += 1; })
+      .catch((error) => console.info("reply_radar_ai_enrich_unavailable", { lead: item.conv.lead_id, reason: String(error.message || error).slice(0, 200) }));
+  }
 
   // Analyse first: this single call produces the suggested reply, the review note and the
   // sentiment, and the follow-up score below reads that sentiment.
@@ -383,9 +408,9 @@ async function runAiPipeline() {
 
   for (const workspace of workspaces || []) {
     let work = [];
-    let leadNames = new Map();
+    let leadsById = new Map();
     try {
-      ({ work, leadNames } = await conversationsNeedingAi(workspace));
+      ({ work, leadsById } = await conversationsNeedingAi(workspace));
     } catch (error) {
       errors++;
       console.warn("reply_radar_ai_pipeline_scan_error", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
@@ -393,7 +418,8 @@ async function runAiPipeline() {
     }
     for (const item of work) {
       try {
-        steps += await runAiForConversation(workspace, item, leadNames.get(String(item.conv.lead_id || "")) || "");
+        const lead = leadsById.get(String(item.conv.lead_id || ""));
+        steps += await runAiForConversation(workspace, item, String((lead && lead.name) || ""));
         processed++;
       } catch (error) {
         errors++;
@@ -407,7 +433,7 @@ async function runAiPipeline() {
 
   if (processed || errors) {
     await writeSyncRun({ workspace_id: null, run_type: "ai-pipeline", source: "render-worker", status: errors > 0 ? "partial" : "success", started_at: startedAt, finished_at: new Date().toISOString(), records_seen: processed + errors, records_written: steps, error_text: errors > 0 ? `${errors} conversations failed AI processing` : null });
-    console.info("reply_radar_ai_pipeline_finished", { processed, steps, errors });
+    console.info("reply_radar_ai_pipeline_finished", { processed, steps, ...(errors ? { errors } : {}) });
   }
 }
 

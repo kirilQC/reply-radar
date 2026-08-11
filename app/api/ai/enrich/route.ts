@@ -25,32 +25,28 @@ export async function POST(request: Request) {
     const profileUrl = String(lead.linkedin_profile_url ?? "").trim();
     if (!profileUrl) return NextResponse.json({ error: "Lead has no LinkedIn profile URL — enrichment requires one" }, { status: 400 });
 
-    const enrichment = await enrichLeadWithAiArk(
-      { url, key },
-      String(lead.workspace_id),
-      profileUrl,
-      String(lead.company ?? ""),
-    );
-
-    // Write enrichment to lead raw_data
     const existingRaw = lead.raw_data && typeof lead.raw_data === "object" ? lead.raw_data as Row : {};
     const replyRadar = existingRaw.reply_radar && typeof existingRaw.reply_radar === "object" ? existingRaw.reply_radar as Row : {};
-    await fetch(`${url}/rest/v1/rr_leads?id=eq.${encodeURIComponent(leadId)}`, {
-      method: "PATCH",
-      headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" },
-      body: JSON.stringify({
-        raw_data: {
-          ...existingRaw,
-          reply_radar: {
-            ...replyRadar,
-            ai_ark: enrichment,
-            enrichment_status: "enriched",
-            enrichment_error: null,
-          },
-        },
-      }),
-      cache: "no-store",
-    });
+    const saveRadar = (patch: Row) =>
+      fetch(`${url}/rest/v1/rr_leads?id=eq.${encodeURIComponent(leadId)}`, {
+        method: "PATCH",
+        headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({ raw_data: { ...existingRaw, reply_radar: { ...replyRadar, ...patch, enrichment_attempted_at: new Date().toISOString() } } }),
+        cache: "no-store",
+      });
+
+    let enrichment;
+    try {
+      enrichment = await enrichLeadWithAiArk({ url, key }, String(lead.workspace_id), profileUrl, String(lead.company ?? ""));
+    } catch (error) {
+      // Recorded on the lead rather than only returned, because AI Ark charges five attempts
+      // per call and the background sweep would otherwise retry an unmatchable lead forever.
+      const message = error instanceof Error ? error.message : "Enrichment failed";
+      await saveRadar({ enrichment_status: "unavailable", enrichment_error: message.slice(0, 1_000) }).catch(() => null);
+      return NextResponse.json({ ok: false, error: message }, { status: 502 });
+    }
+
+    await saveRadar({ ai_ark: enrichment, enrichment_status: "enriched", enrichment_error: null });
 
     return NextResponse.json({ ok: true, enrichment: { headline: enrichment.headline, title: enrichment.title, company: enrichment.company } });
   } catch (error) {
