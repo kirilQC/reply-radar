@@ -21,6 +21,7 @@ Read it rather than re-deriving things. `context/README.md` is the index.
 | [`context/05-conventions-and-gotchas.md`](context/05-conventions-and-gotchas.md) | House rules, lint baseline, repo traps. |
 | [`context/06-product-decisions.md`](context/06-product-decisions.md) | Settled decisions, including reversed ones. Do not relitigate. |
 | [`context/07-verification.md`](context/07-verification.md) | How to prove a change works with no local credentials. |
+| [`context/08-session-handoff.md`](context/08-session-handoff.md) | **Current state: recent commits, what's verified, what's still open.** Start here if picking up cold. |
 | [`context/00-original-handoff.md`](context/00-original-handoff.md) | The original handoff, verbatim. Historical where it conflicts with the above. |
 
 ## The eight things that catch everyone out

@@ -15,6 +15,7 @@ Written to be read in order, but each file stands alone. If you only read one th
 | [`05-conventions-and-gotchas.md`](05-conventions-and-gotchas.md) | House rules, the lint baseline, patterns to copy, and traps in this specific repo. |
 | [`06-product-decisions.md`](06-product-decisions.md) | Decisions the owner has already made, including ones that were reversed. Do not relitigate these. |
 | [`07-verification.md`](07-verification.md) | How to prove a change works when there are no local credentials. The harness pattern. |
+| [`08-session-handoff.md`](08-session-handoff.md) | Where the project stands right now: what shipped recently, what's verified, what's still open. |
 
 ## The thirty-second version
 
