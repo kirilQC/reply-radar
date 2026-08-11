@@ -1,4 +1,4 @@
-import { conversationFromWebhook, fetchFullConversation, type ConversationMessage, type JsonObject } from "./heyreach-conversation";
+import { conversationFromWebhook, fetchFullConversation, messageKey, type ConversationMessage, type JsonObject } from "./heyreach-conversation";
 import { enrichLeadWithAiArk } from "./ai-ark-enrichment";
 import { isAiArkEnrichmentEnabled, leadRollup, mergeLeadAttributions } from "./lead-identity";
 import { writeAuditEvent } from "./audit-log";
@@ -104,8 +104,6 @@ async function syncIdentityRollup(config: SupabaseConfig, profileUrl: string) {
   }
 }
 
-const fingerprint = (message: { direction: unknown; sent_at: unknown; body: unknown }) => `${String(message.direction)}|${new Date(String(message.sent_at)).toISOString()}|${String(message.body)}`;
-
 export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; name?: string | null; slug?: string | null; heyreach_api_key_ciphertext?: string | null }, payload: JsonObject) {
   const lead = object(payload.lead);
   const webhookCampaign = object(payload.campaign);
@@ -202,10 +200,10 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     if (!conversationId) throw new Error("Conversation upsert returned no id.");
 
     const existing = await db(config, `rr_messages?select=heyreach_message_id,direction,body,sent_at&conversation_id=eq.${encodeURIComponent(conversationId)}`) as JsonObject[];
-    const existingByFingerprint = new Map(existing.map((message) => [fingerprint(message as { direction: unknown; sent_at: unknown; body: unknown }), text(message.heyreach_message_id)]));
+    const existingByFingerprint = new Map(existing.map((message) => [messageKey(message.sent_at, message.body), text(message.heyreach_message_id)]));
     const messages = history.messages.map((message: ConversationMessage) => ({
       conversation_id: conversationId,
-      heyreach_message_id: existingByFingerprint.get(fingerprint({ direction: message.direction, sent_at: message.sentAt, body: message.body })) || message.externalId,
+      heyreach_message_id: existingByFingerprint.get(messageKey(message.sentAt, message.body)) || message.externalId,
       direction: message.direction,
       body: message.body,
       sent_at: message.sentAt,

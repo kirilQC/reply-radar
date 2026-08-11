@@ -1062,9 +1062,19 @@ function LeadActivity({
               new Date(String(b.sent_at)).getTime(),
           );
         // Deduplicate: collapse messages with identical body + timestamp
+        // Collapses a message an earlier release stored twice under opposite directions. The two
+        // copies can be stamped seconds apart, so the same body within a few minutes counts as one.
         const conversationMessages = rawMessages.filter((message, index) => {
-          const fp = `${new Date(String(message.sent_at)).toISOString()}|${String(message.body).trim()}`;
-          return index === rawMessages.findIndex((m) => `${new Date(String(m.sent_at)).toISOString()}|${String(m.body).trim()}` === fp);
+          const body = String(message.body).trim();
+          const sentAt = new Date(String(message.sent_at)).getTime();
+          return (
+            index ===
+            rawMessages.findIndex(
+              (candidate) =>
+                String(candidate.body).trim() === body &&
+                Math.abs(new Date(String(candidate.sent_at)).getTime() - sentAt) < 5 * 60_000,
+            )
+          );
         });
         const sender = senderNameFrom(
           ...conversationMessages.map((message) => message.raw_data),

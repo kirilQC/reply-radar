@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { extractMessageRows, messageKey, normalizeHeyReachMessages } from "../../../lib/heyreach-conversation";
 
 type Row = Record<string, unknown>;
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -46,55 +47,6 @@ async function heyReach(apiKey: string, path: string, init: RequestInit) {
     throw new Error(`HeyReach ${path.split("?")[0]} returned ${response.status}`);
   return response.json().catch(() => null);
 }
-
-function messageArrays(root: unknown): Row[] {
-  const candidates: Row[][] = [];
-  const seen = new Set<unknown>();
-  const visit = (value: unknown, depth: number) => {
-    if (!value || depth > 6 || seen.has(value)) return;
-    if (typeof value === "object") seen.add(value);
-    if (Array.isArray(value)) {
-      const rows = value.map(object).filter((row) => Object.keys(row).length);
-      const looksLikeMessages = rows.some(
-        (row) =>
-          row.message !== undefined ||
-          row.body !== undefined ||
-          row.text !== undefined ||
-          row.content !== undefined ||
-          row.messageText !== undefined ||
-          row.message_type !== undefined,
-      );
-      if (looksLikeMessages) candidates.push(rows);
-      value.forEach((item) => visit(item, depth + 1));
-      return;
-    }
-    if (typeof value === "object")
-      Object.values(value as Row).forEach((item) => visit(item, depth + 1));
-  };
-  visit(root, 0);
-  return candidates.sort((a, b) => b.length - a.length)[0] ?? [];
-}
-
-function directionFor(row: Row, accountId: string): "inbound" | "outbound" {
-  if (typeof row.is_reply === "boolean") return row.is_reply ? "inbound" : "outbound";
-  if (typeof row.isReply === "boolean") return row.isReply ? "inbound" : "outbound";
-  for (const key of ["isFromMe", "fromMe", "sentByMe", "isSender", "isOutbound"]) {
-    if (typeof row[key] === "boolean") return row[key] ? "outbound" : "inbound";
-  }
-  const direction = text(row.direction ?? row.messageDirection ?? row.senderType ?? "").toLowerCase();
-  if (["outbound", "sent", "sender", "account", "me"].some((p) => direction.includes(p))) return "outbound";
-  if (["inbound", "received", "reply", "lead"].some((p) => direction.includes(p))) return "inbound";
-  const senderId = text(row.senderId ?? row.sender_id ?? row.linkedInAccountId ?? row.accountId);
-  return senderId && senderId === accountId ? "outbound" : "inbound";
-}
-
-const iso = (v: unknown, fb: string) => {
-  const d = new Date(text(v));
-  return Number.isNaN(d.getTime()) ? fb : d.toISOString();
-};
-
-const fingerprint = (m: { direction: string; sent_at: string; body: string }) =>
-  `${m.direction}|${new Date(m.sent_at).toISOString()}|${m.body}`;
 
 /** Refresh a single conversation by re-fetching from HeyReach and updating messages. */
 async function refreshConversation(
@@ -149,34 +101,24 @@ async function refreshConversation(
 
   if (!chatroom) return { messagesUpdated: 0, error: "No chatroom data returned" };
 
-  const rawMessages = messageArrays(chatroom);
   const now = new Date().toISOString();
-  const messages = rawMessages.map((row) => {
-    const direction = directionFor(row, accountId);
-    const sentAt = iso(row.creation_time ?? row.creationTime ?? row.createdAt ?? row.sentAt ?? row.timestamp, now);
-    const body = text(row.message ?? row.body ?? row.text ?? row.content ?? row.messageText ?? row.messageBody) || "[Empty message]";
-    const suppliedId = text(row.id ?? row.messageId ?? row.message_id ?? row.linkedinMessageId);
-    const externalId = suppliedId || `rr-refresh-${direction}-${sentAt}-${body.slice(0, 30)}`;
-    return { externalId, direction, body, sentAt };
-  });
+  // Normalised by the same helper the webhook ingestion uses, so a refresh can never disagree
+  // with ingestion about who sent a message or what its id is.
+  const messages = normalizeHeyReachMessages(extractMessageRows(chatroom), accountId, { id: accountId, name: "" }, now, "history");
 
   // Get existing messages to merge
   const existing = (await db(url, key,
-    `rr_messages?select=heyreach_message_id,direction,body,sent_at,raw_data&conversation_id=eq.${encodeURIComponent(conversationId)}`,
+    `rr_messages?select=id,heyreach_message_id,direction,body,sent_at,raw_data&conversation_id=eq.${encodeURIComponent(conversationId)}`,
   )) as Row[];
-  const existingByFP = new Map(
-    existing.map((m) => [
-      fingerprint({ direction: text(m.direction), sent_at: text(m.sent_at), body: text(m.body) }),
-      text(m.heyreach_message_id),
-    ]),
-  );
+  const existingByKey = new Map<string, Row[]>();
+  for (const row of existing) {
+    const messageIdentity = messageKey(row.sent_at, row.body);
+    existingByKey.set(messageIdentity, [...(existingByKey.get(messageIdentity) ?? []), row]);
+  }
 
   // Only insert genuinely NEW messages — never overwrite existing raw_data (which contains sentiment)
   const newRecords = messages
-    .filter((m) => {
-      const fp = fingerprint({ direction: m.direction, sent_at: m.sentAt, body: m.body });
-      return !existingByFP.has(fp);
-    })
+    .filter((m) => !existingByKey.has(messageKey(m.sentAt, m.body)))
     .map((m) => ({
       conversation_id: conversationId,
       heyreach_message_id: m.externalId,
@@ -193,6 +135,34 @@ async function refreshConversation(
         headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
         body: JSON.stringify(newRecords.slice(i, i + 200)),
       });
+    }
+  }
+
+  // Repair rows an earlier release stored with the wrong direction. Because the old dedupe key
+  // included the direction, a message we sent could also be saved a second time as if the lead
+  // had sent it. Correct the copy worth keeping and drop the leftovers.
+  for (const message of messages) {
+    const rows = existingByKey.get(messageKey(message.sentAt, message.body));
+    if (!rows?.length) continue;
+    // Keep whichever row carries AI state, so sentiment, drafts and scores survive the repair.
+    const keep =
+      rows.find((row) => {
+        const radar = object(object(row.raw_data).reply_radar);
+        return ["sentiment", "cached_draft", "followup_urgency", "analyzed_at"].some((field) => radar[field] != null);
+      }) ?? rows[0];
+    if (text(keep.direction) !== message.direction) {
+      await db(url, key, `rr_messages?id=eq.${encodeURIComponent(text(keep.id))}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ direction: message.direction }),
+      }).catch(() => null);
+    }
+    for (const row of rows) {
+      if (row === keep) continue;
+      await db(url, key, `rr_messages?id=eq.${encodeURIComponent(text(row.id))}`, {
+        method: "DELETE",
+        headers: { Prefer: "return=minimal" },
+      }).catch(() => null);
     }
   }
 

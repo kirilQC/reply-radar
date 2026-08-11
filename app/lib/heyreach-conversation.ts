@@ -95,7 +95,7 @@ export function isHeyReachValidationPayload(payload: JsonObject) {
   return leadId === "testid";
 }
 
-function messageArrays(root: unknown) {
+export function extractMessageRows(root: unknown) {
   const candidates: JsonObject[][] = [];
   const seen = new Set<unknown>();
   const visit = (value: unknown, depth: number) => {
@@ -114,19 +114,47 @@ function messageArrays(root: unknown) {
   return candidates.sort((a, b) => b.length - a.length)[0] ?? [];
 }
 
-function directionFor(row: JsonObject, accountId: string): "inbound" | "outbound" {
+/**
+ * HeyReach labels every message with `sender: "ME" | "CORRESPONDENT"` and ships no message
+ * id, so this exact match is the only reliable signal and has to be checked before the
+ * looser heuristics below — those match on substrings and would happily read "ME" out of a
+ * sender *name* like "Mehmet". Everything after it is a fallback for other payload shapes.
+ */
+export function directionFor(row: JsonObject, accountId: string): "inbound" | "outbound" {
+  const label = text(first(row, ["sender", "senderType", "authorType", "direction", "messageDirection"])).toUpperCase();
+  if (label === "ME" || label === "SENDER" || label === "ACCOUNT") return "outbound";
+  if (label === "CORRESPONDENT" || label === "THEM" || label === "LEAD" || label === "PARTICIPANT") return "inbound";
+
   if (typeof row.is_reply === "boolean") return row.is_reply ? "inbound" : "outbound";
   if (typeof row.isReply === "boolean") return row.isReply ? "inbound" : "outbound";
   for (const key of ["isFromMe", "fromMe", "sentByMe", "isSender", "isOutbound"]) {
     if (typeof row[key] === "boolean") return row[key] ? "outbound" : "inbound";
   }
-  const direction = text(first(row, ["direction", "messageDirection", "senderType", "authorType", "sender", "type"])).toLowerCase();
-  if (["outbound", "sent", "sender", "account", "me"].some((part) => direction.includes(part))) return "outbound";
+  const direction = text(first(row, ["direction", "messageDirection", "senderType", "authorType", "type"])).toLowerCase();
+  if (["outbound", "sent", "sender", "account"].some((part) => direction.includes(part))) return "outbound";
   if (["inbound", "received", "reply", "lead", "participant", "correspondent"].some((part) => direction.includes(part))) return "inbound";
   const sender = object(first(row, ["sender", "author", "from"]));
   const messageSenderId = text(first(row, ["senderId", "sender_id", "linkedInAccountId", "accountId"])) || text(first(sender, ["id", "accountId", "linkedInAccountId"]));
   return messageSenderId && messageSenderId === accountId ? "outbound" : "inbound";
 }
+
+/**
+ * Identifies a message without its direction. HeyReach sends no message id, so a message is
+ * only recognisable by when it was sent and what it said. Deliberately excluding the
+ * direction means a disagreement about who sent it corrects the existing row instead of
+ * inserting a second copy attributed to the other party.
+ */
+/**
+ * How far apart two records of the same message body may be and still be the same message.
+ * Wide enough to absorb a substituted webhook event timestamp, narrow enough that a lead
+ * genuinely repeating themselves later in a thread stays a separate message.
+ */
+export const NEAR_DUPLICATE_MS = 5 * 60_000;
+
+export const messageKey = (sentAt: unknown, body: unknown) => {
+  const parsed = new Date(text(sentAt));
+  return `${Number.isNaN(parsed.getTime()) ? text(sentAt) : parsed.toISOString()}|${text(body)}`;
+};
 
 export function normalizeHeyReachMessages(rawMessages: unknown[], accountId: string, sender: Sender, fallbackTimestamp: string, source: "history" | "webhook") {
   return rawMessages.map(object).map((row) => {
@@ -135,19 +163,35 @@ export function normalizeHeyReachMessages(rawMessages: unknown[], accountId: str
     const messageType = text(first(row, ["message_type", "messageType", "contentType", "type"]));
     const body = text(first(row, ["message", "body", "text", "content", "messageText", "messageBody"])) || (messageType ? `[${messageType}]` : "[Empty message]");
     const suppliedId = text(first(row, ["id", "messageId", "message_id", "linkedinMessageId", "linkedInMessageId"]));
-    const externalId = suppliedId || `rr-${digest(`${direction}|${sentAt}|${body}`)}`;
+    // The synthetic id must not depend on the direction, or re-classifying a message would
+    // mint a new id and leave the original row behind as a duplicate.
+    const externalId = suppliedId || `rr-${digest(messageKey(sentAt, body))}`;
     return { externalId, direction, body, sentAt, raw: { ...row, reply_radar: { source, sender } } } satisfies ConversationMessage;
   });
 }
 
+/**
+ * Folds the webhook's `recent_messages` into the authoritative chatroom history. The webhook
+ * copy of a message does not always carry its own timestamp or `sender`, so the event time and
+ * a guessed direction get substituted — matching on the direction and an exact timestamp would
+ * therefore treat the same message as two, and show one of them as sent by the other party.
+ * Matching on the body within a short window keeps a single, correctly attributed copy.
+ */
 export function mergeConversationMessages(history: ConversationMessage[], recent: ConversationMessage[]) {
-  const byFingerprint = new Map<string, ConversationMessage>();
-  for (const message of [...history, ...recent]) {
-    const fingerprint = `${message.direction}|${message.sentAt}|${message.body}`;
-    const current = byFingerprint.get(fingerprint);
-    byFingerprint.set(fingerprint, current ? { ...message, externalId: current.externalId, raw: { ...current.raw, webhook_message: message.raw, reply_radar: message.raw.reply_radar } } : message);
+  const merged = [...history];
+  for (const message of recent) {
+    const match = merged.findIndex(
+      (candidate) =>
+        candidate.body === message.body &&
+        Math.abs(Date.parse(candidate.sentAt) - Date.parse(message.sentAt)) < NEAR_DUPLICATE_MS,
+    );
+    if (match >= 0) {
+      merged[match] = { ...merged[match], raw: { ...merged[match].raw, webhook_message: message.raw } };
+      continue;
+    }
+    merged.push(message);
   }
-  return [...byFingerprint.values()].sort((a, b) => a.sentAt.localeCompare(b.sentAt));
+  return merged.sort((a, b) => a.sentAt.localeCompare(b.sentAt));
 }
 
 export function conversationFromWebhook(payload: JsonObject): HistoryResult {
@@ -279,9 +323,9 @@ export async function fetchFullConversation(apiKey: string, payload: JsonObject)
   try {
     historyPayload = await heyReach(apiKey, `inbox/GetChatroom/${encodeURIComponent(sender.id)}/${encodeURIComponent(conversationExternalId)}`, { method: "GET" });
   } catch (error) {
-    if (!messageArrays(conversation).length) throw error;
+    if (!extractMessageRows(conversation).length) throw error;
   }
-  const history = normalizeHeyReachMessages(messageArrays(historyPayload), resolvedSender.id, resolvedSender, eventTimestamp, "history");
+  const history = normalizeHeyReachMessages(extractMessageRows(historyPayload), resolvedSender.id, resolvedSender, eventTimestamp, "history");
   const recentRows = Array.isArray(payload.recent_messages) ? payload.recent_messages : Array.isArray(payload.recentMessages) ? payload.recentMessages : [];
   const recent = normalizeHeyReachMessages(recentRows, resolvedSender.id, resolvedSender, eventTimestamp, "webhook");
   const suppliedCampaign = object(payload.campaign);

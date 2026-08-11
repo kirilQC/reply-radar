@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../lib/person-name";
 import { queryByIds } from "../../lib/chunk-query";
+import { NEAR_DUPLICATE_MS } from "../../lib/heyreach-conversation";
 type Row = Record<string, unknown>;
 
 async function query(url: string, key: string, path: string) {
@@ -191,26 +192,39 @@ export async function GET(request: Request) {
         ),
       ),
     ]);
-    // Deduplicate messages: the refresh endpoint may have created duplicates with
-    // wrong direction. Always prefer the original (non-refresh) message.
-    const isRefresh = (raw: unknown) => {
-      if (!raw || typeof raw !== "object") return false;
+    // Earlier releases could store one message twice under opposite directions, which showed a
+    // message we sent as if the lead had sent it. Those rows are collapsed on read so the thread
+    // is correct even before a refresh repairs the records themselves. Matching allows a small
+    // timestamp drift because the duplicate was sometimes stamped with the webhook event time.
+    const radarOf = (raw: unknown) => {
+      if (!raw || typeof raw !== "object") return {} as Row;
       const rr = (raw as Row).reply_radar;
-      return rr && typeof rr === "object" && (rr as Row).source === "refresh";
+      return rr && typeof rr === "object" ? (rr as Row) : ({} as Row);
+    };
+    const isRefresh = (raw: unknown) => radarOf(raw).source === "refresh";
+    const hasAiState = (raw: unknown) => {
+      const radar = radarOf(raw);
+      return ["sentiment", "cached_draft", "followup_urgency", "analyzed_at"].some((field) => radar[field] != null);
     };
     const deduped: Row[] = [];
-    const seen = new Map<string, number>();
+    const byBody = new Map<string, number[]>();
     for (const msg of messages) {
-      const fp = `${msg.conversation_id}|${new Date(String(msg.sent_at)).toISOString()}|${String(msg.body).trim()}`;
-      const existing = seen.get(fp);
-      if (existing !== undefined) {
-        // Always prefer the non-refresh message (original has correct direction)
-        const existingIsRefresh = isRefresh(deduped[existing].raw_data);
-        const currentIsRefresh = isRefresh(msg.raw_data);
-        if (existingIsRefresh && !currentIsRefresh) deduped[existing] = msg;
+      const bodyKey = `${msg.conversation_id}|${String(msg.body).trim()}`;
+      const sentAt = new Date(String(msg.sent_at)).getTime();
+      const candidates = byBody.get(bodyKey) ?? [];
+      const twin = candidates.find(
+        (position) => Math.abs(new Date(String(deduped[position].sent_at)).getTime() - sentAt) < NEAR_DUPLICATE_MS,
+      );
+      if (twin !== undefined) {
+        // Prefer the copy carrying AI state, then the one the refresh endpoint did not invent.
+        const incumbent = deduped[twin];
+        const preferIncoming = hasAiState(msg.raw_data)
+          ? !hasAiState(incumbent.raw_data)
+          : !hasAiState(incumbent.raw_data) && isRefresh(incumbent.raw_data) && !isRefresh(msg.raw_data);
+        if (preferIncoming) deduped[twin] = msg;
         continue;
       }
-      seen.set(fp, deduped.length);
+      byBody.set(bodyKey, [...candidates, deduped.length]);
       deduped.push(msg);
     }
 
