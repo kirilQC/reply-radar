@@ -897,12 +897,15 @@ function TemplatePicker({ templates, value, onPick, onSave, onDelete }: {
 function DraftFeedPanel({ events, freshIds }: { events: AiAuditEvent[]; freshIds: string[] }) {
   const [visible, setVisible] = useState(10);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  // Only show events where we captured the draft. Older rows (before richer persistence
-  // shipped) will still appear in the raw audit log below.
+  // Only show events with the full v2 payload (inbound message, references, etc.).
+  // Older rows still appear in the raw audit log below, but rendering them here
+  // would show a half-empty card.
   const allDrafts = events.filter((event) => {
     if (event.action !== "conversation.analyzed" && event.action !== "draft.generated" && event.action !== "draft.failed") return false;
     if (event.action === "draft.failed") return true;
-    return Boolean(event.draft && event.draft.trim());
+    const hasDraft = Boolean(event.draft && event.draft.trim());
+    const hasInbound = Boolean(event.inboundMessage && event.inboundMessage.trim());
+    return hasDraft && hasInbound;
   });
   const drafts = allDrafts.slice(0, visible);
   const toggle = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
