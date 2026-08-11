@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { defaultIcpPrompt } from "../../../lib/scoring-templates";
 
 type Row = Record<string, unknown>;
 const object = (v: unknown): Row => v && typeof v === "object" && !Array.isArray(v) ? v as Row : {};
@@ -15,7 +16,10 @@ export async function POST(request: Request) {
   const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId : "";
   const workspaceName = typeof body.workspaceName === "string" ? body.workspaceName : "";
   const leadName = typeof body.leadName === "string" ? body.leadName : "";
-  const icpPrompt = typeof body.icpPrompt === "string" && body.icpPrompt ? body.icpPrompt : "";
+  // A client with no ICP prompt of their own is scored on general seniority rather than on a rubric
+  // invented here. The panel that edits this is locked until the client brief is written, so the
+  // unconfigured case is the normal case early on and needs to already be doing something sensible.
+  const icpPrompt = typeof body.icpPrompt === "string" && body.icpPrompt.trim() ? body.icpPrompt : defaultIcpPrompt();
   // The ICP criteria say which titles and industries to reward; the brief says what the client
   // actually sells. Without it a prompt like "score higher when their remit includes the problem the
   // client solves" has no problem to reason about, so the score would be seniority guesswork.
@@ -54,9 +58,7 @@ export async function POST(request: Request) {
   const briefSection = clientBrief
     ? `\n\nAbout the client you are scoring for — read this first, every judgement below depends on it:\n${clientBrief}`
     : "";
-  const systemPrompt = icpPrompt
-    ? `You are an ICP (Ideal Customer Profile) scoring assistant. Score this lead from 0-100 based on how well they match the client's ICP.${briefSection}\n\nClient ICP criteria:\n${icpPrompt}\n\nReturn ONLY valid JSON with two fields: score (integer 0-100) and reason (one sentence explaining the score).`
-    : `You are an ICP scoring assistant. Score this lead from 0-100 based on their title, company, industry, and seniority. Higher scores = more likely a decision maker at a relevant company.${briefSection}\n\nReturn ONLY valid JSON with two fields: score (integer 0-100) and reason (one sentence explaining the score).`;
+  const systemPrompt = `You are an ICP (Ideal Customer Profile) scoring assistant. Score this lead from 0-100 based on how well they match the client's ICP.${briefSection}\n\nClient ICP criteria:\n${icpPrompt}\n\nReturn ONLY valid JSON with two fields: score (integer 0-100) and reason (one sentence explaining the score).`;
 
   const FALLBACK_MODEL = "claude-haiku-4-5-20251001";
   const model = process.env.ANTHROPIC_MODEL || FALLBACK_MODEL;

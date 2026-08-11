@@ -16,9 +16,12 @@ export type ScoringTemplate = {
   name: string;
   /** What the template does, in a sentence a teammate can pick from. */
   summary: string;
-  /** The specific signals it rewards, so two similar templates are told apart at a glance. */
-  tracks: string;
+  /** The specific signals it rewards, so two similar templates are told apart at a glance. Blank on
+   *  team-saved templates, which are described by whoever saved them. */
+  tracks?: string;
   prompt: string;
+  /** True for prompts a teammate saved, which can be renamed away or deleted. */
+  saved?: boolean;
 };
 
 export const ICP_TEMPLATES: ScoringTemplate[] = [
@@ -216,6 +219,21 @@ Score 0 when the thread is either still live or not worth reopening.`,
 ];
 
 export const DEFAULT_ICP_TEMPLATE_ID = "general-seniority";
+/** The only follow-up rubric that cannot produce a nag, which is what makes it safe to apply unasked. */
+export const DEFAULT_FOLLOW_UP_TEMPLATE_ID = "awaiting-us";
+
+/**
+ * The prompt to score with when a client has none of their own.
+ *
+ * The scoring routes used to carry their own one-line fallback, so a client nobody had configured was
+ * quietly scored by a rubric that appeared nowhere in the product and could not be inspected or
+ * changed. Falling back to a real template means the unconfigured behaviour is the same behaviour a
+ * teammate would have picked, and can be read on the page.
+ */
+export const templatePrompt = (templates: ScoringTemplate[], id: string): string =>
+  templates.find((template) => template.id === id)?.prompt ?? "";
+export const defaultIcpPrompt = () => templatePrompt(ICP_TEMPLATES, DEFAULT_ICP_TEMPLATE_ID);
+export const defaultFollowUpPrompt = () => templatePrompt(FOLLOW_UP_TEMPLATES, DEFAULT_FOLLOW_UP_TEMPLATE_ID);
 
 /**
  * Names the template a prompt came from, or reports it as custom.

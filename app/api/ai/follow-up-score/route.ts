@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
+import { defaultFollowUpPrompt } from "../../../lib/scoring-templates";
 
 export async function POST(request: Request) {
   const url = process.env.SUPABASE_URL;
@@ -14,7 +15,9 @@ export async function POST(request: Request) {
   const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId : "";
   const workspaceName = typeof body.workspaceName === "string" ? body.workspaceName : "";
   const leadName = typeof body.leadName === "string" ? body.leadName : "";
-  const followUpPrompt = typeof body.followUpPrompt === "string" && body.followUpPrompt ? body.followUpPrompt : "";
+  // With no criteria of their own a client is scored on who owes whom a reply — the one rubric that
+  // cannot produce a nag, and therefore the only one safe to apply to a client nobody has configured.
+  const followUpPrompt = typeof body.followUpPrompt === "string" && body.followUpPrompt.trim() ? body.followUpPrompt : defaultFollowUpPrompt();
   const sentiment = typeof body.sentiment === "string" ? body.sentiment : "";
   if (!thread.length) return NextResponse.json({ ok: true, urgency: 0, reason: null });
 
@@ -32,9 +35,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const systemPrompt = followUpPrompt
-    ? `You are a follow-up urgency scorer for sales conversations. Score urgency 0-100 based on the client's criteria.\n\nClient follow-up criteria:\n${followUpPrompt}\n\nReturn ONLY valid JSON: { "urgency": <0-100>, "reason": "<one sentence>" }. If no follow-up is needed, return urgency 0 with a reason.`
-    : `You are a follow-up urgency scorer for LinkedIn sales conversations. Analyze the conversation and score how urgently we need to follow up (0-100). Consider: time since last message, sentiment (${sentiment || "unknown"}), whether the lead asked a question, whether they expressed interest, whether they went silent after agreeing to something. Return ONLY valid JSON: { "urgency": <0-100>, "reason": "<one sentence>" }. If no follow-up is needed, return urgency 0.`;
+  const systemPrompt = `You are a follow-up urgency scorer for LinkedIn sales conversations. Score urgency 0-100 based on the client's criteria.${sentiment ? `\n\nThe lead's latest reply reads as ${sentiment}.` : ""}\n\nClient follow-up criteria:\n${followUpPrompt}\n\nReturn ONLY valid JSON: { "urgency": <0-100>, "reason": "<one sentence>" }. If no follow-up is needed, return urgency 0 with a reason.`;
 
   const threadText = thread.map((item: { direction?: string; body?: string; sentAt?: string }) =>
     `[${item.sentAt ?? ""}] ${item.direction ?? "message"}: ${item.body ?? ""}`

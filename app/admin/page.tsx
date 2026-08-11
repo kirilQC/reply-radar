@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
-import { DEFAULT_ICP_TEMPLATE_ID, FOLLOW_UP_TEMPLATES, ICP_TEMPLATES, MIN_CLIENT_BRIEF_LENGTH, type ScoringTemplate, templateLabel } from "../lib/scoring-templates";
+import { defaultFollowUpPrompt, defaultIcpPrompt, FOLLOW_UP_TEMPLATES, ICP_TEMPLATES, MIN_CLIENT_BRIEF_LENGTH, type ScoringTemplate, templateLabel } from "../lib/scoring-templates";
 
 type ClientWorkspace = {
   id?: string;
@@ -852,21 +852,63 @@ type AiAuditData = { ok?: boolean; events: AiAuditEvent[]; summary: { totalCalls
  * template's wording immediately reports it as "Custom" — a teammate can always tell whether the AI
  * is running something we vetted or something they wrote.
  */
-function TemplatePicker({ templates, value, onPick }: { templates: ScoringTemplate[]; value: string; onPick: (prompt: string) => void }) {
+function TemplatePicker({ templates, value, onPick, onSave, onDelete }: {
+  templates: ScoringTemplate[];
+  value: string;
+  onPick: (prompt: string) => void;
+  onSave: (name: string) => Promise<string>;
+  onDelete: (id: string) => void;
+}) {
   const current = templateLabel(templates, value);
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const nameInput = useRef<HTMLInputElement | null>(null);
+  // Focused on appearance rather than through autoFocus, which would also steal focus on page load.
+  useEffect(() => { if (naming) nameInput.current?.focus(); }, [naming]);
+  const commit = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    const failure = await onSave(name.trim());
+    setBusy(false);
+    if (failure) { setError(failure); return; }
+    setNaming(false); setName(""); setError("");
+  };
   return <div className="template-picker">
     <div className="template-picker-head"><span className="field-label" style={{ margin: 0 }}>START FROM A TEMPLATE</span><b className={current.id ? "template-badge" : "template-badge custom"}>{current.name}</b></div>
-    <div className="template-picker-grid">{templates.map((template) => <button
-      key={template.id}
-      type="button"
-      className={`template-card${current.id === template.id ? " active" : ""}`}
-      onClick={() => onPick(template.prompt)}
-    >
-      <strong>{template.name}</strong>
-      <p>{template.summary}</p>
-      <small><em>Tracks:</em> {template.tracks}</small>
-    </button>)}</div>
-    <small className="template-picker-hint">Pick one to fill the box below, then edit it freely — any change makes it a custom prompt for this client.</small>
+    <div className="template-picker-grid">
+      {templates.map((template) => <div key={template.id} className={`template-card${current.id === template.id ? " active" : ""}`} role="button" tabIndex={0}
+        onClick={() => onPick(template.prompt)}
+        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onPick(template.prompt); } }}
+      >
+        <strong>{template.name}{template.saved && <span className="template-saved-tag">Saved</span>}</strong>
+        {template.summary && <p>{template.summary}</p>}
+        {template.tracks && <small><em>Tracks:</em> {template.tracks}</small>}
+        {template.saved && <button type="button" className="template-delete" title="Delete this saved template"
+          onClick={(event) => { event.stopPropagation(); onDelete(template.id); }}
+        >×</button>}
+      </div>)}
+      {naming
+        // Named inline rather than through a browser prompt, which cannot be styled, cannot show why
+        // a save failed, and cannot be cancelled without losing what was typed.
+        ? <div className="template-card template-card-naming">
+            <input ref={nameInput} value={name} placeholder="Template name" maxLength={80}
+              onChange={(event) => { setName(event.target.value); setError(""); }}
+              onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void commit(); } if (event.key === "Escape") { setNaming(false); setName(""); setError(""); } }} />
+            {error ? <small className="template-error">{error}</small> : <small>Saving under a name already in use replaces it.</small>}
+            <div className="template-naming-actions">
+              <button type="button" className="primary-button" disabled={!name.trim() || busy} onClick={() => void commit()}>{busy ? "Saving…" : "Save"}</button>
+              <button type="button" className="text-button" onClick={() => { setNaming(false); setName(""); setError(""); }}>Cancel</button>
+            </div>
+          </div>
+        : <button type="button" className="template-card template-card-add" onClick={() => setNaming(true)} disabled={!value.trim()}>
+            <span>＋</span>
+            <strong>Save this prompt as a template</strong>
+            <p>{value.trim() ? "Keeps it in this list for every client." : "Write a prompt below first."}</p>
+          </button>}
+    </div>
+    <small className="template-picker-hint">Pick one to fill the box below, then edit it freely — any change makes it a custom prompt for this client. Editing and saving changes is enough to use a custom prompt; only save it as a template if other clients should be able to pick it too.</small>
   </div>;
 }
 
@@ -884,6 +926,34 @@ function AiHubView() {
   const [clientSaving, setClientSaving] = useState(false);
   const [clientSaved, setClientSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "clients">("overview");
+  const [savedTemplates, setSavedTemplates] = useState<Array<{ id: string; kind: string; name: string; summary: string; prompt: string }>>([]);
+
+  const loadSavedTemplates = () => fetch("/api/ai/templates", { cache: "no-store" })
+    .then((r) => r.json())
+    .then((payload) => setSavedTemplates(Array.isArray(payload?.templates) ? payload.templates : []))
+    .catch(() => null);
+
+  /** Returns an error message, or "" when the save landed. */
+  const saveTemplate = async (kind: "icp" | "follow_up", name: string, prompt: string): Promise<string> => {
+    const response = await fetch("/api/ai/templates", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, name, prompt }) }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    if (!response?.ok || !payload?.ok) return String(payload?.error ?? "Could not save the template.");
+    await loadSavedTemplates();
+    return "";
+  };
+
+  const deleteTemplate = async (id: string) => {
+    // Optimistic, then reconciled from the server — a delete that failed would otherwise leave the
+    // card gone from the page but still there for everyone else.
+    setSavedTemplates((previous) => previous.filter((template) => template.id !== id));
+    await fetch(`/api/ai/templates?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => null);
+    await loadSavedTemplates();
+  };
+
+  const templatesFor = (kind: "icp" | "follow_up"): ScoringTemplate[] => [
+    ...(kind === "icp" ? ICP_TEMPLATES : FOLLOW_UP_TEMPLATES),
+    ...savedTemplates.filter((template) => template.kind === kind).map((template) => ({ id: template.id, name: template.name, summary: template.summary, prompt: template.prompt, saved: true })),
+  ];
 
   const loadConfig = (workspace?: string) => {
     const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
@@ -894,11 +964,11 @@ function AiHubView() {
         setGlobalPrompt(String(payload.globalSentimentPrompt ?? ""));
         if (payload.workspaceAi) {
           setClientBrief(payload.workspaceAi.brief);
-          // A client with no ICP prompt stored gets the general seniority template shown rather than
-          // an empty box, because empty is what makes the scoring route fall back to its own generic
-          // prompt — a default nobody chose and nobody can see.
-          setIcpPrompt(payload.workspaceAi.icpPrompt || ICP_TEMPLATES.find((t) => t.id === DEFAULT_ICP_TEMPLATE_ID)?.prompt || "");
-          setFollowUpPrompt(payload.workspaceAi.followUpPrompt);
+          // A client with nothing stored is shown the same defaults the scoring routes fall back to,
+          // so the page always displays the prompt the AI is actually running rather than a blank box
+          // standing in for a default nobody can read.
+          setIcpPrompt(payload.workspaceAi.icpPrompt || defaultIcpPrompt());
+          setFollowUpPrompt(payload.workspaceAi.followUpPrompt || defaultFollowUpPrompt());
           setFollowUpThreshold(Number(payload.workspaceAi.followUpThreshold ?? 50));
           setReplyPrompt(payload.workspaceAi.replyPrompt);
         }
@@ -906,7 +976,7 @@ function AiHubView() {
       .catch(() => null);
   };
 
-  useEffect(() => { loadConfig(); }, []);
+  useEffect(() => { loadConfig(); void loadSavedTemplates(); }, []);
   const [auditVisible, setAuditVisible] = useState(25);
   const [freshIds, setFreshIds] = useState<string[]>([]);
   const seenIdsRef = useRef<Set<string> | null>(null);
@@ -1078,14 +1148,14 @@ function AiHubView() {
                       <small>{briefLength} of {MIN_CLIENT_BRIEF_LENGTH} characters written — {MIN_CLIENT_BRIEF_LENGTH - briefLength} to go.</small>
                     </div>
                   : <>
-                      <TemplatePicker templates={ICP_TEMPLATES} value={icpPrompt} onPick={setIcpPrompt} />
+                      <TemplatePicker templates={templatesFor("icp")} value={icpPrompt} onPick={setIcpPrompt} onSave={(name) => saveTemplate("icp", name, icpPrompt)} onDelete={(id) => void deleteTemplate(id)} />
                       <label className="field-label">ICP PROMPT<textarea value={icpPrompt} onChange={(event) => setIcpPrompt(event.target.value)} placeholder="Describe what makes a lead a good fit for this client: the titles, seniority, company size, and industries that matter, and who to score down." rows={12} style={{ minHeight: 240 }} /></label>
                       <small className="threshold-hint">The client brief above is sent to the AI alongside this prompt on every score.</small>
                     </>}
               </section>
               <section className="admin-panel client-config-section">
                 <div className="panel-heading"><div><h2>Follow-up scoring prompt</h2><p>How should the AI determine follow-up urgency?</p></div></div>
-                <TemplatePicker templates={FOLLOW_UP_TEMPLATES} value={followUpPrompt} onPick={setFollowUpPrompt} />
+                <TemplatePicker templates={templatesFor("follow_up")} value={followUpPrompt} onPick={setFollowUpPrompt} onSave={(name) => saveTemplate("follow_up", name, followUpPrompt)} onDelete={(id) => void deleteTemplate(id)} />
                 <label className="field-label">FOLLOW-UP PROMPT<textarea value={followUpPrompt} onChange={(event) => setFollowUpPrompt(event.target.value)} placeholder="Describe what should make a conversation urgent to follow up on, and what should keep it quiet." rows={12} style={{ minHeight: 240 }} /></label>
                 <label className="field-label">FOLLOW-UP ALERT THRESHOLD<span className="threshold-row"><input type="range" min={0} max={100} step={5} value={followUpThreshold} onChange={(event) => setFollowUpThreshold(Number(event.target.value))} /><b>{followUpThreshold}</b></span><small className="threshold-hint">Only show the &ldquo;follow-up recommended&rdquo; box when a lead scores at or above this. Higher = less noise.</small></label>
               </section>
