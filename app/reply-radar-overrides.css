@@ -158,6 +158,14 @@ html:not(.hydrated) body{visibility:hidden}
 /* Database delete lead button */
 .database-danger-zone{margin-top:24px;padding:20px;border:1px solid color-mix(in srgb,var(--coral) 30%,var(--border));border-radius:9px;background:color-mix(in srgb,var(--coral) 4%,var(--panel))}.database-danger-zone h3{margin:0 0 8px;font-size:12px;color:var(--coral)}.database-danger-zone p{margin:0 0 14px;color:var(--muted);font-size:10px;line-height:1.5}
 .database-delete-lead-button{height:36px;padding:0 18px;border:1px solid color-mix(in srgb,var(--coral) 55%,var(--border));border-radius:7px;background:color-mix(in srgb,var(--coral) 12%,var(--panel));color:var(--coral);font-size:11px;font-weight:650;cursor:pointer}.database-delete-lead-button:hover{background:color-mix(in srgb,var(--coral) 22%,var(--panel));border-color:var(--coral)}
+.database-delete-lead-button:disabled{opacity:.55;cursor:default}
+
+/* Bulk cleanup of inbound-first and orphaned records */
+.database-purge-card{margin:0 0 18px;padding:18px 20px;border:1px solid color-mix(in srgb,var(--coral) 26%,var(--border));border-radius:10px;background:color-mix(in srgb,var(--coral) 4%,var(--panel))}
+.database-purge-card h2{margin:0 0 8px;font-size:12px;color:var(--coral)}
+.database-purge-card p{margin:0 0 12px;color:var(--muted);font-size:10px;line-height:1.6}
+.database-purge-names{color:var(--text)!important;font-style:italic}
+.database-purge-actions{display:flex;align-items:center;gap:14px}
 
 /* Hide star column and adjust grid when follow-up score not shown */
 .row-star-cell{display:none}

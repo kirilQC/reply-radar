@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../../../lib/person-name";
+import { deleteLeadsCompletely, relatedLeadIds } from "../../../../lib/lead-deletion";
 type Row = Record<string, unknown>;
 async function get(url: string, key: string, path: string) {
   const response = await fetch(`${url}/rest/v1/${path}`, {
@@ -118,21 +119,14 @@ export async function DELETE(
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const { leadId } = await context.params;
   if (!/^[0-9a-f-]{36}$/i.test(leadId)) return NextResponse.json({ ok: false, error: "Invalid lead id." }, { status: 400 });
-  const headers = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" };
   try {
-    // Find conversations for this lead
-    const convResponse = await fetch(`${url}/rest/v1/rr_conversations?select=id&lead_id=eq.${encodeURIComponent(leadId)}`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" });
-    const conversations = convResponse.ok ? ((await convResponse.json()) as Row[]) : [];
-    const convIds = conversations.map((c) => String(c.id)).filter(Boolean);
-    // Delete messages for those conversations
-    if (convIds.length) {
-      await fetch(`${url}/rest/v1/rr_messages?conversation_id=in.(${convIds.join(",")})`, { method: "DELETE", headers, cache: "no-store" });
-    }
-    // Delete conversations
-    await fetch(`${url}/rest/v1/rr_conversations?lead_id=eq.${encodeURIComponent(leadId)}`, { method: "DELETE", headers, cache: "no-store" });
-    // Delete the lead
-    await fetch(`${url}/rest/v1/rr_leads?id=eq.${encodeURIComponent(leadId)}`, { method: "DELETE", headers, cache: "no-store" });
-    return NextResponse.json({ ok: true });
+    // The drawer shows one person assembled from every lead row that shares their profile URL, so a
+    // delete has to remove all of those rows. Removing only the clicked row left the same person in
+    // the inbox under another client, looking like the delete had done nothing.
+    const ids = await relatedLeadIds(url, key, leadId);
+    if (!ids.length) return NextResponse.json({ ok: false, error: "Lead not found." }, { status: 404 });
+    const deleted = await deleteLeadsCompletely(url, key, ids);
+    return NextResponse.json({ ok: true, deleted });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Delete failed" }, { status: 502 });
   }

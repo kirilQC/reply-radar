@@ -51,6 +51,15 @@ type Detail = {
   nextMessageOffset: number | null;
 };
 type FilterOptions = { senders: string[]; campaigns: string[] };
+type PurgePreview = {
+  scannedConversations: number;
+  leadInitiatedConversations: number;
+  orphanedConversations: number;
+  leadsToDelete: number;
+  sampleNames: string[];
+  hasMore: boolean;
+  deleted?: { leads: number; conversations: number; messages: number };
+};
 
 const initials = (name: string) =>
   name
@@ -194,6 +203,9 @@ export default function DatabasePage() {
   const [timeRange, setTimeRange] = useState("all");
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({ senders: [], campaigns: [] });
   const [exporting, setExporting] = useState(false);
+  const [purge, setPurge] = useState<PurgePreview | null>(null);
+  const [purgeBusy, setPurgeBusy] = useState<"" | "preview" | "delete">("");
+  const [purgeError, setPurgeError] = useState("");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -317,6 +329,28 @@ export default function DatabasePage() {
     }
   };
 
+  // Counting first and deleting second, against the same scan, so the numbers on screen are the rows
+  // that will go rather than an estimate taken at a different moment.
+  const runPurge = async (confirm: boolean) => {
+    setPurgeBusy(confirm ? "delete" : "preview");
+    setPurgeError("");
+    try {
+      const response = await fetch("/api/database/purge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(confirm ? { confirm: true } : {}),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(String(payload.error || "Cleanup failed."));
+      setPurge(payload as PurgePreview);
+      if (confirm) void load(false);
+    } catch (purgeFailure) {
+      setPurgeError(purgeFailure instanceof Error ? purgeFailure.message : "Cleanup failed.");
+    } finally {
+      setPurgeBusy("");
+    }
+  };
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void load(false);
@@ -352,14 +386,29 @@ export default function DatabasePage() {
   };
 
   const deleteLead = async (leadId: string) => {
-    if (!window.confirm("Permanently delete this lead and all their conversations? This cannot be undone.")) return;
+    // The drawer merges every lead row sharing this profile URL, and the delete removes all of them,
+    // so the confirmation has to say how many clients and conversations that actually covers rather
+    // than implying a single row.
+    const rowCount = detail?.relatedLeads?.length ?? 1;
+    const clientCount = detail?.workspaces?.length ?? 1;
+    const conversationCount = detail?.conversations?.length ?? 0;
+    const scope = [
+      `${conversationCount} conversation${conversationCount === 1 ? "" : "s"}`,
+      rowCount > 1 ? `${rowCount} lead records across ${clientCount} client${clientCount === 1 ? "" : "s"}` : null,
+    ].filter(Boolean).join(" and ");
+    if (!window.confirm(`Permanently delete this lead? This removes ${scope}, plus every message. It cannot be undone.`)) return;
     try {
       const response = await fetch(`/api/database/leads/${leadId}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("Delete failed");
+      const payload = await response.json().catch(() => ({}));
+      // The route verifies the rows are gone before answering, so a failure here means something
+      // survived and the lead must stay on screen rather than appear deleted.
+      if (!response.ok || !payload.ok) throw new Error(String(payload.error || "Delete failed"));
       setSelectedId(null);
       setDetail(null);
       void load(false);
-    } catch { setError("Could not delete lead."); }
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Could not delete lead.");
+    }
   };
 
   useEffect(() => {
@@ -416,8 +465,53 @@ export default function DatabasePage() {
               <h1>Lead Database</h1>
               <div className="database-record-count">{leads.length} loaded</div>
             </div>
-            <div className="database-heading-actions"><button className="secondary-button" onClick={exportCsv} disabled={exporting}>{exporting ? "Exporting…" : "Export CSV ↓"}</button><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
+            <div className="database-heading-actions"><button className="secondary-button" onClick={() => void runPurge(false)} disabled={Boolean(purgeBusy)}>{purgeBusy === "preview" ? "Checking…" : "Find inbound-first leads"}</button><button className="secondary-button" onClick={exportCsv} disabled={exporting}>{exporting ? "Exporting…" : "Export CSV ↓"}</button><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
           </div>
+          {purgeError && <div className="database-error">{purgeError}</div>}
+          {purge && (
+            <section className="database-purge-card">
+              {purge.deleted ? (
+                <>
+                  <h2>Cleanup done</h2>
+                  <p>
+                    Deleted {purge.deleted.leads} lead{purge.deleted.leads === 1 ? "" : "s"},{" "}
+                    {purge.deleted.conversations} conversation{purge.deleted.conversations === 1 ? "" : "s"} and{" "}
+                    {purge.deleted.messages} message{purge.deleted.messages === 1 ? "" : "s"}.
+                  </p>
+                  {purge.hasMore && <p>More records are waiting — run it again to continue.</p>}
+                  <button className="secondary-button" onClick={() => setPurge(null)}>Close</button>
+                </>
+              ) : (
+                <>
+                  <h2>Inbound-first leads</h2>
+                  <p>
+                    Scanned {purge.scannedConversations} conversation{purge.scannedConversations === 1 ? "" : "s"}.{" "}
+                    {purge.leadInitiatedConversations} were started by the lead
+                    {purge.orphanedConversations > 0
+                      ? `, and ${purge.orphanedConversations} belong to a lead record that no longer exists`
+                      : ""}
+                    . {purge.leadsToDelete} lead record{purge.leadsToDelete === 1 ? "" : "s"} will be removed entirely —
+                    a lead is kept if we opened any of their other conversations.
+                  </p>
+                  {purge.sampleNames.length > 0 && (
+                    <p className="database-purge-names">{purge.sampleNames.join(", ")}
+                      {purge.leadInitiatedConversations > purge.sampleNames.length ? " and others" : ""}</p>
+                  )}
+                  {purge.leadInitiatedConversations + purge.orphanedConversations === 0 ? (
+                    <p>Nothing to clean up.</p>
+                  ) : (
+                    <div className="database-purge-actions">
+                      <button className="database-delete-lead-button" onClick={() => void runPurge(true)} disabled={Boolean(purgeBusy)}>
+                        {purgeBusy === "delete" ? "Deleting…" : "Delete them permanently"}
+                      </button>
+                      <button className="text-button" onClick={() => setPurge(null)}>Cancel</button>
+                    </div>
+                  )}
+                  {purge.hasMore && <p>Only the first {purge.scannedConversations} conversations were scanned. Running this again picks up where it left off.</p>}
+                </>
+              )}
+            </section>
+          )}
           <section className="database-toolbar">
             <label className="database-search">
               <span>⌕</span>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../lib/person-name";
 import { queryByIds } from "../../lib/chunk-query";
-import { NEAR_DUPLICATE_MS } from "../../lib/heyreach-conversation";
+import { dedupeMessages } from "../../lib/message-dedupe";
 import { classifyConversationOrigin } from "../../../shared/conversation-origin.mjs";
 type Row = Record<string, unknown>;
 
@@ -193,41 +193,9 @@ export async function GET(request: Request) {
         ),
       ),
     ]);
-    // Earlier releases could store one message twice under opposite directions, which showed a
-    // message we sent as if the lead had sent it. Those rows are collapsed on read so the thread
-    // is correct even before a refresh repairs the records themselves. Matching allows a small
-    // timestamp drift because the duplicate was sometimes stamped with the webhook event time.
-    const radarOf = (raw: unknown) => {
-      if (!raw || typeof raw !== "object") return {} as Row;
-      const rr = (raw as Row).reply_radar;
-      return rr && typeof rr === "object" ? (rr as Row) : ({} as Row);
-    };
-    const isRefresh = (raw: unknown) => radarOf(raw).source === "refresh";
-    const hasAiState = (raw: unknown) => {
-      const radar = radarOf(raw);
-      return ["sentiment", "cached_draft", "followup_urgency", "analyzed_at"].some((field) => radar[field] != null);
-    };
-    const deduped: Row[] = [];
-    const byBody = new Map<string, number[]>();
-    for (const msg of messages) {
-      const bodyKey = `${msg.conversation_id}|${String(msg.body).trim()}`;
-      const sentAt = new Date(String(msg.sent_at)).getTime();
-      const candidates = byBody.get(bodyKey) ?? [];
-      const twin = candidates.find(
-        (position) => Math.abs(new Date(String(deduped[position].sent_at)).getTime() - sentAt) < NEAR_DUPLICATE_MS,
-      );
-      if (twin !== undefined) {
-        // Prefer the copy carrying AI state, then the one the refresh endpoint did not invent.
-        const incumbent = deduped[twin];
-        const preferIncoming = hasAiState(msg.raw_data)
-          ? !hasAiState(incumbent.raw_data)
-          : !hasAiState(incumbent.raw_data) && isRefresh(incumbent.raw_data) && !isRefresh(msg.raw_data);
-        if (preferIncoming) deduped[twin] = msg;
-        continue;
-      }
-      byBody.set(bodyKey, [...candidates, deduped.length]);
-      deduped.push(msg);
-    }
+    // Duplicate rows are collapsed on read so the thread is correct even before a refresh repairs the
+    // records themselves. Shared with the purge, which must judge who spoke first from the same view.
+    const deduped = dedupeMessages(messages);
 
     const workspaceById = new Map(selected.map((row) => [String(row.id), row]));
     const leadById = new Map(leads.map((row) => [String(row.id), row]));
@@ -236,7 +204,16 @@ export async function GET(request: Request) {
     // The classifier abstains unless it is certain, and only a certain verdict removes a row — the
     // whole point of that caution is that nothing reaches this filter on a guess.
     const excluded: string[] = [];
+    const orphaned: string[] = [];
     const result = conversations.filter((conversation) => {
+      // A conversation whose lead row is gone is not a lead any more. These used to render as an
+      // "Unknown lead" card that could not be dismissed, which is how a deleted lead appeared to
+      // survive deletion. Dropping them here also clears the wreckage left by earlier deletes that
+      // failed silently, without waiting for a purge to run.
+      if (!leadById.has(String(conversation.lead_id))) {
+        orphaned.push(String(conversation.id));
+        return false;
+      }
       const verdict = classifyConversationOrigin({
         messages: deduped.filter((message) => message.conversation_id === conversation.id),
         leadRawData: leadById.get(String(conversation.lead_id))?.raw_data,
@@ -348,6 +325,7 @@ export async function GET(request: Request) {
     // Server log only. Nothing about this reaches the inbox, but a dropped row that turned out to be
     // a real outbound lead would otherwise leave no trace anywhere to find it by.
     if (excluded.length) console.info("reply_radar_inbox_dropped_lead_initiated", { count: excluded.length, conversationIds: excluded.slice(0, 25) });
+    if (orphaned.length) console.info("reply_radar_inbox_dropped_orphaned", { count: orphaned.length, conversationIds: orphaned.slice(0, 25) });
     return NextResponse.json({ ok: true, conversations: result });
   } catch (error) {
     return NextResponse.json(
