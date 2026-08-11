@@ -115,6 +115,11 @@ export default function HealthPage() {
   const aiArkHealthy =
     !heartbeat.aiArk ||
     ["healthy", "disabled"].includes(heartbeat.aiArk.status);
+  // Mirrors the heartbeat rule: runs are only failing when there are more than a handful
+  // of failures and they outnumber the successes.
+  const aiArkRunsFailing =
+    (heartbeat.aiArk?.failures24h ?? 0) > 5 &&
+    (heartbeat.aiArk?.failures24h ?? 0) > (heartbeat.aiArk?.successes24h ?? 0);
   const clients = heartbeat.clients ?? [];
   const clientCount = clients.length;
   const attentionCount = clients.filter(
@@ -333,12 +338,8 @@ export default function HealthPage() {
                     </small>
                   </span>
                 </div>
-                <div
-                  className={
-                    (heartbeat.aiArk?.failures24h ?? 0) > 5 ? "bad" : "ok"
-                  }
-                >
-                  <b>{(heartbeat.aiArk?.failures24h ?? 0) > 5 ? "!" : "✓"}</b>
+                <div className={aiArkRunsFailing ? "bad" : "ok"}>
+                  <b>{aiArkRunsFailing ? "!" : "✓"}</b>
                   <span>
                     <strong>API results · 24 hours</strong>
                     <small>
@@ -347,21 +348,15 @@ export default function HealthPage() {
                     </small>
                   </span>
                 </div>
-                <div
-                  className={
-                    (heartbeat.aiArk?.unenrichedLeads24h ?? 0) > 5
-                      ? "bad"
-                      : "ok"
-                  }
-                >
-                  <b>
-                    {(heartbeat.aiArk?.unenrichedLeads24h ?? 0) > 5 ? "!" : "✓"}
-                  </b>
+                {/* Informational only: leads are enriched asynchronously after they arrive,
+                    so a pending backlog is normal and never marks the service down. */}
+                <div className="ok">
+                  <b>i</b>
                   <span>
-                    <strong>Stored lead check</strong>
+                    <strong>Enrichment backlog</strong>
                     <small>
                       {heartbeat.aiArk?.unenrichedLeads24h ?? 0} recent LinkedIn
-                      lead(s) are missing enrichment.
+                      lead(s) still waiting on enrichment.
                     </small>
                   </span>
                 </div>

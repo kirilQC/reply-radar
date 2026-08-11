@@ -7,8 +7,10 @@ type CampaignMetric = {
   connectionsSent: number; connectionsAccepted: number; replies: number;
   messagesStarted: number; acceptanceRate: number; replyRate: number;
   positiveReplies: number; positiveReplyRate: number;
+  launchedAt: string | null; status: string | null;
 };
 const campaignCache = new Map<string, { expires: number; rows: Row[] }>();
+const campaignListCache = new Map<string, { expires: number; rows: Row[] }>();
 const object = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 const attribution = (row: Row) => {
   const radar = object(object(row.raw_data).reply_radar);
@@ -67,6 +69,39 @@ async function heyReachCampaignStats(workspace: Row) {
   return rows;
 }
 
+/**
+ * Campaign launch dates only exist on the campaign records themselves, not on the stats
+ * rollup, so the two have to be joined. Names follow an "XX001:" convention but the number
+ * is not a reliable launch order, so the real `startedAt` is always used.
+ */
+async function heyReachCampaignList(workspace: Row) {
+  const workspaceId = String(workspace.id);
+  const cached = campaignListCache.get(workspaceId);
+  if (cached && cached.expires > Date.now()) return cached.rows;
+  const apiKey = String(workspace.heyreach_api_key_ciphertext ?? "").trim();
+  if (!apiKey) return [];
+  const rows: Row[] = [];
+  const pageSize = 100;
+  // HeyReach caps a page at 100 records, so walk pages until the reported total is covered.
+  for (let offset = 0; offset < 2_000; offset += pageSize) {
+    const response = await fetch("https://api.heyreach.io/api/public/campaign/GetAll", {
+      method: "POST",
+      headers: { "X-API-KEY": apiKey, "content-type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ offset, limit: pageSize }),
+      signal: AbortSignal.timeout(15_000),
+      cache: "no-store",
+    }).catch(() => null);
+    if (!response?.ok) break;
+    const payload = await response.json().catch(() => ({}));
+    const items = Array.isArray(payload?.items) ? (payload.items as Row[]) : [];
+    rows.push(...items);
+    const total = Number(payload?.totalCount ?? rows.length);
+    if (items.length < pageSize || rows.length >= total) break;
+  }
+  campaignListCache.set(workspaceId, { expires: Date.now() + 10 * 60_000, rows });
+  return rows;
+}
+
 export async function GET(request: Request) {
   const { url, key } = config();
   if (!url || !key) return NextResponse.json({ ok: false, status: "not_configured" }, { status: 503 });
@@ -88,8 +123,18 @@ export async function GET(request: Request) {
       (await supabase(`rr_sync_runs?select=id,workspace_id,status,started_at,finished_at,error_text&workspace_id=in.(${filter(batch)})&source=eq.ai_ark&run_type=eq.lead_enrichment&order=started_at.asc`)) ?? [],
     );
     const campaignResponses = await Promise.all(selected.map(async (workspace) => {
-      try { return { workspace, rows: await heyReachCampaignStats(workspace) }; }
-      catch { return { workspace, rows: [] as Row[] }; }
+      const [rows, list] = await Promise.all([
+        heyReachCampaignStats(workspace).catch(() => [] as Row[]),
+        heyReachCampaignList(workspace).catch(() => [] as Row[]),
+      ]);
+      // Launch metadata is keyed by campaign id; fall back to the name for older rows.
+      const launchById = new Map<string, Row>();
+      const launchByName = new Map<string, Row>();
+      for (const item of list) {
+        launchById.set(String(item.id), item);
+        launchByName.set(String(item.name ?? "").trim().toLowerCase(), item);
+      }
+      return { workspace, rows, launchById, launchByName };
     }));
     const now = Date.now();
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
@@ -117,7 +162,7 @@ export async function GET(request: Request) {
     const clientPerformance = selected.map((workspace) => {
       const conversationIds = new Set(conversations.filter((row) => row.workspace_id === workspace.id).map((row) => String(row.id)));
       const clientMessages = messages.filter((row) => conversationIds.has(String(row.conversation_id)));
-      return { name: workspace.name, conversations: conversationIds.size, replies: clientMessages.filter((row) => row.direction === "inbound").length, outbound: clientMessages.filter((row) => row.direction === "outbound").length };
+      return { name: workspace.name, conversations: conversationIds.size, replies: clientMessages.filter((row) => row.direction === "inbound").length, messagesSent: clientMessages.filter((row) => row.direction === "outbound").length };
     }).sort((a, b) => b.replies - a.replies);
     const groupPerformance = (key: "campaign" | "sender") => {
       const groups = new Map<string, { name: string; replies: number; messages: number; clients: Set<string> }>();
@@ -152,7 +197,7 @@ export async function GET(request: Request) {
       const key = `${workspaceId}:${name}`;
       if (name) positiveByCampaign.set(key, (positiveByCampaign.get(key) ?? 0) + 1);
     }
-    const campaignMetrics: CampaignMetric[] = campaignResponses.flatMap(({ workspace, rows }) => rows.map((row) => {
+    const campaignMetrics: CampaignMetric[] = campaignResponses.flatMap(({ workspace, rows, launchById, launchByName }) => rows.map((row) => {
       const accepted = Number(row.connectionsAccepted ?? 0);
       const replies = Number(row.totalMessageReplies ?? 0) + Number(row.totalInmailReplies ?? 0);
       const name = String(row.campaignName ?? `Campaign ${row.campaignId ?? ""}`).trim();
@@ -166,6 +211,8 @@ export async function GET(request: Request) {
         : Number(row.connectionsSent)
           ? (accepted / Number(row.connectionsSent)) * 100
           : 0;
+      const launch = launchById.get(String(row.campaignId ?? "")) ?? launchByName.get(name.toLowerCase());
+      const launchedAt = launch ? String(launch.startedAt ?? launch.creationTime ?? "") : "";
       return {
         workspaceId: String(workspace.id), client: String(workspace.name), campaignId: String(row.campaignId ?? ""), name,
         connectionsSent: Number(row.connectionsSent ?? 0), connectionsAccepted: accepted,
@@ -173,6 +220,8 @@ export async function GET(request: Request) {
         acceptanceRate,
         replyRate: accepted ? replies / accepted * 100 : 0,
         positiveReplies, positiveReplyRate: accepted ? positiveReplies / accepted * 100 : 0,
+        launchedAt: launchedAt || null,
+        status: launch ? String(launch.status ?? "") || null : null,
       };
     }));
     const average = (key: "replyRate" | "acceptanceRate" | "positiveReplyRate") => campaignMetrics.length ? campaignMetrics.reduce((sum, row) => sum + row[key], 0) / campaignMetrics.length : 0;
@@ -186,7 +235,7 @@ export async function GET(request: Request) {
       return { workspaceId: workspace.id, name: workspace.name, slug: workspace.slug, calls: runs.length, successes: runs.filter((run) => run.status === "success").length, failures: runs.filter((run) => run.status === "failed").length };
     });
     const workspaceDetails = selected.map((row) => ({ id: String(row.id), name: String(row.name), slug: String(row.slug), logoUrl: row.logo_url ? String(row.logo_url) : null, accentColor: row.accent_color ? String(row.accent_color) : null }));
-    return NextResponse.json({ ok: true, status: "live", totalReplies: inbound.length, outboundMessages: outbound.length, activeConversations: conversations.length, replies7d: recentMessages.length, trend, averageResponseMinutes, campaignMetrics, campaignAverages, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, aiArkCalls: aiArkRuns.length, aiArkSuccesses: aiArkRuns.filter((run) => run.status === "success").length, aiArkFailures: aiArkRuns.filter((run) => run.status === "failed").length, aiArkTrend, aiArkTrendLabels: aiArkDays.map((day) => day.toLocaleDateString("en-US", { month: "short", day: "numeric" })), aiArkByClient, queueMix, clientLoad, workspaces: selected.map((row) => row.name), workspaceDetails });
+    return NextResponse.json({ ok: true, status: "live", totalReplies: inbound.length, messagesSent: outbound.length, activeConversations: conversations.length, replies7d: recentMessages.length, trend, averageResponseMinutes, campaignMetrics, campaignAverages, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, aiArkCalls: aiArkRuns.length, aiArkSuccesses: aiArkRuns.filter((run) => run.status === "success").length, aiArkFailures: aiArkRuns.filter((run) => run.status === "failed").length, aiArkTrend, aiArkTrendLabels: aiArkDays.map((day) => day.toLocaleDateString("en-US", { month: "short", day: "numeric" })), aiArkByClient, queueMix, clientLoad, workspaces: selected.map((row) => row.name), workspaceDetails });
   } catch (error) {
     return NextResponse.json({ ok: false, status: "error", error: error instanceof Error ? error.message : "Analytics unavailable" }, { status: 502 });
   }

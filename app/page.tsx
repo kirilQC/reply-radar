@@ -68,11 +68,14 @@ type LayoutPrefs = {
   paneSplit: number;
   starredLeadIds: string[];
 };
+type GraphKind = "line" | "area" | "bars" | "hbars" | "donut";
+/** A graph is a dimension (x) crossed with a measure (y) — both are user-selectable. */
 type GraphConfig = {
   id: string;
   title: string;
-  metric: string;
-  kind: "line" | "bars" | "donut";
+  x: string;
+  y: string;
+  kind: GraphKind;
 };
 type AnalyticsSnapshot = {
   status: "live" | "no_data" | "not_configured" | "error";
@@ -93,18 +96,9 @@ const defaultLayout: LayoutPrefs = {
   compact: false,
   metrics: ["avgRepliesCampaign", "acceptanceRate", "positiveRate", "totalReplies"],
   graphs: [
-    {
-      id: "reply-volume",
-      title: "Reply volume",
-      metric: "Replies · 7 days",
-      kind: "line",
-    },
-    {
-      id: "queue-mix",
-      title: "Queue mix",
-      metric: "Lead status",
-      kind: "donut",
-    },
+    { id: "replies-by-day", title: "Replies per day", x: "day", y: "replies", kind: "area" },
+    { id: "sentiment-mix", title: "Sentiment mix", x: "sentiment", y: "conversations", kind: "donut" },
+    { id: "client-load", title: "Conversations by client", x: "client", y: "conversations", kind: "hbars" },
   ],
   paneSplit: 62,
   starredLeadIds: [],
@@ -575,6 +569,7 @@ export function InboxPage() {
           nextLayout.starredLeadIds = Array.isArray(nextLayout.starredLeadIds)
             ? nextLayout.starredLeadIds.map(String)
             : [];
+          nextLayout.graphs = normalizeGraphs(nextLayout.graphs);
           nextLayout.order = Array.from(
             new Set([...nextLayout.order, "metrics", "analytics", "queue"]),
           ).filter((item) =>
@@ -612,6 +607,7 @@ export function InboxPage() {
             )
               ? payload.preferences.layout.starredLeadIds.map(String)
               : current.starredLeadIds,
+            graphs: normalizeGraphs(payload.preferences.layout.graphs),
           }));
         if (payload.preferences.appearance)
           setAppearance((current) => ({
@@ -927,8 +923,8 @@ export function InboxPage() {
       hotConversations: { value: String(positiveCount), sub: `Positive replies ${filterLabel}` },
       avgReplyTime: { value: String(neutralCount), sub: `Neutral replies ${filterLabel}` },
       pipelineSaved: { value: String(negativeCount), sub: `Negative replies ${filterLabel}` },
-      replyCount7d: { value: String(totalReplies), sub: `Inbound replies ${filterLabel}` },
-      totalReplies: { value: String(totalReplies), sub: `Inbound replies ${filterLabel}` },
+      replyCount7d: { value: String(totalReplies), sub: `Replies ${filterLabel}` },
+      totalReplies: { value: String(totalReplies), sub: `Replies ${filterLabel}` },
       positiveRate: { value: `${positiveRate}%`, sub: `Positive rate ${filterLabel}` },
       avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", sub: "Campaign reply rate (replies ÷ accepted)" },
       acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", sub: "Campaign acceptance rate (all time)" },
@@ -1448,7 +1444,10 @@ export function InboxPage() {
             >
               <InboxAnalytics
                 graphs={layoutPrefs.graphs}
-                analytics={analytics}
+                leads={filtered}
+                filterLabel={filter === "All" ? "this inbox" : filter}
+                timeZone={appearance.timeZone}
+                loading={inboxLoading}
                 onChange={(graphs) =>
                   setLayoutPrefs({ ...layoutPrefs, graphs })
                 }
@@ -1643,7 +1642,7 @@ export function InboxPage() {
                   )}
                   {visibleLeads.map((lead) => (
                     <div
-                      className={`lead-row ${current.id === lead.id ? "row-selected" : ""} ${lead.sentiment ? `row-sentiment-${lead.sentiment}` : ""}`}
+                      className={`lead-row ${filter === "follow-ups" ? "lead-row-followups" : ""} ${current.id === lead.id ? "row-selected" : ""} ${lead.sentiment ? `row-sentiment-${lead.sentiment}` : ""}`}
                       key={lead.id}
                       role="button"
                       tabIndex={0}
@@ -1957,40 +1956,328 @@ function Metric({
   );
 }
 
-const graphPresets: Array<Omit<GraphConfig, "id">> = [
-  { title: "Reply volume", metric: "Replies · 7 days", kind: "line" },
-  { title: "Queue mix", metric: "Lead status", kind: "donut" },
-  { title: "Positive reply rate", metric: "Positive replies", kind: "bars" },
-  { title: "Response speed", metric: "Avg. reply time", kind: "line" },
-  { title: "Client load", metric: "Leads by client", kind: "bars" },
+/** Dimensions bucket the live inbox rows along the x axis. */
+const graphDimensions = [
+  { id: "day", label: "Day" },
+  { id: "week", label: "Week" },
+  { id: "client", label: "Client" },
+  { id: "campaign", label: "Campaign" },
+  { id: "sender", label: "Sender" },
+  { id: "sentiment", label: "Sentiment" },
+  { id: "urgency", label: "Follow-up urgency" },
+  { id: "icp", label: "ICP score band" },
 ];
+/** Measures reduce the rows inside a bucket to a single y value. */
+const graphMeasures = [
+  { id: "conversations", label: "Conversations", format: "count" },
+  { id: "replies", label: "Replies", format: "count" },
+  { id: "positive", label: "Positive replies", format: "count" },
+  { id: "positiveRate", label: "Positive reply rate", format: "percent" },
+  { id: "avgReplies", label: "Avg. replies per conversation", format: "decimal" },
+  { id: "avgIcp", label: "Avg. ICP score", format: "decimal" },
+  { id: "avgUrgency", label: "Avg. follow-up urgency", format: "decimal" },
+];
+const graphKinds: Array<{ id: GraphKind; label: string }> = [
+  { id: "area", label: "Area" },
+  { id: "line", label: "Line" },
+  { id: "bars", label: "Columns" },
+  { id: "hbars", label: "Horizontal bars" },
+  { id: "donut", label: "Donut" },
+];
+const graphPresets: Array<Omit<GraphConfig, "id">> = [
+  { title: "Replies per day", x: "day", y: "replies", kind: "area" },
+  { title: "Conversations per day", x: "day", y: "conversations", kind: "line" },
+  { title: "Replies per week", x: "week", y: "replies", kind: "bars" },
+  { title: "Sentiment mix", x: "sentiment", y: "conversations", kind: "donut" },
+  { title: "Conversations by client", x: "client", y: "conversations", kind: "hbars" },
+  { title: "Positive reply rate by client", x: "client", y: "positiveRate", kind: "hbars" },
+  { title: "Top campaigns by replies", x: "campaign", y: "replies", kind: "hbars" },
+  { title: "Positive reply rate by campaign", x: "campaign", y: "positiveRate", kind: "hbars" },
+  { title: "Conversations by sender", x: "sender", y: "conversations", kind: "hbars" },
+  { title: "Follow-up urgency mix", x: "urgency", y: "conversations", kind: "donut" },
+  { title: "Avg. ICP score by client", x: "client", y: "avgIcp", kind: "hbars" },
+  { title: "ICP score spread", x: "icp", y: "conversations", kind: "bars" },
+  { title: "Avg. replies by sentiment", x: "sentiment", y: "avgReplies", kind: "bars" },
+];
+
+/** Older saved preferences stored a free-text `metric`; map them onto the axis model. */
+const legacyGraphAxes: Record<string, { x: string; y: string }> = {
+  "Replies · 7 days": { x: "day", y: "replies" },
+  "Lead status": { x: "urgency", y: "conversations" },
+  "Positive replies": { x: "client", y: "positive" },
+  "Avg. reply time": { x: "day", y: "avgReplies" },
+  "Leads by client": { x: "client", y: "conversations" },
+};
+function normalizeGraphs(value: unknown): GraphConfig[] {
+  if (!Array.isArray(value)) return defaultLayout.graphs;
+  const graphs = value.flatMap((entry, index) => {
+    if (!entry || typeof entry !== "object") return [];
+    const raw = entry as Record<string, unknown>;
+    const legacy = legacyGraphAxes[String(raw.metric ?? "")];
+    const x = graphDimensions.some((item) => item.id === raw.x)
+      ? String(raw.x)
+      : legacy?.x ?? "day";
+    const y = graphMeasures.some((item) => item.id === raw.y)
+      ? String(raw.y)
+      : legacy?.y ?? "conversations";
+    const kind = graphKinds.some((item) => item.id === raw.kind)
+      ? (raw.kind as GraphKind)
+      : "bars";
+    return [
+      {
+        id: String(raw.id || `graph-${index}`),
+        title: String(raw.title || "Untitled graph"),
+        x,
+        y,
+        kind,
+      },
+    ];
+  });
+  return graphs.length ? graphs : defaultLayout.graphs;
+}
+
+const DAY_MS = 86_400_000;
+/** Midnight of the row's date in the viewer's timezone, as a comparable stamp. */
+const dayStamp = (value: string | null | undefined, timeZone: string) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const iso = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+  const stamp = Date.parse(`${iso}T00:00:00Z`);
+  return Number.isNaN(stamp) ? null : stamp;
+};
+const icpBandLabel = (score: number | null | undefined) => {
+  if (typeof score !== "number" || Number.isNaN(score)) return "Unscored";
+  if (score >= 80) return "80–100";
+  if (score >= 60) return "60–79";
+  if (score >= 40) return "40–59";
+  return "Under 40";
+};
+const orderedBuckets: Record<string, string[]> = {
+  sentiment: ["Positive", "Neutral", "Negative", "Unscored"],
+  urgency: ["Hot", "Warm", "Cold", "Nurture", "Unscored"],
+  icp: ["80–100", "60–79", "40–59", "Under 40", "Unscored"],
+};
+const bucketToneClass: Record<string, string> = {
+  Positive: "tone-good",
+  Negative: "tone-bad",
+  Neutral: "tone-neutral",
+  Hot: "tone-bad",
+  Warm: "tone-warn",
+  Cold: "tone-neutral",
+  Nurture: "tone-muted",
+  Unscored: "tone-muted",
+};
+
+type SeriesPoint = { label: string; value: number; rows: number };
+
+function measureRows(rows: Lead[], measure: string): number {
+  if (!rows.length) return 0;
+  const replies = () => rows.reduce((sum, row) => sum + (row.replies || 0), 0);
+  switch (measure) {
+    case "replies":
+      return replies();
+    case "positive":
+      return rows.filter((row) => row.sentiment === "positive").length;
+    case "positiveRate": {
+      const scored = rows.filter((row) => row.sentiment);
+      if (!scored.length) return 0;
+      return (
+        (scored.filter((row) => row.sentiment === "positive").length /
+          scored.length) *
+        100
+      );
+    }
+    case "avgReplies":
+      return replies() / rows.length;
+    case "avgIcp": {
+      const scored = rows.filter((row) => typeof row.leadScore === "number");
+      if (!scored.length) return 0;
+      return (
+        scored.reduce((sum, row) => sum + Number(row.leadScore), 0) /
+        scored.length
+      );
+    }
+    case "avgUrgency": {
+      const scored = rows.filter((row) => Number(row.followUpUrgency) > 0);
+      if (!scored.length) return 0;
+      return (
+        scored.reduce((sum, row) => sum + Number(row.followUpUrgency), 0) /
+        scored.length
+      );
+    }
+    default:
+      return rows.length;
+  }
+}
+
+/**
+ * Buckets the rows currently visible in the inbox, so every graph reflects exactly the
+ * conversations the operator is looking at (including their client and status filters).
+ */
+function buildSeries(
+  rows: Lead[],
+  x: string,
+  y: string,
+  timeZone: string,
+): SeriesPoint[] {
+  if (x === "day" || x === "week") {
+    const span = x === "day" ? 14 : 8;
+    const step = (x === "day" ? 1 : 7) * DAY_MS;
+    const today = dayStamp(new Date().toISOString(), timeZone);
+    if (today === null) return [];
+    const buckets = Array.from({ length: span }, (_, index) => ({
+      start: today - (span - 1 - index) * step,
+      rows: [] as Lead[],
+    }));
+    for (const row of rows) {
+      const stamp = dayStamp(row.latestReplyAt || row.lastMessageAt, timeZone);
+      if (stamp === null) continue;
+      const stepsBack = Math.max(0, Math.floor((today - stamp) / step));
+      const index = span - 1 - stepsBack;
+      if (index >= 0) buckets[index].rows.push(row);
+    }
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      month: "short",
+      day: "numeric",
+    });
+    return buckets.map((bucket) => ({
+      label: formatter.format(new Date(bucket.start)),
+      value: measureRows(bucket.rows, y),
+      rows: bucket.rows.length,
+    }));
+  }
+
+  const keyFor = (row: Lead) => {
+    switch (x) {
+      case "client":
+        return row.client || "Unassigned";
+      case "campaign":
+        return row.campaignName || "No campaign";
+      case "sender":
+        return row.senderName || "Unknown sender";
+      case "sentiment":
+        return row.sentiment
+          ? row.sentiment.charAt(0).toUpperCase() + row.sentiment.slice(1)
+          : "Unscored";
+      case "urgency": {
+        const urgency = Number(row.followUpUrgency) || 0;
+        if (!urgency) return "Unscored";
+        const band = followUpBand(urgency);
+        return band.charAt(0).toUpperCase() + band.slice(1);
+      }
+      case "icp":
+        return icpBandLabel(row.leadScore);
+      default:
+        return "All";
+    }
+  };
+  const grouped = new Map<string, Lead[]>();
+  for (const row of rows) {
+    const key = keyFor(row);
+    const bucket = grouped.get(key);
+    if (bucket) bucket.push(row);
+    else grouped.set(key, [row]);
+  }
+  const fixedOrder = orderedBuckets[x];
+  if (fixedOrder) {
+    return fixedOrder
+      .filter((label) => grouped.has(label))
+      .map((label) => {
+        const bucket = grouped.get(label) ?? [];
+        return { label, value: measureRows(bucket, y), rows: bucket.length };
+      });
+  }
+  const points = [...grouped.entries()]
+    .map(([label, bucket]) => ({
+      label,
+      value: measureRows(bucket, y),
+      rows: bucket.length,
+    }))
+    .sort((a, b) => b.value - a.value || b.rows - a.rows);
+  // Long tails (dozens of campaigns) are unreadable, so keep the top slice.
+  if (points.length <= 10) return points;
+  return points.slice(0, 10);
+}
+
+const formatMeasure = (value: number, format: string) => {
+  if (format === "percent") return `${Math.round(value)}%`;
+  if (format === "decimal") return (Math.round(value * 10) / 10).toLocaleString();
+  return Math.round(value).toLocaleString();
+};
+/** Rounds an axis maximum up to a readable tick value. */
+const niceMax = (max: number) => {
+  if (!(max > 0)) return 1;
+  const exponent = Math.floor(Math.log10(max));
+  const base = 10 ** exponent;
+  const scaled = max / base;
+  const step = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10;
+  return step * base;
+};
 
 function InboxAnalytics({
   graphs,
-  analytics,
+  leads,
+  filterLabel,
+  timeZone,
+  loading,
   onChange,
 }: {
   graphs: GraphConfig[];
-  analytics: AnalyticsSnapshot | null;
+  leads: Lead[];
+  filterLabel: string;
+  timeZone: string;
+  loading: boolean;
   onChange: (graphs: GraphConfig[]) => void;
 }) {
-  const [newPreset, setNewPreset] = useState(2);
-  const [newKind, setNewKind] = useState<GraphConfig["kind"]>("line");
-  const [newTitle, setNewTitle] = useState("");
-  const addGraph = () => {
-    if (graphs.length >= 4) return;
-    const preset = graphPresets[newPreset];
-    onChange([
-      ...graphs,
-      {
-        ...preset,
-        id: `custom-${Date.now()}`,
-        title: newTitle.trim() || preset.title,
-        kind: newKind,
-      },
-    ]);
-    setNewTitle("");
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [customTitle, setCustomTitle] = useState("");
+  const [customX, setCustomX] = useState("client");
+  const [customY, setCustomY] = useState("conversations");
+  const [customKind, setCustomKind] = useState<GraphKind>("hbars");
+  const nextGraphId = useRef(0);
+
+  const update = (id: string, patch: Partial<GraphConfig>) =>
+    onChange(
+      graphs.map((graph) => (graph.id === id ? { ...graph, ...patch } : graph)),
+    );
+  const move = (id: string, offset: number) => {
+    const from = graphs.findIndex((graph) => graph.id === id);
+    const to = from + offset;
+    if (from < 0 || to < 0 || to >= graphs.length) return;
+    const next = [...graphs];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    onChange(next);
   };
+  const addGraph = (graph: Omit<GraphConfig, "id">) => {
+    if (graphs.length >= 6) return;
+    nextGraphId.current += 1;
+    const id = `graph-${graph.x}-${graph.y}-${graph.kind}-${nextGraphId.current}`;
+    onChange([...graphs, { ...graph, id }]);
+    setBuilderOpen(false);
+  };
+  const addCustom = () => {
+    const dimension = graphDimensions.find((item) => item.id === customX);
+    const measure = graphMeasures.find((item) => item.id === customY);
+    addGraph({
+      title:
+        customTitle.trim() ||
+        `${measure?.label ?? "Value"} by ${(dimension?.label ?? "group").toLowerCase()}`,
+      x: customX,
+      y: customY,
+      kind: customKind,
+    });
+    setCustomTitle("");
+  };
+
   return (
     <section className="inbox-analytics-section">
       <div className="inbox-analytics-heading">
@@ -1998,66 +2285,223 @@ function InboxAnalytics({
           <span>INBOX ANALYTICS</span>
           <h2>Conversation trends</h2>
           <p>
-            {analytics?.status === "live"
-              ? "Live aggregates from synced conversations and messages."
-              : "Analytics will populate after Supabase receives synced HeyReach data."}
+            {loading
+              ? "Loading synced conversations…"
+              : `Live across ${leads.length.toLocaleString()} conversation${leads.length === 1 ? "" : "s"} in ${filterLabel}. Charts follow your current filters.`}
           </p>
         </div>
-        <div className="graph-builder">
-          <select
-            value={newPreset}
-            onChange={(event) => setNewPreset(Number(event.target.value))}
+        <div className="graph-toolbar">
+          <button
+            className="graph-toolbar-add"
+            onClick={() => setBuilderOpen((open) => !open)}
+            disabled={graphs.length >= 6}
           >
-            {graphPresets.map((preset, index) => (
-              <option key={preset.title} value={index}>
-                {preset.title}
-              </option>
-            ))}
-          </select>
-          <select
-            value={newKind}
-            onChange={(event) =>
-              setNewKind(event.target.value as GraphConfig["kind"])
-            }
-          >
-            <option value="line">Line</option>
-            <option value="bars">Bars</option>
-            <option value="donut">Donut</option>
-          </select>
-          <input
-            value={newTitle}
-            onChange={(event) => setNewTitle(event.target.value)}
-            placeholder="Custom title"
-          />
-          <button onClick={addGraph} disabled={graphs.length >= 4}>
-            + Add graph
+            {builderOpen ? "Close" : "+ Add graph"}
           </button>
         </div>
       </div>
-      <div className="inbox-graph-grid">
-        {graphs.map((graph) => (
-          <article className="inbox-graph-card" key={graph.id}>
-            <div className="inbox-graph-card-heading">
-              <div>
-                <span>{graph.metric}</span>
-                <strong>{graph.title}</strong>
-              </div>
-              <button
-                aria-label={`Remove ${graph.title}`}
-                onClick={() =>
-                  onChange(graphs.filter((item) => item.id !== graph.id))
+      {builderOpen && (
+        <div className="graph-builder-panel">
+          <div className="graph-builder-presets">
+            <h4>Preset graphs</h4>
+            <div>
+              {graphPresets.map((preset) => (
+                <button key={preset.title} onClick={() => addGraph(preset)}>
+                  {preset.title}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="graph-builder-custom">
+            <h4>Build your own</h4>
+            <label>
+              <span>Title</span>
+              <input
+                value={customTitle}
+                onChange={(event) => setCustomTitle(event.target.value)}
+                placeholder="Optional"
+              />
+            </label>
+            <label>
+              <span>X axis</span>
+              <select
+                value={customX}
+                onChange={(event) => setCustomX(event.target.value)}
+              >
+                {graphDimensions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Y axis</span>
+              <select
+                value={customY}
+                onChange={(event) => setCustomY(event.target.value)}
+              >
+                {graphMeasures.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Type</span>
+              <select
+                value={customKind}
+                onChange={(event) =>
+                  setCustomKind(event.target.value as GraphKind)
                 }
               >
-                ×
-              </button>
-            </div>
-            <GraphVisual
-              kind={graph.kind}
-              metric={graph.metric}
-              analytics={analytics}
-            />
-          </article>
-        ))}
+                {graphKinds.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button onClick={addCustom}>Add to dashboard</button>
+          </div>
+        </div>
+      )}
+      {graphs.length === 0 && (
+        <p className="analytics-empty">
+          No graphs yet — add a preset or build your own.
+        </p>
+      )}
+      <div className="inbox-graph-grid">
+        {graphs.map((graph, index) => {
+          const dimension = graphDimensions.find((item) => item.id === graph.x);
+          const measure = graphMeasures.find((item) => item.id === graph.y);
+          const points = buildSeries(leads, graph.x, graph.y, timeZone);
+          const total = points.reduce((sum, point) => sum + point.value, 0);
+          const headline =
+            measure?.format === "count"
+              ? formatMeasure(total, "count")
+              : points.length
+                ? formatMeasure(total / points.length, measure?.format ?? "count")
+                : "—";
+          return (
+            <article
+              className={`inbox-graph-card kind-${graph.kind}`}
+              key={graph.id}
+            >
+              <div className="inbox-graph-card-heading">
+                <div>
+                  <span>
+                    {measure?.label ?? graph.y} by{" "}
+                    {(dimension?.label ?? graph.x).toLowerCase()}
+                  </span>
+                  <strong>{graph.title}</strong>
+                </div>
+                <div className="inbox-graph-card-actions">
+                  <b title={measure?.format === "count" ? "Total" : "Average"}>
+                    {headline}
+                  </b>
+                  <button
+                    aria-label="Move left"
+                    disabled={index === 0}
+                    onClick={() => move(graph.id, -1)}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    aria-label="Move right"
+                    disabled={index === graphs.length - 1}
+                    onClick={() => move(graph.id, 1)}
+                  >
+                    ›
+                  </button>
+                  <button
+                    aria-label={`Configure ${graph.title}`}
+                    className={editing === graph.id ? "is-active" : ""}
+                    onClick={() =>
+                      setEditing(editing === graph.id ? null : graph.id)
+                    }
+                  >
+                    ⚙
+                  </button>
+                  <button
+                    aria-label={`Remove ${graph.title}`}
+                    onClick={() =>
+                      onChange(graphs.filter((item) => item.id !== graph.id))
+                    }
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+              {editing === graph.id && (
+                <div className="inbox-graph-axes">
+                  <label>
+                    <span>X</span>
+                    <select
+                      value={graph.x}
+                      onChange={(event) =>
+                        update(graph.id, { x: event.target.value })
+                      }
+                    >
+                      {graphDimensions.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Y</span>
+                    <select
+                      value={graph.y}
+                      onChange={(event) =>
+                        update(graph.id, { y: event.target.value })
+                      }
+                    >
+                      {graphMeasures.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Type</span>
+                    <select
+                      value={graph.kind}
+                      onChange={(event) =>
+                        update(graph.id, {
+                          kind: event.target.value as GraphKind,
+                        })
+                      }
+                    >
+                      {graphKinds.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <input
+                    value={graph.title}
+                    onChange={(event) =>
+                      update(graph.id, { title: event.target.value })
+                    }
+                    aria-label="Graph title"
+                  />
+                </div>
+              )}
+              <GraphVisual
+                kind={graph.kind}
+                points={points}
+                format={measure?.format ?? "count"}
+                measureLabel={measure?.label ?? graph.y}
+                loading={loading}
+              />
+            </article>
+          );
+        })}
       </div>
     </section>
   );
@@ -2065,76 +2509,228 @@ function InboxAnalytics({
 
 function GraphVisual({
   kind,
-  metric,
-  analytics,
+  points,
+  format,
+  measureLabel,
+  loading,
 }: {
-  kind: GraphConfig["kind"];
-  metric: string;
-  analytics: AnalyticsSnapshot | null;
+  kind: GraphKind;
+  points: SeriesPoint[];
+  format: string;
+  measureLabel: string;
+  loading: boolean;
 }) {
-  if (!analytics || analytics.status !== "live")
-    return <div className="analytics-empty">No synced data yet</div>;
+  if (loading) return <div className="analytics-empty">Loading…</div>;
+  const populated = points.some((point) => point.value > 0);
+  if (!points.length || !populated)
+    return <div className="analytics-empty">No data for this view yet</div>;
+
   if (kind === "donut") {
-    const total =
-      analytics.queueMix.hot +
-      analytics.queueMix.warm +
-      analytics.queueMix.nurture;
-    const hot = total ? (analytics.queueMix.hot / total) * 100 : 0;
-    const warm = total ? hot + (analytics.queueMix.warm / total) * 100 : 0;
+    const total = points.reduce((sum, point) => sum + point.value, 0);
+    const radius = 52;
+    const circumference = 2 * Math.PI * radius;
+    // Slices are laid out by accumulating the dash offset up front so rendering stays pure.
+    const slices = points.reduce<
+      Array<SeriesPoint & { share: number; dash: number; offset: number }>
+    >((accumulator, point) => {
+      const previous = accumulator[accumulator.length - 1];
+      const offset = previous ? previous.offset + previous.dash : 0;
+      const share = total ? point.value / total : 0;
+      return [...accumulator, { ...point, share, dash: share * circumference, offset }];
+    }, []);
     return (
-      <div
-        className="inbox-donut"
-        style={{
-          background: `conic-gradient(var(--coral) 0 ${hot}%,var(--amber) ${hot}% ${warm}%,#687080 ${warm}% 100%)`,
-        }}
-      >
-        <div>
-          <strong>{total}</strong>
-          <small>leads</small>
-        </div>
+      <div className="inbox-donut-chart">
+        <svg viewBox="0 0 140 140" role="img" aria-label={measureLabel}>
+          <circle className="donut-track" cx="70" cy="70" r={radius} />
+          {slices.map((slice, index) => (
+            <circle
+              key={slice.label}
+              className={`donut-slice ${bucketToneClass[slice.label] ?? `series-${index % 6}`}`}
+              cx="70"
+              cy="70"
+              r={radius}
+              strokeDasharray={`${slice.dash} ${circumference - slice.dash}`}
+              strokeDashoffset={-slice.offset}
+            >
+              <title>{`${slice.label}: ${formatMeasure(slice.value, format)} (${Math.round(slice.share * 100)}%)`}</title>
+            </circle>
+          ))}
+          <text className="donut-total" x="70" y="66">
+            {formatMeasure(total, format === "percent" ? "decimal" : format)}
+          </text>
+          <text className="donut-caption" x="70" y="82">
+            total
+          </text>
+        </svg>
+        <ul className="graph-legend">
+          {points.map((point, index) => (
+            <li key={point.label}>
+              <i
+                className={
+                  bucketToneClass[point.label] ?? `series-${index % 6}`
+                }
+              />
+              <span>{point.label}</span>
+              <b>{formatMeasure(point.value, format)}</b>
+              <em>
+                {total ? Math.round((point.value / total) * 100) : 0}%
+              </em>
+            </li>
+          ))}
+        </ul>
       </div>
     );
   }
-  const values =
-    metric === "Leads by client"
-      ? analytics.clientLoad.map((item) => item.leads)
-      : analytics.trend;
-  if (kind === "bars") {
-    const max = Math.max(...values, 1);
+
+  if (kind === "hbars") {
+    const max = Math.max(...points.map((point) => point.value), 1);
     return (
-      <div className="inbox-bars">
-        {values.map((value, index) => (
-          <i
-            key={index}
-            style={{ height: `${Math.max(5, (value / max) * 100)}%` }}
-          />
+      <div className="inbox-hbars">
+        {points.map((point, index) => (
+          <div className="inbox-hbar-row" key={`${point.label}-${index}`}>
+            <span title={point.label}>{point.label}</span>
+            <div>
+              <i
+                className={
+                  bucketToneClass[point.label] ?? `series-${index % 6}`
+                }
+                style={{ width: `${Math.max(2, (point.value / max) * 100)}%` }}
+              />
+            </div>
+            <b>{formatMeasure(point.value, format)}</b>
+          </div>
         ))}
       </div>
     );
   }
-  const max = Math.max(...values, 1);
-  const points = values
-    .map(
-      (value, index) =>
-        `${values.length === 1 ? 210 : (index / (values.length - 1)) * 420} ${96 - (value / max) * 82}`,
-    )
-    .join(" L");
-  return values.length ? (
+
+  const width = 460;
+  const height = 176;
+  const padLeft = 40;
+  const padRight = 10;
+  const padTop = 12;
+  const padBottom = 28;
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+  const max = niceMax(Math.max(...points.map((point) => point.value)));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({
+    ratio,
+    value: max * ratio,
+    y: padTop + plotHeight * (1 - ratio),
+  }));
+  // Only label every nth category when the axis would otherwise collide.
+  const labelStep = Math.ceil(points.length / 8);
+
+  if (kind === "bars") {
+    const slot = plotWidth / points.length;
+    const barWidth = Math.max(4, Math.min(30, slot * 0.6));
+    return (
+      <svg
+        className="inbox-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={measureLabel}
+      >
+        {ticks.map((tick) => (
+          <g key={tick.ratio}>
+            <line
+              className="chart-grid"
+              x1={padLeft}
+              x2={width - padRight}
+              y1={tick.y}
+              y2={tick.y}
+            />
+            <text className="chart-axis" x={padLeft - 6} y={tick.y + 3}>
+              {formatMeasure(tick.value, format)}
+            </text>
+          </g>
+        ))}
+        {points.map((point, index) => {
+          const barHeight = max ? (point.value / max) * plotHeight : 0;
+          return (
+            <g key={`${point.label}-${index}`}>
+              <rect
+                className={`chart-bar ${bucketToneClass[point.label] ?? ""}`}
+                x={padLeft + slot * index + (slot - barWidth) / 2}
+                y={padTop + plotHeight - barHeight}
+                width={barWidth}
+                height={Math.max(barHeight, point.value > 0 ? 2 : 0)}
+                rx="2"
+              >
+                <title>{`${point.label}: ${formatMeasure(point.value, format)}`}</title>
+              </rect>
+              {index % labelStep === 0 && (
+                <text
+                  className="chart-axis chart-axis-x"
+                  x={padLeft + slot * index + slot / 2}
+                  y={height - 9}
+                >
+                  {point.label.length > 10
+                    ? `${point.label.slice(0, 9)}…`
+                    : point.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    );
+  }
+
+  const coordinates = points.map((point, index) => ({
+    ...point,
+    x:
+      points.length === 1
+        ? padLeft + plotWidth / 2
+        : padLeft + (index / (points.length - 1)) * plotWidth,
+    y: padTop + plotHeight * (1 - (max ? point.value / max : 0)),
+  }));
+  const path = coordinates
+    .map((point, index) => `${index ? "L" : "M"}${point.x} ${point.y}`)
+    .join(" ");
+  return (
     <svg
-      className="inbox-line"
-      viewBox="0 0 420 110"
+      className="inbox-chart"
+      viewBox={`0 0 ${width} ${height}`}
       role="img"
-      aria-label="Live trend graph"
+      aria-label={measureLabel}
     >
-      <path d={`M${points}`} />
-      <circle
-        cx={values.length === 1 ? 210 : 420}
-        cy={96 - (values[values.length - 1] / max) * 82}
-        r="4"
-      />
+      {ticks.map((tick) => (
+        <g key={tick.ratio}>
+          <line
+            className="chart-grid"
+            x1={padLeft}
+            x2={width - padRight}
+            y1={tick.y}
+            y2={tick.y}
+          />
+          <text className="chart-axis" x={padLeft - 6} y={tick.y + 3}>
+            {formatMeasure(tick.value, format)}
+          </text>
+        </g>
+      ))}
+      {kind === "area" && (
+        <path
+          className="chart-area"
+          d={`${path} L${coordinates[coordinates.length - 1].x} ${padTop + plotHeight} L${coordinates[0].x} ${padTop + plotHeight} Z`}
+        />
+      )}
+      <path className="chart-line" d={path} />
+      {coordinates.map((point, index) => (
+        <g key={`${point.label}-${index}`}>
+          <circle className="chart-dot" cx={point.x} cy={point.y} r="3">
+            <title>{`${point.label}: ${formatMeasure(point.value, format)}`}</title>
+          </circle>
+          {index % labelStep === 0 && (
+            <text className="chart-axis chart-axis-x" x={point.x} y={height - 9}>
+              {point.label.length > 10
+                ? `${point.label.slice(0, 9)}…`
+                : point.label}
+            </text>
+          )}
+        </g>
+      ))}
     </svg>
-  ) : (
-    <div className="analytics-empty">No synced data yet</div>
   );
 }
 

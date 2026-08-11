@@ -225,17 +225,18 @@ export async function GET() {
           : {};
       return Object.keys(enrichment).length === 0;
     });
-    const aiArkProblemCount = Math.max(
-      aiArkFailures24h.length,
-      unenrichedLeads24h.length,
-    );
+    // Health is judged on enrichment runs only. A lead that has no ai_ark payload yet is a
+    // normal, self-resolving backlog (leads arrive by webhook and are enriched afterwards,
+    // and some profiles are simply not enrichable), so it is reported as information and
+    // never drives the service down.
+    const aiArkFailing =
+      aiArkFailures24h.length > 5 &&
+      aiArkFailures24h.length > aiArkSuccesses24h.length;
     const aiArkStatus = !aiArkEnabled
       ? "disabled"
       : !process.env.AI_ARK_API_KEY
         ? "not_configured"
-        : !aiArkResult.response.ok ||
-            !recentLeadResult.response.ok ||
-            aiArkProblemCount > 5
+        : !aiArkResult.response.ok || aiArkFailing
           ? "attention"
           : "healthy";
     services[3].status =
@@ -246,10 +247,12 @@ export async function GET() {
           : "down";
     services[3].detail =
       aiArkStatus === "healthy"
-        ? "Recent enrichment records are healthy."
+        ? aiArkSuccesses24h.length
+          ? `${aiArkSuccesses24h.length} successful enrichment run(s) in the last 24 hours.`
+          : "No enrichment failures in the last 24 hours."
         : aiArkStatus === "disabled"
           ? "Disabled globally."
-          : "Recent enrichment data needs attention.";
+          : "Recent enrichment runs are failing.";
 
     const clients = rows.map((row) => {
       const webhookAgeSeconds = ageSeconds(row.last_webhook_received_at);
@@ -380,10 +383,10 @@ export async function GET() {
           ? "Enrichment is intentionally turned off in Vercel."
           : aiArkStatus === "not_configured"
             ? "Enrichment is on, but the AI_ARK_API_KEY is missing."
-            : !aiArkResult.response.ok || !recentLeadResult.response.ok
-              ? "The health check could not read AI Ark run or lead data from Supabase."
+            : !aiArkResult.response.ok
+              ? "The health check could not read AI Ark run data from Supabase."
               : aiArkStatus === "attention"
-                ? `More than 5 recent leads could not be enriched. Check the failures below.`
+                ? `${aiArkFailures24h.length} enrichment run(s) failed in the last 24 hours and failures now outnumber successes. Check the failures below.`
                 : "AI Ark is enriching leads normally.",
       recentFailures: aiArkFailures24h.slice(0, 10).map((run) => ({
         startedAt: run.started_at,
