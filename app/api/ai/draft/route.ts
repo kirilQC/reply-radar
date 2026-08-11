@@ -15,22 +15,32 @@ async function resolveWorkspaceId(slug: string, url: string, headers: Record<str
   return rows[0]?.id ? String(rows[0].id) : slug;
 }
 
-async function fetchPastReplies(workspaceId: string, campaignName: string | undefined): Promise<string[]> {
+export type PastReplyContext = {
+  body: string;
+  senderName: string;
+  leadName: string;
+  campaignName: string;
+};
+
+async function fetchPastReplies(workspaceId: string, campaignName: string | undefined): Promise<PastReplyContext[]> {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key || !workspaceId) return [];
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
   const resolvedId = await resolveWorkspaceId(workspaceId, url, headers);
 
-  // Get all conversations for this workspace
+  // Get all conversations for this workspace + the lead attached to each — the
+  // lead name gets attached to each past reply so the admin feed can label who
+  // the example was sent to.
   const convResponse = await fetch(
-    `${url}/rest/v1/rr_conversations?select=id&workspace_id=eq.${encodeURIComponent(resolvedId)}&limit=200`,
+    `${url}/rest/v1/rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(resolvedId)}&limit=200`,
     { headers, cache: "no-store" },
   );
   if (!convResponse.ok) return [];
   const conversations = (await convResponse.json().catch(() => [])) as Row[];
   const convIds = conversations.map((c) => String(c.id)).filter(Boolean);
   if (!convIds.length) return [];
+  const leadIdByConv = new Map(conversations.map((c) => [String(c.id), String(c.lead_id ?? "")]));
 
   // Fetch recent outbound messages across all this client's conversations
   const msgResponse = await fetch(
@@ -40,40 +50,84 @@ async function fetchPastReplies(workspaceId: string, campaignName: string | unde
   if (!msgResponse.ok) return [];
   const messages = (await msgResponse.json().catch(() => [])) as Row[];
 
+  // Resolve lead names in a single batched request keyed on the conversations
+  // above, so each past reply carries the recipient it was actually sent to.
+  const uniqueLeadIds = [...new Set([...leadIdByConv.values()].filter(Boolean))];
+  const leadNameById = new Map<string, string>();
+  if (uniqueLeadIds.length) {
+    const leadResponse = await fetch(
+      `${url}/rest/v1/rr_leads?select=id,name&id=in.(${uniqueLeadIds.join(",")})`,
+      { headers, cache: "no-store" },
+    ).catch(() => null);
+    if (leadResponse?.ok) {
+      const rows = (await leadResponse.json().catch(() => [])) as Row[];
+      for (const row of rows) leadNameById.set(String(row.id), String(row.name ?? ""));
+    }
+  }
+
   // Separate by campaign: same campaign vs. other campaigns
-  const sameCampaign: string[] = [];
-  const otherCampaign: string[] = [];
+  const sameCampaign: PastReplyContext[] = [];
+  const otherCampaign: PastReplyContext[] = [];
 
   for (const msg of messages) {
     const body = String(msg.body ?? "").trim();
     if (!body || body.length < 15) continue; // skip trivial messages
     const radar = object(object(msg.raw_data).reply_radar);
     const msgCampaign = String(object(radar.campaign).name ?? "");
+    const senderName = String(object(radar.sender).name ?? "");
+    const leadName = leadNameById.get(leadIdByConv.get(String(msg.conversation_id)) ?? "") ?? "";
+    const context: PastReplyContext = { body, senderName, leadName, campaignName: msgCampaign };
     if (campaignName && msgCampaign === campaignName) {
-      sameCampaign.push(body);
+      sameCampaign.push(context);
     } else {
-      otherCampaign.push(body);
+      otherCampaign.push(context);
     }
   }
 
   // Build the final set: prioritize same-campaign replies
-  const result: string[] = [];
-
-  // Add up to 10 from same campaign first
+  const result: PastReplyContext[] = [];
   for (const reply of sameCampaign.slice(0, 10)) {
     if (result.length >= 10) break;
     result.push(reply);
   }
-
-  // Fill remaining slots with other-campaign replies (light reference)
   if (result.length < 10) {
     for (const reply of otherCampaign) {
       if (result.length >= 10) break;
       result.push(reply);
     }
   }
-
   return result;
+}
+
+/** Fetch the lead's role + company for audit-log enrichment (best-effort). */
+async function fetchLeadHeadline(conversationId: string | undefined): Promise<{ leadTitle: string; leadCompany: string }> {
+  const empty = { leadTitle: "", leadCompany: "" };
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key || !conversationId) return empty;
+  const headers = { apikey: key, Authorization: `Bearer ${key}` };
+  try {
+    const convResp = await fetch(
+      `${url}/rest/v1/rr_conversations?select=lead_id&id=eq.${encodeURIComponent(conversationId)}&limit=1`,
+      { headers, cache: "no-store" },
+    );
+    if (!convResp.ok) return empty;
+    const [conv] = (await convResp.json().catch(() => [])) as Row[];
+    const leadId = String(conv?.lead_id ?? "");
+    if (!leadId) return empty;
+    const leadResp = await fetch(
+      `${url}/rest/v1/rr_leads?select=role,company&id=eq.${encodeURIComponent(leadId)}&limit=1`,
+      { headers, cache: "no-store" },
+    );
+    if (!leadResp.ok) return empty;
+    const [lead] = (await leadResp.json().catch(() => [])) as Row[];
+    return {
+      leadTitle: String(lead?.role ?? ""),
+      leadCompany: String(lead?.company ?? ""),
+    };
+  } catch {
+    return empty;
+  }
 }
 
 export async function POST(request: Request) {
@@ -89,15 +143,22 @@ export async function POST(request: Request) {
   // Fetch past outbound replies for tone learning (same client only)
   const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId : "";
   const campaignName = typeof body.campaignName === "string" ? body.campaignName : undefined;
-  let pastReplies: string[] = [];
+  let pastReplies: PastReplyContext[] = [];
   if (mode === "analyze" && workspaceId) {
     pastReplies = await fetchPastReplies(workspaceId, campaignName).catch(() => []);
   }
 
   // Build the tone context from past replies
   const toneContext = pastReplies.length
-    ? `\n\nHere are recent outbound replies from this client's team. Use these as a reference for tone, style, and typical response patterns. Mirror the voice, length, and approach you see in these examples:\n\n${pastReplies.map((r, i) => `Example ${i + 1}: ${r}`).join("\n\n")}\n\n`
+    ? `\n\nHere are recent outbound replies from this client's team. Use these as a reference for tone, style, and typical response patterns. Mirror the voice, length, and approach you see in these examples:\n\n${pastReplies.map((r, i) => `Example ${i + 1}: ${r.body}`).join("\n\n")}\n\n`
     : "";
+
+  // Latest inbound message = what the assistant is trying to answer. Grabbed
+  // from the tail of the thread the caller sent, so we don't burn another read.
+  const inboundMessage = [...thread].reverse().find((item: { direction?: string; body?: string }) => String(item.direction ?? "").toLowerCase() === "inbound");
+  const inboundBody = inboundMessage ? String(inboundMessage.body ?? "") : "";
+  const conversationIdParam = typeof body.conversationId === "string" ? body.conversationId : "";
+  const { leadTitle, leadCompany } = mode === "analyze" ? await fetchLeadHeadline(conversationIdParam) : { leadTitle: "", leadCompany: "" };
 
   const systemPrompt = body.system
     ? String(body.system)
@@ -147,9 +208,22 @@ export async function POST(request: Request) {
     await writeAuditEvent({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }, { actor: "anthropic", action: response.ok ? (mode === "analyze" ? "conversation.analyzed" : "draft.generated") : "draft.failed", entityType: "conversation", entityId: typeof body.conversationId === "string" ? body.conversationId : undefined, details: { source: "anthropic", status: response.ok ? "success" : "failed", model, inputTokens: payload?.usage?.input_tokens ?? 0, outputTokens: payload?.usage?.output_tokens ?? 0, durationMs, sentiment: mode === "analyze" ? String(analysis.sentiment ?? "").toLowerCase() : undefined, workspaceId: body.workspaceId, workspaceName: body.workspaceName, leadName: typeof body.leadName === "string" ? body.leadName : undefined, pastRepliesUsed: pastReplies.length,
       // Full texts persisted so the admin drafting feed can show what the model saw
       // and produced without doing a second lookup. Truncated to keep the row light.
-      pastReplies: pastReplies.map((r) => r.slice(0, 400)),
+      // Legacy flat form kept for older audit readers.
+      pastReplies: pastReplies.map((r) => r.body.slice(0, 400)),
+      // Richer form the admin draft feed reads: each example carries the
+      // sender, recipient and campaign so reviewers can trace the voice source.
+      pastReplyContext: pastReplies.map((r) => ({
+        body: r.body.slice(0, 400),
+        senderName: r.senderName,
+        leadName: r.leadName,
+        campaignName: r.campaignName,
+      })),
       draft: mode === "analyze" ? String(analysis.draft ?? "").slice(0, 1000) : text.slice(0, 1000),
       reason: mode === "analyze" ? String(analysis.reason ?? "").slice(0, 400) : undefined,
+      inboundMessage: inboundBody.slice(0, 1000),
+      campaignName: campaignName ?? "",
+      leadTitle,
+      leadCompany,
       summary: response.ok ? `Anthropic generated a reply draft with ${model} using ${pastReplies.length} past replies as tone reference.` : `Anthropic could not generate a reply draft with ${model}.` } });
     const providerMessage = typeof payload?.error?.message === "string" ? payload.error.message : "Anthropic rejected the draft request.";
     return NextResponse.json({ ok: response.ok, ...(response.ok ? {} : { error: providerMessage }), draft: mode === "analyze" ? String(analysis.draft ?? "") : text, reason: mode === "analyze" ? String(analysis.reason ?? "") : undefined, sentiment: mode === "analyze" ? String(analysis.sentiment ?? "") : undefined, usage: payload?.usage ?? null }, { status: response.ok ? 200 : response.status });

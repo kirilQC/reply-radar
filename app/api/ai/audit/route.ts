@@ -112,7 +112,25 @@ export async function GET(request: Request) {
         conversationId: auditId,
         draft: text(details.draft) || null,
         reason: text(details.reason) || null,
-        pastReplies: Array.isArray(details.pastReplies) ? (details.pastReplies as unknown[]).map((r) => text(r)).filter(Boolean) : [],
+        inboundMessage: text(details.inboundMessage) || null,
+        campaignName: text(details.campaignName) || null,
+        leadTitle: text(details.leadTitle) || null,
+        leadCompany: text(details.leadCompany) || null,
+        // Rich past-reply context (each carries sender/lead/campaign). Falls back
+        // to the legacy string array for rows written before the richer shape shipped.
+        pastReplyContext: Array.isArray(details.pastReplyContext)
+          ? (details.pastReplyContext as unknown[]).map((entry) => {
+              const raw = object(entry);
+              return {
+                body: text(raw.body),
+                senderName: text(raw.senderName),
+                leadName: text(raw.leadName),
+                campaignName: text(raw.campaignName),
+              };
+            }).filter((entry) => entry.body)
+          : Array.isArray(details.pastReplies)
+            ? (details.pastReplies as unknown[]).map((r) => ({ body: text(r), senderName: "", leadName: "", campaignName: "" })).filter((entry) => entry.body)
+            : [],
       };
     });
 

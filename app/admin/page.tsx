@@ -814,7 +814,8 @@ type AiConfig = {
   workspaceAi: { name: string; slug: string; brief: string; model: string; icpPrompt: string; followUpPrompt: string; replyPrompt: string; sentimentPrompt: string; followUpThreshold?: number } | null;
   workspaces: Array<{ id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; hasBrief: boolean }>;
 };
-type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; workspaceLogoUrl: string | null; leadName: string | null; leadPhotoUrl: string | null; conversationId?: string | null; draft?: string | null; reason?: string | null; pastReplies?: string[] };
+type PastReplyRef = { body: string; senderName: string; leadName: string; campaignName: string };
+type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; workspaceLogoUrl: string | null; leadName: string | null; leadPhotoUrl: string | null; conversationId?: string | null; draft?: string | null; reason?: string | null; inboundMessage?: string | null; campaignName?: string | null; leadTitle?: string | null; leadCompany?: string | null; pastReplies?: string[]; pastReplyContext?: PastReplyRef[] };
 type AiAuditData = { ok?: boolean; events: AiAuditEvent[]; summary: { totalCalls: number; successful: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
 
 /**
@@ -895,14 +896,16 @@ function TemplatePicker({ templates, value, onPick, onSave, onDelete }: {
  */
 function DraftFeedPanel({ events, freshIds }: { events: AiAuditEvent[]; freshIds: string[] }) {
   const [visible, setVisible] = useState(10);
-  // Only show events where we captured the draft/references. Events logged before that persistence
-  // shipped will still show up in the audit log below, but there's nothing to display for them here.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Only show events where we captured the draft. Older rows (before richer persistence
+  // shipped) will still appear in the raw audit log below.
   const allDrafts = events.filter((event) => {
     if (event.action !== "conversation.analyzed" && event.action !== "draft.generated" && event.action !== "draft.failed") return false;
     if (event.action === "draft.failed") return true;
     return Boolean(event.draft && event.draft.trim());
   });
   const drafts = allDrafts.slice(0, visible);
+  const toggle = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   return (
     <section className="admin-panel ai-draft-feed-section">
       <div className="panel-heading">
@@ -925,44 +928,76 @@ function DraftFeedPanel({ events, freshIds }: { events: AiAuditEvent[]; freshIds
               : "";
             const isFresh = freshIds.includes(String(event.id));
             const isFailed = event.action === "draft.failed" || event.status === "error" || event.status === "failed";
+            const isOpen = Boolean(expanded[String(event.id)]);
+            const references = event.pastReplyContext ?? [];
+            // Compose the sub-line: title @ company, then campaign
+            const titleCompany = [event.leadTitle, event.leadCompany].filter(Boolean).join(" @ ");
             return (
-              <article className={`ai-draft-card${isFresh ? " ai-draft-card-fresh" : ""}${isFailed ? " ai-draft-card-failed" : ""}`} key={event.id}>
-                <header className="ai-draft-card-head">
-                  <div className="ai-draft-card-who">
-                    <div className="ai-draft-avatar-pair">
-                      {event.leadPhotoUrl ? <img className="ai-draft-avatar-lead" src={event.leadPhotoUrl} alt="" /> : <span className="ai-draft-avatar-placeholder">{(event.leadName ?? "?")[0]}</span>}
-                      {event.workspaceLogoUrl ? <img className="ai-draft-avatar-client" src={event.workspaceLogoUrl} alt="" /> : <span className="ai-draft-avatar-placeholder ai-draft-avatar-client">{(event.workspaceName ?? "?")[0]}</span>}
+              <article className={`ai-draft-card${isFresh ? " ai-draft-card-fresh" : ""}${isFailed ? " ai-draft-card-failed" : ""}${isOpen ? " ai-draft-card-open" : ""}`} key={event.id}>
+                <button type="button" className="ai-draft-card-toggle" onClick={() => toggle(String(event.id))} aria-expanded={isOpen}>
+                  <header className="ai-draft-card-head">
+                    <div className="ai-draft-card-who">
+                      <div className="ai-draft-avatar-pair">
+                        {event.leadPhotoUrl ? <img className="ai-draft-avatar-lead" src={event.leadPhotoUrl} alt="" /> : <span className="ai-draft-avatar-placeholder">{(event.leadName ?? "?")[0]}</span>}
+                        {event.workspaceLogoUrl ? <img className="ai-draft-avatar-client" src={event.workspaceLogoUrl} alt="" /> : <span className="ai-draft-avatar-placeholder ai-draft-avatar-client">{(event.workspaceName ?? "?")[0]}</span>}
+                      </div>
+                      <div className="ai-draft-card-identity">
+                        <strong>{event.leadName || "—"}</strong>
+                        {titleCompany && <span className="ai-draft-card-role">{titleCompany}</span>}
+                        <small>
+                          {event.workspaceName || "—"}
+                          {event.campaignName ? ` · ${event.campaignName}` : ""}
+                          {` · ${date} ${when}`}
+                        </small>
+                      </div>
                     </div>
-                    <div>
-                      <strong>{event.leadName || "—"}</strong>
-                      <small>{event.workspaceName || "—"} · {date} {when}</small>
+                    <div className="ai-draft-card-meta">
+                      {event.sentiment && <span className={`sentiment-badge sentiment-${event.sentiment}`}>{event.sentiment}</span>}
+                      <small>{event.durationMs ? `${event.durationMs}ms` : ""}</small>
+                      <small>{event.inputTokens || event.outputTokens ? `${event.inputTokens}→${event.outputTokens}` : ""}</small>
+                      <span className="ai-draft-card-caret" aria-hidden>{isOpen ? "▲" : "▼"}</span>
                     </div>
-                  </div>
-                  <div className="ai-draft-card-meta">
-                    {event.sentiment && <span className={`sentiment-badge sentiment-${event.sentiment}`}>{event.sentiment}</span>}
-                    <small>{event.durationMs ? `${event.durationMs}ms` : ""}</small>
-                    <small>{event.inputTokens || event.outputTokens ? `${event.inputTokens}→${event.outputTokens}` : ""}</small>
-                  </div>
-                </header>
-                {event.reason && <p className="ai-draft-card-reason">Why: {event.reason}</p>}
-                <div className="ai-draft-card-body">
+                  </header>
                   <div className="ai-draft-block ai-draft-block-output">
-                    <span className="ai-draft-block-label">DRAFT</span>
+                    <span className="ai-draft-block-label">SUGGESTED REPLY</span>
                     <p>{event.draft || (isFailed ? "Draft failed to generate." : "(empty)")}</p>
                   </div>
-                  {event.pastReplies && event.pastReplies.length > 0 && (
-                    <div className="ai-draft-block ai-draft-block-input">
-                      <span className="ai-draft-block-label">
-                        VOICE REFERENCE · {event.pastReplies.length} past reply{event.pastReplies.length === 1 ? "" : "s"} from this client
-                      </span>
-                      <ol className="ai-draft-references">
-                        {event.pastReplies.map((reply, index) => (
-                          <li key={index}>{reply}</li>
-                        ))}
-                      </ol>
-                    </div>
-                  )}
-                </div>
+                </button>
+                {isOpen && (
+                  <div className="ai-draft-card-details">
+                    {event.inboundMessage && (
+                      <div className="ai-draft-block ai-draft-block-inbound">
+                        <span className="ai-draft-block-label">INBOUND MESSAGE (what we&apos;re replying to)</span>
+                        <p>{event.inboundMessage}</p>
+                      </div>
+                    )}
+                    {event.reason && (
+                      <div className="ai-draft-block ai-draft-block-reason">
+                        <span className="ai-draft-block-label">WHY THIS DESERVES ATTENTION</span>
+                        <p>{event.reason}</p>
+                      </div>
+                    )}
+                    {references.length > 0 && (
+                      <div className="ai-draft-block ai-draft-block-input">
+                        <span className="ai-draft-block-label">
+                          VOICE REFERENCE · {references.length} past reply from this client
+                        </span>
+                        <ol className="ai-draft-references">
+                          {references.map((ref, index) => (
+                            <li key={index}>
+                              <div className="ai-draft-reference-meta">
+                                {ref.senderName && <span><b>Sender:</b> {ref.senderName}</span>}
+                                {ref.leadName && <span><b>Lead:</b> {ref.leadName}</span>}
+                                {ref.campaignName && <span><b>Campaign:</b> {ref.campaignName}</span>}
+                              </div>
+                              <p>{ref.body}</p>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+                  </div>
+                )}
               </article>
             );
           })}

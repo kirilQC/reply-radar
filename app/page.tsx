@@ -350,6 +350,8 @@ export function InboxPage() {
   const [aiReason, setAiReason] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [inboxSyncing, setInboxSyncing] = useState(false);
+  const [lastInboxSync, setLastInboxSync] = useState<string>("");
   const [toastMessage, setToastMessage] = useState("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "", id: "", icpPrompt: "", followUpPrompt: "", followUpThreshold: DEFAULT_FOLLOW_UP_THRESHOLD });
@@ -934,6 +936,7 @@ export function InboxPage() {
       .slice(0, 50);
     if (!staleIds.length) return;
     let cancelled = false;
+    setInboxSyncing(true);
     (async () => {
       try {
         const response = await fetch("/api/conversations/refresh", {
@@ -983,10 +986,16 @@ export function InboxPage() {
         );
       } catch {
         /* network hiccups shouldn't crash the inbox */
+      } finally {
+        if (!cancelled) {
+          setInboxSyncing(false);
+          setLastInboxSync(new Date().toISOString());
+        }
       }
     })();
     return () => {
       cancelled = true;
+      setInboxSyncing(false);
     };
     // visibleIdsKey stands in for the visible-lead set; including visibleLeads
     // itself would refire on every setLeads and cause an inbox-wide loop.
@@ -1668,7 +1677,22 @@ export function InboxPage() {
                   } as React.CSSProperties
                 }
               >
-                <section className="queue-card inbox-operational-table">
+                <section className={`queue-card inbox-operational-table${inboxSyncing ? " inbox-syncing" : ""}`}>
+                  <div className="inbox-sync-bar">
+                    <span className="inbox-sync-label">
+                      {inboxSyncing
+                        ? "Syncing latest replies from HeyReach…"
+                        : lastInboxSync
+                          ? `Last synced ${new Date(lastInboxSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true, timeZone: appearance.timeZone })}`
+                          : "Awaiting first sync"}
+                    </span>
+                  </div>
+                  {inboxSyncing && (
+                    <div className="inbox-sync-overlay" role="status" aria-live="polite">
+                      <div className="inbox-sync-spinner" />
+                      <span>Refreshing conversations…</span>
+                    </div>
+                  )}
                   <div className={`table-head ${filter === "follow-ups" ? "table-head-followups" : ""}`}>
                     <span>LEAD</span>
                     <span>CLIENT</span>
@@ -1984,7 +2008,7 @@ export function InboxPage() {
                   <div className="thread-refresh-bar">
                     <small className="last-refreshed">
                       {current.lastRefreshedAt
-                        ? `Last synced ${new Date(current.lastRefreshedAt).toLocaleDateString("en-US", { month: "numeric", day: "numeric", timeZone: appearance.timeZone })} @ ${new Date(current.lastRefreshedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: appearance.timeZone })}`
+                        ? `Last synced ${new Date(current.lastRefreshedAt).toLocaleDateString("en-US", { month: "numeric", day: "numeric", timeZone: appearance.timeZone })} @ ${new Date(current.lastRefreshedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", timeZone: appearance.timeZone })}`
                         : "Not yet synced"}
                     </small>
                     <button

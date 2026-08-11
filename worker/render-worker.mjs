@@ -89,8 +89,13 @@ async function syncWorkspace(workspace) {
 }
 
 // ── Conversation refresh ────────────────────────────────────────────
-const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const REFRESH_BATCH_SIZE = 20;
+// Background Tier 3 refresh: pick the 5 oldest conversations per workspace every
+// ~2.4h so each client gets ~50 refreshes/day, staggered instead of a single spike.
+// Dormant threads (no message in 30 days) are skipped — they aren't going anywhere.
+const REFRESH_LOOP_MS = Math.round(2.4 * 60 * 60 * 1000);
+const REFRESH_STALENESS_MS = REFRESH_LOOP_MS;
+const REFRESH_BATCH_SIZE = 5;
+const REFRESH_DORMANT_DAYS = 30;
 let lastRefreshRun = 0;
 
 async function heyReachFetch(apiKey, path, init = {}) {
@@ -216,9 +221,13 @@ async function refreshAllConversations() {
 
   for (const workspace of workspaces) {
     if (!workspace.heyreach_api_key_ciphertext) continue;
-    const cutoff = new Date(Date.now() - REFRESH_INTERVAL_MS).toISOString();
+    const cutoff = new Date(Date.now() - REFRESH_STALENESS_MS).toISOString();
+    const dormantCutoff = new Date(Date.now() - REFRESH_DORMANT_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    // Two filters: not-recently-refreshed AND not-dormant. Dormant threads (last
+    // message older than 30d) rarely change and would eat the daily budget for
+    // rows that actually move.
     const conversations = await supabase(
-      `rr_conversations?select=id,lead_id,account_id,heyreach_conversation_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&or=(last_refreshed_at.is.null,last_refreshed_at.lt.${encodeURIComponent(cutoff)})&order=last_refreshed_at.asc.nullsfirst&limit=${REFRESH_BATCH_SIZE}`,
+      `rr_conversations?select=id,lead_id,account_id,heyreach_conversation_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&or=(last_refreshed_at.is.null,last_refreshed_at.lt.${encodeURIComponent(cutoff)})&last_message_at=gte.${encodeURIComponent(dormantCutoff)}&order=last_refreshed_at.asc.nullsfirst&limit=${REFRESH_BATCH_SIZE}`,
     );
     if (!conversations || !conversations.length) continue;
 
@@ -540,8 +549,8 @@ async function runOnce() {
   for (const workspace of workspaces) await syncWorkspace(workspace);
   await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "success", started_at: cycleStarted, finished_at: new Date().toISOString(), records_seen: workspaces.length, records_written: 0 });
 
-  // Run conversation refresh every 24 hours
-  if (Date.now() - lastRefreshRun >= REFRESH_INTERVAL_MS) {
+  // Run conversation refresh every ~2.4h (10 batches/day × 5 conversations = 50/workspace/day)
+  if (Date.now() - lastRefreshRun >= REFRESH_LOOP_MS) {
     try { await refreshAllConversations(); } catch (error) { console.error("reply_radar_conversation_refresh_failed", error); }
     lastRefreshRun = Date.now();
   }
