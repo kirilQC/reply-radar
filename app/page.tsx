@@ -2955,7 +2955,12 @@ function LayoutPanel({
           ...metricCatalog
             .map((metric) => metric.id)
             .filter((id) => !prefs.metrics.includes(id)),
-        ].map((metricId) => {
+        ]
+          // Persisted prefs may include ids from a previous deploy that no longer
+          // exist in the catalog. Dropping unknowns prevents the panel from
+          // dereferencing `undefined` and taking the whole inbox down.
+          .filter((metricId) => metricCatalog.some((item) => item.id === metricId))
+          .map((metricId) => {
           const metric = metricCatalog.find((item) => item.id === metricId)!;
           const checked = prefs.metrics.includes(metric.id);
           return (

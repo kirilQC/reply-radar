@@ -209,97 +209,86 @@ export async function enrichLeadWithAiArk(
     throw new Error(
       "AI Ark enrichment is enabled, but AI_ARK_API_KEY is not configured.",
     );
+  // One sync-run row per lead enrichment call. Retries stay internal so the
+  // health check reflects real service outcomes (`success`, `no_match`, `failed`)
+  // rather than counting every transient retry as its own failure.
+  const startedAt = new Date().toISOString();
+  const runRows = (await audit(config, "rr_sync_runs", {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      source: "ai_ark",
+      run_type: "lead_enrichment",
+      status: "running",
+      started_at: startedAt,
+      records_seen: 1,
+      records_written: 0,
+    }),
+  })) as JsonObject[];
+  const runId = text(runRows?.[0]?.id);
+  const markRun = async (fields: JsonObject) => {
+    if (!runId) return;
+    await audit(config, `rr_sync_runs?id=eq.${encodeURIComponent(runId)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ finished_at: new Date().toISOString(), ...fields }),
+    }).catch(() => null);
+  };
+
+  // Distinguishes "AI Ark doesn't have this person" (a data condition, not a
+  // service failure) from real API errors. `no_match` bails out immediately
+  // because retrying won't create a record that doesn't exist.
+  class AiArkNoMatchError extends Error {}
+
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= 5; attempt += 1) {
-    const startedAt = new Date().toISOString();
-    const rows = (await audit(config, "rr_sync_runs", {
-      method: "POST",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify({
-        workspace_id: workspaceId,
-        source: "ai_ark",
-        run_type: "lead_enrichment",
-        status: "running",
-        started_at: startedAt,
-        records_seen: 1,
-        records_written: 0,
-      }),
-    })) as JsonObject[];
-    const runId = text(rows?.[0]?.id);
     try {
-    const response = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { "X-TOKEN": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contact: { socialMediaLink: { any: { include: [profileUrl] } } },
-        page: 0,
-        size: 10,
-      }),
-      signal: AbortSignal.timeout(4_000),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok)
-      throw new Error(
-        `AI Ark People Search failed (${response.status}): ${JSON.stringify(data).slice(0, 1_000)}`,
-      );
-    const person = selectAiArkPerson(data, profileUrl);
-    if (!person)
-      throw new Error(
-        "AI Ark returned results, but none exactly matched this lead's LinkedIn profile URL.",
-      );
-    const enrichment = extractAiArkEnrichment(person, companyName);
-    const [profilePhotoUrl, companyPhotoUrl] = await Promise.all([
-      persistImage(
-        config,
-        text(enrichment.profilePhotoSource),
-        workspaceId,
-        profileUrl,
-        "profile",
-      ),
-      persistImage(
-        config,
-        text(enrichment.companyPhotoSource),
-        workspaceId,
-        profileUrl,
-        "company",
-      ),
-    ]);
-    const result = {
-      ...enrichment,
-      profilePhotoUrl: profilePhotoUrl || enrichment.profilePhotoUrl,
-      companyPhotoUrl: companyPhotoUrl || enrichment.companyPhotoUrl,
-    };
-    if (runId)
-      await audit(config, `rr_sync_runs?id=eq.${encodeURIComponent(runId)}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
+      const response = await fetch(ENDPOINT, {
+        method: "POST",
+        headers: { "X-TOKEN": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({
-          status: "success",
-          finished_at: new Date().toISOString(),
-          records_written: 1,
+          contact: { socialMediaLink: { any: { include: [profileUrl] } } },
+          page: 0,
+          size: 10,
         }),
+        signal: AbortSignal.timeout(4_000),
       });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(
+          `AI Ark People Search failed (${response.status}): ${JSON.stringify(data).slice(0, 1_000)}`,
+        );
+      const person = selectAiArkPerson(data, profileUrl);
+      if (!person)
+        throw new AiArkNoMatchError(
+          "AI Ark has no record matching this lead's LinkedIn profile URL.",
+        );
+      const enrichment = extractAiArkEnrichment(person, companyName);
+      const [profilePhotoUrl, companyPhotoUrl] = await Promise.all([
+        persistImage(config, text(enrichment.profilePhotoSource), workspaceId, profileUrl, "profile"),
+        persistImage(config, text(enrichment.companyPhotoSource), workspaceId, profileUrl, "company"),
+      ]);
+      const result = {
+        ...enrichment,
+        profilePhotoUrl: profilePhotoUrl || enrichment.profilePhotoUrl,
+        companyPhotoUrl: companyPhotoUrl || enrichment.companyPhotoUrl,
+      };
+      await markRun({ status: "success", records_written: 1 });
       return result;
     } catch (error) {
       lastError = error;
-      if (runId)
-        await audit(config, `rr_sync_runs?id=eq.${encodeURIComponent(runId)}`, {
-          method: "PATCH",
-          headers: { Prefer: "return=minimal" },
-          body: JSON.stringify({
-            status: "failed",
-            finished_at: new Date().toISOString(),
-            error_text:
-              error instanceof Error
-                ? error.message.slice(0, 2_000)
-                : "AI Ark enrichment failed",
-          }),
-        }).catch(() => null);
-      if (attempt < 5)
-        await new Promise((resolve) => setTimeout(resolve, attempt * 150));
+      // No-match is a data condition and never retries.
+      if (error instanceof AiArkNoMatchError) break;
+      if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, attempt * 150));
     }
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("AI Ark enrichment failed after five attempts.");
+
+  if (lastError instanceof AiArkNoMatchError) {
+    await markRun({ status: "no_match", error_text: lastError.message.slice(0, 2_000) });
+    throw lastError;
+  }
+  const message = lastError instanceof Error ? lastError.message : "AI Ark enrichment failed after five attempts.";
+  await markRun({ status: "failed", error_text: message.slice(0, 2_000) });
+  throw lastError instanceof Error ? lastError : new Error(message);
 }

@@ -429,11 +429,6 @@ export default function AdminPage() {
                     </section>
                   </div>}
                     {workspaceOpen && <div className="client-config-sections">
-                    <section className="admin-panel client-config-section" id="client-scoring">
-                      <div className="panel-heading"><div><h2>Scoring engine</h2><p>Client-specific queue weights and urgency thresholds.</p></div><span className="saved-dot">● Draft config</span></div>
-                      <div className="field-row"><label className="field-label">HOT THRESHOLD<input type="number" placeholder="Set hot threshold" /></label><label className="field-label">WARM THRESHOLD<input type="number" placeholder="Set warm threshold" /></label></div>
-                      <label className="field-label">UNANSWERED QUESTION WEIGHT<input type="range" defaultValue="0" /></label>
-                    </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
                       <div className="logo-drop">{workspaceLogo ? <img className="logo-sample" src={workspaceLogo} alt={`${client.name} logo`} /> : <div className="logo-sample" style={{ background: accentColor }}>{client.name[0] || "?"}</div>}<div><strong>Upload client logo</strong><small>SVG, PNG, JPG · max 2MB</small></div><button className="secondary-button" type="button" onClick={chooseLogo}>Choose file</button><input ref={logoInput} type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={handleLogo} /></div>
@@ -816,7 +811,7 @@ type AiConfig = {
 };
 type PastReplyRef = { body: string; senderName: string; leadName: string; campaignName: string };
 type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; workspaceLogoUrl: string | null; leadName: string | null; leadPhotoUrl: string | null; conversationId?: string | null; draft?: string | null; reason?: string | null; inboundMessage?: string | null; campaignName?: string | null; leadTitle?: string | null; leadCompany?: string | null; pastReplies?: string[]; pastReplyContext?: PastReplyRef[] };
-type AiAuditData = { ok?: boolean; events: AiAuditEvent[]; summary: { totalCalls: number; successful: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
+type AiAuditData = { ok?: boolean; events: AiAuditEvent[]; drafts?: AiAuditEvent[]; summary: { totalCalls: number; successful: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
 
 /**
  * Vetted prompts offered as a choice, with the current one named.
@@ -1170,7 +1165,7 @@ function AiHubView() {
         </section>
       </div>
 
-      <DraftFeedPanel events={audit?.events ?? []} freshIds={freshIds} />
+      <DraftFeedPanel events={audit?.drafts ?? audit?.events ?? []} freshIds={freshIds} />
 
       <section className="admin-panel ai-audit-section">
         <div className="panel-heading"><div className="ai-audit-title"><h2 style={{ fontSize: 22 }}>AI audit log</h2><span className="ai-audit-live"><i />live</span></div>

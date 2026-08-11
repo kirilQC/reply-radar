@@ -17,23 +17,32 @@ export async function GET(request: Request) {
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
 
   try {
-    // Purge events older than 48 hours (fire-and-forget)
-    const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    void fetch(
-      `${url}/rest/v1/rr_audit_log?actor_type=eq.anthropic&created_at=lt.${cutoff}`,
-      { method: "DELETE", headers: { ...headers, Prefer: "return=minimal" } },
-    ).catch(() => null);
-
-    // Fetch audit rows + workspace logos in parallel
-    const [response, wsResponse] = await Promise.all([
+    // Audit events are now persisted permanently — the draft feed is the source
+    // of truth for what the assistant has produced, so we no longer purge on read.
+    // Fetch general audit rows, workspace logos, and the dedicated draft slice in
+    // parallel. The draft slice is filtered to the reply-drafting event types so
+    // the feed can always show recent generations even when hundreds of sentiment
+    // rows would otherwise push them out of the general 200-row window.
+    const draftEventTypes = "conversation.analyzed,draft.generated,draft.failed";
+    const [response, wsResponse, draftResponse] = await Promise.all([
       fetch(`${url}/rest/v1/rr_audit_log?select=*&actor_type=eq.anthropic&order=created_at.desc&limit=${limit}`, { headers, cache: "no-store" }),
       fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,logo_url`, { headers, cache: "no-store" }),
+      fetch(`${url}/rest/v1/rr_audit_log?select=*&actor_type=eq.anthropic&event_type=in.(${draftEventTypes})&order=created_at.desc&limit=100`, { headers, cache: "no-store" }),
     ]);
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       throw new Error(`Supabase ${response.status}: ${body.slice(0, 200)}`);
     }
-    const rows = (await response.json()) as Row[];
+    const generalRows = (await response.json()) as Row[];
+    const draftOnlyRows = draftResponse.ok ? ((await draftResponse.json()) as Row[]) : [];
+    // Combine both slices for enrichment (id de-dupe), then split back into
+    // `events` (general log) and `drafts` (the feed) on the way out.
+    const rowById = new Map<string, Row>();
+    for (const row of generalRows) rowById.set(text(row.id), row);
+    for (const row of draftOnlyRows) if (!rowById.has(text(row.id))) rowById.set(text(row.id), row);
+    const rows = [...rowById.values()];
+    const generalIds = new Set(generalRows.map((r) => text(r.id)));
+    const draftIds = new Set(draftOnlyRows.map((r) => text(r.id)));
     const workspaces = wsResponse.ok ? ((await wsResponse.json()) as Row[]) : [];
     const wsLogoByName = new Map(workspaces.map((ws) => [text(ws.name).toLowerCase(), text(ws.logo_url)]));
     const wsLogoById = new Map(workspaces.map((ws) => [text(ws.id), text(ws.logo_url)]));
@@ -134,15 +143,23 @@ export async function GET(request: Request) {
       };
     });
 
-    const totalCalls = events.length;
-    const successful = events.filter((e) => e.status === "success").length;
-    const failed = events.filter((e) => e.status === "error" || e.status === "failed").length;
-    const totalInputTokens = events.reduce((s, e) => s + Number(e.inputTokens || 0), 0);
-    const totalOutputTokens = events.reduce((s, e) => s + Number(e.outputTokens || 0), 0);
+    // Split the enriched rows back into two views. `events` is the general log
+    // (limited to the original 200-row window), `drafts` is the dedicated feed
+    // that survives even when hundreds of sentiment rows would otherwise push
+    // draft events off the tail of the general query.
+    const generalEvents = events.filter((e) => generalIds.has(text(e.id)));
+    const draftEvents = events.filter((e) => draftIds.has(text(e.id)));
+
+    const totalCalls = generalEvents.length;
+    const successful = generalEvents.filter((e) => e.status === "success").length;
+    const failed = generalEvents.filter((e) => e.status === "error" || e.status === "failed").length;
+    const totalInputTokens = generalEvents.reduce((s, e) => s + Number(e.inputTokens || 0), 0);
+    const totalOutputTokens = generalEvents.reduce((s, e) => s + Number(e.outputTokens || 0), 0);
 
     return NextResponse.json({
       ok: true,
-      events,
+      events: generalEvents,
+      drafts: draftEvents,
       summary: { totalCalls, successful, failed, totalInputTokens, totalOutputTokens },
     });
   } catch (error) {
