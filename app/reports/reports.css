@@ -1,0 +1,1062 @@
+/* ============================================================
+   Reply Radar — Report Hub
+   Formal, print-first document styling.
+   ============================================================ */
+
+.reports-main {
+  background: #f4f2ec;
+}
+
+.reports-shell {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 28px;
+  padding: 28px 32px 80px;
+  align-items: start;
+}
+
+/* ------------------------- Configurator ------------------------- */
+
+.reports-configurator {
+  position: sticky;
+  top: 24px;
+  background: #ffffff;
+  border: 1px solid #e6e1d4;
+  border-radius: 14px;
+  padding: 22px 22px 24px;
+  box-shadow: 0 1px 2px rgba(20, 22, 36, 0.03), 0 6px 20px rgba(20, 22, 36, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1a1c2a;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.config-heading h2 {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+
+.config-heading p {
+  font-size: 13px;
+  color: #63667a;
+  margin: 0;
+}
+
+.config-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #6c6f80;
+  margin-top: 6px;
+}
+
+.config-select,
+.config-input,
+.config-textarea,
+.config-custom-range input {
+  width: 100%;
+  border: 1px solid #d9d3c3;
+  background: #fbf9f3;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  color: #1a1c2a;
+  font-family: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.config-select:focus,
+.config-input:focus,
+.config-textarea:focus,
+.config-custom-range input:focus {
+  outline: none;
+  border-color: #1f2a4c;
+  background: #ffffff;
+}
+
+.config-textarea {
+  min-height: 74px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.config-period-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.config-period {
+  border: 1px solid #d9d3c3;
+  background: #fbf9f3;
+  color: #1a1c2a;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.config-period:hover {
+  border-color: #b5ac95;
+}
+
+.config-period.is-active {
+  background: #1f2a4c;
+  border-color: #1f2a4c;
+  color: #f4f2ec;
+}
+
+.config-custom-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.config-custom-range label {
+  font-size: 11px;
+  color: #6c6f80;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.config-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+  border: 1px solid #eeeadf;
+  border-radius: 8px;
+  background: #fbf9f3;
+  padding: 6px;
+}
+
+.config-section {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 10px;
+  padding: 8px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease;
+  align-items: start;
+}
+
+.config-section:hover {
+  background: #f0ece0;
+}
+
+.config-section input[type="checkbox"] {
+  margin-top: 2px;
+  accent-color: #1f2a4c;
+}
+
+.config-section span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.config-section strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1c2a;
+}
+
+.config-section em {
+  font-style: normal;
+  font-size: 11.5px;
+  color: #6c6f80;
+  line-height: 1.35;
+}
+
+.config-section.is-locked {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.config-generate {
+  margin-top: 4px;
+  background: #1f2a4c;
+  color: #f4f2ec;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.config-generate:hover:not(:disabled) {
+  background: #2b3767;
+}
+
+.config-generate:disabled {
+  background: #8b91a7;
+  cursor: wait;
+}
+
+.config-error {
+  color: #a4302a;
+  background: #fbebea;
+  border: 1px solid #f0c9c6;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+
+.config-downloads {
+  display: flex;
+  gap: 8px;
+}
+
+.config-downloads button {
+  flex: 1;
+  border: 1px solid #d9d3c3;
+  background: #ffffff;
+  color: #1a1c2a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.config-downloads button:hover {
+  background: #f4f2ec;
+  border-color: #b5ac95;
+}
+
+/* ------------------------- Canvas ------------------------- */
+
+.reports-canvas {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.reports-empty {
+  background: #ffffff;
+  border: 1px dashed #d9d3c3;
+  border-radius: 14px;
+  padding: 60px 40px;
+  text-align: center;
+  color: #63667a;
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+.reports-empty h3 {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 22px;
+  color: #1a1c2a;
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.reports-empty p {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+/* ------------------------- Document ------------------------- */
+
+.report-document {
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  color: #1a1c2a;
+}
+
+/* Each report-page renders as a letter-sized sheet on screen and prints
+   as its own page. */
+.report-page {
+  background: #fbf9f3;
+  border: 1px solid #e6e1d4;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(20, 22, 36, 0.04), 0 12px 32px rgba(20, 22, 36, 0.06);
+  width: 8.5in;
+  min-height: 11in;
+  padding: 0.9in 0.85in;
+  box-sizing: border-box;
+  margin: 0 auto;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-size: 12pt;
+  line-height: 1.55;
+  color: #1a1c2a;
+  page-break-after: always;
+  break-after: page;
+  position: relative;
+}
+
+.report-page:last-child {
+  page-break-after: auto;
+  break-after: auto;
+}
+
+/* ------------------------- Cover ------------------------- */
+
+.report-cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background:
+    linear-gradient(180deg, #fbf9f3 0%, #f0ece0 100%);
+  color: #1a1c2a;
+  position: relative;
+}
+
+.report-cover::before {
+  content: "";
+  position: absolute;
+  left: 0.85in;
+  right: 0.85in;
+  top: 0.9in;
+  height: 2px;
+  background: #1f2a4c;
+}
+
+.report-cover-topline {
+  font-size: 11pt;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #1f2a4c;
+  display: flex;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.report-cover-logo {
+  height: 60px;
+  width: auto;
+  margin-top: 60px;
+  object-fit: contain;
+  align-self: flex-start;
+}
+
+.report-cover-monogram {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: #1f2a4c;
+  color: #f4f2ec;
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 42pt;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 60px;
+  align-self: flex-start;
+  letter-spacing: -0.02em;
+}
+
+.report-cover-title {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 44pt;
+  line-height: 1.05;
+  font-weight: 600;
+  color: #1a1c2a;
+  margin: 40px 0 12px;
+  letter-spacing: -0.02em;
+}
+
+.report-cover-client {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 22pt;
+  font-weight: 500;
+  color: #1f2a4c;
+  margin: 0;
+}
+
+.report-cover-period {
+  font-size: 12pt;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #63667a;
+  margin: 6px 0 0;
+  font-weight: 600;
+}
+
+.report-cover-footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #d9d3c3;
+  margin-top: auto;
+}
+
+.report-cover-footer label {
+  font-size: 9pt;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6c6f80;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.report-cover-footer p {
+  margin: 0;
+  font-size: 11.5pt;
+  color: #1a1c2a;
+  font-weight: 500;
+}
+
+/* ------------------------- Table of contents ------------------------- */
+
+.report-toc-heading {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 30pt;
+  font-weight: 600;
+  color: #1a1c2a;
+  margin: 0 0 32px;
+  letter-spacing: -0.01em;
+  border-bottom: 1px solid #d9d3c3;
+  padding-bottom: 16px;
+}
+
+.report-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.report-toc-list li {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  gap: 16px;
+  align-items: baseline;
+  padding-bottom: 12px;
+  border-bottom: 1px dotted #d9d3c3;
+}
+
+.toc-num {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 16pt;
+  font-weight: 600;
+  color: #1f2a4c;
+}
+
+.toc-label {
+  font-size: 13pt;
+  font-weight: 500;
+  color: #1a1c2a;
+}
+
+.toc-blurb {
+  font-size: 10.5pt;
+  color: #6c6f80;
+  text-align: right;
+  max-width: 3.2in;
+}
+
+/* ------------------------- Section heading ------------------------- */
+
+.report-section-heading {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 4px 20px;
+  align-items: baseline;
+  margin-bottom: 28px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #d9d3c3;
+}
+
+.report-section-number {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 30pt;
+  font-weight: 600;
+  color: #1f2a4c;
+  line-height: 1;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+.report-section-heading h2 {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 24pt;
+  font-weight: 600;
+  color: #1a1c2a;
+  margin: 0;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.report-section-rule {
+  display: none; /* placeholder — border-bottom on parent handles this */
+}
+
+.report-section-body {
+  font-size: 11.5pt;
+  color: #1a1c2a;
+}
+
+/* ------------------------- Executive summary ------------------------- */
+
+.exec-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.exec-lede {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 15pt;
+  line-height: 1.55;
+  color: #1a1c2a;
+  font-weight: 400;
+  margin: 0;
+}
+
+.exec-lede strong {
+  font-weight: 600;
+  color: #1f2a4c;
+}
+
+.exec-highlights {
+  list-style: none;
+  padding: 20px 22px;
+  margin: 0;
+  background: #ffffff;
+  border: 1px solid #e6e1d4;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11.5pt;
+}
+
+.exec-highlights li strong {
+  color: #1f2a4c;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.exec-note {
+  font-size: 10.5pt;
+  color: #63667a;
+  border-top: 1px solid #e6e1d4;
+  padding-top: 14px;
+  margin: 0;
+  font-style: italic;
+}
+
+/* ------------------------- KPI grid ------------------------- */
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.kpi-card {
+  background: #ffffff;
+  border: 1px solid #e6e1d4;
+  border-radius: 8px;
+  padding: 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+}
+
+.kpi-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #1f2a4c;
+  border-radius: 8px 0 0 8px;
+}
+
+.kpi-value {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 28pt;
+  font-weight: 600;
+  color: #1a1c2a;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.kpi-label {
+  font-size: 9.5pt;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6c6f80;
+}
+
+/* ------------------------- Sentiment ------------------------- */
+
+.sentiment-block {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sentiment-bar {
+  display: flex;
+  height: 32px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #d9d3c3;
+  background: #ffffff;
+}
+
+.sentiment-bar-slice {
+  transition: width 300ms ease;
+}
+
+.sentiment-bar-slice.tone-positive {
+  background: #274d3a;
+}
+
+.sentiment-bar-slice.tone-neutral {
+  background: #8f8a72;
+}
+
+.sentiment-bar-slice.tone-negative {
+  background: #7f2a25;
+}
+
+.sentiment-bar-slice.tone-unclassified {
+  background: #d1cbb6;
+}
+
+/* ------------------------- Tables ------------------------- */
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11pt;
+  background: #ffffff;
+  border: 1px solid #e6e1d4;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.report-table thead th {
+  font-size: 9.5pt;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #6c6f80;
+  padding: 12px 14px;
+  text-align: left;
+  background: #f4f2ec;
+  border-bottom: 1px solid #d9d3c3;
+}
+
+.report-table tbody td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #eeeadf;
+  color: #1a1c2a;
+  vertical-align: top;
+}
+
+.report-table tbody tr:nth-child(even) td {
+  background: #fbf9f3;
+}
+
+.report-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ------------------------- Trend & timing bars ------------------------- */
+
+.trend-block,
+.timing-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.trend-bars,
+.timing-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 200px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #e6e1d4;
+  border-radius: 6px;
+}
+
+.trend-bar,
+.timing-bar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.trend-bar-fill,
+.timing-bar-fill {
+  width: 100%;
+  min-height: 2px;
+  background: linear-gradient(180deg, #2b3767 0%, #1f2a4c 100%);
+  border-radius: 3px 3px 0 0;
+  align-self: flex-end;
+}
+
+.trend-bar-label,
+.timing-bar-label {
+  font-size: 8.5pt;
+  color: #6c6f80;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.report-caption {
+  font-size: 10pt;
+  color: #63667a;
+  margin: 0;
+  font-style: italic;
+}
+
+/* ------------------------- Hot conversations ------------------------- */
+
+.hot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hot-item {
+  background: #ffffff;
+  border: 1px solid #e6e1d4;
+  border-left: 3px solid #a4302a;
+  border-radius: 4px;
+  padding: 14px 16px;
+}
+
+.hot-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.hot-header strong {
+  font-size: 12pt;
+  color: #1a1c2a;
+  font-weight: 600;
+}
+
+.hot-role {
+  font-size: 10.5pt;
+  color: #63667a;
+}
+
+.hot-urgency {
+  margin-left: auto;
+  font-size: 9pt;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a4302a;
+  background: #fbebea;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.hot-meta {
+  font-size: 9.5pt;
+  color: #6c6f80;
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
+
+.hot-snippet {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 11.5pt;
+  font-style: italic;
+  color: #1a1c2a;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ------------------------- Sample replies ------------------------- */
+
+.samples {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sample {
+  background: #ffffff;
+  border: 1px solid #e6e1d4;
+  border-radius: 6px;
+  padding: 20px 24px;
+  margin: 0;
+  position: relative;
+}
+
+.sample::before {
+  content: "\201C";
+  position: absolute;
+  left: 8px;
+  top: -4px;
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 48pt;
+  color: #e6e1d4;
+  line-height: 1;
+}
+
+.sample p {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 13pt;
+  line-height: 1.55;
+  color: #1a1c2a;
+  margin: 0 0 10px;
+  position: relative;
+}
+
+.sample footer {
+  font-size: 10pt;
+  color: #6c6f80;
+  border-top: 1px solid #eeeadf;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sample footer strong {
+  color: #1a1c2a;
+}
+
+.sample-meta {
+  font-size: 9pt;
+  letter-spacing: 0.04em;
+  color: #8b91a7;
+}
+
+/* ------------------------- Methodology ------------------------- */
+
+.methodology {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.methodology-notes {
+  background: #ffffff;
+  border: 1px solid #e6e1d4;
+  border-left: 3px solid #1f2a4c;
+  padding: 16px 20px;
+  border-radius: 4px;
+}
+
+.methodology-notes h4 {
+  margin: 0 0 6px;
+  font-size: 10pt;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #1f2a4c;
+}
+
+.methodology-notes p {
+  margin: 0;
+  font-size: 11pt;
+  color: #1a1c2a;
+  line-height: 1.55;
+}
+
+.methodology ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 11pt;
+  color: #1a1c2a;
+}
+
+.methodology ul li {
+  padding-left: 18px;
+  position: relative;
+  line-height: 1.55;
+}
+
+.methodology ul li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 6px;
+  height: 6px;
+  background: #1f2a4c;
+  border-radius: 50%;
+}
+
+.methodology ul li strong {
+  color: #1f2a4c;
+  font-weight: 600;
+}
+
+/* ------------------------- Misc ------------------------- */
+
+.report-empty-note {
+  font-style: italic;
+  color: #63667a;
+  font-size: 11pt;
+  background: #ffffff;
+  border: 1px dashed #d9d3c3;
+  border-radius: 6px;
+  padding: 18px 20px;
+  margin: 0;
+}
+
+/* ------------------------- Responsive (screen only) ------------------------- */
+
+@media (max-width: 1180px) {
+  .reports-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .reports-configurator {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .report-page {
+    width: 100%;
+    padding: 40px 28px;
+    min-height: 0;
+  }
+
+  .kpi-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .report-cover-footer {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+/* ============================================================
+   Print stylesheet — one report page per printed sheet.
+   ============================================================ */
+
+@media print {
+  @page {
+    size: letter;
+    margin: 0;
+  }
+
+  html, body {
+    background: #ffffff !important;
+  }
+
+  .print-hide,
+  .app-sidebar,
+  .topbar {
+    display: none !important;
+  }
+
+  .app-shell,
+  .main-area,
+  .reports-main,
+  .reports-shell {
+    display: block !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    grid-template-columns: none !important;
+  }
+
+  .reports-canvas {
+    gap: 0 !important;
+  }
+
+  .report-document {
+    gap: 0 !important;
+  }
+
+  .report-page {
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    width: 8.5in !important;
+    min-height: 11in !important;
+    height: 11in !important;
+    padding: 0.75in 0.75in !important;
+    page-break-after: always;
+    break-after: page;
+    background: #ffffff !important;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .report-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .report-cover {
+    background: linear-gradient(180deg, #ffffff 0%, #f4f2ec 100%) !important;
+  }
+
+  /* Avoid awkward mid-section breaks. */
+  .report-section-heading,
+  .kpi-card,
+  .hot-item,
+  .sample,
+  .report-table {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}
