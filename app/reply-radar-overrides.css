@@ -198,11 +198,6 @@ html:not(.hydrated) body{visibility:hidden}
 .threshold-row b{min-width:32px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px;color:var(--accent)}
 .threshold-hint{display:block;margin-top:6px;color:var(--muted-2);font-size:10px;text-transform:none;letter-spacing:0}
 
-.origin-notice{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 14px;border-bottom:1px solid var(--border-soft);background:color-mix(in srgb,var(--accent) 6%,transparent);color:var(--muted);font-size:11px;line-height:1.5}
-.origin-notice.active{background:color-mix(in srgb,var(--accent) 12%,transparent)}
-.origin-notice strong{color:var(--text)}
-.origin-notice .text-button{white-space:nowrap}
-
 .template-picker{margin-bottom:16px}
 .template-picker-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
 .template-badge{padding:3px 9px;border-radius:999px;background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}

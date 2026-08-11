@@ -231,23 +231,19 @@ export async function GET(request: Request) {
 
     const workspaceById = new Map(selected.map((row) => [String(row.id), row]));
     const leadById = new Map(leads.map((row) => [String(row.id), row]));
-    // Conversations the lead started are set aside rather than dropped. The previous rule excluded
-    // any conversation with no outbound message at all, which missed the actual case — the lead
-    // messaged us first and a teammate replied, so an outbound message exists — and gave nobody a
-    // way to see what had been excluded or to catch it excluding the wrong person.
-    const includeLeadInitiated = new URL(request.url).searchParams.get("origin") === "inbound";
-    const originById = new Map(
-      conversations.map((conversation) => [
-        String(conversation.id),
-        classifyConversationOrigin({
-          messages: deduped.filter((message) => message.conversation_id === conversation.id),
-          leadRawData: leadById.get(String(conversation.lead_id))?.raw_data,
-        }),
-      ]),
-    );
+    // Conversations the lead started are dropped outright. Reply Radar works outbound replies, so
+    // someone who approached us is not a lead here at all and does not belong in the queue.
+    // The classifier abstains unless it is certain, and only a certain verdict removes a row — the
+    // whole point of that caution is that nothing reaches this filter on a guess.
+    const excluded: string[] = [];
     const result = conversations.filter((conversation) => {
-      const origin = originById.get(String(conversation.id))?.origin;
-      return includeLeadInitiated ? origin === "inbound_lead" : origin !== "inbound_lead";
+      const verdict = classifyConversationOrigin({
+        messages: deduped.filter((message) => message.conversation_id === conversation.id),
+        leadRawData: leadById.get(String(conversation.lead_id))?.raw_data,
+      });
+      if (verdict.origin !== "inbound_lead") return true;
+      excluded.push(String(conversation.id));
+      return false;
     }).map((conversation) => {
       const lead = leadById.get(String(conversation.lead_id)) ?? {};
       const leadRaw =
@@ -346,15 +342,13 @@ export async function GET(request: Request) {
         followUpReason,
         followUpAnalyzedAt: cachedFollowUpAt || null,
         lastRefreshedAt: conversation.last_refreshed_at ?? null,
-        origin: originById.get(String(conversation.id))?.origin ?? "unknown",
-        originReason: originById.get(String(conversation.id))?.reason ?? null,
         messages: thread,
       };
     });
-    // Reported so the inbox can offer a way in to whatever was set aside. A silent exclusion is how
-    // a misclassified outbound lead would go unnoticed.
-    const leadInitiatedCount = [...originById.values()].filter((verdict) => verdict.origin === "inbound_lead").length;
-    return NextResponse.json({ ok: true, conversations: result, leadInitiatedCount });
+    // Server log only. Nothing about this reaches the inbox, but a dropped row that turned out to be
+    // a real outbound lead would otherwise leave no trace anywhere to find it by.
+    if (excluded.length) console.info("reply_radar_inbox_dropped_lead_initiated", { count: excluded.length, conversationIds: excluded.slice(0, 25) });
+    return NextResponse.json({ ok: true, conversations: result });
   } catch (error) {
     return NextResponse.json(
       {

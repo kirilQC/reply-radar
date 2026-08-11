@@ -338,10 +338,6 @@ export function InboxPage() {
   const [directoryLoaded, setDirectoryLoaded] = useState(false);
   const [inboxLoading, setInboxLoading] = useState(true);
   const [inboxError, setInboxError] = useState("");
-  // Conversations the lead started are set aside, not deleted. The count is shown and the set can be
-  // opened, because an exclusion nobody can see is how a misread outbound lead would stay buried.
-  const [leadInitiatedCount, setLeadInitiatedCount] = useState(0);
-  const [showLeadInitiated, setShowLeadInitiated] = useState(false);
   const [queryString, setQueryString] = useState("");
   const [excludedClients, setExcludedClients] = useState<string[]>([]);
   const [visibleLeadCount, setVisibleLeadCount] = useState(10);
@@ -657,7 +653,7 @@ export function InboxPage() {
     setInboxLoading(true);
     setInboxError("");
     fetch(
-      `/api/inbox?workspaces=${encodeURIComponent(trackedWorkspaceSlugs.join(","))}${showLeadInitiated ? "&origin=inbound" : ""}`,
+      `/api/inbox?workspaces=${encodeURIComponent(trackedWorkspaceSlugs.join(","))}`,
       { cache: "no-store" },
     )
       .then(async (response) => ({
@@ -674,7 +670,6 @@ export function InboxPage() {
           ? payload.conversations
           : [];
         setLeads((previous) => mergeInboxLeads(previous, incoming));
-        setLeadInitiatedCount(Number(payload.leadInitiatedCount ?? 0));
       })
       .catch((error) => {
         if (!cancelled) {
@@ -692,7 +687,7 @@ export function InboxPage() {
     return () => {
       cancelled = true;
     };
-  }, [directoryLoaded, trackedWorkspaceSlugs.join(","), showLeadInitiated]);
+  }, [directoryLoaded, trackedWorkspaceSlugs.join(",")]);
   useEffect(() => {
     leadsRef.current = leads;
   }, [leads]);
@@ -1624,9 +1619,6 @@ export function InboxPage() {
                 }
               >
                 <section className="queue-card inbox-operational-table">
-                  {showLeadInitiated
-                    ? <div className="origin-notice active"><span><strong>Showing conversations the lead started.</strong> These are set aside because Reply Radar works outbound replies, so they are not scored or drafted for. If someone here came from a campaign, that is a misread — tell us and we will fix the rule.</span><button className="text-button" onClick={() => setShowLeadInitiated(false)}>Back to outbound</button></div>
-                    : leadInitiatedCount > 0 && <div className="origin-notice"><span>{leadInitiatedCount} conversation{leadInitiatedCount === 1 ? "" : "s"} set aside — the lead messaged first, so they are not an outbound reply.</span><button className="text-button" onClick={() => setShowLeadInitiated(true)}>Review them</button></div>}
                   <div className={`table-head ${filter === "follow-ups" ? "table-head-followups" : ""}`}>
                     <span>LEAD</span>
                     <span>CLIENT</span>
