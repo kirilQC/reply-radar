@@ -225,8 +225,9 @@ Inserting a section anywhere in the markup silently reshuffled the entire page. 
 "Performance overview" was rendering at the top when nobody had asked it to.
 
 **Fix:** named classes with explicit `order` — `.dashboard-stats-section{order:0}`,
-`.dashboard-insights{order:1}`, `.dashboard-profiles-section{order:2}`,
-`.dashboard-clients-section{order:3}`. Done **before** adding the new section, not after.
+`.dashboard-profiles-section{order:1}`, `.dashboard-clients-section{order:2}`. Done **before** adding
+the new section, not after. ("Performance overview" was later removed entirely — the stat tiles say
+the same thing more directly — and the orders were renumbered.)
 
 ### "50 loaded" described the fetch, not the data
 

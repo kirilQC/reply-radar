@@ -17,7 +17,6 @@ const defaultAppearance: AppearancePrefs = {
 
 const initialClients: Array<{ name: string; slug: string; tone: string; leads: number; replies: number; status: string; logoUrl?: string }> = [];
 const initialProfiles: string[][] = [];
-type DashboardAnalytics = { totalReplies?: number; trend?: number[]; queueMix?: { hot: number; warm: number; nurture: number } };
 type Summary = {
   repliesToday: number | null; repliesYesterday: number | null; repliesThisWeek: number | null;
   repliesThisMonth: number | null; repliesAllTime: number | null; clients: number | null;
@@ -56,7 +55,6 @@ export default function DashboardHome() {
   const [profiles, setProfiles] = useState<Array<{ name: string; description: string; tone: string; initials: string; slug: string; photo?: string | null }>>(initialProfiles.map(([name, description, tone, initials]) => ({ name, description, tone, initials, slug: name.toLowerCase().replaceAll(" ", "-") })));
   const [appearance, setAppearance] = useState<AppearancePrefs>(defaultAppearance);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
-  const [analytics, setAnalytics] = useState<DashboardAnalytics>({});
   const [summary, setSummary] = useState<Summary | null>(null);
   useEffect(() => {
     try {
@@ -83,7 +81,6 @@ export default function DashboardHome() {
     })));
   }).catch(() => undefined);
   useEffect(() => { loadProfiles(); }, []);
-  useEffect(() => { fetch("/api/analytics", { cache: "no-store" }).then((response) => response.json()).then(setAnalytics).catch(() => setAnalytics({})); }, []);
   useEffect(() => {
     fetch(`/api/analytics/summary?timeZone=${encodeURIComponent(savedTimeZone())}`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
@@ -198,27 +195,6 @@ export default function DashboardHome() {
                   <span>→</span>
                 </a>
               ))}
-            </div>
-          </section>
-          <section className="dashboard-insights">
-            <div className="section-heading">
-              <div>
-                <h2>Performance overview</h2>
-              </div>
-            </div>
-            <div className="dashboard-chart-grid">
-              <article className="dashboard-chart-card dashboard-line-card">
-                <div className="dashboard-chart-heading"><div><span>REPLY VOLUME</span><strong>{analytics.totalReplies == null ? "—" : `${analytics.totalReplies} replies`}</strong></div><small>Live data</small></div>
-                {analytics.trend?.length ? <div className="dashboard-live-trend">{analytics.trend.map((value, index) => <i key={index} style={{ height: `${Math.max(4, value)}px` }} />)}</div> : <p className="empty-state">No synced analytics data is available yet.</p>}
-              </article>
-              <article className="dashboard-chart-card">
-                <div className="dashboard-chart-heading"><div><span>QUEUE MIX</span><strong>Live conversations</strong></div><small>Current</small></div>
-                <div className="queue-mix-visual"><div className="donut-chart"><div><strong>{analytics.queueMix ? analytics.queueMix.hot + analytics.queueMix.warm + analytics.queueMix.nurture : "—"}</strong><small>{analytics.queueMix ? "leads" : "no data"}</small></div></div><div className="queue-legend"><span><i className="legend-hot"/>Hot <b>{analytics.queueMix?.hot ?? "—"}</b></span><span><i className="legend-warm"/>Warm <b>{analytics.queueMix?.warm ?? "—"}</b></span><span><i className="legend-nurture"/>Nurture <b>{analytics.queueMix?.nurture ?? "—"}</b></span></div></div>
-              </article>
-              <article className="dashboard-chart-card dashboard-snapshot-card">
-                <div className="dashboard-chart-heading"><div><span>WORKSPACE SNAPSHOT</span><strong>At a glance</strong></div><small>Live</small></div>
-                <div className="dashboard-snapshot-list"><div><span>Client workspaces</span><b>{clients.length}</b></div><div><span>Profiles</span><b>{profiles.length}</b></div><div><span>Total replies stored</span><b>{analytics.totalReplies ?? "—"}</b></div></div>
-              </article>
             </div>
           </section>
         </main>

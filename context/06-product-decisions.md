@@ -74,9 +74,18 @@ colour.
 **Also explicitly liked and therefore not to be redesigned:** "i really like how the profiles and
 client workspaces look." Leave those two sections alone.
 
-**Section order on the home page:** stats → insights → profiles → clients. Profiles above client
-workspaces was an explicit earlier requirement. Four client cards should fit on a row when space
-allows.
+**Section order on the home page:** stats → profiles → clients. Profiles above client workspaces was
+an explicit earlier requirement. Four client cards should fit on a row when space allows.
+
+**"Performance overview" is removed and should not come back.** It held a reply-volume line chart, a
+queue-mix donut and a workspace snapshot, all fed by `/api/analytics`. Once the five exact stat tiles
+landed it was saying the same thing less clearly:
+
+> "can we get rid of the perfromance review from the dashboard since we now have those replies boxes
+> on the homepage."
+
+Removing it also took `/api/analytics` off the home-page load path, which is a real saving — that
+route pages through HeyReach. The route itself still exists for other callers.
 
 ---
 
