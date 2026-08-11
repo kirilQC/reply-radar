@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import { NEAR_DUPLICATE_MS, directionFor, extractMessageRows, messageKey, syntheticMessageId } from "../../shared/message-identity.mjs";
+
+// Re-exported so callers keep a single import for conversation handling.
+export { NEAR_DUPLICATE_MS, directionFor, extractMessageRows, messageKey, syntheticMessageId };
 
 export type JsonObject = Record<string, unknown>;
 export type ConversationMessage = {
@@ -95,66 +99,6 @@ export function isHeyReachValidationPayload(payload: JsonObject) {
   return leadId === "testid";
 }
 
-export function extractMessageRows(root: unknown) {
-  const candidates: JsonObject[][] = [];
-  const seen = new Set<unknown>();
-  const visit = (value: unknown, depth: number) => {
-    if (!value || depth > 6 || seen.has(value)) return;
-    if (typeof value === "object") seen.add(value);
-    if (Array.isArray(value)) {
-      const rows = value.map(object).filter((row) => Object.keys(row).length);
-      const looksLikeMessages = rows.some((row) => first(row, ["message", "body", "text", "content", "messageText", "messageBody", "message_type", "messageType"]) !== undefined);
-      if (looksLikeMessages) candidates.push(rows);
-      value.forEach((item) => visit(item, depth + 1));
-      return;
-    }
-    if (typeof value === "object") Object.values(value as JsonObject).forEach((item) => visit(item, depth + 1));
-  };
-  visit(root, 0);
-  return candidates.sort((a, b) => b.length - a.length)[0] ?? [];
-}
-
-/**
- * HeyReach labels every message with `sender: "ME" | "CORRESPONDENT"` and ships no message
- * id, so this exact match is the only reliable signal and has to be checked before the
- * looser heuristics below — those match on substrings and would happily read "ME" out of a
- * sender *name* like "Mehmet". Everything after it is a fallback for other payload shapes.
- */
-export function directionFor(row: JsonObject, accountId: string): "inbound" | "outbound" {
-  const label = text(first(row, ["sender", "senderType", "authorType", "direction", "messageDirection"])).toUpperCase();
-  if (label === "ME" || label === "SENDER" || label === "ACCOUNT") return "outbound";
-  if (label === "CORRESPONDENT" || label === "THEM" || label === "LEAD" || label === "PARTICIPANT") return "inbound";
-
-  if (typeof row.is_reply === "boolean") return row.is_reply ? "inbound" : "outbound";
-  if (typeof row.isReply === "boolean") return row.isReply ? "inbound" : "outbound";
-  for (const key of ["isFromMe", "fromMe", "sentByMe", "isSender", "isOutbound"]) {
-    if (typeof row[key] === "boolean") return row[key] ? "outbound" : "inbound";
-  }
-  const direction = text(first(row, ["direction", "messageDirection", "senderType", "authorType", "type"])).toLowerCase();
-  if (["outbound", "sent", "sender", "account"].some((part) => direction.includes(part))) return "outbound";
-  if (["inbound", "received", "reply", "lead", "participant", "correspondent"].some((part) => direction.includes(part))) return "inbound";
-  const sender = object(first(row, ["sender", "author", "from"]));
-  const messageSenderId = text(first(row, ["senderId", "sender_id", "linkedInAccountId", "accountId"])) || text(first(sender, ["id", "accountId", "linkedInAccountId"]));
-  return messageSenderId && messageSenderId === accountId ? "outbound" : "inbound";
-}
-
-/**
- * Identifies a message without its direction. HeyReach sends no message id, so a message is
- * only recognisable by when it was sent and what it said. Deliberately excluding the
- * direction means a disagreement about who sent it corrects the existing row instead of
- * inserting a second copy attributed to the other party.
- */
-/**
- * How far apart two records of the same message body may be and still be the same message.
- * Wide enough to absorb a substituted webhook event timestamp, narrow enough that a lead
- * genuinely repeating themselves later in a thread stays a separate message.
- */
-export const NEAR_DUPLICATE_MS = 5 * 60_000;
-
-export const messageKey = (sentAt: unknown, body: unknown) => {
-  const parsed = new Date(text(sentAt));
-  return `${Number.isNaN(parsed.getTime()) ? text(sentAt) : parsed.toISOString()}|${text(body)}`;
-};
 
 export function normalizeHeyReachMessages(rawMessages: unknown[], accountId: string, sender: Sender, fallbackTimestamp: string, source: "history" | "webhook") {
   return rawMessages.map(object).map((row) => {
@@ -165,7 +109,7 @@ export function normalizeHeyReachMessages(rawMessages: unknown[], accountId: str
     const suppliedId = text(first(row, ["id", "messageId", "message_id", "linkedinMessageId", "linkedInMessageId"]));
     // The synthetic id must not depend on the direction, or re-classifying a message would
     // mint a new id and leave the original row behind as a duplicate.
-    const externalId = suppliedId || `rr-${digest(messageKey(sentAt, body))}`;
+    const externalId = suppliedId || syntheticMessageId(sentAt, body);
     return { externalId, direction, body, sentAt, raw: { ...row, reply_radar: { source, sender } } } satisfies ConversationMessage;
   });
 }

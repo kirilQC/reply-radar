@@ -1,3 +1,5 @@
+import { directionFor, extractMessageRows, messageKey, syntheticMessageId } from "../shared/message-identity.mjs";
+
 /**
  * Render Background Worker entrypoint.
  *
@@ -87,35 +89,6 @@ async function heyReachFetch(apiKey, path, init = {}) {
   return response.json().catch(() => null);
 }
 
-function messageArrays(root) {
-  const candidates = [];
-  const seen = new Set();
-  const visit = (value, depth) => {
-    if (!value || depth > 6 || seen.has(value)) return;
-    if (typeof value === "object") seen.add(value);
-    if (Array.isArray(value)) {
-      const rows = value.filter((v) => v && typeof v === "object" && !Array.isArray(v));
-      if (rows.some((r) => r.message !== undefined || r.body !== undefined || r.text !== undefined || r.content !== undefined || r.message_type !== undefined)) candidates.push(rows);
-      value.forEach((v) => visit(v, depth + 1));
-      return;
-    }
-    if (typeof value === "object") Object.values(value).forEach((v) => visit(v, depth + 1));
-  };
-  visit(root, 0);
-  return candidates.sort((a, b) => b.length - a.length)[0] || [];
-}
-
-function directionFor(row, accountId) {
-  if (typeof row.is_reply === "boolean") return row.is_reply ? "inbound" : "outbound";
-  if (typeof row.isReply === "boolean") return row.isReply ? "inbound" : "outbound";
-  for (const key of ["isFromMe", "fromMe", "sentByMe"]) if (typeof row[key] === "boolean") return row[key] ? "outbound" : "inbound";
-  const dir = String(row.direction || row.messageDirection || "").toLowerCase();
-  if (["outbound", "sent", "sender"].some((p) => dir.includes(p))) return "outbound";
-  if (["inbound", "received", "reply"].some((p) => dir.includes(p))) return "inbound";
-  const sid = String(row.senderId || row.sender_id || row.linkedInAccountId || row.accountId || "");
-  return sid && sid === accountId ? "outbound" : "inbound";
-}
-
 async function refreshConversation(workspace, conv) {
   const apiKey = workspace.heyreach_api_key_ciphertext;
   const accountId = String(conv.account_id || "");
@@ -140,29 +113,31 @@ async function refreshConversation(workspace, conv) {
   }
   if (!chatroom) return 0;
 
-  const rawMessages = messageArrays(chatroom);
   const now = new Date().toISOString();
-  const messages = rawMessages.map((row) => {
+  const messages = extractMessageRows(chatroom).map((row) => {
     const direction = directionFor(row, accountId);
     const sentAtRaw = row.creation_time || row.creationTime || row.createdAt || row.sentAt || row.timestamp;
     const parsed = new Date(String(sentAtRaw || ""));
     const sentAt = Number.isNaN(parsed.getTime()) ? now : parsed.toISOString();
     const body = String(row.message || row.body || row.text || row.content || row.messageText || row.messageBody || "[Empty message]").trim();
-    const externalId = String(row.id || row.messageId || row.message_id || row.linkedinMessageId || `rr-refresh-${direction}-${sentAt}-${body.slice(0, 30)}`);
-    return { externalId, direction, body, sentAt };
+    const suppliedId = String(row.id || row.messageId || row.message_id || row.linkedinMessageId || "");
+    return { externalId: suppliedId || syntheticMessageId(sentAt, body), direction, body, sentAt };
   });
 
-  // Get existing messages for fingerprint matching
-  const existing = await supabase(`rr_messages?select=heyreach_message_id,direction,body,sent_at&conversation_id=eq.${encodeURIComponent(conv.id)}&limit=5000`);
-  const existingFingerprints = new Set(
-    (existing || []).map((m) => `${m.direction}|${new Date(String(m.sent_at)).toISOString()}|${m.body}`),
-  );
+  const existing = await supabase(`rr_messages?select=id,heyreach_message_id,direction,body,sent_at,raw_data&conversation_id=eq.${encodeURIComponent(conv.id)}&limit=5000`);
+  // Keyed without the direction so a message we previously misattributed is recognised and
+  // corrected rather than inserted a second time as if the other party had sent it.
+  const existingByKey = new Map();
+  for (const row of existing || []) {
+    const identity = messageKey(row.sent_at, row.body);
+    existingByKey.set(identity, [...(existingByKey.get(identity) || []), row]);
+  }
 
   // Only insert genuinely NEW messages. Upserting an existing row would replace its
   // raw_data wholesale, destroying sentiment, cached drafts, follow-up scores and
   // sender/campaign attribution. Mirrors app/api/conversations/refresh/route.ts.
   const records = messages
-    .filter((m) => !existingFingerprints.has(`${m.direction}|${new Date(m.sentAt).toISOString()}|${m.body}`))
+    .filter((m) => !existingByKey.has(messageKey(m.sentAt, m.body)))
     .map((m) => ({
       conversation_id: conv.id,
       heyreach_message_id: m.externalId,
@@ -179,6 +154,30 @@ async function refreshConversation(workspace, conv) {
         headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
         body: JSON.stringify(records.slice(i, i + 200)),
       });
+    }
+  }
+
+  // Repair rows an earlier release stored with the wrong direction, or stored twice because
+  // its dedupe key included the direction. Correct the copy worth keeping, drop the rest.
+  for (const message of messages) {
+    const rows = existingByKey.get(messageKey(message.sentAt, message.body));
+    if (!rows || !rows.length) continue;
+    // Keep whichever row carries AI state, so sentiment, drafts and scores survive the repair.
+    const keep = rows.find((row) => {
+      const radar = (row.raw_data && row.raw_data.reply_radar) || {};
+      return ["sentiment", "cached_draft", "followup_urgency", "analyzed_at"].some((field) => radar[field] != null);
+    }) || rows[0];
+    if (String(keep.direction) !== message.direction) {
+      await supabase(`rr_messages?id=eq.${encodeURIComponent(String(keep.id))}`, {
+        method: "PATCH", headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ direction: message.direction }),
+      }).catch(() => null);
+    }
+    for (const row of rows) {
+      if (row === keep) continue;
+      await supabase(`rr_messages?id=eq.${encodeURIComponent(String(row.id))}`, {
+        method: "DELETE", headers: { Prefer: "return=minimal" },
+      }).catch(() => null);
     }
   }
 
@@ -227,6 +226,191 @@ async function refreshAllConversations() {
   console.info("reply_radar_conversation_refresh_finished", { totalRefreshed, totalErrors });
 }
 
+// ── AI pipeline ─────────────────────────────────────────────────────
+/**
+ * Every reply should already be scored and drafted by the time somebody opens the inbox, so
+ * the worker sweeps for replies with missing AI state instead of waiting for a browser to
+ * trigger the work.
+ *
+ * The Anthropic key, the prompts and the persistence rules all live in the Next.js app, so
+ * this calls its existing routes rather than reimplementing them here — and those routes
+ * already refuse to redo work that is cached, which is what stops a sweep from re-billing.
+ */
+const appBaseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
+// Conversations put through the pipeline per cycle. Each costs up to three Anthropic calls,
+// so this bounds both spend and how long a cycle can run.
+const AI_BATCH_SIZE = Math.max(1, Number(process.env.AI_BATCH_SIZE || 10));
+// How far back to look for replies that still need work, newest reply first.
+const AI_CANDIDATE_LIMIT = 200;
+let missingBaseUrlWarned = false;
+
+const radarOf = (rawData) => {
+  const raw = rawData && typeof rawData === "object" ? rawData : {};
+  return raw.reply_radar && typeof raw.reply_radar === "object" ? raw.reply_radar : {};
+};
+
+async function appPost(path, body) {
+  const response = await fetch(`${appBaseUrl}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(90_000),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`${path} ${response.status}: ${String(payload.error || "").slice(0, 200)}`);
+  return payload;
+}
+
+async function chunked(ids, size, run) {
+  const rows = [];
+  for (let i = 0; i < ids.length; i += size) {
+    const batch = await run(ids.slice(i, i + size));
+    if (batch) rows.push(...batch);
+  }
+  return rows;
+}
+
+/** Replies whose draft, sentiment, ICP score or follow-up score has not been produced yet. */
+async function conversationsNeedingAi(workspace) {
+  const candidates = await supabase(
+    `rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&last_message_direction=eq.inbound&order=last_message_at.desc.nullslast&limit=${AI_CANDIDATE_LIMIT}`,
+  );
+  if (!candidates || !candidates.length) return { work: [], leadNames: new Map() };
+
+  // Per-reply AI state lives on the latest inbound message of each conversation.
+  const inbound = await chunked(candidates.map((c) => c.id), 40, (batch) =>
+    supabase(`rr_messages?select=conversation_id,sent_at,raw_data&conversation_id=in.(${batch.join(",")})&direction=eq.inbound&order=sent_at.desc`),
+  );
+  const latestInbound = new Map();
+  for (const row of inbound) {
+    const id = String(row.conversation_id);
+    if (!latestInbound.has(id)) latestInbound.set(id, row);
+  }
+
+  // The ICP score is stored on the lead and kept forever, so a lead is scored at most once.
+  const leadIds = [...new Set(candidates.map((c) => String(c.lead_id || "")).filter(Boolean))];
+  const leads = await chunked(leadIds, 40, (batch) =>
+    supabase(`rr_leads?select=id,name,raw_data&id=in.(${batch.join(",")})`),
+  );
+  const leadNames = new Map(leads.map((lead) => [String(lead.id), String(lead.name || "")]));
+  const scoredLeads = new Set(
+    leads.filter((lead) => radarOf(lead.raw_data).icp_score != null).map((lead) => String(lead.id)),
+  );
+
+  const work = [];
+  for (const conv of candidates) {
+    const latest = latestInbound.get(String(conv.id));
+    if (!latest) continue;
+    const radar = radarOf(latest.raw_data);
+    // A draft is stale once it predates the reply it was supposed to answer.
+    const analyzedAt = Date.parse(String(radar.analyzed_at || ""));
+    const needsReview = !radar.cached_draft || Number.isNaN(analyzedAt) || analyzedAt <= Date.parse(String(latest.sent_at));
+    const needsFollowUp = !radar.followup_analyzed_at;
+    const needsIcp = Boolean(conv.lead_id) && !scoredLeads.has(String(conv.lead_id));
+    if (!needsReview && !needsFollowUp && !needsIcp) continue;
+    work.push({ conv, needsReview, needsFollowUp, needsIcp, sentiment: String(radar.sentiment || "") });
+    if (work.length >= AI_BATCH_SIZE) break;
+  }
+  return { work, leadNames };
+}
+
+async function runAiForConversation(workspace, item, leadName) {
+  const guardrails = workspace.guardrails && typeof workspace.guardrails === "object" ? workspace.guardrails : {};
+  const rows = await supabase(
+    `rr_messages?select=direction,body,sent_at,raw_data&conversation_id=eq.${encodeURIComponent(item.conv.id)}&order=sent_at.asc&limit=200`,
+  );
+  const thread = (rows || []).map((row) => ({ direction: String(row.direction || ""), body: String(row.body || ""), sentAt: String(row.sent_at || "") }));
+  if (!thread.length) return 0;
+  const campaignName = (rows || [])
+    .map((row) => String((radarOf(row.raw_data).campaign || {}).name || ""))
+    .find(Boolean);
+
+  const shared = { workspaceId: workspace.id, workspaceName: String(workspace.name || workspace.slug || ""), leadName };
+  let steps = 0;
+  let sentiment = item.sentiment;
+
+  // Analyse first: this single call produces the suggested reply, the review note and the
+  // sentiment, and the follow-up score below reads that sentiment.
+  if (item.needsReview) {
+    const payload = await appPost("/api/ai/draft", {
+      ...shared,
+      mode: "analyze",
+      conversationId: item.conv.id,
+      model: String(workspace.anthropic_model || "") || undefined,
+      system: String(workspace.custom_system_prompt || "") || undefined,
+      instruction: workspace.client_brief ? `Client context: ${workspace.client_brief}` : "",
+      campaignName,
+      thread,
+    });
+    const returned = String(payload.sentiment || "").toLowerCase();
+    if (["positive", "neutral", "negative"].includes(returned)) sentiment = returned;
+    steps += 1;
+  }
+
+  if (item.needsIcp) {
+    await appPost("/api/ai/icp-score", { ...shared, leadId: item.conv.lead_id, icpPrompt: String(guardrails.icp_prompt || "") });
+    steps += 1;
+  }
+
+  if (item.needsFollowUp) {
+    await appPost("/api/ai/follow-up-score", {
+      ...shared,
+      conversationId: item.conv.id,
+      followUpPrompt: String(guardrails.follow_up_prompt || ""),
+      sentiment,
+      thread,
+    });
+    steps += 1;
+  }
+
+  return steps;
+}
+
+async function runAiPipeline() {
+  if (!appBaseUrl) {
+    // Warned once rather than every cycle, so the log stays readable.
+    if (!missingBaseUrlWarned) {
+      console.warn("reply_radar_ai_pipeline_skipped", { reason: "APP_BASE_URL is not set, so the worker cannot reach the AI routes" });
+      missingBaseUrlWarned = true;
+    }
+    return;
+  }
+  const startedAt = new Date().toISOString();
+  const workspaces = await supabase("rr_workspaces?select=id,slug,name,client_brief,anthropic_model,custom_system_prompt,guardrails&order=created_at.asc");
+  let processed = 0;
+  let steps = 0;
+  let errors = 0;
+
+  for (const workspace of workspaces || []) {
+    let work = [];
+    let leadNames = new Map();
+    try {
+      ({ work, leadNames } = await conversationsNeedingAi(workspace));
+    } catch (error) {
+      errors++;
+      console.warn("reply_radar_ai_pipeline_scan_error", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
+    for (const item of work) {
+      try {
+        steps += await runAiForConversation(workspace, item, leadNames.get(String(item.conv.lead_id || "")) || "");
+        processed++;
+      } catch (error) {
+        errors++;
+        console.warn("reply_radar_ai_pipeline_error", { workspace: workspace.slug, conversation: item.conv.id, error: error instanceof Error ? error.message : String(error) });
+      }
+      // Spread the Anthropic calls out rather than bursting them.
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    if (work.length) console.info("reply_radar_ai_pipeline_workspace", { workspace: workspace.slug, conversations: work.length });
+  }
+
+  if (processed || errors) {
+    await writeSyncRun({ workspace_id: null, run_type: "ai-pipeline", source: "render-worker", status: errors > 0 ? "partial" : "success", started_at: startedAt, finished_at: new Date().toISOString(), records_seen: processed + errors, records_written: steps, error_text: errors > 0 ? `${errors} conversations failed AI processing` : null });
+    console.info("reply_radar_ai_pipeline_finished", { processed, steps, errors });
+  }
+}
+
 // ── Main loop ───────────────────────────────────────────────────────
 
 async function runOnce() {
@@ -241,6 +425,10 @@ async function runOnce() {
     try { await refreshAllConversations(); } catch (error) { console.error("reply_radar_conversation_refresh_failed", error); }
     lastRefreshRun = Date.now();
   }
+
+  // Every cycle, so a reply that arrives while nobody is on the site is already analysed,
+  // ICP-scored and follow-up-scored by the time it is opened.
+  try { await runAiPipeline(); } catch (error) { console.error("reply_radar_ai_pipeline_failed", error); }
 }
 
 async function main() {

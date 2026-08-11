@@ -38,20 +38,31 @@ export async function GET(request: Request) {
     const wsLogoByName = new Map(workspaces.map((ws) => [text(ws.name).toLowerCase(), text(ws.logo_url)]));
     const wsLogoById = new Map(workspaces.map((ws) => [text(ws.id), text(ws.logo_url)]));
 
-    // Resolve lead name + photo from conversation → lead
-    // actor_id = conversationId for these events
-    const conversationIds = [...new Set(rows.map((r) => text(r.actor_id)).filter((id) => UUID.test(id)))];
-    const leadNameByConvId = new Map<string, string>();
-    const leadPhotoByConvId = new Map<string, string>();
+    // actor_id is whatever entity the action operated on, and that is not the same table for
+    // every action: conversation-scoped work (sentiment, reply drafts, follow-up scores) records
+    // a conversation id, while ICP scoring records the lead id directly. The audit table does not
+    // persist the entity type, so an id is resolved against both tables and the resulting name
+    // and photo are keyed by the audit row's own actor_id either way.
+    const auditIds = [...new Set(rows.map((r) => text(r.actor_id)).filter((id) => UUID.test(id)))];
+    const leadNameByAuditId = new Map<string, string>();
+    const leadPhotoByAuditId = new Map<string, string>();
 
-    const convRows = await queryByIds(conversationIds, 40, async (batch) => {
+    const convRows = await queryByIds(auditIds, 40, async (batch) => {
       const res = await fetch(
         `${url}/rest/v1/rr_conversations?select=id,lead_id&id=in.(${batch.join(",")})`,
         { headers, cache: "no-store" },
       ).catch(() => null);
       return res?.ok ? ((await res.json().catch(() => [])) as Row[]) : [];
     });
-    const leadIds = [...new Set(convRows.map((c) => text(c.lead_id)).filter((id) => UUID.test(id)))];
+    // Ids that matched no conversation are candidate lead ids, so look those up alongside the
+    // leads reached through a conversation.
+    const conversationIds = new Set(convRows.map((c) => text(c.id)));
+    const leadIds = [
+      ...new Set([
+        ...convRows.map((c) => text(c.lead_id)),
+        ...auditIds.filter((id) => !conversationIds.has(id)),
+      ].filter((id) => UUID.test(id))),
+    ];
     const leadRows = await queryByIds(leadIds, 40, async (batch) => {
       const res = await fetch(
         `${url}/rest/v1/rr_leads?select=id,name,raw_data&id=in.(${batch.join(",")})`,
@@ -60,24 +71,29 @@ export async function GET(request: Request) {
       return res?.ok ? ((await res.json().catch(() => [])) as Row[]) : [];
     });
     const leadById = new Map(leadRows.map((l) => [text(l.id), l]));
-    for (const conv of convRows) {
-      const lead = leadById.get(text(conv.lead_id));
-      if (!lead) continue;
-      const cid = text(conv.id);
-      leadNameByConvId.set(cid, text(lead.name));
-      // Enrichment lives at raw_data.reply_radar.ai_ark
+    // Enrichment lives at raw_data.reply_radar.ai_ark
+    const photoOf = (lead: Row) => {
       const enrichment = object(object(object(lead.raw_data).reply_radar).ai_ark);
-      const photo = text(enrichment.profilePhotoSource) || text(enrichment.profilePhotoUrl) || "";
-      if (photo) leadPhotoByConvId.set(cid, photo);
+      return text(enrichment.profilePhotoSource) || text(enrichment.profilePhotoUrl) || "";
+    };
+    const remember = (auditId: string, lead: Row | undefined) => {
+      if (!lead) return;
+      leadNameByAuditId.set(auditId, text(lead.name));
+      const photo = photoOf(lead);
+      if (photo) leadPhotoByAuditId.set(auditId, photo);
+    };
+    for (const conv of convRows) remember(text(conv.id), leadById.get(text(conv.lead_id)));
+    for (const auditId of auditIds) {
+      if (!conversationIds.has(auditId)) remember(auditId, leadById.get(auditId));
     }
 
     const events = rows.map((row) => {
       const details = object(row.details);
       const wsName = text(details.workspaceName);
       const wsId = text(details.workspaceId) || text(row.workspace_id);
-      const convId = text(row.actor_id);
+      const auditId = text(row.actor_id);
       // Lead name: prefer details.leadName (set by frontend), fall back to DB lookup
-      const leadName = text(details.leadName) || leadNameByConvId.get(convId) || "";
+      const leadName = text(details.leadName) || leadNameByAuditId.get(auditId) || "";
       return {
         id: row.id,
         timestamp: row.created_at,
@@ -90,7 +106,7 @@ export async function GET(request: Request) {
         workspaceName: wsName || null,
         workspaceLogoUrl: wsLogoByName.get(wsName.toLowerCase()) || wsLogoById.get(wsId) || null,
         leadName: leadName || null,
-        leadPhotoUrl: leadPhotoByConvId.get(convId) || null,
+        leadPhotoUrl: leadPhotoByAuditId.get(auditId) || null,
       };
     });
 
