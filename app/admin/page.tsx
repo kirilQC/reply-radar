@@ -814,7 +814,7 @@ type AiConfig = {
   workspaceAi: { name: string; slug: string; brief: string; model: string; icpPrompt: string; followUpPrompt: string; replyPrompt: string; sentimentPrompt: string; followUpThreshold?: number } | null;
   workspaces: Array<{ id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; hasBrief: boolean }>;
 };
-type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; workspaceLogoUrl: string | null; leadName: string | null; leadPhotoUrl: string | null };
+type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; workspaceLogoUrl: string | null; leadName: string | null; leadPhotoUrl: string | null; conversationId?: string | null; draft?: string | null; reason?: string | null; pastReplies?: string[] };
 type AiAuditData = { ok?: boolean; events: AiAuditEvent[]; summary: { totalCalls: number; successful: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
 
 /**
@@ -882,6 +882,97 @@ function TemplatePicker({ templates, value, onPick, onSave, onDelete }: {
     </div>
     <small className="template-picker-hint">Pick one to fill the box below, then edit it freely — any change makes it a custom prompt for this client. Editing and saving changes is enough to use a custom prompt; only save it as a template if other clients should be able to pick it too.</small>
   </div>;
+}
+
+/**
+ * Live feed of Anthropic suggested-reply generations. Shows the past client replies that
+ * were fed in as tone reference and the draft that came out, with client + lead photos.
+ *
+ * The AI hub already polls /api/ai/audit every 3s and highlights fresh rows for 2s,
+ * so surfacing the same event stream here — filtered to drafting events and expanded
+ * with the raw draft text and voice examples — is enough to feel live without adding
+ * another polling loop.
+ */
+function DraftFeedPanel({ events, freshIds }: { events: AiAuditEvent[]; freshIds: string[] }) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const drafts = events.filter((event) =>
+    event.action === "conversation.analyzed" || event.action === "draft.generated" || event.action === "draft.failed",
+  ).slice(0, 12);
+  const toggle = (id: string) => setExpanded((current) => ({ ...current, [id]: !current[id] }));
+  return (
+    <section className="admin-panel ai-draft-feed-section">
+      <div className="panel-heading">
+        <div className="ai-audit-title">
+          <h2 style={{ fontSize: 22 }}>Suggested reply feed</h2>
+          <span className="ai-audit-live"><i />live · 3s refresh</span>
+        </div>
+        <small style={{ color: "var(--muted-2)" }}>Shows the 10 client voice examples fed in and the draft returned.</small>
+      </div>
+      {drafts.length === 0 ? (
+        <p className="audit-empty">No drafts yet. New generations will stream in here.</p>
+      ) : (
+        <div className="ai-draft-feed">
+          {drafts.map((event) => {
+            const d = event.timestamp ? new Date(event.timestamp) : null;
+            const when = d && !Number.isNaN(d.getTime())
+              ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true })
+              : "—";
+            const date = d && !Number.isNaN(d.getTime())
+              ? `${d.getMonth() + 1}/${d.getDate()}`
+              : "";
+            const isFresh = freshIds.includes(String(event.id));
+            const isFailed = event.action === "draft.failed" || event.status === "error" || event.status === "failed";
+            const isOpen = expanded[String(event.id)];
+            return (
+              <article className={`ai-draft-card${isFresh ? " ai-draft-card-fresh" : ""}${isFailed ? " ai-draft-card-failed" : ""}`} key={event.id}>
+                <header className="ai-draft-card-head">
+                  <div className="ai-draft-card-who">
+                    <div className="ai-draft-avatar-pair">
+                      {event.leadPhotoUrl ? <img className="ai-draft-avatar-lead" src={event.leadPhotoUrl} alt="" /> : <span className="ai-draft-avatar-placeholder">{(event.leadName ?? "?")[0]}</span>}
+                      {event.workspaceLogoUrl ? <img className="ai-draft-avatar-client" src={event.workspaceLogoUrl} alt="" /> : <span className="ai-draft-avatar-placeholder ai-draft-avatar-client">{(event.workspaceName ?? "?")[0]}</span>}
+                    </div>
+                    <div>
+                      <strong>{event.leadName || "—"}</strong>
+                      <small>{event.workspaceName || "—"} · {date} {when}</small>
+                    </div>
+                  </div>
+                  <div className="ai-draft-card-meta">
+                    {event.sentiment && <span className={`sentiment-badge sentiment-${event.sentiment}`}>{event.sentiment}</span>}
+                    <small>{event.durationMs ? `${event.durationMs}ms` : ""}</small>
+                    <small>{event.inputTokens || event.outputTokens ? `${event.inputTokens}→${event.outputTokens}` : ""}</small>
+                  </div>
+                </header>
+                {event.reason && <p className="ai-draft-card-reason">Why: {event.reason}</p>}
+                <div className="ai-draft-card-body">
+                  <div className="ai-draft-block ai-draft-block-output">
+                    <span className="ai-draft-block-label">DRAFT</span>
+                    <p>{event.draft || (isFailed ? "Draft failed to generate." : "(empty)")}</p>
+                  </div>
+                  {event.pastReplies && event.pastReplies.length > 0 && (
+                    <div className="ai-draft-block ai-draft-block-input">
+                      <button type="button" className="ai-draft-block-toggle" onClick={() => toggle(String(event.id))}>
+                        <span className="ai-draft-block-label">
+                          VOICE REFERENCE · {event.pastReplies.length} past reply{event.pastReplies.length === 1 ? "" : "s"} from this client
+                        </span>
+                        <span>{isOpen ? "Hide ▲" : "Show ▼"}</span>
+                      </button>
+                      {isOpen && (
+                        <ol className="ai-draft-references">
+                          {event.pastReplies.map((reply, index) => (
+                            <li key={index}>{reply}</li>
+                          ))}
+                        </ol>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function AiHubView() {
@@ -1038,6 +1129,8 @@ function AiHubView() {
           </div>
         </section>
       </div>
+
+      <DraftFeedPanel events={audit?.events ?? []} freshIds={freshIds} />
 
       <section className="admin-panel ai-audit-section">
         <div className="panel-heading"><div className="ai-audit-title"><h2 style={{ fontSize: 22 }}>AI audit log</h2><span className="ai-audit-live"><i />live</span></div>

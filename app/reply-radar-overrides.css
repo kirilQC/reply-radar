@@ -258,3 +258,33 @@ html:not(.hydrated) body{visibility:hidden}
 .composer-replied-state p{margin:0;color:var(--text);font-size:13px;font-weight:600}
 .composer-replied-state small{color:var(--muted-2);font-size:10px;max-width:280px;line-height:1.4}
 .composer-responded-check{width:22px;height:22px;font-size:13px}
+/* Live suggested-reply feed on the AI admin overview. Cards stream in from the top; each
+   shows the lead + client photos, the draft the model produced, and the ten past client
+   replies that were used as voice reference (collapsible so the feed stays scannable). */
+.ai-draft-feed-section{margin-top:14px}
+.ai-draft-feed{display:grid;gap:10px}
+.ai-draft-card{padding:14px;border-radius:10px;background:var(--panel-2);border:1px solid var(--border-soft);display:grid;gap:10px;transition:background 0.3s ease,border-color 0.3s ease}
+.ai-draft-card-fresh{background:color-mix(in srgb,var(--accent) 12%,var(--panel-2));border-color:color-mix(in srgb,var(--accent) 40%,var(--border-soft));animation:aiDraftPulse 2s ease-out 1}
+@keyframes aiDraftPulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 40%,transparent)}100%{box-shadow:0 0 0 6px transparent}}
+.ai-draft-card-failed{border-color:color-mix(in srgb,var(--coral) 40%,var(--border-soft))}
+.ai-draft-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.ai-draft-card-who{display:flex;gap:10px;align-items:center;min-width:0}
+.ai-draft-card-who strong{font-size:12px;display:block}
+.ai-draft-card-who small{color:var(--muted-2);font-size:10px}
+.ai-draft-avatar-pair{position:relative;flex:0 0 auto;width:38px;height:32px}
+.ai-draft-avatar-lead,.ai-draft-avatar-client{position:absolute;width:26px;height:26px;border-radius:50%;object-fit:cover;border:2px solid var(--panel-2)}
+.ai-draft-avatar-lead{top:0;left:0;z-index:2}
+.ai-draft-avatar-client{bottom:0;right:0;width:20px;height:20px;z-index:1}
+.ai-draft-avatar-placeholder{position:absolute;display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;top:0;left:0;z-index:2;border:2px solid var(--panel-2)}
+.ai-draft-avatar-placeholder.ai-draft-avatar-client{width:20px;height:20px;font-size:9px;bottom:0;right:0;top:auto;left:auto;background:var(--muted-2);z-index:1}
+.ai-draft-card-meta{display:flex;gap:8px;align-items:center;color:var(--muted-2);font-size:10px;flex:0 0 auto}
+.ai-draft-card-reason{margin:0;color:var(--muted);font-size:11px;font-style:italic;padding:6px 10px;border-left:2px solid color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 4%,transparent);border-radius:0 6px 6px 0}
+.ai-draft-card-body{display:grid;gap:8px}
+.ai-draft-block{padding:10px 12px;border-radius:8px;background:var(--panel);border:1px solid var(--border-soft)}
+.ai-draft-block-label{display:inline-block;color:var(--muted-2);font-size:9px;letter-spacing:0.08em;font-weight:600;margin-bottom:4px}
+.ai-draft-block-output p{margin:0;color:var(--text);font-size:12px;line-height:1.5;white-space:pre-wrap}
+.ai-draft-block-toggle{width:100%;background:none;border:none;padding:0;color:inherit;font:inherit;display:flex;justify-content:space-between;align-items:center;cursor:pointer;text-align:left}
+.ai-draft-block-toggle:hover .ai-draft-block-label{color:var(--text)}
+.ai-draft-block-toggle span:last-child{color:var(--muted-2);font-size:10px}
+.ai-draft-references{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:11px;line-height:1.45;display:grid;gap:6px}
+.ai-draft-references li{padding-left:4px}

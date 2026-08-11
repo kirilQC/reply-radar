@@ -107,6 +107,12 @@ export async function GET(request: Request) {
         workspaceLogoUrl: wsLogoByName.get(wsName.toLowerCase()) || wsLogoById.get(wsId) || null,
         leadName: leadName || null,
         leadPhotoUrl: leadPhotoByAuditId.get(auditId) || null,
+        // Draft feed fields: the reply text the model produced and the client-voice examples
+        // that were fed in. Only populated for `conversation.analyzed` and `draft.generated`.
+        conversationId: auditId,
+        draft: text(details.draft) || null,
+        reason: text(details.reason) || null,
+        pastReplies: Array.isArray(details.pastReplies) ? (details.pastReplies as unknown[]).map((r) => text(r)).filter(Boolean) : [],
       };
     });
 
