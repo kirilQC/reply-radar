@@ -241,3 +241,12 @@ html:not(.hydrated) body{visibility:hidden}
 .locked-progress i{display:block;height:100%;border-radius:999px;background:var(--accent);transition:width .2s ease}
 
 @media(max-width:800px){.template-picker-grid{grid-template-columns:1fr}.ai-client-layout{grid-template-columns:1fr}.ai-client-sidebar{max-height:none;border-right:0;border-bottom:1px solid var(--border-soft);flex-direction:row;flex-wrap:wrap;padding:12px}.ai-audit-head{display:none}.ai-audit-row{grid-template-columns:1fr 1fr;gap:6px}}
+
+/* Green check next to the lead name when the latest message in the thread is
+   outbound. Lets you scan the inbox and see which threads you've already
+   handled without opening each one. Needs the flex/min-width rules on the
+   name line so the check stays visible when the name would otherwise be
+   ellipsis-truncated. */
+.lead-main strong.lead-name{display:flex;align-items:center;gap:6px;min-width:0}
+.lead-main strong.lead-name .lead-name-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.lead-main .responded-check{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:14px;height:14px;border-radius:50%;background:color-mix(in srgb,var(--green) 22%,transparent);color:var(--green);font-size:9px;font-weight:700;line-height:1}

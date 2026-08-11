@@ -1662,7 +1662,18 @@ export function InboxPage() {
                           <SafeAvatar src={lead.photoUrl} alt={lead.name} fallback={lead.initials} />
                         </div>
                         <div>
-                          <strong>{lead.name}</strong>
+                          <strong className="lead-name">
+                            <span className="lead-name-text">{lead.name}</span>
+                            {lead.messages.at(-1)?.direction === "outbound" && (
+                              <span
+                                className="responded-check"
+                                title="You've already replied to this thread"
+                                aria-label="Replied"
+                              >
+                                ✓
+                              </span>
+                            )}
+                          </strong>
                           <span>
                             {lead.role} @ {lead.company}
                           </span>
