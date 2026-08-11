@@ -894,11 +894,11 @@ function TemplatePicker({ templates, value, onPick, onSave, onDelete }: {
  * another polling loop.
  */
 function DraftFeedPanel({ events, freshIds }: { events: AiAuditEvent[]; freshIds: string[] }) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const drafts = events.filter((event) =>
+  const [visible, setVisible] = useState(10);
+  const allDrafts = events.filter((event) =>
     event.action === "conversation.analyzed" || event.action === "draft.generated" || event.action === "draft.failed",
-  ).slice(0, 12);
-  const toggle = (id: string) => setExpanded((current) => ({ ...current, [id]: !current[id] }));
+  );
+  const drafts = allDrafts.slice(0, visible);
   return (
     <section className="admin-panel ai-draft-feed-section">
       <div className="panel-heading">
@@ -922,7 +922,6 @@ function DraftFeedPanel({ events, freshIds }: { events: AiAuditEvent[]; freshIds
               : "";
             const isFresh = freshIds.includes(String(event.id));
             const isFailed = event.action === "draft.failed" || event.status === "error" || event.status === "failed";
-            const isOpen = expanded[String(event.id)];
             return (
               <article className={`ai-draft-card${isFresh ? " ai-draft-card-fresh" : ""}${isFailed ? " ai-draft-card-failed" : ""}`} key={event.id}>
                 <header className="ai-draft-card-head">
@@ -950,25 +949,25 @@ function DraftFeedPanel({ events, freshIds }: { events: AiAuditEvent[]; freshIds
                   </div>
                   {event.pastReplies && event.pastReplies.length > 0 && (
                     <div className="ai-draft-block ai-draft-block-input">
-                      <button type="button" className="ai-draft-block-toggle" onClick={() => toggle(String(event.id))}>
-                        <span className="ai-draft-block-label">
-                          VOICE REFERENCE · {event.pastReplies.length} past reply{event.pastReplies.length === 1 ? "" : "s"} from this client
-                        </span>
-                        <span>{isOpen ? "Hide ▲" : "Show ▼"}</span>
-                      </button>
-                      {isOpen && (
-                        <ol className="ai-draft-references">
-                          {event.pastReplies.map((reply, index) => (
-                            <li key={index}>{reply}</li>
-                          ))}
-                        </ol>
-                      )}
+                      <span className="ai-draft-block-label">
+                        VOICE REFERENCE · {event.pastReplies.length} past reply{event.pastReplies.length === 1 ? "" : "s"} from this client
+                      </span>
+                      <ol className="ai-draft-references">
+                        {event.pastReplies.map((reply, index) => (
+                          <li key={index}>{reply}</li>
+                        ))}
+                      </ol>
                     </div>
                   )}
                 </div>
               </article>
             );
           })}
+          {allDrafts.length > visible && (
+            <button type="button" className="audit-see-more" onClick={() => setVisible((v) => v + 10)}>
+              See 10 more
+            </button>
+          )}
         </div>
       )}
     </section>

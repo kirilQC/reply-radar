@@ -269,8 +269,8 @@ html:not(.hydrated) body{visibility:hidden}
 .ai-draft-card-failed{border-color:color-mix(in srgb,var(--coral) 40%,var(--border-soft))}
 .ai-draft-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 .ai-draft-card-who{display:flex;gap:10px;align-items:center;min-width:0}
-.ai-draft-card-who strong{font-size:12px;display:block}
-.ai-draft-card-who small{color:var(--muted-2);font-size:10px}
+.ai-draft-card-who strong{font-size:15px;display:block;line-height:1.25}
+.ai-draft-card-who small{color:var(--muted-2);font-size:12px}
 .ai-draft-avatar-pair{position:relative;flex:0 0 auto;width:38px;height:32px}
 .ai-draft-avatar-lead,.ai-draft-avatar-client{position:absolute;width:26px;height:26px;border-radius:50%;object-fit:cover;border:2px solid var(--panel-2)}
 .ai-draft-avatar-lead{top:0;left:0;z-index:2}
