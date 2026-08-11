@@ -249,7 +249,20 @@ async function refreshAllConversations() {
  * this calls its existing routes rather than reimplementing them here — and those routes
  * already refuse to redo work that is cached, which is what stops a sweep from re-billing.
  */
-const appBaseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
+// APP_BASE_URL is typed into the Render dashboard by hand, and a hostname pasted without a scheme
+// ("reply-radar.vercel.app") makes every fetch fail with "Failed to parse URL" — which reads like a
+// bug in the sweep rather than a missing "https://". The scheme is assumed instead of demanded.
+const appBaseUrl = (() => {
+  const configured = (process.env.APP_BASE_URL || "").trim().replace(/\/+$/, "");
+  if (!configured) return "";
+  const withScheme = /^https?:\/\//i.test(configured) ? configured : `https://${configured}`;
+  try {
+    return new URL(withScheme).origin;
+  } catch {
+    console.error("reply_radar_app_base_url_invalid", { value: configured.slice(0, 200) });
+    return "";
+  }
+})();
 // Conversations put through the pipeline per client per cycle. Each costs up to three Anthropic
 // calls, so this bounds both spend and how long one client can hold the sweep.
 const AI_BATCH_SIZE = Math.max(1, Number(process.env.AI_BATCH_SIZE || 10));
