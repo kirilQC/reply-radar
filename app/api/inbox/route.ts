@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../lib/person-name";
 import { queryByIds } from "../../lib/chunk-query";
 import { NEAR_DUPLICATE_MS } from "../../lib/heyreach-conversation";
+import { classifyConversationOrigin } from "../../../shared/conversation-origin.mjs";
 type Row = Record<string, unknown>;
 
 async function query(url: string, key: string, path: string) {
@@ -230,11 +231,23 @@ export async function GET(request: Request) {
 
     const workspaceById = new Map(selected.map((row) => [String(row.id), row]));
     const leadById = new Map(leads.map((row) => [String(row.id), row]));
+    // Conversations the lead started are set aside rather than dropped. The previous rule excluded
+    // any conversation with no outbound message at all, which missed the actual case — the lead
+    // messaged us first and a teammate replied, so an outbound message exists — and gave nobody a
+    // way to see what had been excluded or to catch it excluding the wrong person.
+    const includeLeadInitiated = new URL(request.url).searchParams.get("origin") === "inbound";
+    const originById = new Map(
+      conversations.map((conversation) => [
+        String(conversation.id),
+        classifyConversationOrigin({
+          messages: deduped.filter((message) => message.conversation_id === conversation.id),
+          leadRawData: leadById.get(String(conversation.lead_id))?.raw_data,
+        }),
+      ]),
+    );
     const result = conversations.filter((conversation) => {
-      // Exclude conversations where there are NO outbound messages at all (lead-initiated cold inbound)
-      const convoMessages = deduped.filter((m) => m.conversation_id === conversation.id);
-      if (!convoMessages.length) return true;
-      return convoMessages.some((m) => m.direction === "outbound");
+      const origin = originById.get(String(conversation.id))?.origin;
+      return includeLeadInitiated ? origin === "inbound_lead" : origin !== "inbound_lead";
     }).map((conversation) => {
       const lead = leadById.get(String(conversation.lead_id)) ?? {};
       const leadRaw =
@@ -333,10 +346,15 @@ export async function GET(request: Request) {
         followUpReason,
         followUpAnalyzedAt: cachedFollowUpAt || null,
         lastRefreshedAt: conversation.last_refreshed_at ?? null,
+        origin: originById.get(String(conversation.id))?.origin ?? "unknown",
+        originReason: originById.get(String(conversation.id))?.reason ?? null,
         messages: thread,
       };
     });
-    return NextResponse.json({ ok: true, conversations: result });
+    // Reported so the inbox can offer a way in to whatever was set aside. A silent exclusion is how
+    // a misclassified outbound lead would go unnoticed.
+    const leadInitiatedCount = [...originById.values()].filter((verdict) => verdict.origin === "inbound_lead").length;
+    return NextResponse.json({ ok: true, conversations: result, leadInitiatedCount });
   } catch (error) {
     return NextResponse.json(
       {

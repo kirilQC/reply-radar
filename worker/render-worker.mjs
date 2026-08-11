@@ -1,3 +1,4 @@
+import { classifyConversationOrigin } from "../shared/conversation-origin.mjs";
 import { directionFor, extractMessageRows, messageKey, syntheticMessageId } from "../shared/message-identity.mjs";
 
 /**
@@ -349,16 +350,23 @@ async function conversationsNeedingAi(workspace) {
   );
   if (!candidates || !candidates.length) return { work: [], leadsById: new Map() };
 
-  // Per-reply AI state lives on the latest inbound message of each conversation. Batched small
-  // with an explicit ceiling: PostgREST caps rows per request, and a truncated page here would
-  // hide a conversation's newest reply and stall it out of the sweep every cycle.
-  const inbound = await chunked(candidates.map((c) => c.id), 20, (batch) =>
-    supabase(`rr_messages?select=conversation_id,sent_at,raw_data&conversation_id=in.(${batch.join(",")})&direction=eq.inbound&order=sent_at.desc&limit=5000`),
+  // Every message, not just the inbound ones: per-reply AI state lives on the newest inbound
+  // message, but deciding whether the lead approached us needs the *first* message and the campaign
+  // attribution that any message may carry. Batched small with an explicit ceiling, because
+  // PostgREST caps rows per request and a truncated page here would hide a conversation's newest
+  // reply and stall it out of the sweep every cycle.
+  const allMessages = await chunked(candidates.map((c) => c.id), 20, (batch) =>
+    supabase(`rr_messages?select=conversation_id,direction,sent_at,raw_data&conversation_id=in.(${batch.join(",")})&order=sent_at.desc&limit=5000`),
   );
+  const messagesByConversation = new Map();
   const latestInbound = new Map();
-  for (const row of inbound) {
+  for (const row of allMessages) {
     const id = String(row.conversation_id);
-    if (!latestInbound.has(id)) latestInbound.set(id, row);
+    const rows = messagesByConversation.get(id);
+    if (rows) rows.push(row);
+    else messagesByConversation.set(id, [row]);
+    // Newest first from the query, so the first inbound row seen is the latest one.
+    if (String(row.direction) === "inbound" && !latestInbound.has(id)) latestInbound.set(id, row);
   }
 
   // Enrichment and the ICP score are both stored on the lead and kept, so each happens once.
@@ -374,6 +382,9 @@ async function conversationsNeedingAi(workspace) {
     if (!latest) continue;
     const radar = radarOf(latest.raw_data);
     const lead = leadsById.get(String(conv.lead_id || ""));
+    // Someone who approached us is not part of the outbound motion the inbox works, and the inbox
+    // sets them aside. Scoring and drafting for them would be money spent on a row nobody sees.
+    if (classifyConversationOrigin({ messages: messagesByConversation.get(String(conv.id)) || [], leadRawData: lead && lead.raw_data }).origin === "inbound_lead") continue;
     // A draft is stale once it predates the reply it was supposed to answer.
     const analyzedAt = Date.parse(String(radar.analyzed_at || ""));
     const needsReview = !radar.cached_draft || Number.isNaN(analyzedAt) || analyzedAt <= Date.parse(String(latest.sent_at));
@@ -429,7 +440,7 @@ async function runAiForConversation(workspace, item, leadName) {
   }
 
   if (item.needsIcp) {
-    await appPost("/api/ai/icp-score", { ...shared, leadId: item.conv.lead_id, icpPrompt: String(guardrails.icp_prompt || "") });
+    await appPost("/api/ai/icp-score", { ...shared, leadId: item.conv.lead_id, icpPrompt: String(guardrails.icp_prompt || ""), clientBrief: String(workspace.client_brief || "") });
     steps += 1;
   }
 

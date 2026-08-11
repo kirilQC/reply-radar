@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
+import { DEFAULT_ICP_TEMPLATE_ID, FOLLOW_UP_TEMPLATES, ICP_TEMPLATES, MIN_CLIENT_BRIEF_LENGTH, type ScoringTemplate, templateLabel } from "../lib/scoring-templates";
 
 type ClientWorkspace = {
   id?: string;
@@ -844,6 +845,31 @@ type AiConfig = {
 type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; workspaceLogoUrl: string | null; leadName: string | null; leadPhotoUrl: string | null };
 type AiAuditData = { ok?: boolean; events: AiAuditEvent[]; summary: { totalCalls: number; successful: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
 
+/**
+ * Vetted prompts offered as a choice, with the current one named.
+ *
+ * The label is derived from the text rather than remembered from the last click, so editing a
+ * template's wording immediately reports it as "Custom" — a teammate can always tell whether the AI
+ * is running something we vetted or something they wrote.
+ */
+function TemplatePicker({ templates, value, onPick }: { templates: ScoringTemplate[]; value: string; onPick: (prompt: string) => void }) {
+  const current = templateLabel(templates, value);
+  return <div className="template-picker">
+    <div className="template-picker-head"><span className="field-label" style={{ margin: 0 }}>START FROM A TEMPLATE</span><b className={current.id ? "template-badge" : "template-badge custom"}>{current.name}</b></div>
+    <div className="template-picker-grid">{templates.map((template) => <button
+      key={template.id}
+      type="button"
+      className={`template-card${current.id === template.id ? " active" : ""}`}
+      onClick={() => onPick(template.prompt)}
+    >
+      <strong>{template.name}</strong>
+      <p>{template.summary}</p>
+      <small><em>Tracks:</em> {template.tracks}</small>
+    </button>)}</div>
+    <small className="template-picker-hint">Pick one to fill the box below, then edit it freely — any change makes it a custom prompt for this client.</small>
+  </div>;
+}
+
 function AiHubView() {
   const [config, setConfig] = useState<AiConfig | null>(null);
   const [audit, setAudit] = useState<AiAuditData | null>(null);
@@ -868,7 +894,10 @@ function AiHubView() {
         setGlobalPrompt(String(payload.globalSentimentPrompt ?? ""));
         if (payload.workspaceAi) {
           setClientBrief(payload.workspaceAi.brief);
-          setIcpPrompt(payload.workspaceAi.icpPrompt);
+          // A client with no ICP prompt stored gets the general seniority template shown rather than
+          // an empty box, because empty is what makes the scoring route fall back to its own generic
+          // prompt — a default nobody chose and nobody can see.
+          setIcpPrompt(payload.workspaceAi.icpPrompt || ICP_TEMPLATES.find((t) => t.id === DEFAULT_ICP_TEMPLATE_ID)?.prompt || "");
           setFollowUpPrompt(payload.workspaceAi.followUpPrompt);
           setFollowUpThreshold(Number(payload.workspaceAi.followUpThreshold ?? 50));
           setReplyPrompt(payload.workspaceAi.replyPrompt);
@@ -927,6 +956,10 @@ function AiHubView() {
   };
 
   const selectedWs = config?.workspaces?.find((ws) => ws.slug === selectedClient);
+  // Judged on the live textarea rather than what is saved, so the panel unlocks as the brief is
+  // typed instead of demanding a save round-trip first.
+  const briefLength = clientBrief.trim().length;
+  const icpLocked = briefLength < MIN_CLIENT_BRIEF_LENGTH;
 
   return <div className="ai-hub-view">
     <div className="admin-heading"><div>
@@ -1031,13 +1064,29 @@ function AiHubView() {
                 <label className="field-label">CLIENT BRIEF<textarea value={clientBrief} onChange={(event) => setClientBrief(event.target.value)} placeholder="Tell the AI everything about this client: what they do, who their ideal customer is, their value proposition, competitive advantages, tone of voice, and any important context." rows={6} style={{ minHeight: 150 }} /></label>
                 <button className="upload-zone" type="button"><span style={{ fontSize: 20 }}>＋</span><div><strong>Upload client documents</strong><small>PDF, DOCX, TXT · stored in Supabase Storage</small></div></button>
               </section>
-              <section className="admin-panel client-config-section">
-                <div className="panel-heading"><div><h2>ICP scoring prompt</h2><p>How should the AI score this lead against the client&apos;s ideal customer profile?</p></div></div>
-                <label className="field-label">ICP PROMPT<textarea value={icpPrompt} onChange={(event) => setIcpPrompt(event.target.value)} placeholder="Score this lead from 0 to 100 based on how well they match the client's ideal customer profile. Consider: job title, company size, industry, seniority, and geographic location. Return a JSON object with 'score' (number) and 'reason' (string)." rows={5} style={{ minHeight: 120 }} /></label>
+              <section className={`admin-panel client-config-section${icpLocked ? " section-locked" : ""}`}>
+                <div className="panel-heading"><div><h2>ICP scoring prompt</h2><p>How should the AI score this lead against the client&apos;s ideal customer profile?</p></div>
+                  {icpLocked && <span className="locked-badge">🔒 Locked</span>}
+                </div>
+                {icpLocked
+                  // ICP scoring is a judgement about fit, and fit is meaningless without knowing what
+                  // the client sells and to whom. Scoring against an empty brief produces confident
+                  // numbers derived from nothing, which is worse than no score at all.
+                  ? <div className="locked-explainer">
+                      <p>Fill in the <strong>client brief</strong> above first. ICP scoring judges how well a lead fits <em>this client</em>, so the AI needs to know what they sell and who they sell it to before any score means anything.</p>
+                      <div className="locked-progress"><i style={{ width: `${Math.min(100, Math.round((briefLength / MIN_CLIENT_BRIEF_LENGTH) * 100))}%` }} /></div>
+                      <small>{briefLength} of {MIN_CLIENT_BRIEF_LENGTH} characters written — {MIN_CLIENT_BRIEF_LENGTH - briefLength} to go.</small>
+                    </div>
+                  : <>
+                      <TemplatePicker templates={ICP_TEMPLATES} value={icpPrompt} onPick={setIcpPrompt} />
+                      <label className="field-label">ICP PROMPT<textarea value={icpPrompt} onChange={(event) => setIcpPrompt(event.target.value)} placeholder="Describe what makes a lead a good fit for this client: the titles, seniority, company size, and industries that matter, and who to score down." rows={12} style={{ minHeight: 240 }} /></label>
+                      <small className="threshold-hint">The client brief above is sent to the AI alongside this prompt on every score.</small>
+                    </>}
               </section>
               <section className="admin-panel client-config-section">
                 <div className="panel-heading"><div><h2>Follow-up scoring prompt</h2><p>How should the AI determine follow-up urgency?</p></div></div>
-                <label className="field-label">FOLLOW-UP PROMPT<textarea value={followUpPrompt} onChange={(event) => setFollowUpPrompt(event.target.value)} placeholder="Analyze the conversation and score the follow-up urgency from 0 to 100. Consider: whether the lead asked a question, expressed interest, mentioned a timeline, or requested a meeting. Return a JSON object with 'score' (number), 'tier' ('hot' | 'warm' | 'nurture'), and 'reason' (string)." rows={5} style={{ minHeight: 120 }} /></label>
+                <TemplatePicker templates={FOLLOW_UP_TEMPLATES} value={followUpPrompt} onPick={setFollowUpPrompt} />
+                <label className="field-label">FOLLOW-UP PROMPT<textarea value={followUpPrompt} onChange={(event) => setFollowUpPrompt(event.target.value)} placeholder="Describe what should make a conversation urgent to follow up on, and what should keep it quiet." rows={12} style={{ minHeight: 240 }} /></label>
                 <label className="field-label">FOLLOW-UP ALERT THRESHOLD<span className="threshold-row"><input type="range" min={0} max={100} step={5} value={followUpThreshold} onChange={(event) => setFollowUpThreshold(Number(event.target.value))} /><b>{followUpThreshold}</b></span><small className="threshold-hint">Only show the &ldquo;follow-up recommended&rdquo; box when a lead scores at or above this. Higher = less noise.</small></label>
               </section>
             </div>

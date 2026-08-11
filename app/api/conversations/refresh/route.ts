@@ -183,6 +183,18 @@ async function refreshConversation(
     );
   }
 
+  // A refresh pulls the whole chatroom, which is precisely what a webhook-only ingest was missing.
+  // Recording that unblocks the judgement about who started the conversation, which abstains until
+  // it can be sure the earliest stored message really is the earliest message.
+  const leadRaw = object(lead?.raw_data);
+  if (messages.length && text(object(leadRaw.reply_radar).history_status) !== "complete") {
+    await db(url, key, `rr_leads?id=eq.${encodeURIComponent(text(conv.lead_id))}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ raw_data: { ...leadRaw, reply_radar: { ...object(leadRaw.reply_radar), history_status: "complete", history_fetched_at: now } } }),
+    }).catch(() => null);
+  }
+
   // Return the full updated message list so the frontend can update in-place
   const updatedMessages = (await db(url, key,
     `rr_messages?select=id,body,direction,sent_at,raw_data&conversation_id=eq.${encodeURIComponent(conversationId)}&order=sent_at.asc`,
