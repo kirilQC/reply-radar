@@ -130,6 +130,49 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
       ...(history.campaign.id ? { id: history.campaign.id } : {}),
       ...(history.campaign.name ? { name: history.campaign.name } : {}),
     };
+    // Reply Radar exists to work outbound campaign replies. Anyone who reached out to us
+    // without a campaign attached is not part of that motion — the inbox already hides
+    // them, but they were still burning storage and query time. Refuse the insert at the
+    // door so they never land in the database in the first place. Campaign attribution
+    // can come from the webhook envelope, the fetched history, or any single message row.
+    const anyMessageHasCampaign = history.messages.some((message) => {
+      const raw = object(object(message.raw).reply_radar);
+      const embedded = object(raw.campaign);
+      return Boolean(text(embedded.id) || text(embedded.name));
+    });
+    const hasCampaignAttribution = Boolean(text(campaign.id) || text(campaign.name)) || anyMessageHasCampaign;
+    const earliestMessage = history.messages.length
+      ? [...history.messages].sort((left, right) => String(left.sentAt).localeCompare(String(right.sentAt)))[0]
+      : null;
+    const leadReachedOutFirst = earliestMessage?.direction === "inbound";
+    if (!hasCampaignAttribution && leadReachedOutFirst) {
+      if (eventId) {
+        await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({
+            status: "discarded",
+            processed_at: new Date().toISOString(),
+            error_text: "Lead reached out to us first and is not attributed to any campaign — Reply Radar only tracks outbound replies.",
+          }),
+        }).catch(() => null);
+      }
+      await writeAuditEvent(config, {
+        actor: "Supabase",
+        action: "conversation.discarded",
+        entityType: "conversation",
+        entityId: suppliedConversationId || "unknown",
+        details: {
+          source: "supabase",
+          status: "discarded",
+          workspaceId: workspace.id,
+          workspaceName: text(workspace.name) || text(workspace.slug),
+          reason: "inbound_lead_no_campaign",
+          summary: "Skipped: lead approached us first and is not tied to any campaign.",
+        },
+      }).catch(() => null);
+      return { discarded: true, reason: "inbound_lead_no_campaign" as const };
+    }
     const conversationExternalId = history.conversationExternalId || suppliedConversationId;
     const profileUrl = normalizedProfileUrl(lead.profile_url);
     const existingByProfile = profileUrl ? await db(config, `rr_leads?select=id,linkedin_id,role,company,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&linkedin_profile_url=eq.${encodeURIComponent(profileUrl)}&limit=1`) as JsonObject[] : [];

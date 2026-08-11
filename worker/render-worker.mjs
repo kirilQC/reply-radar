@@ -249,6 +249,45 @@ async function refreshAllConversations() {
   console.info("reply_radar_conversation_refresh_finished", { totalRefreshed, totalErrors });
 }
 
+// ── Inbound-lead auto purge ─────────────────────────────────────────
+// The ingestion path refuses non-campaign inbound leads at the door, but rows that
+// pre-date that guard still sit in the database. Every ~1h the worker calls the
+// purge route with `confirm: true` so those rows get cleaned out on their own —
+// no more manually running the admin purge to keep the inbox honest.
+const PURGE_LOOP_MS = 60 * 60 * 1000;
+let lastPurgeRun = 0;
+
+async function purgeInboundLeads() {
+  if (!appBaseUrl) return;
+  const startedAt = new Date().toISOString();
+  try {
+    const response = await fetch(`${appBaseUrl}/api/database/purge`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: true }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`purge ${response.status}: ${String(payload.error || "").slice(0, 200)}`);
+    const deleted = payload.deleted || {};
+    await writeSyncRun({
+      workspace_id: null,
+      run_type: "inbound-purge",
+      source: "render-worker",
+      status: "success",
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      records_seen: Number(payload.scannedConversations || 0),
+      records_written: Number(deleted.conversations || 0) + Number(deleted.leads || 0),
+    });
+    if (deleted.conversations || deleted.leads) {
+      console.info("reply_radar_inbound_purge", { leads: deleted.leads, conversations: deleted.conversations, messages: deleted.messages });
+    }
+  } catch (error) {
+    console.warn("reply_radar_inbound_purge_failed", { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 // ── AI pipeline ─────────────────────────────────────────────────────
 /**
  * Every reply should already be scored and drafted by the time somebody opens the inbox, so
@@ -553,6 +592,14 @@ async function runOnce() {
   if (Date.now() - lastRefreshRun >= REFRESH_LOOP_MS) {
     try { await refreshAllConversations(); } catch (error) { console.error("reply_radar_conversation_refresh_failed", error); }
     lastRefreshRun = Date.now();
+  }
+
+  // Sweep pre-existing inbound-first (non-campaign) leads out of the database
+  // every hour. Ingestion now rejects them up front, so this steadily drains the
+  // backlog that was written before the guard shipped.
+  if (Date.now() - lastPurgeRun >= PURGE_LOOP_MS) {
+    try { await purgeInboundLeads(); } catch (error) { console.error("reply_radar_inbound_purge_failed", error); }
+    lastPurgeRun = Date.now();
   }
 
   // Every cycle, so a reply that arrives while nobody is on the site is already analysed,
