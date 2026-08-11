@@ -895,18 +895,21 @@ function TemplatePicker({ templates, value, onPick, onSave, onDelete }: {
  */
 function DraftFeedPanel({ events, freshIds }: { events: AiAuditEvent[]; freshIds: string[] }) {
   const [visible, setVisible] = useState(10);
-  const allDrafts = events.filter((event) =>
-    event.action === "conversation.analyzed" || event.action === "draft.generated" || event.action === "draft.failed",
-  );
+  // Only show events where we captured the draft/references. Events logged before that persistence
+  // shipped will still show up in the audit log below, but there's nothing to display for them here.
+  const allDrafts = events.filter((event) => {
+    if (event.action !== "conversation.analyzed" && event.action !== "draft.generated" && event.action !== "draft.failed") return false;
+    if (event.action === "draft.failed") return true;
+    return Boolean(event.draft && event.draft.trim());
+  });
   const drafts = allDrafts.slice(0, visible);
   return (
     <section className="admin-panel ai-draft-feed-section">
       <div className="panel-heading">
         <div className="ai-audit-title">
           <h2 style={{ fontSize: 22 }}>Suggested reply feed</h2>
-          <span className="ai-audit-live"><i />live · 3s refresh</span>
+          <span className="ai-audit-live"><i />live</span>
         </div>
-        <small style={{ color: "var(--muted-2)" }}>Shows the 10 client voice examples fed in and the draft returned.</small>
       </div>
       {drafts.length === 0 ? (
         <p className="audit-empty">No drafts yet. New generations will stream in here.</p>
