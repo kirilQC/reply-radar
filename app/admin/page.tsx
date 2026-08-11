@@ -56,7 +56,6 @@ export default function AdminPage() {
   const [workspaceError, setWorkspaceError] = useState("");
   const [themePreset, setThemePreset] = useState("midnight");
   const [logos, setLogos] = useState<Record<string, string>>({});
-  const [documents, setDocuments] = useState<Record<string, string[]>>({});
   const [accentOverrides, setAccentOverrides] = useState<Record<string, string>>(() => {
     if (typeof window === "undefined") return {};
     try {
@@ -65,7 +64,6 @@ export default function AdminPage() {
     } catch { return {}; }
   });
   const logoInput = useRef<HTMLInputElement>(null);
-  const docsInput = useRef<HTMLInputElement>(null);
   const [heartbeat, setHeartbeat] = useState<HeartbeatPayload | null>(null);
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
@@ -206,15 +204,6 @@ export default function AdminPage() {
       void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, previousSlug: client.slug, name: client.name, slug: client.slug, clientBrief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", websiteUrl: client.website ?? "", anthropicModel: client.anthropicModel ?? null, logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) });
     };
     reader.readAsDataURL(file);
-  };
-  const handleDocuments = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    if (!files.length) return;
-    setDocuments((current) => ({
-      ...current,
-      [client.slug]: [...(current[client.slug] ?? []), ...files.map((file) => file.name)],
-    }));
-    event.target.value = "";
   };
   const copyWebhook = () => {
     void navigator.clipboard?.writeText(client.webhookUrl || `https://reply-radar-mauve.vercel.app/api/webhooks/heyreach/${client.slug}`);
@@ -437,26 +426,9 @@ export default function AdminPage() {
                           <input value={workspaceDraft.slug} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slug: event.target.value }))} placeholder="Enter workspace slug" />
                         </label>
                       </div>
-                      <button className="upload-zone" type="button" onClick={() => docsInput.current?.click()}>
-                        ＋{" "}
-                        <div>
-                          <strong>Drop client docs here</strong>
-                          <small>
-                            {documents[client.slug]?.length
-                              ? `${documents[client.slug].length} file${documents[client.slug].length === 1 ? "" : "s"} selected`
-                              : "PDF, DOCX, TXT, MD · stored in Supabase Storage"}
-                          </small>
-                        </div>
-                      </button>
-                      <input ref={docsInput} type="file" accept=".pdf,.doc,.docx,.txt,.md" multiple hidden onChange={handleDocuments} />
                     </section>
                   </div>}
                     {workspaceOpen && <div className="client-config-sections">
-                    <section className="admin-panel client-config-section" id="client-ai">
-                      <div className="panel-heading"><div><h2>AI context & voice</h2><p>Client-specific Anthropic drafting rules and review guardrails.</p></div><span className="connection-badge"><i /> Client-specific</span></div>
-                      <div className="field-row"><label className="field-label">MODEL<select value={workspaceDraft.anthropicModel} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, anthropicModel: event.target.value }))}><option value="">Select model</option><option>claude-opus-4-1-20250805</option><option>claude-opus-4-20250514</option><option>claude-sonnet-4-20250514</option><option>claude-3-7-sonnet-latest</option><option>claude-3-5-haiku-latest</option></select></label><label className="field-label">TEMPERATURE<input type="number" placeholder="Set temperature (0–1)" min="0" max="1" step="0.05" /><small>Lower values are more consistent; higher values are more varied.</small></label></div>
-                      <label className="field-label">CUSTOM SYSTEM PROMPT<textarea placeholder="Add client-specific drafting and sentiment rules" value={workspaceDraft.systemPrompt} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, systemPrompt: event.target.value }))} /></label>
-                    </section>
                     <section className="admin-panel client-config-section" id="client-scoring">
                       <div className="panel-heading"><div><h2>Scoring engine</h2><p>Client-specific queue weights and urgency thresholds.</p></div><span className="saved-dot">● Draft config</span></div>
                       <div className="field-row"><label className="field-label">HOT THRESHOLD<input type="number" placeholder="Set hot threshold" /></label><label className="field-label">WARM THRESHOLD<input type="number" placeholder="Set warm threshold" /></label></div>

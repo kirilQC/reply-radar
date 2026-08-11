@@ -319,7 +319,7 @@ export function InboxPage() {
   // (which then triggered another round of paid AI calls, and another re-sort).
   const [selectedId, setSelectedId] = useState(""),
     [activeNav, setActiveNav] = useState("inbox"),
-    [filter, setFilter] = useState("All follow-ups"),
+    [filter, setFilter] = useState("today"),
     [sort, setSort] = useState("score-desc"),
     [search, setSearch] = useState(""),
     [theme, setTheme] = useState("midnight"),
@@ -1595,9 +1595,8 @@ export function InboxPage() {
                       </button>
                     ))}
                   </div>
-                  {clientParam ? (
-                    <div className="unified-filter-wrap">
-                      <button className="filter-button unified-filter-toggle" onClick={() => { setFilterDropdownOpen((v) => !v); setFilterSub(null); }}>
+                  <div className="unified-filter-wrap">
+                    <button className="filter-button unified-filter-toggle" onClick={() => { setFilterDropdownOpen((v) => !v); setFilterSub(null); }}>
                         Filters{(campaignFilter || senderFilter || sentimentFilter || sort !== "score-desc" || ["Starred", "Hot", "Warm", "Nurture"].includes(filter)) ? " ●" : ""}
                       </button>
                       {filterDropdownOpen && (
@@ -1652,39 +1651,6 @@ export function InboxPage() {
                         </div>
                       )}
                     </div>
-                  ) : (
-                    <>
-                      <select
-                        className="filter-button"
-                        aria-label="Filter by tier"
-                        value={["Starred", "Hot", "Warm", "Nurture"].includes(filter) ? filter : ""}
-                        onChange={(event) => {
-                          setFilter(event.target.value || "All follow-ups");
-                          setSelectedId("");
-                        }}
-                      >
-                        <option value="">Tier filter</option>
-                        <option value="Starred">Starred</option>
-                        <option value="Hot">Hot</option>
-                        <option value="Warm">Warm</option>
-                        <option value="Nurture">Nurture</option>
-                      </select>
-                      <select
-                        className="filter-button"
-                        aria-label="Sort conversations"
-                        value={sort}
-                        onChange={(event) => {
-                          setSort(event.target.value);
-                          setSelectedId("");
-                        }}
-                      >
-                        <option value="score-desc">Sort: Score</option>
-                        <option value="newest">Sort: Newest</option>
-                        <option value="oldest">Sort: Oldest</option>
-                        <option value="name">Sort: Name</option>
-                      </select>
-                    </>
-                  )}
                   <div className="heading-actions inbox-actions">
                     <button className="secondary-button">
                       Export <span>↓</span>
