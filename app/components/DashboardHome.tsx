@@ -18,6 +18,38 @@ const defaultAppearance: AppearancePrefs = {
 const initialClients: Array<{ name: string; slug: string; tone: string; leads: number; replies: number; status: string; logoUrl?: string }> = [];
 const initialProfiles: string[][] = [];
 type DashboardAnalytics = { totalReplies?: number; trend?: number[]; queueMix?: { hot: number; warm: number; nurture: number } };
+type Summary = {
+  repliesToday: number | null; repliesYesterday: number | null; repliesThisWeek: number | null;
+  repliesThisMonth: number | null; repliesAllTime: number | null; clients: number | null;
+  leads: number | null; monthLabel?: string;
+};
+
+const number = (value: number | null | undefined) => (value == null ? "—" : value.toLocaleString());
+
+/**
+ * A headline number with the period it covers and one line of context beneath it.
+ *
+ * The context line is the point: "12 replies" alone says nothing about whether that is a good day.
+ */
+function StatTile({ label, value, hint, tone }: { label: string; value: string; hint: string; tone?: string }) {
+  return (
+    <article className="dashboard-stat-tile">
+      <span className="dashboard-stat-label">{label}</span>
+      <strong className="dashboard-stat-value" style={tone ? { color: tone } : undefined}>{value}</strong>
+      <small className="dashboard-stat-hint">{hint}</small>
+    </article>
+  );
+}
+
+/** Reads the saved time zone so "today" means the reader's today, not the server's. */
+const savedTimeZone = () => {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("reply-radar-prefs:general") || "{}");
+    return String(parsed?.appearance?.timeZone || defaultAppearance.timeZone);
+  } catch {
+    return defaultAppearance.timeZone;
+  }
+};
 
 export default function DashboardHome() {
   const [clients, setClients] = useState(initialClients);
@@ -25,6 +57,7 @@ export default function DashboardHome() {
   const [appearance, setAppearance] = useState<AppearancePrefs>(defaultAppearance);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [analytics, setAnalytics] = useState<DashboardAnalytics>({});
+  const [summary, setSummary] = useState<Summary | null>(null);
   useEffect(() => {
     try {
       const savedClients = window.localStorage.getItem("reply-radar-workspaces:v2");
@@ -51,6 +84,12 @@ export default function DashboardHome() {
   }).catch(() => undefined);
   useEffect(() => { loadProfiles(); }, []);
   useEffect(() => { fetch("/api/analytics", { cache: "no-store" }).then((response) => response.json()).then(setAnalytics).catch(() => setAnalytics({})); }, []);
+  useEffect(() => {
+    fetch(`/api/analytics/summary?timeZone=${encodeURIComponent(savedTimeZone())}`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => { if (payload?.ok) setSummary(payload as Summary); })
+      .catch(() => undefined);
+  }, []);
   useEffect(() => {
     const refresh = () => {
       try {
@@ -91,7 +130,33 @@ export default function DashboardHome() {
           </div>
         </header>
         <main className="dashboard-home">
-          <section>
+          <section className="dashboard-stats-section">
+            <div className="dashboard-stats-grid">
+              <StatTile
+                label="Replies today"
+                value={number(summary?.repliesToday)}
+                hint={
+                  summary?.repliesToday == null || summary?.repliesYesterday == null
+                    ? "Since midnight"
+                    : summary.repliesToday === summary.repliesYesterday
+                      ? "Same as yesterday"
+                      : `${summary.repliesToday > summary.repliesYesterday ? "▲" : "▼"} ${Math.abs(summary.repliesToday - summary.repliesYesterday).toLocaleString()} vs yesterday`
+                }
+              />
+              <StatTile label="This week" value={number(summary?.repliesThisWeek)} hint="Since Monday" />
+              <StatTile label="This month" value={number(summary?.repliesThisMonth)} hint={summary?.monthLabel ?? "Calendar month"} />
+              <StatTile label="All-time replies" value={number(summary?.repliesAllTime)} hint={summary?.leads == null ? "Every reply stored" : `Across ${summary.leads.toLocaleString()} leads`} />
+              {/* Counted from the workspaces table rather than from the browser's saved copy, which can
+                  lag behind a client someone else added. */}
+              <StatTile
+                label="Clients set up"
+                value={number(summary?.clients ?? (clients.length || null))}
+                hint={`${profiles.length} profile${profiles.length === 1 ? "" : "s"}`}
+                tone="var(--accent)"
+              />
+            </div>
+          </section>
+          <section className="dashboard-clients-section">
             <div className="section-heading">
               <div>
                 <h2>Client workspaces</h2>
@@ -112,7 +177,7 @@ export default function DashboardHome() {
               ))}
             </div>
           </section>
-          <section>
+          <section className="dashboard-profiles-section">
             <div className="section-heading">
               <div>
                 <h2>Profiles</h2>

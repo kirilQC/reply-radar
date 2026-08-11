@@ -211,6 +211,8 @@ export default function DatabasePage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
+  const [totalLeads, setTotalLeads] = useState<number | null>(null);
+  const [totalFiltered, setTotalFiltered] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
@@ -271,6 +273,8 @@ export default function DatabasePage() {
         );
         setCursor(payload.nextCursor ?? null);
         setHasMore(Boolean(payload.hasMore));
+        setTotalLeads(typeof payload.totalLeads === "number" ? payload.totalLeads : null);
+        setTotalFiltered(Boolean(payload.filtered));
       } catch (loadError) {
         setError(
           loadError instanceof Error
@@ -463,7 +467,15 @@ export default function DatabasePage() {
           <div className="database-heading">
             <div>
               <h1>Lead Database</h1>
-              <div className="database-record-count">{leads.length} loaded</div>
+              {/* The count is what the database holds, not what this page happens to have fetched.
+                  Filters change what is being counted, so the wording changes with them. */}
+              <div className="database-record-count">
+                {totalLeads == null
+                  ? `${leads.length.toLocaleString()} leads`
+                  : totalFiltered
+                    ? `${totalLeads.toLocaleString()} matching lead${totalLeads === 1 ? "" : "s"}`
+                    : `${totalLeads.toLocaleString()} total lead${totalLeads === 1 ? "" : "s"} in the database`}
+              </div>
             </div>
             <div className="database-heading-actions"><button className="secondary-button" onClick={() => void runPurge(false)} disabled={Boolean(purgeBusy)}>{purgeBusy === "preview" ? "Checking…" : "Find inbound-first leads"}</button><button className="secondary-button" onClick={exportCsv} disabled={exporting}>{exporting ? "Exporting…" : "Export CSV ↓"}</button><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
           </div>

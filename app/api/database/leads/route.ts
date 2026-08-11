@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../../lib/person-name";
+import { countRows } from "../../../lib/rest-count";
 type Row = Record<string, unknown>;
 const field = (value: unknown, key: string) =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -177,6 +178,17 @@ export async function GET(request: Request) {
       const recentLeadIds = new Set(recentConversations.map((row) => String(row.lead_id)));
       rows = rows.filter((lead) => recentLeadIds.has(String(lead.id)));
     }
+    // Sender, campaign and time-range filters are applied in memory, so in that case the filtered set
+    // in hand already is the answer. Otherwise ask the database, since paging only ever sees one page.
+    // The cursor is left out either way: it narrows to "older than this page", which is a paging
+    // detail, not something the reader is filtering by.
+    const countFilters = [
+      selectedWorkspace ? `workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}` : "",
+      search ? `or=(name.ilike.*${encodeURIComponent(search)}*,company.ilike.*${encodeURIComponent(search)}*,role.ilike.*${encodeURIComponent(search)}*,linkedin_id.ilike.*${encodeURIComponent(search)}*)` : "",
+    ].filter(Boolean).join("&");
+    const totalLeads = metadataFiltering
+      ? rows.length
+      : await countRows(url, key, `rr_leads?select=id${countFilters ? `&${countFilters}` : ""}`);
     const page = rows.slice(0, limit);
     const leadIds = page.map((lead) => String(lead.id));
     const conversations = leadIds.length
@@ -299,6 +311,8 @@ export async function GET(request: Request) {
         logoUrl: workspace.logo_url,
       })),
       filterOptions,
+      totalLeads,
+      filtered: Boolean(selectedWorkspace || search || metadataFiltering),
       hasMore: rows.length > limit,
       nextCursor:
         rows.length > limit && page.length
