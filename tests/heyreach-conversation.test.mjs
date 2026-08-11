@@ -35,7 +35,10 @@ test("appends the webhook reply without duplicating a history message", () => {
   const merged = mergeConversationMessages(history, webhook);
   assert.equal(merged.length, 1);
   assert.equal(merged[0].body, "Definitely");
-  assert.equal(merged[0].raw.reply_radar.source, "webhook");
+  // The API history row stays canonical because it carries the real message id; the webhook copy is
+  // kept beside it rather than replacing it, so nothing the webhook knew is lost to the merge.
+  assert.equal(merged[0].raw.reply_radar.source, "history");
+  assert.equal(merged[0].raw.webhook_message.reply_radar.source, "webhook");
 });
 
 test("keeps the complete thread in chronological order", () => {
