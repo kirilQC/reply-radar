@@ -55,6 +55,17 @@ async function writeSyncRun(payload) {
   }
 }
 
+/**
+ * Stamps a fresh worker heartbeat. The health page reads the newest heartbeat row's `started_at`
+ * and calls the worker stale after five minutes, so long-running background work has to say it is
+ * still alive as it goes — otherwise a worker busy analysing replies reports itself as down.
+ */
+async function touchHeartbeat() {
+  const now = new Date().toISOString();
+  await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "success", started_at: now, finished_at: now, records_seen: 0, records_written: 0 })
+    .catch((error) => console.warn("reply_radar_heartbeat_touch_failed", { reason: error instanceof Error ? error.message : String(error) }));
+}
+
 async function syncWorkspace(workspace) {
   const startedAt = new Date().toISOString();
   let status = "success";
@@ -239,15 +250,25 @@ async function refreshAllConversations() {
  * already refuse to redo work that is cached, which is what stops a sweep from re-billing.
  */
 const appBaseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
-// Conversations put through the pipeline per cycle. Each costs up to three Anthropic calls,
-// so this bounds both spend and how long a cycle can run.
+// Conversations put through the pipeline per client per cycle. Each costs up to three Anthropic
+// calls, so this bounds both spend and how long one client can hold the sweep.
 const AI_BATCH_SIZE = Math.max(1, Number(process.env.AI_BATCH_SIZE || 10));
 // How far back to look for replies that still need work, newest reply first.
 const AI_CANDIDATE_LIMIT = 200;
+// Conversations analysed at the same time. Each conversation is three sequential Anthropic calls
+// that mostly sit waiting, so a handful in flight multiplies throughput without bursting the API.
+const AI_CONCURRENCY = Math.max(1, Number(process.env.AI_CONCURRENCY || 4));
+// Wall clock the sweep may use before it stops starting new work and lets the cycle finish. The
+// backlog is worked down over successive cycles instead of one cycle running away with the
+// process, which would delay every HeyReach connection check behind it.
+const AI_CYCLE_BUDGET_MS = Math.max(30, Number(process.env.AI_CYCLE_BUDGET_SECONDS || 600)) * 1000;
 // A lead AI Ark could not match is left alone for a week. AI Ark bills five attempts per call,
 // so retrying every cycle would spend real money re-learning the same answer.
 const ENRICHMENT_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
 let missingBaseUrlWarned = false;
+// Slug of the client the previous cycle ran out of budget on, so the next cycle resumes there
+// rather than restarting at the first client and starving the rest of the list forever.
+let aiWorkspaceCursor = "";
 
 const radarOf = (rawData) => {
   const raw = rawData && typeof rawData === "object" ? rawData : {};
@@ -276,6 +297,22 @@ async function chunked(ids, size, run) {
 }
 
 /**
+ * Runs `task` over `items` with at most `limit` of them in flight. Deliberately minimal: the sweep
+ * only needs the waiting overlapped, and nothing downstream cares what order they finish in.
+ */
+async function inParallel(items, limit, task) {
+  let next = 0;
+  const runner = async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      await task(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runner));
+}
+
+/**
  * A lead is worth enriching once, if AI Ark can identify them at all. Enrichment supplies the
  * headline, industry, company size and profile photo, so it runs before ICP scoring — and the
  * ICP score is kept forever, which makes it worth scoring against the fuller picture.
@@ -290,14 +327,20 @@ function needsEnrichment(lead) {
 
 /** Replies whose enrichment, draft, sentiment, ICP score or follow-up score is still missing. */
 async function conversationsNeedingAi(workspace) {
+  // Deliberately not filtered on last_message_direction. That column says who spoke *last*, so
+  // filtering on "inbound" silently excluded every conversation a teammate had already replied
+  // to, plus every row where the column was never populated — which is most of the inbox. What
+  // qualifies a conversation is that the lead replied at all, and that is checked below.
   const candidates = await supabase(
-    `rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&last_message_direction=eq.inbound&order=last_message_at.desc.nullslast&limit=${AI_CANDIDATE_LIMIT}`,
+    `rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&order=last_message_at.desc.nullslast&limit=${AI_CANDIDATE_LIMIT}`,
   );
   if (!candidates || !candidates.length) return { work: [], leadsById: new Map() };
 
-  // Per-reply AI state lives on the latest inbound message of each conversation.
-  const inbound = await chunked(candidates.map((c) => c.id), 40, (batch) =>
-    supabase(`rr_messages?select=conversation_id,sent_at,raw_data&conversation_id=in.(${batch.join(",")})&direction=eq.inbound&order=sent_at.desc`),
+  // Per-reply AI state lives on the latest inbound message of each conversation. Batched small
+  // with an explicit ceiling: PostgREST caps rows per request, and a truncated page here would
+  // hide a conversation's newest reply and stall it out of the sweep every cycle.
+  const inbound = await chunked(candidates.map((c) => c.id), 20, (batch) =>
+    supabase(`rr_messages?select=conversation_id,sent_at,raw_data&conversation_id=in.(${batch.join(",")})&direction=eq.inbound&order=sent_at.desc&limit=5000`),
   );
   const latestInbound = new Map();
   for (const row of inbound) {
@@ -401,12 +444,29 @@ async function runAiPipeline() {
     return;
   }
   const startedAt = new Date().toISOString();
-  const workspaces = await supabase("rr_workspaces?select=id,slug,name,client_brief,anthropic_model,custom_system_prompt,guardrails&order=created_at.asc");
+  const deadline = Date.now() + AI_CYCLE_BUDGET_MS;
+  const workspaces = (await supabase("rr_workspaces?select=id,slug,name,client_brief,anthropic_model,custom_system_prompt,guardrails&order=created_at.asc")) || [];
+  // Start at the client the previous cycle ran out of budget on and wrap around from there, so a
+  // large backlog at the top of the list cannot keep the clients below it permanently unprocessed.
+  // A cursor naming a client that no longer exists resolves to -1 and falls back to the start.
+  const resumeAt = Math.max(0, workspaces.findIndex((workspace) => String(workspace.slug) === aiWorkspaceCursor));
+  const ordered = [...workspaces.slice(resumeAt), ...workspaces.slice(0, resumeAt)];
+
   let processed = 0;
   let steps = 0;
   let errors = 0;
+  let lastHeartbeat = Date.now();
+  let ranOutOn = "";
 
-  for (const workspace of workspaces || []) {
+  for (const workspace of ordered) {
+    if (Date.now() >= deadline) {
+      ranOutOn = String(workspace.slug || "");
+      break;
+    }
+    if (Date.now() - lastHeartbeat >= 60_000) {
+      lastHeartbeat = Date.now();
+      await touchHeartbeat();
+    }
     let work = [];
     let leadsById = new Map();
     try {
@@ -416,7 +476,13 @@ async function runAiPipeline() {
       console.warn("reply_radar_ai_pipeline_scan_error", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
       continue;
     }
-    for (const item of work) {
+    if (!work.length) continue;
+
+    await inParallel(work, AI_CONCURRENCY, async (item) => {
+      if (Date.now() >= deadline) {
+        ranOutOn = String(workspace.slug || "");
+        return;
+      }
       try {
         const lead = leadsById.get(String(item.conv.lead_id || ""));
         steps += await runAiForConversation(workspace, item, String((lead && lead.name) || ""));
@@ -425,11 +491,15 @@ async function runAiPipeline() {
         errors++;
         console.warn("reply_radar_ai_pipeline_error", { workspace: workspace.slug, conversation: item.conv.id, error: error instanceof Error ? error.message : String(error) });
       }
-      // Spread the Anthropic calls out rather than bursting them.
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-    }
-    if (work.length) console.info("reply_radar_ai_pipeline_workspace", { workspace: workspace.slug, conversations: work.length });
+      if (Date.now() - lastHeartbeat >= 60_000) {
+        lastHeartbeat = Date.now();
+        await touchHeartbeat();
+      }
+    });
+    console.info("reply_radar_ai_pipeline_workspace", { workspace: workspace.slug, conversations: work.length });
   }
+  aiWorkspaceCursor = ranOutOn;
+  if (ranOutOn) console.info("reply_radar_ai_pipeline_budget_reached", { resumeAt: ranOutOn, budgetSeconds: AI_CYCLE_BUDGET_MS / 1000 });
 
   if (processed || errors) {
     await writeSyncRun({ workspace_id: null, run_type: "ai-pipeline", source: "render-worker", status: errors > 0 ? "partial" : "success", started_at: startedAt, finished_at: new Date().toISOString(), records_seen: processed + errors, records_written: steps, error_text: errors > 0 ? `${errors} conversations failed AI processing` : null });

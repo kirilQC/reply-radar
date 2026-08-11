@@ -26,7 +26,9 @@ Vercel and Render should have the server-side values below (never expose service
 - `POLL_INTERVAL_SECONDS` (usually `120`)
 - `WORKER_SERVICE_URL` (optional, used for health visibility)
 - `APP_BASE_URL` (Render only — the public URL of the Vercel deployment, e.g. `https://replyradar.example.com`). The worker calls the app's AI routes over HTTP so new replies are analysed, ICP-scored and follow-up-scored in the background; without it the AI sweep logs that it is skipped and the rest of the worker carries on.
-- `AI_BATCH_SIZE` (Render only, optional, default `10`) — conversations put through the AI pipeline per cycle. Each one costs up to three Anthropic calls plus, for a lead seen for the first time, one AI Ark lookup.
+- `AI_BATCH_SIZE` (Render only, optional, default `10`) — conversations put through the AI pipeline per client per cycle. Each one costs up to three Anthropic calls plus, for a lead seen for the first time, one AI Ark lookup.
+- `AI_CONCURRENCY` (Render only, optional, default `4`) — conversations analysed at the same time.
+- `AI_CYCLE_BUDGET_SECONDS` (Render only, optional, default `600`) — how long one AI sweep may run before it stops starting new work. When the budget runs out the worker remembers which client it stopped at and resumes there next cycle, so a large backlog at one client cannot starve the others. The sweep stamps a fresh `rr_sync_runs` heartbeat as it goes, so a long sweep does not make the health page report the worker stale.
 - `AI_ARK_API_KEY` (Vercel) — the worker reaches AI Ark through the app's `/api/ai/enrich` route, so the key belongs on Vercel, not Render.
 
 The Supabase service-role key must remain server-side. The public Supabase anon key may be used by a browser client only if RLS is designed correctly; this app currently favors server API routes.
