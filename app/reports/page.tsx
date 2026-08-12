@@ -269,6 +269,24 @@ export default function ReportsPage() {
   const [composed, setComposed] = useState<Composed | null>(null);
   const [messageText, setMessageText] = useState("");
   const [composing, setComposing] = useState(false);
+
+  /**
+   * The written sections as they stood when the email was last written, as a JSON string.
+   *
+   * The document needs nothing from the model to stay current — `WrittenSection` prints `written`
+   * verbatim, so the pages change as fast as typing. The email is the opposite: the sections are folded
+   * into its bullets, so it is out of date the moment one of them changes, and comparing against this is
+   * how the page knows.
+   */
+  const [composedFrom, setComposedFrom] = useState("");
+
+  /**
+   * Whether the email has been edited by hand since it was written.
+   *
+   * Once it has, nothing rewrites it without being asked. Silently replacing a paragraph somebody typed
+   * because they then fixed a typo in the recap box would be the worst kind of helpful.
+   */
+  const [messageEdited, setMessageEdited] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState("");
 
@@ -375,6 +393,8 @@ export default function ReportsPage() {
     setSavedNotice("");
     setSavedLayout(null);
     setDocRevealed(false);
+    setComposedFrom("");
+    setMessageEdited(false);
     setError("");
   };
 
@@ -607,6 +627,60 @@ export default function ReportsPage() {
     [workspaceSlug, activeWorkspace, template, reportTitle, preparedBy, notes, written, runPrompt, refreshSaved],
   );
 
+  /**
+   * Writes the headline, the narrative and the email from a report and the account manager's sections.
+   *
+   * Everything it needs is an argument. It runs both at the tail of `generate`, before React has
+   * re-rendered with the report just fetched, and from the live refresh below — so reading `report` out
+   * of state here would sometimes compose against the previous one.
+   */
+  const composeCopy = useCallback(
+    async (data: ReportData, sections: Record<string, string>, chosen: ReportTemplate): Promise<Composed | null> => {
+      const signature = JSON.stringify(sections);
+      setComposing(true);
+      try {
+        const response = await fetch("/api/reports/compose", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            // The prompt as it stands on the config screen, not as the template stores it.
+            prompt: runPrompt.trim() || chosen.prompt,
+            templateId: chosen.id,
+            periodLabel: data.periodLabel,
+            clients: data.clients,
+            // What the account manager typed. Treated as fact by the writer, and the reason the message
+            // can mention a booked meeting that appears in no table.
+            written: sections,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) {
+          // The report itself is valid and on screen; only the copy failed. Saying so beats replacing a
+          // working document with an error, and it still gets archived — without the write-up.
+          setError(`The email could not be written: ${payload.error || response.status}. The report itself is fine.`);
+          return null;
+        }
+        const copy: Composed = {
+          headline: String(payload.headline || ""),
+          narrative: String(payload.narrative || ""),
+          message: String(payload.message || ""),
+        };
+        setComposed(copy);
+        setMessageText(copy.message);
+        setMessageEdited(false);
+        setComposedFrom(signature);
+        setError("");
+        return copy;
+      } catch (err) {
+        setError(`The email could not be written: ${err instanceof Error ? err.message : "the request failed"}.`);
+        return null;
+      } finally {
+        setComposing(false);
+      }
+    },
+    [runPrompt],
+  );
+
   const generate = useCallback(async () => {
     if (!workspaceSlug) {
       setError("Pick a client first.");
@@ -640,42 +714,7 @@ export default function ReportsPage() {
 
       // Only a template carries a prompt, so only a template gets written copy. Build-your-own keeps
       // the deterministic summary that is computed from the numbers.
-      let copy: Composed | null = null;
-      if (template) {
-        setComposing(true);
-        try {
-          const composeResponse = await fetch("/api/reports/compose", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              // The prompt as it stands on the config screen, not as the template stores it.
-              prompt: runPrompt.trim() || template.prompt,
-              templateId: template.id,
-              periodLabel: payload.periodLabel,
-              clients: payload.clients,
-              // What the account manager typed. Treated as fact by the writer, and the reason the
-              // message can mention a booked meeting that appears in no table.
-              written,
-            }),
-          });
-          const composePayload = await composeResponse.json().catch(() => ({}));
-          if (composeResponse.ok && composePayload.ok) {
-            copy = {
-              headline: String(composePayload.headline || ""),
-              narrative: String(composePayload.narrative || ""),
-              message: String(composePayload.message || ""),
-            };
-            setComposed(copy);
-            setMessageText(copy.message);
-          } else {
-            // The report itself is valid and on screen; only the copy failed. Saying so beats replacing
-            // a working document with an error, and it still gets archived — without the write-up.
-            setError(`Report generated, but the write-up failed: ${composePayload.error || composeResponse.status}`);
-          }
-        } finally {
-          setComposing(false);
-        }
-      }
+      const copy = template ? await composeCopy(payload, written, template) : null;
 
       // Archived without being asked. Generating a client report is the act of record; making that
       // durable should not depend on remembering to press a second button afterwards.
@@ -695,9 +734,27 @@ export default function ReportsPage() {
     fileReport,
     liveCampaigns,
     campaignPick,
-    runPrompt,
+    composeCopy,
     written,
   ]);
+
+  /**
+   * Keeps the email in step with the sections as they are typed.
+   *
+   * Debounced, because every keystroke in the recap box would otherwise be a request. A hand-edited
+   * email is left alone — the banner in the compose panel offers a rewrite instead, so discarding
+   * somebody's wording is always their decision.
+   */
+  const writtenKey = useMemo(() => JSON.stringify(written), [written]);
+  const emailStale = Boolean(report && template && composed) && writtenKey !== composedFrom;
+
+  useEffect(() => {
+    if (!emailStale || messageEdited || composing || loading || !report || !template) return;
+    const timer = setTimeout(() => {
+      composeCopy(report, written, template);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [emailStale, messageEdited, composing, loading, report, template, written, composeCopy]);
 
   const downloadPdf = () => {
     if (!report || overLimit) return;
@@ -1034,79 +1091,86 @@ export default function ReportsPage() {
               </p>
             </div>
 
-            {/* The client is settled on the way in, so it is shown as context rather than as a control —
-                changing it here would leave the hub behind it describing somebody else. */}
-            <span className="config-label">Client</span>
-            <div className="config-static">{clientLabel || "No client selected"}</div>
+            {/* Grouped rather than stacked. The panel asks for a dozen things and they are not equally
+                interesting; without the grouping the prompt box and the "prepared by" field carry the
+                same weight, which is what made this read as a pile of inputs. */}
+            <div className="config-group">
+              {/* The client is settled on the way in, so it is shown as context rather than as a control —
+                  changing it here would leave the hub behind it describing somebody else. */}
+              <span className="config-label">Client</span>
+              <div className="config-static">{clientLabel || "No client selected"}</div>
 
-            <span className="config-label">Period</span>
-            <div className="config-period-grid">
-              {PERIOD_OPTIONS.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className={`config-period ${period === option ? "is-active" : ""}`}
-                  onClick={() => setPeriod(option)}
-                >
-                  {periodLabel(option)}
-                </button>
-              ))}
-            </div>
-
-            {period === "custom" && (
-              <div className="config-custom-range">
-                <label>
-                  From
-                  <input type="date" value={customSince} onChange={(e) => setCustomSince(e.target.value)} />
-                </label>
-                <label>
-                  To
-                  <input type="date" value={customUntil} onChange={(e) => setCustomUntil(e.target.value)} />
-                </label>
+              <span className="config-label">Period</span>
+              <div className="config-period-grid">
+                {PERIOD_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={`config-period ${period === option ? "is-active" : ""}`}
+                    onClick={() => setPeriod(option)}
+                  >
+                    {periodLabel(option)}
+                  </button>
+                ))}
               </div>
-            )}
+
+              {period === "custom" && (
+                <div className="config-custom-range">
+                  <label>
+                    From
+                    <input type="date" value={customSince} onChange={(e) => setCustomSince(e.target.value)} />
+                  </label>
+                  <label>
+                    To
+                    <input type="date" value={customUntil} onChange={(e) => setCustomUntil(e.target.value)} />
+                  </label>
+                </div>
+              )}
+            </div>
 
             {/* Which campaigns the report may talk about. Read from HeyReach on the way in, so the
                 document, the write-up and the archived copy all describe the same set. */}
-            <span className="config-label">Campaigns</span>
-            {campaignsLoading ? (
-              <div className="config-static">Asking HeyReach…</div>
-            ) : liveCampaigns.length ? (
-              <>
-                <div className="config-sections config-campaigns">
-                  {liveCampaigns.map((row) => {
-                    const on = campaignPick.has(row.id);
-                    return (
-                      <label key={row.id} className={`config-section ${on ? "is-on" : ""}`}>
-                        <input type="checkbox" checked={on} onChange={() => toggleCampaign(row.id)} />
-                        <span>
-                          <strong>{row.name}</strong>
-                          <em>
-                            {CAMPAIGN_STATE_LABELS[row.state] || row.status || "Unknown"} ·{" "}
-                            {row.progress.pending.toLocaleString()} pending ·{" "}
-                            {row.progress.contacted.toLocaleString()} contacted
-                          </em>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-                <p className="config-hint">
-                  {campaignPick.size} of {liveCampaigns.length} ticked. Only ticked campaigns appear in
-                  the report. Active ones — live with leads still to contact — are ticked to begin with;
-                  paused and worked-through campaigns are listed below them to be opted into.
-                </p>
-              </>
-            ) : (
-              <div className="config-static">{campaignsNote || "No campaigns found for this client."}</div>
-            )}
-            {liveCampaigns.length > 0 && campaignsNote && <div className="config-note">{campaignsNote}</div>}
+            <div className="config-group">
+              <span className="config-label">Campaigns</span>
+              {campaignsLoading ? (
+                <div className="config-static">Asking HeyReach…</div>
+              ) : liveCampaigns.length ? (
+                <>
+                  <div className="config-sections config-campaigns">
+                    {liveCampaigns.map((row) => {
+                      const on = campaignPick.has(row.id);
+                      return (
+                        <label key={row.id} className={`config-section ${on ? "is-on" : ""}`}>
+                          <input type="checkbox" checked={on} onChange={() => toggleCampaign(row.id)} />
+                          <span>
+                            <strong>{row.name}</strong>
+                            <em>
+                              {CAMPAIGN_STATE_LABELS[row.state] || row.status || "Unknown"} ·{" "}
+                              {row.progress.pending.toLocaleString()} pending ·{" "}
+                              {row.progress.contacted.toLocaleString()} contacted
+                            </em>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="config-hint">
+                    {campaignPick.size} of {liveCampaigns.length} ticked. Only ticked campaigns appear in
+                    the report. Active ones — live with leads still to contact — are ticked to begin with;
+                    paused and worked-through campaigns are listed below them to be opted into.
+                  </p>
+                </>
+              ) : (
+                <div className="config-static">{campaignsNote || "No campaigns found for this client."}</div>
+              )}
+              {liveCampaigns.length > 0 && campaignsNote && <div className="config-note">{campaignsNote}</div>}
+            </div>
 
             {/* The half of the report the app cannot know. Booked meetings, why a campaign was paused,
                 what was promised on a call — none of it is in HeyReach or in our tables, so it is asked
                 for here and printed verbatim. The write-up is told to agree with it, not rewrite it. */}
             {writtenFields.length > 0 && (
-              <>
+              <div className="config-group">
                 <span className="config-label">Your sections</span>
                 {writtenFields.map((id) => (
                   <div key={id} className="config-written">
@@ -1127,15 +1191,16 @@ export default function ReportsPage() {
                 <p className="config-hint">
                   Printed as you type them. Anything left blank is left out of the report rather than
                   filled in for you.
+                  {composed && " The email is rewritten to match a moment after you stop typing."}
                 </p>
-              </>
+              </div>
             )}
 
             {/* Almost everything that makes one report read differently from another is in here, so it
                 is on the page rather than behind an edit-the-template detour. Tweaks apply to this run
                 only — the template everybody else runs is left alone. */}
             {template && (
-              <>
+              <div className="config-group">
                 <label className="config-label" htmlFor="run-prompt">
                   Prompt
                 </label>
@@ -1150,113 +1215,122 @@ export default function ReportsPage() {
                     ? "The template's prompt. Edit it for this report without changing the template."
                     : "Edited for this report only. The saved template is unchanged."}
                 </p>
-              </>
-            )}
-
-            <span className="config-label">Cover page</span>
-            <input
-              className="config-input"
-              placeholder="Report title"
-              value={reportTitle}
-              onChange={(e) => setReportTitle(e.target.value)}
-            />
-            <input
-              className="config-input"
-              placeholder="Prepared by"
-              value={preparedBy}
-              onChange={(e) => setPreparedBy(e.target.value)}
-            />
-            <textarea
-              className="config-textarea"
-              placeholder="Optional note that appears at the end of the report (e.g. what to look at first)."
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-
-            {template ? (
-              // The layout is the template, so it is stated rather than offered. One line each, because
-              // this is a config screen for the last few decisions — not a place to rebuild the report.
-              <p className="config-hint config-layout">
-                {template.output === "email" ? "Produces an email" : "Produces a PDF"} from{" "}
-                {template.pages.length === 1 ? "1 page" : `${template.pages.length} pages`}:{" "}
-                {template.pages.map((page) => page.map((id) => SECTION_LABELS[id]).join(", ")).join(" / ")}.
-                {template.output === "email" && " The pages are there if you want the PDF too."}
-              </p>
-            ) : (
-              <>
-                <span className="config-label">Sections</span>
-                <div className="config-sections">
-                  {SECTIONS.map((section) => {
-                    const on = sections.has(section.id);
-                    return (
-                      <label
-                        key={section.id}
-                        className={`config-section ${on ? "is-on" : ""} ${section.alwaysOn ? "is-locked" : ""}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={on}
-                          disabled={section.alwaysOn}
-                          onChange={() => toggleSection(section.id)}
-                        />
-                        <span>
-                          <strong>{section.label}</strong>
-                          <em>{section.blurb}</em>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-
-                <div className="page-meter">
-                  <div className="page-meter-top">
-                    <span>Page budget</span>
-                    <b>
-                      {budget.pageCount} / {PAGE_LIMIT}
-                    </b>
-                  </div>
-                  <div className="page-meter-track">
-                    {Array.from({ length: Math.max(PAGE_LIMIT, budget.pageCount) }).map((_, index) => (
-                      <i
-                        key={index}
-                        className={index >= PAGE_LIMIT ? "over" : index < budget.pageCount ? "filled" : ""}
-                      />
-                    ))}
-                  </div>
-                  {overLimit && (
-                    <div className="page-meter-warning">
-                      {budget.overflowPages === 1 ? "One page" : `${budget.overflowPages} pages`} over. Drop{" "}
-                      {trimAdvice.map((id) => SECTION_LABELS[id]).join(" and ")} to fit.
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            <button className="config-generate" onClick={generate} disabled={loading || overLimit}>
-              {loading ? "Generating…" : composing ? "Writing…" : "Generate report"}
-            </button>
-            {error && <div className="config-error">{error}</div>}
-
-            {report && (
-              <div className="config-downloads">
-                {/* Two clicks for an email report, deliberately. The first renders the pages so they can
-                    be read before the print dialog opens over them. */}
-                {showDocument ? (
-                  <button onClick={downloadPdf} disabled={overLimit}>
-                    Download PDF
-                  </button>
-                ) : (
-                  <button onClick={() => setDocRevealed(true)}>Generate PDF</button>
-                )}
-                <button onClick={downloadCsv}>Download CSV</button>
               </div>
             )}
-            {/* Archiving happens on its own, so this reports rather than asks. It still has to be visible:
-                a save that failed is the one case where the report on screen is the only copy. */}
-            {(saving || savedNotice) && (
-              <div className="config-note">{saving ? "Filing to the archive…" : savedNotice}</div>
-            )}
+
+            <div className="config-group">
+              <span className="config-label">Cover page</span>
+              <input
+                className="config-input"
+                placeholder="Report title"
+                value={reportTitle}
+                onChange={(e) => setReportTitle(e.target.value)}
+              />
+              <input
+                className="config-input"
+                placeholder="Prepared by"
+                value={preparedBy}
+                onChange={(e) => setPreparedBy(e.target.value)}
+              />
+              <textarea
+                className="config-textarea"
+                placeholder="Optional note that appears at the end of the report (e.g. what to look at first)."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </div>
+
+            <div className="config-group">
+              {template ? (
+                // The layout is the template, so it is stated rather than offered. One line each, because
+                // this is a config screen for the last few decisions — not a place to rebuild the report.
+                <p className="config-hint config-layout">
+                  {template.output === "email" ? "Produces an email" : "Produces a PDF"} from{" "}
+                  {template.pages.length === 1 ? "1 page" : `${template.pages.length} pages`}:{" "}
+                  {template.pages.map((page) => page.map((id) => SECTION_LABELS[id]).join(", ")).join(" / ")}.
+                  {template.output === "email" && " The pages are there if you want the PDF too."}
+                </p>
+              ) : (
+                <>
+                  <span className="config-label">Sections</span>
+                  <div className="config-sections">
+                    {SECTIONS.map((section) => {
+                      const on = sections.has(section.id);
+                      return (
+                        <label
+                          key={section.id}
+                          className={`config-section ${on ? "is-on" : ""} ${section.alwaysOn ? "is-locked" : ""}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            disabled={section.alwaysOn}
+                            onChange={() => toggleSection(section.id)}
+                          />
+                          <span>
+                            <strong>{section.label}</strong>
+                            <em>{section.blurb}</em>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="page-meter">
+                    <div className="page-meter-top">
+                      <span>Page budget</span>
+                      <b>
+                        {budget.pageCount} / {PAGE_LIMIT}
+                      </b>
+                    </div>
+                    <div className="page-meter-track">
+                      {Array.from({ length: Math.max(PAGE_LIMIT, budget.pageCount) }).map((_, index) => (
+                        <i
+                          key={index}
+                          className={index >= PAGE_LIMIT ? "over" : index < budget.pageCount ? "filled" : ""}
+                        />
+                      ))}
+                    </div>
+                    {overLimit && (
+                      <div className="page-meter-warning">
+                        {budget.overflowPages === 1 ? "One page" : `${budget.overflowPages} pages`} over. Drop{" "}
+                        {trimAdvice.map((id) => SECTION_LABELS[id]).join(" and ")} to fit.
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Pinned to the foot of the panel rather than sitting at the end of it. The panel scrolls,
+                and with a prompt box and four written sections in it the Generate button and the
+                downloads were below the fold — you had to scroll a form you had finished to leave it. */}
+            <div className="config-actions">
+              <button className="config-generate" onClick={generate} disabled={loading || overLimit}>
+                {loading ? "Generating…" : composing ? "Writing…" : report ? "Regenerate report" : "Generate report"}
+              </button>
+
+              {report && (
+                <div className="config-downloads">
+                  {/* Two clicks for an email report, deliberately. The first renders the pages so they can
+                      be read before the print dialog opens over them. */}
+                  {showDocument ? (
+                    <button onClick={downloadPdf} disabled={overLimit}>
+                      Download PDF
+                    </button>
+                  ) : (
+                    <button onClick={() => setDocRevealed(true)}>Generate PDF</button>
+                  )}
+                  <button onClick={downloadCsv}>Download CSV</button>
+                </div>
+              )}
+              {error && <div className="config-error">{error}</div>}
+              {/* Archiving happens on its own, so this reports rather than asks. It still has to be
+                  visible: a save that failed is the one case where the report on screen is the only copy. */}
+              {(saving || savedNotice) && (
+                <div className="config-note">{saving ? "Filing to the archive…" : savedNotice}</div>
+              )}
+            </div>
           </aside>
 
           <section className="reports-canvas">
@@ -1278,20 +1352,47 @@ export default function ReportsPage() {
             )}
 
             {report && (composed || composing) && (
-              <div className="compose-panel print-hide">
+              /* Widened when the email is the deliverable rather than a covering note for a PDF — it is
+                 the thing being read and edited, so it gets the room the document would have had. */
+              <div className={`compose-panel print-hide ${showDocument ? "" : "is-primary"}`}>
                 <header>
                   <h3>Email to send</h3>
+                  <span className="compose-state">
+                    {composing
+                      ? "Rewriting from your sections…"
+                      : messageEdited
+                        ? "Edited by hand"
+                        : emailStale
+                          ? "Your sections changed"
+                          : ""}
+                  </span>
                   {composed && (
                     <button type="button" className="compose-copy" onClick={() => navigator.clipboard?.writeText(messageText)}>
                       Copy
                     </button>
                   )}
                 </header>
-                {composing ? (
-                  <p className="report-empty-note">Writing the summary and the message…</p>
-                ) : (
-                  <textarea value={messageText} onChange={(event) => setMessageText(event.target.value)} />
+
+                {/* The one case the debounce deliberately will not handle. An edited email is not
+                    overwritten behind somebody's back, so catching up is offered rather than done. */}
+                {emailStale && messageEdited && !composing && template && (
+                  <div className="compose-stale">
+                    <span>Your written sections have changed since this was written.</span>
+                    <button type="button" onClick={() => composeCopy(report, written, template)}>
+                      Rewrite it
+                    </button>
+                  </div>
                 )}
+
+                <textarea
+                  value={messageText}
+                  onChange={(event) => {
+                    setMessageText(event.target.value);
+                    setMessageEdited(true);
+                  }}
+                  placeholder={composing ? "Writing the summary and the email…" : "The email will appear here."}
+                  aria-busy={composing}
+                />
               </div>
             )}
 

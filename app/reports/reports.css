@@ -48,9 +48,9 @@ body.light-mode .reports-main {
 
 .reports-shell {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
-  gap: 28px;
-  padding: 28px 32px 80px;
+  grid-template-columns: 372px minmax(0, 1fr);
+  gap: 24px;
+  padding: 24px 28px 64px;
   align-items: start;
 }
 
@@ -58,18 +58,18 @@ body.light-mode .reports-main {
 
 .reports-configurator {
   position: sticky;
-  top: 24px;
+  top: 20px;
   background: var(--report-surface);
   border: 1px solid var(--report-line);
   border-radius: 14px;
-  padding: 22px 22px 24px;
+  /* No bottom padding: the action bar is pinned to the foot and provides its own. */
+  padding: 20px 0 0;
   box-shadow: 0 1px 2px rgba(20, 22, 36, 0.03), 0 6px 20px rgba(20, 22, 36, 0.04);
   display: flex;
   flex-direction: column;
-  gap: 14px;
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--report-ink);
-  max-height: calc(100vh - 48px);
+  max-height: calc(100vh - 40px);
   overflow-y: auto;
 }
 
@@ -81,9 +81,70 @@ body.light-mode .reports-main {
  * scroll container's automatic minimum height resolves to zero rather than to its content. The list
  * then collapses to an empty strip while the textareas around it, which have a min-height, keep their
  * size. It looked exactly like HeyReach had returned nothing.
+ *
+ * The same applies one level down, inside a group, for the same reason.
  */
-.reports-configurator > * {
+.reports-configurator > *,
+.config-group > * {
   flex-shrink: 0;
+}
+
+/* The panel's own padding moved onto the groups, so the two things above them supply their own. */
+.reports-configurator > .config-back {
+  padding: 0 20px;
+}
+
+.reports-configurator > .config-heading {
+  padding: 0 20px 12px;
+}
+
+/*
+ * One block per decision, hairline-separated.
+ *
+ * The panel asks for a dozen things and they are not equally interesting. Stacked at one rhythm, the
+ * prompt — which is nearly all of what makes one report differ from another — carried the same weight as
+ * the "prepared by" field, and the whole thing read as a pile of inputs rather than a form.
+ */
+.config-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--report-line);
+}
+
+/* The first group sits under the heading, which is separator enough. */
+.config-heading + .config-group {
+  border-top: none;
+  padding-top: 4px;
+}
+
+.config-group > .config-label:first-child {
+  margin-top: 0;
+}
+
+/* The group's own hairline already sets this line apart, so its left rule is redundant here. */
+.config-group > .config-layout {
+  border-left: none;
+  padding-left: 0;
+}
+
+/*
+ * The panel's footer, pinned so it is reachable without scrolling back through a finished form.
+ *
+ * Sticky rather than fixed: it belongs to the panel, and the panel is what scrolls.
+ */
+.config-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 20px 18px;
+  margin-top: auto;
+  background: var(--report-surface);
+  border-top: 1px solid var(--report-line);
+  border-radius: 0 0 14px 14px;
 }
 
 .config-heading h2 {
@@ -364,17 +425,23 @@ body.light-mode .reports-main {
 .reports-canvas {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 24px;
+  /* Matches the configurator, so the two columns start and end together instead of leaving the taller
+     one running on past a short canvas. */
+  min-height: calc(100vh - 40px);
 }
 
 .reports-empty {
   background: var(--report-surface);
   border: 1px dashed var(--report-line);
   border-radius: 14px;
-  padding: 60px 40px;
+  padding: 44px 36px;
   text-align: center;
   color: var(--report-ink-soft);
   font-family: "Inter", system-ui, sans-serif;
+  max-width: 8.5in;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .reports-empty h3 {
@@ -1066,6 +1133,15 @@ body.light-mode .reports-main {
     position: static;
     max-height: none;
   }
+
+  /* Stacked, the panel no longer scrolls, so there is nothing for the footer to stick to. */
+  .config-actions {
+    position: static;
+  }
+
+  .reports-canvas {
+    min-height: 0;
+  }
 }
 
 @media (max-width: 900px) {
@@ -1517,20 +1593,35 @@ body.light-mode .reports-main {
 
 .compose-panel {
   border: 1px solid var(--report-line);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--report-surface);
-  padding: 16px 17px;
+  padding: 16px 18px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   max-width: 8.5in;
   margin: 0 auto 20px;
+  box-shadow: 0 1px 2px rgba(20, 22, 36, 0.03), 0 8px 24px rgba(20, 22, 36, 0.05);
+}
+
+/*
+ * The email when the email *is* the report, rather than a covering note for a PDF.
+ *
+ * An email template renders no pages until asked, so this used to be a narrow box adrift in an empty
+ * column — the report was a sidebar-width strip in the middle of the screen. Given the whole canvas it
+ * reads like the thing being sent, which is what it is. The measure is still capped: a recap set to the
+ * full width of a monitor is unreadable, and unlike the document it has no page to sit on.
+ */
+.compose-panel.is-primary {
+  max-width: 800px;
+  padding: 22px 26px 26px;
+  min-height: calc(100vh - 92px);
+  margin-bottom: 0;
 }
 
 .compose-panel header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
 }
 
@@ -1543,7 +1634,15 @@ body.light-mode .reports-main {
   font-weight: 700;
 }
 
+/* Whether what is on screen is current, being rewritten, or somebody's own words. */
+.compose-state {
+  font-size: 11.5px;
+  color: var(--report-ink-soft);
+  letter-spacing: 0.01em;
+}
+
 .compose-copy {
+  margin-left: auto;
   background: transparent;
   border: 1px solid var(--report-line);
   border-radius: 6px;
@@ -1559,23 +1658,69 @@ body.light-mode .reports-main {
   color: var(--report-brand);
 }
 
+/* Offered, never done automatically: the email below has been typed in, and catching it up to the
+   written sections means throwing those edits away. */
+.compose-stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--report-line);
+  border-left: 3px solid var(--report-brand);
+  background: var(--report-inset);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: var(--report-ink);
+}
+
+.compose-stale button {
+  flex-shrink: 0;
+  border: 1px solid var(--report-brand);
+  background: var(--report-brand);
+  color: var(--report-canvas);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .compose-panel textarea {
   width: 100%;
-  min-height: 148px;
+  min-height: 300px;
   resize: vertical;
   border: 1px solid var(--report-line);
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--report-inset);
   color: var(--report-ink);
-  padding: 11px 12px;
-  font-size: 13px;
-  line-height: 1.55;
+  padding: 14px 16px;
+  font-size: 13.5px;
+  line-height: 1.65;
   font-family: inherit;
+  transition: opacity 150ms ease;
+}
+
+/* Fills whatever height the panel has, so the email is never a small window onto a longer message. */
+.compose-panel.is-primary textarea {
+  flex: 1;
+  min-height: 440px;
+  background: var(--report-surface);
+  font-size: 14.5px;
+  padding: 20px 22px;
 }
 
 .compose-panel textarea:focus {
   outline: none;
   border-color: var(--report-brand);
+  background: var(--report-surface);
+}
+
+/* Being rewritten. Dimmed rather than swapped for a spinner: replacing the box would collapse the
+   panel and bounce the page every time somebody paused typing in a written section. */
+.compose-panel textarea[aria-busy="true"] {
+  opacity: 0.55;
 }
 
 /*
@@ -1732,8 +1877,11 @@ body.light-mode .reports-main {
     grid-template-columns: none !important;
   }
 
+  /* The screen height the canvas holds so it sits level with the configurator would print as a blank
+     sheet before the cover page. */
   .reports-canvas {
     gap: 0 !important;
+    min-height: 0 !important;
   }
 
   .report-document {
