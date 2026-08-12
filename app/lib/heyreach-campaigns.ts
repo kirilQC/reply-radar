@@ -66,10 +66,10 @@ export const DAILY_CONNECTIONS_PER_SENDER = 25;
 /**
  * Fields HeyReach has been seen to carry the assigned LinkedIn accounts under.
  *
- * More than one because `/campaign/GetAll` is not documented field by field and the sender list is the
- * one thing here we cannot verify from a fixture. Reading several names costs nothing and the failure
- * mode is the honest one: no recognised field means zero senders, which means the runway is unknown
- * rather than wrong.
+ * `campaignAccountIds` is the one a live `/campaign/GetAll` actually returns; the rest are read as well
+ * because the endpoint is not documented field by field and a rename would silently zero every runway.
+ * The failure mode is the honest one: no recognised field means no senders, which means the runway is
+ * unknown rather than wrong.
  */
 const SENDER_FIELDS = [
   "campaignAccountIds",
@@ -121,6 +121,15 @@ export type CampaignStatusRow = {
   progress: CampaignProgress;
   /** LinkedIn accounts assigned to send it. Zero means HeyReach did not say, not that nobody is on it. */
   senders: number;
+  /**
+   * The people behind that number, where HeyReach gave us names for them.
+   *
+   * A client knows Eyal and Roi; "3 senders" tells them nothing they can act on. Kept separate from the
+   * count rather than replacing it because the two can disagree — an account assigned to a campaign but
+   * since removed from the workspace still counts towards sending capacity and has no name to print.
+   * The runway is computed from the count for exactly that reason.
+   */
+  senderNames: string[];
   /** Days of sending left at the current sender count. Null when the sender count is unknown. */
   daysLeftInSending: number | null;
 };
@@ -141,25 +150,43 @@ export function sendingDaysLeft(pending: number, senders: number): number | null
   return Math.ceil(pending / (senders * DAILY_CONNECTIONS_PER_SENDER));
 }
 
-/** Counts the distinct accounts on a campaign, whichever shape HeyReach used to list them. */
-function countSenders(row: Row): number {
+/**
+ * The distinct accounts assigned to a campaign, whichever shape HeyReach used to list them.
+ *
+ * Ids rather than a count, because the count is only half of what a report wants — see `senderNames`.
+ * A field carrying objects rather than ids is read for a name too, so a payload that already names its
+ * senders does not need the second call.
+ */
+function senderRefs(row: Row): Array<{ id: string; name: string }> {
   for (const field of SENDER_FIELDS) {
     const value = row[field];
     if (!Array.isArray(value)) continue;
-    const ids = new Set(
-      value
-        .map((item) => {
-          if (item && typeof item === "object") {
-            const account = object(item);
-            return text(account.id ?? account.linkedInUserId ?? account.accountId ?? account.linkedInAccountId);
-          }
-          return text(item);
-        })
-        .filter(Boolean),
-    );
-    if (ids.size) return ids.size;
+    const byId = new Map<string, string>();
+    for (const item of value) {
+      if (item && typeof item === "object") {
+        const account = object(item);
+        const id = text(account.id ?? account.linkedInUserId ?? account.accountId ?? account.linkedInAccountId);
+        if (id && !byId.has(id)) byId.set(id, accountName(account));
+        continue;
+      }
+      const id = text(item);
+      if (id && !byId.has(id)) byId.set(id, "");
+    }
+    if (byId.size) return [...byId].map(([id, name]) => ({ id, name }));
   }
-  return 0;
+  return [];
+}
+
+/**
+ * A LinkedIn account's display name, from whichever of the several name fields HeyReach populated.
+ *
+ * Never the email address. `/li_account/GetAll` always carries one and it is usually a personal Gmail —
+ * printing "eyalbe@gmail.com" as a sender in a client report would be worse than printing nothing.
+ */
+function accountName(account: Row): string {
+  const full = text(account.fullName ?? account.name);
+  if (full) return full;
+  return [text(account.firstName), text(account.lastName)].filter(Boolean).join(" ");
 }
 
 export type CampaignStatus = {
@@ -237,8 +264,15 @@ export const emptyStatus = (reason: string): CampaignStatus => ({
  *
  * Split out from the fetch so the classification is testable without an API key, which is the only
  * way it gets tested at all — there is no HeyReach account in CI.
+ *
+ * `senderNamesById` comes from a second endpoint because the campaign payload lists its senders as bare
+ * numeric ids. Passed in rather than fetched here so this stays pure; absent, campaigns still carry the
+ * sender count and the runway, and only the names are missing.
  */
-export function summariseCampaigns(rows: unknown[]): CampaignStatus {
+export function summariseCampaigns(
+  rows: unknown[],
+  senderNamesById: Map<string, string> = new Map(),
+): CampaignStatus {
   const buckets: Record<CampaignState, CampaignStatusRow[]> = {
     active: [],
     "worked-through": [],
@@ -268,7 +302,7 @@ export function summariseCampaigns(rows: unknown[]): CampaignStatus {
       contacted: count(stats.totalUsersInProgress) + count(stats.totalUsersFinished),
     };
     const state = resolveState(reported, progress.pending);
-    const senders = countSenders(row);
+    const refs = senderRefs(row);
 
     buckets[state].push({
       id,
@@ -277,8 +311,9 @@ export function summariseCampaigns(rows: unknown[]): CampaignStatus {
       state,
       launchedAt: iso(row.startedAt ?? row.creationTime ?? row.createdAt),
       progress,
-      senders,
-      daysLeftInSending: sendingDaysLeft(progress.pending, senders),
+      senders: refs.length,
+      senderNames: refs.map((ref) => ref.name || senderNamesById.get(ref.id) || "").filter(Boolean),
+      daysLeftInSending: sendingDaysLeft(progress.pending, refs.length),
     });
   }
 
@@ -358,8 +393,51 @@ async function fetchCampaignPages(apiKey: string): Promise<unknown[]> {
 }
 
 /**
- * The one call a report makes. Never throws: a client whose HeyReach is down still gets a report,
+ * Every LinkedIn account in the workspace, as id → display name.
+ *
+ * The campaign payload names its senders only as numeric ids, so this is the lookup that turns
+ * `campaignAccountIds: [117558, 187697]` into "Eyal Ben Ezra and Roi Galipapa". The path is
+ * `/li_account/GetAll` — `/linkedinaccount/GetAll`, which the shape of every other route suggests,
+ * returns 404.
+ *
+ * Failure is swallowed to an empty map on purpose. Names are an improvement on the sender count, not a
+ * precondition for it, and a report must not lose its campaign section because one extra call failed.
+ */
+async function fetchSenderNames(apiKey: string): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  try {
+    for (let offset = 0; offset < PAGE_CEILING; offset += PAGE_SIZE) {
+      const response = await fetch(`${API_BASE.replace(/\/$/, "")}/li_account/GetAll`, {
+        method: "POST",
+        headers: { "X-API-KEY": apiKey, "content-type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ offset, limit: PAGE_SIZE }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        cache: "no-store",
+      });
+      if (!response.ok) break;
+      const payload = object(await response.json().catch(() => ({})));
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      for (const raw of items) {
+        const account = object(raw);
+        const id = text(account.id);
+        const name = accountName(account);
+        if (id && name) names.set(id, name);
+      }
+      const total = Number(payload.totalCount ?? names.size);
+      if (items.length < PAGE_SIZE || names.size >= total) break;
+    }
+  } catch {
+    /* names are a nicety; the count and the runway do not depend on them */
+  }
+  return names;
+}
+
+/**
+ * What a report asks HeyReach for. Never throws: a client whose HeyReach is down still gets a report,
  * with the campaign block marked unavailable.
+ *
+ * The two calls run together because neither needs the other's answer, and the accounts list is small
+ * and identical for every campaign in the workspace — one lookup serves the whole report.
  */
 export async function campaignStatusFor(apiKey: string): Promise<CampaignStatus> {
   const key = text(apiKey);
@@ -369,7 +447,8 @@ export async function campaignStatusFor(apiKey: string): Promise<CampaignStatus>
   if (cached && cached.expires > Date.now()) return cached.status;
 
   try {
-    const status = summariseCampaigns(await fetchCampaignPages(key));
+    const [rows, senderNames] = await Promise.all([fetchCampaignPages(key), fetchSenderNames(key)]);
+    const status = summariseCampaigns(rows, senderNames);
     cache.set(key, { expires: Date.now() + CACHE_TTL_MS, status });
     return status;
   } catch (error) {

@@ -503,6 +503,73 @@ body.light-mode .reports-main {
   line-height: 1.45;
 }
 
+/* ------------------------- PDF appearance ------------------------- */
+
+.theme-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/*
+ * The colour is the label, so the button is the swatch itself rather than a swatch beside a name. The name
+ * is on `title` and `aria-label` for anyone who cannot use the colour to tell them apart.
+ */
+.theme-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid var(--report-line);
+  padding: 0;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--report-ink-soft);
+  background: var(--report-inset);
+  transition:
+    box-shadow 120ms ease,
+    border-color 120ms ease;
+}
+
+/* A ring outside the swatch rather than a border on it, so the selected state does not eat 2px of the very
+   colour the control exists to show. */
+.theme-swatch.is-on {
+  border-color: var(--report-ink);
+  box-shadow: 0 0 0 2px var(--report-canvas), 0 0 0 3px var(--report-ink);
+}
+
+.theme-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.theme-choice {
+  padding: 6px 12px;
+  border: 1px solid var(--report-line);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--report-ink-soft);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background 120ms ease;
+}
+
+.theme-choice:hover {
+  border-color: var(--report-brand);
+}
+
+.theme-choice.is-on {
+  border-color: var(--report-brand);
+  background: var(--report-brand);
+  color: #fff;
+}
+
 /* The layout, stated in one line. Boxed so it reads as a fact about the template rather than as a
    caption belonging to the control above it. */
 .config-layout {
@@ -700,87 +767,115 @@ body.light-mode .reports-main {
 
 /* ------------------------- Cover ------------------------- */
 
+/*
+ * Three bands: the logo lockup at the top, the title sitting on the optical centre, the imprint at the
+ * foot. `justify-content: space-between` rather than three fixed offsets, so a client with a tall logo or
+ * a two-line title pushes the layout instead of overlapping it.
+ *
+ * The brand flood is the default because that is how the cover is used — as the front of something sent to
+ * a client — and the two other styles below only ever take paint away.
+ */
 .report-cover {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background:
-    linear-gradient(180deg, var(--report-inset) 0%, var(--report-inset) 100%);
-  color: var(--report-ink);
+  background: linear-gradient(160deg, var(--report-brand-deep) 0%, var(--report-brand) 100%);
+  color: #ffffff;
+  position: relative;
+  overflow: hidden;
+}
+
+/* An oversized quarter-circle bled off the bottom-right corner: enough geometry to stop the flood reading
+   as a plain block, positioned so nothing can ever be printed on top of it. */
+.report-cover::after {
+  content: "";
+  position: absolute;
+  right: -2.2in;
+  bottom: -2.6in;
+  width: 5.4in;
+  height: 5.4in;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.report-cover-lockup {
+  display: flex;
+  align-items: center;
+  gap: 22px;
   position: relative;
 }
 
-.report-cover::before {
-  content: "";
-  position: absolute;
-  left: 0.85in;
-  right: 0.85in;
-  top: 0.9in;
-  height: 2px;
-  background: var(--report-brand);
+/*
+ * Height-constrained rather than width-constrained, and never stretched. Client logos arrive as anything
+ * from a square avatar to a wide wordmark, and a lockup where one mark towers over the other looks like
+ * the wrong file was used.
+ */
+.report-cover-mark {
+  height: 46px;
+  width: auto;
+  max-width: 2.6in;
+  object-fit: contain;
 }
 
-.report-cover-topline {
+/* Our own mark is a white wordmark on transparent, so it needs no help; a client's is usually drawn for a
+   white page and would disappear into the flood, hence the plate behind it. */
+.report-cover-mark-client {
+  background: #ffffff;
+  border-radius: 4px;
+  padding: 6px 10px;
+  box-sizing: content-box;
+}
+
+.report-cover-lockup-rule {
+  width: 1px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.report-cover-body {
+  position: relative;
+  margin: 0.6in 0;
+}
+
+.report-cover-eyebrow {
   font-size: 11pt;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--report-brand);
-  display: flex;
-  gap: 8px;
-  margin-top: 24px;
-}
-
-.report-cover-logo {
-  height: 60px;
-  width: auto;
-  margin-top: 60px;
-  object-fit: contain;
-  align-self: flex-start;
-}
-
-.report-cover-monogram {
-  width: 88px;
-  height: 88px;
-  border-radius: 50%;
-  background: var(--report-brand);
-  color: var(--report-canvas);
-  font-family: "Playfair Display", "Georgia", serif;
-  font-size: 42pt;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 60px;
-  align-self: flex-start;
-  letter-spacing: -0.02em;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0 0 18px;
 }
 
 .report-cover-title {
   font-family: "Playfair Display", "Georgia", serif;
-  font-size: 44pt;
-  line-height: 1.05;
+  font-size: 46pt;
+  line-height: 1.03;
   font-weight: 600;
-  color: var(--report-ink);
-  margin: 40px 0 12px;
+  color: inherit;
+  margin: 0 0 24px;
   letter-spacing: -0.02em;
+  max-width: 5.6in;
 }
 
+/* The rule reads as the join between the title and who it is for, which is why it hangs off the client
+   name rather than sitting under the title. */
 .report-cover-client {
-  font-family: "Playfair Display", "Georgia", serif;
-  font-size: 22pt;
-  font-weight: 500;
-  color: var(--report-brand);
+  font-size: 19pt;
+  font-weight: 600;
+  color: inherit;
   margin: 0;
+  padding-top: 18px;
+  border-top: 2px solid rgba(255, 255, 255, 0.45);
+  max-width: 5.6in;
 }
 
 .report-cover-period {
-  font-size: 12pt;
+  font-size: 11.5pt;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--report-ink-soft);
-  margin: 6px 0 0;
-  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
+  margin: 8px 0 0;
+  font-weight: 500;
 }
 
 .report-cover-footer {
@@ -788,25 +883,143 @@ body.light-mode .reports-main {
   grid-template-columns: 1fr 1fr 1fr;
   gap: 24px;
   padding-top: 20px;
-  border-top: 1px solid var(--report-line);
-  margin-top: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.28);
+  position: relative;
 }
 
-.report-cover-footer label {
-  font-size: 9pt;
+.report-cover-footer-label {
+  font-size: 8.5pt;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--report-ink-soft);
+  color: rgba(255, 255, 255, 0.62);
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
 }
 
 .report-cover-footer p {
   margin: 0;
-  font-size: 11.5pt;
-  color: var(--report-ink);
+  font-size: 11pt;
+  color: inherit;
   font-weight: 500;
+}
+
+/* ------------------------- Cover styles ------------------------- */
+
+/*
+ * `light` is the same cover on paper stock, for a client who prints rather than reads on screen. Every
+ * white-on-flood value is restated against ink here rather than being made a variable, because there are
+ * only two schemes and a variable for each would be four indirections to read one colour.
+ */
+.report-document[data-cover="light"] .report-cover {
+  background: var(--report-surface);
+  color: var(--report-ink);
+}
+
+.report-document[data-cover="light"] .report-cover::after {
+  background: color-mix(in srgb, var(--report-brand) 8%, transparent);
+}
+
+.report-document[data-cover="light"] .report-cover-mark-client {
+  background: transparent;
+  padding: 0;
+}
+
+.report-document[data-cover="light"] .report-cover-lockup-rule {
+  background: var(--report-line);
+}
+
+.report-document[data-cover="light"] .report-cover-eyebrow,
+.report-document[data-cover="light"] .report-cover-period {
+  color: var(--report-brand);
+}
+
+.report-document[data-cover="light"] .report-cover-client {
+  border-top-color: var(--report-brand);
+}
+
+.report-document[data-cover="light"] .report-cover-footer {
+  border-top-color: var(--report-line);
+}
+
+.report-document[data-cover="light"] .report-cover-footer-label {
+  color: var(--report-ink-soft);
+}
+
+/* `minimal` is `light` with the geometry and the flood gone: a title, a lockup and an imprint. For a weekly
+   recap, where a full-bleed cover is more ceremony than the contents deserve. */
+.report-document[data-cover="minimal"] .report-cover {
+  background: var(--report-surface);
+  color: var(--report-ink);
+}
+
+.report-document[data-cover="minimal"] .report-cover::after {
+  display: none;
+}
+
+.report-document[data-cover="minimal"] .report-cover-mark-client {
+  background: transparent;
+  padding: 0;
+}
+
+.report-document[data-cover="minimal"] .report-cover-lockup-rule {
+  background: var(--report-line);
+}
+
+.report-document[data-cover="minimal"] .report-cover-eyebrow,
+.report-document[data-cover="minimal"] .report-cover-period {
+  color: var(--report-ink-soft);
+}
+
+.report-document[data-cover="minimal"] .report-cover-title {
+  font-size: 38pt;
+}
+
+.report-document[data-cover="minimal"] .report-cover-client {
+  border-top: none;
+  padding-top: 0;
+  color: var(--report-brand);
+}
+
+.report-document[data-cover="minimal"] .report-cover-footer {
+  border-top-color: var(--report-line);
+}
+
+.report-document[data-cover="minimal"] .report-cover-footer-label {
+  color: var(--report-ink-soft);
+}
+
+/* ------------------------- Heading font & density ------------------------- */
+
+/*
+ * The display serif is the house style; the sans is for a client whose own brand is a sans and for whom a
+ * Playfair heading reads as somebody else's document. Applied to headings only — body copy is sans in both,
+ * because a page of serif body text at 11pt is a different document, not a themed one.
+ */
+.report-document[data-font="sans"] .report-cover-title,
+.report-document[data-font="sans"] .report-section-heading h2 {
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: -0.015em;
+}
+
+/*
+ * Compact only ever removes height, which is what makes it safe: the section weights do not know about it,
+ * so a theme that could *add* height would let a page that the meter passed clip at the printer.
+ */
+.report-document[data-density="compact"] .report-block {
+  margin-bottom: 18px;
+}
+
+.report-document[data-density="compact"] .report-section-heading {
+  margin-bottom: 10px;
+}
+
+.report-document[data-density="compact"] .report-table tbody td {
+  padding: 7px 12px;
+}
+
+.report-document[data-density="compact"] .report-page {
+  line-height: 1.42;
 }
 
 /* ------------------------- Section heading ------------------------- */
@@ -1022,6 +1235,35 @@ body.light-mode .reports-main {
 
 .report-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+/*
+ * The active-campaigns table, which carries up to nine columns and a wrapping list of sender names.
+ *
+ * At the default type size and padding it ran off the bottom of the printed sheet, and the print
+ * stylesheet clips rather than spills so that the page count stays a fact. Fixed layout keeps the
+ * columns from being dragged wide by a long campaign name; the tighter type and padding buy back the
+ * rows. Only the first column wraps — a figure that wraps is a figure that has become two.
+ */
+.report-table-compact {
+  table-layout: fixed;
+  font-size: 9.5pt;
+}
+
+.report-table-compact thead th {
+  font-size: 8pt;
+  letter-spacing: 0.06em;
+  padding: 7px 8px;
+}
+
+.report-table-compact tbody td {
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+}
+
+.report-table-compact tbody td:first-child,
+.report-table-compact thead th:first-child {
+  width: 26%;
 }
 
 /* ------------------------- Trend & timing bars ------------------------- */
@@ -1300,69 +1542,37 @@ body.light-mode .reports-main {
   color: var(--report-ink-faint);
 }
 
-/* ------------------------- Methodology ------------------------- */
+/* ------------------------- Notes for the reader ------------------------- */
 
-.methodology {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.methodology-notes {
-  background: var(--report-surface);
-  border: 1px solid var(--report-line);
+/*
+ * The preparer's own note, after the last section of the last sheet.
+ *
+ * Deliberately not `margin-top: auto`: the page footer already claims the free space that way, and a second
+ * auto margin in the same flex column splits it between them, dropping the note halfway down the page for
+ * no reason a reader could infer. It follows the content instead, and the border is what separates it from
+ * the section above rather than distance.
+ */
+.report-reader-note {
+  padding: 14px 18px;
+  background: var(--report-inset);
   border-left: 3px solid var(--report-brand);
-  padding: 16px 20px;
   border-radius: 4px;
 }
 
-.methodology-notes h4 {
-  margin: 0 0 6px;
-  font-size: 10pt;
+.report-reader-note h4 {
+  margin: 0 0 5px;
+  font-size: 9pt;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--report-brand);
 }
 
-.methodology-notes p {
+.report-reader-note p {
   margin: 0;
-  font-size: 11pt;
+  font-size: 10.5pt;
   color: var(--report-ink);
-  line-height: 1.55;
-}
-
-.methodology ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  font-size: 11pt;
-  color: var(--report-ink);
-}
-
-.methodology ul li {
-  padding-left: 18px;
-  position: relative;
-  line-height: 1.55;
-}
-
-.methodology ul li::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 9px;
-  width: 6px;
-  height: 6px;
-  background: var(--report-brand);
-  border-radius: 50%;
-}
-
-.methodology ul li strong {
-  color: var(--report-brand);
-  font-weight: 600;
+  line-height: 1.5;
 }
 
 /* ------------------------- Misc ------------------------- */
@@ -1989,66 +2199,6 @@ body.light-mode .reports-main {
   margin-bottom: 0;
 }
 
-/* A compact brand band, used when the cover shares a page rather than owning one. */
-.report-masthead {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding-bottom: 16px;
-  margin-bottom: 22px;
-  border-bottom: 2px solid var(--report-brand);
-}
-
-.report-masthead-logo {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  object-fit: contain;
-  background: var(--report-inset);
-}
-
-.report-masthead-mono {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  background: var(--report-brand);
-  color: #fff;
-  font-weight: 700;
-  font-size: 17px;
-}
-
-.report-masthead-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.report-masthead-text h1 {
-  margin: 0;
-  font-size: 19pt;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
-  font-weight: 640;
-}
-
-.report-masthead-text p {
-  margin: 0;
-  font-size: 10pt;
-  color: var(--report-ink-soft);
-}
-
-.report-masthead-aside {
-  margin-left: auto;
-  text-align: right;
-  font-size: 8.5pt;
-  color: var(--report-ink-faint);
-  line-height: 1.5;
-  white-space: nowrap;
-}
-
 .report-headline {
   font-size: 13pt;
   line-height: 1.4;
@@ -2168,8 +2318,22 @@ body.light-mode .reports-main {
     break-after: auto;
   }
 
+  /*
+   * The cover keeps its own background rather than being flattened for the printer.
+   *
+   * It used to be overridden to the page colour here, from when the cover was a light sheet in a dark
+   * document. It is now the brand flood, and the colour-adjust rule at the top of this block is what makes
+   * that survive the print pipeline — so the override would only undo the design on the one output that
+   * matters. `.report-page`'s own `background: var(--report-surface) !important` above is the reason this
+   * has to be restated at all.
+   */
   .report-cover {
-    background: linear-gradient(180deg, var(--report-surface) 0%, var(--report-canvas) 100%) !important;
+    background: linear-gradient(160deg, var(--report-brand-deep) 0%, var(--report-brand) 100%) !important;
+  }
+
+  .report-document[data-cover="light"] .report-cover,
+  .report-document[data-cover="minimal"] .report-cover {
+    background: var(--report-surface) !important;
   }
 
   .kpi-grid {

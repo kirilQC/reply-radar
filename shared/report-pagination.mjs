@@ -16,7 +16,13 @@
  * in this repo, for the same reason: tests are .mjs and cannot import TypeScript.
  */
 
-/** Hard product limit. Three pages get read; ten do not. */
+/**
+ * Hard product limit. Three pages get read; ten do not.
+ *
+ * Content pages. A printed report also opens with a cover sheet, which is not counted here because it is
+ * not a choice — every PDF gets one whatever the layout says, so it can no more push a selection over the
+ * limit than the paper can.
+ */
 export const PAGE_LIMIT = 3;
 
 /**
@@ -41,7 +47,6 @@ export const PAGE_CAPACITY = 12;
  * all-time report.
  */
 export const SECTION_WEIGHTS = {
-  cover: 3,
   // One line, and one line is all the box invites. Costed above zero anyway because it still carries a
   // section heading, which is most of what it occupies.
   intro: 1,
@@ -55,9 +60,10 @@ export const SECTION_WEIGHTS = {
   kpis: 3,
   sentiment: 3,
   trend: 3,
-  // Fewer than ten campaigns run at once, so this table is short by nature — but it carries five
-  // columns and a caption, which costs about what the reply-derived campaign table costs.
-  "active-campaigns": 4,
+  // Costed above the reply-derived campaign table despite listing the same campaigns: this one can carry
+  // eight columns, one of which is a list of sender names that wraps, so its rows are taller than a row of
+  // figures. It was 4, and at 4 it clipped off the bottom of the page.
+  "active-campaigns": 5,
   campaigns: 4,
   // A handful of one-liners, so it costs what the other typed lists cost less the paragraph.
   "booked-meetings": 3,
@@ -73,7 +79,6 @@ export const SECTION_WEIGHTS = {
   "what-we-did": 4,
   priorities: 4,
   "warm-close": 2,
-  methodology: 2,
 };
 
 /**
@@ -89,9 +94,9 @@ export const weightOf = (section) => SECTION_WEIGHTS[section] ?? 3;
 /**
  * Greedily fills one page before starting the next, preserving the order sections were given in.
  *
- * Order is preserved rather than optimised because the sequence is editorial — the cover comes first
- * and methodology comes last, and a bin-packer that reorders sections to save a page would produce a
- * tidier number and a worse document. A section heavier than a whole page still gets its own page
+ * Order is preserved rather than optimised because the sequence is editorial — the opening line comes
+ * first and the sign-off comes last, and a bin-packer that reorders sections to save a page would produce
+ * a tidier number and a worse document. A section heavier than a whole page still gets its own page
  * rather than being dropped.
  *
  * Returns every page needed, which may exceed PAGE_LIMIT — deciding what to do about that belongs to
@@ -140,15 +145,15 @@ export function paginate(sections) {
 /**
  * The sections to drop, heaviest-first, to bring a selection back inside the limit.
  *
- * Heaviest-first so the fewest removals get the biggest saving, and it never suggests dropping the
- * cover, the executive summary or the methodology note — the first two are what makes the document a
- * report and the third is what makes its numbers defensible.
+ * Heaviest-first so the fewest removals get the biggest saving, and it never suggests dropping the opening
+ * line or the executive summary — between them they are what makes the document a report rather than a
+ * pile of tables, and a reader who only gets as far as page one has read them both.
  *
  * @param {SectionId[]} sections
  * @returns {SectionId[]}
  */
 export function suggestTrim(sections) {
-  const protected_ = new Set(["cover", "executive-summary", "methodology"]);
+  const protected_ = new Set(["intro", "executive-summary"]);
   const { withinLimit } = paginate(sections);
   if (withinLimit) return [];
 

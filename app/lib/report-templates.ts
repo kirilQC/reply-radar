@@ -16,7 +16,6 @@
  */
 
 export type SectionId =
-  | "cover"
   | "intro"
   | "recap"
   | "executive-summary"
@@ -36,8 +35,7 @@ export type SectionId =
   | "sample-replies"
   | "what-we-did"
   | "priorities"
-  | "warm-close"
-  | "methodology";
+  | "warm-close";
 
 /**
  * Sections whose content the account manager types, not sections the app computes.
@@ -99,8 +97,15 @@ export const WRITTEN_SECTION_PROMPTS: Record<WrittenSectionId, { label: string; 
 
 export type SectionDef = { id: SectionId; label: string; blurb: string; alwaysOn?: boolean };
 
+/**
+ * Every section that can appear in the body of a report.
+ *
+ * The cover is not among them, and neither is a methodology note. The cover is guaranteed — a PDF gets
+ * one as its first sheet whatever the layout says, so offering it as a section would be offering a choice
+ * that does not exist. The methodology note is gone for good: it explained our arithmetic to a reader who
+ * never asked, and every figure that needed a denominator now carries one in its own caption.
+ */
 export const SECTIONS: SectionDef[] = [
-  { id: "cover", label: "Cover page", blurb: "Client, period, generated date, brand mark", alwaysOn: true },
   { id: "intro", label: "Intro", blurb: "The opening line — written for you, then yours to edit" },
   { id: "recap", label: "Recap", blurb: "Your own opening paragraph, typed before generating" },
   { id: "executive-summary", label: "Executive summary", blurb: "Auto-written narrative from the numbers" },
@@ -133,7 +138,6 @@ export const SECTIONS: SectionDef[] = [
   { id: "what-we-did", label: "What we did this week", blurb: "Your own list of the work done" },
   { id: "priorities", label: "Priorities for next week", blurb: "Your own list of what happens next" },
   { id: "warm-close", label: "Warm close", blurb: "Your own sign-off" },
-  { id: "methodology", label: "Methodology & notes", blurb: "How the numbers were computed", alwaysOn: true },
 ];
 
 /**
@@ -183,11 +187,14 @@ export const SECTION_LABELS: Record<SectionId, string> = SECTIONS.reduce(
 );
 
 /**
- * A client report must never run past three pages.
+ * A client report must never run past three pages of content.
  *
  * This is a product rule, not a rendering detail: a ten-page PDF does not get read. Templates satisfy
  * it by construction. "Build your own" cannot, so it measures the rendered document and refuses to
  * export past the limit.
+ *
+ * Content pages. A PDF also gets a cover sheet, which is not counted here because it is not a choice —
+ * every printed report opens with one, so it can no more push a layout over the limit than the paper can.
  */
 export const PAGE_LIMIT = 3;
 
@@ -203,17 +210,111 @@ export const PAGE_LIMIT = 3;
  * and half is pulled, which is the point — the report is the two halves joined, and neither half can
  * write the other.
  *
- * Every page here weighs exactly what `PAGE_CAPACITY` allows, which is not a coincidence: this layout is
- * the ground truth the weight model is calibrated against, so a page that overflowed here would mean the
- * meter is wrong rather than that the page is. Adding a section means taking one off that page.
+ * The first page is deliberately filled to `PAGE_CAPACITY` exactly: this layout is the ground truth the
+ * weight model is calibrated against, so a page that overflowed here would mean the meter is wrong rather
+ * than that the page is. The later two carry slack because the campaign table and the reply quotes grow
+ * with the data behind them, and a page that only fits when the week was quiet is not a layout.
  */
 export const DEFAULT_TEMPLATE_PAGES: SectionId[][] = [
-  ["cover", "intro", "recap", "metrics"],
-  ["active-campaigns", "booked-meetings", "best-replies"],
-  ["what-we-did", "priorities", "warm-close", "methodology"],
+  ["intro", "recap", "metrics", "booked-meetings"],
+  ["active-campaigns", "best-replies"],
+  ["what-we-did", "priorities", "warm-close"],
 ];
 
 export type ReportPeriod = "daily" | "weekly" | "monthly" | "quarterly" | "all-time" | "custom";
+
+/**
+ * How a printed report looks, as opposed to what it says.
+ *
+ * Separate from the template because the two change for different reasons. A template is the *content*
+ * decision — which sections, which prompt, which period — and it is shared across every client who gets
+ * that report. The look is per report: one client's brand is navy and another's is not, and a QBR deck
+ * wants a heavier cover than a Friday recap. Bundling them would mean a template per client per palette.
+ *
+ * Deliberately four choices and no more. Every one of them is a knob a document designer would reach for
+ * first, and each is expressible as one CSS custom property or one attribute on the document root — which
+ * is the boundary: anything needing its own layout branch is a template, not a theme.
+ */
+export type PdfTheme = {
+  /** The accent every rule, figure and heading number takes. A CSS colour, applied as `--report-brand`. */
+  accent: string;
+  coverStyle: PdfCoverStyle;
+  headingFont: PdfHeadingFont;
+  density: PdfDensity;
+};
+
+/**
+ * How the cover sheet is dressed.
+ *
+ * `brand` floods it in the accent, which is what an agency deck looks like. `light` is the same layout on
+ * paper stock, for a client who prints. `minimal` drops the flood and the rules and leaves the lockup, for
+ * a reader who finds a full-bleed cover on a weekly recap overdressed. The layout is common to all three —
+ * a cover that rearranged itself per style would be three covers to keep working.
+ */
+export type PdfCoverStyle = "brand" | "light" | "minimal";
+
+/** Headings in a display serif, as the report has always used, or in the body sans. */
+export type PdfHeadingFont = "serif" | "sans";
+
+/**
+ * How much air the blocks get.
+ *
+ * `compact` is not a way to fit more on a page — the section weights decide that, and they do not know
+ * about this. It is for a reader who wants the figures closer together, and it is safe precisely because
+ * it only ever removes height.
+ */
+export type PdfDensity = "comfortable" | "compact";
+
+/**
+ * The look a report gets when nobody chose one: the palette the stylesheet already ships.
+ *
+ * `accent` is empty rather than a hex value on purpose. An empty accent means "inherit", so the document
+ * keeps following the app's own accent variable and light/dark switch, exactly as it did before there was
+ * a theme at all. Naming a default colour here would silently pin every report to it.
+ */
+export const DEFAULT_PDF_THEME: PdfTheme = {
+  accent: "",
+  coverStyle: "brand",
+  headingFont: "serif",
+  density: "comfortable",
+};
+
+/**
+ * The accents on offer, as swatches rather than a colour picker.
+ *
+ * A picker invites #00FF00 on a client report. These are QC's own accent, the two neutrals that read as
+ * corporate on paper, and three that cover most client brands closely enough to be recognisable.
+ */
+export const PDF_ACCENTS: Array<{ id: string; label: string; value: string }> = [
+  { id: "app", label: "App accent", value: "" },
+  { id: "navy", label: "Navy", value: "#1f2a4c" },
+  { id: "violet", label: "Violet", value: "#6d5fd6" },
+  { id: "teal", label: "Teal", value: "#0f766e" },
+  { id: "amber", label: "Amber", value: "#b45309" },
+  { id: "crimson", label: "Crimson", value: "#9f1239" },
+  { id: "graphite", label: "Graphite", value: "#3f3f46" },
+];
+
+/**
+ * Anything stored alongside a report, coerced back into a theme.
+ *
+ * Archived reports predate this type, so `data.theme` is usually absent and every field has to survive
+ * being missing. An accent is passed through only if it looks like a colour we wrote — the value lands in
+ * a `style` attribute, and a stored string is not a trusted one.
+ */
+export function normalisePdfTheme(raw: unknown): PdfTheme {
+  const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const accent = typeof value.accent === "string" ? value.accent.trim() : "";
+  const coverStyle = value.coverStyle;
+  const headingFont = value.headingFont;
+  const density = value.density;
+  return {
+    accent: /^#[0-9a-f]{3,8}$/i.test(accent) ? accent : "",
+    coverStyle: coverStyle === "light" || coverStyle === "minimal" ? coverStyle : "brand",
+    headingFont: headingFont === "sans" ? "sans" : "serif",
+    density: density === "compact" ? "compact" : "comfortable",
+  };
+}
 
 /**
  * What a template actually produces.
@@ -375,12 +476,12 @@ RULES:
     defaultPeriod: "all-time",
     output: "pdf",
     builtIn: true,
-    // Page 1 sets the story, page 2 proves it with performance, page 3 names the people worth
-    // acting on. Methodology rides along on the last page rather than earning one of its own.
+    // Page 1 sets the story, page 2 proves it with performance, page 3 names the people worth acting on.
+    // The cover sheet in front of all three is guaranteed by the renderer, not listed here.
     pages: [
-      ["cover", "executive-summary", "kpis"],
+      ["executive-summary", "kpis"],
       ["trend", "campaigns", "senders"],
-      ["top-leads", "methodology"],
+      ["top-leads"],
     ],
     prompt: `This is an all-time executive summary covering the entire engagement to date. The reader is
 a senior stakeholder — often the person who approves the budget — who has not been following week to

@@ -57,8 +57,18 @@ test("built-in template layouts fit the capacity the meter measures against", ()
 });
 
 test("packing keeps every section, in the order given", () => {
-  const sections = ["cover", "executive-summary", "kpis", "trend", "campaigns", "senders", "top-leads", "methodology"];
+  const sections = ["executive-summary", "kpis", "trend", "campaigns", "senders", "top-leads"];
   assert.deepEqual(packPages(sections).flat(), sections);
+});
+
+test("the cover and the methodology note are not selectable sections", () => {
+  // Neither is a choice any more. The cover is printed in front of every PDF whatever the layout says, and
+  // the methodology note is gone for good — leaving either in the picker would offer a decision that has
+  // already been made, and leaving a weight behind would let a stale saved layout be costed as if it fit.
+  for (const gone of ["cover", "methodology"]) {
+    assert.ok(!SECTIONS.some((section) => section.id === gone), `${gone} should not be offered as a section`);
+    assert.ok(!Object.hasOwn(SECTION_WEIGHTS, gone), `${gone} should not carry a page weight`);
+  }
 });
 
 test("packing fills a page before starting the next", () => {
@@ -81,7 +91,7 @@ test("a section heavier than a page still gets a page rather than being dropped"
 test("the default build-your-own selection is inside the limit", () => {
   // The default has to fit, or the page meter greets everyone with a warning about a selection they
   // never made. This is the regression that produced the ten-page report.
-  const defaults = ["cover", "executive-summary", "kpis", "trend", "campaigns", "senders", "top-leads", "methodology"];
+  const defaults = ["executive-summary", "kpis", "trend", "campaigns", "senders", "top-leads"];
   const budget = paginate(defaults);
   assert.equal(budget.withinLimit, true, `the default selection needs ${budget.pageCount} pages`);
   assert.equal(budget.overflowPages, 0);
@@ -106,11 +116,11 @@ test("the trim suggestion actually brings a selection back inside the limit", ()
 
 test("the trim suggestion never touches what makes it a report", () => {
   const trim = suggestTrim(SECTIONS.map((section) => section.id));
-  for (const protectedSection of ["cover", "executive-summary", "methodology"]) {
+  for (const protectedSection of ["intro", "executive-summary"]) {
     assert.ok(!trim.includes(protectedSection), `${protectedSection} must never be suggested for removal`);
   }
 });
 
 test("a selection already within the limit is asked to drop nothing", () => {
-  assert.deepEqual(suggestTrim(["cover", "executive-summary", "kpis", "methodology"]), []);
+  assert.deepEqual(suggestTrim(["intro", "executive-summary", "kpis"]), []);
 });

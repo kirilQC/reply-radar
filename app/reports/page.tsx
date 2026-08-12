@@ -7,18 +7,21 @@ import {
   BUILT_IN_TEMPLATES,
   CAMPAIGN_METRICS,
   DEFAULT_CAMPAIGN_METRICS,
+  DEFAULT_PDF_THEME,
   isWrittenSection,
+  normalisePdfTheme,
   OUTPUT_LABELS,
   PAGE_LIMIT,
+  PDF_ACCENTS,
   SECTION_LABELS,
   SECTIONS,
   WRITTEN_SECTION_PROMPTS,
   type CampaignMetricId,
+  type PdfTheme,
   type ReportOutput,
   type ReportPeriod as Period,
   type ReportTemplate,
   type SectionId,
-  type WrittenSectionId,
 } from "../lib/report-templates";
 import { packPages, paginate, suggestTrim } from "../../shared/report-pagination.mjs";
 import "./reports.css";
@@ -64,6 +67,14 @@ type LiveCampaign = {
   progress: { listSize: number; pending: number; contacted: number };
   /** LinkedIn accounts assigned to send it. Zero means HeyReach did not say. */
   senders: number;
+  /**
+   * Those accounts by name, where the workspace lookup could name them.
+   *
+   * Shorter than `senders` when an account is assigned to the campaign but no longer in the workspace, so
+   * the runway is still computed from the count. Printed instead of the count because a client knows who
+   * Eyal is and can do nothing with "3".
+   */
+  senderNames: string[];
   /** Pending leads ÷ daily capacity. Null when the sender count is unknown, never a guess. */
   daysLeftInSending: number | null;
 };
@@ -160,18 +171,26 @@ type ReportData = {
  * now has to be inside the limit, or the page meter greets everyone with a warning.
  */
 const DEFAULT_SECTIONS: SectionId[] = [
-  "cover",
   "executive-summary",
   "kpis",
   "trend",
   "campaigns",
   "senders",
   "top-leads",
-  "methodology",
 ];
 
 /** The template id a build-your-own report is filed under, so its card can report a last-run date too. */
 const BUILD_YOUR_OWN_ID = "build-your-own";
+
+const COVER_STYLE_LABELS: Record<PdfTheme["coverStyle"], string> = {
+  brand: "Brand",
+  light: "Light",
+  minimal: "Minimal",
+};
+
+/** What a chosen accent is called, so a shut fold can still say what it is set to. */
+const accentLabel = (value: string) =>
+  PDF_ACCENTS.find((accent) => accent.value === value)?.label ?? "Custom";
 
 /**
  * Plain English for each campaign state.
@@ -285,6 +304,17 @@ export default function ReportsPage() {
    * but showing three pages of charts under a recap email implies the client is getting both.
    */
   const [docRevealed, setDocRevealed] = useState(false);
+
+  /**
+   * How the printed document looks. See `PdfTheme`.
+   *
+   * Held here rather than in the template because it is a per-report choice, and filed with the report so
+   * that reopening one shows the document that was actually sent rather than today's palette applied to
+   * last quarter's numbers.
+   */
+  const [theme, setTheme] = useState<PdfTheme>(DEFAULT_PDF_THEME);
+  const setThemeField = <K extends keyof PdfTheme>(field: K, value: PdfTheme[K]) =>
+    setTheme((current) => ({ ...current, [field]: value }));
 
   /**
    * Whether the quoted replies are in this report.
@@ -675,8 +705,20 @@ export default function ReportsPage() {
             // `written` and `prompt` are part of the document, not settings: reopening a report has to
             // show the recap the client actually read, and the prompt explains why the copy reads as
             // it does even after the template has been edited since.
-            data: { report: data, pages: layout, reportTitle, preparedBy, notes, written, prompt: runPrompt, composed: copy },
-            pageEstimate: layout.length,
+            data: {
+              report: data,
+              pages: layout,
+              reportTitle,
+              preparedBy,
+              notes,
+              written,
+              prompt: runPrompt,
+              composed: copy,
+              theme,
+            },
+            // The cover sheet, which every printed report gets and no layout lists. The archive row is what
+            // the directory prints as "3 pages", so it has to count sheets rather than entries.
+            pageEstimate: layout.length + 1,
             generatedBy: preparedBy,
           }),
         });
@@ -692,7 +734,7 @@ export default function ReportsPage() {
         setSaving(false);
       }
     },
-    [workspaceSlug, activeWorkspace, template, reportTitle, preparedBy, notes, written, runPrompt, refreshSaved],
+    [workspaceSlug, activeWorkspace, template, reportTitle, preparedBy, notes, written, runPrompt, theme, refreshSaved],
   );
 
   /**
@@ -913,6 +955,9 @@ export default function ReportsPage() {
           : {},
       );
       setRunPrompt(String(snapshot.prompt || ""));
+      // Reports filed before there was a theme have none, and `normalisePdfTheme` turns that into the
+      // stylesheet's own palette — which is what those reports were printed with.
+      setTheme(normalisePdfTheme(snapshot.theme));
       setSections(new Set((Array.isArray(row.sections) ? row.sections : []) as SectionId[]));
       setSavedLayout(Array.isArray(snapshot.pages) ? (snapshot.pages as SectionId[][]) : null);
       const storedCopy = snapshot.composed as Composed | null | undefined;
@@ -1318,10 +1363,6 @@ export default function ReportsPage() {
                       </label>
                     ))}
                   </div>
-                  <div className="config-note">
-                    Days left is pending leads divided by daily capacity — senders × 25 requests a day. It is left off
-                    a campaign HeyReach gives no senders for rather than guessed at.
-                  </div>
                 </div>
               )}
             </ConfigFold>
@@ -1399,45 +1440,120 @@ export default function ReportsPage() {
               </ConfigFold>
             )}
 
-            {/* Only ever seen on a printed page, so it does not belong open on an email report's screen. */}
-            <ConfigFold
-              id="cover"
-              label="Cover page & notes"
-              note={outputMode === "email" ? "PDF only" : reportTitle || "untitled"}
-              open={openFolds.has("cover")}
-              onToggle={toggleFold}
-            >
-              <input
-                className="config-input"
-                placeholder="Report title"
-                value={reportTitle}
-                onChange={(e) => setReportTitle(e.target.value)}
-              />
-              <input
-                className="config-input"
-                placeholder="Prepared by"
-                value={preparedBy}
-                onChange={(e) => setPreparedBy(e.target.value)}
-              />
-              <textarea
-                className="config-textarea"
-                placeholder="Optional note that appears at the end of the report (e.g. what to look at first)."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-            </ConfigFold>
+            {/*
+              Nothing in either of these folds changes an email, so on an email report they are not there at
+              all — they used to sit in the panel captioned "PDF only", which is a control that exists to
+              tell you it does nothing. Clicking Generate PDF is what makes them relevant, and `showDocument`
+              is exactly that: the document is on screen, so the things that dress it are worth asking about.
+            */}
+            {showDocument && (
+              <>
+                <ConfigFold
+                  id="cover"
+                  label="Cover page & notes"
+                  note={reportTitle || "untitled"}
+                  open={openFolds.has("cover")}
+                  onToggle={toggleFold}
+                >
+                  <input
+                    className="config-input"
+                    placeholder="Report title"
+                    value={reportTitle}
+                    onChange={(e) => setReportTitle(e.target.value)}
+                  />
+                  <input
+                    className="config-input"
+                    placeholder="Prepared by"
+                    value={preparedBy}
+                    onChange={(e) => setPreparedBy(e.target.value)}
+                  />
+                  <textarea
+                    className="config-textarea"
+                    placeholder="Optional note that appears at the end of the report (e.g. what to look at first)."
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                  />
+                  <p className="config-hint">
+                    The cover is always the first page, with the QC Growth logo and the client&apos;s own.
+                  </p>
+                </ConfigFold>
 
-            {template ? (
-              // The layout is the template, so it is stated rather than offered — and stated once, in
-              // passing, because this is a config screen for the last few decisions rather than a place
-              // to rebuild the report.
-              <p className="config-hint config-layout">
-                {template.output === "email" ? "Produces an email" : "Produces a PDF"} from{" "}
-                {template.pages.length === 1 ? "1 page" : `${template.pages.length} pages`}:{" "}
-                {template.pages.map((page) => page.map((id) => SECTION_LABELS[id]).join(", ")).join(" / ")}.
-                {template.output === "email" && " The pages are there if you want the PDF too."}
-              </p>
-            ) : (
+                <ConfigFold
+                  id="appearance"
+                  label="PDF appearance"
+                  note={`${COVER_STYLE_LABELS[theme.coverStyle]} · ${accentLabel(theme.accent)}`}
+                  open={openFolds.has("appearance")}
+                  onToggle={toggleFold}
+                >
+                  {/* Swatches rather than a colour input: a picker on a client report invites #00FF00. */}
+                  <span className="config-label">Accent</span>
+                  <div className="theme-swatches">
+                    {PDF_ACCENTS.map((accent) => (
+                      <button
+                        key={accent.id}
+                        type="button"
+                        className={`theme-swatch ${theme.accent === accent.value ? "is-on" : ""}`}
+                        style={accent.value ? { background: accent.value } : undefined}
+                        onClick={() => setThemeField("accent", accent.value)}
+                        aria-label={accent.label}
+                        title={accent.label}
+                      >
+                        {!accent.value && <span>Aa</span>}
+                      </button>
+                    ))}
+                  </div>
+
+                  <span className="config-label">Cover</span>
+                  <div className="theme-choices">
+                    {(["brand", "light", "minimal"] as const).map((style) => (
+                      <button
+                        key={style}
+                        type="button"
+                        className={`theme-choice ${theme.coverStyle === style ? "is-on" : ""}`}
+                        onClick={() => setThemeField("coverStyle", style)}
+                      >
+                        {COVER_STYLE_LABELS[style]}
+                      </button>
+                    ))}
+                  </div>
+
+                  <span className="config-label">Headings</span>
+                  <div className="theme-choices">
+                    {(["serif", "sans"] as const).map((font) => (
+                      <button
+                        key={font}
+                        type="button"
+                        className={`theme-choice ${theme.headingFont === font ? "is-on" : ""}`}
+                        onClick={() => setThemeField("headingFont", font)}
+                      >
+                        {font === "serif" ? "Serif" : "Sans"}
+                      </button>
+                    ))}
+                  </div>
+
+                  <span className="config-label">Density</span>
+                  <div className="theme-choices">
+                    {(["comfortable", "compact"] as const).map((density) => (
+                      <button
+                        key={density}
+                        type="button"
+                        className={`theme-choice ${theme.density === density ? "is-on" : ""}`}
+                        onClick={() => setThemeField("density", density)}
+                      >
+                        {density === "comfortable" ? "Comfortable" : "Compact"}
+                      </button>
+                    ))}
+                  </div>
+
+                  <p className="config-hint">
+                    Changes the pages as you click. Saved with the report, so reopening it shows the version
+                    the client was sent.
+                  </p>
+                </ConfigFold>
+              </>
+            )}
+
+            {template ? null : (
               <div className="config-group">
                 <span className="config-label">Sections</span>
                 <div className="config-sections">
@@ -1593,6 +1709,7 @@ export default function ReportsPage() {
                   pages={pages}
                   written={written}
                   campaignMetrics={campaignMetrics}
+                  theme={theme}
                   headline={composed?.headline || ""}
                   narrative={composed?.narrative || ""}
                 />
@@ -1750,8 +1867,15 @@ function buildCsv(report: ReportData) {
   return lines.join("\n");
 }
 
+/**
+ * The heading each section prints above itself.
+ *
+ * Also the renderer's test for whether an id is still a section at all: archived reports store the layout
+ * they were generated with, and layouts saved before the cover and the methodology note were removed still
+ * name them. An id with no title here is one this build cannot draw, so it is dropped rather than rendered
+ * as an untitled empty block.
+ */
 const SECTION_TITLES: Record<SectionId, string> = {
-  cover: "Cover",
   intro: "Intro",
   recap: "Recap",
   "executive-summary": "Executive summary",
@@ -1772,15 +1896,46 @@ const SECTION_TITLES: Record<SectionId, string> = {
   "what-we-did": "What we did this week",
   priorities: "Priorities for next week",
   "warm-close": "Where we are",
-  methodology: "Methodology & notes",
 };
 
 /**
- * Renders one client's report as a fixed number of printed pages.
+ * The layout with everything that would print as an empty heading taken out.
  *
- * The `pages` prop is the layout: one printed sheet per inner array. Sections used to render as
- * `.report-page` each, which is why eleven ticked boxes produced a thirteen-page PDF; they are now
- * blocks that stack inside a page, and the page count is decided before anything renders.
+ * Two jobs, both of which have to happen to the *layout* rather than inside the render, or the page count
+ * beside the export button stops describing the document:
+ *
+ * A written section nobody filled in is dropped. It used to print its heading over "Booked meetings was
+ * left blank for this report", which tells a client about our form rather than their results — and the
+ * section was optional precisely because some weeks have nothing to say under it.
+ *
+ * An id this build cannot draw is dropped too. Archived reports keep the layout they were filed with, and
+ * layouts filed before the cover and the methodology note were removed still name them; `SECTION_TITLES`
+ * is the test, since an id with no heading is one there is no longer a section for.
+ *
+ * A page left with nothing on it goes as well, which is the one case where this changes the sheet count —
+ * correctly, because a blank sheet is not a page of a report.
+ */
+function printablePages(pages: SectionId[][], written: Record<string, string>): SectionId[][] {
+  return pages
+    .map((page) =>
+      page.filter((id) => {
+        if (!SECTION_TITLES[id]) return false;
+        return isWrittenSection(id) ? Boolean((written[id] || "").trim()) : true;
+      }),
+    )
+    .filter((page) => page.length > 0);
+}
+
+/**
+ * Renders one client's report as a cover sheet followed by a fixed number of content pages.
+ *
+ * The `pages` prop is the content layout: one printed sheet per inner array. Sections used to render as
+ * `.report-page` each, which is why eleven ticked boxes produced a thirteen-page PDF; they are now blocks
+ * that stack inside a page, and the page count is decided before anything renders.
+ *
+ * The cover is not in that layout and never was a section. Every printed report opens with one — it is what
+ * makes the thing a document rather than a printout — so it is guaranteed here instead of being a box
+ * somebody could forget to tick.
  */
 function ReportDocument({
   client,
@@ -1791,6 +1946,7 @@ function ReportDocument({
   pages,
   written,
   campaignMetrics,
+  theme,
   headline,
   narrative,
 }: {
@@ -1803,23 +1959,21 @@ function ReportDocument({
   written: Record<string, string>;
   /** The same per-campaign choices the email obeys, so the table and the email cannot disagree. */
   campaignMetrics: Set<CampaignMetricId>;
+  theme: PdfTheme;
   headline: string;
   narrative: string;
 }) {
   const generated = formatDate(report.generatedAt, client.workspace.timezone);
-  const flat = pages.flat();
+  const sheets = printablePages(pages, written);
 
-  // Number the chapters that appear in the body, skipping the cover and the methodology note so that
-  // "01 / Executive summary" is the first real chapter.
+  // "01 / Executive summary" is the first chapter: the cover is not numbered because it is not one.
   const numberFor: Record<string, string> = {};
-  flat
-    .filter((id) => id !== "cover" && id !== "methodology")
-    .forEach((id, index) => {
-      numberFor[id] = String(index + 1).padStart(2, "0");
-    });
+  sheets.flat().forEach((id, index) => {
+    numberFor[id] = String(index + 1).padStart(2, "0");
+  });
 
   const body = (id: SectionId) => {
-    if (isWrittenSection(id)) return <WrittenSection id={id} value={written[id] || ""} />;
+    if (isWrittenSection(id)) return <WrittenSection value={written[id] || ""} />;
     switch (id) {
       case "executive-summary":
         return <ExecutiveSummary client={client} report={report} narrative={narrative} />;
@@ -1849,103 +2003,157 @@ function ReportDocument({
         return <BestReplies client={client} />;
       case "sample-replies":
         return <SampleReplies client={client} />;
-      case "methodology":
-        return <Methodology client={client} report={report} notes={notes} />;
       default:
         return null;
     }
   };
 
   return (
-    <article className="report-document">
-      {pages.map((page, pageIndex) => {
-        // A cover alone on a page gets the full-bleed treatment; sharing a page it becomes a masthead,
-        // because a title page that is only a third of a page looks like a mistake.
-        const coverOwnsPage = page.length === 1 && page[0] === "cover";
-        if (coverOwnsPage) {
-          return (
-            <section className="report-page report-cover" key={pageIndex}>
-              <div className="report-cover-topline">
-                <span>{preparedBy}</span>
-                <span>·</span>
-                <span>Reply Radar</span>
-              </div>
-              {client.workspace.logoUrl ? (
-                <img className="report-cover-logo" src={client.workspace.logoUrl} alt={`${client.workspace.name} logo`} />
-              ) : (
-                <div className="report-cover-monogram">{client.workspace.name[0]}</div>
-              )}
-              <h1 className="report-cover-title">{reportTitle}</h1>
-              <p className="report-cover-client">{client.workspace.name}</p>
-              <p className="report-cover-period">{report.periodLabel}</p>
-              <div className="report-cover-footer">
-                <div>
-                  <label>Prepared</label>
-                  <p>{generated}</p>
-                </div>
-                <div>
-                  <label>Prepared for</label>
-                  <p>{client.workspace.name}</p>
-                </div>
-                <div>
-                  <label>Prepared by</label>
-                  <p>{preparedBy}</p>
-                </div>
-              </div>
-            </section>
-          );
-        }
+    <article
+      className="report-document"
+      data-cover={theme.coverStyle}
+      data-font={theme.headingFont}
+      data-density={theme.density}
+      /*
+       * The one place a chosen colour enters the document. Written as a variable override on the root
+       * rather than onto each element, so the accent reaches every rule, figure and heading number the
+       * stylesheet already paints with it — including ones added later. An empty accent sets nothing, which
+       * leaves the document inheriting the app's own accent as it always did.
+       */
+      style={theme.accent ? ({ "--report-brand": theme.accent } as React.CSSProperties) : undefined}
+    >
+      <ReportCover
+        client={client}
+        report={report}
+        reportTitle={reportTitle}
+        preparedBy={preparedBy}
+        generated={generated}
+      />
 
-        return (
-          <section className="report-page" key={pageIndex}>
-            {page.includes("cover") && (
-              <header className="report-masthead">
-                {client.workspace.logoUrl ? (
-                  <img className="report-masthead-logo" src={client.workspace.logoUrl} alt={`${client.workspace.name} logo`} />
-                ) : (
-                  <div className="report-masthead-mono">{client.workspace.name[0]}</div>
-                )}
-                <div className="report-masthead-text">
-                  <h1>{reportTitle}</h1>
-                  <p>
-                    {client.workspace.name} · {report.periodLabel}
-                  </p>
-                </div>
-                <div className="report-masthead-aside">
-                  {generated}
-                  <br />
-                  {preparedBy}
-                </div>
+      {sheets.map((page, pageIndex) => (
+        <section className="report-page" key={pageIndex}>
+          {pageIndex === 0 && headline && <p className="report-headline">{headline}</p>}
+
+          {page.map((id) => (
+            <div className="report-block" key={id}>
+              <header className="report-section-heading">
+                {numberFor[id] && <span className="report-section-number">{numberFor[id]}</span>}
+                <h2>{SECTION_TITLES[id]}</h2>
+                <span className="report-section-rule" />
               </header>
-            )}
+              <div className="report-section-body">{body(id)}</div>
+            </div>
+          ))}
 
-            {pageIndex === 0 && headline && <p className="report-headline">{headline}</p>}
+          {/*
+            The notes belong to whoever prepared the report, not to a section, and they used to ride along
+            inside the methodology block. With that gone they sit at the foot of the last sheet — which is
+            where a note to the reader goes in a document, and keeps them from being mistaken for a finding.
+          */}
+          {pageIndex === sheets.length - 1 && notes.trim() && (
+            <aside className="report-reader-note">
+              <h4>Notes for the reader</h4>
+              <p>{notes.trim()}</p>
+            </aside>
+          )}
 
-            {page
-              .filter((id) => id !== "cover")
-              .map((id) => (
-                <div className="report-block" key={id}>
-                  <header className="report-section-heading">
-                    {numberFor[id] && <span className="report-section-number">{numberFor[id]}</span>}
-                    <h2>{SECTION_TITLES[id]}</h2>
-                    <span className="report-section-rule" />
-                  </header>
-                  <div className="report-section-body">{body(id)}</div>
-                </div>
-              ))}
-
-            <footer className="report-page-footer">
-              <span>
-                {client.workspace.name} · {report.periodLabel}
-              </span>
-              <span>
-                Page {pageIndex + 1} of {pages.length}
-              </span>
-            </footer>
-          </section>
-        );
-      })}
+          <footer className="report-page-footer">
+            <span>
+              {client.workspace.name} · {report.periodLabel}
+            </span>
+            <span>
+              Page {pageIndex + 1} of {sheets.length}
+            </span>
+          </footer>
+        </section>
+      ))}
     </article>
+  );
+}
+
+/**
+ * What the cover calls the reporting period, in the words a reader would use.
+ *
+ * `periodLabel` is the exact window — "1–7 Aug 2026", "August 2026" — which belongs on the cover but does
+ * not describe the *cadence*, and the cadence is what tells a client whether this is their Friday recap or
+ * their quarterly. Custom windows get no cadence word because inventing one would be a claim about a
+ * schedule that does not exist.
+ */
+const PERIOD_CADENCE: Partial<Record<Period, string>> = {
+  daily: "Daily report",
+  weekly: "Weekly report",
+  monthly: "Monthly report",
+  quarterly: "Quarterly report",
+  "all-time": "All-time report",
+};
+
+/**
+ * The first sheet of every printed report.
+ *
+ * QC's mark is on it unconditionally — this is agency work delivered under our name, and a cover without
+ * the logo is a document that could have come from anywhere. The client's own mark sits opposite it as a
+ * lockup, because the report is about them: two marks separated by a rule reads as "us, for you", which is
+ * the relationship the cover is there to state.
+ *
+ * Everything on it is either given or derived; there is nothing to fill in. A cover that could come out
+ * half-finished would be a cover somebody had to remember to check.
+ */
+function ReportCover({
+  client,
+  report,
+  reportTitle,
+  preparedBy,
+  generated,
+}: {
+  client: ClientReport;
+  report: ReportData;
+  reportTitle: string;
+  preparedBy: string;
+  generated: string;
+}) {
+  const cadence = PERIOD_CADENCE[report.period];
+  return (
+    <section className="report-page report-cover">
+      <header className="report-cover-lockup">
+        {/* Next's <Image> wants known dimensions and an optimiser; a print sheet wants neither, and the
+            client logo is an arbitrary remote URL. Both marks stay plain <img> for the same reason. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="report-cover-mark" src="/qc-growth-logo.png" alt="QC Growth" />
+        {client.workspace.logoUrl && (
+          <>
+            <span className="report-cover-lockup-rule" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              className="report-cover-mark report-cover-mark-client"
+              src={client.workspace.logoUrl}
+              alt={`${client.workspace.name} logo`}
+            />
+          </>
+        )}
+      </header>
+
+      <div className="report-cover-body">
+        {cadence && <p className="report-cover-eyebrow">{cadence}</p>}
+        <h1 className="report-cover-title">{reportTitle}</h1>
+        <p className="report-cover-client">{client.workspace.name}</p>
+        <p className="report-cover-period">{report.periodLabel}</p>
+      </div>
+
+      <div className="report-cover-footer">
+        <div>
+          <span className="report-cover-footer-label">Prepared for</span>
+          <p>{client.workspace.name}</p>
+        </div>
+        <div>
+          <span className="report-cover-footer-label">Prepared by</span>
+          <p>{preparedBy}</p>
+        </div>
+        <div>
+          <span className="report-cover-footer-label">Date</span>
+          <p>{generated}</p>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -2018,10 +2226,12 @@ function ExecutiveSummary({
  * report where the words are the client's own, and reformatting them further would put sentences in
  * front of a client that nobody wrote.
  */
-function WrittenSection({ id, value }: { id: WrittenSectionId; value: string }) {
+function WrittenSection({ value }: { value: string }) {
+  // A blank one never reaches here: `printablePages` drops it from the layout, heading and all, because a
+  // client reading "Booked meetings was left blank for this report" has been shown our form rather than
+  // their results. The guard stays because the layout and the values are two props and could disagree.
   const trimmed = value.trim();
-  if (!trimmed)
-    return <EmptyNote>{WRITTEN_SECTION_PROMPTS[id].label} was left blank for this report.</EmptyNote>;
+  if (!trimmed) return null;
 
   const blocks = trimmed.split(/\n{2,}/).filter(Boolean);
   return (
@@ -2188,19 +2398,24 @@ function TrendChart({ client }: { client: ClientReport }) {
 const CAMPAIGN_ROW_CAP = 12;
 
 /**
- * What is running right now, from HeyReach rather than from stored replies.
+ * How many campaigns the table will print before it says "and N more".
  *
- * Ordered active-first because that is the answer to the client's question; scheduled campaigns follow
- * because "launching next" is the second half of it. Campaigns that have worked through their list are
- * deliberately not here — to us they are complete, and listing them as live would be the exact
- * misreading this section exists to prevent.
+ * Lower than `CAMPAIGN_ROW_CAP` because these rows are taller: eight possible columns and a wrapping list
+ * of sender names, against one line of figures. Twelve of them ran off the bottom of the sheet, which the
+ * print stylesheet clips rather than spills.
  */
+const ACTIVE_CAMPAIGN_ROW_CAP = 8;
+
 /**
- * The live campaigns, with the columns the account manager asked for and no others.
+ * The campaigns this report was generated for, from HeyReach rather than from stored replies.
  *
- * Driven by the same choices as the email's campaign lines. A table showing the sending runway next to an
- * email that omitted it — or the reverse — would make the report contradict its own covering note, and
- * whichever one the client read second would be the one they queried.
+ * Every campaign that was ticked, in every state — not just the ones we would call active. The selection
+ * has already been made on the config screen, and someone who ticks a finished campaign is asking to be
+ * told it is finished. Filtering by our own definition of "active" here silently overrode that choice.
+ *
+ * The columns are driven by the same choices as the email's campaign lines. A table showing the sending
+ * runway next to an email that omitted it — or the reverse — would make the report contradict its own
+ * covering note, and whichever the client read second would be the one they queried.
  */
 function ActiveCampaignTable({ client, metrics }: { client: ClientReport; metrics: Set<CampaignMetricId> }) {
   const status = client.campaignStatus;
@@ -2211,11 +2426,13 @@ function ActiveCampaignTable({ client, metrics }: { client: ClientReport; metric
       </EmptyNote>
     );
 
-  const rows = [...status.active, ...status.scheduled];
+  const selected = [...status.active, ...status.scheduled, ...status.workedThrough, ...status.paused];
   // Deliberately not "nothing was active": the campaigns in a report are chosen before it is
   // generated, so an empty table can equally mean none were selected. Claiming otherwise would be a
   // guess printed in front of a client.
-  if (!rows.length) return <EmptyNote>No active campaigns are included in this report.</EmptyNote>;
+  if (!selected.length) return <EmptyNote>No campaigns are included in this report.</EmptyNote>;
+  const rows = selected.slice(0, ACTIVE_CAMPAIGN_ROW_CAP);
+  const omitted = selected.length - rows.length;
 
   const key = (value: string) => value.trim().toLowerCase();
   const repliesByCampaign = new Map(client.campaigns.map((row) => [key(row.name), row]));
@@ -2247,9 +2464,14 @@ function ActiveCampaignTable({ client, metrics }: { client: ClientReport; metric
     },
     { id: "replies", label: "Replies", cell: (row) => num(repliesByCampaign.get(key(row.name))?.replies ?? 0) },
     { id: "positive-replies", label: "Positive", cell: (row) => num(repliesByCampaign.get(key(row.name))?.positive ?? 0) },
-    // Dashes, not zeros: HeyReach not telling us who is assigned is not the same as nobody being
-    // assigned, and a runway we cannot compute must not print as "0 days".
-    { id: "senders", label: "Senders", cell: (row) => (row.senders > 0 ? num(row.senders) : "—") },
+    // Names, not a headcount — the client knows who Eyal is and can do nothing with "3". The count is the
+    // fallback for a workspace whose accounts we could not name; a dash means HeyReach named no accounts at
+    // all, which is not the same as nobody being assigned, so a runway we cannot compute prints as a dash too.
+    {
+      id: "senders",
+      label: "Senders",
+      cell: (row) => (row.senderNames.length ? row.senderNames.join(", ") : row.senders > 0 ? num(row.senders) : "—"),
+    },
     { id: "pending", label: "Leads pending", cell: (row) => num(row.progress.pending) },
     {
       id: "days-left",
@@ -2258,15 +2480,17 @@ function ActiveCampaignTable({ client, metrics }: { client: ClientReport; metric
     },
   ];
   const columns = allColumns.filter((column) => metrics.has(column.id));
+  // Figures right-align so they can be scanned down; a date and a list of names are text and do not.
+  const align = (id: CampaignMetricId) => (id === "launched" || id === "senders" ? undefined : ({ textAlign: "right" } as const));
 
   return (
     <>
-      <table className="report-table">
+      <table className="report-table report-table-compact">
         <thead>
           <tr>
             <th>Campaign</th>
             {columns.map((column) => (
-              <th key={column.id} style={column.id === "launched" ? undefined : { textAlign: "right" }}>
+              <th key={column.id} style={align(column.id)}>
                 {column.label}
               </th>
             ))}
@@ -2277,10 +2501,12 @@ function ActiveCampaignTable({ client, metrics }: { client: ClientReport; metric
             <tr key={row.id || row.name}>
               <td>
                 {row.name}
-                {row.state === "scheduled" && <span className="report-tag">Scheduled</span>}
+                {/* Only the states that are not "running with leads to go" get a tag: the heading already
+                    says that, and marking every row distinguishes nothing. */}
+                {CAMPAIGN_STATE_TAGS[row.state] && <span className="report-tag">{CAMPAIGN_STATE_TAGS[row.state]}</span>}
               </td>
               {columns.map((column) => (
-                <td key={column.id} style={column.id === "launched" ? undefined : { textAlign: "right" }}>
+                <td key={column.id} style={align(column.id)}>
                   {column.cell(row)}
                 </td>
               ))}
@@ -2289,13 +2515,24 @@ function ActiveCampaignTable({ client, metrics }: { client: ClientReport; metric
         </tbody>
       </table>
       <p className="report-caption">
-        Active means live in HeyReach with leads still to contact.
-        {metrics.has("days-left") &&
-          " Days left is the leads still pending divided by daily sending capacity — senders × 25 connection requests a day."}
+        {omitted > 0 &&
+          `Showing the first ${ACTIVE_CAMPAIGN_ROW_CAP} of ${selected.length} campaigns in this report; ${omitted} more ${omitted === 1 ? "is" : "are"} omitted to keep the page. `}
+        Untagged campaigns are live in HeyReach with leads still to contact.
       </p>
     </>
   );
 }
+
+/**
+ * How a campaign that is not actively sending is flagged in its own row.
+ *
+ * `active` is deliberately absent — see the comment at its only use.
+ */
+const CAMPAIGN_STATE_TAGS: Record<string, string> = {
+  scheduled: "Scheduled",
+  "worked-through": "List finished",
+  paused: "Paused",
+};
 
 function CampaignTable({ client }: { client: ClientReport }) {
   if (!client.campaigns.length) return <EmptyNote>No campaign attribution captured in this period.</EmptyNote>;
@@ -2503,54 +2740,6 @@ function SampleReplies({ client }: { client: ClientReport }) {
           </footer>
         </blockquote>
       ))}
-    </div>
-  );
-}
-
-function Methodology({
-  client,
-  report,
-  notes,
-}: {
-  client: ClientReport;
-  report: ReportData;
-  notes: string;
-}) {
-  return (
-    <div className="methodology">
-      {notes && (
-        <div className="methodology-notes">
-          <h4>Notes for the reader</h4>
-          <p>{notes}</p>
-        </div>
-      )}
-      <ul>
-        <li>
-          <strong>Source:</strong> Reply Radar's ledger of HeyReach conversations for {client.workspace.name}. Numbers
-          reflect what has been received via HeyReach webhooks and confirmed through direct API sync.
-        </li>
-        <li>
-          <strong>Time window:</strong> {report.periodLabel}
-          {report.since && ` — from ${formatDate(report.since, client.workspace.timezone)}`}
-          {report.until && ` to ${formatDate(report.until, client.workspace.timezone)}`}.
-        </li>
-        <li>
-          <strong>Sentiment:</strong> Classified per reply by Anthropic Claude Haiku 4.5 using the workspace's
-          guardrails prompt. Positive / neutral / negative are the model's returned labels.
-        </li>
-        <li>
-          <strong>ICP score:</strong> 0–100, produced by Claude with the workspace's ICP prompt. Kept forever on
-          the lead row so scores are consistent across reports.
-        </li>
-        <li>
-          <strong>Follow-up urgency:</strong> Model-scored per reply. "Hot" is urgency ≥ 60; the inbox flags
-          urgency ≥ 75 in red.
-        </li>
-        <li>
-          <strong>Attribution:</strong> Campaigns and senders come from the HeyReach webhook payload. Replies
-          missing attribution appear under "— Unattributed —".
-        </li>
-      </ul>
     </div>
   );
 }

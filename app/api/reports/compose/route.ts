@@ -195,8 +195,20 @@ function campaignLines(client: Json, metrics: CampaignMetricId[]): string[] {
   const funnelById = new Map(funnel.filter((row) => text(row.campaignId)).map((row) => [text(row.campaignId), row]));
   const funnelByName = new Map(funnel.map((row) => [key(row.name), row]));
 
-  // The same two buckets the document's table shows, so the email and the page name the same campaigns.
-  return [...array(status.active), ...array(status.scheduled)]
+  /**
+   * Every campaign the report was generated for, in the order the document's table lists them.
+   *
+   * All four buckets, not just the live ones. The campaigns here have already been narrowed to the ones
+   * ticked on the config screen, and a campaign somebody ticked belongs in their report even when it has
+   * no pending leads left — being told a list is finished is the point of asking. Reading only `active`
+   * meant our own definition of the word silently overrode an explicit choice.
+   */
+  return [
+    ...array(status.active),
+    ...array(status.scheduled),
+    ...array(status.workedThrough),
+    ...array(status.paused),
+  ]
     .filter((row) => text(row.name))
     .slice(0, 12)
     .map((row) => {
@@ -211,15 +223,35 @@ function campaignLines(client: Json, metrics: CampaignMetricId[]): string[] {
       if (wanted.has("connections-accepted")) facts.push(`${int(stats.connectionsAccepted).toLocaleString()} accepted`);
       if (wanted.has("replies")) facts.push(plural(int(reply.replies), "reply", "replies"));
       if (wanted.has("positive-replies")) facts.push(`${int(reply.positive).toLocaleString()} positive`);
-      if (wanted.has("senders") && int(row.senders) > 0) facts.push(plural(int(row.senders), "sender", "senders"));
+      // Names, not a headcount. The client knows who Eyal and Roi are; "3 senders" is a fact they can do
+      // nothing with. The count is the fallback for a workspace whose accounts we could not name.
+      if (wanted.has("senders")) {
+        const names = Array.isArray(row.senderNames) ? row.senderNames.map(text).filter(Boolean) : [];
+        if (names.length) facts.push(names.join(", "));
+        else if (int(row.senders) > 0) facts.push(plural(int(row.senders), "sender", "senders"));
+      }
       if (wanted.has("pending")) facts.push(`${int(progress.pending).toLocaleString()} pending`);
       if (wanted.has("days-left") && typeof daysLeft === "number")
         facts.push(`${plural(daysLeft, "day", "days")} of sending left`);
 
-      const scheduled = text(row.state) === "scheduled" ? " (scheduled)" : "";
-      return `${text(row.name)}${scheduled}${facts.length ? ` — ${facts.join(" · ")}` : ""}`;
+      // Only the states that are not "running with leads to go", because that is what the section's own
+      // heading already says. Left unmarked, a finished campaign reads as one still working.
+      const note = STATE_NOTES[text(row.state)] ?? "";
+      return `${text(row.name)}${note}${facts.length ? ` — ${facts.join(" · ")}` : ""}`;
     });
 }
+
+/**
+ * How a campaign that is not actively sending is flagged on its own line.
+ *
+ * `active` is deliberately absent: the section is about what is running, so marking the running ones adds
+ * a word to every line and distinguishes nothing.
+ */
+const STATE_NOTES: Record<string, string> = {
+  scheduled: " (scheduled)",
+  "worked-through": " (list finished)",
+  paused: " (paused)",
+};
 
 /**
  * Joins the model's blocks and the account manager's own words into the email that gets sent.
