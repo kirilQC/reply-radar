@@ -42,7 +42,13 @@ export const PAGE_CAPACITY = 12;
  */
 export const SECTION_WEIGHTS = {
   cover: 3,
+  // Written sections are costed for the length people actually type into a box that size: a paragraph
+  // for the recap and the close, a handful of one-liners for the two lists. Someone who writes an essay
+  // will overflow, which the meter cannot know in advance and the print preview will show.
+  recap: 4,
   "executive-summary": 4,
+  // Six figures with their denominators spelled out, so a little more than the KPI grid.
+  metrics: 4,
   kpis: 3,
   sentiment: 3,
   trend: 3,
@@ -56,6 +62,9 @@ export const SECTION_WEIGHTS = {
   "hot-conversations": 6,
   "reply-timing": 3,
   "sample-replies": 6,
+  "what-we-did": 4,
+  priorities: 4,
+  "warm-close": 2,
   methodology: 2,
 };
 

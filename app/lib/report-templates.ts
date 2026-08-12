@@ -17,7 +17,9 @@
 
 export type SectionId =
   | "cover"
+  | "recap"
   | "executive-summary"
+  | "metrics"
   | "kpis"
   | "sentiment"
   | "trend"
@@ -29,13 +31,58 @@ export type SectionId =
   | "hot-conversations"
   | "reply-timing"
   | "sample-replies"
+  | "what-we-did"
+  | "priorities"
+  | "warm-close"
   | "methodology";
+
+/**
+ * Sections whose content the account manager types, not sections the app computes.
+ *
+ * Booked meetings, why a campaign was paused, what happens next — none of that is in HeyReach or in our
+ * tables, and no amount of prompt engineering will conjure it. So the report asks. A template gets an
+ * input box for each of these that appears in its layout, which means adding one here and giving it a
+ * weight is all it takes for the box to appear.
+ */
+export const WRITTEN_SECTIONS = ["recap", "what-we-did", "priorities", "warm-close"] as const;
+
+export type WrittenSectionId = (typeof WRITTEN_SECTIONS)[number];
+
+export const isWrittenSection = (id: SectionId): id is WrittenSectionId =>
+  (WRITTEN_SECTIONS as readonly string[]).includes(id);
+
+/** The label and placeholder each written box carries in the config screen. */
+export const WRITTEN_SECTION_PROMPTS: Record<WrittenSectionId, { label: string; placeholder: string }> = {
+  recap: {
+    label: "Recap",
+    placeholder:
+      "The opening paragraph, in your words. Anything the numbers cannot say — meetings booked, who you spoke to, how the week actually went.",
+  },
+  "what-we-did": {
+    label: "What we did this week",
+    placeholder: "Campaigns launched or paused, lists built, copy tested, accounts added. One line each.",
+  },
+  priorities: {
+    label: "Priorities for next week",
+    placeholder: "What happens next, and anything you need from the client. One line each.",
+  },
+  "warm-close": {
+    label: "Warm close",
+    placeholder: "How you want to sign off. A sentence or two.",
+  },
+};
 
 export type SectionDef = { id: SectionId; label: string; blurb: string; alwaysOn?: boolean };
 
 export const SECTIONS: SectionDef[] = [
   { id: "cover", label: "Cover page", blurb: "Client, period, generated date, brand mark", alwaysOn: true },
+  { id: "recap", label: "Recap", blurb: "Your own opening paragraph, typed before generating" },
   { id: "executive-summary", label: "Executive summary", blurb: "Auto-written narrative from the numbers" },
+  {
+    id: "metrics",
+    label: "Performance metrics",
+    blurb: "Replies, positives, acceptance and reply rates — selected campaigns only",
+  },
   { id: "kpis", label: "Headline KPIs", blurb: "Replies, positive rate, hot leads, avg per day" },
   { id: "sentiment", label: "Sentiment breakdown", blurb: "Positive / neutral / negative split with %" },
   { id: "trend", label: "Reply trend", blurb: "Daily bar chart over the period" },
@@ -51,6 +98,9 @@ export const SECTIONS: SectionDef[] = [
   { id: "hot-conversations", label: "Hot conversations", blurb: "Follow-up urgency ≥ 60 with snippets" },
   { id: "reply-timing", label: "Reply timing", blurb: "Hour-of-day heatmap in client's timezone" },
   { id: "sample-replies", label: "Sample positive replies", blurb: "Six verbatim positive replies for evidence" },
+  { id: "what-we-did", label: "What we did this week", blurb: "Your own list of the work done" },
+  { id: "priorities", label: "Priorities for next week", blurb: "Your own list of what happens next" },
+  { id: "warm-close", label: "Warm close", blurb: "Your own sign-off" },
   { id: "methodology", label: "Methodology & notes", blurb: "How the numbers were computed", alwaysOn: true },
 ];
 
@@ -73,14 +123,17 @@ export const PAGE_LIMIT = 3;
  *
  * Writing a template is meant to be a matter of typing a prompt, so the layout cannot be a required
  * decision — but a template still has to state its pages, because that declaration is what guarantees
- * it stays inside the limit. This is the general-purpose answer: the story, then what is running and
- * what it produced, then the people worth acting on. Anyone who wants different sections wants "Build
- * your own", which is a different tool.
+ * it stays inside the limit.
+ *
+ * The shape is the client recap the agency actually sends: the account manager's own opening, then the
+ * numbers and what is running, then what was done, what is next, and a sign-off. Half of that is typed
+ * and half is pulled, which is the point — the report is the two halves joined, and neither half can
+ * write the other.
  */
 export const DEFAULT_TEMPLATE_PAGES: SectionId[][] = [
-  ["cover", "executive-summary", "kpis"],
-  ["trend", "active-campaigns", "campaigns"],
-  ["senders", "top-leads", "methodology"],
+  ["cover", "recap", "metrics"],
+  ["active-campaigns", "what-we-did", "priorities"],
+  ["warm-close", "methodology"],
 ];
 
 export type ReportPeriod = "daily" | "weekly" | "monthly" | "quarterly" | "all-time" | "custom";
@@ -89,8 +142,6 @@ export type ReportTemplate = {
   id: string;
   name: string;
   summary: string;
-  /** Where the written message is meant to go. Changes the tone Claude writes in, nothing else. */
-  channel: "email" | "slack";
   /**
    * The period the template is written for, preselected when it is opened and still changeable.
    * A template whose prompt says "the entire engagement" must not quietly produce a monthly report.
@@ -127,7 +178,7 @@ Return ONLY a JSON object, no prose around it, in exactly this shape:
 {
   "headline": "one line, max 70 characters, the single most important fact",
   "narrative": "the executive summary for the PDF, 90-150 words, 2 short paragraphs",
-  "message": "the message to send, following the channel and length rules given below"
+  "message": "the email to send with the report attached, following the length rules given below"
 }`;
 
 export const BUILT_IN_TEMPLATES: ReportTemplate[] = [
@@ -135,7 +186,6 @@ export const BUILT_IN_TEMPLATES: ReportTemplate[] = [
     id: "all-time-exec",
     name: "All-time executive summary",
     summary: "The whole relationship in three pages — for QBRs, renewals and exec updates.",
-    channel: "email",
     defaultPeriod: "all-time",
     builtIn: true,
     // Page 1 sets the story, page 2 proves it with performance, page 3 names the people worth
@@ -184,7 +234,6 @@ export function normaliseTemplate(input: unknown): ReportTemplate | null {
     id,
     name: name.slice(0, 80),
     summary: typeof row.summary === "string" ? row.summary.trim().slice(0, 200) : "",
-    channel: row.channel === "slack" ? "slack" : "email",
     defaultPeriod: PERIODS.has(row.defaultPeriod as ReportPeriod) ? (row.defaultPeriod as ReportPeriod) : "monthly",
     pages,
     prompt,

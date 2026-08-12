@@ -10,12 +10,19 @@
 import { NextResponse } from "next/server";
 import { queryByIds } from "../../../lib/chunk-query";
 import {
+  allCampaigns,
   campaignStatusFor,
   emptyStatus,
   selectCampaigns,
   stateByName,
   type CampaignStatus,
 } from "../../../lib/heyreach-campaigns";
+import {
+  campaignFunnelFor,
+  emptyFunnel,
+  reportMetrics,
+  type CampaignFunnel,
+} from "../../../lib/heyreach-campaign-metrics";
 import { dedupeMessages } from "../../../lib/message-dedupe";
 
 type Row = Record<string, unknown>;
@@ -109,6 +116,17 @@ export async function POST(request: Request) {
   const campaignIds = Array.isArray(body.campaignIds) ? body.campaignIds.map(text).filter(Boolean) : null;
   const { since, until, label } = periodRange(period, timeZone, { since: customSince, until: customUntil });
 
+  /**
+   * The same window, but stated as two real dates.
+   *
+   * `since`/`until` are null for an open-ended period, which our own scans read as "no bound".
+   * HeyReach's stats endpoint has no such notion and needs both ends, so all-time becomes a floor
+   * that predates the agency and a ceiling of now. It filters by activity, so a window wider than the
+   * data costs nothing.
+   */
+  const statsSince = since ?? "2020-01-01T00:00:00.000Z";
+  const statsUntil = until ?? new Date().toISOString();
+
   try {
     // Resolve workspace(s)
     const workspaces = await query(
@@ -122,13 +140,26 @@ export async function POST(request: Request) {
     const workspaceIds = workspaces.map((w) => text(w.id));
     const workspaceById = new Map(workspaces.map((w) => [text(w.id), w]));
 
-    // Which campaigns are live comes from HeyReach, not from our own tables, so it is started here
-    // and awaited after the Supabase scans below — the two have nothing to say to each other and
-    // running them in sequence would add HeyReach's latency to every report for no reason.
-    const campaignStatusPending = Promise.all(
+    /**
+     * What HeyReach knows: which campaigns are live, and how the outbound funnel performed.
+     *
+     * Started here and awaited after the Supabase scans below — the two have nothing to say to each
+     * other and running them in sequence would add HeyReach's latency to every report for no reason.
+     *
+     * The funnel waits on the status because it needs campaign ids to scope itself to, and when the
+     * caller has not picked any it takes every campaign the account has. Asking HeyReach for stats
+     * with an empty id list would silently widen the rates to the whole account, which is the one
+     * answer that must never be printed next to a named set of campaigns.
+     */
+    const heyReachPending = Promise.all(
       workspaces.map(async (workspace) => {
-        const status = await campaignStatusFor(text(workspace.heyreach_api_key_ciphertext));
-        return [text(workspace.id), selectCampaigns(status, campaignIds)] as const;
+        const apiKey = text(workspace.heyreach_api_key_ciphertext);
+        const status = selectCampaigns(await campaignStatusFor(apiKey), campaignIds);
+        const ids = campaignIds ?? allCampaigns(status).map((row) => row.id);
+        const funnel = status.available
+          ? await campaignFunnelFor(apiKey, ids, statsSince, statsUntil)
+          : emptyFunnel(status.reason);
+        return [text(workspace.id), { status, funnel }] as const;
       }),
     );
 
@@ -183,7 +214,9 @@ export async function POST(request: Request) {
       else messagesByWorkspace.set(workspaceId, [message]);
     }
 
-    const campaignStatusByWorkspace = new Map<string, CampaignStatus>(await campaignStatusPending);
+    const heyReachByWorkspace = new Map<string, { status: CampaignStatus; funnel: CampaignFunnel }>(
+      await heyReachPending,
+    );
 
     const clientReports = workspaces.map((workspace) => {
       const workspaceId = text(workspace.id);
@@ -214,7 +247,8 @@ export async function POST(request: Request) {
       // Live status, joined onto the reply-derived rows by name because reply attribution carries a
       // campaign name and not an id. A row with no match keeps an empty state rather than being
       // called dormant — the campaign may simply have been renamed since the reply came in.
-      const campaignStatus = campaignStatusByWorkspace.get(workspaceId) ?? emptyStatus("Status was not requested.");
+      const heyReach = heyReachByWorkspace.get(workspaceId);
+      const campaignStatus = heyReach?.status ?? emptyStatus("Status was not requested.");
       const liveByName = stateByName(campaignStatus);
       const campaignRows = [...campaigns.values()]
         .sort((a, b) => b.replies - a.replies)
@@ -390,6 +424,17 @@ export async function POST(request: Request) {
           scheduledCampaigns: campaignStatus.available ? campaignStatus.scheduled.length : null,
           silentActiveCampaigns: campaignStatus.available ? activeWithoutReplies.length : null,
         },
+        /**
+         * The outbound funnel joined to our replies: sent, accepted, and the three rates.
+         *
+         * HeyReach supplies the denominators and we supply the numerators, which is what lets the
+         * report's reply rate be divided back out of the reply count printed above it.
+         */
+        metrics: reportMetrics(heyReach?.funnel ?? emptyFunnel("Rates were not requested."), {
+          total: totalReplies,
+          positive: sentimentCounts.positive,
+          leadsReplied: repliedLeadIds.size,
+        }),
         sentiment: sentimentCounts,
         campaigns: campaignRows,
         campaignStatus: {

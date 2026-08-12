@@ -87,8 +87,33 @@ function digest(client: Json) {
         note: "Live campaign status was unavailable. Do not state which campaigns are active; say the status needs confirming in HeyReach.",
       };
 
+  /**
+   * The funnel, measured across the selected campaigns only.
+   *
+   * Every rate here carries its denominator, because "reply rate 14%" invites the model to divide by
+   * whatever number is nearest and get a different answer than the page shows.
+   */
+  const funnel = object(client.metrics);
+  const performance = funnel.available
+    ? {
+        scope: `Rates cover only the ${int(funnel.campaignCount)} campaign(s) selected for this report, over the period.`,
+        connectionRequestsSent: int(funnel.connectionsSent),
+        connectionRequestsAccepted: int(funnel.connectionsAccepted),
+        averageAcceptanceRatePercent: Number((Number(funnel.acceptanceRate) || 0).toFixed(1)),
+        acceptanceRateNote: "Mean of each selected campaign's own accepted ÷ sent.",
+        replyRatePercent: Number((Number(funnel.replyRate) || 0).toFixed(1)),
+        positiveReplyRatePercent: Number((Number(funnel.positiveReplyRate) || 0).toFixed(1)),
+        rateDenominatorNote: "Reply rate and positive reply rate are replies ÷ connections accepted.",
+        repliesFromLeads: int(funnel.leadsReplied),
+      }
+    : {
+        available: false,
+        note: "Campaign funnel figures were unavailable, so do not quote acceptance or reply rates.",
+      };
+
   return {
     activeCampaigns,
+    performance,
     client: text(object(client.workspace).name),
     totalReplies: int(summary.totalReplies),
     positiveReplies: int(summary.positiveReplies),
@@ -135,23 +160,41 @@ export async function POST(request: Request) {
   if (!clients.length)
     return NextResponse.json({ ok: false, error: "There is no report data to write about." }, { status: 400 });
 
-  const channel = body.channel === "slack" ? "slack" : "email";
   const periodLabel = text(body.periodLabel) || "the period";
   const digests = clients.map(digest);
   const totalReplies = digests.reduce((total, item) => total + item.totalReplies, 0);
 
-  const channelRules =
-    channel === "slack"
-      ? "The message is a Slack message. 60-100 words, plain text, no markdown headers, no bullet characters other than a leading dash."
-      : "The message is an email body. Follow the word count in the instructions below. No subject line, no signature.";
+  /**
+   * What the account manager typed into the report's written sections.
+   *
+   * This is the half of the report the app cannot know — booked meetings, why a campaign was paused,
+   * what was promised on a call. It is treated as fact and outranks the model's reading of the numbers,
+   * but it must not be rewritten: the client is going to read those words as they were typed, so the
+   * message has to agree with them rather than paraphrase them into something slightly different.
+   */
+  const written = Object.entries(object(body.written))
+    .map(([section, value]) => [section, text(value)] as const)
+    .filter(([, value]) => value);
+
+  const writtenBlock = written.length
+    ? `
+The account manager has written these sections themselves. They are true, they may contain facts that
+appear nowhere in the data below (booked meetings, calls, context), and the report will print them
+verbatim. Use them: your message must be consistent with them and may refer to what they say. Do not
+contradict them, do not restate them word for word, and do not invent detail around them.
+
+${written.map(([section, value]) => `[${section}]\n${value}`).join("\n\n")}
+`
+    : "";
 
   const userContent = `${prompt}
 
-${channelRules}
+The message is an email body. Follow the word count in the instructions below. No subject line, no
+signature.
 
 Period covered: ${periodLabel}
 ${digests.length > 1 ? `This report covers ${digests.length} clients. Write about the portfolio as a whole.` : ""}
-
+${writtenBlock}
 Report data (JSON — these are the only numbers you may use):
 ${JSON.stringify(digests.length === 1 ? digests[0] : digests, null, 2)}`;
 
@@ -226,7 +269,7 @@ ${JSON.stringify(digests.length === 1 ? digests[0] : digests, null, 2)}`;
           inputTokens: int(object(payload.usage).input_tokens),
           outputTokens: int(object(payload.usage).output_tokens),
           templateId: text(body.templateId),
-          channel,
+          writtenSections: written.map(([section]) => section),
           clientCount: digests.length,
           totalReplies,
         },

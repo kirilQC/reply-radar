@@ -242,6 +242,36 @@ body.light-mode .reports-main {
   line-height: 1.45;
 }
 
+/* The layout, stated in one line. Boxed so it reads as a fact about the template rather than as a
+   caption belonging to the control above it. */
+.config-layout {
+  border-left: 2px solid var(--report-line);
+  padding-left: 10px;
+}
+
+/* Each written box gets its own label. They are stacked with a little air because these are the
+   sections somebody is actually composing in, not fields being filled in. */
+.config-written {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.config-written-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--report-ink);
+  letter-spacing: 0.01em;
+}
+
+/* Taller than the other boxes: the prompt is a few paragraphs and scrolling a five-line window to
+   tweak one sentence is the reason people would avoid editing it. */
+.config-prompt {
+  min-height: 200px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
 .config-generate {
   margin-top: 4px;
   background: var(--report-brand);
@@ -765,6 +795,38 @@ body.light-mode .reports-main {
   color: var(--report-ink-soft);
   margin: 0;
   font-style: italic;
+}
+
+/* The figures and the caption that gives them their denominators, kept together so a rate is never
+   printed on one page with its explanation on the next. */
+.metrics-block {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  break-inside: avoid;
+}
+
+/* A section in the account manager's own words. Set at reading size rather than as report furniture —
+   this is the part of the document a client reads as a letter. */
+.written-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 10.5pt;
+  line-height: 1.55;
+  color: var(--report-ink);
+}
+
+.written-block p {
+  margin: 0;
+}
+
+.written-block ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 /* A campaign that has not launched yet sits in the same table as the live ones, so it needs to

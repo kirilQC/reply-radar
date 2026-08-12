@@ -92,7 +92,9 @@ export async function POST(request: Request) {
     period: text(body.period) || "custom",
     period_label: text(body.periodLabel) || "Custom range",
     sections: Array.isArray(body.sections) ? body.sections : [],
-    message_channel: text(body.messageChannel) || null,
+    // `message_channel` is deliberately not written. Every report's message is an email now; the column
+    // is left in place because rows already carry it, but nothing new should be filed under a choice
+    // that no longer exists.
     message_text: text(body.messageText) || null,
     csv_text: typeof body.csvText === "string" ? body.csvText : null,
     data: body.data && typeof body.data === "object" ? body.data : {},

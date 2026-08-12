@@ -5,12 +5,15 @@ import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import {
   BUILT_IN_TEMPLATES,
+  isWrittenSection,
   PAGE_LIMIT,
   SECTION_LABELS,
   SECTIONS,
+  WRITTEN_SECTION_PROMPTS,
   type ReportPeriod as Period,
   type ReportTemplate,
   type SectionId,
+  type WrittenSectionId,
 } from "../lib/report-templates";
 import { packPages, paginate, suggestTrim } from "../../shared/report-pagination.mjs";
 import "./reports.css";
@@ -87,6 +90,26 @@ type ClientReport = {
     activeCampaigns: number | null;
     scheduledCampaigns: number | null;
     silentActiveCampaigns: number | null;
+  };
+  /**
+   * The outbound funnel for the campaigns this report names, joined to our replies.
+   *
+   * `available: false` is a real state, not a zero — it means HeyReach could not be asked, and every
+   * rate below it has to be printed as unknown rather than as 0%.
+   */
+  metrics: {
+    available: boolean;
+    reason: string;
+    campaignCount: number;
+    connectionsSent: number;
+    connectionsAccepted: number;
+    acceptanceRate: number;
+    replies: number;
+    positiveReplies: number;
+    leadsReplied: number;
+    replyRate: number;
+    positiveReplyRate: number;
+    campaigns: Array<{ campaignId: string; name: string; connectionsSent: number; connectionsAccepted: number; acceptanceRate: number }>;
   };
   sentiment: { positive: number; neutral: number; negative: number; unclassified: number };
   campaigns: Array<{
@@ -184,7 +207,6 @@ export default function ReportsPage() {
   const [draftName, setDraftName] = useState("");
   const [draftSummary, setDraftSummary] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
-  const [draftChannel, setDraftChannel] = useState<"email" | "slack">("email");
   const [draftPeriod, setDraftPeriod] = useState<Period>("monthly");
   const [templateBusy, setTemplateBusy] = useState(false);
   const [templateError, setTemplateError] = useState("");
@@ -213,6 +235,23 @@ export default function ReportsPage() {
   const [campaignPick, setCampaignPick] = useState<Set<string>>(new Set());
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [campaignsNote, setCampaignsNote] = useState("");
+
+  /**
+   * The template's prompt, editable for this run only.
+   *
+   * Nearly all of what makes one report different from another lives in the prompt, so the config
+   * screen puts it on the page rather than behind an edit-the-template detour. Changing it here does
+   * not save it — a tweak for one client's week should not silently rewrite the template everybody
+   * else is running.
+   */
+  const [runPrompt, setRunPrompt] = useState("");
+
+  /**
+   * The sections the account manager writes, which the app has no way to know: meetings booked, why a
+   * campaign was paused, what happens next. Kept as one record keyed by section id so adding a written
+   * section is a matter of listing it in WRITTEN_SECTIONS.
+   */
+  const [written, setWritten] = useState<Record<string, string>>({});
 
   const [composed, setComposed] = useState<Composed | null>(null);
   const [messageText, setMessageText] = useState("");
@@ -330,6 +369,10 @@ export default function ReportsPage() {
     setTemplate(chosen);
     setPeriod(chosen.defaultPeriod);
     setReportTitle(chosen.name);
+    setRunPrompt(chosen.prompt);
+    // Boxes start empty rather than carrying over what was typed for the last client, which would be
+    // the worst possible default: last week's recap sent under this week's numbers.
+    setWritten({});
     setView("builder");
     loadCampaigns(workspaceSlug);
   };
@@ -338,6 +381,8 @@ export default function ReportsPage() {
     resetOutput();
     setTemplate(null);
     setReportTitle("Outbound Reply Report");
+    setRunPrompt("");
+    setWritten({});
     setView("builder");
     loadCampaigns(workspaceSlug);
   };
@@ -418,7 +463,6 @@ export default function ReportsPage() {
           name,
           summary: draftSummary.trim(),
           prompt,
-          channel: draftChannel,
           defaultPeriod: draftPeriod,
         }),
       });
@@ -472,6 +516,14 @@ export default function ReportsPage() {
     () => savedLayout ?? (template ? template.pages : packPages(orderedSections)),
     [savedLayout, template, orderedSections],
   );
+  /**
+   * The boxes to put on the config screen: one per written section the chosen layout actually prints.
+   *
+   * Derived from the layout rather than listed by hand, so a template that does not include a warm
+   * close never asks for one — and a template that does gets the box without any code being touched.
+   */
+  const writtenFields = useMemo(() => pages.flat().filter(isWrittenSection), [pages]);
+
   const budget = useMemo(() => paginate(orderedSections), [orderedSections]);
   // Only a live build-your-own selection can be over the limit. A template is capped by construction,
   // and a report already sent to a client is history — refusing to reprint it would be absurd.
@@ -505,10 +557,12 @@ export default function ReportsPage() {
             period: data.period,
             periodLabel: data.periodLabel,
             sections: sectionIds,
-            messageChannel: template?.channel || null,
             messageText: copy?.message || "",
             csvText: buildCsv(data),
-            data: { report: data, pages: layout, reportTitle, preparedBy, notes, composed: copy },
+            // `written` and `prompt` are part of the document, not settings: reopening a report has to
+            // show the recap the client actually read, and the prompt explains why the copy reads as
+            // it does even after the template has been edited since.
+            data: { report: data, pages: layout, reportTitle, preparedBy, notes, written, prompt: runPrompt, composed: copy },
             pageEstimate: layout.length,
             generatedBy: preparedBy,
           }),
@@ -525,7 +579,7 @@ export default function ReportsPage() {
         setSaving(false);
       }
     },
-    [workspaceSlug, activeWorkspace, template, reportTitle, preparedBy, notes, refreshSaved],
+    [workspaceSlug, activeWorkspace, template, reportTitle, preparedBy, notes, written, runPrompt, refreshSaved],
   );
 
   const generate = useCallback(async () => {
@@ -569,11 +623,14 @@ export default function ReportsPage() {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-              prompt: template.prompt,
+              // The prompt as it stands on the config screen, not as the template stores it.
+              prompt: runPrompt.trim() || template.prompt,
               templateId: template.id,
-              channel: template.channel,
               periodLabel: payload.periodLabel,
               clients: payload.clients,
+              // What the account manager typed. Treated as fact by the writer, and the reason the
+              // message can mention a booked meeting that appears in no table.
+              written,
             }),
           });
           const composePayload = await composeResponse.json().catch(() => ({}));
@@ -613,6 +670,8 @@ export default function ReportsPage() {
     fileReport,
     liveCampaigns,
     campaignPick,
+    runPrompt,
+    written,
   ]);
 
   const downloadPdf = () => {
@@ -650,6 +709,14 @@ export default function ReportsPage() {
       setReportTitle(String(snapshot.reportTitle || row.title || "Report"));
       setPreparedBy(String(snapshot.preparedBy || row.generated_by || "QC Growth"));
       setNotes(String(snapshot.notes || ""));
+      // Restored from the snapshot rather than left blank: the recap and the close are the halves of
+      // the report the client actually read, and a reopened report without them is a different document.
+      setWritten(
+        snapshot.written && typeof snapshot.written === "object" && !Array.isArray(snapshot.written)
+          ? (snapshot.written as Record<string, string>)
+          : {},
+      );
+      setRunPrompt(String(snapshot.prompt || ""));
       setSections(new Set((Array.isArray(row.sections) ? row.sections : []) as SectionId[]));
       setSavedLayout(Array.isArray(snapshot.pages) ? (snapshot.pages as SectionId[][]) : null);
       const storedCopy = snapshot.composed as Composed | null | undefined;
@@ -774,39 +841,21 @@ export default function ReportsPage() {
                   onChange={(event) => setDraftSummary(event.target.value)}
                 />
 
-                <div className="hub-composer-row">
-                  <div>
-                    <label className="config-label" htmlFor="template-channel">
-                      Message channel
-                    </label>
-                    <select
-                      id="template-channel"
-                      className="config-select"
-                      value={draftChannel}
-                      onChange={(event) => setDraftChannel(event.target.value as "email" | "slack")}
-                    >
-                      <option value="email">Email</option>
-                      <option value="slack">Slack</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="config-label" htmlFor="template-period">
-                      Default period
-                    </label>
-                    <select
-                      id="template-period"
-                      className="config-select"
-                      value={draftPeriod}
-                      onChange={(event) => setDraftPeriod(event.target.value as Period)}
-                    >
-                      {PERIOD_OPTIONS.filter((option) => option !== "custom").map((option) => (
-                        <option key={option} value={option}>
-                          {periodLabel(option)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                <label className="config-label" htmlFor="template-period">
+                  Default period
+                </label>
+                <select
+                  id="template-period"
+                  className="config-select"
+                  value={draftPeriod}
+                  onChange={(event) => setDraftPeriod(event.target.value as Period)}
+                >
+                  {PERIOD_OPTIONS.filter((option) => option !== "custom").map((option) => (
+                    <option key={option} value={option}>
+                      {periodLabel(option)}
+                    </option>
+                  ))}
+                </select>
 
                 <label className="config-label" htmlFor="template-prompt">
                   Prompt
@@ -843,9 +892,9 @@ export default function ReportsPage() {
                       <div className="hub-card-meta">
                         <b>{lastRun ? `Last run ${formatDate(lastRun)}` : "Never run"}</b>
                         <span>·</span>
-                        <span>{option.channel === "slack" ? "Slack" : "Email"}</span>
-                        <span>·</span>
                         <span>{periodLabel(option.defaultPeriod)}</span>
+                        <span>·</span>
+                        <span>{option.pages.length === 1 ? "1 page" : `${option.pages.length} pages`}</span>
                       </div>
                     </button>
                     {!option.builtIn && (
@@ -929,17 +978,17 @@ export default function ReportsPage() {
               <h2>{template ? template.name : "Build your own report"}</h2>
               <p>
                 {template
-                  ? template.summary
+                  ? "The numbers are pulled when you generate. What is left is the part only you know — pick the campaigns, write your sections, tweak the prompt."
                   : "Choose the sections you want. The report is capped at three pages, so heavier sections cost more of the budget."}
               </p>
             </div>
 
             {/* The client is settled on the way in, so it is shown as context rather than as a control —
                 changing it here would leave the hub behind it describing somebody else. */}
-            <label className="config-label">Client</label>
+            <span className="config-label">Client</span>
             <div className="config-static">{clientLabel || "No client selected"}</div>
 
-            <label className="config-label">Period</label>
+            <span className="config-label">Period</span>
             <div className="config-period-grid">
               {PERIOD_OPTIONS.map((option) => (
                 <button
@@ -968,7 +1017,7 @@ export default function ReportsPage() {
 
             {/* Which campaigns the report may talk about. Read from HeyReach on the way in, so the
                 document, the write-up and the archived copy all describe the same set. */}
-            <label className="config-label">Campaigns</label>
+            <span className="config-label">Campaigns</span>
             {campaignsLoading ? (
               <div className="config-static">Asking HeyReach…</div>
             ) : liveCampaigns.length ? (
@@ -1002,7 +1051,58 @@ export default function ReportsPage() {
             )}
             {liveCampaigns.length > 0 && campaignsNote && <div className="config-note">{campaignsNote}</div>}
 
-            <label className="config-label">Cover page</label>
+            {/* The half of the report the app cannot know. Booked meetings, why a campaign was paused,
+                what was promised on a call — none of it is in HeyReach or in our tables, so it is asked
+                for here and printed verbatim. The write-up is told to agree with it, not rewrite it. */}
+            {writtenFields.length > 0 && (
+              <>
+                <span className="config-label">Your sections</span>
+                {writtenFields.map((id) => (
+                  <div key={id} className="config-written">
+                    <label className="config-written-label" htmlFor={`written-${id}`}>
+                      {WRITTEN_SECTION_PROMPTS[id].label}
+                    </label>
+                    <textarea
+                      id={`written-${id}`}
+                      className="config-textarea"
+                      placeholder={WRITTEN_SECTION_PROMPTS[id].placeholder}
+                      value={written[id] || ""}
+                      onChange={(event) =>
+                        setWritten((current) => ({ ...current, [id]: event.target.value }))
+                      }
+                    />
+                  </div>
+                ))}
+                <p className="config-hint">
+                  Printed as you type them. Anything left blank is left out of the report rather than
+                  filled in for you.
+                </p>
+              </>
+            )}
+
+            {/* Almost everything that makes one report read differently from another is in here, so it
+                is on the page rather than behind an edit-the-template detour. Tweaks apply to this run
+                only — the template everybody else runs is left alone. */}
+            {template && (
+              <>
+                <label className="config-label" htmlFor="run-prompt">
+                  Prompt
+                </label>
+                <textarea
+                  id="run-prompt"
+                  className="config-textarea config-prompt"
+                  value={runPrompt}
+                  onChange={(event) => setRunPrompt(event.target.value)}
+                />
+                <p className="config-hint">
+                  {runPrompt.trim() === template.prompt.trim()
+                    ? "The template's prompt. Edit it for this report without changing the template."
+                    : "Edited for this report only. The saved template is unchanged."}
+                </p>
+              </>
+            )}
+
+            <span className="config-label">Cover page</span>
             <input
               className="config-input"
               placeholder="Report title"
@@ -1022,22 +1122,16 @@ export default function ReportsPage() {
               onChange={(e) => setNotes(e.target.value)}
             />
 
-            <label className="config-label">{template ? "Layout" : "Sections"}</label>
             {template ? (
-              // A template's layout is the template. Showing it as read-only pages explains what will
-              // print without inviting an edit that would break the page guarantee.
-              <div className="config-sections">
-                {template.pages.map((page, index) => (
-                  <div key={index} className="config-section is-locked">
-                    <span>
-                      <strong>Page {index + 1}</strong>
-                      <em>{page.map((id) => SECTION_LABELS[id]).join(" · ")}</em>
-                    </span>
-                  </div>
-                ))}
-              </div>
+              // The layout is the template, so it is stated rather than offered. One line each, because
+              // this is a config screen for the last few decisions — not a place to rebuild the report.
+              <p className="config-hint config-layout">
+                Prints as {template.pages.length === 1 ? "1 page" : `${template.pages.length} pages`}:{" "}
+                {template.pages.map((page) => page.map((id) => SECTION_LABELS[id]).join(", ")).join(" / ")}.
+              </p>
             ) : (
               <>
+                <span className="config-label">Sections</span>
                 <div className="config-sections">
                   {SECTIONS.map((section) => {
                     const on = sections.has(section.id);
@@ -1127,7 +1221,7 @@ export default function ReportsPage() {
             {report && (composed || composing) && (
               <div className="compose-panel print-hide">
                 <header>
-                  <h3>{template?.channel === "slack" ? "Slack message" : "Email to send"}</h3>
+                  <h3>Email to send</h3>
                   {composed && (
                     <button type="button" className="compose-copy" onClick={() => navigator.clipboard?.writeText(messageText)}>
                       Copy
@@ -1152,6 +1246,7 @@ export default function ReportsPage() {
                   preparedBy={preparedBy}
                   notes={notes}
                   pages={pages}
+                  written={written}
                   headline={composed?.headline || ""}
                   narrative={composed?.narrative || ""}
                 />
@@ -1188,6 +1283,28 @@ function buildCsv(report: ReportData) {
     lines.push(`Avg replies/day,${client.summary.avgRepliesPerDay.toFixed(2)}`);
     lines.push(`Hot conversations,${client.summary.hotCount}`);
     lines.push(`Top ICP leads (≥75),${client.summary.topIcpCount}`);
+    lines.push("");
+    // The funnel, with its denominators, so someone in a spreadsheet can rebuild every rate the PDF
+    // prints instead of taking them on trust.
+    lines.push("Outbound funnel (HeyReach, selected campaigns only)");
+    if (client.metrics?.available) {
+      lines.push("Metric,Value");
+      lines.push(`Campaigns counted,${client.metrics.campaignCount}`);
+      lines.push(`Connection requests sent,${client.metrics.connectionsSent}`);
+      lines.push(`Connection requests accepted,${client.metrics.connectionsAccepted}`);
+      lines.push(`Average acceptance rate,${pct(client.metrics.acceptanceRate)}`);
+      lines.push(`Replies,${client.metrics.replies}`);
+      lines.push(`Leads that replied,${client.metrics.leadsReplied}`);
+      lines.push(`Reply rate (replies / accepted),${pct(client.metrics.replyRate)}`);
+      lines.push(`Positive reply rate (positive / accepted),${pct(client.metrics.positiveReplyRate)}`);
+      lines.push("");
+      lines.push("Campaign,Requests sent,Requests accepted,Acceptance rate");
+      for (const row of client.metrics.campaigns) {
+        lines.push([csv(row.name), row.connectionsSent, row.connectionsAccepted, pct(row.acceptanceRate)].join(","));
+      }
+    } else {
+      lines.push(`Unavailable,${csv(client.metrics?.reason || "HeyReach was not reachable")}`);
+    }
     lines.push("");
     lines.push("Campaigns");
     lines.push("Campaign,Replies,Positive,Negative,Positive rate,HeyReach state");
@@ -1256,7 +1373,9 @@ function buildCsv(report: ReportData) {
 
 const SECTION_TITLES: Record<SectionId, string> = {
   cover: "Cover",
+  recap: "Recap",
   "executive-summary": "Executive summary",
+  metrics: "Performance",
   kpis: "Headline KPIs",
   sentiment: "Sentiment breakdown",
   trend: "Reply trend",
@@ -1268,6 +1387,9 @@ const SECTION_TITLES: Record<SectionId, string> = {
   "hot-conversations": "Hot conversations",
   "reply-timing": "Reply timing",
   "sample-replies": "Sample positive replies",
+  "what-we-did": "What we did this week",
+  priorities: "Priorities for next week",
+  "warm-close": "Where we are",
   methodology: "Methodology & notes",
 };
 
@@ -1285,6 +1407,7 @@ function ReportDocument({
   preparedBy,
   notes,
   pages,
+  written,
   headline,
   narrative,
 }: {
@@ -1294,6 +1417,7 @@ function ReportDocument({
   preparedBy: string;
   notes: string;
   pages: SectionId[][];
+  written: Record<string, string>;
   headline: string;
   narrative: string;
 }) {
@@ -1310,9 +1434,12 @@ function ReportDocument({
     });
 
   const body = (id: SectionId) => {
+    if (isWrittenSection(id)) return <WrittenSection id={id} value={written[id] || ""} />;
     switch (id) {
       case "executive-summary":
         return <ExecutiveSummary client={client} report={report} narrative={narrative} />;
+      case "metrics":
+        return <MetricsBlock client={client} report={report} />;
       case "kpis":
         return <KpiGrid client={client} />;
       case "sentiment":
@@ -1491,6 +1618,88 @@ function ExecutiveSummary({
         Prepared for the period beginning {report.since ? formatDate(report.since, zone) : "the earliest recorded reply"}
         {report.until ? ` and ending ${formatDate(report.until, zone)}` : " through the present"}. All figures
         are computed from Reply Radar's source-of-truth ledger; no sampling.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * A section the account manager wrote, printed as typed.
+ *
+ * Blank lines split paragraphs and single lines that start with a dash become a list, because that is
+ * how people type "one line each" into a box. Nothing else is interpreted — this is the one part of the
+ * report where the words are the client's own, and reformatting them further would put sentences in
+ * front of a client that nobody wrote.
+ */
+function WrittenSection({ id, value }: { id: WrittenSectionId; value: string }) {
+  const trimmed = value.trim();
+  if (!trimmed)
+    return <EmptyNote>{WRITTEN_SECTION_PROMPTS[id].label} was left blank for this report.</EmptyNote>;
+
+  const blocks = trimmed.split(/\n{2,}/).filter(Boolean);
+  return (
+    <div className="written-block">
+      {blocks.map((block, index) => {
+        const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+        const bulleted = lines.length > 1 && lines.every((line) => /^[-•*]\s*/.test(line));
+        if (bulleted)
+          return (
+            <ul key={index}>
+              {lines.map((line, lineIndex) => (
+                <li key={lineIndex}>{line.replace(/^[-•*]\s*/, "")}</li>
+              ))}
+            </ul>
+          );
+        return <p key={index}>{lines.join(" ")}</p>;
+      })}
+    </div>
+  );
+}
+
+/**
+ * The outbound funnel: what was sent, what was accepted, and what came back.
+ *
+ * Every figure carries its denominator in the caption. A client reading "reply rate 14%" will try to
+ * divide the reply count by something, and the only way that arithmetic works out is if the report says
+ * which number it divided by. The scope line is there for the same reason — these rates describe the
+ * campaigns this report names, not the whole account.
+ */
+function MetricsBlock({ client, report }: { client: ClientReport; report: ReportData }) {
+  const metrics = client.metrics;
+  if (!metrics)
+    return <EmptyNote>Performance figures were not included when this report was generated.</EmptyNote>;
+  if (!metrics.available)
+    return (
+      <EmptyNote>
+        Acceptance and reply rates were unavailable{metrics.reason ? ` — ${metrics.reason}` : ""}. Confirm in
+        HeyReach.
+      </EmptyNote>
+    );
+
+  const figures = [
+    { label: "Connection requests sent", value: num(metrics.connectionsSent) },
+    { label: "Requests accepted", value: num(metrics.connectionsAccepted) },
+    { label: "Average acceptance rate", value: pct(metrics.acceptanceRate) },
+    { label: `Replies from ${num(metrics.leadsReplied)} leads`, value: num(metrics.replies) },
+    { label: "Reply rate", value: pct(metrics.replyRate) },
+    { label: "Positive reply rate", value: pct(metrics.positiveReplyRate) },
+  ];
+
+  return (
+    <div className="metrics-block">
+      <div className="kpi-grid">
+        {figures.map((figure) => (
+          <div className="kpi-card" key={figure.label}>
+            <div className="kpi-value">{figure.value}</div>
+            <div className="kpi-label">{figure.label}</div>
+          </div>
+        ))}
+      </div>
+      <p className="report-caption">
+        {report.periodLabel}, across the {metrics.campaignCount === 1 ? "campaign" : `${metrics.campaignCount} campaigns`}{" "}
+        named in this report — not the whole account. Acceptance rate is the average of each campaign's own
+        accepted ÷ sent. Reply rate is {num(metrics.replies)} ÷ {num(metrics.connectionsAccepted)} accepted
+        connections; positive reply rate is {num(metrics.positiveReplies)} ÷ the same.
       </p>
     </div>
   );

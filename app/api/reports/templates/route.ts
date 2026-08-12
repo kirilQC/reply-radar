@@ -33,7 +33,21 @@ async function db(path: string, init?: RequestInit) {
     headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", ...(init?.headers ?? {}) },
     cache: "no-store",
   });
-  if (!response.ok) throw new Error(`Supabase ${path.split("?")[0]} ${response.status}`);
+  if (!response.ok) {
+    // PostgREST explains itself in the body — a missing column, a failed constraint, the wrong conflict
+    // target. Reporting the bare status turns every one of those into the same unactionable "400",
+    // which is what made this failure impossible to diagnose from the UI.
+    const detail = await response.text().catch(() => "");
+    const parsed = (() => {
+      try {
+        return JSON.parse(detail) as { message?: string; hint?: string };
+      } catch {
+        return null;
+      }
+    })();
+    const because = [parsed?.message, parsed?.hint].filter(Boolean).join(" — ") || detail.slice(0, 200);
+    throw new Error(`Supabase ${path.split("?")[0]} ${response.status}${because ? `: ${because}` : ""}`);
+  }
   return response;
 }
 
@@ -50,12 +64,31 @@ async function readSaved(): Promise<ReportTemplate[]> {
   return parsed.map(normaliseTemplate).filter((template): template is ReportTemplate => Boolean(template));
 }
 
-const writeSaved = (templates: ReportTemplate[]) =>
-  db("rr_global_config", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ key: CONFIG_KEY, value: JSON.stringify(templates) }),
+/**
+ * Updates the row if it is there, inserts it if it is not.
+ *
+ * Deliberately not an upsert. `Prefer: resolution=merge-duplicates` compiles to `ON CONFLICT (key)`,
+ * which PostgREST rejects with a 400 unless `key` carries a unique constraint — and in this database it
+ * does not, which is why saving a template failed while reading them appeared to work. A PATCH filtered
+ * on the key needs no constraint at all, and asking for the representation back is what tells us
+ * whether it matched anything, since PostgREST reports a zero-row update as success.
+ */
+async function writeSaved(templates: ReportTemplate[]) {
+  const value = JSON.stringify(templates);
+  const patched = await db(`rr_global_config?key=eq.${CONFIG_KEY}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ value }),
   });
+  const rows = (await patched.json().catch(() => [])) as Row[];
+  if (Array.isArray(rows) && rows.length) return;
+
+  await db("rr_global_config", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ key: CONFIG_KEY, value }),
+  });
+}
 
 export async function GET() {
   try {
@@ -95,7 +128,6 @@ export async function POST(request: Request) {
       id: match?.id || `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       name,
       summary: text(body.summary),
-      channel: body.channel,
       defaultPeriod: body.defaultPeriod,
       pages,
       prompt,
