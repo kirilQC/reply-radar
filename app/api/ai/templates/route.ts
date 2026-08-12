@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
+import { asList, explainConfigError, readConfig, writeConfig } from "../../../lib/app-config";
 
 /**
  * Scoring prompts a teammate wrote and chose to keep, shared across every client.
  *
- * Stored as one `rr_global_config` row rather than a new table, reusing the exact key/value shape the
- * sentiment prompt already saves through — the production schema has drifted from `supabase/schema.sql`
- * more than once, so the safe move is a path that is known to work rather than a migration written
- * against a file that may not describe the database.
+ * Stored as one row in `rr_app_config` rather than a table of its own — a named list this small does
+ * not earn a schema. This used to address `rr_global_config` with the same key/value query, on the
+ * belief that it was "a path that is known to work" because the sentiment prompt saved through it. It
+ * was not: that table has no `key` or `value` column, so every save 400d and every read was caught and
+ * reported as "no saved templates". Nothing written here was ever stored.
  *
  * Saving here is deliberately separate from saving a client's own prompt. Most custom prompts are for
  * one client and belong nowhere else; only the ones worth reusing get a name.
@@ -17,32 +19,8 @@ export type SavedTemplate = { id: string; kind: "icp" | "follow_up"; name: strin
 const CONFIG_KEY = "scoring_templates";
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
-async function db(path: string, init?: RequestInit) {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Supabase not configured");
-  const response = await fetch(`${url}/rest/v1/${path}`, {
-    ...init,
-    headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", ...(init?.headers ?? {}) },
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error(`Supabase ${path.split("?")[0]} ${response.status}`);
-  return response;
-}
-
-/**
- * Reads the stored list, tolerating both a JSON string and an already-parsed array.
- *
- * Which of those comes back depends on whether the `value` column is `text` or `jsonb`, and that is
- * not something this code should need to know to keep working.
- */
 async function readTemplates(): Promise<SavedTemplate[]> {
-  const response = await db(`rr_global_config?select=key,value&key=eq.${CONFIG_KEY}&limit=1`);
-  const rows = (await response.json().catch(() => [])) as Row[];
-  const raw = rows[0]?.value;
-  const parsed = typeof raw === "string" ? JSON.parse(raw || "[]") : raw;
-  if (!Array.isArray(parsed)) return [];
-  return parsed
+  return asList(await readConfig(CONFIG_KEY))
     .map((item) => {
       const row = (item && typeof item === "object" ? item : {}) as Row;
       return {
@@ -57,12 +35,7 @@ async function readTemplates(): Promise<SavedTemplate[]> {
     .filter((template) => template.id && template.name && template.prompt);
 }
 
-const writeTemplates = (templates: SavedTemplate[]) =>
-  db("rr_global_config", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ key: CONFIG_KEY, value: JSON.stringify(templates) }),
-  });
+const writeTemplates = (templates: SavedTemplate[]) => writeConfig(CONFIG_KEY, templates);
 
 export async function GET() {
   try {
@@ -98,7 +71,7 @@ export async function POST(request: Request) {
     await writeTemplates(match ? existing.map((row) => (row.id === match.id ? template : row)) : [...existing, template]);
     return NextResponse.json({ ok: true, template, replaced: Boolean(match) });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not save the template." }, { status: 502 });
+    return NextResponse.json({ ok: false, error: explainConfigError(error, "Could not save the template.") }, { status: 502 });
   }
 }
 
@@ -110,6 +83,6 @@ export async function DELETE(request: Request) {
     await writeTemplates(existing.filter((template) => template.id !== id));
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not delete the template." }, { status: 502 });
+    return NextResponse.json({ ok: false, error: explainConfigError(error, "Could not delete the template.") }, { status: 502 });
   }
 }

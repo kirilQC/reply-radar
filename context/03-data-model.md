@@ -39,7 +39,7 @@ Concrete, verified divergences as of this writing:
 |---|---|---|
 | `rr_leads` | `title`, `profile_url` | `role`, `linkedin_id`, `linkedin_profile_url` |
 | `rr_sync_runs` | no `run_type` column | worker writes `run_type: "heartbeat"` every cycle |
-| `rr_global_config` | `id boolean primary key`, no `key`/`value` | `app/api/ai/templates` and `app/api/ai/config` still query it as `select=key,value&key=eq...`, which 400s every time. `ai/config` returns `{ ok: upsertResponse.ok }` and shows no error, so the sentiment prompt has never saved. Report templates were moved to `rr_app_config`. |
+| `rr_global_config` | `id boolean primary key`, no `key`/`value` | three routes queried it as `select=key,value&key=eq...`, which 400s every time — report templates, scoring templates and the sentiment prompt. All three silently stored nothing. Fixed: they go through `app/lib/app-config.ts` onto `rr_app_config`. Do not add a fourth. |
 | `rr_scores` | declared, with `on delete cascade` | may not exist at all |
 
 Consequences already baked into the code:

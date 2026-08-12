@@ -21,83 +21,19 @@ import {
   PAGE_LIMIT,
   type ReportTemplate,
 } from "../../../lib/report-templates";
+import { asList, explainConfigError, readConfig, writeConfig } from "../../../lib/app-config";
 
 type Row = Record<string, unknown>;
 
-const CONFIG_TABLE = "rr_app_config";
 const CONFIG_KEY = "report_templates";
-const MIGRATION = "supabase/migrations/20260812_rr_app_config.sql";
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
-async function db(path: string, init?: RequestInit) {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Supabase not configured");
-  const response = await fetch(`${url}/rest/v1/${path}`, {
-    ...init,
-    headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", ...(init?.headers ?? {}) },
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    // PostgREST explains itself in the body — a missing column, a failed constraint, the wrong conflict
-    // target. Reporting the bare status turns every one of those into the same unactionable "400",
-    // which is what made this failure impossible to diagnose from the UI.
-    const detail = await response.text().catch(() => "");
-    const parsed = (() => {
-      try {
-        return JSON.parse(detail) as { message?: string; hint?: string };
-      } catch {
-        return null;
-      }
-    })();
-    const because = [parsed?.message, parsed?.hint].filter(Boolean).join(" — ") || detail.slice(0, 200);
-    throw new Error(`Supabase ${path.split("?")[0]} ${response.status}${because ? `: ${because}` : ""}`);
-  }
-  return response;
-}
+const readSaved = async (): Promise<ReportTemplate[]> =>
+  asList(await readConfig(CONFIG_KEY))
+    .map(normaliseTemplate)
+    .filter((template): template is ReportTemplate => Boolean(template));
 
-/**
- * Reads the stored list, tolerating both a JSON string and an already-parsed array — which of those
- * comes back depends on whether `value` is a `text` or `jsonb` column, and this should not need to know.
- */
-async function readSaved(): Promise<ReportTemplate[]> {
-  const response = await db(`${CONFIG_TABLE}?select=key,value&key=eq.${CONFIG_KEY}&limit=1`);
-  const rows = (await response.json().catch(() => [])) as Row[];
-  const raw = rows[0]?.value;
-  const parsed = typeof raw === "string" ? JSON.parse(raw || "[]") : raw;
-  if (!Array.isArray(parsed)) return [];
-  return parsed.map(normaliseTemplate).filter((template): template is ReportTemplate => Boolean(template));
-}
-
-/**
- * Writes the whole list back under the one key.
- *
- * An upsert is safe here because `key` is the table's primary key — `resolution=merge-duplicates`
- * compiles to `ON CONFLICT (key)`, which PostgREST only accepts when a constraint backs the column.
- * The list is stored as a jsonb array rather than a stringified one, so the row is readable in the
- * Supabase editor.
- */
-async function writeSaved(templates: ReportTemplate[]) {
-  await db(CONFIG_TABLE, {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ key: CONFIG_KEY, value: templates, updated_at: new Date().toISOString() }),
-  });
-}
-
-/**
- * The message a teammate sees when a save fails.
- *
- * A missing table is the one failure they can fix themselves, so it says which file to run instead of
- * quoting a PostgREST code at them. Everything else is passed through as-is.
- */
-function explain(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : "";
-  if (!message) return fallback;
-  return /does not exist|schema cache|relation/i.test(message)
-    ? `${message} — run ${MIGRATION} in the Supabase SQL editor.`
-    : message;
-}
+const writeSaved = (templates: ReportTemplate[]) => writeConfig(CONFIG_KEY, templates);
 
 export async function GET() {
   try {
@@ -149,7 +85,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, template, replaced: Boolean(match) });
   } catch (error) {
     return NextResponse.json(
-      { ok: false, error: explain(error, "Could not save the template.") },
+      { ok: false, error: explainConfigError(error, "Could not save the template.") },
       { status: 502 },
     );
   }
@@ -166,7 +102,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
-      { ok: false, error: explain(error, "Could not delete the template.") },
+      { ok: false, error: explainConfigError(error, "Could not delete the template.") },
       { status: 502 },
     );
   }

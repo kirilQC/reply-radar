@@ -1016,6 +1016,7 @@ function AiHubView() {
   const [selectedClient, setSelectedClient] = useState<string>("");
   const [globalPrompt, setGlobalPrompt] = useState("");
   const [promptSaved, setPromptSaved] = useState(false);
+  const [promptError, setPromptError] = useState("");
   const [clientBrief, setClientBrief] = useState("");
   const [icpPrompt, setIcpPrompt] = useState("");
   const [followUpPrompt, setFollowUpPrompt] = useState("");
@@ -1105,8 +1106,25 @@ function AiHubView() {
     if (selectedClient) loadConfig(selectedClient);
   }, [selectedClient]);
 
+  /**
+   * "Saved ✓" now means saved.
+   *
+   * This used to flash regardless of what came back, and the route it calls was writing to a table with
+   * no `key` column — so the prompt failed to save every time and the button said it had worked. The
+   * reason is shown instead of swallowed.
+   */
   const saveGlobalPrompt = async () => {
-    await fetch("/api/ai/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "save_sentiment_prompt", value: globalPrompt }) });
+    setPromptError("");
+    const response = await fetch("/api/ai/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "save_sentiment_prompt", value: globalPrompt }),
+    }).catch(() => null);
+    const payload = (await response?.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!payload?.ok) {
+      setPromptError(payload?.error || "Could not save the prompt.");
+      return;
+    }
     setPromptSaved(true);
     setTimeout(() => setPromptSaved(false), 2500);
   };
@@ -1206,6 +1224,7 @@ function AiHubView() {
         <label className="field-label">GLOBAL SENTIMENT PROMPT
           <textarea value={globalPrompt} onChange={(event) => setGlobalPrompt(event.target.value)} rows={8} style={{ minHeight: 180 }} />
         </label>
+        {promptError && <p className="form-error" role="alert">{promptError}</p>}
         <button className="text-button" onClick={() => setGlobalPrompt(config?.defaultSentimentPrompt ?? "")}>Reset to default prompt</button>
       </section>
     </>}

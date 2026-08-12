@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { DEFAULT_SENTIMENT_PROMPT } from "../../../lib/reply-sentiment";
+import { explainConfigError, readConfigPrefix, writeConfig } from "../../../lib/app-config";
 
 type Row = Record<string, unknown>;
+
+/** The global prompt, and one variant per client that overrides it. */
+const SENTIMENT_PREFIX = "sentiment_prompt";
+const sentimentKey = (workspace: string | null) => (workspace ? `${SENTIMENT_PREFIX}_${workspace}` : SENTIMENT_PREFIX);
+const asPrompt = (value: unknown) => (typeof value === "string" ? value : "");
 
 async function supabase(url: string, key: string, path: string, init?: RequestInit) {
   const response = await fetch(`${url}/rest/v1/${path}`, {
@@ -21,14 +27,12 @@ export async function GET(request: Request) {
   const workspace = params.get("workspace");
 
   try {
-    // Get all AI-related config keys
-    const configResponse = await supabase(url, key, "rr_global_config?select=key,value&key=like.sentiment_prompt*");
-    const configRows = configResponse.ok ? ((await configResponse.json()) as Row[]) : [];
+    // The global sentiment prompt and every client's override, in one read. A failure here is not fatal:
+    // the built-in default is what the scorer falls back to anyway.
+    const prompts = await readConfigPrefix(SENTIMENT_PREFIX).catch(() => new Map<string, unknown>());
 
-    const globalPrompt = configRows.find((row) => row.key === "sentiment_prompt")?.value ?? DEFAULT_SENTIMENT_PROMPT;
-    const workspacePrompt = workspace
-      ? configRows.find((row) => row.key === `sentiment_prompt_${workspace}`)?.value ?? null
-      : null;
+    const globalPrompt = asPrompt(prompts.get(SENTIMENT_PREFIX)) || DEFAULT_SENTIMENT_PROMPT;
+    const workspacePrompt = workspace ? asPrompt(prompts.get(sentimentKey(workspace))) || null : null;
 
     // Anthropic API status
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
@@ -86,14 +90,19 @@ export async function POST(request: Request) {
     const { action, workspace, value } = body;
 
     if (action === "save_sentiment_prompt") {
-      const configKey = workspace ? `sentiment_prompt_${workspace}` : "sentiment_prompt";
-      // Upsert into rr_global_config
-      const upsertResponse = await supabase(url, key, "rr_global_config", {
-        method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify({ key: configKey, value: value ?? "" }),
-      });
-      return NextResponse.json({ ok: upsertResponse.ok });
+      // This used to return `{ ok: upsertResponse.ok }` against `rr_global_config`, which has no `key`
+      // column — so the save failed every time and the page reported it as `ok: false` with no
+      // explanation, which reads as nothing happening. A write that fails must now say why.
+      try {
+        const scope = typeof workspace === "string" && workspace.trim() ? workspace.trim() : null;
+        await writeConfig(sentimentKey(scope), typeof value === "string" ? value : "");
+      } catch (error) {
+        return NextResponse.json(
+          { ok: false, error: explainConfigError(error, "Could not save the prompt.") },
+          { status: 502 },
+        );
+      }
+      return NextResponse.json({ ok: true });
     }
 
     if (action === "save_workspace_ai") {

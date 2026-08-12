@@ -183,10 +183,10 @@ Every table is prefixed `rr_` so nothing collides with the rest of the Supabase 
 
 > [!IMPORTANT]
 > **`rr_global_config` is a single-row settings table** — `id boolean primary key`, one column per
-> setting. It has no `key`/`value` columns. Small key/value lists belong in `rr_app_config`
-> (`supabase/migrations/20260812_rr_app_config.sql`). Report templates were moved there after every
-> save failed with "column rr_global_config.key does not exist"; `app/api/ai/templates/route.ts` and
-> `app/api/ai/config/route.ts` still make the same mistake and still silently fail to save.
+> setting. It has no `key`/`value` columns, and querying it as `select=key,value&key=eq...` 400s. Small
+> key/value lists belong in `rr_app_config`; go through `app/lib/app-config.ts` rather than writing
+> another copy of the query. Report templates, scoring templates and the sentiment prompt were all
+> broken this way and were all moved. Run `supabase/migrations/20260812_rr_app_config.sql` once.
 
 AI state lives in JSON rather than columns, so adding a signal never needs a migration:
 
