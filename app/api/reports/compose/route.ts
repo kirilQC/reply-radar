@@ -189,8 +189,7 @@ ${written.map(([section, value]) => `[${section}]\n${value}`).join("\n\n")}
 
   const userContent = `${prompt}
 
-The message is an email body. Follow the word count in the instructions below. No subject line, no
-signature.
+Follow the structure and the word count the instructions above give for the message.
 
 Period covered: ${periodLabel}
 ${digests.length > 1 ? `This report covers ${digests.length} clients. Write about the portfolio as a whole.` : ""}

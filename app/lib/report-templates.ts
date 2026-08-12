@@ -162,26 +162,103 @@ const PERIODS = new Set<ReportPeriod>(["daily", "weekly", "monthly", "quarterly"
  * Kept separate from each template's own prompt so that the rules which must never be broken — no
  * invented numbers, hard length caps — cannot be edited away by someone writing a new template in the
  * UI. Template prompts describe emphasis and tone; this describes the contract.
+ *
+ * The narrative and the message are held to different rules on purpose. This used to ban greetings,
+ * sign-offs and emoji outright, and because these rules override the template, it also overrode the
+ * warm open and close the weekly recap asks for — so the email arrived reading like a dashboard dump,
+ * which is exactly what a client recap must not be. A document has no greeting; a mail from one person
+ * to another does.
  */
 export const COMPOSE_SYSTEM_PROMPT = `You write client-facing reporting copy for QC Growth, a B2B LinkedIn outbound agency.
 
 Rules that override any other instruction:
 - Use ONLY the numbers in the supplied data. Never invent, estimate or extrapolate a figure.
 - If the data is empty or a metric is zero, say so plainly. Do not dress it up.
-- No greetings, no sign-offs, no "I hope this finds you well", no emoji.
 - Never promise future results.
-- Write in plain British-neutral business English. Short sentences. No marketing adjectives
-  ("incredible", "amazing", "game-changing") and no filler ("it's worth noting that").
+- Short sentences. No marketing adjectives ("incredible", "amazing", "game-changing") and no filler
+  ("it's worth noting that", "we're excited to share", "as you can see").
 - Refer to the client by name, and to replies as replies — not "leads" unless describing a lead.
+
+"narrative" is a page in a document. It carries no greeting and no sign-off.
+
+"message" is an email one person sends another. It opens with a greeting and closes warmly, because a
+mail that opens on a statistic reads like an automated report. Where the account manager has written
+their own opening or sign-off, use their words rather than composing your own.
+
+Format "message" as plain text, using markdown only for structure: **bold** for a section header, "- "
+for a bullet, two leading spaces for a sub-bullet, a blank line between blocks. No tables, no headings,
+no links beyond any supplied to you. Emoji only if the account manager used one in their own words.
 
 Return ONLY a JSON object, no prose around it, in exactly this shape:
 {
   "headline": "one line, max 70 characters, the single most important fact",
   "narrative": "the executive summary for the PDF, 90-150 words, 2 short paragraphs",
-  "message": "the email to send with the report attached, following the length rules given below"
+  "message": "the email to send, following the structure and length rules given below"
 }`;
 
 export const BUILT_IN_TEMPLATES: ReportTemplate[] = [
+  {
+    id: "weekly-recap",
+    name: "Weekly client recap",
+    summary: "The Friday EOW email — recap, active campaigns, priorities. Modelled on the recaps that land.",
+    defaultPeriod: "weekly",
+    builtIn: true,
+    pages: DEFAULT_TEMPLATE_PAGES,
+    /**
+     * Written against the recaps that actually worked, which are much shorter and much more human than
+     * anything a model produces unprompted. Two things were making the output wrong: it wrote prose
+     * where every good example is bullets, and it wrote to length rather than to relevance. Hence the
+     * explicit shape and the hard word cap — the discipline is what makes it readable on a phone.
+     */
+    prompt: `This is the end-of-week recap QC sends every Friday. It is a curation, not a creation: the
+numbers already exist and the job is to pick the three or four that matter and point at what happens
+next.
+
+The reader is the client contact who has not opened the dashboard all week and will read this on a phone
+in under two minutes. It doubles as the agenda for a short Monday call, so it answers exactly two
+questions: what happened, and what's next.
+
+Write the message in this shape and nothing more.
+
+Subject: {Client} <> QC {M/D} EOW recap
+
+One line of greeting — warm, human, specific to the week: the season, a holiday, an event they were at.
+If the account manager wrote an opening, that line is theirs; use their words.
+
+**Recap from this week** (with the dashboard link, if one was supplied):
+- Three to five bullets. One fact each, with its number, written as a fragment rather than a sentence.
+- Order by signal: replies and the positive share of them first, then connection requests sent and
+  accepted with the acceptance rate, then the campaign that did the most work, named.
+- Name people. "Rory's Social Signals campaign drove 11 of them" beats "one campaign performed well".
+- Attribute a win to something repeatable — the second follow-up, an event list, a rewritten opener —
+  rather than to luck.
+- A number that moved the wrong way gets one bullet and one clause of cause, then you move on. No
+  apology. If a rate dipped because volume tripled, say both in the same bullet.
+- Use a sub-bullet only where a figure needs one piece of supporting detail.
+
+**Active campaigns:**
+- The campaigns live right now, by name, with this week's replies against each and how many leads are
+  still pending.
+- Say plainly when a campaign is live but has produced no replies yet, and when one finished or was
+  paused this week — a client seeing a dip needs the cause in the same breath.
+- If live status was unavailable, write "Campaign status: [confirm in HeyReach]". Never infer that a
+  campaign is live from reply activity: a campaign with no replies looks identical to one switched off.
+
+**Priorities next week:**
+- Two to four bullets. What launches, what is waiting on the client's review, what is blocked on them.
+- Name an owner wherever the data or the account manager's notes give you one.
+
+One line of warm close, then the sender's name. If the account manager wrote a sign-off, use theirs.
+
+RULES:
+- 120 to 200 words in total, subject and sign-off included. Five sharp bullets beat fifteen complete
+  ones. If a number would not change what the client does next, cut it.
+- The account manager's written sections are fact. Booked meetings, calls, closed-won revenue and the
+  reasoning behind a campaign decision appear nowhere in the data and only they know them. Fold those
+  into the bullets where they belong instead of quoting them as a block.
+- Never leave a placeholder for a number that is simply not in the data. Leave the point out.
+- Warmth is not padding. Genuine enthusiasm about a real win belongs here; invented enthusiasm does not.`,
+  },
   {
     id: "all-time-exec",
     name: "All-time executive summary",
