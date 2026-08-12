@@ -129,6 +129,99 @@ body.light-mode .reports-main {
   padding-left: 0;
 }
 
+/* Stated at the foot of the panel rather than inside a group, so it needs the padding a group would
+   have given it. */
+.reports-configurator > .config-layout {
+  padding: 14px 20px 0;
+  border-left: none;
+}
+
+/*
+ * A block that stays shut until it is wanted.
+ *
+ * Of the things this panel asks for, two get touched on every run — the client and the period — and the
+ * rest get touched occasionally. Laid out flat, the prompt, the cover page and fifteen campaign
+ * checkboxes buried those two and made the panel a wall. Folded, the row itself carries the state, so
+ * shutting one is not the same as losing sight of it.
+ */
+.config-fold {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--report-line);
+}
+
+.config-fold-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 13px 20px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  color: var(--report-ink);
+  transition: background 120ms ease;
+}
+
+.config-fold-head:hover {
+  background: var(--report-inset);
+}
+
+.config-fold-head .config-label {
+  margin-top: 0;
+  cursor: pointer;
+}
+
+/* The state of the block while it is closed. Pushed right so the labels stay in one column and the
+   eye can run down them. */
+.config-fold-head em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--report-ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46%;
+}
+
+/* Last, and after the note, so it sits at a fixed edge whatever the note says. `em` takes the auto
+   margin instead when there is a note, which is why this only claims one when there is not. */
+.config-fold-head i {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-style: normal;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--report-ink-faint);
+}
+
+.config-fold-head em + i {
+  margin-left: 0;
+}
+
+.config-fold.is-open .config-fold-head i {
+  color: var(--report-ink);
+}
+
+.config-fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 20px 16px;
+}
+
+/* Same reason as the groups above: a scroll container inside flex will otherwise collapse to nothing. */
+.config-fold-body > * {
+  flex-shrink: 0;
+}
+
+.config-fold-body > .config-label:first-child {
+  margin-top: 0;
+}
+
 /*
  * The panel's footer, pinned so it is reachable without scrolling back through a finished form.
  *
@@ -200,22 +293,27 @@ body.light-mode .reports-main {
   line-height: 1.45;
 }
 
+/*
+ * Three across rather than two. Six options in two columns is three rows of chunky buttons, and it was
+ * the single heaviest thing in the panel for a decision that is nearly always left on "weekly".
+ */
 .config-period-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
 }
 
 .config-period {
   border: 1px solid var(--report-line);
   background: var(--report-inset);
   color: var(--report-ink);
-  border-radius: 8px;
-  padding: 9px 10px;
-  font-size: 12.5px;
+  border-radius: 6px;
+  padding: 6px 4px;
+  font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
+  white-space: nowrap;
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
 
@@ -431,30 +529,48 @@ body.light-mode .reports-main {
   min-height: calc(100vh - 40px);
 }
 
-.reports-empty {
-  background: var(--report-surface);
-  border: 1px dashed var(--report-line);
-  border-radius: 14px;
-  padding: 44px 36px;
-  text-align: center;
+/*
+ * No border, no dashed outline, no heading. An empty canvas does not need a panel drawn on it saying it
+ * is empty; one grey line in the middle of the space is enough, and the spinner carries the waiting.
+ */
+.reports-idle {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
   color: var(--report-ink-soft);
   font-family: "Inter", system-ui, sans-serif;
-  max-width: 8.5in;
-  margin: 0 auto;
-  width: 100%;
+  text-align: center;
 }
 
-.reports-empty h3 {
-  font-family: "Playfair Display", "Georgia", serif;
-  font-size: 22px;
-  color: var(--report-ink);
-  margin: 0 0 8px;
-  font-weight: 600;
-}
-
-.reports-empty p {
+.reports-idle p {
   margin: 0;
-  font-size: 13.5px;
+  font-size: 13px;
+}
+
+.reports-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--report-line);
+  border-top-color: var(--report-brand);
+  animation: reports-spin 700ms linear infinite;
+}
+
+@keyframes reports-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Respecting this is not decoration: a wheel that never stops turning is exactly the thing that sets
+   off vestibular symptoms, and the sentence underneath already says the report is being built. */
+@media (prefers-reduced-motion: reduce) {
+  .reports-spinner {
+    animation-duration: 2.4s;
+  }
 }
 
 /* ------------------------- Document ------------------------- */
@@ -1599,6 +1715,16 @@ body.light-mode .reports-main {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  /*
+   * `width: 100%` is load-bearing, and its absence is why this box has always been a narrow strip.
+   *
+   * The panel is a column-flex child with `margin: 0 auto` for centring, and an auto cross-axis margin
+   * switches off flex stretching — so instead of filling the canvas the panel was sized to fit its
+   * content, and its widest content is a <textarea>, whose intrinsic width is its default `cols` of 20
+   * characters. That is the ~270px column in the screenshots: not a max-width being hit, but a textarea
+   * quietly deciding how wide the report should be.
+   */
+  width: 100%;
   max-width: 8.5in;
   margin: 0 auto 20px;
   box-shadow: 0 1px 2px rgba(20, 22, 36, 0.03), 0 8px 24px rgba(20, 22, 36, 0.05);
@@ -1613,7 +1739,7 @@ body.light-mode .reports-main {
  * full width of a monitor is unreadable, and unlike the document it has no page to sit on.
  */
 .compose-panel.is-primary {
-  max-width: 800px;
+  max-width: 900px;
   padding: 22px 26px 26px;
   min-height: calc(100vh - 92px);
   margin-bottom: 0;

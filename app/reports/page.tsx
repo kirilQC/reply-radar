@@ -266,6 +266,23 @@ export default function ReportsPage() {
    */
   const [docRevealed, setDocRevealed] = useState(false);
 
+  /**
+   * Which of the panel's foldable blocks are open.
+   *
+   * The panel had every control expanded at once, so the two things somebody actually touches every time
+   * — the campaigns and their own sections — were separated by a 200px prompt box and three cover-page
+   * fields nobody edits twice. The prompt still matters, which is why it is one click away rather than
+   * gone; it is just not the first thing you scroll past.
+   */
+  const [openFolds, setOpenFolds] = useState<Set<string>>(new Set(["campaigns"]));
+  const toggleFold = (id: string) =>
+    setOpenFolds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   const [composed, setComposed] = useState<Composed | null>(null);
   const [messageText, setMessageText] = useState("");
   const [composing, setComposing] = useState(false);
@@ -1130,8 +1147,19 @@ export default function ReportsPage() {
 
             {/* Which campaigns the report may talk about. Read from HeyReach on the way in, so the
                 document, the write-up and the archived copy all describe the same set. */}
-            <div className="config-group">
-              <span className="config-label">Campaigns</span>
+            <ConfigFold
+              id="campaigns"
+              label="Campaigns"
+              note={
+                campaignsLoading
+                  ? "asking HeyReach…"
+                  : liveCampaigns.length
+                    ? `${campaignPick.size} of ${liveCampaigns.length} ticked`
+                    : "none found"
+              }
+              open={openFolds.has("campaigns")}
+              onToggle={toggleFold}
+            >
               {campaignsLoading ? (
                 <div className="config-static">Asking HeyReach…</div>
               ) : liveCampaigns.length ? (
@@ -1155,16 +1183,16 @@ export default function ReportsPage() {
                     })}
                   </div>
                   <p className="config-hint">
-                    {campaignPick.size} of {liveCampaigns.length} ticked. Only ticked campaigns appear in
-                    the report. Active ones — live with leads still to contact — are ticked to begin with;
-                    paused and worked-through campaigns are listed below them to be opted into.
+                    Only ticked campaigns appear in the report. Active ones — live with leads still to
+                    contact — are ticked to begin with; paused and worked-through campaigns are listed
+                    below them to be opted into.
                   </p>
                 </>
               ) : (
                 <div className="config-static">{campaignsNote || "No campaigns found for this client."}</div>
               )}
               {liveCampaigns.length > 0 && campaignsNote && <div className="config-note">{campaignsNote}</div>}
-            </div>
+            </ConfigFold>
 
             {/* The half of the report the app cannot know. Booked meetings, why a campaign was paused,
                 what was promised on a call — none of it is in HeyReach or in our tables, so it is asked
@@ -1200,10 +1228,13 @@ export default function ReportsPage() {
                 is on the page rather than behind an edit-the-template detour. Tweaks apply to this run
                 only — the template everybody else runs is left alone. */}
             {template && (
-              <div className="config-group">
-                <label className="config-label" htmlFor="run-prompt">
-                  Prompt
-                </label>
+              <ConfigFold
+                id="prompt"
+                label="Edit prompt"
+                note={runPrompt.trim() === template.prompt.trim() ? "template default" : "edited for this run"}
+                open={openFolds.has("prompt")}
+                onToggle={toggleFold}
+              >
                 <textarea
                   id="run-prompt"
                   className="config-textarea config-prompt"
@@ -1215,11 +1246,17 @@ export default function ReportsPage() {
                     ? "The template's prompt. Edit it for this report without changing the template."
                     : "Edited for this report only. The saved template is unchanged."}
                 </p>
-              </div>
+              </ConfigFold>
             )}
 
-            <div className="config-group">
-              <span className="config-label">Cover page</span>
+            {/* Only ever seen on a printed page, so it does not belong open on an email report's screen. */}
+            <ConfigFold
+              id="cover"
+              label="Cover page & notes"
+              note={outputMode === "email" ? "PDF only" : reportTitle || "untitled"}
+              open={openFolds.has("cover")}
+              onToggle={toggleFold}
+            >
               <input
                 className="config-input"
                 placeholder="Report title"
@@ -1238,69 +1275,68 @@ export default function ReportsPage() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
               />
-            </div>
+            </ConfigFold>
 
-            <div className="config-group">
-              {template ? (
-                // The layout is the template, so it is stated rather than offered. One line each, because
-                // this is a config screen for the last few decisions — not a place to rebuild the report.
-                <p className="config-hint config-layout">
-                  {template.output === "email" ? "Produces an email" : "Produces a PDF"} from{" "}
-                  {template.pages.length === 1 ? "1 page" : `${template.pages.length} pages`}:{" "}
-                  {template.pages.map((page) => page.map((id) => SECTION_LABELS[id]).join(", ")).join(" / ")}.
-                  {template.output === "email" && " The pages are there if you want the PDF too."}
-                </p>
-              ) : (
-                <>
-                  <span className="config-label">Sections</span>
-                  <div className="config-sections">
-                    {SECTIONS.map((section) => {
-                      const on = sections.has(section.id);
-                      return (
-                        <label
-                          key={section.id}
-                          className={`config-section ${on ? "is-on" : ""} ${section.alwaysOn ? "is-locked" : ""}`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={on}
-                            disabled={section.alwaysOn}
-                            onChange={() => toggleSection(section.id)}
-                          />
-                          <span>
-                            <strong>{section.label}</strong>
-                            <em>{section.blurb}</em>
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-
-                  <div className="page-meter">
-                    <div className="page-meter-top">
-                      <span>Page budget</span>
-                      <b>
-                        {budget.pageCount} / {PAGE_LIMIT}
-                      </b>
-                    </div>
-                    <div className="page-meter-track">
-                      {Array.from({ length: Math.max(PAGE_LIMIT, budget.pageCount) }).map((_, index) => (
-                        <i
-                          key={index}
-                          className={index >= PAGE_LIMIT ? "over" : index < budget.pageCount ? "filled" : ""}
+            {template ? (
+              // The layout is the template, so it is stated rather than offered — and stated once, in
+              // passing, because this is a config screen for the last few decisions rather than a place
+              // to rebuild the report.
+              <p className="config-hint config-layout">
+                {template.output === "email" ? "Produces an email" : "Produces a PDF"} from{" "}
+                {template.pages.length === 1 ? "1 page" : `${template.pages.length} pages`}:{" "}
+                {template.pages.map((page) => page.map((id) => SECTION_LABELS[id]).join(", ")).join(" / ")}.
+                {template.output === "email" && " The pages are there if you want the PDF too."}
+              </p>
+            ) : (
+              <div className="config-group">
+                <span className="config-label">Sections</span>
+                <div className="config-sections">
+                  {SECTIONS.map((section) => {
+                    const on = sections.has(section.id);
+                    return (
+                      <label
+                        key={section.id}
+                        className={`config-section ${on ? "is-on" : ""} ${section.alwaysOn ? "is-locked" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          disabled={section.alwaysOn}
+                          onChange={() => toggleSection(section.id)}
                         />
-                      ))}
-                    </div>
-                    {overLimit && (
-                      <div className="page-meter-warning">
-                        {budget.overflowPages === 1 ? "One page" : `${budget.overflowPages} pages`} over. Drop{" "}
-                        {trimAdvice.map((id) => SECTION_LABELS[id]).join(" and ")} to fit.
-                      </div>
-                    )}
+                        <span>
+                          <strong>{section.label}</strong>
+                          <em>{section.blurb}</em>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <div className="page-meter">
+                  <div className="page-meter-top">
+                    <span>Page budget</span>
+                    <b>
+                      {budget.pageCount} / {PAGE_LIMIT}
+                    </b>
                   </div>
-                </>
-              )}
-            </div>
+                  <div className="page-meter-track">
+                    {Array.from({ length: Math.max(PAGE_LIMIT, budget.pageCount) }).map((_, index) => (
+                      <i
+                        key={index}
+                        className={index >= PAGE_LIMIT ? "over" : index < budget.pageCount ? "filled" : ""}
+                      />
+                    ))}
+                  </div>
+                  {overLimit && (
+                    <div className="page-meter-warning">
+                      {budget.overflowPages === 1 ? "One page" : `${budget.overflowPages} pages`} over. Drop{" "}
+                      {trimAdvice.map((id) => SECTION_LABELS[id]).join(" and ")} to fit.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Pinned to the foot of the panel rather than sitting at the end of it. The panel scrolls,
                 and with a prompt box and four written sections in it the Generate button and the
@@ -1334,20 +1370,23 @@ export default function ReportsPage() {
           </aside>
 
           <section className="reports-canvas">
-            {!report && !loading && (
-              <div className="reports-empty">
-                <h3>Ready when you are.</h3>
-                <p>
-                  {template
-                    ? "Pick a client, then hit Generate. The layout and the write-up come from the template."
-                    : "Pick a client and a period, choose the sections you want, then hit Generate."}
-                </p>
-              </div>
-            )}
-            {loading && (
-              <div className="reports-empty">
-                <h3>Generating…</h3>
-                <p>Reading conversations, sentiment, campaigns and ICP scores from the source of truth.</p>
+            {/* Two panels announcing "Ready when you are." and "Generating…" were a lot of furniture for
+                two states that need one line each. Waiting is the only one worth dwelling on, and a
+                turning wheel says it better than a heading does. */}
+            {!report && (
+              <div className="reports-idle">
+                {loading ? (
+                  <>
+                    <span className="reports-spinner" aria-hidden="true" />
+                    <p role="status">Reading conversations, sentiment, campaigns and ICP scores…</p>
+                  </>
+                ) : (
+                  <p>
+                    {template
+                      ? "Pick a client, then hit Generate."
+                      : "Pick a client and a period, choose your sections, then hit Generate."}
+                  </p>
+                )}
               </div>
             )}
 
@@ -1416,6 +1455,39 @@ export default function ReportsPage() {
         </main>
         )}
       </section>
+    </div>
+  );
+}
+
+/**
+ * A block of the config panel that stays shut until it is wanted.
+ *
+ * `note` is what the block says about itself while closed — "4 of 15 ticked", "Edited for this run" —
+ * so folding something away never means losing track of what it is set to.
+ */
+function ConfigFold({
+  id,
+  label,
+  note,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string;
+  label: string;
+  note?: string;
+  open: boolean;
+  onToggle: (id: string) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`config-fold ${open ? "is-open" : ""}`}>
+      <button type="button" className="config-fold-head" onClick={() => onToggle(id)} aria-expanded={open}>
+        <span className="config-label">{label}</span>
+        {note && <em>{note}</em>}
+        <i aria-hidden="true">{open ? "−" : "+"}</i>
+      </button>
+      {open && <div className="config-fold-body">{children}</div>}
     </div>
   );
 }

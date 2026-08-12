@@ -203,19 +203,28 @@ Rules that override any other instruction:
 
 "narrative" is a page in a document. It carries no greeting and no sign-off.
 
-"message" is an email one person sends another. It opens with a greeting and closes warmly, because a
-mail that opens on a statistic reads like an automated report. Where the account manager has written
-their own opening or sign-off, use their words rather than composing your own.
+YOU DO NOT WRITE THE EMAIL. You write the blocks of it that come from the data, and the app assembles
+the email around them. The account manager's own sections — their recap, what they did, their
+priorities, their sign-off — are printed word for word exactly as typed, and you never see your output
+next to theirs. So:
+- Do not repeat, summarise, tidy, expand on or rephrase anything they wrote. It is already in the email.
+- Do not contradict it either. If they say a campaign was paused, do not call it live.
+- Do not write section headings or greetings into a block. Each block is only its own content.
 
-Format "message" as plain text, using markdown only for structure: **bold** for a section header, "- "
-for a bullet, two leading spaces for a sub-bullet, a blank line between blocks. No tables, no headings,
-no links beyond any supplied to you. Emoji only if the account manager used one in their own words.
+Write plain text. Markdown only for emphasis inside a bullet. No tables, no headings, no links beyond
+any supplied to you. Emoji only if the account manager used one in their own words.
 
-Return ONLY a JSON object, no prose around it, in exactly this shape:
+Return ONLY a JSON object, no prose around it, in exactly this shape. Return an empty string or an empty
+array for any block the data cannot support — never a placeholder:
 {
   "headline": "one line, max 70 characters, the single most important fact",
   "narrative": "the executive summary for the PDF, 90-150 words, 2 short paragraphs",
-  "message": "the email to send, following the structure and length rules given below"
+  "subject": "the email subject line, no 'Subject:' prefix",
+  "greeting": "one line, warm and human. Omit entirely if the account manager wrote their own opening",
+  "recapBullets": ["one fact each, with its number, as a fragment. No leading dash"],
+  "campaignBullets": ["one live campaign each: name, replies this period, leads still pending"],
+  "priorityBullets": ["only if the account manager left their priorities blank. Otherwise []"],
+  "close": "one line of warm close plus the sender name. Omit if they wrote their own sign-off"
 }`;
 
 export const BUILT_IN_TEMPLATES: ReportTemplate[] = [
@@ -242,15 +251,12 @@ The reader is the client contact who has not opened the dashboard all week and w
 in under two minutes. It doubles as the agenda for a short Monday call, so it answers exactly two
 questions: what happened, and what's next.
 
-Write the message in this shape and nothing more.
+"subject": {Client} <> QC {M/D} EOW recap
 
-Subject: {Client} <> QC {M/D} EOW recap
+"greeting": one line — warm, human, specific to the week: the season, a holiday, an event they were at.
 
-One line of greeting — warm, human, specific to the week: the season, a holiday, an event they were at.
-If the account manager wrote an opening, that line is theirs; use their words.
-
-**Recap from this week** (with the dashboard link, if one was supplied):
-- Three to five bullets. One fact each, with its number, written as a fragment rather than a sentence.
+"recapBullets": three to five, and this is the heart of it.
+- One fact each, with its number, written as a fragment rather than a sentence.
 - Order by signal: replies and the positive share of them first, then connection requests sent and
   accepted with the acceptance rate, then the campaign that did the most work, named.
 - Name people. "Rory's Social Signals campaign drove 11 of them" beats "one campaign performed well".
@@ -258,28 +264,24 @@ If the account manager wrote an opening, that line is theirs; use their words.
   rather than to luck.
 - A number that moved the wrong way gets one bullet and one clause of cause, then you move on. No
   apology. If a rate dipped because volume tripled, say both in the same bullet.
-- Use a sub-bullet only where a figure needs one piece of supporting detail.
 
-**Active campaigns:**
-- The campaigns live right now, by name, with this week's replies against each and how many leads are
-  still pending.
+"campaignBullets": the campaigns live right now, by name, with this period's replies against each and
+how many leads are still pending.
 - Say plainly when a campaign is live but has produced no replies yet, and when one finished or was
-  paused this week — a client seeing a dip needs the cause in the same breath.
-- If live status was unavailable, write "Campaign status: [confirm in HeyReach]". Never infer that a
-  campaign is live from reply activity: a campaign with no replies looks identical to one switched off.
+  paused — a client seeing a dip needs the cause in the same breath.
+- If live status was unavailable, return one bullet reading "Campaign status: [confirm in HeyReach]".
+  Never infer that a campaign is live from reply activity: a campaign with no replies looks identical to
+  one switched off.
 
-**Priorities next week:**
-- Two to four bullets. What launches, what is waiting on the client's review, what is blocked on them.
-- Name an owner wherever the data or the account manager's notes give you one.
+"priorityBullets": two to four — what launches, what is waiting on the client's review, what is blocked
+on them, with an owner where the data gives you one. Return [] if the account manager wrote their own
+priorities; theirs are used instead of yours, unedited.
 
-One line of warm close, then the sender's name. If the account manager wrote a sign-off, use theirs.
+"close": one line of warm close, then the sender's name.
 
 RULES:
-- 120 to 200 words in total, subject and sign-off included. Five sharp bullets beat fifteen complete
-  ones. If a number would not change what the client does next, cut it.
-- The account manager's written sections are fact. Booked meetings, calls, closed-won revenue and the
-  reasoning behind a campaign decision appear nowhere in the data and only they know them. Fold those
-  into the bullets where they belong instead of quoting them as a block.
+- Your blocks come to about 100-150 words together. Five sharp bullets beat fifteen complete ones. If a
+  number would not change what the client does next, cut it.
 - Never leave a placeholder for a number that is simply not in the data. Leave the point out.
 - Warmth is not padding. Genuine enthusiasm about a real win belongs here; invented enthusiasm does not.`,
   },
@@ -307,9 +309,9 @@ Emphasis, in order:
 3. Which campaign and which sender did the most work.
 4. How many genuinely high-fit leads (ICP 75+) the engagement has surfaced.
 
-The message should be an email of 120-180 words that an account manager can send with the PDF
-attached. Open with the single most important number. One short paragraph of context. Close by naming
-what the client should look at first in the PDF. No subject line.`,
+The email is a covering note for the attached PDF, not the report itself. Put the whole of it in
+"recapBullets" — four or five, opening with the single most important number and ending with what the
+client should look at first in the PDF. Leave "campaignBullets" and "priorityBullets" empty.`,
   },
 ];
 

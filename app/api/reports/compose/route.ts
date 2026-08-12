@@ -148,6 +148,54 @@ function digest(client: Json) {
   };
 }
 
+/**
+ * Joins the model's blocks and the account manager's own words into the email that gets sent.
+ *
+ * The account manager's sections are pasted in, not passed through the model. Asking a model to
+ * "reproduce this verbatim" is a request, not a guarantee: told to fold the written sections into its
+ * bullets it rewrote them, so "we want to buy a zoo" came back as three plausible priorities about
+ * retarget campaigns. Whatever is typed into those boxes is what the client reads, character for
+ * character, and the model only ever writes the blocks derived from the numbers.
+ *
+ * A section the account manager left blank falls back to the model where a model can reasonably fill it
+ * (priorities, the close) and is dropped where it cannot (their recap, what they did — the app does not
+ * know what they did).
+ */
+function assembleEmail(parts: Json, written: Record<string, string>) {
+  const list = (value: unknown) =>
+    (Array.isArray(value) ? value.map((row) => text(row)) : [])
+      .filter(Boolean)
+      .map((line) => (line.startsWith("-") ? line : `- ${line}`));
+
+  const blocks: string[] = [];
+  const section = (heading: string, body: string[]) => {
+    const lines = body.filter(Boolean);
+    if (lines.length) blocks.push(`**${heading}**\n${lines.join("\n")}`);
+  };
+
+  const subject = text(parts.subject);
+  if (subject) blocks.push(`Subject: ${subject}`);
+
+  // Skipped only when their own opening already greets the reader, which is the one case where keeping
+  // both would greet them twice — and of the two, the model's is the one that sounds like software.
+  const greetsAlready = /^\s*(hi|hey|hello|good morning|good afternoon|happy)\b/i.test(written.recap || "");
+  const greeting = greetsAlready ? "" : text(parts.greeting);
+  if (greeting) blocks.push(greeting);
+
+  // Their words first, then the numbers under the same heading — the order every recap that works uses.
+  section("Recap from this week", [written.recap || "", ...list(parts.recapBullets)]);
+  section("What we did this week", [written["what-we-did"] || ""]);
+  section("Active campaigns", list(parts.campaignBullets));
+  section("Priorities next week", [written.priorities || list(parts.priorityBullets).join("\n")]);
+
+  const close = written["warm-close"] || text(parts.close);
+  if (close) blocks.push(close);
+
+  // Nothing usable came back and nothing was typed. Better to hand back the model's own prose, if it
+  // sent any, than an empty box.
+  return blocks.join("\n\n") || text(parts.message);
+}
+
 export async function POST(request: Request) {
   if (!process.env.ANTHROPIC_API_KEY)
     return NextResponse.json({ ok: false, error: "ANTHROPIC_API_KEY is not configured." }, { status: 503 });
@@ -178,10 +226,13 @@ export async function POST(request: Request) {
 
   const writtenBlock = written.length
     ? `
-The account manager has written these sections themselves. They are true, they may contain facts that
-appear nowhere in the data below (booked meetings, calls, context), and the report will print them
-verbatim. Use them: your message must be consistent with them and may refer to what they say. Do not
-contradict them, do not restate them word for word, and do not invent detail around them.
+The account manager wrote these sections. They are already in the email, character for character, and
+the app puts them there — not you. They are true, and they may contain facts that appear nowhere in the
+data below: booked meetings, calls, why a campaign was paused.
+
+They are shown to you for one reason only: so that nothing you write contradicts them or says the same
+thing twice. Do not reproduce them, summarise them, improve them, or write a block that covers the same
+ground.
 
 ${written.map(([section, value]) => `[${section}]\n${value}`).join("\n\n")}
 `
@@ -189,7 +240,7 @@ ${written.map(([section, value]) => `[${section}]\n${value}`).join("\n\n")}
 
   const userContent = `${prompt}
 
-Follow the structure and the word count the instructions above give for the message.
+Follow the structure and the length the instructions above give for each block.
 
 Period covered: ${periodLabel}
 ${digests.length > 1 ? `This report covers ${digests.length} clients. Write about the portfolio as a whole.` : ""}
@@ -280,7 +331,7 @@ ${JSON.stringify(digests.length === 1 ? digests[0] : digests, null, 2)}`;
       model,
       headline: text(parsed.headline).slice(0, 140),
       narrative: text(parsed.narrative),
-      message: text(parsed.message),
+      message: assembleEmail(parsed, Object.fromEntries(written)),
     });
   } catch (error) {
     return NextResponse.json(
