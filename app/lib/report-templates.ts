@@ -6,6 +6,9 @@
  * to show and how to narrate it. That is what makes adding a template a matter of writing a prompt in
  * the UI rather than shipping code.
  *
+ * Section ids are also the contract with `shared/report-pagination.mjs`: every id here needs a weight
+ * there, or a new section would be costed at the fallback and a four-page report could claim three.
+ *
  * Templates declare `pages` as an array of arrays rather than a flat section list. This is the whole
  * mechanism behind the three-page guarantee: a template cannot exceed three pages because the page
  * boundaries are part of its definition, not an emergent property of how tall the content happens to
@@ -18,6 +21,7 @@ export type SectionId =
   | "kpis"
   | "sentiment"
   | "trend"
+  | "active-campaigns"
   | "campaigns"
   | "senders"
   | "top-leads"
@@ -35,6 +39,11 @@ export const SECTIONS: SectionDef[] = [
   { id: "kpis", label: "Headline KPIs", blurb: "Replies, positive rate, hot leads, avg per day" },
   { id: "sentiment", label: "Sentiment breakdown", blurb: "Positive / neutral / negative split with %" },
   { id: "trend", label: "Reply trend", blurb: "Daily bar chart over the period" },
+  {
+    id: "active-campaigns",
+    label: "Active campaigns",
+    blurb: "Live in HeyReach with leads still pending, plus launch date",
+  },
   { id: "campaigns", label: "Campaign performance", blurb: "Replies + positive rate per campaign" },
   { id: "senders", label: "Sender leaderboard", blurb: "Top LinkedIn accounts by reply volume" },
   { id: "top-leads", label: "Top leads", blurb: "Highest ICP scores with role, company, reason" },
@@ -64,14 +73,14 @@ export const PAGE_LIMIT = 3;
  *
  * Writing a template is meant to be a matter of typing a prompt, so the layout cannot be a required
  * decision — but a template still has to state its pages, because that declaration is what guarantees
- * it stays inside the limit. This is the general-purpose answer: the story, then the performance that
- * proves it, then the people worth acting on. Anyone who wants different sections wants "Build your
- * own", which is a different tool.
+ * it stays inside the limit. This is the general-purpose answer: the story, then what is running and
+ * what it produced, then the people worth acting on. Anyone who wants different sections wants "Build
+ * your own", which is a different tool.
  */
 export const DEFAULT_TEMPLATE_PAGES: SectionId[][] = [
   ["cover", "executive-summary", "kpis"],
-  ["trend", "campaigns", "senders"],
-  ["top-leads", "methodology"],
+  ["trend", "active-campaigns", "campaigns"],
+  ["senders", "top-leads", "methodology"],
 ];
 
 export type ReportPeriod = "daily" | "weekly" | "monthly" | "quarterly" | "all-time" | "custom";

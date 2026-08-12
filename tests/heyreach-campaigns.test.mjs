@@ -1,19 +1,27 @@
 /**
- * Live campaign status.
+ * Live campaign status, and the definition of "active" that the whole feature turns on.
  *
- * The classification is the whole feature: a report that tells a client "nothing is running" when
- * three campaigns are running is worse than one that says nothing at all. There is no HeyReach
- * account in CI, so the fetch is untestable here — the sorting of a real `/campaign/GetAll` payload
- * into states is what gets tested, against a fixture copied from an actual response.
+ * HeyReach keeps a campaign in IN_PROGRESS while leads already in the sequence finish their steps, so
+ * its own status cannot answer "what is working for this client?". Ours can: active means live *and*
+ * still holding pending leads. Getting that backwards tells a client four campaigns are running when
+ * two are, which is the failure these tests exist to catch.
+ *
+ * There is no HeyReach account in CI, so the fetch is untestable here — what gets tested is the
+ * sorting of a real `/campaign/GetAll` payload, against a fixture copied from an actual response.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  classifyState,
+  allCampaigns,
+  classifyReportedState,
   emptyStatus,
+  resolveState,
+  selectCampaigns,
   stateByName,
   summariseCampaigns,
 } from "../app/lib/heyreach-campaigns.ts";
+import { DEFAULT_TEMPLATE_PAGES, PAGE_LIMIT } from "../app/lib/report-templates.ts";
+import { PAGE_CAPACITY, paginate } from "../shared/report-pagination.mjs";
 
 /** Trimmed from a real response — field names and casing are exactly as HeyReach returns them. */
 const LIVE_CAMPAIGN = {
@@ -30,6 +38,20 @@ const LIVE_CAMPAIGN = {
   startedAt: "2026-08-10T19:17:05.558054Z",
 };
 
+/** The same campaign a fortnight later: nobody new left to contact, so it is finished to us. */
+const WORKED_THROUGH_CAMPAIGN = {
+  id: 544001,
+  name: "W039: Ops leaders, US",
+  status: "IN_PROGRESS",
+  progressStats: {
+    totalUsers: 420,
+    totalUsersInProgress: 96,
+    totalUsersPending: 0,
+    totalUsersFinished: 324,
+  },
+  startedAt: "2026-07-02T09:00:00.000Z",
+};
+
 test("every status HeyReach documents is recognised", () => {
   // These eight are the values the campaign list endpoint accepts as filters, so they are the full
   // vocabulary. An unrecognised one would land a live campaign in the wrong bucket.
@@ -39,56 +61,93 @@ test("every status HeyReach documents is recognised", () => {
     STARTING: "running",
     SCHEDULED: "scheduled",
     PAUSED: "paused",
-    FINISHED: "finished",
-    CANCELED: "finished",
-    FAILED: "finished",
+    FINISHED: "closed",
+    CANCELED: "closed",
+    FAILED: "closed",
   };
   for (const [status, state] of Object.entries(expected)) {
-    assert.equal(classifyState(status), state, `${status} should classify as ${state}`);
+    assert.equal(classifyReportedState(status), state, `${status} should classify as ${state}`);
   }
 });
 
 test("status matching survives the casing and punctuation the API might use", () => {
   for (const status of ["in_progress", "In Progress", "IN-PROGRESS", " IN_PROGRESS "]) {
-    assert.equal(classifyState(status), "running", `${JSON.stringify(status)} should be running`);
+    assert.equal(classifyReportedState(status), "running", `${JSON.stringify(status)} should be running`);
   }
-  assert.equal(classifyState(""), "unknown");
-  assert.equal(classifyState(null), "unknown");
+  assert.equal(classifyReportedState(""), "unknown");
+  assert.equal(classifyReportedState(null), "unknown");
 });
 
-test("a real campaign row is sorted into running with its progress intact", () => {
+test("active means running with pending leads, and nothing else does", () => {
+  assert.equal(resolveState("running", 298), "active");
+  // The rule in one line: in progress with nobody left to contact is complete, however many leads are
+  // still walking through the sequence.
+  assert.equal(resolveState("running", 0), "worked-through");
+  // Pending leads do not make a paused or scheduled campaign active — it is not contacting anyone.
+  assert.equal(resolveState("paused", 500), "paused");
+  assert.equal(resolveState("scheduled", 500), "scheduled");
+  assert.equal(resolveState("closed", 500), "closed");
+  // An unreadable status with work left is treated as live: over-reporting a campaign that is on the
+  // list beats hiding one that is working.
+  assert.equal(resolveState("unknown", 12), "active");
+  assert.equal(resolveState("unknown", 0), "unknown");
+});
+
+test("a real campaign row is sorted into active with its progress intact", () => {
   const status = summariseCampaigns([LIVE_CAMPAIGN]);
   assert.equal(status.available, true);
   assert.equal(status.total, 1);
-  assert.equal(status.running.length, 1);
-  const [row] = status.running;
+  assert.equal(status.active.length, 1);
+  const [row] = status.active;
   assert.equal(row.id, "544987");
   assert.equal(row.name, "W040: Website ICP Visitors");
   assert.equal(row.status, "IN_PROGRESS");
-  assert.equal(row.startedAt, "2026-08-10T19:17:05.558Z");
-  // Progress is what makes a live-but-quiet campaign reportable rather than just absent.
-  assert.deepEqual(row.progress, { total: 711, pending: 298, inProgress: 85, finished: 159 });
+  assert.equal(row.state, "active");
+  assert.equal(row.launchedAt, "2026-08-10T19:17:05.558Z");
+  // Contacted is deliberately one number: in-sequence and completed both mean "already approached".
+  assert.deepEqual(row.progress, { listSize: 711, pending: 298, contacted: 244 });
+});
+
+test("a campaign HeyReach still calls in progress is complete once the list is exhausted", () => {
+  const status = summariseCampaigns([LIVE_CAMPAIGN, WORKED_THROUGH_CAMPAIGN]);
+  assert.deepEqual(status.active.map((row) => row.name), ["W040: Website ICP Visitors"]);
+  assert.deepEqual(status.workedThrough.map((row) => row.name), ["W039: Ops leaders, US"]);
+  // Both are IN_PROGRESS in HeyReach. Reporting two as active is the mistake.
+  assert.equal(status.workedThrough[0].status, "IN_PROGRESS");
+  assert.equal(status.workedThrough[0].progress.contacted, 420);
 });
 
 test("each state lands in its own list and drafts stay out of all of them", () => {
+  const pending = { progressStats: { totalUsers: 10, totalUsersPending: 10 } };
   const status = summariseCampaigns([
-    { id: 1, name: "Live", status: "IN_PROGRESS" },
-    { id: 2, name: "Next week", status: "SCHEDULED" },
-    { id: 3, name: "Held", status: "PAUSED" },
+    { id: 1, name: "Live", status: "IN_PROGRESS", ...pending },
+    { id: 2, name: "Next week", status: "SCHEDULED", ...pending },
+    { id: 3, name: "Held", status: "PAUSED", ...pending },
     { id: 4, name: "Done", status: "FINISHED" },
-    { id: 5, name: "Never launched", status: "DRAFT" },
+    { id: 5, name: "Never launched", status: "DRAFT", ...pending },
   ]);
-  assert.deepEqual(status.running.map((row) => row.name), ["Live"]);
+  assert.deepEqual(status.active.map((row) => row.name), ["Live"]);
   assert.deepEqual(status.scheduled.map((row) => row.name), ["Next week"]);
   assert.deepEqual(status.paused.map((row) => row.name), ["Held"]);
-  assert.deepEqual(status.finished.map((row) => row.name), ["Done"]);
-  // A draft is not a campaign the client should hear about, but it is still one in the workspace.
+  // Closed and draft campaigns are counted but never listed: a client hears about neither, and a draft
+  // with a full list must not be dressed up as active.
+  assert.deepEqual(allCampaigns(status).map((row) => row.name), ["Live", "Next week", "Held"]);
   assert.equal(status.total, 5);
 });
 
-test("an unknown status is treated as possibly live rather than dropped", () => {
-  const status = summariseCampaigns([{ id: 9, name: "Mystery", status: "WARMING_UP" }]);
-  assert.deepEqual(status.running.map((row) => row.name), ["Mystery"]);
+test("active campaigns are listed newest first", () => {
+  const status = summariseCampaigns([
+    { id: 1, name: "Older", status: "IN_PROGRESS", startedAt: "2026-06-01T00:00:00Z", progressStats: { totalUsersPending: 5 } },
+    { id: 2, name: "Newest", status: "IN_PROGRESS", startedAt: "2026-08-09T00:00:00Z", progressStats: { totalUsersPending: 5 } },
+  ]);
+  assert.deepEqual(status.active.map((row) => row.name), ["Newest", "Older"]);
+});
+
+test("an unknown status with work left is reported rather than dropped", () => {
+  const status = summariseCampaigns([
+    { id: 9, name: "Mystery", status: "WARMING_UP", progressStats: { totalUsersPending: 40 } },
+  ]);
+  assert.deepEqual(status.active.map((row) => row.name), ["Mystery"]);
   assert.deepEqual(status.unrecognised, ["WARMING_UP"]);
 });
 
@@ -96,25 +155,58 @@ test("junk in the payload cannot throw or invent a campaign", () => {
   const status = summariseCampaigns([null, "nope", 42, {}, { status: "IN_PROGRESS" }, LIVE_CAMPAIGN]);
   // The bare `{status}` row has neither id nor name, so there is nothing to report about it.
   assert.equal(status.total, 1);
-  assert.equal(status.running.length, 1);
-  assert.deepEqual(summariseCampaigns(undefined).running, []);
+  assert.equal(status.active.length, 1);
+  assert.deepEqual(summariseCampaigns(undefined).active, []);
 });
 
 test("unavailable status is never mistaken for an empty workspace", () => {
   const status = emptyStatus("No HeyReach API key is saved for this client.");
   assert.equal(status.available, false);
   assert.match(status.reason, /API key/);
-  assert.deepEqual(status.running, []);
+  assert.deepEqual(status.active, []);
+  assert.deepEqual(allCampaigns(status), []);
 });
 
 test("the name index is what joins live status onto reply-derived campaign rows", () => {
   const status = summariseCampaigns([
-    { id: 1, name: "W040: Website ICP Visitors", status: "IN_PROGRESS" },
-    { id: 2, name: "W012: Old list", status: "FINISHED" },
+    { id: 1, name: "W040: Website ICP Visitors", status: "IN_PROGRESS", progressStats: { totalUsersPending: 3 } },
+    { id: 2, name: "W039: Ops leaders, US", status: "IN_PROGRESS", progressStats: { totalUsersPending: 0 } },
+    { id: 3, name: "W012: Old list", status: "FINISHED" },
   ]);
   const index = stateByName(status);
   // Reply attribution stores the campaign name as typed, so the lookup has to be case-insensitive.
-  assert.equal(index.get("w040: website icp visitors").state, "running");
-  assert.equal(index.get("w012: old list").state, "finished");
+  assert.equal(index.get("w040: website icp visitors").state, "active");
+  assert.equal(index.get("w039: ops leaders, us").state, "worked-through");
+  // A closed campaign is not in the index, so the reply table simply shows no live state for it.
+  assert.equal(index.get("w012: old list"), undefined);
   assert.equal(index.get("a campaign since renamed"), undefined);
+});
+
+test("toggling campaigns narrows the report, and no selection means all of them", () => {
+  const status = summariseCampaigns([
+    { id: 1, name: "Live A", status: "IN_PROGRESS", progressStats: { totalUsersPending: 5 } },
+    { id: 2, name: "Live B", status: "IN_PROGRESS", progressStats: { totalUsersPending: 5 } },
+    { id: 3, name: "Held", status: "PAUSED", progressStats: { totalUsersPending: 5 } },
+  ]);
+  assert.deepEqual(selectCampaigns(status, ["2", "3"]).active.map((row) => row.name), ["Live B"]);
+  assert.deepEqual(selectCampaigns(status, ["2", "3"]).paused.map((row) => row.name), ["Held"]);
+  // Absent selection is a caller that never saw the toggles; it gets the whole picture.
+  assert.equal(allCampaigns(selectCampaigns(status, null)).length, 3);
+  assert.equal(allCampaigns(selectCampaigns(status, undefined)).length, 3);
+  // An empty selection is somebody unticking everything, which is a real answer and is obeyed.
+  assert.equal(allCampaigns(selectCampaigns(status, [])).length, 0);
+  // Filtering never flips availability: an empty report is not an unreachable HeyReach.
+  assert.equal(selectCampaigns(status, []).available, true);
+});
+
+test("the default template layout fits the pages it claims", () => {
+  // Every custom template inherits this layout, so if it overflows, every template someone writes in
+  // the UI overflows with it.
+  assert.ok(DEFAULT_TEMPLATE_PAGES.length <= PAGE_LIMIT);
+  for (const page of DEFAULT_TEMPLATE_PAGES) {
+    const { pageCount } = paginate(page);
+    assert.equal(pageCount, 1, `${page.join(" + ")} should fit on one page`);
+  }
+  assert.equal(paginate(DEFAULT_TEMPLATE_PAGES.flat()).pageCount, PAGE_LIMIT);
+  assert.ok(PAGE_CAPACITY > 0);
 });

@@ -46,6 +46,9 @@ export const SECTION_WEIGHTS = {
   kpis: 3,
   sentiment: 3,
   trend: 3,
+  // Fewer than ten campaigns run at once, so this table is short by nature — but it carries five
+  // columns and a caption, which costs about what the reply-derived campaign table costs.
+  "active-campaigns": 4,
   campaigns: 4,
   senders: 4,
   "top-leads": 5,

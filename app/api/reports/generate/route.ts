@@ -12,6 +12,7 @@ import { queryByIds } from "../../../lib/chunk-query";
 import {
   campaignStatusFor,
   emptyStatus,
+  selectCampaigns,
   stateByName,
   type CampaignStatus,
 } from "../../../lib/heyreach-campaigns";
@@ -99,6 +100,13 @@ export async function POST(request: Request) {
   const timeZone = text(body.timeZone) || "America/New_York";
   const customSince = text(body.since);
   const customUntil = text(body.until);
+  /**
+   * The campaigns the report is allowed to mention, chosen on the builder.
+   *
+   * Absent means all of them, so a caller that has never heard of the checkboxes still gets a full
+   * report. An empty array is different: it is somebody having unticked everything, and it is obeyed.
+   */
+  const campaignIds = Array.isArray(body.campaignIds) ? body.campaignIds.map(text).filter(Boolean) : null;
   const { since, until, label } = periodRange(period, timeZone, { since: customSince, until: customUntil });
 
   try {
@@ -118,9 +126,10 @@ export async function POST(request: Request) {
     // and awaited after the Supabase scans below — the two have nothing to say to each other and
     // running them in sequence would add HeyReach's latency to every report for no reason.
     const campaignStatusPending = Promise.all(
-      workspaces.map(async (workspace) =>
-        [text(workspace.id), await campaignStatusFor(text(workspace.heyreach_api_key_ciphertext))] as const,
-      ),
+      workspaces.map(async (workspace) => {
+        const status = await campaignStatusFor(text(workspace.heyreach_api_key_ciphertext));
+        return [text(workspace.id), selectCampaigns(status, campaignIds)] as const;
+      }),
     );
 
     // Fetch conversations for scope
@@ -216,15 +225,15 @@ export async function POST(request: Request) {
             positiveRate: row.replies ? Math.round((row.positive / row.replies) * 100) : 0,
             state: live?.state ?? "",
             status: live?.status ?? "",
-            running: live?.state === "running",
+            active: live?.state === "active",
           };
         });
 
-      // Campaigns that are switched on but produced no replies in the period. These exist nowhere in
-      // our own data — a silent campaign is indistinguishable from an absent one — and they are the
-      // reason this fetch is here at all.
+      // Campaigns that are active but produced no replies in the period. These exist nowhere in our
+      // own data — a silent campaign is indistinguishable from an absent one — and they are the reason
+      // this fetch is here at all.
       const repliedCampaignNames = new Set([...campaigns.keys()].map((name) => name.trim().toLowerCase()));
-      const runningWithoutReplies = campaignStatus.running.filter(
+      const activeWithoutReplies = campaignStatus.active.filter(
         (row) => !repliedCampaignNames.has(row.name.trim().toLowerCase()),
       );
 
@@ -377,17 +386,17 @@ export async function POST(request: Request) {
           bestSender,
           hotCount: hotConversations.length,
           topIcpCount: topLeads.filter((lead) => lead.icpScore >= 75).length,
-          runningCampaigns: campaignStatus.available ? campaignStatus.running.length : null,
+          activeCampaigns: campaignStatus.available ? campaignStatus.active.length : null,
           scheduledCampaigns: campaignStatus.available ? campaignStatus.scheduled.length : null,
-          silentRunningCampaigns: campaignStatus.available ? runningWithoutReplies.length : null,
+          silentActiveCampaigns: campaignStatus.available ? activeWithoutReplies.length : null,
         },
         sentiment: sentimentCounts,
         campaigns: campaignRows,
         campaignStatus: {
           ...campaignStatus,
-          // Named separately from `running` so a section can list "live, no replies this period"
+          // Named separately from `active` so a section can list "live, no replies this period"
           // without re-deriving it from two other arrays.
-          runningWithoutReplies,
+          activeWithoutReplies,
         },
         senders: senderRows,
         topLeads,

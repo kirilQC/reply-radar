@@ -56,22 +56,35 @@ function digest(client: Json) {
 
   /**
    * Live campaign state, phrased so the model cannot mistake "we could not ask" for "nothing is
-   * running". Only names and states go in — the ids and timestamps are for the PDF, not the writer.
+   * running", and so it cannot call a worked-through campaign active. The definition is restated here
+   * because the model sees only this JSON, not the code that produced it.
    */
   const status = object(client.campaignStatus);
-  const names = (value: unknown) => array(value).map((row) => text(row.name)).filter(Boolean);
+  const campaign = (row: Json) => ({
+    name: text(row.name),
+    launched: text(row.launchedAt).slice(0, 10),
+    leadsPending: int(object(row.progress).pending),
+    leadsContacted: int(object(row.progress).contacted),
+  });
+  const rows = (value: unknown, limit: number) =>
+    array(value)
+      .filter((row) => text(row.name))
+      .slice(0, limit)
+      .map(campaign);
   const activeCampaigns = status.available
     ? {
+        definition:
+          "Active means the campaign is live and still has leads pending, i.e. leads yet to enter the sequence. A campaign with no pending leads is complete even if HeyReach still calls it in progress.",
         statusKnown: true,
-        running: names(status.running).slice(0, 10),
-        runningWithNoRepliesThisPeriod: names(status.runningWithoutReplies).slice(0, 10),
-        scheduledToLaunch: names(status.scheduled).slice(0, 6),
-        paused: names(status.paused).slice(0, 6),
-        recentlyFinished: names(status.finished).slice(0, 6),
+        active: rows(status.active, 10),
+        activeWithNoRepliesThisPeriod: rows(status.activeWithoutReplies, 10),
+        scheduledToLaunch: rows(status.scheduled, 6),
+        completedNoLeadsLeftToContact: rows(status.workedThrough, 6),
+        paused: rows(status.paused, 6),
       }
     : {
         statusKnown: false,
-        note: "Live campaign status was unavailable. Do not state which campaigns are running; say the status needs confirming in HeyReach.",
+        note: "Live campaign status was unavailable. Do not state which campaigns are active; say the status needs confirming in HeyReach.",
       };
 
   return {

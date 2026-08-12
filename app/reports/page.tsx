@@ -40,6 +40,35 @@ type SavedReport = {
 /** The copy Claude wrote: a headline for the page, the PDF narrative, and the message to send. */
 type Composed = { headline: string; narrative: string; message: string };
 
+/**
+ * A campaign as HeyReach reports it, once the pending-lead rule has been applied.
+ *
+ * "Active" here means live *and* still feeding new leads into the sequence. HeyReach keeps a campaign
+ * in progress while leads already in the sequence finish their steps, which is not the same thing —
+ * see `app/lib/heyreach-campaigns.ts`.
+ */
+type LiveCampaign = {
+  id: string;
+  name: string;
+  status: string;
+  state: string;
+  launchedAt: string;
+  progress: { listSize: number; pending: number; contacted: number };
+};
+
+type CampaignStatusBlock = {
+  available: boolean;
+  reason: string;
+  fetchedAt: string;
+  active: LiveCampaign[];
+  workedThrough: LiveCampaign[];
+  scheduled: LiveCampaign[];
+  paused: LiveCampaign[];
+  activeWithoutReplies: LiveCampaign[];
+  total: number;
+  unrecognised: string[];
+};
+
 type ClientReport = {
   workspace: { id: string; slug: string; name: string; logoUrl: string; accentColor: string; website: string; clientBrief: string; timezone: string };
   summary: {
@@ -54,9 +83,23 @@ type ClientReport = {
     bestSender: string;
     hotCount: number;
     topIcpCount: number;
+    /** Null when HeyReach could not be reached — which is not the same as zero. */
+    activeCampaigns: number | null;
+    scheduledCampaigns: number | null;
+    silentActiveCampaigns: number | null;
   };
   sentiment: { positive: number; neutral: number; negative: number; unclassified: number };
-  campaigns: Array<{ name: string; replies: number; positive: number; negative: number; positiveRate: number }>;
+  campaigns: Array<{
+    name: string;
+    replies: number;
+    positive: number;
+    negative: number;
+    positiveRate: number;
+    state: string;
+    status: string;
+    active: boolean;
+  }>;
+  campaignStatus: CampaignStatusBlock;
   senders: Array<{ name: string; replies: number; positive: number; positiveRate: number }>;
   topLeads: Array<{ id: string; name: string; role: string; company: string; icpScore: number; icpReason: string; profileUrl: string }>;
   icpBuckets: { excellent: number; strong: number; moderate: number; weak: number };
@@ -95,6 +138,22 @@ const DEFAULT_SECTIONS: SectionId[] = [
 
 /** The template id a build-your-own report is filed under, so its card can report a last-run date too. */
 const BUILD_YOUR_OWN_ID = "build-your-own";
+
+/**
+ * Plain English for each campaign state.
+ *
+ * "Worked through" is the one that matters: HeyReach still calls those campaigns in progress, but with
+ * no leads left to contact they are finished as far as a client is concerned.
+ */
+const CAMPAIGN_STATE_LABELS: Record<string, string> = {
+  active: "Active",
+  "worked-through": "Worked through",
+  scheduled: "Scheduled",
+  paused: "Paused",
+  closed: "Closed",
+  draft: "Draft",
+  unknown: "Unknown",
+};
 
 const PERIOD_OPTIONS: Period[] = ["daily", "weekly", "monthly", "quarterly", "all-time", "custom"];
 const periodLabel = (value: Period) => (value === "all-time" ? "All time" : value[0].toUpperCase() + value.slice(1));
@@ -143,6 +202,18 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
 
+  /**
+   * The campaigns HeyReach says this client has, and which of them the report may mention.
+   *
+   * Fetched when the builder opens rather than after generating, so the document, the write-up and the
+   * archived copy are all about the same set of campaigns. Active ones are ticked to begin with —
+   * that is the report almost everybody wants — and anything else is there to be opted into.
+   */
+  const [liveCampaigns, setLiveCampaigns] = useState<LiveCampaign[]>([]);
+  const [campaignPick, setCampaignPick] = useState<Set<string>>(new Set());
+  const [campaignsLoading, setCampaignsLoading] = useState(false);
+  const [campaignsNote, setCampaignsNote] = useState("");
+
   const [composed, setComposed] = useState<Composed | null>(null);
   const [messageText, setMessageText] = useState("");
   const [composing, setComposing] = useState(false);
@@ -187,6 +258,53 @@ export default function ReportsPage() {
     load();
   }, [refreshSaved, refreshTemplates]);
 
+  /**
+   * Asks HeyReach what this client is running. Selection defaults to the active campaigns, so someone
+   * who never touches the list still gets the honest answer to "what is live?".
+   */
+  const loadCampaigns = useCallback(async (slug: string) => {
+    if (!slug) return;
+    setCampaignsLoading(true);
+    setCampaignsNote("");
+    try {
+      const response = await fetch(`/api/reports/campaigns?workspace=${encodeURIComponent(slug)}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not read the campaign list.");
+      const clients = Array.isArray(payload.clients) ? (payload.clients as Array<Record<string, unknown>>) : [];
+      const rows = clients.flatMap((row) => (Array.isArray(row.campaigns) ? (row.campaigns as LiveCampaign[]) : []));
+      setLiveCampaigns(rows);
+      setCampaignPick(new Set(rows.filter((row) => row.state === "active").map((row) => row.id)));
+      const unavailable = clients.filter((row) => !row.available);
+      setCampaignsNote(
+        unavailable.length
+          ? `HeyReach did not answer for ${unavailable.length === clients.length ? "this client" : `${unavailable.length} of ${clients.length} clients`}: ${String(unavailable[0]?.reason || "unknown reason")}`
+          : "",
+      );
+    } catch (err) {
+      setLiveCampaigns([]);
+      setCampaignPick(new Set());
+      setCampaignsNote(err instanceof Error ? err.message : "Could not read the campaign list.");
+    } finally {
+      setCampaignsLoading(false);
+    }
+  }, []);
+
+  const toggleCampaign = (id: string) => {
+    setCampaignPick((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  /** Campaigns belong to one client, so changing client has to drop them rather than carry them over. */
+  const clearCampaigns = () => {
+    setLiveCampaigns([]);
+    setCampaignPick(new Set());
+    setCampaignsNote("");
+  };
+
   const toggleSection = (id: SectionId) => {
     if (SECTIONS.find((section) => section.id === id)?.alwaysOn) return;
     setSections((current) => {
@@ -213,6 +331,7 @@ export default function ReportsPage() {
     setPeriod(chosen.defaultPeriod);
     setReportTitle(chosen.name);
     setView("builder");
+    loadCampaigns(workspaceSlug);
   };
 
   const openBuilder = () => {
@@ -220,6 +339,7 @@ export default function ReportsPage() {
     setTemplate(null);
     setReportTitle("Outbound Reply Report");
     setView("builder");
+    loadCampaigns(workspaceSlug);
   };
 
   const openClient = (slug: string) => {
@@ -227,6 +347,7 @@ export default function ReportsPage() {
     setWorkspaceSlug(slug);
     setComposerOpen(false);
     setTemplateError("");
+    clearCampaigns();
     setView("hub");
   };
 
@@ -234,6 +355,7 @@ export default function ReportsPage() {
     resetOutput();
     setWorkspaceSlug("");
     setComposerOpen(false);
+    clearCampaigns();
     setView("clients");
   };
 
@@ -428,6 +550,9 @@ export default function ReportsPage() {
           since: period === "custom" ? customSince : undefined,
           until: period === "custom" ? customUntil : undefined,
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          // Sent whenever the list was readable, even when nothing is ticked: an empty array is the
+          // user saying "no campaigns", which is not the same as never having been asked.
+          campaignIds: liveCampaigns.length ? [...campaignPick] : undefined,
         }),
       });
       const payload = (await response.json()) as ReportData & { error?: string };
@@ -478,7 +603,17 @@ export default function ReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [workspaceSlug, period, customSince, customUntil, template, orderedSections, fileReport]);
+  }, [
+    workspaceSlug,
+    period,
+    customSince,
+    customUntil,
+    template,
+    orderedSections,
+    fileReport,
+    liveCampaigns,
+    campaignPick,
+  ]);
 
   const downloadPdf = () => {
     if (!report || overLimit) return;
@@ -831,6 +966,42 @@ export default function ReportsPage() {
               </div>
             )}
 
+            {/* Which campaigns the report may talk about. Read from HeyReach on the way in, so the
+                document, the write-up and the archived copy all describe the same set. */}
+            <label className="config-label">Campaigns</label>
+            {campaignsLoading ? (
+              <div className="config-static">Asking HeyReach…</div>
+            ) : liveCampaigns.length ? (
+              <>
+                <div className="config-sections config-campaigns">
+                  {liveCampaigns.map((row) => {
+                    const on = campaignPick.has(row.id);
+                    return (
+                      <label key={row.id} className={`config-section ${on ? "is-on" : ""}`}>
+                        <input type="checkbox" checked={on} onChange={() => toggleCampaign(row.id)} />
+                        <span>
+                          <strong>{row.name}</strong>
+                          <em>
+                            {CAMPAIGN_STATE_LABELS[row.state] || row.status || "Unknown"} ·{" "}
+                            {row.progress.pending.toLocaleString()} pending ·{" "}
+                            {row.progress.contacted.toLocaleString()} contacted
+                          </em>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="config-hint">
+                  {campaignPick.size} of {liveCampaigns.length} ticked. Only ticked campaigns appear in
+                  the report. Active ones — live with leads still to contact — are ticked to begin with;
+                  paused and worked-through campaigns are listed below them to be opted into.
+                </p>
+              </>
+            ) : (
+              <div className="config-static">{campaignsNote || "No campaigns found for this client."}</div>
+            )}
+            {liveCampaigns.length > 0 && campaignsNote && <div className="config-note">{campaignsNote}</div>}
+
             <label className="config-label">Cover page</label>
             <input
               className="config-input"
@@ -1019,9 +1190,38 @@ function buildCsv(report: ReportData) {
     lines.push(`Top ICP leads (≥75),${client.summary.topIcpCount}`);
     lines.push("");
     lines.push("Campaigns");
-    lines.push("Campaign,Replies,Positive,Negative,Positive rate");
+    lines.push("Campaign,Replies,Positive,Negative,Positive rate,HeyReach state");
     for (const row of client.campaigns) {
-      lines.push([csv(row.name), row.replies, row.positive, row.negative, `${row.positiveRate}%`].join(","));
+      lines.push(
+        [csv(row.name), row.replies, row.positive, row.negative, `${row.positiveRate}%`, csv(row.state || "unknown")].join(","),
+      );
+    }
+    lines.push("");
+    // Straight from HeyReach rather than from replies, so the CSV can be checked against the platform.
+    lines.push("Campaign status (HeyReach)");
+    if (client.campaignStatus?.available) {
+      lines.push("Campaign,State,HeyReach status,Launched,Leads on list,Leads pending,Leads contacted");
+      const statusRows = [
+        ...client.campaignStatus.active,
+        ...client.campaignStatus.scheduled,
+        ...client.campaignStatus.workedThrough,
+        ...client.campaignStatus.paused,
+      ];
+      for (const row of statusRows) {
+        lines.push(
+          [
+            csv(row.name),
+            csv(row.state),
+            csv(row.status),
+            row.launchedAt ? row.launchedAt.slice(0, 10) : "",
+            row.progress.listSize,
+            row.progress.pending,
+            row.progress.contacted,
+          ].join(","),
+        );
+      }
+    } else {
+      lines.push(`Unavailable,${csv(client.campaignStatus?.reason || "HeyReach was not reachable")}`);
     }
     lines.push("");
     lines.push("Senders");
@@ -1060,6 +1260,7 @@ const SECTION_TITLES: Record<SectionId, string> = {
   kpis: "Headline KPIs",
   sentiment: "Sentiment breakdown",
   trend: "Reply trend",
+  "active-campaigns": "Active campaigns",
   campaigns: "Campaign performance",
   senders: "Sender leaderboard",
   "top-leads": "Top leads by ICP score",
@@ -1118,6 +1319,8 @@ function ReportDocument({
         return <SentimentBreakdown client={client} />;
       case "trend":
         return <TrendChart client={client} />;
+      case "active-campaigns":
+        return <ActiveCampaignTable client={client} />;
       case "campaigns":
         return <CampaignTable client={client} />;
       case "senders":
@@ -1387,6 +1590,65 @@ function TrendChart({ client }: { client: ClientReport }) {
  * the renderer rather than the route keeps the CSV complete, which is the point of having a CSV.
  */
 const CAMPAIGN_ROW_CAP = 12;
+
+/**
+ * What is running right now, from HeyReach rather than from stored replies.
+ *
+ * Ordered active-first because that is the answer to the client's question; scheduled campaigns follow
+ * because "launching next" is the second half of it. Campaigns that have worked through their list are
+ * deliberately not here — to us they are complete, and listing them as live would be the exact
+ * misreading this section exists to prevent.
+ */
+function ActiveCampaignTable({ client }: { client: ClientReport }) {
+  const status = client.campaignStatus;
+  if (!status || !status.available)
+    return (
+      <EmptyNote>
+        Live campaign status was unavailable{status?.reason ? ` — ${status.reason}` : ""}. Confirm in HeyReach.
+      </EmptyNote>
+    );
+
+  const rows = [...status.active, ...status.scheduled];
+  // Deliberately not "nothing was active": the campaigns in a report are chosen before it is
+  // generated, so an empty table can equally mean none were selected. Claiming otherwise would be a
+  // guess printed in front of a client.
+  if (!rows.length) return <EmptyNote>No active campaigns are included in this report.</EmptyNote>;
+
+  const repliesByCampaign = new Map(client.campaigns.map((row) => [row.name.trim().toLowerCase(), row.replies]));
+  return (
+    <>
+      <table className="report-table">
+        <thead>
+          <tr>
+            <th>Campaign</th>
+            <th>Launched</th>
+            <th style={{ textAlign: "right" }}>Leads pending</th>
+            <th style={{ textAlign: "right" }}>Leads contacted</th>
+            <th style={{ textAlign: "right" }}>Replies</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id || row.name}>
+              <td>
+                {row.name}
+                {row.state === "scheduled" && <span className="report-tag">Scheduled</span>}
+              </td>
+              <td>{row.launchedAt ? formatShort(row.launchedAt, client.workspace.timezone) : "—"}</td>
+              <td style={{ textAlign: "right" }}>{num(row.progress.pending)}</td>
+              <td style={{ textAlign: "right" }}>{num(row.progress.contacted)}</td>
+              <td style={{ textAlign: "right" }}>{num(repliesByCampaign.get(row.name.trim().toLowerCase()) ?? 0)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="report-caption">
+        Active means live in HeyReach with leads still to contact. Leads contacted counts everyone who has entered the
+        sequence, whether they are still in it or have completed it.
+      </p>
+    </>
+  );
+}
 
 function CampaignTable({ client }: { client: ClientReport }) {
   if (!client.campaigns.length) return <EmptyNote>No campaign attribution captured in this period.</EmptyNote>;
