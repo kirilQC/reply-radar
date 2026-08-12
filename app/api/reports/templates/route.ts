@@ -11,7 +11,13 @@
  * so a teammate experimenting with prompts can never leave the hub with nothing in it.
  */
 import { NextResponse } from "next/server";
-import { BUILT_IN_TEMPLATES, normaliseTemplate, PAGE_LIMIT, type ReportTemplate } from "../../../lib/report-templates";
+import {
+  BUILT_IN_TEMPLATES,
+  DEFAULT_TEMPLATE_PAGES,
+  normaliseTemplate,
+  PAGE_LIMIT,
+  type ReportTemplate,
+} from "../../../lib/report-templates";
 
 type Row = Record<string, unknown>;
 
@@ -72,8 +78,10 @@ export async function POST(request: Request) {
     if (BUILT_IN_TEMPLATES.some((template) => template.name.toLowerCase() === name.toLowerCase()))
       return NextResponse.json({ ok: false, error: "That name belongs to a built-in template. Pick another." }, { status: 409 });
 
-    const pages = Array.isArray(body.pages) ? body.pages : [];
-    if (!pages.length || pages.length > PAGE_LIMIT)
+    // A layout is optional on the way in — writing a template is meant to be typing a prompt — but a
+    // layout that is supplied still has to respect the limit, so a caller cannot smuggle in four pages.
+    const pages = Array.isArray(body.pages) && body.pages.length ? body.pages : DEFAULT_TEMPLATE_PAGES;
+    if (pages.length > PAGE_LIMIT)
       return NextResponse.json(
         { ok: false, error: `A template must lay out between 1 and ${PAGE_LIMIT} pages.` },
         { status: 400 },

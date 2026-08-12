@@ -15,12 +15,20 @@ import {
 import { packPages, paginate, suggestTrim } from "../../shared/report-pagination.mjs";
 import "./reports.css";
 
-type Workspace = { id: string; slug: string; name: string; logo_url?: string; timezone?: string };
+type Workspace = { id: string; slug: string; name: string; logo_url?: string; accent_color?: string; timezone?: string };
 
-/** What the archive needs to draw a row. The heavy columns are deliberately not listed. */
+/**
+ * What the archive needs to draw a row. The heavy columns are deliberately not listed.
+ *
+ * `workspace_id` and `template_id` are here because the whole archive is fetched once and then sliced
+ * locally — by client for the directory counts, and by template for the "last run" date on each card.
+ * Those are two cheap groupings over a list that is already in memory, not two more round trips.
+ */
 type SavedReport = {
   id: string;
+  workspace_id: string | null;
   workspace_name: string;
+  template_id: string;
   template_name: string;
   title: string;
   period_label: string;
@@ -85,6 +93,12 @@ const DEFAULT_SECTIONS: SectionId[] = [
   "methodology",
 ];
 
+/** The template id a build-your-own report is filed under, so its card can report a last-run date too. */
+const BUILD_YOUR_OWN_ID = "build-your-own";
+
+const PERIOD_OPTIONS: Period[] = ["daily", "weekly", "monthly", "quarterly", "all-time", "custom"];
+const periodLabel = (value: Period) => (value === "all-time" ? "All time" : value[0].toUpperCase() + value.slice(1));
+
 const formatDate = (value: string, timeZone = "America/New_York") =>
   new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone }).format(new Date(value));
 const formatShort = (value: string, timeZone = "America/New_York") =>
@@ -93,12 +107,28 @@ const num = (value: number) => Math.round(value).toLocaleString();
 const pct = (value: number) => `${value.toFixed(1)}%`;
 
 export default function ReportsPage() {
-  // "hub" is the landing: choose a template, build your own, or reopen something already sent.
-  const [view, setView] = useState<"hub" | "builder">("hub");
+  /**
+   * Three screens, in the order the work happens: pick the client, pick the report, read the report.
+   *
+   * Choosing the client first is what makes the rest of the page honest. A template card can say when
+   * that report was last run and the archive can show only what that client has been sent, neither of
+   * which means anything until the page knows who it is talking about.
+   */
+  const [view, setView] = useState<"clients" | "hub" | "builder">("clients");
   const [template, setTemplate] = useState<ReportTemplate | null>(null);
   const [templates, setTemplates] = useState<ReportTemplate[]>(BUILT_IN_TEMPLATES);
   const [saved, setSaved] = useState<SavedReport[]>([]);
   const [savedWarning, setSavedWarning] = useState("");
+
+  // Authoring a template: a name and a prompt, which is all a template really is.
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [draftSummary, setDraftSummary] = useState("");
+  const [draftPrompt, setDraftPrompt] = useState("");
+  const [draftChannel, setDraftChannel] = useState<"email" | "slack">("email");
+  const [draftPeriod, setDraftPeriod] = useState<Period>("monthly");
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const [templateError, setTemplateError] = useState("");
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceSlug, setWorkspaceSlug] = useState<string>("");
@@ -130,30 +160,32 @@ export default function ReportsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    const load = async () => {
-      const [workspaceResponse, templateResponse] = await Promise.allSettled([
-        fetch("/api/admin/workspaces", { cache: "no-store" }),
-        fetch("/api/reports/templates", { cache: "no-store" }),
-      ]);
+  const refreshTemplates = useCallback(async () => {
+    try {
+      const response = await fetch("/api/reports/templates", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      // The route always returns at least the built-ins, so an empty array means something went wrong
+      // and the existing list is the better thing to keep on screen.
+      if (Array.isArray(payload.templates) && payload.templates.length) {
+        setTemplates(payload.templates as ReportTemplate[]);
+      }
+    } catch {
+      /* keep whatever is already listed */
+    }
+  }, []);
 
-      if (workspaceResponse.status === "fulfilled") {
-        const payload = await workspaceResponse.value.json().catch(() => ({}));
-        if (Array.isArray(payload.workspaces)) {
-          setWorkspaces(payload.workspaces as Workspace[]);
-          if (payload.workspaces.length) setWorkspaceSlug(String((payload.workspaces[0] as Workspace).slug));
-        }
-      }
-      if (templateResponse.status === "fulfilled") {
-        const payload = await templateResponse.value.json().catch(() => ({}));
-        if (Array.isArray(payload.templates) && payload.templates.length) {
-          setTemplates(payload.templates as ReportTemplate[]);
-        }
-      }
-      refreshSaved();
+  useEffect(() => {
+    // No client is preselected: the directory is the landing screen, and quietly defaulting to
+    // whichever client sorts first would make every "last run" date on the next screen belong to
+    // someone the reader never chose.
+    const load = async () => {
+      const workspaceResponse = await fetch("/api/admin/workspaces", { cache: "no-store" }).catch(() => null);
+      const payload = workspaceResponse ? await workspaceResponse.json().catch(() => ({})) : {};
+      if (Array.isArray(payload.workspaces)) setWorkspaces(payload.workspaces as Workspace[]);
+      await Promise.allSettled([refreshTemplates(), refreshSaved()]);
     };
     load();
-  }, [refreshSaved]);
+  }, [refreshSaved, refreshTemplates]);
 
   const toggleSection = (id: SectionId) => {
     if (SECTIONS.find((section) => section.id === id)?.alwaysOn) return;
@@ -190,6 +222,116 @@ export default function ReportsPage() {
     setView("builder");
   };
 
+  const openClient = (slug: string) => {
+    resetOutput();
+    setWorkspaceSlug(slug);
+    setComposerOpen(false);
+    setTemplateError("");
+    setView("hub");
+  };
+
+  const backToClients = () => {
+    resetOutput();
+    setWorkspaceSlug("");
+    setComposerOpen(false);
+    setView("clients");
+  };
+
+  const sortedWorkspaces = useMemo(
+    () => [...workspaces].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+    [workspaces],
+  );
+
+  const activeWorkspace = useMemo(
+    () => workspaces.find((row) => row.slug === workspaceSlug) ?? null,
+    [workspaces, workspaceSlug],
+  );
+
+  const clientLabel = workspaceSlug === "all" ? "All clients" : activeWorkspace?.name || "";
+
+  /**
+   * The archive, narrowed to the client on screen.
+   *
+   * A combined report belongs to no single client, so it is stored with a null workspace id — which
+   * makes "All clients" a real filter rather than the absence of one. Without that, the combined view
+   * would list every client's individual reports alongside its own.
+   */
+  const clientReports = useMemo(
+    () =>
+      saved.filter((row) =>
+        workspaceSlug === "all" ? !row.workspace_id : Boolean(activeWorkspace) && row.workspace_id === activeWorkspace?.id,
+      ),
+    [saved, workspaceSlug, activeWorkspace],
+  );
+
+  /** When each template was last run for this client — the answer to "have we sent this already?". */
+  const lastRunByTemplate = useMemo(() => {
+    const latest = new Map<string, string>();
+    for (const row of clientReports) {
+      const current = latest.get(row.template_id);
+      if (!current || row.generated_at > current) latest.set(row.template_id, row.generated_at);
+    }
+    return latest;
+  }, [clientReports]);
+
+  const reportCountFor = useCallback(
+    (workspace: Workspace) => saved.filter((row) => row.workspace_id === workspace.id).length,
+    [saved],
+  );
+
+  const saveTemplate = async () => {
+    const name = draftName.trim();
+    const prompt = draftPrompt.trim();
+    if (!name || !prompt) {
+      setTemplateError("A template needs a name and a prompt.");
+      return;
+    }
+    setTemplateBusy(true);
+    setTemplateError("");
+    try {
+      const response = await fetch("/api/reports/templates", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          summary: draftSummary.trim(),
+          prompt,
+          channel: draftChannel,
+          defaultPeriod: draftPeriod,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not save the template.");
+      await refreshTemplates();
+      setComposerOpen(false);
+      setDraftName("");
+      setDraftSummary("");
+      setDraftPrompt("");
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : "Could not save the template.");
+    } finally {
+      setTemplateBusy(false);
+    }
+  };
+
+  /** Templates are shared, so deleting one takes it away from everybody. Hence the confirm. */
+  const deleteTemplate = async (chosen: ReportTemplate) => {
+    if (!window.confirm(`Delete the "${chosen.name}" template for everyone? Reports already saved from it are kept.`))
+      return;
+    setTemplateBusy(true);
+    setTemplateError("");
+    try {
+      const response = await fetch(`/api/reports/templates?id=${encodeURIComponent(chosen.id)}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not delete the template.");
+      await refreshTemplates();
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : "Could not delete the template.");
+    } finally {
+      setTemplateBusy(false);
+    }
+  };
+
   /**
    * The page layout of the document currently on screen.
    *
@@ -214,6 +356,56 @@ export default function ReportsPage() {
   const overLimit = !template && !savedLayout && !budget.withinLimit;
   const trimAdvice = useMemo(() => (overLimit ? suggestTrim(orderedSections) : []), [overLimit, orderedSections]);
 
+  /**
+   * Files the report in Supabase, artifacts and numbers together.
+   *
+   * The data snapshot goes in alongside the message and the CSV so that reopening it years later
+   * renders exactly what the client saw, even after the underlying replies have been purged or
+   * re-scored. Nothing about a saved report is ever recomputed.
+   *
+   * Everything is passed in rather than read from state. This runs at the tail of `generate`, before
+   * React has re-rendered with the report it just fetched, so the state still holds the *previous*
+   * report — reading it here would file the wrong document under the right name.
+   */
+  const fileReport = useCallback(
+    async (data: ReportData, copy: Composed | null, layout: SectionId[][], sectionIds: SectionId[]) => {
+      setSaving(true);
+      try {
+        const response = await fetch("/api/reports/saved", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            workspaceId: workspaceSlug === "all" ? "" : activeWorkspace?.id || "",
+            workspaceName: workspaceSlug === "all" ? "All clients" : data.clients[0]?.workspace.name || "",
+            templateId: template?.id || BUILD_YOUR_OWN_ID,
+            templateName: template?.name || "Build your own",
+            title: reportTitle,
+            period: data.period,
+            periodLabel: data.periodLabel,
+            sections: sectionIds,
+            messageChannel: template?.channel || null,
+            messageText: copy?.message || "",
+            csvText: buildCsv(data),
+            data: { report: data, pages: layout, reportTitle, preparedBy, notes, composed: copy },
+            pageEstimate: layout.length,
+            generatedBy: preparedBy,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not save the report.");
+        setSavedNotice("Saved to the archive.");
+        refreshSaved();
+      } catch (err) {
+        // Kept out of `error`, which may already be carrying a warning about the write-up. Losing the
+        // archive copy is worth saying plainly, but it does not invalidate the report on screen.
+        setSavedNotice(`Not archived: ${err instanceof Error ? err.message : "the save failed."}`);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [workspaceSlug, activeWorkspace, template, reportTitle, preparedBy, notes, refreshSaved],
+  );
+
   const generate = useCallback(async () => {
     if (!workspaceSlug) {
       setError("Pick a client first.");
@@ -222,6 +414,10 @@ export default function ReportsPage() {
     setLoading(true);
     setError("");
     setSavedNotice("");
+    // A new pull is a new document, so it must not inherit the layout of a report reopened from the
+    // archive — the rendered pages and the filed pages have to be the same thing.
+    setSavedLayout(null);
+    const layout: SectionId[][] = template ? template.pages : packPages(orderedSections);
     try {
       const response = await fetch("/api/reports/generate", {
         method: "POST",
@@ -240,43 +436,49 @@ export default function ReportsPage() {
 
       // Only a template carries a prompt, so only a template gets written copy. Build-your-own keeps
       // the deterministic summary that is computed from the numbers.
-      if (!template) return;
-      setComposing(true);
-      try {
-        const composeResponse = await fetch("/api/reports/compose", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            prompt: template.prompt,
-            templateId: template.id,
-            channel: template.channel,
-            periodLabel: payload.periodLabel,
-            clients: payload.clients,
-          }),
-        });
-        const composePayload = await composeResponse.json().catch(() => ({}));
-        if (!composeResponse.ok || !composePayload.ok) {
-          // The report itself is valid and on screen; only the copy failed. Saying so beats replacing
-          // a working document with an error.
-          setError(`Report generated, but the write-up failed: ${composePayload.error || composeResponse.status}`);
-          return;
+      let copy: Composed | null = null;
+      if (template) {
+        setComposing(true);
+        try {
+          const composeResponse = await fetch("/api/reports/compose", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              prompt: template.prompt,
+              templateId: template.id,
+              channel: template.channel,
+              periodLabel: payload.periodLabel,
+              clients: payload.clients,
+            }),
+          });
+          const composePayload = await composeResponse.json().catch(() => ({}));
+          if (composeResponse.ok && composePayload.ok) {
+            copy = {
+              headline: String(composePayload.headline || ""),
+              narrative: String(composePayload.narrative || ""),
+              message: String(composePayload.message || ""),
+            };
+            setComposed(copy);
+            setMessageText(copy.message);
+          } else {
+            // The report itself is valid and on screen; only the copy failed. Saying so beats replacing
+            // a working document with an error, and it still gets archived — without the write-up.
+            setError(`Report generated, but the write-up failed: ${composePayload.error || composeResponse.status}`);
+          }
+        } finally {
+          setComposing(false);
         }
-        const result: Composed = {
-          headline: String(composePayload.headline || ""),
-          narrative: String(composePayload.narrative || ""),
-          message: String(composePayload.message || ""),
-        };
-        setComposed(result);
-        setMessageText(result.message);
-      } finally {
-        setComposing(false);
       }
+
+      // Archived without being asked. Generating a client report is the act of record; making that
+      // durable should not depend on remembering to press a second button afterwards.
+      await fileReport(payload, copy, layout, orderedSections);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Report generation failed");
     } finally {
       setLoading(false);
     }
-  }, [workspaceSlug, period, customSince, customUntil, template]);
+  }, [workspaceSlug, period, customSince, customUntil, template, orderedSections, fileReport]);
 
   const downloadPdf = () => {
     if (!report || overLimit) return;
@@ -294,49 +496,6 @@ export default function ReportsPage() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  };
-
-  /**
-   * Files the report in Supabase, artifacts and numbers together.
-   *
-   * The data snapshot goes in alongside the message and the CSV so that reopening it years later
-   * renders exactly what the client saw, even after the underlying replies have been purged or
-   * re-scored. Nothing about a saved report is ever recomputed.
-   */
-  const saveReport = async () => {
-    if (!report) return;
-    setSaving(true);
-    setError("");
-    try {
-      const response = await fetch("/api/reports/saved", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId: workspaceSlug === "all" ? "" : workspaces.find((row) => row.slug === workspaceSlug)?.id || "",
-          workspaceName: workspaceSlug === "all" ? "All clients" : report.clients[0]?.workspace.name || "",
-          templateId: template?.id || "build-your-own",
-          templateName: template?.name || "Build your own",
-          title: reportTitle,
-          period: report.period,
-          periodLabel: report.periodLabel,
-          sections: orderedSections,
-          messageChannel: template?.channel || null,
-          messageText,
-          csvText: buildCsv(report),
-          data: { report, pages, reportTitle, preparedBy, notes, composed },
-          pageEstimate: pages.length,
-          generatedBy: preparedBy,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not save the report.");
-      setSavedNotice("Saved to the archive.");
-      refreshSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the report.");
-    } finally {
-      setSaving(false);
-    }
   };
 
   /** Reopens a filed report from its snapshot. Read-only in spirit: nothing is regenerated. */
@@ -383,63 +542,227 @@ export default function ReportsPage() {
           </div>
         </header>
 
-        {view === "hub" ? (
+        {view === "clients" ? (
           <main className="reports-hub print-hide">
             <div className="hub-lede">
-              <h1>Report hub</h1>
-              <p>
-                Start from a template to get a finished report with the write-up already drafted, or build your own
-                from the sections you want. Either way it comes out as three pages or fewer, with a message to send
-                and a CSV of the underlying numbers.
-              </p>
+              <h1>Reports</h1>
+            </div>
+
+            <div className="hub-group-label">
+              <span>Client workspaces</span>
+              <span>{sortedWorkspaces.length === 1 ? "1 client" : `${sortedWorkspaces.length} clients`}</span>
+            </div>
+            <div className="client-grid">
+              {sortedWorkspaces.map((workspace) => {
+                const count = reportCountFor(workspace);
+                return (
+                  <button
+                    key={workspace.slug}
+                    type="button"
+                    className="client-card"
+                    onClick={() => openClient(workspace.slug)}
+                  >
+                    <i style={workspace.logo_url ? undefined : { background: workspace.accent_color || "var(--report-brand)" }}>
+                      {workspace.logo_url ? <img src={workspace.logo_url} alt="" /> : workspace.name.slice(0, 1).toUpperCase()}
+                    </i>
+                    <h3>{workspace.name}</h3>
+                    <small>{count ? `${count} report${count === 1 ? "" : "s"}` : "No reports yet"}</small>
+                  </button>
+                );
+              })}
+              <button type="button" className="client-card client-card-all" onClick={() => openClient("all")}>
+                <i>∑</i>
+                <h3>All clients</h3>
+                <small>Combined across every workspace</small>
+              </button>
+            </div>
+
+            {!sortedWorkspaces.length && (
+              <div className="hub-empty">
+                No client workspaces yet. Add one in the admin console and it will appear here.
+              </div>
+            )}
+            {error && <div className="config-error">{error}</div>}
+          </main>
+        ) : view === "hub" ? (
+          <main className="reports-hub print-hide">
+            <button type="button" className="config-back" onClick={backToClients}>
+              ← All clients
+            </button>
+            <div className="hub-lede">
+              <h1>{clientLabel}</h1>
             </div>
 
             <div className="hub-group-label">
               <span>Templates</span>
-              <span>{templates.length === 1 ? "1 template" : `${templates.length} templates`}</span>
-            </div>
-            <div className="hub-card-grid">
-              {templates.map((option) => (
-                <button key={option.id} type="button" className="hub-card" onClick={() => openTemplate(option)}>
-                  <h3>{option.name}</h3>
-                  <p>{option.summary || "No description."}</p>
-                  <div className="hub-card-meta">
-                    <b>{option.pages.length === 1 ? "1 page" : `${option.pages.length} pages`}</b>
-                    <span>·</span>
-                    <span>{option.channel === "slack" ? "Slack message" : "Email"}</span>
-                    <span>·</span>
-                    <span>{option.defaultPeriod === "all-time" ? "All time" : option.defaultPeriod}</span>
-                  </div>
-                </button>
-              ))}
-
-              <button type="button" className="hub-card hub-card-custom" onClick={openBuilder}>
-                <h3>Build your own report</h3>
-                <p>
-                  Pick the sections yourself. The page count is tracked as you go, so you can see when a selection
-                  stops fitting.
-                </p>
-                <div className="hub-card-meta">
-                  <b>Up to {PAGE_LIMIT} pages</b>
-                  <span>·</span>
-                  <span>{SECTIONS.length} sections</span>
-                </div>
+              <button
+                type="button"
+                className="hub-add"
+                onClick={() => {
+                  setComposerOpen((open) => !open);
+                  setTemplateError("");
+                }}
+              >
+                {composerOpen ? "Cancel" : "+ Add template"}
               </button>
             </div>
 
-            <div className="hub-group-label">
-              <span>Saved reports</span>
-              <span>{saved.length ? `${saved.length} on file` : "nothing yet"}</span>
+            {composerOpen && (
+              <div className="hub-composer">
+                <p className="hub-composer-note">
+                  A template is a prompt. The numbers always come from the data — the prompt decides what the
+                  write-up emphasises, who it is addressed to, and how the message reads. Templates are shared, so
+                  one saved here shows up for everyone.
+                </p>
+
+                <label className="config-label" htmlFor="template-name">
+                  Template name
+                </label>
+                <input
+                  id="template-name"
+                  className="config-input"
+                  placeholder="e.g. Monthly performance recap"
+                  maxLength={80}
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                />
+
+                <label className="config-label" htmlFor="template-summary">
+                  One-line description
+                </label>
+                <input
+                  id="template-summary"
+                  className="config-input"
+                  placeholder="Optional. Shown on the card."
+                  maxLength={200}
+                  value={draftSummary}
+                  onChange={(event) => setDraftSummary(event.target.value)}
+                />
+
+                <div className="hub-composer-row">
+                  <div>
+                    <label className="config-label" htmlFor="template-channel">
+                      Message channel
+                    </label>
+                    <select
+                      id="template-channel"
+                      className="config-select"
+                      value={draftChannel}
+                      onChange={(event) => setDraftChannel(event.target.value as "email" | "slack")}
+                    >
+                      <option value="email">Email</option>
+                      <option value="slack">Slack</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="config-label" htmlFor="template-period">
+                      Default period
+                    </label>
+                    <select
+                      id="template-period"
+                      className="config-select"
+                      value={draftPeriod}
+                      onChange={(event) => setDraftPeriod(event.target.value as Period)}
+                    >
+                      {PERIOD_OPTIONS.filter((option) => option !== "custom").map((option) => (
+                        <option key={option} value={option}>
+                          {periodLabel(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <label className="config-label" htmlFor="template-prompt">
+                  Prompt
+                </label>
+                <textarea
+                  id="template-prompt"
+                  className="config-textarea hub-composer-prompt"
+                  placeholder="What is this report for, and who reads it? Say what to lead with, what to emphasise, and how long the message should be."
+                  value={draftPrompt}
+                  onChange={(event) => setDraftPrompt(event.target.value)}
+                />
+
+                <button
+                  className="config-generate"
+                  onClick={saveTemplate}
+                  disabled={templateBusy || !draftName.trim() || !draftPrompt.trim()}
+                >
+                  {templateBusy ? "Saving…" : "Save template"}
+                </button>
+              </div>
+            )}
+            {templateError && <div className="config-error">{templateError}</div>}
+
+            <div className="hub-card-grid">
+              {templates.map((option) => {
+                const lastRun = lastRunByTemplate.get(option.id);
+                return (
+                  <div key={option.id} className="hub-card">
+                    {/* The card is a container rather than a button so the delete control can sit beside the
+                        open control instead of nested inside it, which no browser would accept. */}
+                    <button type="button" className="hub-card-open" onClick={() => openTemplate(option)}>
+                      <h3>{option.name}</h3>
+                      <p>{option.summary || "No description."}</p>
+                      <div className="hub-card-meta">
+                        <b>{lastRun ? `Last run ${formatDate(lastRun)}` : "Never run"}</b>
+                        <span>·</span>
+                        <span>{option.channel === "slack" ? "Slack" : "Email"}</span>
+                        <span>·</span>
+                        <span>{periodLabel(option.defaultPeriod)}</span>
+                      </div>
+                    </button>
+                    {!option.builtIn && (
+                      <button
+                        type="button"
+                        className="hub-card-delete"
+                        disabled={templateBusy}
+                        title={`Delete the ${option.name} template`}
+                        aria-label={`Delete the ${option.name} template`}
+                        onClick={() => deleteTemplate(option)}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              <div className="hub-card hub-card-custom">
+                <button type="button" className="hub-card-open" onClick={openBuilder}>
+                  <h3>Build your own report</h3>
+                  <p>
+                    Pick the sections yourself. The page count is tracked as you go, so you can see when a selection
+                    stops fitting.
+                  </p>
+                  <div className="hub-card-meta">
+                    <b>
+                      {lastRunByTemplate.has(BUILD_YOUR_OWN_ID)
+                        ? `Last run ${formatDate(lastRunByTemplate.get(BUILD_YOUR_OWN_ID) as string)}`
+                        : "Never run"}
+                    </b>
+                    <span>·</span>
+                    <span>Up to {PAGE_LIMIT} pages</span>
+                    <span>·</span>
+                    <span>{SECTIONS.length} sections</span>
+                  </div>
+                </button>
+              </div>
             </div>
-            {saved.length ? (
+
+            <div className="hub-group-label">
+              <span>Past reports</span>
+              <span>{clientReports.length ? `${clientReports.length} on file` : "nothing yet"}</span>
+            </div>
+            {clientReports.length ? (
               <div className="hub-saved-list">
-                {saved.map((row) => (
+                {clientReports.map((row) => (
                   <button key={row.id} type="button" className="hub-saved-row" onClick={() => openSaved(row.id)}>
                     <span>
                       <strong>{row.title}</strong>
                       <small>{row.template_name}</small>
                     </span>
-                    <span>{row.workspace_name}</span>
                     <span>{row.period_label}</span>
                     <span>{row.page_estimate ? `${row.page_estimate}p` : "—"}</span>
                     <time dateTime={row.generated_at}>{formatDate(row.generated_at)}</time>
@@ -454,7 +777,7 @@ export default function ReportsPage() {
                     <code>supabase/migrations/20260812_rr_reports.sql</code>.
                   </>
                 ) : (
-                  "Reports you save are kept here permanently, with the exact numbers they were built from — so one a client has already seen always reopens showing what it showed on the day it was sent."
+                  "Every report generated is filed here automatically, with the exact numbers it was built from — so one a client has already seen always reopens showing what it showed on the day it was sent."
                 )}
               </div>
             )}
@@ -465,7 +788,7 @@ export default function ReportsPage() {
         <main className="reports-shell">
           <aside className="reports-configurator print-hide">
             <button type="button" className="config-back" onClick={() => { resetOutput(); setView("hub"); }}>
-              ← All reports
+              ← {clientLabel || "All clients"}
             </button>
             <div className="config-heading">
               <h2>{template ? template.name : "Build your own report"}</h2>
@@ -476,27 +799,21 @@ export default function ReportsPage() {
               </p>
             </div>
 
+            {/* The client is settled on the way in, so it is shown as context rather than as a control —
+                changing it here would leave the hub behind it describing somebody else. */}
             <label className="config-label">Client</label>
-            <select className="config-select" value={workspaceSlug} onChange={(e) => setWorkspaceSlug(e.target.value)}>
-              <option value="">Pick a client…</option>
-              <option value="all">All clients (combined)</option>
-              {workspaces.map((workspace) => (
-                <option key={workspace.slug} value={workspace.slug}>
-                  {workspace.name}
-                </option>
-              ))}
-            </select>
+            <div className="config-static">{clientLabel || "No client selected"}</div>
 
             <label className="config-label">Period</label>
             <div className="config-period-grid">
-              {(["daily", "weekly", "monthly", "quarterly", "all-time", "custom"] as Period[]).map((option) => (
+              {PERIOD_OPTIONS.map((option) => (
                 <button
                   key={option}
                   type="button"
                   className={`config-period ${period === option ? "is-active" : ""}`}
                   onClick={() => setPeriod(option)}
                 >
-                  {option === "all-time" ? "All time" : option[0].toUpperCase() + option.slice(1)}
+                  {periodLabel(option)}
                 </button>
               ))}
             </div>
@@ -609,12 +926,13 @@ export default function ReportsPage() {
                   Download PDF
                 </button>
                 <button onClick={downloadCsv}>Download CSV</button>
-                <button onClick={saveReport} disabled={saving}>
-                  {saving ? "Saving…" : "Save to archive"}
-                </button>
               </div>
             )}
-            {savedNotice && <div className="config-error">{savedNotice}</div>}
+            {/* Archiving happens on its own, so this reports rather than asks. It still has to be visible:
+                a save that failed is the one case where the report on screen is the only copy. */}
+            {(saving || savedNotice) && (
+              <div className="config-note">{saving ? "Filing to the archive…" : savedNotice}</div>
+            )}
           </aside>
 
           <section className="reports-canvas">

@@ -262,6 +262,23 @@ body.light-mode .reports-main {
   font-size: 12.5px;
 }
 
+/* Something the report is fixed to rather than something to choose — a settled decision, shown. */
+.config-static {
+  border: 1px solid var(--report-line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: var(--report-inset);
+  color: var(--report-ink-soft);
+  font-size: 12.5px;
+}
+
+/* Status, not a problem: used for the archive filing itself while nobody asked it to. */
+.config-note {
+  color: var(--report-ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .config-downloads {
   display: flex;
   gap: 8px;
@@ -1008,24 +1025,81 @@ body.light-mode .reports-main {
   gap: 12px;
 }
 
+/*
+ * The card is a frame, not a control.
+ *
+ * A template card carries two actions — open it, delete it — and a button cannot contain another
+ * button. So the frame holds the border and the hover state, and the two controls sit side by side
+ * inside it, with the open action stretched to fill so the whole card still reads as clickable.
+ */
 .hub-card {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 9px;
-  text-align: left;
   background: var(--report-surface);
   border: 1px solid var(--report-line);
   border-radius: 10px;
-  padding: 17px 17px 15px;
-  color: var(--report-ink);
-  font-family: inherit;
-  cursor: pointer;
   transition: border-color 120ms ease, transform 120ms ease;
 }
 
 .hub-card:hover {
   border-color: var(--report-brand);
   transform: translateY(-1px);
+}
+
+.hub-card-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  padding: 17px 17px 15px;
+  color: var(--report-ink);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/*
+ * Revealed on hover because deleting a shared template is not a routine action, and a row of ×
+ * buttons invites the accident. Focus keeps it reachable without a mouse.
+ */
+.hub-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: var(--report-inset);
+  border: 1px solid var(--report-line);
+  border-radius: 6px;
+  color: var(--report-ink-faint);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.hub-card:hover .hub-card-delete,
+.hub-card-delete:focus-visible {
+  opacity: 1;
+}
+
+.hub-card-delete:hover {
+  color: var(--report-negative);
+  border-color: var(--report-negative);
+}
+
+.hub-card-delete:disabled {
+  cursor: default;
+  opacity: 0.35;
 }
 
 .hub-card h3 {
@@ -1065,6 +1139,129 @@ body.light-mode .reports-main {
   border-style: dashed;
 }
 
+/* ------------------------- Client directory ------------------------- */
+
+/*
+ * Deliberately the same shape as the client grid on the home page. Arriving at Reports should feel
+ * like the same building, and the logo is how anyone actually finds the client they want.
+ */
+.client-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 13px;
+}
+
+.client-card {
+  display: block;
+  text-align: left;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+  padding: 18px;
+  color: var(--report-ink);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.client-card:hover {
+  border-color: var(--report-brand);
+  transform: translateY(-2px);
+}
+
+.client-card > i {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  overflow: hidden;
+  color: #fff;
+  font-style: normal;
+  font-weight: 750;
+  font-size: 14px;
+}
+
+.client-card > i img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.client-card h3 {
+  margin: 18px 0 4px;
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.client-card small {
+  font-size: 11px;
+  color: var(--report-ink-faint);
+}
+
+.client-card-all {
+  border-style: dashed;
+}
+
+.client-card-all > i {
+  background: var(--report-inset);
+  color: var(--report-ink-soft);
+  font-size: 16px;
+}
+
+/* ------------------------- Authoring a template ------------------------- */
+
+.hub-add {
+  background: transparent;
+  border: 1px solid var(--report-line);
+  border-radius: 7px;
+  padding: 5px 11px;
+  color: var(--report-ink-soft);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.hub-add:hover {
+  border-color: var(--report-brand);
+  color: var(--report-brand);
+}
+
+.hub-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+  padding: 20px 20px 22px;
+  margin-bottom: 16px;
+}
+
+.hub-composer-note {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--report-ink-soft);
+  max-width: 74ch;
+}
+
+.hub-composer-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+/* A prompt is prose and gets edited a lot, so it is given room rather than a three-line slot. */
+.hub-composer-prompt {
+  min-height: 168px;
+}
+
 /* The way back to the hub from a report that is already on screen. */
 .config-back {
   align-self: flex-start;
@@ -1095,7 +1292,9 @@ body.light-mode .reports-main {
 
 .hub-saved-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  /* Title and template, then period, page count, date. The client is not a column: the whole list
+     belongs to one client, so repeating the name on every row would say nothing. */
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto auto;
   gap: 14px;
   align-items: center;
   padding: 12px 16px;

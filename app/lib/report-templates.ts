@@ -59,6 +59,21 @@ export const SECTION_LABELS: Record<SectionId, string> = SECTIONS.reduce(
  */
 export const PAGE_LIMIT = 3;
 
+/**
+ * The layout a template gets when whoever created it did not design one.
+ *
+ * Writing a template is meant to be a matter of typing a prompt, so the layout cannot be a required
+ * decision — but a template still has to state its pages, because that declaration is what guarantees
+ * it stays inside the limit. This is the general-purpose answer: the story, then the performance that
+ * proves it, then the people worth acting on. Anyone who wants different sections wants "Build your
+ * own", which is a different tool.
+ */
+export const DEFAULT_TEMPLATE_PAGES: SectionId[][] = [
+  ["cover", "executive-summary", "kpis"],
+  ["trend", "campaigns", "senders"],
+  ["top-leads", "methodology"],
+];
+
 export type ReportPeriod = "daily" | "weekly" | "monthly" | "quarterly" | "all-time" | "custom";
 
 export type ReportTemplate = {
