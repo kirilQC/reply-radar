@@ -407,6 +407,55 @@ body.light-mode .reports-main {
   max-height: 190px;
 }
 
+/* Chips rather than another checkbox list. Eight short labels stacked as rows would be taller than the
+   campaign list they belong to and would read as eight more campaigns; laid out as chips they read as
+   what they are — a set of facts, several of which are on. */
+.config-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--report-inset);
+}
+
+.config-metric-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.config-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--report-line);
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--report-ink-soft);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background 120ms ease;
+}
+
+.config-chip:hover {
+  border-color: var(--report-brand);
+}
+
+.config-chip.is-on {
+  border-color: var(--report-brand);
+  color: var(--report-ink);
+  background: var(--report-inset);
+}
+
+.config-chip input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--report-brand);
+}
+
 /* A single tick standing on its own rather than one row of a scrolling list, so it carries the border
    and inset background that `.config-sections` would otherwise give it. Same interior as
    `.config-section` — a lone checkbox that looked different from the ones above it would read as a

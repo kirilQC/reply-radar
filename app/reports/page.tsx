@@ -5,12 +5,15 @@ import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import {
   BUILT_IN_TEMPLATES,
+  CAMPAIGN_METRICS,
+  DEFAULT_CAMPAIGN_METRICS,
   isWrittenSection,
   OUTPUT_LABELS,
   PAGE_LIMIT,
   SECTION_LABELS,
   SECTIONS,
   WRITTEN_SECTION_PROMPTS,
+  type CampaignMetricId,
   type ReportOutput,
   type ReportPeriod as Period,
   type ReportTemplate,
@@ -59,6 +62,10 @@ type LiveCampaign = {
   state: string;
   launchedAt: string;
   progress: { listSize: number; pending: number; contacted: number };
+  /** LinkedIn accounts assigned to send it. Zero means HeyReach did not say. */
+  senders: number;
+  /** Pending leads ÷ daily capacity. Null when the sender count is unknown, never a guess. */
+  daysLeftInSending: number | null;
 };
 
 type CampaignStatusBlock = {
@@ -288,6 +295,23 @@ export default function ReportsPage() {
    * removed is worse than one that is not.
    */
   const [includeBestReplies, setIncludeBestReplies] = useState(true);
+
+  /**
+   * What each campaign line is allowed to say about itself.
+   *
+   * Sits with the campaign checkboxes because it is the second half of the same question: which
+   * campaigns the client hears about, and what they hear about each. A week where a list is nearly
+   * exhausted wants the sending runway on the line; a quiet week wants replies and nothing else.
+   */
+  const [campaignMetrics, setCampaignMetrics] = useState<Set<CampaignMetricId>>(
+    () => new Set(DEFAULT_CAMPAIGN_METRICS),
+  );
+  const toggleMetric = (id: CampaignMetricId) =>
+    setCampaignMetrics((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
 
   /**
    * Which of the panel's foldable blocks are open.
@@ -672,6 +696,20 @@ export default function ReportsPage() {
   );
 
   /**
+   * Everything the email is written from, as one string.
+   *
+   * The typed boxes and the per-run choices together, because a choice changes the email as surely as a
+   * box does. With only the boxes in here, unticking a metric redrew the document's campaign table and
+   * left the email describing those campaigns the old way — and the two stayed at odds until somebody
+   * happened to type something.
+   */
+  const runSignature = useCallback(
+    (sections: Record<string, string>) =>
+      JSON.stringify({ sections, metrics: [...campaignMetrics].sort(), includeBestReplies }),
+    [campaignMetrics, includeBestReplies],
+  );
+
+  /**
    * Writes the headline, the narrative and the email from a report and the account manager's sections.
    *
    * Everything it needs is an argument. It runs both at the tail of `generate`, before React has
@@ -680,7 +718,7 @@ export default function ReportsPage() {
    */
   const composeCopy = useCallback(
     async (data: ReportData, sections: Record<string, string>, chosen: ReportTemplate): Promise<Composed | null> => {
-      const signature = JSON.stringify(sections);
+      const signature = runSignature(sections);
       setComposing(true);
       try {
         const response = await fetch("/api/reports/compose", {
@@ -698,6 +736,9 @@ export default function ReportsPage() {
             // The quotes are lifted from the report by the route, not written by the model, so all it
             // needs to know is whether they are wanted.
             includeBestReplies,
+            // Same arrangement for the campaign lines: the route has the figures, this says which of
+            // them the client is to see.
+            campaignMetrics: [...campaignMetrics],
           }),
         });
         const payload = await response.json().catch(() => ({}));
@@ -718,20 +759,27 @@ export default function ReportsPage() {
         setError("");
 
         /**
-         * The intro box, filled in with the line the model just wrote.
+         * The first and last lines of the email, filled into their boxes.
          *
          * Nobody wants to draft a greeting from nothing, and nobody wants software to own the first
-         * sentence the client reads — so the model writes one, it lands in the box, and from that moment
-         * the box is what gets printed. An intro already typed is never overwritten.
+         * sentence the client reads — so the model writes both ends, they land in the boxes, and from
+         * that moment the boxes are what get printed. Anything already typed is never overwritten.
          *
          * The staleness signature has to be recorded against the seeded sections, not the ones sent, or
-         * filling this box would immediately look like a change the account manager made and kick off
+         * filling these boxes would immediately look like a change the account manager made and kick off
          * another rewrite of the email that was just written.
          */
-        const greeting = String(payload.greeting || "").trim();
-        if (greeting && !sections.intro?.trim()) {
-          setWritten((current) => (current.intro?.trim() ? current : { ...current, intro: greeting }));
-          setComposedFrom(JSON.stringify({ ...sections, intro: greeting }));
+        const seeds: Array<[string, string]> = [
+          ["intro", String(payload.greeting || "").trim()],
+          ["warm-close", String(payload.close || "").trim()],
+        ];
+        const fill = Object.fromEntries(seeds.filter(([id, value]) => value && !sections[id]?.trim()));
+        if (Object.keys(fill).length) {
+          setWritten((current) => ({
+            ...current,
+            ...Object.fromEntries(Object.entries(fill).filter(([id]) => !current[id]?.trim())),
+          }));
+          setComposedFrom(runSignature({ ...sections, ...fill }));
         } else {
           setComposedFrom(signature);
         }
@@ -743,7 +791,7 @@ export default function ReportsPage() {
         setComposing(false);
       }
     },
-    [runPrompt, includeBestReplies],
+    [runPrompt, includeBestReplies, campaignMetrics, runSignature],
   );
 
   const generate = useCallback(async () => {
@@ -811,7 +859,7 @@ export default function ReportsPage() {
    * email is left alone — the banner in the compose panel offers a rewrite instead, so discarding
    * somebody's wording is always their decision.
    */
-  const writtenKey = useMemo(() => JSON.stringify(written), [written]);
+  const writtenKey = useMemo(() => runSignature(written), [runSignature, written]);
   const emailStale = Boolean(report && template && composed) && writtenKey !== composedFrom;
 
   useEffect(() => {
@@ -1236,6 +1284,9 @@ export default function ReportsPage() {
                             {CAMPAIGN_STATE_LABELS[row.state] || row.status || "Unknown"} ·{" "}
                             {row.progress.pending.toLocaleString()} pending ·{" "}
                             {row.progress.contacted.toLocaleString()} contacted
+                            {/* Shown here as well as in the report because it is half of why a campaign
+                                is worth mentioning: a list with two days left is news. */}
+                            {row.daysLeftInSending !== null && ` · ${row.daysLeftInSending}d left`}
                           </em>
                         </span>
                       </label>
@@ -1246,6 +1297,33 @@ export default function ReportsPage() {
                 <div className="config-static">{campaignsNote || "No campaigns found for this client."}</div>
               )}
               {liveCampaigns.length > 0 && campaignsNote && <div className="config-note">{campaignsNote}</div>}
+
+              {/* What each of those campaigns is allowed to say about itself. Inside this fold because
+                  it is the same decision continued — the campaigns, then the facts about them. */}
+              {liveCampaigns.length > 0 && (
+                <div className="config-metrics">
+                  <span className="config-label">What each campaign line says</span>
+                  <div className="config-metric-grid">
+                    {CAMPAIGN_METRICS.map((metric) => (
+                      <label
+                        key={metric.id}
+                        className={`config-chip ${campaignMetrics.has(metric.id) ? "is-on" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={campaignMetrics.has(metric.id)}
+                          onChange={() => toggleMetric(metric.id)}
+                        />
+                        {metric.label}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="config-note">
+                    Days left is pending leads divided by daily capacity — senders × 25 requests a day. It is left off
+                    a campaign HeyReach gives no senders for rather than guessed at.
+                  </div>
+                </div>
+              )}
             </ConfigFold>
 
             {/* The one pulled section that is a choice. Pulled, so it sits with the campaigns rather than
@@ -1514,6 +1592,7 @@ export default function ReportsPage() {
                   notes={notes}
                   pages={pages}
                   written={written}
+                  campaignMetrics={campaignMetrics}
                   headline={composed?.headline || ""}
                   narrative={composed?.narrative || ""}
                 />
@@ -1711,6 +1790,7 @@ function ReportDocument({
   notes,
   pages,
   written,
+  campaignMetrics,
   headline,
   narrative,
 }: {
@@ -1721,6 +1801,8 @@ function ReportDocument({
   notes: string;
   pages: SectionId[][];
   written: Record<string, string>;
+  /** The same per-campaign choices the email obeys, so the table and the email cannot disagree. */
+  campaignMetrics: Set<CampaignMetricId>;
   headline: string;
   narrative: string;
 }) {
@@ -1750,7 +1832,7 @@ function ReportDocument({
       case "trend":
         return <TrendChart client={client} />;
       case "active-campaigns":
-        return <ActiveCampaignTable client={client} />;
+        return <ActiveCampaignTable client={client} metrics={campaignMetrics} />;
       case "campaigns":
         return <CampaignTable client={client} />;
       case "senders":
@@ -2113,7 +2195,14 @@ const CAMPAIGN_ROW_CAP = 12;
  * deliberately not here — to us they are complete, and listing them as live would be the exact
  * misreading this section exists to prevent.
  */
-function ActiveCampaignTable({ client }: { client: ClientReport }) {
+/**
+ * The live campaigns, with the columns the account manager asked for and no others.
+ *
+ * Driven by the same choices as the email's campaign lines. A table showing the sending runway next to an
+ * email that omitted it — or the reverse — would make the report contradict its own covering note, and
+ * whichever one the client read second would be the one they queried.
+ */
+function ActiveCampaignTable({ client, metrics }: { client: ClientReport; metrics: Set<CampaignMetricId> }) {
   const status = client.campaignStatus;
   if (!status || !status.available)
     return (
@@ -2128,17 +2217,59 @@ function ActiveCampaignTable({ client }: { client: ClientReport }) {
   // guess printed in front of a client.
   if (!rows.length) return <EmptyNote>No active campaigns are included in this report.</EmptyNote>;
 
-  const repliesByCampaign = new Map(client.campaigns.map((row) => [row.name.trim().toLowerCase(), row.replies]));
+  const key = (value: string) => value.trim().toLowerCase();
+  const repliesByCampaign = new Map(client.campaigns.map((row) => [key(row.name), row]));
+  const funnelById = new Map(client.metrics.campaigns.map((row) => [row.campaignId, row]));
+  const funnelByName = new Map(client.metrics.campaigns.map((row) => [key(row.name), row]));
+
+  /**
+   * One column definition per metric, in the order the config screen lists them.
+   *
+   * `cell` returns a string rather than a node because every one of these is a number or a date, and a
+   * column whose contents are built two different ways is a column that will eventually be aligned two
+   * different ways.
+   */
+  const allColumns: Array<{ id: CampaignMetricId; label: string; cell: (row: LiveCampaign) => string }> = [
+    {
+      id: "launched",
+      label: "Launched",
+      cell: (row) => (row.launchedAt ? formatShort(row.launchedAt, client.workspace.timezone) : "—"),
+    },
+    {
+      id: "connections-sent",
+      label: "Sent",
+      cell: (row) => num((funnelById.get(row.id) ?? funnelByName.get(key(row.name)))?.connectionsSent ?? 0),
+    },
+    {
+      id: "connections-accepted",
+      label: "Accepted",
+      cell: (row) => num((funnelById.get(row.id) ?? funnelByName.get(key(row.name)))?.connectionsAccepted ?? 0),
+    },
+    { id: "replies", label: "Replies", cell: (row) => num(repliesByCampaign.get(key(row.name))?.replies ?? 0) },
+    { id: "positive-replies", label: "Positive", cell: (row) => num(repliesByCampaign.get(key(row.name))?.positive ?? 0) },
+    // Dashes, not zeros: HeyReach not telling us who is assigned is not the same as nobody being
+    // assigned, and a runway we cannot compute must not print as "0 days".
+    { id: "senders", label: "Senders", cell: (row) => (row.senders > 0 ? num(row.senders) : "—") },
+    { id: "pending", label: "Leads pending", cell: (row) => num(row.progress.pending) },
+    {
+      id: "days-left",
+      label: "Days left",
+      cell: (row) => (row.daysLeftInSending === null ? "—" : num(row.daysLeftInSending)),
+    },
+  ];
+  const columns = allColumns.filter((column) => metrics.has(column.id));
+
   return (
     <>
       <table className="report-table">
         <thead>
           <tr>
             <th>Campaign</th>
-            <th>Launched</th>
-            <th style={{ textAlign: "right" }}>Leads pending</th>
-            <th style={{ textAlign: "right" }}>Leads contacted</th>
-            <th style={{ textAlign: "right" }}>Replies</th>
+            {columns.map((column) => (
+              <th key={column.id} style={column.id === "launched" ? undefined : { textAlign: "right" }}>
+                {column.label}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -2148,17 +2279,19 @@ function ActiveCampaignTable({ client }: { client: ClientReport }) {
                 {row.name}
                 {row.state === "scheduled" && <span className="report-tag">Scheduled</span>}
               </td>
-              <td>{row.launchedAt ? formatShort(row.launchedAt, client.workspace.timezone) : "—"}</td>
-              <td style={{ textAlign: "right" }}>{num(row.progress.pending)}</td>
-              <td style={{ textAlign: "right" }}>{num(row.progress.contacted)}</td>
-              <td style={{ textAlign: "right" }}>{num(repliesByCampaign.get(row.name.trim().toLowerCase()) ?? 0)}</td>
+              {columns.map((column) => (
+                <td key={column.id} style={column.id === "launched" ? undefined : { textAlign: "right" }}>
+                  {column.cell(row)}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
       </table>
       <p className="report-caption">
-        Active means live in HeyReach with leads still to contact. Leads contacted counts everyone who has entered the
-        sequence, whether they are still in it or have completed it.
+        Active means live in HeyReach with leads still to contact.
+        {metrics.has("days-left") &&
+          " Days left is the leads still pending divided by daily sending capacity — senders × 25 connection requests a day."}
       </p>
     </>
   );

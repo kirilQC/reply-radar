@@ -17,6 +17,7 @@ import {
   emptyStatus,
   resolveState,
   selectCampaigns,
+  sendingDaysLeft,
   stateByName,
   summariseCampaigns,
 } from "../app/lib/heyreach-campaigns.ts";
@@ -197,6 +198,66 @@ test("toggling campaigns narrows the report, and no selection means all of them"
   assert.equal(allCampaigns(selectCampaigns(status, [])).length, 0);
   // Filtering never flips availability: an empty report is not an unreachable HeyReach.
   assert.equal(selectCampaigns(status, []).available, true);
+});
+
+test("the sending runway is pending leads divided by what the senders can send in a day", () => {
+  // The worked example the rule came from: 500 pending across 4 senders is 100 requests a day, so the
+  // campaign has five more days of sending in it.
+  assert.equal(sendingDaysLeft(500, 4), 5);
+  assert.equal(sendingDaysLeft(500, 2), 10);
+  assert.equal(sendingDaysLeft(500, 1), 20);
+  // Rounded up, because a part-day of sending is still a day the client should expect the campaign to run.
+  assert.equal(sendingDaysLeft(30, 1), 2);
+  assert.equal(sendingDaysLeft(1, 4), 1);
+  // Nothing left to contact is genuinely nought days, and it is the one honest zero here.
+  assert.equal(sendingDaysLeft(0, 4), 0);
+  // No senders is not "finishes today". It is a campaign that is not sending at all, and the answer has
+  // to be that we cannot say — printing 0 would read as complete.
+  assert.equal(sendingDaysLeft(500, 0), null);
+  assert.equal(sendingDaysLeft(500, -1), null);
+  assert.equal(sendingDaysLeft(Number.NaN, 4), null);
+});
+
+test("senders are counted from the payload and turned into a runway", () => {
+  const [row] = summariseCampaigns([
+    {
+      id: 77,
+      name: "SW021: Core ICP Retarget",
+      status: "IN_PROGRESS",
+      campaignAccountIds: [11, 12, 13, 14],
+      progressStats: { totalUsers: 900, totalUsersPending: 500, totalUsersFinished: 400 },
+    },
+  ]).active;
+  assert.equal(row.senders, 4);
+  assert.equal(row.daysLeftInSending, 5);
+});
+
+test("a campaign HeyReach lists no senders for reports an unknown runway, not a finished one", () => {
+  const [row] = summariseCampaigns([
+    { id: 78, name: "Nobody assigned", status: "IN_PROGRESS", progressStats: { totalUsersPending: 500 } },
+  ]).active;
+  assert.equal(row.senders, 0);
+  assert.equal(row.daysLeftInSending, null);
+});
+
+test("the sender list is counted whichever shape HeyReach sends it in", () => {
+  // The one field here that is not verified against a captured response, so several plausible names are
+  // read. Objects and bare ids both appear in HeyReach payloads depending on the endpoint.
+  const shapes = [
+    { campaignAccountIds: [1, 2] },
+    { accountIds: ["1", "2"] },
+    { linkedInSenders: [{ id: 1 }, { id: 2 }] },
+    { linkedInUsers: [{ linkedInUserId: 1 }, { linkedInUserId: 2 }] },
+    // The same account twice is one sender: duplicates would double the daily capacity and halve the runway.
+    { campaignAccountIds: [1, 1, 2] },
+  ];
+  for (const shape of shapes) {
+    const [row] = summariseCampaigns([
+      { id: 1, name: "Live", status: "IN_PROGRESS", progressStats: { totalUsersPending: 100 }, ...shape },
+    ]).active;
+    assert.equal(row.senders, 2, `${JSON.stringify(shape)} should count two senders`);
+    assert.equal(row.daysLeftInSending, 2);
+  }
 });
 
 test("the default template layout fits the pages it claims", () => {

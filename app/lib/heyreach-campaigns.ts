@@ -54,6 +54,33 @@ const REQUEST_TIMEOUT_MS = 30_000;
  * someone else's rate limit, not a cache of the report.
  */
 const CACHE_TTL_MS = 60_000;
+/**
+ * Connection requests one LinkedIn account sends in a day.
+ *
+ * QC's own sending cap, not LinkedIn's limit — it is the number the pulse check and the campaign
+ * schedules are both built around, so a runway calculated from anything else would contradict what the
+ * team already tells clients.
+ */
+export const DAILY_CONNECTIONS_PER_SENDER = 25;
+
+/**
+ * Fields HeyReach has been seen to carry the assigned LinkedIn accounts under.
+ *
+ * More than one because `/campaign/GetAll` is not documented field by field and the sender list is the
+ * one thing here we cannot verify from a fixture. Reading several names costs nothing and the failure
+ * mode is the honest one: no recognised field means zero senders, which means the runway is unknown
+ * rather than wrong.
+ */
+const SENDER_FIELDS = [
+  "campaignAccountIds",
+  "accountIds",
+  "linkedInAccountIds",
+  "linkedInUserIds",
+  "campaignAccounts",
+  "linkedInSenders",
+  "linkedInUsers",
+  "senders",
+];
 
 const object = (value: unknown): Row =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {};
@@ -92,7 +119,48 @@ export type CampaignStatusRow = {
   /** When the campaign went live. Empty if HeyReach has no start date, e.g. a scheduled campaign. */
   launchedAt: string;
   progress: CampaignProgress;
+  /** LinkedIn accounts assigned to send it. Zero means HeyReach did not say, not that nobody is on it. */
+  senders: number;
+  /** Days of sending left at the current sender count. Null when the sender count is unknown. */
+  daysLeftInSending: number | null;
 };
+
+/**
+ * How much longer a campaign has to run before its list is exhausted.
+ *
+ * Pending leads divided by the daily send capacity, which is the sender count times the per-sender cap:
+ * 500 pending across 4 senders is 100 a day, so five days left. It is the answer to the question a
+ * client actually asks about a campaign — not "how big is the list" but "when do you need more leads?"
+ *
+ * Null rather than zero when there are no senders. A campaign with nobody assigned is not finishing
+ * today; it is not sending at all, and the honest answer is that we cannot say.
+ */
+export function sendingDaysLeft(pending: number, senders: number): number | null {
+  if (!Number.isFinite(pending) || !Number.isFinite(senders) || senders <= 0) return null;
+  if (pending <= 0) return 0;
+  return Math.ceil(pending / (senders * DAILY_CONNECTIONS_PER_SENDER));
+}
+
+/** Counts the distinct accounts on a campaign, whichever shape HeyReach used to list them. */
+function countSenders(row: Row): number {
+  for (const field of SENDER_FIELDS) {
+    const value = row[field];
+    if (!Array.isArray(value)) continue;
+    const ids = new Set(
+      value
+        .map((item) => {
+          if (item && typeof item === "object") {
+            const account = object(item);
+            return text(account.id ?? account.linkedInUserId ?? account.accountId ?? account.linkedInAccountId);
+          }
+          return text(item);
+        })
+        .filter(Boolean),
+    );
+    if (ids.size) return ids.size;
+  }
+  return 0;
+}
 
 export type CampaignStatus = {
   /** False means we could not ask. Nothing below should then be read as "there are none". */
@@ -200,6 +268,7 @@ export function summariseCampaigns(rows: unknown[]): CampaignStatus {
       contacted: count(stats.totalUsersInProgress) + count(stats.totalUsersFinished),
     };
     const state = resolveState(reported, progress.pending);
+    const senders = countSenders(row);
 
     buckets[state].push({
       id,
@@ -208,6 +277,8 @@ export function summariseCampaigns(rows: unknown[]): CampaignStatus {
       state,
       launchedAt: iso(row.startedAt ?? row.creationTime ?? row.createdAt),
       progress,
+      senders,
+      daysLeftInSending: sendingDaysLeft(progress.pending, senders),
     });
   }
 

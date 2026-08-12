@@ -136,6 +136,47 @@ export const SECTIONS: SectionDef[] = [
   { id: "methodology", label: "Methodology & notes", blurb: "How the numbers were computed", alwaysOn: true },
 ];
 
+/**
+ * What a campaign line in the email is allowed to say about itself.
+ *
+ * The Active campaigns section used to be one bullet per campaign with the replies against it, which is
+ * right for a quiet week and thin for a week where the news is that a list is nearly exhausted. So the
+ * facts are a per-run choice: the campaigns are picked on the config screen, and so is what gets said
+ * about each of them.
+ *
+ * Ordered as a line reads rather than by importance — dates and counts of work done, then what is left.
+ * Lives here because the config screen offers the choices and the compose route obeys them, and a label
+ * that disagreed between the two would be a tick that appears to do nothing.
+ */
+export type CampaignMetricId =
+  | "launched"
+  | "connections-sent"
+  | "connections-accepted"
+  | "replies"
+  | "positive-replies"
+  | "senders"
+  | "pending"
+  | "days-left";
+
+export const CAMPAIGN_METRICS: Array<{ id: CampaignMetricId; label: string }> = [
+  { id: "launched", label: "Date launched" },
+  { id: "connections-sent", label: "Connections sent" },
+  { id: "connections-accepted", label: "Connections accepted" },
+  { id: "replies", label: "Replies received" },
+  { id: "positive-replies", label: "Positive replies" },
+  { id: "senders", label: "Senders on this campaign" },
+  { id: "pending", label: "Pending leads" },
+  { id: "days-left", label: "Days left in sending" },
+];
+
+/**
+ * What a campaign line says when nobody has chosen.
+ *
+ * Replies only, because that is what the section said before it could say anything else — an existing
+ * report must not change shape because the choice arrived.
+ */
+export const DEFAULT_CAMPAIGN_METRICS: CampaignMetricId[] = ["replies"];
+
 export const SECTION_LABELS: Record<SectionId, string> = SECTIONS.reduce(
   (labels, section) => ({ ...labels, [section.id]: section.label }),
   {} as Record<SectionId, string>,
@@ -258,14 +299,16 @@ array for any block the data cannot support — never a placeholder:
   "subject": "the email subject line, no 'Subject:' prefix",
   "greeting": "the opening line, warm and human. Omit entirely if the account manager wrote their own intro",
   "recapBullets": ["one fact each, with its number, as a fragment. No leading dash"],
-  "campaignBullets": ["one live campaign each: its name and this period's replies against it, nothing else"],
+  "campaignBullets": ["[] unless live campaign status was unavailable — see below"],
   "priorityBullets": ["only if the account manager left their priorities blank. Otherwise []"],
-  "close": "one line of warm close plus the sender name. Omit if they wrote their own sign-off"
+  "close": "one line of warm close. No name and no sign-off — the app signs every email itself"
 }
 
-A campaign bullet never carries how many leads are still pending, or the size of its list, or how many
-have been contacted. That is our workload, not the client's news, and it made every campaign line twice
-as long as the fact in it.`;
+The campaign lines are written by the app, not by you. It has the exact figures for each campaign and the
+account manager has chosen which of them to print, so a bullet you write about a campaign would either
+duplicate that line or contradict it. Return "campaignBullets": [] whenever live campaign status was
+available. The one exception is when it was not: then, and only then, return a single bullet reading
+"Campaign status: [confirm in HeyReach]".`;
 
 export const BUILT_IN_TEMPLATES: ReportTemplate[] = [
   {
@@ -305,19 +348,19 @@ questions: what happened, and what's next.
 - A number that moved the wrong way gets one bullet and one clause of cause, then you move on. No
   apology. If a rate dipped because volume tripled, say both in the same bullet.
 
-"campaignBullets": the campaigns live right now, by name, with this period's replies against each. Stop
-there — no pending-lead count, no list size, no contacted count.
-- Say plainly when a campaign is live but has produced no replies yet, and when one finished or was
-  paused — a client seeing a dip needs the cause in the same breath.
-- If live status was unavailable, return one bullet reading "Campaign status: [confirm in HeyReach]".
-  Never infer that a campaign is live from reply activity: a campaign with no replies looks identical to
-  one switched off.
+"campaignBullets": []. The app prints the campaign lines itself, with whichever figures the account
+manager ticked for this report. The only time you fill this is when live campaign status was unavailable,
+and then it is the single bullet "Campaign status: [confirm in HeyReach]" — never infer that a campaign is
+live from reply activity, because a campaign with no replies looks identical to one switched off.
+- What still belongs to you is the cause: if a campaign finished or was paused and that explains a dip,
+  say so in a recap bullet, where the number it explains already is.
 
 "priorityBullets": two to four — what launches, what is waiting on the client's review, what is blocked
 on them, with an owner where the data gives you one. Return [] if the account manager wrote their own
 priorities; theirs are used instead of yours, unedited.
 
-"close": one line of warm close, then the sender's name.
+"close": one line of warm close — a next step or a note about the Monday call. Not a sign-off: the app
+signs every email as QC Growth, so a name here would be signed twice.
 
 RULES:
 - Your blocks come to about 100-150 words together. Five sharp bullets beat fifteen complete ones. If a

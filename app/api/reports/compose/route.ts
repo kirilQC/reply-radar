@@ -12,11 +12,23 @@
  */
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
-import { COMPOSE_SYSTEM_PROMPT } from "../../../lib/report-templates";
+import {
+  COMPOSE_SYSTEM_PROMPT,
+  DEFAULT_CAMPAIGN_METRICS,
+  type CampaignMetricId,
+} from "../../../lib/report-templates";
 
 type Json = Record<string, unknown>;
 
 const FALLBACK_MODEL = "claude-haiku-4-5-20251001";
+/**
+ * How every email ends, without exception.
+ *
+ * It is the agency's signature, not a piece of copy: the close above it changes weekly and this does not,
+ * so it is appended rather than written. Kept out of the model's remit and out of the warm-close box for
+ * the same reason — the two places it could be typed are the two places it could go missing.
+ */
+const SIGN_OFF = "- QC Growth";
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 const object = (value: unknown): Json =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : {};
@@ -149,6 +161,67 @@ function digest(client: Json) {
 }
 
 /**
+ * The Active campaigns lines, built from the report rather than written by the model.
+ *
+ * Every figure on these lines is exact and the account manager has chosen which of them to print, so
+ * there is nothing for a model to add and one obvious thing for it to get wrong. It is the same argument
+ * as the quoted replies: where the data is the message, the data is pasted in.
+ *
+ * Three sources have to be joined per campaign. HeyReach's campaign list knows what is live, when it
+ * launched, what is pending and who is sending; its stats endpoint knows requests sent and accepted; our
+ * own tables know the replies. They are joined on campaign id where both sides have one and on name
+ * otherwise, because reply attribution carries a name and not an id.
+ *
+ * A metric with nothing behind it is left off the line rather than printed as zero — except the counts
+ * that genuinely can be zero, where zero is the news. Days left is the exception's exception: no senders
+ * means we cannot say, and "0 days left" would read as finished.
+ */
+function campaignLines(client: Json, metrics: CampaignMetricId[]): string[] {
+  const status = object(client.campaignStatus);
+  if (!status.available) return [];
+
+  const wanted = new Set(metrics);
+  const zone = text(object(client.workspace).timezone) || "America/New_York";
+  const day = (value: string) => {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "";
+    return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: zone }).format(parsed);
+  };
+  const plural = (count: number, one: string, many: string) => `${count.toLocaleString()} ${count === 1 ? one : many}`;
+
+  const key = (value: unknown) => text(value).trim().toLowerCase();
+  const replies = new Map(array(client.campaigns).map((row) => [key(row.name), row]));
+  const funnel = array(object(client.metrics).campaigns);
+  const funnelById = new Map(funnel.filter((row) => text(row.campaignId)).map((row) => [text(row.campaignId), row]));
+  const funnelByName = new Map(funnel.map((row) => [key(row.name), row]));
+
+  // The same two buckets the document's table shows, so the email and the page name the same campaigns.
+  return [...array(status.active), ...array(status.scheduled)]
+    .filter((row) => text(row.name))
+    .slice(0, 12)
+    .map((row) => {
+      const progress = object(row.progress);
+      const reply = object(replies.get(key(row.name)));
+      const stats = object(funnelById.get(text(row.id)) ?? funnelByName.get(key(row.name)));
+      const daysLeft = row.daysLeftInSending;
+      const facts: string[] = [];
+
+      if (wanted.has("launched") && day(text(row.launchedAt))) facts.push(`launched ${day(text(row.launchedAt))}`);
+      if (wanted.has("connections-sent")) facts.push(`${int(stats.connectionsSent).toLocaleString()} sent`);
+      if (wanted.has("connections-accepted")) facts.push(`${int(stats.connectionsAccepted).toLocaleString()} accepted`);
+      if (wanted.has("replies")) facts.push(plural(int(reply.replies), "reply", "replies"));
+      if (wanted.has("positive-replies")) facts.push(`${int(reply.positive).toLocaleString()} positive`);
+      if (wanted.has("senders") && int(row.senders) > 0) facts.push(plural(int(row.senders), "sender", "senders"));
+      if (wanted.has("pending")) facts.push(`${int(progress.pending).toLocaleString()} pending`);
+      if (wanted.has("days-left") && typeof daysLeft === "number")
+        facts.push(`${plural(daysLeft, "day", "days")} of sending left`);
+
+      const scheduled = text(row.state) === "scheduled" ? " (scheduled)" : "";
+      return `${text(row.name)}${scheduled}${facts.length ? ` — ${facts.join(" · ")}` : ""}`;
+    });
+}
+
+/**
  * Joins the model's blocks and the account manager's own words into the email that gets sent.
  *
  * The account manager's sections are pasted in, not passed through the model. Asking a model to
@@ -161,7 +234,7 @@ function digest(client: Json) {
  * (priorities, the close) and is dropped where it cannot (their recap, what they did — the app does not
  * know what they did).
  */
-function assembleEmail(parts: Json, written: Record<string, string>, bestReplies: Json[]) {
+function assembleEmail(parts: Json, written: Record<string, string>, bestReplies: Json[], campaigns: string[]) {
   const list = (value: unknown) =>
     (Array.isArray(value) ? value.map((row) => text(row)) : [])
       .filter(Boolean)
@@ -191,7 +264,8 @@ function assembleEmail(parts: Json, written: Record<string, string>, bestReplies
   // Their words first, then the numbers under the same heading — the order every recap that works uses.
   section("Recap from this week", written.recap || "", list(parts.recapBullets));
   section("What we did this week", written["what-we-did"] || "");
-  section("Active campaigns", list(parts.campaignBullets));
+  // The assembled lines win; the model's bullets are only ever the "status unavailable" note.
+  section("Active campaigns", campaigns.length ? list(campaigns) : list(parts.campaignBullets));
   section("Booked meetings", written["booked-meetings"] || "");
 
   /**
@@ -218,7 +292,17 @@ function assembleEmail(parts: Json, written: Record<string, string>, bestReplies
 
   // Nothing usable came back and nothing was typed. Better to hand back the model's own prose, if it
   // sent any, than an empty box.
-  return blocks.join("\n\n") || text(parts.message);
+  const email = blocks.join("\n\n") || text(parts.message);
+  if (!email) return "";
+
+  /**
+   * The signature, unless it is somehow already there.
+   *
+   * Checked rather than assumed because the warm-close box is free text and somebody will eventually
+   * type the sign-off into it — and an email signed twice is a worse failure than one signed by the app
+   * when the account manager meant to do it themselves.
+   */
+  return /qc\s*growth\s*$/i.test(email) ? email : `${email}\n\n${SIGN_OFF}`;
 }
 
 export async function POST(request: Request) {
@@ -245,6 +329,18 @@ export async function POST(request: Request) {
    */
   const bestReplies =
     body.includeBestReplies === false ? [] : clients.flatMap((client) => array(client.bestReplies)).slice(0, 5);
+
+  /**
+   * The campaign lines, and what each of them is allowed to say.
+   *
+   * An absent choice falls back to the default rather than to nothing, so a caller that predates the
+   * toggles still gets the replies figure the section always carried. An empty array is a real choice —
+   * somebody wanting the campaign names on their own — and produces bare names.
+   */
+  const chosenMetrics = (
+    Array.isArray(body.campaignMetrics) ? body.campaignMetrics.map(text).filter(Boolean) : DEFAULT_CAMPAIGN_METRICS
+  ) as CampaignMetricId[];
+  const campaigns = clients.flatMap((client) => campaignLines(client, chosenMetrics));
   const totalReplies = digests.reduce((total, item) => total + item.totalReplies, 0);
 
   /**
@@ -366,11 +462,12 @@ ${JSON.stringify(digests.length === 1 ? digests[0] : digests, null, 2)}`;
       model,
       headline: text(parsed.headline).slice(0, 140),
       narrative: text(parsed.narrative),
-      // Returned separately from the email so the page can seed the intro box with it. The box is
-      // authoritative from then on, and the only way it can start with something in it is if the line the
-      // model wrote comes back on its own rather than buried in the assembled message.
+      // Returned separately from the email so the page can seed the intro and warm-close boxes with them.
+      // Those boxes are authoritative from then on, and the only way either can start with something in it
+      // is if the line the model wrote comes back on its own rather than buried in the assembled message.
       greeting: text(parsed.greeting),
-      message: assembleEmail(parsed, Object.fromEntries(written), bestReplies),
+      close: text(parsed.close),
+      message: assembleEmail(parsed, Object.fromEntries(written), bestReplies, campaigns),
     });
   } catch (error) {
     return NextResponse.json(
