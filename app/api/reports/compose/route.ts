@@ -53,7 +53,29 @@ function digest(client: Json) {
   }
 
   const icp = object(client.icpBuckets);
+
+  /**
+   * Live campaign state, phrased so the model cannot mistake "we could not ask" for "nothing is
+   * running". Only names and states go in — the ids and timestamps are for the PDF, not the writer.
+   */
+  const status = object(client.campaignStatus);
+  const names = (value: unknown) => array(value).map((row) => text(row.name)).filter(Boolean);
+  const activeCampaigns = status.available
+    ? {
+        statusKnown: true,
+        running: names(status.running).slice(0, 10),
+        runningWithNoRepliesThisPeriod: names(status.runningWithoutReplies).slice(0, 10),
+        scheduledToLaunch: names(status.scheduled).slice(0, 6),
+        paused: names(status.paused).slice(0, 6),
+        recentlyFinished: names(status.finished).slice(0, 6),
+      }
+    : {
+        statusKnown: false,
+        note: "Live campaign status was unavailable. Do not state which campaigns are running; say the status needs confirming in HeyReach.",
+      };
+
   return {
+    activeCampaigns,
     client: text(object(client.workspace).name),
     totalReplies: int(summary.totalReplies),
     positiveReplies: int(summary.positiveReplies),

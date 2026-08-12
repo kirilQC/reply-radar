@@ -9,6 +9,12 @@
  */
 import { NextResponse } from "next/server";
 import { queryByIds } from "../../../lib/chunk-query";
+import {
+  campaignStatusFor,
+  emptyStatus,
+  stateByName,
+  type CampaignStatus,
+} from "../../../lib/heyreach-campaigns";
 import { dedupeMessages } from "../../../lib/message-dedupe";
 
 type Row = Record<string, unknown>;
@@ -100,13 +106,22 @@ export async function POST(request: Request) {
     const workspaces = await query(
       url,
       key,
-      `rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,website_url,client_brief${workspaceSlug && workspaceSlug !== "all" ? `&slug=eq.${encodeURIComponent(workspaceSlug)}` : ""}&order=name.asc`,
+      `rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,website_url,client_brief,heyreach_api_key_ciphertext${workspaceSlug && workspaceSlug !== "all" ? `&slug=eq.${encodeURIComponent(workspaceSlug)}` : ""}&order=name.asc`,
     );
     if (!workspaces.length)
       return NextResponse.json({ ok: false, error: "No matching client." }, { status: 404 });
 
     const workspaceIds = workspaces.map((w) => text(w.id));
     const workspaceById = new Map(workspaces.map((w) => [text(w.id), w]));
+
+    // Which campaigns are live comes from HeyReach, not from our own tables, so it is started here
+    // and awaited after the Supabase scans below — the two have nothing to say to each other and
+    // running them in sequence would add HeyReach's latency to every report for no reason.
+    const campaignStatusPending = Promise.all(
+      workspaces.map(async (workspace) =>
+        [text(workspace.id), await campaignStatusFor(text(workspace.heyreach_api_key_ciphertext))] as const,
+      ),
+    );
 
     // Fetch conversations for scope
     const conversations = await query(
@@ -159,6 +174,8 @@ export async function POST(request: Request) {
       else messagesByWorkspace.set(workspaceId, [message]);
     }
 
+    const campaignStatusByWorkspace = new Map<string, CampaignStatus>(await campaignStatusPending);
+
     const clientReports = workspaces.map((workspace) => {
       const workspaceId = text(workspace.id);
       const workspaceMessages = messagesByWorkspace.get(workspaceId) || [];
@@ -185,12 +202,31 @@ export async function POST(request: Request) {
         if (sentiment === "negative") bucket.negative += 1;
         campaigns.set(name, bucket);
       }
+      // Live status, joined onto the reply-derived rows by name because reply attribution carries a
+      // campaign name and not an id. A row with no match keeps an empty state rather than being
+      // called dormant — the campaign may simply have been renamed since the reply came in.
+      const campaignStatus = campaignStatusByWorkspace.get(workspaceId) ?? emptyStatus("Status was not requested.");
+      const liveByName = stateByName(campaignStatus);
       const campaignRows = [...campaigns.values()]
         .sort((a, b) => b.replies - a.replies)
-        .map((row) => ({
-          ...row,
-          positiveRate: row.replies ? Math.round((row.positive / row.replies) * 100) : 0,
-        }));
+        .map((row) => {
+          const live = liveByName.get(row.name.trim().toLowerCase());
+          return {
+            ...row,
+            positiveRate: row.replies ? Math.round((row.positive / row.replies) * 100) : 0,
+            state: live?.state ?? "",
+            status: live?.status ?? "",
+            running: live?.state === "running",
+          };
+        });
+
+      // Campaigns that are switched on but produced no replies in the period. These exist nowhere in
+      // our own data — a silent campaign is indistinguishable from an absent one — and they are the
+      // reason this fetch is here at all.
+      const repliedCampaignNames = new Set([...campaigns.keys()].map((name) => name.trim().toLowerCase()));
+      const runningWithoutReplies = campaignStatus.running.filter(
+        (row) => !repliedCampaignNames.has(row.name.trim().toLowerCase()),
+      );
 
       // Sender leaderboard
       const senders = new Map<string, { name: string; replies: number; positive: number }>();
@@ -341,9 +377,18 @@ export async function POST(request: Request) {
           bestSender,
           hotCount: hotConversations.length,
           topIcpCount: topLeads.filter((lead) => lead.icpScore >= 75).length,
+          runningCampaigns: campaignStatus.available ? campaignStatus.running.length : null,
+          scheduledCampaigns: campaignStatus.available ? campaignStatus.scheduled.length : null,
+          silentRunningCampaigns: campaignStatus.available ? runningWithoutReplies.length : null,
         },
         sentiment: sentimentCounts,
         campaigns: campaignRows,
+        campaignStatus: {
+          ...campaignStatus,
+          // Named separately from `running` so a section can list "live, no replies this period"
+          // without re-deriving it from two other arrays.
+          runningWithoutReplies,
+        },
         senders: senderRows,
         topLeads,
         icpBuckets,
