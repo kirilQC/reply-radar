@@ -1,10 +1,49 @@
 /* ============================================================
    Reply Radar — Report Hub
-   Formal, print-first document styling.
    ============================================================ */
 
+/*
+ * The report's own palette, defined in terms of the app's.
+ *
+ * This exists as a separate layer rather than using --panel and --text directly because a document has
+ * distinctions the app UI does not: the sheet must read as raised above the canvas behind it, and table
+ * furniture needs a third weight of ink. Mapping onto the app variables means the report follows the
+ * appearance toggle in the topbar for free, in both directions.
+ */
 .reports-main {
-  background: #f4f2ec;
+  --report-canvas: var(--bg);
+  --report-surface: var(--panel);
+  --report-inset: var(--panel-2);
+  --report-line: var(--border);
+  --report-ink: var(--text);
+  --report-ink-soft: var(--muted);
+  --report-ink-faint: var(--muted-2);
+  --report-brand: var(--accent);
+  --report-brand-deep: #6d5fd6;
+  --report-negative: var(--coral);
+  --report-negative-bg: #2c1d20;
+  --report-positive: var(--green);
+  background: var(--report-canvas);
+  color: var(--report-ink);
+}
+
+/*
+ * In light mode the original cream-and-navy document palette is the better one, so it comes back rather
+ * than being derived from the light app variables — a document wants warmer paper than a UI does.
+ */
+body.light-mode .reports-main {
+  --report-canvas: #f4f2ec;
+  --report-surface: #ffffff;
+  --report-inset: #fbf9f3;
+  --report-line: #e6e1d4;
+  --report-ink: #1a1c2a;
+  --report-ink-soft: #63667a;
+  --report-ink-faint: #8f8a72;
+  --report-brand: #1f2a4c;
+  --report-brand-deep: #2b3767;
+  --report-negative: #a4302a;
+  --report-negative-bg: #fbebea;
+  --report-positive: #274d3a;
 }
 
 .reports-shell {
@@ -20,8 +59,8 @@
 .reports-configurator {
   position: sticky;
   top: 24px;
-  background: #ffffff;
-  border: 1px solid #e6e1d4;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
   border-radius: 14px;
   padding: 22px 22px 24px;
   box-shadow: 0 1px 2px rgba(20, 22, 36, 0.03), 0 6px 20px rgba(20, 22, 36, 0.04);
@@ -29,7 +68,7 @@
   flex-direction: column;
   gap: 14px;
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: #1a1c2a;
+  color: var(--report-ink);
   max-height: calc(100vh - 48px);
   overflow-y: auto;
 }
@@ -44,7 +83,7 @@
 
 .config-heading p {
   font-size: 13px;
-  color: #63667a;
+  color: var(--report-ink-soft);
   margin: 0;
 }
 
@@ -53,7 +92,7 @@
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #6c6f80;
+  color: var(--report-ink-soft);
   margin-top: 6px;
 }
 
@@ -62,12 +101,12 @@
 .config-textarea,
 .config-custom-range input {
   width: 100%;
-  border: 1px solid #d9d3c3;
-  background: #fbf9f3;
+  border: 1px solid var(--report-line);
+  background: var(--report-inset);
   border-radius: 8px;
   padding: 9px 12px;
   font-size: 13.5px;
-  color: #1a1c2a;
+  color: var(--report-ink);
   font-family: inherit;
   transition: border-color 120ms ease, background 120ms ease;
 }
@@ -77,8 +116,8 @@
 .config-textarea:focus,
 .config-custom-range input:focus {
   outline: none;
-  border-color: #1f2a4c;
-  background: #ffffff;
+  border-color: var(--report-brand);
+  background: var(--report-surface);
 }
 
 .config-textarea {
@@ -94,9 +133,9 @@
 }
 
 .config-period {
-  border: 1px solid #d9d3c3;
-  background: #fbf9f3;
-  color: #1a1c2a;
+  border: 1px solid var(--report-line);
+  background: var(--report-inset);
+  color: var(--report-ink);
   border-radius: 8px;
   padding: 9px 10px;
   font-size: 12.5px;
@@ -107,13 +146,13 @@
 }
 
 .config-period:hover {
-  border-color: #b5ac95;
+  border-color: var(--report-ink-faint);
 }
 
 .config-period.is-active {
-  background: #1f2a4c;
-  border-color: #1f2a4c;
-  color: #f4f2ec;
+  background: var(--report-brand);
+  border-color: var(--report-brand);
+  color: var(--report-canvas);
 }
 
 .config-custom-range {
@@ -124,7 +163,7 @@
 
 .config-custom-range label {
   font-size: 11px;
-  color: #6c6f80;
+  color: var(--report-ink-soft);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -140,9 +179,9 @@
   max-height: 260px;
   overflow-y: auto;
   padding-right: 4px;
-  border: 1px solid #eeeadf;
+  border: 1px solid var(--report-inset);
   border-radius: 8px;
-  background: #fbf9f3;
+  background: var(--report-inset);
   padding: 6px;
 }
 
@@ -158,12 +197,12 @@
 }
 
 .config-section:hover {
-  background: #f0ece0;
+  background: var(--report-inset);
 }
 
 .config-section input[type="checkbox"] {
   margin-top: 2px;
-  accent-color: #1f2a4c;
+  accent-color: var(--report-brand);
 }
 
 .config-section span {
@@ -175,13 +214,13 @@
 .config-section strong {
   font-size: 13px;
   font-weight: 600;
-  color: #1a1c2a;
+  color: var(--report-ink);
 }
 
 .config-section em {
   font-style: normal;
   font-size: 11.5px;
-  color: #6c6f80;
+  color: var(--report-ink-soft);
   line-height: 1.35;
 }
 
@@ -192,8 +231,8 @@
 
 .config-generate {
   margin-top: 4px;
-  background: #1f2a4c;
-  color: #f4f2ec;
+  background: var(--report-brand);
+  color: var(--report-canvas);
   border: none;
   border-radius: 10px;
   padding: 12px 16px;
@@ -206,18 +245,18 @@
 }
 
 .config-generate:hover:not(:disabled) {
-  background: #2b3767;
+  background: var(--report-brand-deep);
 }
 
 .config-generate:disabled {
-  background: #8b91a7;
+  background: var(--report-ink-faint);
   cursor: wait;
 }
 
 .config-error {
-  color: #a4302a;
-  background: #fbebea;
-  border: 1px solid #f0c9c6;
+  color: var(--report-negative);
+  background: var(--report-negative-bg);
+  border: 1px solid var(--report-negative);
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 12.5px;
@@ -230,9 +269,9 @@
 
 .config-downloads button {
   flex: 1;
-  border: 1px solid #d9d3c3;
-  background: #ffffff;
-  color: #1a1c2a;
+  border: 1px solid var(--report-line);
+  background: var(--report-surface);
+  color: var(--report-ink);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 13px;
@@ -243,8 +282,8 @@
 }
 
 .config-downloads button:hover {
-  background: #f4f2ec;
-  border-color: #b5ac95;
+  background: var(--report-canvas);
+  border-color: var(--report-ink-faint);
 }
 
 /* ------------------------- Canvas ------------------------- */
@@ -256,19 +295,19 @@
 }
 
 .reports-empty {
-  background: #ffffff;
-  border: 1px dashed #d9d3c3;
+  background: var(--report-surface);
+  border: 1px dashed var(--report-line);
   border-radius: 14px;
   padding: 60px 40px;
   text-align: center;
-  color: #63667a;
+  color: var(--report-ink-soft);
   font-family: "Inter", system-ui, sans-serif;
 }
 
 .reports-empty h3 {
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 22px;
-  color: #1a1c2a;
+  color: var(--report-ink);
   margin: 0 0 8px;
   font-weight: 600;
 }
@@ -285,16 +324,16 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
-  color: #1a1c2a;
+  color: var(--report-ink);
 }
 
 /* Each report-page renders as a letter-sized sheet on screen and prints
    as its own page. */
 .report-page {
-  background: #fbf9f3;
-  border: 1px solid #e6e1d4;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
   border-radius: 6px;
-  box-shadow: 0 1px 3px rgba(20, 22, 36, 0.04), 0 12px 32px rgba(20, 22, 36, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28), 0 12px 32px rgba(0, 0, 0, 0.34);
   width: 8.5in;
   min-height: 11in;
   padding: 0.9in 0.85in;
@@ -303,7 +342,7 @@
   font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
   font-size: 12pt;
   line-height: 1.55;
-  color: #1a1c2a;
+  color: var(--report-ink);
   page-break-after: always;
   break-after: page;
   position: relative;
@@ -321,8 +360,8 @@
   flex-direction: column;
   justify-content: space-between;
   background:
-    linear-gradient(180deg, #fbf9f3 0%, #f0ece0 100%);
-  color: #1a1c2a;
+    linear-gradient(180deg, var(--report-inset) 0%, var(--report-inset) 100%);
+  color: var(--report-ink);
   position: relative;
 }
 
@@ -333,7 +372,7 @@
   right: 0.85in;
   top: 0.9in;
   height: 2px;
-  background: #1f2a4c;
+  background: var(--report-brand);
 }
 
 .report-cover-topline {
@@ -341,7 +380,7 @@
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #1f2a4c;
+  color: var(--report-brand);
   display: flex;
   gap: 8px;
   margin-top: 24px;
@@ -359,8 +398,8 @@
   width: 88px;
   height: 88px;
   border-radius: 50%;
-  background: #1f2a4c;
-  color: #f4f2ec;
+  background: var(--report-brand);
+  color: var(--report-canvas);
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 42pt;
   font-weight: 600;
@@ -377,7 +416,7 @@
   font-size: 44pt;
   line-height: 1.05;
   font-weight: 600;
-  color: #1a1c2a;
+  color: var(--report-ink);
   margin: 40px 0 12px;
   letter-spacing: -0.02em;
 }
@@ -386,7 +425,7 @@
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 22pt;
   font-weight: 500;
-  color: #1f2a4c;
+  color: var(--report-brand);
   margin: 0;
 }
 
@@ -394,7 +433,7 @@
   font-size: 12pt;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: #63667a;
+  color: var(--report-ink-soft);
   margin: 6px 0 0;
   font-weight: 600;
 }
@@ -404,7 +443,7 @@
   grid-template-columns: 1fr 1fr 1fr;
   gap: 24px;
   padding-top: 20px;
-  border-top: 1px solid #d9d3c3;
+  border-top: 1px solid var(--report-line);
   margin-top: auto;
 }
 
@@ -413,7 +452,7 @@
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #6c6f80;
+  color: var(--report-ink-soft);
   display: block;
   margin-bottom: 4px;
 }
@@ -421,59 +460,8 @@
 .report-cover-footer p {
   margin: 0;
   font-size: 11.5pt;
-  color: #1a1c2a;
+  color: var(--report-ink);
   font-weight: 500;
-}
-
-/* ------------------------- Table of contents ------------------------- */
-
-.report-toc-heading {
-  font-family: "Playfair Display", "Georgia", serif;
-  font-size: 30pt;
-  font-weight: 600;
-  color: #1a1c2a;
-  margin: 0 0 32px;
-  letter-spacing: -0.01em;
-  border-bottom: 1px solid #d9d3c3;
-  padding-bottom: 16px;
-}
-
-.report-toc-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.report-toc-list li {
-  display: grid;
-  grid-template-columns: 40px 1fr auto;
-  gap: 16px;
-  align-items: baseline;
-  padding-bottom: 12px;
-  border-bottom: 1px dotted #d9d3c3;
-}
-
-.toc-num {
-  font-family: "Playfair Display", "Georgia", serif;
-  font-size: 16pt;
-  font-weight: 600;
-  color: #1f2a4c;
-}
-
-.toc-label {
-  font-size: 13pt;
-  font-weight: 500;
-  color: #1a1c2a;
-}
-
-.toc-blurb {
-  font-size: 10.5pt;
-  color: #6c6f80;
-  text-align: right;
-  max-width: 3.2in;
 }
 
 /* ------------------------- Section heading ------------------------- */
@@ -486,14 +474,14 @@
   align-items: baseline;
   margin-bottom: 28px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #d9d3c3;
+  border-bottom: 1px solid var(--report-line);
 }
 
 .report-section-number {
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 30pt;
   font-weight: 600;
-  color: #1f2a4c;
+  color: var(--report-brand);
   line-height: 1;
   grid-row: 1 / span 2;
   align-self: center;
@@ -503,7 +491,7 @@
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 24pt;
   font-weight: 600;
-  color: #1a1c2a;
+  color: var(--report-ink);
   margin: 0;
   letter-spacing: -0.01em;
   line-height: 1.1;
@@ -515,7 +503,7 @@
 
 .report-section-body {
   font-size: 11.5pt;
-  color: #1a1c2a;
+  color: var(--report-ink);
 }
 
 /* ------------------------- Executive summary ------------------------- */
@@ -530,22 +518,22 @@
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 15pt;
   line-height: 1.55;
-  color: #1a1c2a;
+  color: var(--report-ink);
   font-weight: 400;
   margin: 0;
 }
 
 .exec-lede strong {
   font-weight: 600;
-  color: #1f2a4c;
+  color: var(--report-brand);
 }
 
 .exec-highlights {
   list-style: none;
   padding: 20px 22px;
   margin: 0;
-  background: #ffffff;
-  border: 1px solid #e6e1d4;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
   border-radius: 6px;
   display: flex;
   flex-direction: column;
@@ -554,15 +542,15 @@
 }
 
 .exec-highlights li strong {
-  color: #1f2a4c;
+  color: var(--report-brand);
   font-weight: 600;
   margin-right: 4px;
 }
 
 .exec-note {
   font-size: 10.5pt;
-  color: #63667a;
-  border-top: 1px solid #e6e1d4;
+  color: var(--report-ink-soft);
+  border-top: 1px solid var(--report-line);
   padding-top: 14px;
   margin: 0;
   font-style: italic;
@@ -577,8 +565,8 @@
 }
 
 .kpi-card {
-  background: #ffffff;
-  border: 1px solid #e6e1d4;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
   border-radius: 8px;
   padding: 22px 20px;
   display: flex;
@@ -594,7 +582,7 @@
   top: 0;
   bottom: 0;
   width: 3px;
-  background: #1f2a4c;
+  background: var(--report-brand);
   border-radius: 8px 0 0 8px;
 }
 
@@ -602,7 +590,7 @@
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 28pt;
   font-weight: 600;
-  color: #1a1c2a;
+  color: var(--report-ink);
   line-height: 1;
   letter-spacing: -0.02em;
 }
@@ -612,7 +600,7 @@
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #6c6f80;
+  color: var(--report-ink-soft);
 }
 
 /* ------------------------- Sentiment ------------------------- */
@@ -628,8 +616,8 @@
   height: 32px;
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid #d9d3c3;
-  background: #ffffff;
+  border: 1px solid var(--report-line);
+  background: var(--report-surface);
 }
 
 .sentiment-bar-slice {
@@ -637,19 +625,19 @@
 }
 
 .sentiment-bar-slice.tone-positive {
-  background: #274d3a;
+  background: var(--report-positive);
 }
 
 .sentiment-bar-slice.tone-neutral {
-  background: #8f8a72;
+  background: var(--report-ink-faint);
 }
 
 .sentiment-bar-slice.tone-negative {
-  background: #7f2a25;
+  background: var(--report-negative);
 }
 
 .sentiment-bar-slice.tone-unclassified {
-  background: #d1cbb6;
+  background: var(--report-line);
 }
 
 /* ------------------------- Tables ------------------------- */
@@ -658,8 +646,8 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 11pt;
-  background: #ffffff;
-  border: 1px solid #e6e1d4;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -669,22 +657,22 @@
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #6c6f80;
+  color: var(--report-ink-soft);
   padding: 12px 14px;
   text-align: left;
-  background: #f4f2ec;
-  border-bottom: 1px solid #d9d3c3;
+  background: var(--report-canvas);
+  border-bottom: 1px solid var(--report-line);
 }
 
 .report-table tbody td {
   padding: 11px 14px;
-  border-bottom: 1px solid #eeeadf;
-  color: #1a1c2a;
+  border-bottom: 1px solid var(--report-inset);
+  color: var(--report-ink);
   vertical-align: top;
 }
 
 .report-table tbody tr:nth-child(even) td {
-  background: #fbf9f3;
+  background: var(--report-inset);
 }
 
 .report-table tbody tr:last-child td {
@@ -707,8 +695,8 @@
   gap: 4px;
   height: 200px;
   padding: 12px;
-  background: #ffffff;
-  border: 1px solid #e6e1d4;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
   border-radius: 6px;
 }
 
@@ -726,7 +714,7 @@
 .timing-bar-fill {
   width: 100%;
   min-height: 2px;
-  background: linear-gradient(180deg, #2b3767 0%, #1f2a4c 100%);
+  background: linear-gradient(180deg, var(--report-brand-deep) 0%, var(--report-brand) 100%);
   border-radius: 3px 3px 0 0;
   align-self: flex-end;
 }
@@ -734,7 +722,7 @@
 .trend-bar-label,
 .timing-bar-label {
   font-size: 8.5pt;
-  color: #6c6f80;
+  color: var(--report-ink-soft);
   letter-spacing: 0.04em;
   white-space: nowrap;
   overflow: hidden;
@@ -744,7 +732,7 @@
 
 .report-caption {
   font-size: 10pt;
-  color: #63667a;
+  color: var(--report-ink-soft);
   margin: 0;
   font-style: italic;
 }
@@ -758,9 +746,9 @@
 }
 
 .hot-item {
-  background: #ffffff;
-  border: 1px solid #e6e1d4;
-  border-left: 3px solid #a4302a;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
+  border-left: 3px solid var(--report-negative);
   border-radius: 4px;
   padding: 14px 16px;
 }
@@ -775,13 +763,13 @@
 
 .hot-header strong {
   font-size: 12pt;
-  color: #1a1c2a;
+  color: var(--report-ink);
   font-weight: 600;
 }
 
 .hot-role {
   font-size: 10.5pt;
-  color: #63667a;
+  color: var(--report-ink-soft);
 }
 
 .hot-urgency {
@@ -790,15 +778,15 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #a4302a;
-  background: #fbebea;
+  color: var(--report-negative);
+  background: var(--report-negative-bg);
   padding: 3px 9px;
   border-radius: 999px;
 }
 
 .hot-meta {
   font-size: 9.5pt;
-  color: #6c6f80;
+  color: var(--report-ink-soft);
   margin-bottom: 8px;
   letter-spacing: 0.02em;
 }
@@ -807,7 +795,7 @@
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 11.5pt;
   font-style: italic;
-  color: #1a1c2a;
+  color: var(--report-ink);
   margin: 0;
   line-height: 1.5;
 }
@@ -821,8 +809,8 @@
 }
 
 .sample {
-  background: #ffffff;
-  border: 1px solid #e6e1d4;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
   border-radius: 6px;
   padding: 20px 24px;
   margin: 0;
@@ -836,7 +824,7 @@
   top: -4px;
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 48pt;
-  color: #e6e1d4;
+  color: var(--report-line);
   line-height: 1;
 }
 
@@ -844,15 +832,15 @@
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 13pt;
   line-height: 1.55;
-  color: #1a1c2a;
+  color: var(--report-ink);
   margin: 0 0 10px;
   position: relative;
 }
 
 .sample footer {
   font-size: 10pt;
-  color: #6c6f80;
-  border-top: 1px solid #eeeadf;
+  color: var(--report-ink-soft);
+  border-top: 1px solid var(--report-inset);
   padding-top: 8px;
   display: flex;
   flex-direction: column;
@@ -860,13 +848,13 @@
 }
 
 .sample footer strong {
-  color: #1a1c2a;
+  color: var(--report-ink);
 }
 
 .sample-meta {
   font-size: 9pt;
   letter-spacing: 0.04em;
-  color: #8b91a7;
+  color: var(--report-ink-faint);
 }
 
 /* ------------------------- Methodology ------------------------- */
@@ -878,9 +866,9 @@
 }
 
 .methodology-notes {
-  background: #ffffff;
-  border: 1px solid #e6e1d4;
-  border-left: 3px solid #1f2a4c;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
+  border-left: 3px solid var(--report-brand);
   padding: 16px 20px;
   border-radius: 4px;
 }
@@ -891,13 +879,13 @@
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #1f2a4c;
+  color: var(--report-brand);
 }
 
 .methodology-notes p {
   margin: 0;
   font-size: 11pt;
-  color: #1a1c2a;
+  color: var(--report-ink);
   line-height: 1.55;
 }
 
@@ -909,7 +897,7 @@
   flex-direction: column;
   gap: 12px;
   font-size: 11pt;
-  color: #1a1c2a;
+  color: var(--report-ink);
 }
 
 .methodology ul li {
@@ -925,12 +913,12 @@
   top: 9px;
   width: 6px;
   height: 6px;
-  background: #1f2a4c;
+  background: var(--report-brand);
   border-radius: 50%;
 }
 
 .methodology ul li strong {
-  color: #1f2a4c;
+  color: var(--report-brand);
   font-weight: 600;
 }
 
@@ -938,10 +926,10 @@
 
 .report-empty-note {
   font-style: italic;
-  color: #63667a;
+  color: var(--report-ink-soft);
   font-size: 11pt;
-  background: #ffffff;
-  border: 1px dashed #d9d3c3;
+  background: var(--report-surface);
+  border: 1px dashed var(--report-line);
   border-radius: 6px;
   padding: 18px 20px;
   margin: 0;
@@ -978,6 +966,419 @@
 }
 
 /* ============================================================
+   Hub landing — choosing a report before configuring one.
+   ============================================================ */
+
+.reports-hub {
+  padding: 30px 34px 80px;
+  max-width: 1180px;
+  margin: 0 auto;
+  color: var(--report-ink);
+}
+
+.hub-lede h1 {
+  font-size: 27px;
+  letter-spacing: -0.03em;
+  margin: 0 0 6px;
+  font-weight: 660;
+}
+
+.hub-lede p {
+  margin: 0 0 28px;
+  color: var(--report-ink-soft);
+  font-size: 13px;
+  max-width: 62ch;
+}
+
+.hub-group-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--report-ink-faint);
+  margin: 30px 0 12px;
+}
+
+.hub-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 12px;
+}
+
+.hub-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  text-align: left;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+  padding: 17px 17px 15px;
+  color: var(--report-ink);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.hub-card:hover {
+  border-color: var(--report-brand);
+  transform: translateY(-1px);
+}
+
+.hub-card h3 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.hub-card p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--report-ink-soft);
+}
+
+/* The page count is the promise the card is making, so it is set apart from the prose. */
+.hub-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--report-ink-faint);
+  border-top: 1px solid var(--report-line);
+}
+
+.hub-card-meta b {
+  color: var(--report-brand);
+  font-weight: 700;
+}
+
+.hub-card.hub-card-custom {
+  border-style: dashed;
+}
+
+/* The way back to the hub from a report that is already on screen. */
+.config-back {
+  align-self: flex-start;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin-bottom: 14px;
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  color: var(--report-ink-soft);
+}
+
+.config-back:hover {
+  color: var(--report-brand);
+}
+
+/* ------------------------- Saved archive ------------------------- */
+
+.hub-saved-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--report-surface);
+}
+
+.hub-saved-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--report-line);
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  text-align: left;
+  color: var(--report-ink);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hub-saved-row:last-child {
+  border-bottom: 0;
+}
+
+.hub-saved-row:hover {
+  background: var(--report-inset);
+}
+
+.hub-saved-row strong {
+  font-weight: 600;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hub-saved-row small {
+  color: var(--report-ink-faint);
+  font-size: 11px;
+}
+
+.hub-saved-row time {
+  color: var(--report-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.hub-empty {
+  border: 1px dashed var(--report-line);
+  border-radius: 10px;
+  padding: 22px;
+  color: var(--report-ink-soft);
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: var(--report-surface);
+}
+
+.hub-empty code {
+  font-size: 11.5px;
+  background: var(--report-inset);
+  border: 1px solid var(--report-line);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* ============================================================
+   Page budget meter — the three-page rule, made visible.
+   ============================================================ */
+
+.page-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px solid var(--report-line);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: var(--report-inset);
+}
+
+.page-meter-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--report-ink-soft);
+}
+
+.page-meter-top b {
+  color: var(--report-ink);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.page-meter-track {
+  display: flex;
+  gap: 4px;
+}
+
+.page-meter-track i {
+  height: 5px;
+  flex: 1;
+  border-radius: 3px;
+  background: var(--report-line);
+}
+
+.page-meter-track i.filled {
+  background: var(--report-brand);
+}
+
+.page-meter-track i.over {
+  background: var(--report-negative);
+}
+
+.page-meter-warning {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--report-negative);
+}
+
+/* ============================================================
+   Composed copy — the message Claude wrote to send with the PDF.
+   ============================================================ */
+
+.compose-panel {
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+  background: var(--report-surface);
+  padding: 16px 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 8.5in;
+  margin: 0 auto 20px;
+}
+
+.compose-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.compose-panel h3 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--report-ink-faint);
+  font-weight: 700;
+}
+
+.compose-copy {
+  background: transparent;
+  border: 1px solid var(--report-line);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--report-ink-soft);
+}
+
+.compose-copy:hover {
+  border-color: var(--report-brand);
+  color: var(--report-brand);
+}
+
+.compose-panel textarea {
+  width: 100%;
+  min-height: 148px;
+  resize: vertical;
+  border: 1px solid var(--report-line);
+  border-radius: 7px;
+  background: var(--report-inset);
+  color: var(--report-ink);
+  padding: 11px 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  font-family: inherit;
+}
+
+.compose-panel textarea:focus {
+  outline: none;
+  border-color: var(--report-brand);
+}
+
+/*
+ * Blocks stack within a page instead of each taking one.
+ *
+ * This is what keeps a report to three pages: the old layout gave every section its own sheet, so
+ * ticking eleven sections produced a thirteen-page document however short each section was.
+ */
+.report-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 26px;
+}
+
+.report-block:last-child {
+  margin-bottom: 0;
+}
+
+/* A compact brand band, used when the cover shares a page rather than owning one. */
+.report-masthead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 16px;
+  margin-bottom: 22px;
+  border-bottom: 2px solid var(--report-brand);
+}
+
+.report-masthead-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: var(--report-inset);
+}
+
+.report-masthead-mono {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--report-brand);
+  color: #fff;
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.report-masthead-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.report-masthead-text h1 {
+  margin: 0;
+  font-size: 19pt;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  font-weight: 640;
+}
+
+.report-masthead-text p {
+  margin: 0;
+  font-size: 10pt;
+  color: var(--report-ink-soft);
+}
+
+.report-masthead-aside {
+  margin-left: auto;
+  text-align: right;
+  font-size: 8.5pt;
+  color: var(--report-ink-faint);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.report-headline {
+  font-size: 13pt;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--report-brand);
+  margin: 0 0 14px;
+}
+
+/* Page numbering, so a printed report can be put back in order. */
+.report-page-footer {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--report-line);
+  display: flex;
+  justify-content: space-between;
+  font-size: 8pt;
+  color: var(--report-ink-faint);
+  letter-spacing: 0.04em;
+}
+
+.report-page {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================================================
    Print stylesheet — one report page per printed sheet.
    ============================================================ */
 
@@ -987,7 +1388,24 @@
     margin: 0;
   }
 
+  /*
+   * Browsers drop background colours when printing unless told otherwise, which would send a dark
+   * report to the printer as invisible light text on white. This forces the design through to the PDF.
+   */
+  html, body, .reports-main, .report-page, .report-page * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /*
+   * The report palette is scoped to .reports-main, which html and body sit outside of, so the sheet
+   * colour is restated here rather than referenced. Kept in sync with the two blocks at the top.
+   */
   html, body {
+    background: #0b0c10 !important;
+  }
+
+  body.light-mode {
     background: #ffffff !important;
   }
 
@@ -997,12 +1415,16 @@
     display: none !important;
   }
 
+  /*
+   * .app-shell and .main-area sit outside .reports-main and so cannot see the report variables. They
+   * are made transparent rather than coloured, letting the body colour above show through.
+   */
   .app-shell,
   .main-area,
   .reports-main,
   .reports-shell {
     display: block !important;
-    background: #ffffff !important;
+    background: transparent !important;
     padding: 0 !important;
     margin: 0 !important;
     grid-template-columns: none !important;
@@ -1027,9 +1449,19 @@
     padding: 0.75in 0.75in !important;
     page-break-after: always;
     break-after: page;
-    background: #ffffff !important;
+    background: var(--report-surface) !important;
     display: flex;
     flex-direction: column;
+    /*
+     * The page count has to be a fact, not an estimate.
+     *
+     * Without this, content that runs slightly long spills onto an extra sheet and a report promised as
+     * three pages prints as four — which is the bug this whole layout exists to fix. A fixed sheet with
+     * hidden overflow means the number beside the export button is the number of sheets, always. The
+     * risk is clipping, which is why the section weights are calibrated conservatively and the page
+     * meter warns before anyone gets here.
+     */
+    overflow: hidden !important;
   }
 
   .report-page:last-child {
@@ -1038,17 +1470,7 @@
   }
 
   .report-cover {
-    background: linear-gradient(180deg, #ffffff 0%, #f4f2ec 100%) !important;
-  }
-
-  /* Avoid awkward mid-section breaks. */
-  .report-section-heading,
-  .kpi-card,
-  .hot-item,
-  .sample,
-  .report-table {
-    break-inside: avoid;
-    page-break-inside: avoid;
+    background: linear-gradient(180deg, var(--report-surface) 0%, var(--report-canvas) 100%) !important;
   }
 
   .kpi-grid {

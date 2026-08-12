@@ -82,11 +82,32 @@ create table if not exists rr_audit_log (
   id uuid primary key default gen_random_uuid(), actor text, action text not null, entity_type text,
   entity_id text, details jsonb not null default '{}'::jsonb, created_at timestamptz not null default now()
 );
+-- Generated client reports, kept permanently.
+--
+-- workspace_id is nullable on purpose: "All clients" is a valid report scope, and a report should
+-- outlive the client it describes, so the reference nulls out rather than cascading. workspace_name is
+-- denormalised beside it so a deleted client leaves its report history readable instead of blank.
+-- data holds the exact numbers the report was rendered from, which is what makes a saved report
+-- reproducible years later even after the underlying messages have been purged.
+create table if not exists rr_reports (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid references rr_workspaces(id) on delete set null,
+  workspace_name text not null default 'All clients',
+  template_id text not null, template_name text not null, title text not null,
+  period text not null, period_label text not null,
+  sections jsonb not null default '[]'::jsonb,
+  message_channel text, message_text text, csv_text text,
+  data jsonb not null default '{}'::jsonb,
+  page_estimate integer, generated_by text,
+  generated_at timestamptz not null default now()
+);
 
 create index if not exists rr_conversations_workspace_score_idx on rr_conversations(workspace_id, score desc);
 create index if not exists rr_conversations_workspace_last_message_idx on rr_conversations(workspace_id, last_message_at desc);
 create index if not exists rr_messages_sent_at_idx on rr_messages(sent_at desc);
 create index if not exists rr_webhook_events_workspace_received_idx on rr_webhook_events(workspace_id, received_at desc);
+create index if not exists rr_reports_workspace_generated_idx on rr_reports(workspace_id, generated_at desc);
+create index if not exists rr_reports_generated_idx on rr_reports(generated_at desc);
 
 create or replace function rr_set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at = now(); return new; end; $$;
 drop trigger if exists rr_workspaces_updated_at on rr_workspaces;
@@ -111,3 +132,4 @@ alter table rr_graphs enable row level security;
 alter table rr_webhook_events enable row level security;
 alter table rr_sync_runs enable row level security;
 alter table rr_audit_log enable row level security;
+alter table rr_reports enable row level security;
