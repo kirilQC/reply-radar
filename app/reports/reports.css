@@ -407,6 +407,46 @@ body.light-mode .reports-main {
   max-height: 190px;
 }
 
+/* A single tick standing on its own rather than one row of a scrolling list, so it carries the border
+   and inset background that `.config-sections` would otherwise give it. Same interior as
+   `.config-section` — a lone checkbox that looked different from the ones above it would read as a
+   different kind of control. */
+.config-toggle {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--report-inset);
+  border-radius: 8px;
+  background: var(--report-inset);
+  cursor: pointer;
+}
+
+.config-toggle input[type="checkbox"] {
+  margin-top: 2px;
+  accent-color: var(--report-brand);
+}
+
+.config-toggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.config-toggle strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--report-ink);
+}
+
+.config-toggle em {
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--report-ink-soft);
+  line-height: 1.35;
+}
+
 .config-hint {
   margin: 0;
   color: var(--report-ink-soft);
@@ -1103,6 +1143,57 @@ body.light-mode .reports-main {
   line-height: 1.5;
 }
 
+/* ------------------------- Best replies ------------------------- */
+
+/* Quieter than `.sample` on purpose. These are meant to be read straight through, five in a row, so
+   they get no card, no border and no giant quote glyph — attribution above, the words below, and the
+   only rule on the page is the hairline that separates one person from the next. */
+.best-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.best-reply {
+  margin: 0;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--report-inset);
+}
+
+.best-replies .best-reply:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+/* The name leads and the title sits under it, because "who said this" is the part that makes the
+   quote worth printing. */
+.best-reply cite {
+  font-style: normal;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 8px;
+}
+
+.best-reply cite strong {
+  font-size: 10.5pt;
+  font-weight: 600;
+  color: var(--report-ink);
+}
+
+.best-reply cite span {
+  font-size: 9.5pt;
+  color: var(--report-ink-soft);
+}
+
+.best-reply p {
+  font-family: "Playfair Display", "Georgia", serif;
+  font-size: 12.5pt;
+  line-height: 1.55;
+  color: var(--report-ink);
+  margin: 0;
+}
+
 /* ------------------------- Sample replies ------------------------- */
 
 .samples {
@@ -1765,23 +1856,6 @@ body.light-mode .reports-main {
   font-size: 11.5px;
   color: var(--report-ink-soft);
   letter-spacing: 0.01em;
-}
-
-.compose-copy {
-  margin-left: auto;
-  background: transparent;
-  border: 1px solid var(--report-line);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-family: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  color: var(--report-ink-soft);
-}
-
-.compose-copy:hover {
-  border-color: var(--report-brand);
-  color: var(--report-brand);
 }
 
 /* Offered, never done automatically: the email below has been typed in, and catching it up to the

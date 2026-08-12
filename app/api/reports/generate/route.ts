@@ -391,6 +391,43 @@ export async function POST(request: Request) {
           };
         });
 
+      /**
+       * The five replies worth quoting to the client.
+       *
+       * "Best" has to be decided from something we actually store, and the closest thing to "this reply
+       * was great" is a positive reply the scorer thought needed answering soonest — follow-up urgency is
+       * the model's read of how much intent is in the message. Ties break on recency, because between two
+       * equally strong replies the client would rather hear about this week's.
+       *
+       * One per conversation. Someone enthusiastic across three messages is one good reply, not three,
+       * and without this the whole section can be a single lead talking to themselves.
+       */
+      const seenBestConversations = new Set<string>();
+      const bestReplies = sortedByRecency
+        .filter((message) => text(radarOf(message.raw_data).sentiment).toLowerCase() === "positive")
+        .filter((message) => Boolean(text(message.body).trim()))
+        .filter((message) => {
+          const conversationId = text(message.conversation_id);
+          if (seenBestConversations.has(conversationId)) return false;
+          seenBestConversations.add(conversationId);
+          return true;
+        })
+        .sort((a, b) => {
+          const urgency = (row: Row) => Number(radarOf(row.raw_data).followup_urgency) || 0;
+          return urgency(b) - urgency(a) || text(b.sent_at).localeCompare(text(a.sent_at));
+        })
+        .slice(0, 5)
+        .map((message) => {
+          const lead = leadByConversation.get(text(message.conversation_id));
+          return {
+            leadName: text(lead?.name) || "—",
+            role: text(lead?.role) || "",
+            company: text(lead?.company) || "",
+            sentAt: text(message.sent_at),
+            body: text(message.body).slice(0, 600),
+          };
+        });
+
       // Executive summary numbers
       const bestCampaign = campaignRows[0]?.name || "—";
       const bestSender = senderRows[0]?.name || "—";
@@ -448,6 +485,7 @@ export async function POST(request: Request) {
         icpBuckets,
         hotConversations,
         sampleReplies,
+        bestReplies,
         replyTiming: hours,
         trend: trendRows,
       };

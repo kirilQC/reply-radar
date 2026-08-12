@@ -130,6 +130,8 @@ type ClientReport = {
   icpBuckets: { excellent: number; strong: number; moderate: number; weak: number };
   hotConversations: Array<{ leadName: string; role: string; company: string; sentAt: string; urgency: number; snippet: string; campaign: string }>;
   sampleReplies: Array<{ leadName: string; role: string; company: string; sentAt: string; body: string; campaign: string; senderName: string }>;
+  /** The five strongest replies, for quoting. Deliberately without campaign, sender or score. */
+  bestReplies: Array<{ leadName: string; role: string; company: string; sentAt: string; body: string }>;
   replyTiming: number[];
   trend: Array<{ day: string; replies: number }>;
 };
@@ -179,6 +181,17 @@ const CAMPAIGN_STATE_LABELS: Record<string, string> = {
   draft: "Draft",
   unknown: "Unknown",
 };
+
+/**
+ * Applies the one per-run section choice to a layout.
+ *
+ * Done to the layout rather than at render time so that the page count, the page meter, the printed
+ * document and the copy filed in the archive cannot disagree about whether the section is in the report.
+ */
+const applySectionChoices = (layout: SectionId[][], includeBestReplies: boolean) =>
+  includeBestReplies
+    ? layout
+    : layout.map((page) => page.filter((id) => id !== "best-replies")).filter((page) => page.length);
 
 const PERIOD_OPTIONS: Period[] = ["daily", "weekly", "monthly", "quarterly", "all-time", "custom"];
 const periodLabel = (value: Period) => (value === "all-time" ? "All time" : value[0].toUpperCase() + value.slice(1));
@@ -265,6 +278,16 @@ export default function ReportsPage() {
    * but showing three pages of charts under a recap email implies the client is getting both.
    */
   const [docRevealed, setDocRevealed] = useState(false);
+
+  /**
+   * Whether the quoted replies are in this report.
+   *
+   * The one pulled section that is a judgement call rather than a fact: five replies read as proof in a
+   * good week and as thin in a quiet one, so it is a tick rather than part of the template. Dropping it
+   * takes it out of the pages, the email and the archived copy together — a section that is only half
+   * removed is worse than one that is not.
+   */
+  const [includeBestReplies, setIncludeBestReplies] = useState(true);
 
   /**
    * Which of the panel's foldable blocks are open.
@@ -566,8 +589,12 @@ export default function ReportsPage() {
   // that layout is part of what the client was sent.
   const [savedLayout, setSavedLayout] = useState<SectionId[][] | null>(null);
   const pages: SectionId[][] = useMemo(
-    () => savedLayout ?? (template ? template.pages : packPages(orderedSections)),
-    [savedLayout, template, orderedSections],
+    () =>
+      // A reopened report keeps its filed layout untouched — the tick on this screen decides what the next
+      // report contains, not what a report already sent to a client turns out to have contained.
+      savedLayout ??
+      applySectionChoices(template ? template.pages : packPages(orderedSections), includeBestReplies),
+    [savedLayout, template, orderedSections, includeBestReplies],
   );
   /**
    * The boxes to put on the config screen: one per written section the chosen layout actually prints.
@@ -668,6 +695,9 @@ export default function ReportsPage() {
             // What the account manager typed. Treated as fact by the writer, and the reason the message
             // can mention a booked meeting that appears in no table.
             written: sections,
+            // The quotes are lifted from the report by the route, not written by the model, so all it
+            // needs to know is whether they are wanted.
+            includeBestReplies,
           }),
         });
         const payload = await response.json().catch(() => ({}));
@@ -685,8 +715,26 @@ export default function ReportsPage() {
         setComposed(copy);
         setMessageText(copy.message);
         setMessageEdited(false);
-        setComposedFrom(signature);
         setError("");
+
+        /**
+         * The intro box, filled in with the line the model just wrote.
+         *
+         * Nobody wants to draft a greeting from nothing, and nobody wants software to own the first
+         * sentence the client reads — so the model writes one, it lands in the box, and from that moment
+         * the box is what gets printed. An intro already typed is never overwritten.
+         *
+         * The staleness signature has to be recorded against the seeded sections, not the ones sent, or
+         * filling this box would immediately look like a change the account manager made and kick off
+         * another rewrite of the email that was just written.
+         */
+        const greeting = String(payload.greeting || "").trim();
+        if (greeting && !sections.intro?.trim()) {
+          setWritten((current) => (current.intro?.trim() ? current : { ...current, intro: greeting }));
+          setComposedFrom(JSON.stringify({ ...sections, intro: greeting }));
+        } else {
+          setComposedFrom(signature);
+        }
         return copy;
       } catch (err) {
         setError(`The email could not be written: ${err instanceof Error ? err.message : "the request failed"}.`);
@@ -695,7 +743,7 @@ export default function ReportsPage() {
         setComposing(false);
       }
     },
-    [runPrompt],
+    [runPrompt, includeBestReplies],
   );
 
   const generate = useCallback(async () => {
@@ -709,7 +757,7 @@ export default function ReportsPage() {
     // A new pull is a new document, so it must not inherit the layout of a report reopened from the
     // archive — the rendered pages and the filed pages have to be the same thing.
     setSavedLayout(null);
-    const layout: SectionId[][] = template ? template.pages : packPages(orderedSections);
+    const layout = applySectionChoices(template ? template.pages : packPages(orderedSections), includeBestReplies);
     try {
       const response = await fetch("/api/reports/generate", {
         method: "POST",
@@ -753,6 +801,7 @@ export default function ReportsPage() {
     campaignPick,
     composeCopy,
     written,
+    includeBestReplies,
   ]);
 
   /**
@@ -1101,49 +1150,61 @@ export default function ReportsPage() {
             </button>
             <div className="config-heading">
               <h2>{template ? template.name : "Build your own report"}</h2>
-              <p>
-                {template
-                  ? "The numbers are pulled when you generate. What is left is the part only you know — pick the campaigns, write your sections, tweak the prompt."
-                  : "Choose the sections you want. The report is capped at three pages, so heavier sections cost more of the budget."}
-              </p>
-            </div>
-
-            {/* Grouped rather than stacked. The panel asks for a dozen things and they are not equally
-                interesting; without the grouping the prompt box and the "prepared by" field carry the
-                same weight, which is what made this read as a pile of inputs. */}
-            <div className="config-group">
-              {/* The client is settled on the way in, so it is shown as context rather than as a control —
-                  changing it here would leave the hub behind it describing somebody else. */}
-              <span className="config-label">Client</span>
-              <div className="config-static">{clientLabel || "No client selected"}</div>
-
-              <span className="config-label">Period</span>
-              <div className="config-period-grid">
-                {PERIOD_OPTIONS.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={`config-period ${period === option ? "is-active" : ""}`}
-                    onClick={() => setPeriod(option)}
-                  >
-                    {periodLabel(option)}
-                  </button>
-                ))}
-              </div>
-
-              {period === "custom" && (
-                <div className="config-custom-range">
-                  <label>
-                    From
-                    <input type="date" value={customSince} onChange={(e) => setCustomSince(e.target.value)} />
-                  </label>
-                  <label>
-                    To
-                    <input type="date" value={customUntil} onChange={(e) => setCustomUntil(e.target.value)} />
-                  </label>
-                </div>
+              {/* Only the builder gets a line of explanation, because only the builder has a rule that is
+                  not obvious from the controls. A template's screen explaining itself was three lines of
+                  reassurance above the thing it was describing. */}
+              {!template && (
+                <p>
+                  Choose the sections you want. The report is capped at three pages, so heavier sections
+                  cost more of the budget.
+                </p>
               )}
             </div>
+
+            {/*
+              Neither the client nor the period is a decision left at this point.
+              The client was chosen two screens ago and is named in the back link; the period is part of
+              what a template is — a prompt written for "the entire engagement" must not be run over a
+              Tuesday. So a template shows neither, and the builder, which has no template to answer
+              them, shows the period.
+
+              The date fields are the exception: a template whose period is a custom range still has to be
+              told which range, and there is nowhere else to say it.
+            */}
+            {(!template || period === "custom") && (
+              <div className="config-group">
+                {!template && (
+                  <>
+                    <span className="config-label">Period</span>
+                    <div className="config-period-grid">
+                      {PERIOD_OPTIONS.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className={`config-period ${period === option ? "is-active" : ""}`}
+                          onClick={() => setPeriod(option)}
+                        >
+                          {periodLabel(option)}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {period === "custom" && (
+                  <div className="config-custom-range">
+                    <label>
+                      From
+                      <input type="date" value={customSince} onChange={(e) => setCustomSince(e.target.value)} />
+                    </label>
+                    <label>
+                      To
+                      <input type="date" value={customUntil} onChange={(e) => setCustomUntil(e.target.value)} />
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Which campaigns the report may talk about. Read from HeyReach on the way in, so the
                 document, the write-up and the archived copy all describe the same set. */}
@@ -1163,36 +1224,47 @@ export default function ReportsPage() {
               {campaignsLoading ? (
                 <div className="config-static">Asking HeyReach…</div>
               ) : liveCampaigns.length ? (
-                <>
-                  <div className="config-sections config-campaigns">
-                    {liveCampaigns.map((row) => {
-                      const on = campaignPick.has(row.id);
-                      return (
-                        <label key={row.id} className={`config-section ${on ? "is-on" : ""}`}>
-                          <input type="checkbox" checked={on} onChange={() => toggleCampaign(row.id)} />
-                          <span>
-                            <strong>{row.name}</strong>
-                            <em>
-                              {CAMPAIGN_STATE_LABELS[row.state] || row.status || "Unknown"} ·{" "}
-                              {row.progress.pending.toLocaleString()} pending ·{" "}
-                              {row.progress.contacted.toLocaleString()} contacted
-                            </em>
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <p className="config-hint">
-                    Only ticked campaigns appear in the report. Active ones — live with leads still to
-                    contact — are ticked to begin with; paused and worked-through campaigns are listed
-                    below them to be opted into.
-                  </p>
-                </>
+                <div className="config-sections config-campaigns">
+                  {liveCampaigns.map((row) => {
+                    const on = campaignPick.has(row.id);
+                    return (
+                      <label key={row.id} className={`config-section ${on ? "is-on" : ""}`}>
+                        <input type="checkbox" checked={on} onChange={() => toggleCampaign(row.id)} />
+                        <span>
+                          <strong>{row.name}</strong>
+                          <em>
+                            {CAMPAIGN_STATE_LABELS[row.state] || row.status || "Unknown"} ·{" "}
+                            {row.progress.pending.toLocaleString()} pending ·{" "}
+                            {row.progress.contacted.toLocaleString()} contacted
+                          </em>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
               ) : (
                 <div className="config-static">{campaignsNote || "No campaigns found for this client."}</div>
               )}
               {liveCampaigns.length > 0 && campaignsNote && <div className="config-note">{campaignsNote}</div>}
             </ConfigFold>
+
+            {/* The one pulled section that is a choice. Pulled, so it sits with the campaigns rather than
+                with the boxes below — nothing here is typed. */}
+            {template && (
+              <div className="config-group">
+                <label className="config-toggle">
+                  <input
+                    type="checkbox"
+                    checked={includeBestReplies}
+                    onChange={() => setIncludeBestReplies((current) => !current)}
+                  />
+                  <span>
+                    <strong>Best replies from this week</strong>
+                    <em>The five strongest replies, quoted as written. Name, title, company, message.</em>
+                  </span>
+                </label>
+              </div>
+            )}
 
             {/* The half of the report the app cannot know. Booked meetings, why a campaign was paused,
                 what was promised on a call — none of it is in HeyReach or in our tables, so it is asked
@@ -1405,11 +1477,6 @@ export default function ReportsPage() {
                           ? "Your sections changed"
                           : ""}
                   </span>
-                  {composed && (
-                    <button type="button" className="compose-copy" onClick={() => navigator.clipboard?.writeText(messageText)}>
-                      Copy
-                    </button>
-                  )}
                 </header>
 
                 {/* The one case the debounce deliberately will not handle. An edited email is not
@@ -1606,6 +1673,7 @@ function buildCsv(report: ReportData) {
 
 const SECTION_TITLES: Record<SectionId, string> = {
   cover: "Cover",
+  intro: "Intro",
   recap: "Recap",
   "executive-summary": "Executive summary",
   metrics: "Performance",
@@ -1614,6 +1682,8 @@ const SECTION_TITLES: Record<SectionId, string> = {
   trend: "Reply trend",
   "active-campaigns": "Active campaigns",
   campaigns: "Campaign performance",
+  "booked-meetings": "Booked meetings",
+  "best-replies": "Best replies from this week",
   senders: "Sender leaderboard",
   "top-leads": "Top leads by ICP score",
   "icp-distribution": "ICP distribution",
@@ -1693,6 +1763,8 @@ function ReportDocument({
         return <HotConversations client={client} />;
       case "reply-timing":
         return <ReplyTimingChart client={client} />;
+      case "best-replies":
+        return <BestReplies client={client} />;
       case "sample-replies":
         return <SampleReplies client={client} />;
       case "methodology":
@@ -2251,6 +2323,33 @@ function ReplyTimingChart({ client }: { client: ClientReport }) {
       <p className="report-caption">
         Inbound reply volume by hour of day in {client.workspace.timezone.replace("_", " ")}.
       </p>
+    </div>
+  );
+}
+
+/**
+ * The five replies worth showing a client, and nothing around them.
+ *
+ * No campaign, no sender, no urgency score, no date. Those belong in `sample-replies`, which exists to be
+ * audited; this exists to be read. A quote with four pieces of metadata hanging off it stops being
+ * somebody's words and turns back into a row of a table.
+ */
+function BestReplies({ client }: { client: ClientReport }) {
+  const replies = client.bestReplies ?? [];
+  if (!replies.length) return <EmptyNote>No positive replies captured in this period.</EmptyNote>;
+  return (
+    <div className="best-replies">
+      {replies.map((row, index) => (
+        <blockquote className="best-reply" key={index}>
+          <cite>
+            <strong>{row.leadName}</strong>
+            {[row.role, row.company].filter(Boolean).length > 0 && (
+              <span>{[row.role, row.company].filter(Boolean).join(", ")}</span>
+            )}
+          </cite>
+          <p>{row.body}</p>
+        </blockquote>
+      ))}
     </div>
   );
 }

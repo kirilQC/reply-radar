@@ -17,6 +17,7 @@
 
 export type SectionId =
   | "cover"
+  | "intro"
   | "recap"
   | "executive-summary"
   | "metrics"
@@ -25,6 +26,8 @@ export type SectionId =
   | "trend"
   | "active-campaigns"
   | "campaigns"
+  | "booked-meetings"
+  | "best-replies"
   | "senders"
   | "top-leads"
   | "icp-distribution"
@@ -44,7 +47,14 @@ export type SectionId =
  * input box for each of these that appears in its layout, which means adding one here and giving it a
  * weight is all it takes for the box to appear.
  */
-export const WRITTEN_SECTIONS = ["recap", "what-we-did", "priorities", "warm-close"] as const;
+export const WRITTEN_SECTIONS = [
+  "intro",
+  "recap",
+  "booked-meetings",
+  "what-we-did",
+  "priorities",
+  "warm-close",
+] as const;
 
 export type WrittenSectionId = (typeof WRITTEN_SECTIONS)[number];
 
@@ -53,6 +63,17 @@ export const isWrittenSection = (id: SectionId): id is WrittenSectionId =>
 
 /** The label and placeholder each written box carries in the config screen. */
 export const WRITTEN_SECTION_PROMPTS: Record<WrittenSectionId, { label: string; placeholder: string }> = {
+  /**
+   * The opening line, and the one written box that does not start empty.
+   *
+   * A greeting is the part of a recap that has to sound like a person and the part nobody wants to draft
+   * from nothing, so the first compose writes one and puts it straight into this box. From then on the
+   * box wins: it is a written section like any other, printed exactly as it stands.
+   */
+  intro: {
+    label: "Intro",
+    placeholder: "The opening line. Written for you when you generate, then yours to change.",
+  },
   recap: {
     label: "Recap",
     placeholder:
@@ -61,6 +82,10 @@ export const WRITTEN_SECTION_PROMPTS: Record<WrittenSectionId, { label: string; 
   "what-we-did": {
     label: "What we did this week",
     placeholder: "Campaigns launched or paused, lists built, copy tested, accounts added. One line each.",
+  },
+  "booked-meetings": {
+    label: "Booked meetings",
+    placeholder: "Who is on the calendar, when, and with whom. One line each.",
   },
   priorities: {
     label: "Priorities for next week",
@@ -76,6 +101,7 @@ export type SectionDef = { id: SectionId; label: string; blurb: string; alwaysOn
 
 export const SECTIONS: SectionDef[] = [
   { id: "cover", label: "Cover page", blurb: "Client, period, generated date, brand mark", alwaysOn: true },
+  { id: "intro", label: "Intro", blurb: "The opening line — written for you, then yours to edit" },
   { id: "recap", label: "Recap", blurb: "Your own opening paragraph, typed before generating" },
   { id: "executive-summary", label: "Executive summary", blurb: "Auto-written narrative from the numbers" },
   {
@@ -92,6 +118,12 @@ export const SECTIONS: SectionDef[] = [
     blurb: "Live in HeyReach with leads still pending, plus launch date",
   },
   { id: "campaigns", label: "Campaign performance", blurb: "Replies + positive rate per campaign" },
+  { id: "booked-meetings", label: "Booked meetings", blurb: "Your own list of what is on the calendar" },
+  {
+    id: "best-replies",
+    label: "Best replies from this week",
+    blurb: "The five strongest replies, pulled for you — name, title, company, what they said",
+  },
   { id: "senders", label: "Sender leaderboard", blurb: "Top LinkedIn accounts by reply volume" },
   { id: "top-leads", label: "Top leads", blurb: "Highest ICP scores with role, company, reason" },
   { id: "icp-distribution", label: "ICP distribution", blurb: "How your replied leads cluster" },
@@ -129,11 +161,15 @@ export const PAGE_LIMIT = 3;
  * numbers and what is running, then what was done, what is next, and a sign-off. Half of that is typed
  * and half is pulled, which is the point — the report is the two halves joined, and neither half can
  * write the other.
+ *
+ * Every page here weighs exactly what `PAGE_CAPACITY` allows, which is not a coincidence: this layout is
+ * the ground truth the weight model is calibrated against, so a page that overflowed here would mean the
+ * meter is wrong rather than that the page is. Adding a section means taking one off that page.
  */
 export const DEFAULT_TEMPLATE_PAGES: SectionId[][] = [
-  ["cover", "recap", "metrics"],
-  ["active-campaigns", "what-we-did", "priorities"],
-  ["warm-close", "methodology"],
+  ["cover", "intro", "recap", "metrics"],
+  ["active-campaigns", "booked-meetings", "best-replies"],
+  ["what-we-did", "priorities", "warm-close", "methodology"],
 ];
 
 export type ReportPeriod = "daily" | "weekly" | "monthly" | "quarterly" | "all-time" | "custom";
@@ -220,12 +256,16 @@ array for any block the data cannot support — never a placeholder:
   "headline": "one line, max 70 characters, the single most important fact",
   "narrative": "the executive summary for the PDF, 90-150 words, 2 short paragraphs",
   "subject": "the email subject line, no 'Subject:' prefix",
-  "greeting": "one line, warm and human. Omit entirely if the account manager wrote their own opening",
+  "greeting": "the opening line, warm and human. Omit entirely if the account manager wrote their own intro",
   "recapBullets": ["one fact each, with its number, as a fragment. No leading dash"],
-  "campaignBullets": ["one live campaign each: name, replies this period, leads still pending"],
+  "campaignBullets": ["one live campaign each: its name and this period's replies against it, nothing else"],
   "priorityBullets": ["only if the account manager left their priorities blank. Otherwise []"],
   "close": "one line of warm close plus the sender name. Omit if they wrote their own sign-off"
-}`;
+}
+
+A campaign bullet never carries how many leads are still pending, or the size of its list, or how many
+have been contacted. That is our workload, not the client's news, and it made every campaign line twice
+as long as the fact in it.`;
 
 export const BUILT_IN_TEMPLATES: ReportTemplate[] = [
   {
@@ -265,8 +305,8 @@ questions: what happened, and what's next.
 - A number that moved the wrong way gets one bullet and one clause of cause, then you move on. No
   apology. If a rate dipped because volume tripled, say both in the same bullet.
 
-"campaignBullets": the campaigns live right now, by name, with this period's replies against each and
-how many leads are still pending.
+"campaignBullets": the campaigns live right now, by name, with this period's replies against each. Stop
+there — no pending-lead count, no list size, no contacted count.
 - Say plainly when a campaign is live but has produced no replies yet, and when one finished or was
   paused — a client seeing a dip needs the cause in the same breath.
 - If live status was unavailable, return one bullet reading "Campaign status: [confirm in HeyReach]".

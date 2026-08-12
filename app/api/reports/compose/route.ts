@@ -161,32 +161,57 @@ function digest(client: Json) {
  * (priorities, the close) and is dropped where it cannot (their recap, what they did — the app does not
  * know what they did).
  */
-function assembleEmail(parts: Json, written: Record<string, string>) {
+function assembleEmail(parts: Json, written: Record<string, string>, bestReplies: Json[]) {
   const list = (value: unknown) =>
     (Array.isArray(value) ? value.map((row) => text(row)) : [])
       .filter(Boolean)
-      .map((line) => (line.startsWith("-") ? line : `- ${line}`));
+      .map((line) => (line.startsWith("-") ? line : `- ${line}`))
+      .join("\n");
 
   const blocks: string[] = [];
-  const section = (heading: string, body: string[]) => {
-    const lines = body.filter(Boolean);
-    if (lines.length) blocks.push(`**${heading}**\n${lines.join("\n")}`);
+  /**
+   * Chunks within a section are separated by a blank line, not a newline.
+   *
+   * That blank line is the whole difference between a recap that reads as somebody's paragraph followed
+   * by the week's numbers and one where their last sentence looks like the first bullet's preamble.
+   */
+  const section = (heading: string, ...chunks: string[]) => {
+    const body = chunks.filter(Boolean).join("\n\n");
+    if (body) blocks.push(`**${heading}**\n${body}`);
   };
 
   const subject = text(parts.subject);
   if (subject) blocks.push(`Subject: ${subject}`);
 
-  // Skipped only when their own opening already greets the reader, which is the one case where keeping
-  // both would greet them twice — and of the two, the model's is the one that sounds like software.
-  const greetsAlready = /^\s*(hi|hey|hello|good morning|good afternoon|happy)\b/i.test(written.recap || "");
-  const greeting = greetsAlready ? "" : text(parts.greeting);
-  if (greeting) blocks.push(greeting);
+  // The intro box wins over the model's greeting, and it is seeded from that greeting the first time a
+  // report is written — so after the first pass this is always the account manager's own line.
+  const intro = written.intro || text(parts.greeting);
+  if (intro) blocks.push(intro);
 
   // Their words first, then the numbers under the same heading — the order every recap that works uses.
-  section("Recap from this week", [written.recap || "", ...list(parts.recapBullets)]);
-  section("What we did this week", [written["what-we-did"] || ""]);
+  section("Recap from this week", written.recap || "", list(parts.recapBullets));
+  section("What we did this week", written["what-we-did"] || "");
   section("Active campaigns", list(parts.campaignBullets));
-  section("Priorities next week", [written.priorities || list(parts.priorityBullets).join("\n")]);
+  section("Booked meetings", written["booked-meetings"] || "");
+
+  /**
+   * Verbatim, and assembled here rather than asked for.
+   *
+   * The point of quoting a reply to a client is that it is what the person actually wrote; a model given
+   * the text to "include" would tidy it, and a tidied quote is a fabricated one. Name, title, company and
+   * the message — nothing else, because everything else is our plumbing.
+   */
+  const quotes = bestReplies
+    .map((row) => {
+      const who = [text(row.role), text(row.company)].filter(Boolean).join(", ");
+      const body = text(row.body).replace(/\s+/g, " ");
+      if (!body) return "";
+      return `${text(row.leadName) || "A lead"}${who ? ` — ${who}` : ""}\n"${body}"`;
+    })
+    .filter(Boolean);
+  section("Best replies from this week", ...quotes);
+
+  section("Priorities next week", written.priorities || list(parts.priorityBullets));
 
   const close = written["warm-close"] || text(parts.close);
   if (close) blocks.push(close);
@@ -210,6 +235,16 @@ export async function POST(request: Request) {
 
   const periodLabel = text(body.periodLabel) || "the period";
   const digests = clients.map(digest);
+
+  /**
+   * The replies to quote, taken from the report rather than from the model.
+   *
+   * Off when the section has been unticked on the config screen, which is why this is a flag rather than
+   * something inferred from whether any replies came back: no quotes and quotes-not-wanted read the same
+   * in the data and mean different things to whoever is about to send this.
+   */
+  const bestReplies =
+    body.includeBestReplies === false ? [] : clients.flatMap((client) => array(client.bestReplies)).slice(0, 5);
   const totalReplies = digests.reduce((total, item) => total + item.totalReplies, 0);
 
   /**
@@ -331,7 +366,11 @@ ${JSON.stringify(digests.length === 1 ? digests[0] : digests, null, 2)}`;
       model,
       headline: text(parsed.headline).slice(0, 140),
       narrative: text(parsed.narrative),
-      message: assembleEmail(parsed, Object.fromEntries(written)),
+      // Returned separately from the email so the page can seed the intro box with it. The box is
+      // authoritative from then on, and the only way it can start with something in it is if the line the
+      // model wrote comes back on its own rather than buried in the assembled message.
+      greeting: text(parsed.greeting),
+      message: assembleEmail(parsed, Object.fromEntries(written), bestReplies),
     });
   } catch (error) {
     return NextResponse.json(

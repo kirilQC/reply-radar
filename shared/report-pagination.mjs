@@ -42,6 +42,9 @@ export const PAGE_CAPACITY = 12;
  */
 export const SECTION_WEIGHTS = {
   cover: 3,
+  // One line, and one line is all the box invites. Costed above zero anyway because it still carries a
+  // section heading, which is most of what it occupies.
+  intro: 1,
   // Written sections are costed for the length people actually type into a box that size: a paragraph
   // for the recap and the close, a handful of one-liners for the two lists. Someone who writes an essay
   // will overflow, which the meter cannot know in advance and the print preview will show.
@@ -56,6 +59,11 @@ export const SECTION_WEIGHTS = {
   // columns and a caption, which costs about what the reply-derived campaign table costs.
   "active-campaigns": 4,
   campaigns: 4,
+  // A handful of one-liners, so it costs what the other typed lists cost less the paragraph.
+  "booked-meetings": 3,
+  // Five quotes, but each is a name line and a sentence or two rather than the full attribution block
+  // that `sample-replies` prints — hence cheaper than that section despite covering the same ground.
+  "best-replies": 5,
   senders: 4,
   "top-leads": 5,
   "icp-distribution": 2,
