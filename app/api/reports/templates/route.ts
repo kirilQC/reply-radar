@@ -74,6 +74,7 @@ export async function POST(request: Request) {
       name,
       summary: text(body.summary),
       defaultPeriod: body.defaultPeriod,
+      output: body.output,
       pages,
       prompt,
       createdAt: match?.createdAt || new Date().toISOString(),

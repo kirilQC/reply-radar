@@ -6,10 +6,12 @@ import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import {
   BUILT_IN_TEMPLATES,
   isWrittenSection,
+  OUTPUT_LABELS,
   PAGE_LIMIT,
   SECTION_LABELS,
   SECTIONS,
   WRITTEN_SECTION_PROMPTS,
+  type ReportOutput,
   type ReportPeriod as Period,
   type ReportTemplate,
   type SectionId,
@@ -208,6 +210,8 @@ export default function ReportsPage() {
   const [draftSummary, setDraftSummary] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
   const [draftPeriod, setDraftPeriod] = useState<Period>("monthly");
+  // Email first, because the reports the agency sends most often are emails.
+  const [draftOutput, setDraftOutput] = useState<ReportOutput>("email");
   const [templateBusy, setTemplateBusy] = useState(false);
   const [templateError, setTemplateError] = useState("");
 
@@ -252,6 +256,15 @@ export default function ReportsPage() {
    * section is a matter of listing it in WRITTEN_SECTIONS.
    */
   const [written, setWritten] = useState<Record<string, string>>({});
+
+  /**
+   * Whether the multi-page document is on screen.
+   *
+   * An email template does not render one until asked. The sections are still laid out and still hold
+   * the numbers — that is what makes "Generate PDF" instant rather than a second trip to the server —
+   * but showing three pages of charts under a recap email implies the client is getting both.
+   */
+  const [docRevealed, setDocRevealed] = useState(false);
 
   const [composed, setComposed] = useState<Composed | null>(null);
   const [messageText, setMessageText] = useState("");
@@ -361,6 +374,7 @@ export default function ReportsPage() {
     setMessageText("");
     setSavedNotice("");
     setSavedLayout(null);
+    setDocRevealed(false);
     setError("");
   };
 
@@ -464,6 +478,7 @@ export default function ReportsPage() {
           summary: draftSummary.trim(),
           prompt,
           defaultPeriod: draftPeriod,
+          output: draftOutput,
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -473,6 +488,7 @@ export default function ReportsPage() {
       setDraftName("");
       setDraftSummary("");
       setDraftPrompt("");
+      setDraftOutput("email");
     } catch (err) {
       setTemplateError(err instanceof Error ? err.message : "Could not save the template.");
     } finally {
@@ -523,6 +539,15 @@ export default function ReportsPage() {
    * close never asks for one — and a template that does gets the box without any code being touched.
    */
   const writtenFields = useMemo(() => pages.flat().filter(isWrittenSection), [pages]);
+
+  /**
+   * The deliverable. Build-your-own is a document by definition — it is a section picker.
+   *
+   * A reopened report always shows its pages: it is history, and the archive's job is to show what was
+   * produced rather than to re-litigate which half of it was the deliverable.
+   */
+  const outputMode: ReportOutput = savedLayout ? "pdf" : (template?.output ?? "pdf");
+  const showDocument = outputMode === "pdf" || docRevealed;
 
   const budget = useMemo(() => paginate(orderedSections), [orderedSections]);
   // Only a live build-your-own selection can be over the limit. A template is capped by construction,
@@ -841,6 +866,24 @@ export default function ReportsPage() {
                   onChange={(event) => setDraftSummary(event.target.value)}
                 />
 
+                <label className="config-label" htmlFor="template-output">
+                  What does it produce?
+                </label>
+                <select
+                  id="template-output"
+                  className="config-select"
+                  value={draftOutput}
+                  onChange={(event) => setDraftOutput(event.target.value as ReportOutput)}
+                >
+                  <option value="email">An email to send</option>
+                  <option value="pdf">A PDF document</option>
+                </select>
+                <p className="config-hint">
+                  {draftOutput === "email"
+                    ? "You get the written email. The pages are still built behind it, so a PDF is one button away when you want one."
+                    : "You get the multi-page document, with a short covering email to send it with."}
+                </p>
+
                 <label className="config-label" htmlFor="template-period">
                   Default period
                 </label>
@@ -894,7 +937,15 @@ export default function ReportsPage() {
                         <span>·</span>
                         <span>{periodLabel(option.defaultPeriod)}</span>
                         <span>·</span>
-                        <span>{option.pages.length === 1 ? "1 page" : `${option.pages.length} pages`}</span>
+                        {/* Page count is only meaningful for a document. An email template has pages
+                            behind it, but printing them is not what the template is for. */}
+                        <span>
+                          {option.output === "email"
+                            ? OUTPUT_LABELS.email
+                            : option.pages.length === 1
+                              ? "1 page"
+                              : `${option.pages.length} pages`}
+                        </span>
                       </div>
                     </button>
                     {!option.builtIn && (
@@ -1126,8 +1177,10 @@ export default function ReportsPage() {
               // The layout is the template, so it is stated rather than offered. One line each, because
               // this is a config screen for the last few decisions — not a place to rebuild the report.
               <p className="config-hint config-layout">
-                Prints as {template.pages.length === 1 ? "1 page" : `${template.pages.length} pages`}:{" "}
+                {template.output === "email" ? "Produces an email" : "Produces a PDF"} from{" "}
+                {template.pages.length === 1 ? "1 page" : `${template.pages.length} pages`}:{" "}
                 {template.pages.map((page) => page.map((id) => SECTION_LABELS[id]).join(", ")).join(" / ")}.
+                {template.output === "email" && " The pages are there if you want the PDF too."}
               </p>
             ) : (
               <>
@@ -1187,9 +1240,15 @@ export default function ReportsPage() {
 
             {report && (
               <div className="config-downloads">
-                <button onClick={downloadPdf} disabled={overLimit}>
-                  Download PDF
-                </button>
+                {/* Two clicks for an email report, deliberately. The first renders the pages so they can
+                    be read before the print dialog opens over them. */}
+                {showDocument ? (
+                  <button onClick={downloadPdf} disabled={overLimit}>
+                    Download PDF
+                  </button>
+                ) : (
+                  <button onClick={() => setDocRevealed(true)}>Generate PDF</button>
+                )}
                 <button onClick={downloadCsv}>Download CSV</button>
               </div>
             )}
@@ -1237,6 +1296,7 @@ export default function ReportsPage() {
             )}
 
             {report &&
+              showDocument &&
               report.clients.map((client) => (
                 <ReportDocument
                   key={client.workspace.id}

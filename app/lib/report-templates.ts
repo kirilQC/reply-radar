@@ -138,6 +138,25 @@ export const DEFAULT_TEMPLATE_PAGES: SectionId[][] = [
 
 export type ReportPeriod = "daily" | "weekly" | "monthly" | "quarterly" | "all-time" | "custom";
 
+/**
+ * What a template actually produces.
+ *
+ * This used to be assumed: every template rendered a multi-page document and the email was a covering
+ * note for it. That is wrong for the report QC sends most often — the Friday recap *is* an email, and
+ * nobody attaches three pages of charts to it. So a template says which one it is for, and the config
+ * screen leads with that.
+ *
+ * "email" does not mean the document is unavailable. The sections are still laid out and still hold the
+ * numbers, so a PDF can be produced on demand from the same report; it is just not what you get by
+ * default. The reverse is not offered, because a document template's email is only ever a covering note.
+ */
+export type ReportOutput = "email" | "pdf";
+
+export const OUTPUT_LABELS: Record<ReportOutput, string> = {
+  email: "Email",
+  pdf: "PDF document",
+};
+
 export type ReportTemplate = {
   id: string;
   name: string;
@@ -147,6 +166,8 @@ export type ReportTemplate = {
    * A template whose prompt says "the entire engagement" must not quietly produce a monthly report.
    */
   defaultPeriod: ReportPeriod;
+  /** Email or document. Governs what the report screen shows once it has generated. */
+  output: ReportOutput;
   /** One inner array per page. Length is the page count, and it is capped at PAGE_LIMIT. */
   pages: SectionId[][];
   prompt: string;
@@ -155,6 +176,7 @@ export type ReportTemplate = {
 };
 
 const PERIODS = new Set<ReportPeriod>(["daily", "weekly", "monthly", "quarterly", "all-time", "custom"]);
+const OUTPUTS = new Set<ReportOutput>(["email", "pdf"]);
 
 /**
  * The prompt shared by every template.
@@ -202,6 +224,8 @@ export const BUILT_IN_TEMPLATES: ReportTemplate[] = [
     name: "Weekly client recap",
     summary: "The Friday EOW email — recap, active campaigns, priorities. Modelled on the recaps that land.",
     defaultPeriod: "weekly",
+    // This one is a mail, not a deck. The sections still exist behind it for anyone who wants the PDF.
+    output: "email",
     builtIn: true,
     pages: DEFAULT_TEMPLATE_PAGES,
     /**
@@ -264,6 +288,7 @@ RULES:
     name: "All-time executive summary",
     summary: "The whole relationship in three pages — for QBRs, renewals and exec updates.",
     defaultPeriod: "all-time",
+    output: "pdf",
     builtIn: true,
     // Page 1 sets the story, page 2 proves it with performance, page 3 names the people worth
     // acting on. Methodology rides along on the last page rather than earning one of its own.
@@ -312,6 +337,8 @@ export function normaliseTemplate(input: unknown): ReportTemplate | null {
     name: name.slice(0, 80),
     summary: typeof row.summary === "string" ? row.summary.trim().slice(0, 200) : "",
     defaultPeriod: PERIODS.has(row.defaultPeriod as ReportPeriod) ? (row.defaultPeriod as ReportPeriod) : "monthly",
+    // Templates saved before this field existed rendered a document, so that is what they keep doing.
+    output: OUTPUTS.has(row.output as ReportOutput) ? (row.output as ReportOutput) : "pdf",
     pages,
     prompt,
     builtIn: false,
