@@ -73,6 +73,19 @@ body.light-mode .reports-main {
   overflow-y: auto;
 }
 
+/*
+ * Nothing in the panel may be squeezed; the panel scrolls instead.
+ *
+ * This is load-bearing. The panel is a flex column with a max-height, so once its contents are taller
+ * than the viewport flex looks for something to shrink — and it picks the campaign list, because a
+ * scroll container's automatic minimum height resolves to zero rather than to its content. The list
+ * then collapses to an empty strip while the textareas around it, which have a min-height, keep their
+ * size. It looked exactly like HeyReach had returned nothing.
+ */
+.reports-configurator > * {
+  flex-shrink: 0;
+}
+
 .config-heading h2 {
   font-family: "Playfair Display", "Georgia", serif;
   font-size: 22px;

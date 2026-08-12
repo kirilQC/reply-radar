@@ -172,14 +172,21 @@ HeyReach key and none should be added to Render.
 Every table is prefixed `rr_` so nothing collides with the rest of the Supabase project:
 `rr_workspaces`, `rr_profiles`, `rr_profile_workspaces`, `rr_profile_preferences`,
 `rr_conversations`, `rr_messages`, `rr_leads`, `rr_scores`, `rr_graphs`, `rr_documents`,
-`rr_webhook_events`, `rr_sync_runs`, `rr_audit_log`, `rr_device_preferences`, `rr_global_config`.
+`rr_webhook_events`, `rr_sync_runs`, `rr_audit_log`, `rr_device_preferences`, `rr_global_config`,
+`rr_app_config`, `rr_reports`.
 
 > [!WARNING]
 > **`supabase/schema.sql` has drifted from production.** Inspect the real columns in Supabase before
-> relying on it. Several past outages came from code assuming a column that was not there. Notably
-> `rr_global_config` in the file has no `key`/`value` columns even though the app upserts them, and
-> `rr_scores` is declared but may not exist in a given database — which is why deletion tolerates a
-> 404 on that table and removes children explicitly instead of trusting `on delete cascade`.
+> relying on it. Several past outages came from code assuming a column that was not there. `rr_scores`
+> is declared but may not exist in a given database — which is why deletion tolerates a 404 on that
+> table and removes children explicitly instead of trusting `on delete cascade`.
+
+> [!IMPORTANT]
+> **`rr_global_config` is a single-row settings table** — `id boolean primary key`, one column per
+> setting. It has no `key`/`value` columns. Small key/value lists belong in `rr_app_config`
+> (`supabase/migrations/20260812_rr_app_config.sql`). Report templates were moved there after every
+> save failed with "column rr_global_config.key does not exist"; `app/api/ai/templates/route.ts` and
+> `app/api/ai/config/route.ts` still make the same mistake and still silently fail to save.
 
 AI state lives in JSON rather than columns, so adding a signal never needs a migration:
 

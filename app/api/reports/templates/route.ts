@@ -1,11 +1,14 @@
 /**
  * Report templates a teammate created, stored beside the built-in ones.
  *
- * Kept in a single `rr_global_config` row rather than its own table, matching what the scoring
- * templates already do. The reasoning there applies here: the production schema has drifted from
- * `supabase/schema.sql` more than once, and a list this small is not worth a migration that might be
- * written against a file which no longer describes the database. Saved reports are different — those
- * grow without bound and do get a real table.
+ * Kept as one row in `rr_app_config`, a key/value table, rather than in its own table — a list this
+ * small does not earn a schema of its own. Saved reports are different, and get a real table.
+ *
+ * This used to read and write `rr_global_config` with the same key/value query, copying what the
+ * scoring templates do. That was never going to work: `rr_global_config` is a single-row settings
+ * table with one column per setting and no `key` or `value` column at all, so every save failed and
+ * every read was swallowed as "nothing saved yet". `rr_app_config` is the table that code was always
+ * describing; see `supabase/migrations/20260812_rr_app_config.sql`.
  *
  * Built-in templates are code, not data. They are merged in on read and cannot be edited or deleted,
  * so a teammate experimenting with prompts can never leave the hub with nothing in it.
@@ -21,7 +24,9 @@ import {
 
 type Row = Record<string, unknown>;
 
+const CONFIG_TABLE = "rr_app_config";
 const CONFIG_KEY = "report_templates";
+const MIGRATION = "supabase/migrations/20260812_rr_app_config.sql";
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
 async function db(path: string, init?: RequestInit) {
@@ -56,7 +61,7 @@ async function db(path: string, init?: RequestInit) {
  * comes back depends on whether `value` is a `text` or `jsonb` column, and this should not need to know.
  */
 async function readSaved(): Promise<ReportTemplate[]> {
-  const response = await db(`rr_global_config?select=key,value&key=eq.${CONFIG_KEY}&limit=1`);
+  const response = await db(`${CONFIG_TABLE}?select=key,value&key=eq.${CONFIG_KEY}&limit=1`);
   const rows = (await response.json().catch(() => [])) as Row[];
   const raw = rows[0]?.value;
   const parsed = typeof raw === "string" ? JSON.parse(raw || "[]") : raw;
@@ -65,29 +70,33 @@ async function readSaved(): Promise<ReportTemplate[]> {
 }
 
 /**
- * Updates the row if it is there, inserts it if it is not.
+ * Writes the whole list back under the one key.
  *
- * Deliberately not an upsert. `Prefer: resolution=merge-duplicates` compiles to `ON CONFLICT (key)`,
- * which PostgREST rejects with a 400 unless `key` carries a unique constraint — and in this database it
- * does not, which is why saving a template failed while reading them appeared to work. A PATCH filtered
- * on the key needs no constraint at all, and asking for the representation back is what tells us
- * whether it matched anything, since PostgREST reports a zero-row update as success.
+ * An upsert is safe here because `key` is the table's primary key — `resolution=merge-duplicates`
+ * compiles to `ON CONFLICT (key)`, which PostgREST only accepts when a constraint backs the column.
+ * The list is stored as a jsonb array rather than a stringified one, so the row is readable in the
+ * Supabase editor.
  */
 async function writeSaved(templates: ReportTemplate[]) {
-  const value = JSON.stringify(templates);
-  const patched = await db(`rr_global_config?key=eq.${CONFIG_KEY}`, {
-    method: "PATCH",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ value }),
-  });
-  const rows = (await patched.json().catch(() => [])) as Row[];
-  if (Array.isArray(rows) && rows.length) return;
-
-  await db("rr_global_config", {
+  await db(CONFIG_TABLE, {
     method: "POST",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ key: CONFIG_KEY, value }),
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ key: CONFIG_KEY, value: templates, updated_at: new Date().toISOString() }),
   });
+}
+
+/**
+ * The message a teammate sees when a save fails.
+ *
+ * A missing table is the one failure they can fix themselves, so it says which file to run instead of
+ * quoting a PostgREST code at them. Everything else is passed through as-is.
+ */
+function explain(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : "";
+  if (!message) return fallback;
+  return /does not exist|schema cache|relation/i.test(message)
+    ? `${message} — run ${MIGRATION} in the Supabase SQL editor.`
+    : message;
 }
 
 export async function GET() {
@@ -140,7 +149,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, template, replaced: Boolean(match) });
   } catch (error) {
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "Could not save the template." },
+      { ok: false, error: explain(error, "Could not save the template.") },
       { status: 502 },
     );
   }
@@ -157,7 +166,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "Could not delete the template." },
+      { ok: false, error: explain(error, "Could not delete the template.") },
       { status: 502 },
     );
   }

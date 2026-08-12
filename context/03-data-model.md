@@ -12,7 +12,8 @@ All prefixed `rr_` so nothing collides with the unrelated tables in the same Sup
 | `rr_profile_workspaces` | Which teammate is assigned to which client. Composite PK. |
 | `rr_profile_preferences` | Per-teammate `appearance` and `inbox_layout` JSON. |
 | `rr_device_preferences` | The same, keyed by device, for the general inbox where no profile is selected. |
-| `rr_global_config` | App-wide settings. |
+| `rr_global_config` | App-wide settings. **One row**, one column per setting. Not a key/value store. |
+| `rr_app_config` | Small app-wide key/value lists (`key` PK, `value` jsonb). Report templates live here. |
 | `rr_leads` | One row per **lead per client**. A person working with three clients is three rows. |
 | `rr_conversations` | One thread. `workspace_id`, `lead_id`, `external_id`, score/tier, `last_message_at`. |
 | `rr_messages` | One message. `conversation_id`, `direction`, `body`, `sent_at`, `raw_data`. |
@@ -38,7 +39,7 @@ Concrete, verified divergences as of this writing:
 |---|---|---|
 | `rr_leads` | `title`, `profile_url` | `role`, `linkedin_id`, `linkedin_profile_url` |
 | `rr_sync_runs` | no `run_type` column | worker writes `run_type: "heartbeat"` every cycle |
-| `rr_global_config` | `id boolean primary key`, no `key`/`value` | app upserts `{ key, value }` with `Prefer: resolution=merge-duplicates` |
+| `rr_global_config` | `id boolean primary key`, no `key`/`value` | `app/api/ai/templates` and `app/api/ai/config` still query it as `select=key,value&key=eq...`, which 400s every time. `ai/config` returns `{ ok: upsertResponse.ok }` and shows no error, so the sentiment prompt has never saved. Report templates were moved to `rr_app_config`. |
 | `rr_scores` | declared, with `on delete cascade` | may not exist at all |
 
 Consequences already baked into the code:

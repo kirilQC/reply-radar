@@ -26,6 +26,12 @@ create table if not exists rr_global_config (
   supabase_service_role_key_ciphertext text, worker_service_url text, worker_config jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now(), check (id)
 );
+-- Small app-wide lists that do not earn a table each. `rr_global_config` above is NOT this: it is one
+-- row with one column per setting, and code that queries it as key/value fails.
+create table if not exists rr_app_config (
+  key text primary key, value jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
 create table if not exists rr_profile_preferences (
   profile_id uuid primary key references rr_profiles(id) on delete cascade,
   appearance jsonb not null default '{}'::jsonb, inbox_layout jsonb not null default '{}'::jsonb,
@@ -121,6 +127,7 @@ alter table rr_workspaces enable row level security;
 alter table rr_profiles enable row level security;
 alter table rr_profile_workspaces enable row level security;
 alter table rr_global_config enable row level security;
+alter table rr_app_config enable row level security;
 alter table rr_profile_preferences enable row level security;
 alter table rr_device_preferences enable row level security;
 alter table rr_leads enable row level security;
