@@ -4,6 +4,11 @@
 import AppSidebar from "./AppSidebar";
 import AppearancePanel, { type AppearancePrefs } from "./AppearancePanel";
 import { useEffect, useState } from "react";
+import {
+  identityKey,
+  readCachedAppearance,
+  writeCachedAppearance,
+} from "../lib/preference-identity";
 
 const defaultAppearance: AppearancePrefs = {
   mode: "midnight",
@@ -40,14 +45,8 @@ function StatTile({ label, value, hint, tone }: { label: string; value: string; 
 }
 
 /** Reads the saved time zone so "today" means the reader's today, not the server's. */
-const savedTimeZone = () => {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem("reply-radar-prefs:general") || "{}");
-    return String(parsed?.appearance?.timeZone || defaultAppearance.timeZone);
-  } catch {
-    return defaultAppearance.timeZone;
-  }
-};
+const savedTimeZone = () =>
+  String(readCachedAppearance()?.timeZone || defaultAppearance.timeZone);
 
 export default function DashboardHome() {
   const [clients, setClients] = useState(initialClients);
@@ -61,11 +60,8 @@ export default function DashboardHome() {
       if (savedClients) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setClients(JSON.parse(savedClients)); }
       const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
       if (savedProfiles) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients?: string[]; color?: string; initials?: string; slug?: string; photo?: string | null }) => ({ ...profile, description: (profile.clients ?? []).join(" · "), tone: profile.color ?? "#8b7cff", initials: profile.initials ?? profile.name.slice(0, 2).toUpperCase(), slug: profile.slug ?? profile.name.toLowerCase().replaceAll(" ", "-"), photo: profile.photo ?? null }))); }
-      const savedPreferences = window.localStorage.getItem("reply-radar-prefs:general");
-      if (savedPreferences) {
-        const parsed = JSON.parse(savedPreferences);
-        if (parsed.appearance) setAppearance({ ...defaultAppearance, ...parsed.appearance });
-      }
+      const savedAppearance = readCachedAppearance();
+      if (savedAppearance) setAppearance({ ...defaultAppearance, ...savedAppearance });
     } catch { /* keep the empty state */ }
   }, []);
   const loadProfiles = () => fetch("/api/admin/profiles", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).then((payload) => {
@@ -108,9 +104,30 @@ export default function DashboardHome() {
     root.style.setProperty("--reply-radar-zoom", `${appearance.zoom / 100}`);
     document.body.classList.toggle("light-mode", appearance.mode === "light");
   }, [appearance]);
+  // PreferenceBootstrap can restore a look off the server after this mounted; follow it so the
+  // panel shows what is actually on screen.
+  useEffect(() => {
+    const onChange = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | Partial<AppearancePrefs>
+        | undefined;
+      if (detail) setAppearance((current) => ({ ...current, ...detail }));
+    };
+    window.addEventListener("reply-radar-appearance-changed", onChange);
+    return () =>
+      window.removeEventListener("reply-radar-appearance-changed", onChange);
+  }, []);
   const saveAppearance = () => {
-    const existing = JSON.parse(window.localStorage.getItem("reply-radar-prefs:general") || "{}");
-    window.localStorage.setItem("reply-radar-prefs:general", JSON.stringify({ ...existing, appearance }));
+    writeCachedAppearance(appearance);
+    void fetch("/api/preferences", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        identity: identityKey(),
+        scope: identityKey(),
+        preferences: { appearance },
+      }),
+    }).catch(() => undefined);
     window.dispatchEvent(new CustomEvent("reply-radar-appearance-changed", { detail: appearance }));
     setAppearanceOpen(false);
   };

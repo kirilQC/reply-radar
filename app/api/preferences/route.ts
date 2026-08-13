@@ -31,18 +31,38 @@ async function request(path: string, init: RequestInit = {}) {
 }
 
 export async function GET(requestValue: NextRequest) {
-  const scope = safeScope(requestValue.nextUrl.searchParams.get("scope"));
+  const params = requestValue.nextUrl.searchParams;
+  const scope = safeScope(params.get("scope"));
+  // Appearance belongs to the person (identity), layout to the person AND the client they
+  // are looking at (scope). `legacy` is whatever key this browser used before identities
+  // existed, so a first load after the change restores rather than resets.
+  const identity = params.get("identity")
+    ? safeScope(params.get("identity"))
+    : scope;
+  const legacy = params.get("legacy") ? safeScope(params.get("legacy")) : "";
   try {
+    const keys = [...new Set([identity, scope, legacy].filter(Boolean))];
     const rows = (await request(
-      `rr_device_preferences?select=appearance,inbox_layout&device_key=eq.${encodeURIComponent(scope)}&limit=1`,
+      `rr_device_preferences?select=device_key,appearance,inbox_layout&device_key=in.(${keys
+        .map((key) => `"${encodeURIComponent(key)}"`)
+        .join(",")})`,
     )) as Row[] | null;
-    const row = Array.isArray(rows) ? rows[0] : null;
+    const byKey = new Map(
+      (Array.isArray(rows) ? rows : []).map((row) => [String(row.device_key), row]),
+    );
+    const appearanceRow = byKey.get(identity) ?? (legacy ? byKey.get(legacy) : undefined);
+    const layoutRow = byKey.get(scope) ?? (legacy ? byKey.get(legacy) : undefined);
     return NextResponse.json({
       ok: true,
       scope,
-      preferences: row
-        ? { appearance: row.appearance ?? {}, layout: row.inbox_layout ?? {} }
-        : null,
+      identity,
+      preferences:
+        appearanceRow || layoutRow
+          ? {
+              appearance: appearanceRow?.appearance ?? {},
+              layout: layoutRow?.inbox_layout ?? {},
+            }
+          : null,
     });
   } catch (error) {
     return NextResponse.json(
@@ -64,18 +84,26 @@ export async function POST(requestValue: NextRequest) {
       { status: 400 },
     );
   const scope = safeScope(body.scope);
+  const identity = body.identity ? safeScope(body.identity) : scope;
   const preferences = body.preferences as Row;
-  try {
-    await request("rr_device_preferences?on_conflict=device_key", {
+  const upsert = (deviceKey: string, columns: Row) =>
+    request("rr_device_preferences?on_conflict=device_key", {
       method: "POST",
       headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify({
-        device_key: scope,
-        appearance: preferences.appearance ?? {},
-        inbox_layout: preferences.layout ?? {},
+        device_key: deviceKey,
+        ...columns,
         updated_at: new Date().toISOString(),
       }),
     });
+  try {
+    // Written as two rows on purpose: the identity row is the one every page of the site
+    // reads its appearance from, so a change made inside a client inbox has to land there
+    // and not on the client. Columns absent from the payload are left alone.
+    if (preferences.appearance)
+      await upsert(identity, { appearance: preferences.appearance });
+    if (preferences.layout)
+      await upsert(scope, { inbox_layout: preferences.layout });
   } catch (error) {
     return NextResponse.json(
       {
@@ -88,13 +116,19 @@ export async function POST(requestValue: NextRequest) {
       { status: 502 },
     );
   }
-  const response = NextResponse.json({ ok: true, scope });
-  response.cookies.set("reply-radar-preferences", JSON.stringify(preferences), {
-    httpOnly: false,
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 365 * 2,
-    path: "/",
-  });
+  const response = NextResponse.json({ ok: true, scope, identity });
+  // Appearance only. Layout is per client now, and a cookie has no idea which client it came
+  // from — that is how a client's pane split used to leak into every other view.
+  response.cookies.set(
+    "reply-radar-preferences",
+    JSON.stringify({ appearance: preferences.appearance ?? {} }),
+    {
+      httpOnly: false,
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 365 * 2,
+      path: "/",
+    },
+  );
   await writeAuditEvent(config(), {
     actor: "Dashboard user",
     action: Array.isArray(
@@ -103,11 +137,11 @@ export async function POST(requestValue: NextRequest) {
       ? "lead.stars.saved"
       : "appearance.saved",
     entityType: "preferences",
-    entityId: scope,
+    entityId: identity,
     details: {
       source: "user",
       status: "success",
-      summary: `Dashboard preferences were saved for ${scope}.`,
+      summary: `Dashboard preferences were saved for ${identity}${preferences.layout ? ` (layout: ${scope})` : ""}.`,
     },
   });
   return response;

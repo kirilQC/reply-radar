@@ -8,6 +8,14 @@ import AppSidebar from "./components/AppSidebar";
 import AppearancePanel, {
   type AppearancePrefs,
 } from "./components/AppearancePanel";
+import {
+  identityKey,
+  layoutKey,
+  layoutStorageKey,
+  readCachedAppearance,
+  setActiveProfile,
+  writeCachedAppearance,
+} from "./lib/preference-identity";
 
 type Lead = {
   id: string;
@@ -548,28 +556,34 @@ export function InboxPage() {
       ? activeWorkspace.website.trim()
       : `https://${activeWorkspace.website.trim()}`
     : "";
-  const preferenceScope = profileParam
+  // The thing being looked at. Layout is remembered per scope (a client's section order and
+  // pane split are that client's, not everyone's); appearance is not scoped at all.
+  const layoutScope = profileParam
     ? `profile:${profileParam}`
     : clientParam
       ? `client:${clientParam}`
       : "general";
-  const preferenceKey = `reply-radar-prefs:${preferenceScope}`;
+  // Arriving as a profile is the closest thing to signing in, so it is remembered: the accent
+  // picked here still applies on /reports, and a teammate on their own profile keeps theirs.
+  useEffect(() => {
+    if (profileParam) setActiveProfile(profileParam);
+  }, [profileParam]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
-        const saved = window.localStorage.getItem(preferenceKey);
-        const fallback = window.localStorage.getItem(
-          "reply-radar-prefs:general",
+        const savedLayout = window.localStorage.getItem(
+          layoutStorageKey(layoutScope),
         );
-        const cookieValue = document.cookie
-          .split("; ")
-          .find((item) => item.startsWith("reply-radar-preferences="))
-          ?.split("=")[1];
-        const parsed = JSON.parse(
-          saved ||
-            fallback ||
-            (cookieValue ? decodeURIComponent(cookieValue) : "null"),
+        // Pre-identity saves lived under one key per scope and held both halves.
+        const legacy = window.localStorage.getItem(
+          `reply-radar-prefs:${layoutScope}`,
         );
+        const parsed = {
+          layout:
+            JSON.parse(savedLayout || "null")?.layout ??
+            JSON.parse(legacy || "null")?.layout,
+          appearance: readCachedAppearance(),
+        };
         if (parsed?.layout) {
           const nextLayout = { ...defaultLayout, ...parsed.layout };
           nextLayout.starredLeadIds = Array.isArray(nextLayout.starredLeadIds)
@@ -594,12 +608,15 @@ export function InboxPage() {
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [preferenceKey]);
+  }, [layoutScope]);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/preferences?scope=${encodeURIComponent(preferenceScope)}`, {
-      cache: "no-store",
-    })
+    fetch(
+      `/api/preferences?identity=${encodeURIComponent(identityKey())}&scope=${encodeURIComponent(layoutKey(layoutScope))}&legacy=${encodeURIComponent(layoutScope)}`,
+      {
+        cache: "no-store",
+      },
+    )
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (cancelled || !payload?.preferences) return;
@@ -625,7 +642,7 @@ export function InboxPage() {
     return () => {
       cancelled = true;
     };
-  }, [preferenceScope]);
+  }, [layoutScope]);
   useEffect(() => {
     // Wait for the workspace directory: firing early sends an empty slug list, which the
     // API reads as "every client" and costs a full second round trip a moment later.
@@ -734,12 +751,12 @@ export function InboxPage() {
     nextAppearance = appearance,
   ) => {
     const payload = { layout: nextLayout, appearance: nextAppearance };
-    window.localStorage.setItem(preferenceKey, JSON.stringify(payload));
-    // Also retain the device-level fallback for the general inbox.
     window.localStorage.setItem(
-      "reply-radar-prefs:general",
-      JSON.stringify(payload),
+      layoutStorageKey(layoutScope),
+      JSON.stringify({ layout: nextLayout }),
     );
+    // Appearance is stored once, without a scope, because it applies to the whole site.
+    writeCachedAppearance(nextAppearance);
     // Apply the same settings to the document immediately so they remain global
     // while navigating between routes (not just on the inbox's local <main>).
     const root = document.documentElement;
@@ -757,8 +774,18 @@ export function InboxPage() {
     void fetch("/api/preferences", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ scope: preferenceScope, preferences: payload }),
+      body: JSON.stringify({
+        identity: identityKey(),
+        scope: layoutKey(layoutScope),
+        preferences: payload,
+      }),
     }).catch(() => undefined);
+    // Other routes mount their own appearance applier; this tells them to re-read.
+    window.dispatchEvent(
+      new CustomEvent("reply-radar-appearance-changed", {
+        detail: nextAppearance,
+      }),
+    );
   };
   useEffect(() => {
     if (activeNav !== "inbox") router.push(`/${activeNav}`);

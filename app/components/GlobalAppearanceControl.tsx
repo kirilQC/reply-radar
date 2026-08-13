@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 import AppearancePanel, { type AppearancePrefs } from "./AppearancePanel";
+import {
+  identityKey,
+  readCachedAppearance,
+  writeCachedAppearance,
+} from "../lib/preference-identity";
 
 const defaults: AppearancePrefs = {
   mode: "midnight",
@@ -25,19 +30,40 @@ const applyAppearance = (appearance: AppearancePrefs) => {
 export default function GlobalAppearanceControl() {
   const [appearance, setAppearance] = useState<AppearancePrefs>(() => {
     if (typeof window === "undefined") return defaults;
-    try {
-      const stored = JSON.parse(window.localStorage.getItem("reply-radar-prefs:general") || "{}");
-      return stored.appearance ? { ...defaults, ...stored.appearance } : defaults;
-    } catch { return defaults; }
+    const stored = readCachedAppearance();
+    return stored ? { ...defaults, ...stored } : defaults;
   });
   const [open, setOpen] = useState(false);
 
   useEffect(() => { applyAppearance(appearance); }, [appearance]);
+  // PreferenceBootstrap can restore a look off the server after this mounted; follow it so the
+  // panel shows what is actually on screen.
+  useEffect(() => {
+    const onChange = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | Partial<AppearancePrefs>
+        | undefined;
+      if (detail) setAppearance((current) => ({ ...current, ...detail }));
+    };
+    window.addEventListener("reply-radar-appearance-changed", onChange);
+    return () =>
+      window.removeEventListener("reply-radar-appearance-changed", onChange);
+  }, []);
 
   const save = () => {
-    let stored: Record<string, unknown> = {};
-    try { stored = JSON.parse(window.localStorage.getItem("reply-radar-prefs:general") || "{}"); } catch { /* replace invalid cache */ }
-    window.localStorage.setItem("reply-radar-prefs:general", JSON.stringify({ ...stored, appearance }));
+    writeCachedAppearance(appearance);
+    // Local storage alone meant a new browser — or the same person on another machine — got
+    // the stock purple back. Appearance is stored against the identity, with no scope, so it
+    // is the same everywhere on the site.
+    void fetch("/api/preferences", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        identity: identityKey(),
+        scope: identityKey(),
+        preferences: { appearance },
+      }),
+    }).catch(() => undefined);
     window.dispatchEvent(new CustomEvent("reply-radar-appearance-changed", { detail: appearance }));
     setOpen(false);
   };
