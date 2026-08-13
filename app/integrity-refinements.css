@@ -1105,3 +1105,31 @@
 .profile-field + .profile-field {
   margin-top: 14px;
 }
+
+/* The sidebar and the page content are two independent scroll panes rather than
+   one long document. `overflow: hidden` on the shell removes the window
+   scrollbar so there is no third scroller to fight with, and
+   `overscroll-behavior: contain` is what stops a pane that has bottomed out
+   from handing the rest of the wheel gesture to its neighbour. */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell > .sidebar,
+.app-shell > .main-area {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Below 760px the sidebar is a fixed off-canvas drawer, so it already spans the
+   viewport and must not inherit the flex-child height above. */
+@media (max-width: 760px) {
+  .app-shell > .sidebar {
+    height: auto;
+  }
+}
