@@ -808,6 +808,86 @@ const readScreenshot = (file: File) =>
     reader.readAsDataURL(file);
   });
 
+type Release = { sha: string; shortSha: string; date: string; author: string; summary: string; url: string };
+/** Five, then five more. Long enough to see the last few days, short enough not to bury the form below it. */
+const RELEASE_PAGE = 5;
+
+/**
+ * What has shipped, straight from the commit history.
+ *
+ * It sits in the feedback tab because it answers the question feedback provokes: "was that fixed yet?"
+ * Nothing here is written by hand — every entry is a real commit, so the log cannot fall out of date
+ * and there is no step anyone has to remember after a release.
+ */
+function ReleaseHistory() {
+  const [releases, setReleases] = useState<Release[]>([]);
+  const [total, setTotal] = useState(0);
+  const [repoUrl, setRepoUrl] = useState("https://github.com/kirilQC/reply-radar");
+  const [shown, setShown] = useState(RELEASE_PAGE);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/releases", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (cancelled) return;
+        // The repo link is served even when the history is not, so it is read before the error check.
+        if (typeof payload.repoUrl === "string") setRepoUrl(payload.repoUrl);
+        if (!response.ok || !payload.ok) throw new Error(payload.error || "The commit history could not be loaded.");
+        setReleases(Array.isArray(payload.releases) ? payload.releases : []);
+        setTotal(Number(payload.total) || 0);
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The commit history could not be loaded.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const visible = releases.slice(0, shown);
+  return (
+    <section className="admin-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>Release history</h2>
+          {/* The count is every commit on the branch, not the length of the list below it — the list
+              is one page of the most recent, and saying "5 changes" would undersell the project. */}
+          <p>{total ? `${total.toLocaleString()} change${total === 1 ? "" : "s"} shipped.` : "Every change to Reply Radar, newest first."}</p>
+        </div>
+        <a className="filter-button" href={repoUrl} target="_blank" rel="noreferrer">View the repo</a>
+      </div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {loading && <p className="feedback-empty">Loading…</p>}
+      {!loading && !error && !visible.length && <p className="feedback-empty">No commits found.</p>}
+      {visible.length > 0 && (
+        <ol className="release-list">
+          {visible.map((release) => (
+            <li key={release.sha}>
+              <div className="release-meta">
+                <time dateTime={release.date}>{new Date(release.date).toLocaleString()}</time>
+                <span className="release-author">{release.author}</span>
+              </div>
+              <a className="release-summary" href={release.url} target="_blank" rel="noreferrer">
+                {release.summary}
+                <code>{release.shortSha}</code>
+              </a>
+            </li>
+          ))}
+        </ol>
+      )}
+      {shown < releases.length && (
+        <button type="button" className="release-more" onClick={() => setShown((value) => value + RELEASE_PAGE)}>
+          View {Math.min(RELEASE_PAGE, releases.length - shown)} more
+        </button>
+      )}
+    </section>
+  );
+}
+
 function FeedbackView() {
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -962,6 +1042,7 @@ function FeedbackView() {
           {sent && <p className="feedback-sent" role="status">Thanks — that landed.</p>}
         </div>
       </section>
+      <ReleaseHistory />
       <section className="admin-panel">
         <div className="panel-heading">
           <div><h2>Submitted feedback</h2><p>{items.length} item{items.length === 1 ? "" : "s"}. Move each one along as you work through it.</p></div>

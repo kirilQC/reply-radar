@@ -1797,6 +1797,74 @@ a.tag-outline-link:hover {
   white-space: nowrap;
 }
 
+/* ── Release history ─────────────────────────────────────────────────────────────────────────────
+   The commit log in the feedback tab. Rows are divided rather than boxed: these are entries in one
+   continuous history, and giving each its own card would make twenty commits look like twenty
+   unrelated notices. */
+.release-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.release-list li {
+  display: grid;
+  gap: 5px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.release-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.release-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+.release-meta time {
+  color: var(--muted-2);
+  font-size: 10px;
+  /* Timestamps stacked down a column have to align digit for digit or the list looks ragged. */
+  font-variant-numeric: tabular-nums;
+}
+.release-author {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+.release-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-decoration: none;
+}
+.release-summary:hover {
+  color: var(--accent);
+}
+.release-summary code {
+  flex: none;
+  color: var(--muted-2);
+  font-size: 10px;
+}
+.release-more {
+  margin-top: 12px;
+  width: 100%;
+  padding: 8px 0;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+.release-more:hover {
+  color: var(--text);
+  border-color: var(--muted-2);
+}
+
 /* The client cards and the three ranking cards below them are separate questions — who we work
    with, then how the work is going. Butted together with only the grid's own 14px between them
    they read as one continuous block and the eye runs straight past the boundary. */
