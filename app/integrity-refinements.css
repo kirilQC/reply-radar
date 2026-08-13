@@ -670,9 +670,9 @@
    message bubbles under an orange draft box. Neither was a choice. The bubbles
    were written as literal hexes (#292452, #3c365e, #8982bb) back when the
    default accent happened to be purple, so they were never wired to the theme
-   at all — while the composer fills itself with `--accent-2`, which is derived
-   from the accent the user picked. Change the accent to orange and the two
-   halves come apart, because only one half was ever listening.
+   at all — while the composer filled itself from the accent the user picked.
+   Change the accent to orange and the two halves come apart, because only one
+   half was ever listening.
 
    Everything below reads from the theme, so the pane holds together at any
    accent. The rule it follows: surfaces stay neutral, and the accent appears
@@ -817,4 +817,64 @@
   display: inline;
   margin: 0;
   color: var(--muted);
+}
+
+/* ============================================================================
+   Light mode: the selected-item bugs.
+   ----------------------------------------------------------------------------
+   Light mode was not broken in general — it was broken wherever a selected or
+   hovered surface had been written as a literal dark hex while its text stayed
+   `var(--text)`. In dark mode that reads correctly by accident, because --text is
+   light. Flip to light mode and --text turns near-black, so the label becomes
+   near-black on near-black: the sidebar's selected client and the Configuration
+   nav's active item both went blank while clearly still being *there*.
+
+   Each rule below pairs a light surface with the same accent rail the dark theme
+   uses, so selection stays legible and reads as selection in both modes.
+   ========================================================================= */
+
+.light-mode .admin-nav button:hover,
+.light-mode .admin-nav button.active,
+.light-mode .admin-nav-client-button.active,
+.light-mode .app-sidebar .client-directory-item.selected,
+.light-mode .admin-client-group.selected > .admin-client-button {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+/* The selected row needs to out-read a plain hover, which shares the surface. */
+.light-mode .admin-nav button.active,
+.light-mode .admin-nav-client-button.active,
+.light-mode .app-sidebar .client-directory-item.selected,
+.light-mode .admin-client-group.selected > .admin-client-button {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
+  font-weight: 600;
+}
+
+/* Inset code and preview panels, both literal near-blacks. */
+.light-mode .endpoint-box,
+.light-mode .preview-score,
+.light-mode .assigned-client-option.checked {
+  background: var(--panel-2);
+  border-color: var(--border);
+}
+
+/* A dark chip carrying dark text once --text flipped. */
+.light-mode .segmented button.selected {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 2px #0000000f;
+}
+
+/* Counter badges were dark violet plates sized for a dark sidebar. */
+.light-mode .nav-count,
+.light-mode .queue-header h2 span {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+/* The sidebar goes white in light mode, so its own border has to appear. */
+.light-mode .app-sidebar,
+.light-mode .sidebar {
+  border-right-color: var(--border);
 }

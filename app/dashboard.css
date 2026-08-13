@@ -11,6 +11,9 @@
 .dashboard-clients-section{order:2}
 .dashboard-home>section{margin-bottom:56px}.dashboard-home>section:last-child{margin-bottom:0}
 .dashboard-client-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.dashboard-profiles-section{margin-top:10px}
+/* Profiles sits directly above Client workspaces, and the two headings were reading as one
+   group. A little more air, not a new section break. */
+.dashboard-clients-section{margin-top:22px}
 
 /* Headline counts. Tabular figures so the numbers do not jitter as they load. */
 .dashboard-stats-section{margin-bottom:40px!important}

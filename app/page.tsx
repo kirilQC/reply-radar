@@ -116,7 +116,6 @@ const defaultAppearance: AppearancePrefs = {
   font: "Inter, ui-sans-serif, system-ui, sans-serif",
   background: "#0b0c10",
   accent: "#8b7cff",
-  accent2: "",
   timeZone: "America/New_York",
 };
 const timeZoneSuffix: Record<string, string> = {
@@ -741,7 +740,6 @@ export function InboxPage() {
     // while navigating between routes (not just on the inbox's local <main>).
     const root = document.documentElement;
     root.style.setProperty("--accent", nextAppearance.accent);
-    if (nextAppearance.accent2) root.style.setProperty("--accent-2", `color-mix(in srgb, ${nextAppearance.accent2} 25%, var(--panel))`);
     root.style.setProperty("--bg", nextAppearance.background);
     root.style.setProperty("--font", nextAppearance.font);
     root.style.setProperty(

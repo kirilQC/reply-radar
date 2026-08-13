@@ -11,7 +11,6 @@ const defaultAppearance: AppearancePrefs = {
   font: "Inter, ui-sans-serif, system-ui, sans-serif",
   background: "#0b0c10",
   accent: "#8b7cff",
-  accent2: "",
   timeZone: "America/New_York",
 };
 
