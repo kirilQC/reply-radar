@@ -102,7 +102,7 @@ const defaultLayout: LayoutPrefs = {
   showAnalytics: true,
   showDetail: true,
   compact: false,
-  metrics: ["totalReplies", "acceptanceRate", "avgRepliesCampaign", "positiveRate", "needsReply"],
+  metrics: ["totalReplies", "needsReply", "acceptanceRate", "avgRepliesCampaign", "positiveRate"],
   // Every inbox opens on these two until someone adds their own.
   graphs: [
     { id: "replies-by-day", title: "Replies per day", x: "day", y: "replies", kind: "area" },
@@ -228,7 +228,7 @@ const metricCatalog = [
   },
   {
     id: "avgRepliesCampaign",
-    label: "Reply rate",
+    label: "Average reply rate",
     value: "—",
     delta: "",
     tone: "coral",
@@ -236,7 +236,7 @@ const metricCatalog = [
   },
   {
     id: "acceptanceRate",
-    label: "Acceptance rate",
+    label: "Average acceptance rate",
     value: "—",
     delta: "",
     tone: "amber",
@@ -1102,6 +1102,8 @@ export function InboxPage() {
   const liveMetric = (metric: (typeof metricCatalog)[number]) => {
     const averages = analytics?.campaignAverages;
     const filterLabel = filter === "today" ? "today" : filter === "week" ? "this week" : filter === "follow-ups" ? "needing follow-up" : "total";
+    // The card headings name the range in plain English; "total" reads as a count.
+    const rangeWord = filterLabel === "total" ? "all time" : filterLabel;
     const positiveCount = filtered.filter((l) => l.sentiment === "positive").length;
     const negativeCount = filtered.filter((l) => l.sentiment === "negative").length;
     const totalReplies = filtered.reduce((sum, l) => sum + l.replies, 0);
@@ -1114,11 +1116,11 @@ export function InboxPage() {
       hotConversations: { value: String(positiveCount), sub: `Positive replies ${filterLabel}` },
       pipelineSaved: { value: String(negativeCount), sub: `Negative replies ${filterLabel}` },
       replyCount7d: { value: String(totalReplies), sub: `Replies ${filterLabel}` },
-      totalReplies: { value: String(totalReplies), label: `Replies ${filterLabel === "total" ? "· all time" : filterLabel}`, sub: `Replies ${filterLabel}` },
-      positiveRate: { value: `${positiveRate}%`, sub: `From our sentiment analysis · ${filterLabel}` },
-      avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", sub: "Average across campaigns" },
-      acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", sub: "Average across campaigns" },
-      needsReply: { value: String(needsReplyCount), sub: `Leads waiting on us · ${filterLabel}`, label: `${needsReplyCount === 1 ? "1 lead needs" : `${needsReplyCount} leads need`} to be replied to` },
+      totalReplies: { value: String(totalReplies), label: `Replies ${rangeWord}`, sub: `Replies ${filterLabel}` },
+      positiveRate: { value: `${positiveRate}%`, label: `Positive reply rate ${rangeWord}`, sub: `From our sentiment analysis · ${filterLabel}` },
+      avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", label: "Average reply rate", sub: "Average across campaigns" },
+      acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", label: "Average acceptance rate", sub: "Average across campaigns" },
+      needsReply: { value: String(needsReplyCount), sub: `Leads waiting on us · ${filterLabel}`, label: `Number of leads needing reply ${rangeWord}` },
     };
     return { ...metric, ...(values[metric.id] ?? {}) };
   };
@@ -2075,9 +2077,16 @@ export function InboxPage() {
                         {current.followUpUrgency ?? 0} · {followUpBand(current.followUpUrgency ?? 0)}
                       </span>
                       {current.campaignName && (
-                        <span className="tag-outline">
+                        // Straight through to this campaign's analytics. The client
+                        // slug is passed when we have it so the page does not have to
+                        // guess which workspace a shared campaign name belongs to.
+                        <a
+                          className="tag-outline tag-outline-link"
+                          href={`/analytics?${new URLSearchParams({ ...(current.clientSlug ? { client: current.clientSlug } : {}), campaign: current.campaignName }).toString()}`}
+                          title={`Open ${current.campaignName} analytics`}
+                        >
                           {current.campaignName}
-                        </span>
+                        </a>
                       )}
                       {current.sentiment && (
                         <button
@@ -2220,13 +2229,11 @@ function Metric({
   value,
   delta,
   tone,
-  sub,
 }: {
   label: string;
   value: string;
   delta: string;
   tone: string;
-  sub: string;
 }) {
   return (
     <div className="metric-card">
@@ -2234,7 +2241,6 @@ function Metric({
       <span>{label}</span>
       <strong>{value}</strong>
       <em>{delta}</em>
-      <small>{sub}</small>
     </div>
   );
 }

@@ -179,6 +179,19 @@ create table if not exists rr_reports (
   generated_at timestamptz not null default now()
 );
 
+-- Bug reports and ideas from the team. `submitted_by` is null when the reporter chose to stay
+-- anonymous, which is the default; nothing else on the row identifies them.
+create table if not exists rr_feedback (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null default 'other' check (kind in ('bug', 'idea', 'other')),
+  message text not null,
+  submitted_by text,
+  page text,
+  status text not null default 'new' check (status in ('new', 'viewed', 'working', 'fixed')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists rr_workspaces_created_idx on rr_workspaces(created_at);
 create index if not exists rr_profile_workspaces_workspace_idx on rr_profile_workspaces(workspace_id);
 -- rr_leads is filtered by workspace and by profile URL on every ingestion pass.
@@ -197,6 +210,7 @@ create index if not exists rr_sync_runs_source_type_started_idx on rr_sync_runs(
 create index if not exists rr_audit_log_created_idx on rr_audit_log(created_at desc);
 create index if not exists rr_reports_workspace_generated_idx on rr_reports(workspace_id, generated_at desc);
 create index if not exists rr_reports_generated_idx on rr_reports(generated_at desc);
+create index if not exists rr_feedback_status_created_idx on rr_feedback(status, created_at desc);
 
 create or replace function rr_set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at = now(); return new; end; $$;
 drop trigger if exists rr_workspaces_updated_at on rr_workspaces;
@@ -205,6 +219,8 @@ drop trigger if exists rr_profiles_updated_at on rr_profiles;
 create trigger rr_profiles_updated_at before update on rr_profiles for each row execute function rr_set_updated_at();
 drop trigger if exists rr_conversations_updated_at on rr_conversations;
 create trigger rr_conversations_updated_at before update on rr_conversations for each row execute function rr_set_updated_at();
+drop trigger if exists rr_feedback_updated_at on rr_feedback;
+create trigger rr_feedback_updated_at before update on rr_feedback for each row execute function rr_set_updated_at();
 
 -- Enabled with zero policies on every table, which is deliberate: all access is server-side with the
 -- service role key, which bypasses RLS. The anon key therefore reads nothing at all.
@@ -226,6 +242,7 @@ alter table rr_webhook_events enable row level security;
 alter table rr_sync_runs enable row level security;
 alter table rr_audit_log enable row level security;
 alter table rr_reports enable row level security;
+alter table rr_feedback enable row level security;
 
 -- A readable flattening of rr_leads for exports and ad-hoc queries: the client resolved to a name
 -- rather than a UUID, and the timestamps that generated columns cannot hold.

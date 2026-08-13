@@ -1192,3 +1192,200 @@
 .queue-search-shell.is-open .queue-search-input {
   padding-right: 9px;
 }
+
+/* Metric cards: the heading carries the meaning now that the repeated caption
+   underneath is gone, so it gets the extra weight and the card gets its height back. */
+.metric-card > span {
+  margin-bottom: 7px;
+  font-size: 12.5px;
+}
+.metric-card {
+  min-height: 92px;
+}
+.compact-inbox .metric-card {
+  min-height: 84px;
+}
+
+/* The campaign chip in the thread header is a link to that campaign's analytics. */
+a.tag-outline-link {
+  text-decoration: none;
+  cursor: pointer;
+}
+a.tag-outline-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Feedback */
+.feedback-view {
+  display: grid;
+  gap: 16px;
+}
+.feedback-form {
+  display: grid;
+  gap: 12px;
+}
+.feedback-kind {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.feedback-kind button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.feedback-kind button.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+  color: var(--text);
+}
+.feedback-identity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.feedback-identity input {
+  flex: 0 1 220px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+}
+.feedback-identity .primary-button {
+  margin-left: auto;
+}
+.feedback-anon-toggle {
+  padding: 7px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.feedback-anon-toggle.anonymous {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--green) 55%, var(--border));
+  color: var(--green);
+}
+.feedback-sent {
+  margin: 0;
+  color: var(--green);
+  font-size: 11px;
+}
+.feedback-empty {
+  margin: 0;
+  color: var(--muted-2);
+  font-size: 12px;
+}
+.feedback-list {
+  display: grid;
+  gap: 10px;
+}
+.feedback-card {
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  /* A colour-coded left edge so the state of the queue reads at a glance. */
+  border-left: 3px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.feedback-card.status-new {
+  border-left-color: var(--accent);
+}
+.feedback-card.status-viewed {
+  border-left-color: #5b9adf;
+}
+.feedback-card.status-working {
+  border-left-color: var(--amber);
+}
+.feedback-card.status-fixed {
+  border-left-color: var(--green);
+  opacity: 0.72;
+}
+.feedback-card header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+.feedback-kind-tag {
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--border) 60%, transparent);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.feedback-kind-tag.kind-bug {
+  background: color-mix(in srgb, var(--coral) 22%, transparent);
+  color: var(--coral);
+}
+.feedback-byline {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+.feedback-stamp {
+  color: var(--muted-2);
+  font-size: 10px;
+}
+.feedback-delete {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-2);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.feedback-delete:hover {
+  background: var(--panel);
+  color: var(--coral);
+}
+.feedback-card p {
+  margin: 0 0 11px;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.feedback-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.feedback-card footer button {
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-2);
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.feedback-card footer button:hover {
+  color: var(--text);
+}
+.feedback-card footer button.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+}

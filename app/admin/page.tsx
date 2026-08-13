@@ -216,7 +216,7 @@ export default function AdminPage() {
         <main className={`admin-shell admin-theme-${themePreset}`}>
           <header className="admin-topbar">
             <div className="admin-breadcrumb admin-configuration-title">
-              Configuration{active === "workspaces" && workspaceOpen ? <><span>/</span> {client.name || "New workspace"}</> : active !== "workspaces" ? <><span>/</span> {active === "ai-hub" ? "AI" : active === "ai" ? "AI context" : active === "scoring" ? "Scoring engine" : active === "heartbeat" ? "Heartbeat" : active === "audit" ? "Audit log" : "Theme studio"}</> : null}
+              Configuration{active === "workspaces" && workspaceOpen ? <><span>/</span> {client.name || "New workspace"}</> : active !== "workspaces" ? <><span>/</span> {active === "ai-hub" ? "AI" : active === "ai" ? "AI context" : active === "scoring" ? "Scoring engine" : active === "heartbeat" ? "Heartbeat" : active === "feedback" ? "Feedback" : active === "audit" ? "Audit log" : "Theme studio"}</> : null}
             </div>
             <div className="admin-top-actions">
               <GlobalAppearanceControl />
@@ -239,6 +239,7 @@ export default function AdminPage() {
               </button>
               <div className="admin-nav-caption system-caption">SYSTEM</div>
               {[
+                ["feedback", "Feedback", "✎"],
                 ["audit", "Audit log", "≡"],
               ].map(([id, label, icon]) => (
                 <button
@@ -265,9 +266,11 @@ export default function AdminPage() {
                               ? "Theme studio"
                               : active === "heartbeat"
                                 ? "Heartbeat"
-                                : active === "audit"
-                                  ? "Audit log"
-                                  : "System health"}
+                                : active === "feedback"
+                                  ? "Feedback"
+                                  : active === "audit"
+                                    ? "Audit log"
+                                    : "System health"}
                   </h1>
                   {!(active === "workspaces" && workspaceOpen) && active !== "workspaces" && active !== "audit" && <p>
                     {active === "ai"
@@ -276,6 +279,8 @@ export default function AdminPage() {
                             ? "Make follow-up urgency explainable and client-specific."
                             : active === "heartbeat"
                               ? "Live pulse checks for credentials, webhooks, and sync freshness."
+                              : active === "feedback"
+                                ? "Report a bug or send an idea. Leave your name off and it stays anonymous."
                               : active === "audit"
                                 ? ""
                             : active === "theme"
@@ -292,6 +297,7 @@ export default function AdminPage() {
               </div>}
               {workspaceError && active === "workspaces" && <p className="form-error" role="alert">{workspaceError}</p>}
               {active === "heartbeat" && <HeartbeatView heartbeat={heartbeat} onRefresh={() => { setHeartbeat(null); setHeartbeatRefresh((value) => value + 1); }} />}
+              {active === "feedback" && <FeedbackView />}
               {active === "audit" && <AuditView />}
               {active === "workspaces" && (
                 <>
@@ -706,6 +712,159 @@ function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload |
       }) : <div className="heartbeat-empty">No clients were found. Add a client and start the Render worker to begin checks.</div>}</div></section>
       {detail === "advanced" && <section className="admin-panel"><div className="panel-heading"><div><h2>Full diagnostic payload</h2><p>Runtime flags, freshness thresholds, query status codes, timings, row counts, recent sync runs, and webhook events. Secrets are never included.</p></div></div><details className="diagnostic-details" open><summary>Raw heartbeat JSON</summary><pre>{JSON.stringify(heartbeat, null, 2)}</pre></details></section>}
       <p className="heartbeat-last-checked">Last checked {heartbeat?.checkedAt ? new Date(heartbeat.checkedAt).toLocaleString() : "not yet"}</p>
+    </div>
+  );
+}
+
+type FeedbackItem = {
+  id: string;
+  kind: string;
+  message: string;
+  submittedBy: string | null;
+  page: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+const feedbackStages = [
+  ["new", "New"],
+  ["viewed", "Viewed"],
+  ["working", "Working on"],
+  ["fixed", "Fixed"],
+] as const;
+const feedbackKinds = [
+  ["bug", "Bug"],
+  ["idea", "Idea"],
+  ["other", "Something else"],
+] as const;
+
+function FeedbackView() {
+  const [items, setItems] = useState<FeedbackItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [kind, setKind] = useState<string>("bug");
+  const [message, setMessage] = useState("");
+  const [name, setName] = useState("");
+  const [signed, setSigned] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const load = async () => {
+    try {
+      const response = await fetch("/api/feedback", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Feedback could not be loaded.");
+      setItems(Array.isArray(payload.items) ? payload.items : []);
+      setError("");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Feedback could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const submit = async () => {
+    if (!message.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      const response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        // Only send a name when the reporter opted in, so the anonymous path never
+        // depends on the server ignoring a value we shipped anyway.
+        body: JSON.stringify({ kind, message, submittedBy: signed ? name : "", page: window.location.pathname }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "Submitting failed.");
+      setMessage("");
+      setSent(true);
+      window.setTimeout(() => setSent(false), 4000);
+      await load();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Submitting failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const setStage = async (item: FeedbackItem, status: string) => {
+    // Optimistic, because the only thing a failed PATCH costs is a stale badge and
+    // the next load corrects it.
+    setItems((current) => current.map((row) => (row.id === item.id ? { ...row, status } : row)));
+    const response = await fetch("/api/feedback", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: item.id, status }) });
+    if (!response.ok) void load();
+  };
+  const remove = async (item: FeedbackItem) => {
+    setItems((current) => current.filter((row) => row.id !== item.id));
+    const response = await fetch("/api/feedback", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: item.id }) });
+    if (!response.ok) void load();
+  };
+
+  const visible = statusFilter ? items.filter((item) => item.status === statusFilter) : items;
+  return (
+    <div className="feedback-view">
+      <section className="admin-panel">
+        <div className="panel-heading"><div><h2>Send feedback</h2><p>Bugs, rough edges, ideas — anything. Your name is only attached if you add it.</p></div></div>
+        <div className="feedback-form">
+          <div className="feedback-kind">
+            {feedbackKinds.map(([value, label]) => (
+              <button key={value} type="button" className={kind === value ? "selected" : ""} onClick={() => setKind(value)}>{label}</button>
+            ))}
+          </div>
+          <label className="field-label">WHAT HAPPENED<textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={6} placeholder="What were you doing, what did you expect, and what happened instead?" /></label>
+          <div className="feedback-identity">
+            <button type="button" className={`feedback-anon-toggle ${signed ? "" : "anonymous"}`} onClick={() => setSigned((value) => !value)}>
+              {signed ? "Signing this" : "Staying anonymous"}
+            </button>
+            {signed && <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" aria-label="Your name" />}
+            <button type="button" className="primary-button" onClick={() => void submit()} disabled={submitting || !message.trim()}>
+              {submitting ? "Sending…" : "Submit"}
+            </button>
+          </div>
+          {sent && <p className="feedback-sent" role="status">Thanks — that landed.</p>}
+        </div>
+      </section>
+      <section className="admin-panel">
+        <div className="panel-heading">
+          <div><h2>Submitted feedback</h2><p>{items.length} item{items.length === 1 ? "" : "s"}. Move each one along as you work through it.</p></div>
+          <select className="filter-button" aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="">All statuses</option>
+            {feedbackStages.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </div>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        {loading && <p className="feedback-empty">Loading…</p>}
+        {!loading && !visible.length && <p className="feedback-empty">Nothing here yet.</p>}
+        <div className="feedback-list">
+          {visible.map((item) => (
+            <article key={item.id} className={`feedback-card status-${item.status}`}>
+              <header>
+                <span className={`feedback-kind-tag kind-${item.kind}`}>{feedbackKinds.find(([value]) => value === item.kind)?.[1] ?? item.kind}</span>
+                <span className="feedback-byline">{item.submittedBy ?? "Anonymous"}</span>
+                <span className="feedback-stamp">{new Date(item.createdAt).toLocaleString()}</span>
+                <button type="button" className="feedback-delete" aria-label="Delete this feedback" onClick={() => void remove(item)}>×</button>
+              </header>
+              <p>{item.message}</p>
+              <footer>
+                {feedbackStages.map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={item.status === value ? "selected" : ""}
+                    onClick={() => void setStage(item, value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </footer>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

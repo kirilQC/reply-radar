@@ -69,6 +69,8 @@ export default function AnalyticsPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignMetric | null>(null);
   const [sort, setSort] = useState("launch-desc");
   const [copied, setCopied] = useState(false);
+  // The campaign name from the URL, resolved against the metrics once they load.
+  const [urlCampaign, setUrlCampaign] = useState<string | null>(null);
 
   useEffect(() => {
     const load = () => fetch("/api/analytics", { cache: "no-store" }).then((response) => response.json()).then((payload) => { setData(payload); setUpdatedAt(new Date()); }).catch(() => setData({ status: "error" }));
@@ -80,30 +82,58 @@ export default function AnalyticsPage() {
   // The client view is addressable so it can be shared, bookmarked, or served from a
   // per-client subdomain (middleware rewrites `<slug>.host` to `/analytics?client=<slug>`).
   useEffect(() => {
-    const readSlug = () => setSelectedSlug(new URLSearchParams(window.location.search).get("client"));
+    const readSlug = () => {
+      const params = new URLSearchParams(window.location.search);
+      setSelectedSlug(params.get("client"));
+      setUrlCampaign(params.get("campaign"));
+    };
     readSlug();
     window.addEventListener("popstate", readSlug);
     return () => window.removeEventListener("popstate", readSlug);
   }, []);
+  // Deep links from the inbox carry a campaign name, not an id, because that is all a
+  // conversation knows. Matching is derived rather than pushed into state through an
+  // effect, so the modal opens on the first render after the metrics arrive. An
+  // unrecognised name simply leaves you on the client or index page.
+  const linkedCampaign = useMemo(() => {
+    if (!urlCampaign) return null;
+    const wanted = urlCampaign.trim().toLowerCase();
+    return (data.campaignMetrics ?? []).find((campaign) => campaign.name.trim().toLowerCase() === wanted) ?? null;
+  }, [urlCampaign, data.campaignMetrics]);
+  const activeCampaign = selectedCampaign ?? linkedCampaign;
+
+  // Closing the modal also drops `?campaign=` so a refresh does not reopen it.
+  const closeCampaign = () => {
+    setSelectedCampaign(null);
+    setUrlCampaign(null);
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("campaign")) return;
+    params.delete("campaign");
+    const query = params.toString();
+    window.history.replaceState({}, "", query ? `/analytics?${query}` : "/analytics");
+  };
   useEffect(() => {
-    if (!selectedCampaign) return;
+    if (!activeCampaign) return;
     const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelectedCampaign(null);
+      if (event.key === "Escape") closeCampaign();
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [selectedCampaign]);
-
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCampaign]);
   const openClient = (slug: string | null) => {
     setSelectedSlug(slug);
     setSelectedCampaign(null);
+    setUrlCampaign(null);
     setCopied(false);
     const url = slug ? `/analytics?client=${encodeURIComponent(slug)}` : "/analytics";
     window.history.pushState({}, "", url);
   };
 
   const workspaces = data.workspaceDetails ?? [];
-  const clientDetail = selectedSlug ? workspaces.find((workspace) => workspace.slug === selectedSlug) ?? null : null;
+  // A campaign link without ?client= still has to land on that campaign's client.
+  const activeSlug = selectedSlug ?? (linkedCampaign ? workspaces.find((workspace) => workspace.id === linkedCampaign.workspaceId)?.slug ?? null : null);
+  const clientDetail = activeSlug ? workspaces.find((workspace) => workspace.slug === activeSlug) ?? null : null;
   const clientCampaigns = useMemo(
     () => (clientDetail ? (data.campaignMetrics ?? []).filter((campaign) => campaign.workspaceId === clientDetail.id) : []),
     [clientDetail, data.campaignMetrics],
@@ -111,7 +141,7 @@ export default function AnalyticsPage() {
   const sortedCampaigns = useMemo(() => sortCampaigns(clientCampaigns, sort), [clientCampaigns, sort]);
   const clientPerf = clientDetail ? (data.clientPerformance ?? []).find((row) => row.name === clientDetail.name) : null;
 
-  if (selectedSlug && clientDetail) {
+  if (activeSlug && clientDetail) {
     const average = (key: "replyRate" | "acceptanceRate" | "positiveReplyRate") =>
       clientCampaigns.length ? clientCampaigns.reduce((sum, campaign) => sum + campaign[key], 0) / clientCampaigns.length : null;
     // HeyReach reply totals cover the full campaign history, not just what we have synced.
@@ -185,31 +215,31 @@ export default function AnalyticsPage() {
           {!clientCampaigns.length && <p className="empty-state">No campaigns found for this client.</p>}
         </section>
       </main>
-      {selectedCampaign && (
+      {activeCampaign && (
         <div className="campaign-modal-backdrop">
           <button
             type="button"
             className="campaign-modal-dismiss"
             aria-label="Close campaign details"
-            onClick={() => setSelectedCampaign(null)}
+            onClick={closeCampaign}
           />
-          <div className="campaign-modal" role="dialog" aria-modal="true" aria-label={selectedCampaign.name}>
+          <div className="campaign-modal" role="dialog" aria-modal="true" aria-label={activeCampaign.name}>
             <header>
               <div>
-                <span>{launchDate(selectedCampaign.launchedAt)}{selectedCampaign.status ? ` · ${selectedCampaign.status.replace(/_/g, " ").toLowerCase()}` : ""}</span>
-                <h3>{selectedCampaign.name}</h3>
+                <span>{launchDate(activeCampaign.launchedAt)}{activeCampaign.status ? ` · ${activeCampaign.status.replace(/_/g, " ").toLowerCase()}` : ""}</span>
+                <h3>{activeCampaign.name}</h3>
               </div>
-              <button aria-label="Close" onClick={() => setSelectedCampaign(null)}>×</button>
+              <button aria-label="Close" onClick={closeCampaign}>×</button>
             </header>
             <div className="campaign-modal-grid">
-              <Kpi label="Reply rate" value={`${selectedCampaign.replyRate.toFixed(1)}%`}/>
-              <Kpi label="Acceptance rate" value={`${selectedCampaign.acceptanceRate.toFixed(1)}%`}/>
-              <Kpi label="Positive reply rate" value={`${selectedCampaign.positiveReplyRate.toFixed(1)}%`}/>
-              <Kpi label="Connections sent" value={selectedCampaign.connectionsSent.toLocaleString()}/>
-              <Kpi label="Connections accepted" value={selectedCampaign.connectionsAccepted.toLocaleString()}/>
-              <Kpi label="Replies" value={selectedCampaign.replies.toLocaleString()}/>
-              <Kpi label="Positive replies" value={selectedCampaign.positiveReplies.toLocaleString()}/>
-              <Kpi label="Messages started" value={selectedCampaign.messagesStarted.toLocaleString()}/>
+              <Kpi label="Reply rate" value={`${activeCampaign.replyRate.toFixed(1)}%`}/>
+              <Kpi label="Acceptance rate" value={`${activeCampaign.acceptanceRate.toFixed(1)}%`}/>
+              <Kpi label="Positive reply rate" value={`${activeCampaign.positiveReplyRate.toFixed(1)}%`}/>
+              <Kpi label="Connections sent" value={activeCampaign.connectionsSent.toLocaleString()}/>
+              <Kpi label="Connections accepted" value={activeCampaign.connectionsAccepted.toLocaleString()}/>
+              <Kpi label="Replies" value={activeCampaign.replies.toLocaleString()}/>
+              <Kpi label="Positive replies" value={activeCampaign.positiveReplies.toLocaleString()}/>
+              <Kpi label="Messages started" value={activeCampaign.messagesStarted.toLocaleString()}/>
             </div>
           </div>
         </div>
