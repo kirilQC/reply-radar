@@ -58,6 +58,19 @@ type Heartbeat = {
       error?: string;
     }>;
     recentRuns?: Array<Record<string, unknown>>;
+    usage?: {
+      windowDays: number;
+      calls: number;
+      successes: number;
+      failures: number;
+      byClient: Array<{
+        name: string;
+        slug: string;
+        calls: number;
+        successes: number;
+        failures: number;
+      }>;
+    };
   };
 };
 
@@ -358,6 +371,57 @@ export default function HealthPage() {
                     </small>
                   </span>
                 </div>
+              </div>
+              {/* Usage sat on the analytics page, where it was counted over all of history and
+                  so could never be squared with the 24-hour verdict above. It belongs next to
+                  that verdict, over a window that is stated rather than assumed. */}
+              <div className="ai-ark-usage">
+                <div className="ai-ark-usage-heading">
+                  <h3>Enrichment usage</h3>
+                  <span>
+                    Last {heartbeat.aiArk?.usage?.windowDays ?? 14} days ·
+                    provider calls only, cached profiles are not counted
+                  </span>
+                </div>
+                <div className="ai-ark-usage-summary">
+                  <div>
+                    <span>Successful</span>
+                    <strong>
+                      {(heartbeat.aiArk?.usage?.successes ?? 0).toLocaleString()}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Failed</span>
+                    <strong>
+                      {(heartbeat.aiArk?.usage?.failures ?? 0).toLocaleString()}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Total calls</span>
+                    <strong>
+                      {(heartbeat.aiArk?.usage?.calls ?? 0).toLocaleString()}
+                    </strong>
+                  </div>
+                </div>
+                {heartbeat.aiArk?.usage?.byClient?.length ? (
+                  <div className="ai-ark-usage-clients">
+                    {heartbeat.aiArk.usage.byClient.map((client) => (
+                      <div key={client.slug}>
+                        <strong>{client.name}</strong>
+                        <span>{client.calls.toLocaleString()} calls</span>
+                        <em className={client.failures ? "failed" : "healthy"}>
+                          {client.failures
+                            ? `${client.failures} failed`
+                            : "Healthy"}
+                        </em>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="empty-state">
+                    No enrichment calls in this window.
+                  </p>
+                )}
               </div>
               {mode === "advanced" && (
                 <details className="diagnostic-details" open>

@@ -75,9 +75,11 @@ type LayoutPrefs = {
   compact: boolean;
   metrics: string[];
   graphs: GraphConfig[];
+  /** The charts' own time range, deliberately separate from the queue's view. */
+  graphRange: string;
   paneSplit: number;
   starredLeadIds: string[];
-  /** Which generation of the stock graphs this layout was last written against. */
+  /** Which generation of the stock defaults this layout was last written against. */
   defaultsRevision?: number;
 };
 type GraphKind = "line" | "area" | "bars" | "hbars" | "donut";
@@ -101,38 +103,74 @@ type AnalyticsSnapshot = {
 };
 type QuickTemplate = { id: string; name: string; value: string };
 /**
- * Bumped whenever the stock graphs change and every inbox is meant to get them, including
- * ones somebody had already customised. A saved layout carries the revision it was written
- * against, so the reset below happens exactly once per inbox and later edits stand.
+ * Bumped whenever the stock metrics or graphs change and every inbox is meant to get them,
+ * including ones somebody had already customised. A saved layout carries the revision it was
+ * written against, so the reset below happens exactly once per inbox and later edits stand.
  */
-const layoutDefaultsRevision = 2;
+const layoutDefaultsRevision = 3;
+/**
+ * The five boxes every inbox opens on, in this order.
+ *
+ * One list rather than one per inbox type: a client inbox and the general inbox were showing
+ * the same five metrics in different orders, which made the row look like it had been
+ * rearranged by whichever page you came from.
+ */
+const defaultMetricIds = ["totalReplies", "needsReply", "acceptanceRate", "avgRepliesCampaign", "positiveRate"];
 const defaultLayout: LayoutPrefs = {
   order: ["metrics", "queue", "analytics"],
   showMetrics: true,
   showAnalytics: true,
   showDetail: true,
   compact: false,
-  metrics: ["totalReplies", "needsReply", "acceptanceRate", "avgRepliesCampaign", "positiveRate"],
+  metrics: defaultMetricIds,
   // Every inbox opens on these two until someone changes them.
   graphs: [
     { id: "replies-by-day", title: "Reply volume", x: "day", y: "replies", kind: "area" },
     { id: "replies-by-campaign", title: "Replies by campaign", x: "campaign", y: "replies", kind: "bars" },
   ],
+  // The charts open on the whole history: a graph of one day is a dot, and the point of these
+  // two is the shape over time.
+  graphRange: "all",
   paneSplit: 62,
   starredLeadIds: [],
   defaultsRevision: layoutDefaultsRevision,
 };
-const applyGraphDefaults = (layout: LayoutPrefs): LayoutPrefs =>
+/** The stock metrics, graphs and range, reapplied once to any layout written before them. */
+const applyLayoutDefaults = (layout: LayoutPrefs): LayoutPrefs =>
   layout.defaultsRevision === layoutDefaultsRevision
     ? layout
-    : { ...layout, graphs: defaultLayout.graphs };
-const clientCampaignMetricIds = [
-  "totalReplies",
-  "acceptanceRate",
-  "avgRepliesCampaign",
-  "positiveRate",
-  "needsReply",
-];
+    : {
+        ...layout,
+        metrics: defaultLayout.metrics,
+        graphs: defaultLayout.graphs,
+        graphRange: defaultLayout.graphRange,
+      };
+/**
+ * The five ranges the charts can be drawn over. Separate from the queue's own view because the
+ * two answer different questions: the queue is "what do I work on now", the charts are "how is
+ * this client doing", and narrowing one must not narrow the other.
+ */
+const graphRanges = [
+  ["today", "Today"],
+  ["week", "This week"],
+  ["month", "This month"],
+  ["quarter", "This quarter"],
+  ["all", "All time"],
+] as const;
+/** Where the chosen range begins, or null for all time. */
+const graphRangeStart = (range: string) => {
+  const now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (range === "today") return midnight;
+  if (range === "week") {
+    const start = new Date(midnight);
+    start.setDate(start.getDate() - start.getDay());
+    return start;
+  }
+  if (range === "month") return new Date(now.getFullYear(), now.getMonth(), 1);
+  if (range === "quarter") return new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+  return null;
+};
 const defaultAppearance: AppearancePrefs = {
   mode: "midnight",
   zoom: 100,
@@ -638,8 +676,7 @@ export function InboxPage() {
           ).filter((item) =>
             ["metrics", "analytics", "queue"].includes(item),
           ) as LayoutPrefs["order"];
-          if (clientParam) nextLayout.metrics = clientCampaignMetricIds;
-          setLayoutPrefs(applyGraphDefaults(nextLayout));
+          setLayoutPrefs(applyLayoutDefaults(nextLayout));
         }
         if (parsed?.appearance) {
           const nextAppearance = { ...defaultAppearance, ...parsed.appearance };
@@ -665,10 +702,9 @@ export function InboxPage() {
         if (cancelled || !payload?.preferences) return;
         if (payload.preferences.layout)
           setLayoutPrefs((current) =>
-            applyGraphDefaults({
+            applyLayoutDefaults({
               ...current,
               ...payload.preferences.layout,
-              ...(clientParam ? { metrics: clientCampaignMetricIds } : {}),
               starredLeadIds: Array.isArray(
                 payload.preferences.layout.starredLeadIds,
               )
@@ -1110,20 +1146,30 @@ export function InboxPage() {
     // itself would refire on every setLeads and cause an inbox-wide loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleIdsKey]);
-  // Names the range the charts are actually drawn over, so a reader can tell at a
-  // glance whether a flat line means a quiet day or a quiet quarter.
-  const analyticsRangeLabel =
-    filter === "today"
-      ? "Today"
-      : filter === "week"
-        ? "This week"
-        : filter === "follow-ups"
-          ? "Replies needing follow-up · all time"
-          : filter === "Starred"
-            ? "Starred replies · all time"
-            : ["Hot", "Warm", "Nurture"].includes(filter)
-              ? `${filter} replies · all time`
-              : "All replies · all time";
+  /**
+   * What the charts are drawn over: this inbox's replies within the chart range, and nothing
+   * else. The queue's filters are not applied, because the charts used to inherit them and a
+   * search for one company would redraw "Reply volume" as that company's reply volume — which
+   * looks like the client's numbers collapsing rather than a filter being on.
+   */
+  const graphLeads = useMemo(() => {
+    const scoped = leads.filter(
+      (lead) =>
+        (!assignedClients || assignedClients.includes(lead.client)) &&
+        !excludedClients.includes(lead.client),
+    );
+    const start = graphRangeStart(layoutPrefs.graphRange);
+    if (!start) return scoped;
+    return scoped.filter(
+      (lead) => new Date(String(lead.latestReplyAt || lead.lastMessageAt)) >= start,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    leads,
+    layoutPrefs.graphRange,
+    assignedClients?.join("|") ?? "",
+    excludedClients.join("|"),
+  ]);
   const liveMetric = (metric: (typeof metricCatalog)[number]) => {
     const averages = analytics?.campaignAverages;
     const filterLabel = filter === "today" ? "today" : filter === "week" ? "this week" : filter === "follow-ups" ? "needing follow-up" : "total";
@@ -1684,10 +1730,15 @@ export function InboxPage() {
             >
               <InboxAnalytics
                 graphs={layoutPrefs.graphs}
-                leads={filtered}
-                filterLabel={analyticsRangeLabel}
+                leads={graphLeads}
+                range={layoutPrefs.graphRange}
                 timeZone={appearance.timeZone}
                 loading={inboxLoading}
+                onRangeChange={(graphRange) => {
+                  const next = { ...layoutPrefs, graphRange };
+                  setLayoutPrefs(next);
+                  savePreferences(next, appearance);
+                }}
                 onChange={(graphs) => {
                   // Touching the graphs opts this inbox out of the defaults reset, so it has
                   // to be written now — otherwise the next load would undo the edit.
@@ -2548,16 +2599,18 @@ const niceMax = (max: number) => {
 function InboxAnalytics({
   graphs,
   leads,
-  filterLabel,
+  range,
   timeZone,
   loading,
+  onRangeChange,
   onChange,
 }: {
   graphs: GraphConfig[];
   leads: Lead[];
-  filterLabel: string;
+  range: string;
   timeZone: string;
   loading: boolean;
+  onRangeChange: (range: string) => void;
   onChange: (graphs: GraphConfig[]) => void;
 }) {
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -2607,11 +2660,23 @@ function InboxAnalytics({
       <div className="inbox-analytics-heading">
         <div>
           <h2>Client analytics</h2>
-          {/* The charts are drawn from the already-filtered queue, so name the
-              range instead of restating the row count nobody was reading. */}
-          <span className="inbox-analytics-range">
-            {loading ? "Loading…" : filterLabel}
-          </span>
+          {/* The charts' own range. It sits in the heading rather than in the layout panel
+              because it is read as often as it is set — a flat line means nothing until you
+              know whether you are looking at a quiet day or a quiet quarter. */}
+          <div className="inbox-analytics-range" role="group" aria-label="Chart range">
+            {graphRanges.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={range === value ? "is-active" : ""}
+                aria-pressed={range === value}
+                onClick={() => onRangeChange(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {loading && <span className="inbox-analytics-loading">Loading…</span>}
         </div>
         <div className="graph-toolbar">
           <button

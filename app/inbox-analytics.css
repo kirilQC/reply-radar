@@ -26,17 +26,42 @@
   font-size: 19px;
   letter-spacing: -0.01em;
 }
-/* Quietly states which range the charts cover — it follows the queue filter. */
+/* The charts' own range. A segmented control rather than a dropdown: there are five options,
+   which one is on has to be readable without opening anything, and switching between two of
+   them to compare is one click each. */
 .inbox-analytics-heading .inbox-analytics-range {
+  display: flex;
   flex: 0 0 auto;
-  padding: 3px 9px;
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--border-soft);
   border-radius: 20px;
   background: var(--panel-2);
+}
+.inbox-analytics-range button {
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
   color: var(--muted);
+  font-family: inherit;
   font-size: 9.5px;
   font-weight: 650;
   letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.inbox-analytics-range button:hover {
+  color: var(--text);
+}
+.inbox-analytics-range button.is-active {
+  background: color-mix(in srgb, var(--accent) 20%, var(--panel));
+  color: var(--text);
+}
+.inbox-analytics-loading {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+  font-size: 10px;
 }
 .graph-toolbar {
   display: flex;

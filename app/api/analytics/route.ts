@@ -113,7 +113,7 @@ export async function GET(request: Request) {
     const workspaces = await supabase("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,logo_url,accent_color&order=name.asc") ?? [];
     const selected = requested.length ? workspaces.filter((row) => requested.includes(String(row.slug))) : workspaces;
     const ids = selected.map((row) => String(row.id));
-    if (!ids.length) return NextResponse.json({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], aiArkCalls: 0, aiArkSuccesses: 0, aiArkFailures: 0, aiArkTrend: [], aiArkTrendLabels: [], aiArkByClient: [], queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });
+    if (!ids.length) return NextResponse.json({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], trendLabels: [], averageDailyReplies: 0, queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });
     const filter = (batch: string[]) => batch.map(encodeURIComponent).join(",");
     const conversations = await queryByIds(ids, 20, async (batch) =>
       (await supabase(`rr_conversations?select=id,workspace_id,score,tier,last_message_at,created_at&workspace_id=in.(${filter(batch)})&limit=1000`)) ?? [],
@@ -121,9 +121,6 @@ export async function GET(request: Request) {
     const conversationIdList = conversations.map((row) => String(row.id)).filter(Boolean);
     const messages = await queryByIds(conversationIdList, 20, async (batch) =>
       (await supabase(`rr_messages?select=conversation_id,direction,sent_at,raw_data&conversation_id=in.(${filter(batch)})&order=sent_at.asc`)) ?? [],
-    );
-    const aiArkRuns = await queryByIds(ids, 20, async (batch) =>
-      (await supabase(`rr_sync_runs?select=id,workspace_id,status,started_at,finished_at,error_text&workspace_id=in.(${filter(batch)})&source=eq.ai_ark&run_type=eq.lead_enrichment&order=started_at.asc`)) ?? [],
     );
     const campaignResponses = await Promise.all(selected.map(async (workspace) => {
       const [rows, list] = await Promise.all([
@@ -144,9 +141,14 @@ export async function GET(request: Request) {
     const inbound = messages.filter((row) => row.direction === "inbound");
     const outbound = messages.filter((row) => row.direction === "outbound");
     const recentMessages = inbound.filter((row) => new Date(String(row.sent_at)).getTime() >= weekAgo);
-    const trend = Array.from({ length: 7 }, (_, index) => {
-      const dayStart = new Date(now - (6 - index) * 24 * 60 * 60 * 1000);
+    // Fourteen days rather than seven: a week of bars is too short to tell a slow week from a
+    // trend, and the chart now has the width for it.
+    const trendDays = Array.from({ length: 14 }, (_, index) => {
+      const dayStart = new Date(now - (13 - index) * 24 * 60 * 60 * 1000);
       dayStart.setHours(0, 0, 0, 0);
+      return dayStart;
+    });
+    const trend = trendDays.map((dayStart) => {
       const dayEnd = new Date(dayStart);
       dayEnd.setDate(dayStart.getDate() + 1);
       return inbound.filter((row) => {
@@ -154,6 +156,19 @@ export async function GET(request: Request) {
         return timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
       }).length;
     });
+    const trendLabels = trendDays.map((day) => day.toLocaleDateString("en-US", { month: "numeric", day: "numeric" }));
+    /**
+     * Replies per day across every client, over the span we actually hold data for.
+     *
+     * Dividing by a fixed window would understate a client we onboarded last week, so the
+     * divisor is the number of days from the first stored reply to today.
+     */
+    const firstReplyAt = inbound.reduce((earliest, row) => {
+      const timestamp = new Date(String(row.sent_at)).getTime();
+      return Number.isFinite(timestamp) && timestamp < earliest ? timestamp : earliest;
+    }, Number.POSITIVE_INFINITY);
+    const daysCovered = Number.isFinite(firstReplyAt) ? Math.max(1, Math.ceil((now - firstReplyAt) / 86_400_000)) : 1;
+    const averageDailyReplies = inbound.length ? inbound.length / daysCovered : 0;
     const queueMix = conversations.reduce<{ hot: number; warm: number; nurture: number }>((result, row) => {
       const tier = String(row.tier || "nurture").toLowerCase();
       if (tier === "hot" || tier === "warm" || tier === "nurture") result[tier] += 1;
@@ -229,16 +244,8 @@ export async function GET(request: Request) {
     }));
     const average = (key: "replyRate" | "acceptanceRate" | "positiveReplyRate") => campaignMetrics.length ? campaignMetrics.reduce((sum, row) => sum + row[key], 0) / campaignMetrics.length : 0;
     const campaignAverages = { replyRate: average("replyRate"), acceptanceRate: average("acceptanceRate"), positiveReplyRate: average("positiveReplyRate") };
-    const aiArkDays = Array.from({ length: 14 }, (_, index) => {
-      const day = new Date(now - (13 - index) * 24 * 60 * 60 * 1000); day.setHours(0, 0, 0, 0); return day;
-    });
-    const aiArkTrend = aiArkDays.map((dayStart) => { const end = new Date(dayStart); end.setDate(dayStart.getDate() + 1); return aiArkRuns.filter((run) => { const timestamp = new Date(String(run.started_at)).getTime(); return timestamp >= dayStart.getTime() && timestamp < end.getTime(); }).length; });
-    const aiArkByClient = selected.map((workspace) => {
-      const runs = aiArkRuns.filter((run) => run.workspace_id === workspace.id);
-      return { workspaceId: workspace.id, name: workspace.name, slug: workspace.slug, calls: runs.length, successes: runs.filter((run) => run.status === "success").length, failures: runs.filter((run) => run.status === "failed").length };
-    });
     const workspaceDetails = selected.map((row) => ({ id: String(row.id), name: String(row.name), slug: String(row.slug), logoUrl: row.logo_url ? String(row.logo_url) : null, accentColor: row.accent_color ? String(row.accent_color) : null }));
-    return NextResponse.json({ ok: true, status: "live", totalReplies: inbound.length, messagesSent: outbound.length, activeConversations: conversations.length, replies7d: recentMessages.length, trend, averageResponseMinutes, campaignMetrics, campaignAverages, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, aiArkCalls: aiArkRuns.length, aiArkSuccesses: aiArkRuns.filter((run) => run.status === "success").length, aiArkFailures: aiArkRuns.filter((run) => run.status === "failed").length, aiArkTrend, aiArkTrendLabels: aiArkDays.map((day) => day.toLocaleDateString("en-US", { month: "short", day: "numeric" })), aiArkByClient, queueMix, clientLoad, workspaces: selected.map((row) => row.name), workspaceDetails });
+    return NextResponse.json({ ok: true, status: "live", totalReplies: inbound.length, messagesSent: outbound.length, activeConversations: conversations.length, replies7d: recentMessages.length, trend, trendLabels, averageDailyReplies, averageResponseMinutes, campaignMetrics, campaignAverages, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, queueMix, clientLoad, workspaces: selected.map((row) => row.name), workspaceDetails });
   } catch (error) {
     return NextResponse.json({ ok: false, status: "error", error: error instanceof Error ? error.message : "Analytics unavailable" }, { status: 502 });
   }

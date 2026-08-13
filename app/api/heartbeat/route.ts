@@ -100,6 +100,17 @@ export async function GET() {
 
   try {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString();
+    /**
+     * The window the enrichment usage figures are counted over.
+     *
+     * Usage lived on the analytics page and was counted over all of history, which meant the
+     * headline call count kept climbing long after enrichment stopped running and could never
+     * be reconciled against the 24-hour health verdict beside it. Two weeks is short enough to
+     * describe the present and long enough to show a gap.
+     */
+    const usageWindowDays = 14;
+    const usageStart = new Date(Date.now() - usageWindowDays * 24 * 60 * 60 * 1_000);
+    usageStart.setHours(0, 0, 0, 0);
     const anthropicStarted = Date.now();
     const anthropicCheck = process.env.ANTHROPIC_API_KEY
       ? fetch("https://api.anthropic.com/v1/models?limit=1", {
@@ -135,6 +146,7 @@ export async function GET() {
       eventResult,
       schemaResult,
       aiArkResult,
+      aiArkUsageResult,
       recentLeadResult,
       anthropicResult,
     ] = await Promise.all([
@@ -144,6 +156,9 @@ export async function GET() {
       request(""),
       request(
         "rr_sync_runs?select=*&source=eq.ai_ark&run_type=eq.lead_enrichment&order=started_at.desc&limit=100",
+      ),
+      request(
+        `rr_sync_runs?select=workspace_id,status,started_at&source=eq.ai_ark&run_type=eq.lead_enrichment&started_at=gte.${encodeURIComponent(usageStart.toISOString())}&order=started_at.desc&limit=5000`,
       ),
       request(
         `rr_leads?select=id,workspace_id,linkedin_profile_url,raw_data,created_at&linkedin_profile_url=not.is.null&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=1000`,
@@ -170,6 +185,9 @@ export async function GET() {
       : [];
     const aiArkRuns = Array.isArray(aiArkResult.body)
       ? (aiArkResult.body as Row[])
+      : [];
+    const aiArkUsageRuns = Array.isArray(aiArkUsageResult.body)
+      ? (aiArkUsageResult.body as Row[])
       : [];
     const recentLeads = Array.isArray(recentLeadResult.body)
       ? (recentLeadResult.body as Row[])
@@ -394,6 +412,27 @@ export async function GET() {
         error: run.error_text,
       })),
       recentRuns: aiArkRuns.slice(0, 25),
+      usage: {
+        windowDays: usageWindowDays,
+        calls: aiArkUsageRuns.length,
+        successes: aiArkUsageRuns.filter((run) => run.status === "success").length,
+        failures: aiArkUsageRuns.filter((run) => run.status === "failed").length,
+        byClient: rows
+          .map((workspace) => {
+            const runs = aiArkUsageRuns.filter(
+              (run) => String(run.workspace_id) === String(workspace.id),
+            );
+            return {
+              name: String(workspace.name),
+              slug: String(workspace.slug),
+              calls: runs.length,
+              successes: runs.filter((run) => run.status === "success").length,
+              failures: runs.filter((run) => run.status === "failed").length,
+            };
+          })
+          .filter((client) => client.calls > 0)
+          .sort((a, b) => b.calls - a.calls),
+      },
     };
     return NextResponse.json({
       status: "live",
