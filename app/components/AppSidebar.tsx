@@ -10,8 +10,10 @@ const items = [
   ["/inbox", "Inbox", "inbox"],
   ["/database", "Database", "database"],
   ["/profiles", "Profiles", "profiles"],
+  ["/meetings", "Meetings", "calendar"],
   ["/analytics", "Analytics", "analytics"],
   ["/reports", "Reports", "reports"],
+  ["/os-brain", "OS Brain", "brain"],
   ["/health", "System health", "health"],
   ["/admin", "Configuration", "settings"],
 ] as const;
@@ -25,6 +27,7 @@ const iconPaths: Record<string, string> = {
   inbox: "M4 5h16v14H4z M4 9h5l1.5 2h3L15 9h5",
   settings: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7",
   database: "M5 5c0-2 14-2 14 0v14c0 2-14 2-14 0z M5 5c0 2 14 2 14 0 M5 12c0 2 14 2 14 0",
+  brain: "M12 5a3 3 0 0 0-3 3 2.5 2.5 0 0 0-1 4.8V16a3 3 0 0 0 4 2.8 3 3 0 0 0 4-2.8v-3.2A2.5 2.5 0 0 0 15 8a3 3 0 0 0-3-3 M12 5v14",
 };
 function SidebarIcon({ name }: { name: string }) {
   return (

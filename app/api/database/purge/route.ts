@@ -1,12 +1,18 @@
 /**
- * One-off cleanup for records the inbox already refuses to show.
+ * Removes records the inbox already refuses to show. The Render worker calls this hourly.
  *
  * The inbox filters out conversations the lead started, and conversations whose lead row no longer
  * exists. Filtering keeps them off screen but leaves them in the database, where they still cost
  * query time and still show up in exports and counts. This removes them for good.
  *
- * A dry run is the default. Deleting is irreversible, so the caller has to ask for it explicitly, and
- * the same scan that reports the numbers is the one that does the deleting when it is confirmed.
+ * There is no button for it any more, on purpose: leaving it to someone to remember meant the
+ * database quietly filled with people who had cold-messaged us. The verdict comes from
+ * classifyConversationOrigin, which stores nothing, so tightening that rule is what makes this sweep
+ * reach rows a previous version of the rule had waved through — which is exactly what happened to the
+ * conversations that were being credited to campaigns they had never been in.
+ *
+ * A dry run is still the default, because the caller has to be explicit about an irreversible delete,
+ * and the same scan that reports the numbers is the one that does the deleting when confirmed.
  */
 import { NextResponse } from "next/server";
 import { queryByIds } from "../../../lib/chunk-query";

@@ -173,23 +173,36 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
       ...webhookCampaign,
       ...(history.campaign.id ? { id: history.campaign.id } : {}),
       ...(history.campaign.name ? { name: history.campaign.name } : {}),
+      source: history.campaign.source,
     };
-    // Reply Radar exists to work outbound campaign replies. Anyone who reached out to us
-    // without a campaign attached is not part of that motion — the inbox already hides
-    // them, but they were still burning storage and query time. Refuse the insert at the
-    // door so they never land in the database in the first place. Campaign attribution
-    // can come from the webhook envelope, the fetched history, or any single message row.
-    const anyMessageHasCampaign = history.messages.some((message) => {
-      const raw = object(object(message.raw).reply_radar);
-      const embedded = object(raw.campaign);
-      return Boolean(text(embedded.id) || text(embedded.name));
-    });
-    const hasCampaignAttribution = Boolean(text(campaign.id) || text(campaign.name)) || anyMessageHasCampaign;
+    /*
+     * Nobody gets into the database unless we spoke first.
+     *
+     * This guard existed already and it did not work, because it accepted a campaign name as proof
+     * of outreach and `campaignForLead` was inventing campaign names out of the sending account's
+     * roster. Every cold DM therefore looked campaign-attributed and walked straight in — and then
+     * showed up in the inbox wearing a campaign it had never been part of.
+     *
+     * So the message order is what decides now. A campaign only overrides it when HeyReach itself
+     * vouched for the attribution (`source` of "webhook" or "membership"), which is the case that
+     * genuinely needs the exemption: a campaign can open with a connection request, and the lead's
+     * first *message* is then inbound even though we found them.
+     *
+     * The one thing that is not decided here is a thread we could not read in full. HeyReach being
+     * unreachable leaves us holding the newest messages only, where the earliest one we have is not
+     * the earliest one that exists — and discarding on that would mean a HeyReach outage silently
+     * threw away every reply that arrived during it. Those are stored and reported as unknown, and
+     * the worker's refresh reads the real thread and marks the lead complete, after which the purge
+     * settles it on evidence.
+     */
+    const campaignProvesOutreach =
+      (history.campaign.source === "webhook" || history.campaign.source === "membership") &&
+      Boolean(text(campaign.id) || text(campaign.name));
     const earliestMessage = history.messages.length
-      ? [...history.messages].sort((left, right) => String(left.sentAt).localeCompare(String(right.sentAt)))[0]
+      ? [...history.messages].sort((left, right) => Date.parse(String(left.sentAt)) - Date.parse(String(right.sentAt)))[0]
       : null;
-    const leadReachedOutFirst = earliestMessage?.direction === "inbound";
-    if (!hasCampaignAttribution && leadReachedOutFirst) {
+    const leadReachedOutFirst = !historyError && earliestMessage?.direction === "inbound";
+    if (!campaignProvesOutreach && leadReachedOutFirst) {
       if (eventId) {
         await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, {
           method: "PATCH",
@@ -197,7 +210,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
           body: JSON.stringify({
             status: "discarded",
             processed_at: new Date().toISOString(),
-            error_text: "Lead reached out to us first and is not attributed to any campaign — Reply Radar only tracks outbound replies.",
+            error_text: "The lead sent the first message and HeyReach does not have them in a campaign — Reply Radar only tracks replies to outreach we sent.",
           }),
         }).catch(() => null);
       }
@@ -212,7 +225,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
           workspaceId: workspace.id,
           workspaceName: text(workspace.name) || text(workspace.slug),
           reason: "inbound_lead_no_campaign",
-          summary: "Skipped: lead approached us first and is not tied to any campaign.",
+          summary: "Skipped: the lead sent the first message and is in none of our campaigns.",
         },
       }).catch(() => null);
       return { discarded: true, reason: "inbound_lead_no_campaign" as const };

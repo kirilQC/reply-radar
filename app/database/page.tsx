@@ -51,17 +51,8 @@ type Detail = {
   nextMessageOffset: number | null;
 };
 type FilterOptions = { senders: string[]; campaigns: string[] };
-type PurgePreview = {
-  scannedConversations: number;
-  leadInitiatedConversations: number;
-  orphanedConversations: number;
-  leadsToDelete: number;
-  sampleNames: string[];
-  hasMore: boolean;
-  deleted?: { leads: number; conversations: number; messages: number };
-};
-/** Mirrors the shape /api/database/blocked returns. Declared here like Detail and PurgePreview, rather
-    than imported from the server lib, so this client file pulls in no server code. */
+/** Mirrors the shape /api/database/blocked returns. Declared here like Detail, rather than imported
+    from the server lib, so this client file pulls in no server code. */
 type BlockedLead = { profileKey: string; name: string; reason: string; blockedAt: string };
 
 const initials = (name: string) =>
@@ -206,14 +197,12 @@ export default function DatabasePage() {
   const [timeRange, setTimeRange] = useState("all");
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({ senders: [], campaigns: [] });
   const [exporting, setExporting] = useState(false);
-  const [purge, setPurge] = useState<PurgePreview | null>(null);
-  const [purgeBusy, setPurgeBusy] = useState<"" | "preview" | "delete">("");
-  const [purgeError, setPurgeError] = useState("");
+  const [blockedError, setBlockedError] = useState("");
   /**
-   * The block list, fetched only when someone asks to see it.
+   * The block list, loaded with the page.
    *
-   * `null` means "not opened", which is different from an empty array meaning "nobody is blocked" — the
-   * panel has to be able to say the second thing.
+   * `null` means "not read yet", which is different from an empty array meaning "nobody is blocked" —
+   * the section has to be able to say the second thing rather than look like it failed.
    */
   const [blocked, setBlocked] = useState<BlockedLead[] | null>(null);
   const [blockedBusy, setBlockedBusy] = useState(false);
@@ -345,28 +334,6 @@ export default function DatabasePage() {
     }
   };
 
-  // Counting first and deleting second, against the same scan, so the numbers on screen are the rows
-  // that will go rather than an estimate taken at a different moment.
-  const runPurge = async (confirm: boolean) => {
-    setPurgeBusy(confirm ? "delete" : "preview");
-    setPurgeError("");
-    try {
-      const response = await fetch("/api/database/purge", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(confirm ? { confirm: true } : {}),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) throw new Error(String(payload.error || "Cleanup failed."));
-      setPurge(payload as PurgePreview);
-      if (confirm) void load(false);
-    } catch (purgeFailure) {
-      setPurgeError(purgeFailure instanceof Error ? purgeFailure.message : "Cleanup failed.");
-    } finally {
-      setPurgeBusy("");
-    }
-  };
-
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void load(false);
@@ -427,20 +394,29 @@ export default function DatabasePage() {
     }
   };
 
-  const loadBlocked = async () => {
+  const loadBlocked = useCallback(async () => {
     setBlockedBusy(true);
-    setPurgeError("");
+    setBlockedError("");
     try {
       const response = await fetch("/api/database/blocked", { cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) throw new Error(String(payload.error || "Could not read the block list."));
       setBlocked(Array.isArray(payload.blocked) ? payload.blocked : []);
-    } catch (blockedError) {
-      setPurgeError(blockedError instanceof Error ? blockedError.message : "Could not read the block list.");
+    } catch (failure) {
+      setBlockedError(failure instanceof Error ? failure.message : "Could not read the block list.");
     } finally {
       setBlockedBusy(false);
     }
-  };
+  }, []);
+
+  // Deferred a tick like the lead load above it, because the fetch flips a busy flag as its first act
+  // and doing that during the render pass is what the set-state-in-effect rule is warning about.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadBlocked();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadBlocked]);
 
   /**
    * Unblocking does not bring anyone back — the records went with the block. It only stops us refusing
@@ -463,7 +439,7 @@ export default function DatabasePage() {
       if (!response.ok || !payload.ok) throw new Error(String(payload.error || "Unblock failed"));
       setBlocked((current) => (current ?? []).filter((item) => item.profileKey !== entry.profileKey));
     } catch (unblockError) {
-      setPurgeError(unblockError instanceof Error ? unblockError.message : "Could not unblock this profile.");
+      setBlockedError(unblockError instanceof Error ? unblockError.message : "Could not unblock this profile.");
     } finally {
       setBlockedBusy(false);
     }
@@ -482,7 +458,7 @@ export default function DatabasePage() {
     const conversationCount = detail?.conversations?.length ?? 0;
     if (
       !window.confirm(
-        `Block ${name}? This deletes ${conversationCount} conversation${conversationCount === 1 ? "" : "s"} and every message, and any future reply from their LinkedIn profile will be refused instead of appearing in the inbox. You can unblock them from "Blocked profiles".`,
+        `Block ${name}? This deletes ${conversationCount} conversation${conversationCount === 1 ? "" : "s"} and every message, and any future reply from their LinkedIn profile will be refused instead of appearing in the inbox. You can unblock them from "Blocked profiles" at the bottom of this page.`,
       )
     )
       return;
@@ -493,9 +469,9 @@ export default function DatabasePage() {
       if (!response.ok || !payload.ok) throw new Error(String(payload.error || "Block failed"));
       setSelectedId(null);
       setDetail(null);
-      // Refreshed rather than patched locally: the block list is the record of what happened, and a count
+      // Refreshed rather than patched locally: the block list is the record of what happened, and an entry
       // assembled on the client would be a second opinion about it.
-      if (blocked) void loadBlocked();
+      void loadBlocked();
       void load(false);
     } catch (blockError) {
       setError(blockError instanceof Error ? blockError.message : "Could not block this lead.");
@@ -566,89 +542,8 @@ export default function DatabasePage() {
                     : `${totalLeads.toLocaleString()} total lead${totalLeads === 1 ? "" : "s"} in the database`}
               </div>
             </div>
-            <div className="database-heading-actions"><button className="secondary-button" onClick={() => void runPurge(false)} disabled={Boolean(purgeBusy)}>{purgeBusy === "preview" ? "Checking…" : "Find inbound-first leads"}</button><button className="secondary-button" onClick={() => (blocked ? setBlocked(null) : void loadBlocked())} disabled={blockedBusy}>{blockedBusy ? "Loading…" : blocked ? "Hide blocked" : "Blocked profiles"}</button><button className="secondary-button" onClick={exportCsv} disabled={exporting}>{exporting ? "Exporting…" : "Export CSV ↓"}</button><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
+            <div className="database-heading-actions"><button className="secondary-button" onClick={exportCsv} disabled={exporting}>{exporting ? "Exporting…" : "Export CSV ↓"}</button><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
           </div>
-          {purgeError && <div className="database-error">{purgeError}</div>}
-          {/*
-            The only way off the block list.
-            Blocking is one click behind one confirmation and it deletes the records that would let you
-            find the person again, so without this a mis-click would be permanent. Reuses the purge card,
-            which is the same kind of thing: a panel that appears when asked and closes when done.
-          */}
-          {blocked && (
-            <section className="database-purge-card">
-              <h2>Blocked profiles</h2>
-              {blocked.length === 0 ? (
-                <p>Nobody is blocked. Blocking someone from their lead record stops their future replies being stored.</p>
-              ) : (
-                <>
-                  <p>
-                    {blocked.length} profile{blocked.length === 1 ? "" : "s"} refused at ingestion. Replies from
-                    {blocked.length === 1 ? " this profile is" : " these profiles are"} discarded instead of appearing
-                    in the inbox. Unblocking does not restore deleted conversations.
-                  </p>
-                  <ul className="database-blocked-list">
-                    {blocked.map((entry) => (
-                      <li key={entry.profileKey}>
-                        <span>
-                          <strong>{entry.name || entry.profileKey}</strong>
-                          <small>{entry.reason || entry.profileKey}</small>
-                        </span>
-                        <button className="text-button" onClick={() => void unblock(entry)} disabled={blockedBusy}>
-                          Unblock
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-              <button className="secondary-button" onClick={() => setBlocked(null)}>Close</button>
-            </section>
-          )}
-          {purge && (
-            <section className="database-purge-card">
-              {purge.deleted ? (
-                <>
-                  <h2>Cleanup done</h2>
-                  <p>
-                    Deleted {purge.deleted.leads} lead{purge.deleted.leads === 1 ? "" : "s"},{" "}
-                    {purge.deleted.conversations} conversation{purge.deleted.conversations === 1 ? "" : "s"} and{" "}
-                    {purge.deleted.messages} message{purge.deleted.messages === 1 ? "" : "s"}.
-                  </p>
-                  {purge.hasMore && <p>More records are waiting — run it again to continue.</p>}
-                  <button className="secondary-button" onClick={() => setPurge(null)}>Close</button>
-                </>
-              ) : (
-                <>
-                  <h2>Inbound-first leads</h2>
-                  <p>
-                    Scanned {purge.scannedConversations} conversation{purge.scannedConversations === 1 ? "" : "s"}.{" "}
-                    {purge.leadInitiatedConversations} were started by the lead
-                    {purge.orphanedConversations > 0
-                      ? `, and ${purge.orphanedConversations} belong to a lead record that no longer exists`
-                      : ""}
-                    . {purge.leadsToDelete} lead record{purge.leadsToDelete === 1 ? "" : "s"} will be removed entirely —
-                    a lead is kept if we opened any of their other conversations.
-                  </p>
-                  {purge.sampleNames.length > 0 && (
-                    <p className="database-purge-names">{purge.sampleNames.join(", ")}
-                      {purge.leadInitiatedConversations > purge.sampleNames.length ? " and others" : ""}</p>
-                  )}
-                  {purge.leadInitiatedConversations + purge.orphanedConversations === 0 ? (
-                    <p>Nothing to clean up.</p>
-                  ) : (
-                    <div className="database-purge-actions">
-                      <button className="database-delete-lead-button" onClick={() => void runPurge(true)} disabled={Boolean(purgeBusy)}>
-                        {purgeBusy === "delete" ? "Deleting…" : "Delete them permanently"}
-                      </button>
-                      <button className="text-button" onClick={() => setPurge(null)}>Cancel</button>
-                    </div>
-                  )}
-                  {purge.hasMore && <p>Only the first {purge.scannedConversations} conversations were scanned. Running this again picks up where it left off.</p>}
-                </>
-              )}
-            </section>
-          )}
           <section className="database-toolbar">
             <label className="database-search">
               <span>⌕</span>
@@ -772,6 +667,46 @@ export default function DatabasePage() {
               {loadingMore ? "Loading…" : "Load 50 more leads"}
             </button>
           )}
+          {/*
+            The only way off the block list, and the only place blocked people are visible at all.
+
+            It sits under the table rather than behind a button because blocking is one click behind one
+            confirmation and it deletes the records that would otherwise let you find the person again — so
+            a mis-click needs to be recoverable without knowing that a panel exists. Below the leads is the
+            right place for it: it is a footnote about who is missing from the list above.
+          */}
+          <section className="database-blocked-card" aria-label="Blocked profiles">
+            <h2>Blocked profiles</h2>
+            {blockedError ? (
+              <p className="database-blocked-error">{blockedError}</p>
+            ) : blocked == null ? (
+              <p>Reading the block list…</p>
+            ) : blocked.length === 0 ? (
+              <p>Nobody is blocked. Blocking someone from their lead record deletes their records and stops their future replies being stored.</p>
+            ) : (
+              <>
+                <p>
+                  {blocked.length} profile{blocked.length === 1 ? "" : "s"} refused at ingestion —
+                  {blocked.length === 1 ? " their replies are" : " their replies are"} discarded instead of
+                  appearing in the inbox. Unblocking does not restore deleted conversations; it only means the
+                  next reply is stored again.
+                </p>
+                <ul className="database-blocked-list">
+                  {blocked.map((entry) => (
+                    <li key={entry.profileKey}>
+                      <span>
+                        <strong>{entry.name || entry.profileKey}</strong>
+                        <small>{entry.reason || entry.profileKey}</small>
+                      </span>
+                      <button className="text-button" onClick={() => void unblock(entry)} disabled={blockedBusy}>
+                        Unblock
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
         </main>
       </section>
       {selectedId && (

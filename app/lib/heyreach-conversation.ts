@@ -14,13 +14,30 @@ export type ConversationMessage = {
 };
 
 type Sender = { id: string; name: string };
+
+/**
+ * Where a campaign name came from, because that decides whether it is evidence or decoration.
+ *
+ * `webhook` — HeyReach's own webhook envelope named the campaign this reply belongs to.
+ * `membership` — HeyReach confirmed the lead is enrolled in the campaign.
+ * `derived` — the name was found somewhere in a conversation payload. Good enough to display, not
+ *   good enough to conclude we ever contacted this person.
+ *
+ * Only the first two are trusted, and the distinction matters: attribution used to be synthesised
+ * from whatever campaign the sending account happened to be running, which handed a campaign name
+ * to people who had cold-messaged us out of nowhere. That fallback is gone, and the source is
+ * recorded so nothing downstream has to take a bare name on faith again.
+ */
+export type CampaignSource = "" | "webhook" | "membership" | "derived";
+export type CampaignAttribution = { id: string; name: string; source: CampaignSource };
+
 type HistoryResult = {
   conversationExternalId: string;
   messages: ConversationMessage[];
   sender: Sender;
   fetchedAt: string;
   conversationSummary: JsonObject;
-  campaign: { id: string; name: string };
+  campaign: CampaignAttribution;
 };
 
 const apiBase = process.env.HEYREACH_API_BASE ?? "https://api.heyreach.io/api/public";
@@ -148,10 +165,11 @@ export function conversationFromWebhook(payload: JsonObject): HistoryResult {
       ? payload.recentMessages
       : [];
   const suppliedCampaign = object(payload.campaign);
-  const campaign = {
+  const envelope = {
     id: text(first(suppliedCampaign, ["id", "campaignId", "campaign_id"])),
     name: text(first(suppliedCampaign, ["name", "title", "campaignName", "campaign_name"])),
   };
+  const campaign: CampaignAttribution = { ...envelope, source: envelope.id || envelope.name ? "webhook" : "" };
   const conversationExternalId =
     text(payload.conversation_id ?? payload.conversationId) ||
     text(payload.correlation_id ?? payload.correlationId) ||
@@ -196,11 +214,19 @@ function newestEligibleCampaign(rows: JsonObject[], eventTimestamp: string) {
   })[0];
 }
 
-async function campaignForLead(apiKey: string, lead: JsonObject, senderId: string, eventTimestamp: string) {
-  const campaignIdentity = (row: JsonObject) => ({
-    id: text(first(row, ["campaignId", "campaign_id", "id"])),
-    name: text(first(row, ["campaignName", "campaign_name", "name", "title"])),
-  });
+/**
+ * Asks HeyReach which of our campaigns this lead is actually enrolled in.
+ *
+ * An empty answer means an empty answer. This function used to fall back to `campaign/GetAll`
+ * filtered by the sending account and pick that account's newest campaign — so a stranger who
+ * cold-messaged one of our senders came out of here wearing the name of a campaign they had never
+ * been in. That is where the phantom campaign names came from, and it also defeated every guard
+ * downstream that read a campaign name as proof we had gone out and found the person.
+ *
+ * Returning nothing is the honest answer, and the caller is built to cope with it.
+ */
+async function campaignMembership(apiKey: string, lead: JsonObject, eventTimestamp: string): Promise<CampaignAttribution> {
+  const none: CampaignAttribution = { id: "", name: "", source: "" };
   try {
     const identity = {
       email: text(lead.email_address ?? lead.emailAddress),
@@ -214,25 +240,15 @@ async function campaignForLead(apiKey: string, lead: JsonObject, senderId: strin
     const root = object(response);
     const rows = Array.isArray(root.items) ? root.items.map(object) : Array.isArray(response) ? response.map(object) : [];
     const selected = newestEligibleCampaign(rows, eventTimestamp);
-    if (selected) return campaignIdentity(selected);
-
-    // Some HeyReach workspaces return an empty GetCampaignsForLead result for
-    // replies that still originated in a campaign. In that case, use the
-    // sender's campaign roster and the reply timestamp as deterministic
-    // attribution rather than discarding campaign context.
-    const numericSenderId = Number(senderId);
-    if (!Number.isFinite(numericSenderId)) return { id: "", name: "" };
-    const senderCampaignResponse = await heyReach(apiKey, "campaign/GetAll", {
-      method: "POST",
-      body: JSON.stringify({ offset: 0, limit: 100, accountIds: [numericSenderId] }),
-    });
-    const senderCampaignRoot = object(senderCampaignResponse);
-    const senderCampaigns = Array.isArray(senderCampaignRoot.items) ? senderCampaignRoot.items.map(object) : [];
-    const senderCampaign = newestEligibleCampaign(senderCampaigns, eventTimestamp);
-    return senderCampaign ? campaignIdentity(senderCampaign) : { id: "", name: "" };
+    if (!selected) return none;
+    return {
+      id: text(first(selected, ["campaignId", "campaign_id", "id"])),
+      name: text(first(selected, ["campaignName", "campaign_name", "name", "title"])),
+      source: "membership",
+    };
   } catch {
     // Campaign attribution must never prevent a valid reply from being stored.
-    return { id: "", name: "" };
+    return none;
   }
 }
 
@@ -277,11 +293,19 @@ export async function fetchFullConversation(apiKey: string, payload: JsonObject)
     id: text(first(suppliedCampaign, ["id", "campaignId", "campaign_id"])),
     name: text(first(suppliedCampaign, ["name", "title", "campaignName", "campaign_name"])),
   };
+  // Membership is asked before the payload scan, not after it. The scan walks seven levels of the
+  // chatroom looking for anything campaign-shaped, which finds names that belong to the account or
+  // the inbox rather than to this lead — fine as a label, useless as evidence.
+  const membership = webhookCampaign.name || webhookCampaign.id
+    ? null
+    : await campaignMembership(apiKey, lead, eventTimestamp);
   const embeddedCampaign = campaignFrom([payload, conversation, historyPayload]);
-  const resolvedCampaign = webhookCampaign.name
-    ? webhookCampaign
-    : embeddedCampaign.name
-      ? embeddedCampaign
-      : await campaignForLead(apiKey, lead, resolvedSender.id, eventTimestamp);
+  const resolvedCampaign: CampaignAttribution = webhookCampaign.name || webhookCampaign.id
+    ? { ...webhookCampaign, source: "webhook" }
+    : membership?.name || membership?.id
+      ? membership
+      : embeddedCampaign.name || embeddedCampaign.id
+        ? { ...embeddedCampaign, source: "derived" }
+        : { id: "", name: "", source: "" };
   return { conversationExternalId, messages: mergeConversationMessages(history, recent), sender: resolvedSender, fetchedAt: new Date().toISOString(), conversationSummary: conversation, campaign: resolvedCampaign };
 }

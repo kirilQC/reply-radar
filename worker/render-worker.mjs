@@ -115,8 +115,9 @@ async function refreshConversation(workspace, conv) {
   if (!accountId || !heyreachConvId) return 0;
 
   // Get lead profile URL
-  const leads = conv.lead_id ? await supabase(`rr_leads?select=linkedin_profile_url&id=eq.${encodeURIComponent(conv.lead_id)}&limit=1`) : [];
+  const leads = conv.lead_id ? await supabase(`rr_leads?select=linkedin_profile_url,raw_data&id=eq.${encodeURIComponent(conv.lead_id)}&limit=1`) : [];
   const profileUrl = String((leads && leads[0]?.linkedin_profile_url) || "");
+  const leadRaw = (leads && leads[0] && leads[0].raw_data) || {};
 
   let chatroom = null;
   try {
@@ -200,6 +201,24 @@ async function refreshConversation(workspace, conv) {
     }
   }
 
+  /*
+   * A lead stored from the webhook alone is holding the newest messages only, so nothing can say who
+   * spoke first and the origin check has to abstain — which means an inbound-first conversation that
+   * arrived while HeyReach was unreachable sits in the inbox indefinitely.
+   *
+   * Reading the chatroom is what ends that. The full thread is now stored, so the lead is marked
+   * complete and the next purge judges it on real evidence. Mirrors app/api/conversations/refresh,
+   * which did this already — but that only runs when somebody opens the conversation, and the point
+   * of the worker is that nobody has to.
+   */
+  if (messages.length && String((leadRaw.reply_radar || {}).history_status || "") !== "complete" && conv.lead_id) {
+    await supabase(`rr_leads?id=eq.${encodeURIComponent(conv.lead_id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ raw_data: { ...leadRaw, reply_radar: { ...(leadRaw.reply_radar || {}), history_status: "complete", history_fetched_at: now } } }),
+    }).catch(() => null);
+  }
+
   const latest = [...messages].sort((a, b) => b.sentAt.localeCompare(a.sentAt))[0];
   if (latest) {
     await supabase(`rr_conversations?id=eq.${encodeURIComponent(conv.id)}`, {
@@ -250,10 +269,11 @@ async function refreshAllConversations() {
 }
 
 // ── Inbound-lead auto purge ─────────────────────────────────────────
-// The ingestion path refuses non-campaign inbound leads at the door, but rows that
-// pre-date that guard still sit in the database. Every ~1h the worker calls the
-// purge route with `confirm: true` so those rows get cleaned out on their own —
-// no more manually running the admin purge to keep the inbox honest.
+// Ingestion refuses leads who messaged us first, but rows that pre-date that guard — or
+// that got past an earlier, looser version of it — still sit in the database. Every ~1h
+// the worker calls the purge route with `confirm: true` so they clean themselves out.
+// This is the only thing that runs the purge now; the admin button for it is gone,
+// because relying on somebody to remember is how the noise built up in the first place.
 const PURGE_LOOP_MS = 60 * 60 * 1000;
 let lastPurgeRun = 0;
 
