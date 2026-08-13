@@ -244,6 +244,7 @@ export default function ReportsPage() {
   const [templates, setTemplates] = useState<ReportTemplate[]>(BUILT_IN_TEMPLATES);
   const [saved, setSaved] = useState<SavedReport[]>([]);
   const [savedWarning, setSavedWarning] = useState("");
+  const [deletingId, setDeletingId] = useState("");
 
   // Authoring a template: a name and a prompt, which is all a template really is.
   const [composerOpen, setComposerOpen] = useState(false);
@@ -983,6 +984,33 @@ export default function ReportsPage() {
     }
   };
 
+  /**
+   * Removes a filed report for good.
+   *
+   * Confirmed by name and date rather than with a generic "are you sure", because the hub fills up with
+   * rows that read identically — several same-day runs of the same template — and the whole risk here is
+   * deleting the one that was actually sent to the client.
+   */
+  const deleteSaved = async (row: SavedReport) => {
+    if (deletingId) return;
+    const confirmed = window.confirm(
+      `Delete "${row.title}" from ${formatDate(row.generated_at)}?\n\nThe report and the numbers it was built from are removed permanently. This cannot be undone.`,
+    );
+    if (!confirmed) return;
+    setDeletingId(row.id);
+    try {
+      const response = await fetch(`/api/reports/saved?id=${encodeURIComponent(row.id)}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "That report could not be deleted.");
+      setSaved((prev) => prev.filter((entry) => entry.id !== row.id));
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That report could not be deleted.");
+    } finally {
+      setDeletingId("");
+    }
+  };
+
   return (
     <div className="app-shell">
       <AppSidebar />
@@ -1221,15 +1249,29 @@ export default function ReportsPage() {
             {clientReports.length ? (
               <div className="hub-saved-list">
                 {clientReports.map((row) => (
-                  <button key={row.id} type="button" className="hub-saved-row" onClick={() => openSaved(row.id)}>
-                    <span>
-                      <strong>{row.title}</strong>
-                      <small>{row.template_name}</small>
-                    </span>
-                    <span>{row.period_label}</span>
-                    <span>{row.page_estimate ? `${row.page_estimate}p` : "—"}</span>
-                    <time dateTime={row.generated_at}>{formatDate(row.generated_at)}</time>
-                  </button>
+                  // The row that opens a report and the button that deletes it have to be siblings:
+                  // one cannot be nested inside the other, so the entry is the wrapper.
+                  <div key={row.id} className="hub-saved-entry">
+                    <button type="button" className="hub-saved-row" onClick={() => openSaved(row.id)}>
+                      <span>
+                        <strong>{row.title}</strong>
+                        <small>{row.template_name}</small>
+                      </span>
+                      <span>{row.period_label}</span>
+                      <span>{row.page_estimate ? `${row.page_estimate}p` : "—"}</span>
+                      <time dateTime={row.generated_at}>{formatDate(row.generated_at)}</time>
+                    </button>
+                    <button
+                      type="button"
+                      className="hub-saved-delete"
+                      onClick={() => void deleteSaved(row)}
+                      disabled={deletingId === row.id}
+                      title={`Delete ${row.title}`}
+                      aria-label={`Delete ${row.title} from ${formatDate(row.generated_at)}`}
+                    >
+                      {deletingId === row.id ? "…" : "✕"}
+                    </button>
+                  </div>
                 ))}
               </div>
             ) : (

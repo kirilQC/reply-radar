@@ -2151,6 +2151,22 @@ body.light-mode .prompt-dialog-backdrop {
   background: var(--report-surface);
 }
 
+/* The dividing line lives on the entry rather than the row, because the row is no longer the whole
+   width of the list: the delete button sits beside it and has to sit above the same line. */
+.hub-saved-entry {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--report-line);
+}
+
+.hub-saved-entry:last-child {
+  border-bottom: 0;
+}
+
+.hub-saved-entry:hover {
+  background: var(--report-inset);
+}
+
 .hub-saved-row {
   display: grid;
   /* Title and template, then period, page count, date. The client is not a column: the whole list
@@ -2158,12 +2174,11 @@ body.light-mode .prompt-dialog-backdrop {
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto auto;
   gap: 14px;
   align-items: center;
+  flex: 1;
+  min-width: 0;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--report-line);
+  border: 0;
   background: transparent;
-  border-left: 0;
-  border-right: 0;
-  border-top: 0;
   text-align: left;
   color: var(--report-ink);
   font-family: inherit;
@@ -2171,12 +2186,37 @@ body.light-mode .prompt-dialog-backdrop {
   cursor: pointer;
 }
 
-.hub-saved-row:last-child {
-  border-bottom: 0;
+/* Deliberately quiet until the row is hovered, and never the thing the eye lands on first: opening a
+   filed report is the common action and deleting one is irreversible. */
+.hub-saved-delete {
+  flex: 0 0 auto;
+  width: 38px;
+  border: 0;
+  border-left: 1px solid transparent;
+  background: transparent;
+  color: var(--report-ink-faint);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
 }
 
-.hub-saved-row:hover {
-  background: var(--report-inset);
+.hub-saved-entry:hover .hub-saved-delete,
+.hub-saved-delete:focus-visible {
+  opacity: 1;
+  border-left-color: var(--report-line);
+}
+
+.hub-saved-delete:hover:not(:disabled) {
+  color: var(--report-negative);
+  background: var(--report-negative-bg);
+}
+
+.hub-saved-delete:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
 .hub-saved-row strong {

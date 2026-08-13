@@ -1114,6 +1114,25 @@ export function InboxPage() {
     }
     setAiLoading(false);
   };
+  // Sentiment is scored once, when the reply lands, and then never revisited — which is the right
+  // default until the classification rules change, at which point the stored verdict is an old
+  // opinion nothing would otherwise correct. Clicking the badge asks for today's answer.
+  const [sentimentBusy, setSentimentBusy] = useState(false);
+  const rescoreSentiment = async () => {
+    if (sentimentBusy || current.id === "empty") return;
+    const conversationId = current.id;
+    setSentimentBusy(true);
+    const response = await fetch("/api/conversations/sentiment/rescore", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ conversationId, workspaceId: workspaceAi.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name }),
+    }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    if (response?.ok && payload?.sentiment) {
+      setLeads((prev) => prev.map((lead) => (lead.id === conversationId ? { ...lead, sentiment: String(payload.sentiment) } : lead)));
+    }
+    setSentimentBusy(false);
+  };
   useEffect(() => {
     setAiDraft("");
     setAiReason("");
@@ -1910,7 +1929,17 @@ export function InboxPage() {
                           {current.campaignName}
                         </span>
                       )}
-                      {current.sentiment && <span className={`sentiment-badge sentiment-${current.sentiment}`}>{current.sentiment}</span>}
+                      {current.sentiment && (
+                        <button
+                          type="button"
+                          className={`sentiment-badge sentiment-${current.sentiment} sentiment-badge-action`}
+                          onClick={() => void rescoreSentiment()}
+                          disabled={sentimentBusy}
+                          title="Re-score this reply with the current sentiment rules"
+                        >
+                          {sentimentBusy ? "scoring…" : current.sentiment}
+                        </button>
+                      )}
                     </div>
                     {Boolean(current.headline || current.industry) && (
                       <p className="enrichment-summary">
