@@ -350,6 +350,10 @@ export function InboxPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [inboxSyncing, setInboxSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState({ done: 0, total: 0 });
+  const syncPercent = syncProgress.total
+    ? Math.round((syncProgress.done / syncProgress.total) * 100)
+    : 0;
   const [lastInboxSync, setLastInboxSync] = useState<string>("");
   const [toastMessage, setToastMessage] = useState("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -935,55 +939,74 @@ export function InboxPage() {
     if (!staleIds.length) return;
     let cancelled = false;
     setInboxSyncing(true);
+    setSyncProgress({ done: 0, total: staleIds.length });
     (async () => {
+      // Refreshed in small batches rather than one 50-conversation request, so the
+      // progress bar is measuring real work: each batch that lands moves the bar and
+      // updates its rows immediately, instead of the whole inbox arriving at once.
+      const BATCH_SIZE = 5;
       try {
-        const response = await fetch("/api/conversations/refresh", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ conversationIds: staleIds }),
-        });
-        const data = (await response.json().catch(() => null)) as
-          | {
-              ok?: boolean;
-              results?: Array<{
-                id?: string;
-                thread?: unknown;
-                lastRefreshedAt?: string;
-              }>;
-            }
-          | null;
-        if (cancelled || !data?.ok || !Array.isArray(data.results)) return;
-        const nowIso = new Date().toISOString();
-        const updates = new Map<
-          string,
-          { thread: Lead["messages"]; lastRefreshedAt: string }
-        >();
-        for (const result of data.results) {
-          if (
-            result &&
-            typeof result.id === "string" &&
-            Array.isArray(result.thread)
-          ) {
-            updates.set(result.id, {
-              thread: result.thread as Lead["messages"],
-              lastRefreshedAt: result.lastRefreshedAt ?? nowIso,
+        for (let offset = 0; offset < staleIds.length; offset += BATCH_SIZE) {
+          if (cancelled) return;
+          const batch = staleIds.slice(offset, offset + BATCH_SIZE);
+          try {
+            const response = await fetch("/api/conversations/refresh", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ conversationIds: batch }),
             });
+            const data = (await response.json().catch(() => null)) as
+              | {
+                  ok?: boolean;
+                  results?: Array<{
+                    id?: string;
+                    thread?: unknown;
+                    lastRefreshedAt?: string;
+                  }>;
+                }
+              | null;
+            if (cancelled) return;
+            if (data?.ok && Array.isArray(data.results)) {
+              const nowIso = new Date().toISOString();
+              const updates = new Map<
+                string,
+                { thread: Lead["messages"]; lastRefreshedAt: string }
+              >();
+              for (const result of data.results) {
+                if (
+                  result &&
+                  typeof result.id === "string" &&
+                  Array.isArray(result.thread)
+                ) {
+                  updates.set(result.id, {
+                    thread: result.thread as Lead["messages"],
+                    lastRefreshedAt: result.lastRefreshedAt ?? nowIso,
+                  });
+                }
+              }
+              if (updates.size) {
+                setLeads((prev) =>
+                  prev.map((lead) => {
+                    const update = updates.get(lead.id);
+                    if (!update) return lead;
+                    return {
+                      ...lead,
+                      messages: update.thread,
+                      lastRefreshedAt: update.lastRefreshedAt,
+                    };
+                  }),
+                );
+              }
+            }
+          } catch {
+            /* one bad batch shouldn't stop the rest of the sync */
           }
+          if (cancelled) return;
+          setSyncProgress({
+            done: Math.min(offset + batch.length, staleIds.length),
+            total: staleIds.length,
+          });
         }
-        if (!updates.size) return;
-        setLeads((prev) =>
-          prev.map((lead) => {
-            const update = updates.get(lead.id);
-            if (!update) return lead;
-            return {
-              ...lead,
-              messages: update.thread,
-              lastRefreshedAt: update.lastRefreshedAt,
-            };
-          }),
-        );
-      } catch {
-        /* network hiccups shouldn't crash the inbox */
       } finally {
         if (!cancelled) {
           setInboxSyncing(false);
@@ -1224,7 +1247,11 @@ export function InboxPage() {
       style={
         {
           "--accent": appearance.accent,
-          "--bg": appearance.background,
+          // The saved background is a dark plate (every preset is), and setting it
+          // inline here beat the --bg that .light-mode redefines on this same
+          // element — which is why light mode kept painting a dark page. Light mode
+          // owns its own surface.
+          ...(theme === "light" ? {} : { "--bg": appearance.background }),
           "--font": appearance.font,
           fontFamily: appearance.font,
         } as React.CSSProperties
@@ -1706,8 +1733,23 @@ export function InboxPage() {
                   </div>
                   {inboxSyncing && (
                     <div className="inbox-sync-overlay" role="status" aria-live="polite">
-                      <div className="inbox-sync-spinner" />
-                      <span>Refreshing conversations…</span>
+                      <span className="inbox-sync-caption">Refreshing conversations…</span>
+                      <div
+                        className="inbox-sync-progress"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={syncProgress.total}
+                        aria-valuenow={syncProgress.done}
+                      >
+                        {/* The floor keeps a sliver of colour on screen from the first frame,
+                            so the bar reads as "started" rather than "stuck at empty". */}
+                        <span style={{ width: `${Math.max(3, syncPercent)}%` }} />
+                      </div>
+                      <span className="inbox-sync-count">
+                        {syncProgress.total
+                          ? `${syncProgress.done} of ${syncProgress.total} conversations`
+                          : "Starting…"}
+                      </span>
                     </div>
                   )}
                   <div className={`table-head ${filter === "follow-ups" ? "table-head-followups" : ""}`}>
@@ -2018,7 +2060,6 @@ export function InboxPage() {
                       <div className="composer-replied-state" role="status" aria-live="polite">
                         <span className="responded-check composer-responded-check" aria-hidden="true">✓</span>
                         <p>Lead has been replied to!</p>
-                        <small>Waiting on the lead. If they respond, a fresh draft will appear here.</small>
                       </div>
                     ) : (
                       <textarea

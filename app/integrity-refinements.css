@@ -925,3 +925,96 @@
   font-weight: 600;
   vertical-align: 1px;
 }
+
+/* ── "Replied to" state, compacted ────────────────────────────────────────────
+   It was a 120px-tall stacked block for one line of information. Same badge,
+   laid out as a row, so the thread above it keeps the space. */
+.composer-replied-state {
+  flex-direction: row;
+  gap: 9px;
+  padding: 11px 14px;
+  min-height: 0;
+}
+
+.composer-replied-state p {
+  font-size: 12px;
+}
+
+/* ── Sync overlay: a real progress bar ────────────────────────────────────────
+   The spinner said "working" and nothing else. The refresh now runs in batches,
+   so there is an honest count to show, and the block sits near the top of the
+   table instead of being centred in a card that is a screen tall. */
+.inbox-sync-overlay {
+  place-items: start center;
+  align-content: start;
+  padding-top: 54px;
+  gap: 9px;
+}
+
+.inbox-sync-overlay > span {
+  margin-top: 0;
+}
+
+.inbox-sync-caption {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.inbox-sync-progress {
+  width: min(320px, 60%);
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
+  overflow: hidden;
+}
+
+.inbox-sync-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  /* Batches land in steps; the transition is what makes it read as filling. */
+  transition: width 0.35s ease;
+}
+
+.inbox-sync-count {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Sentiment row tints in light mode ────────────────────────────────────────
+   A 5% wash over a dark panel is a visible plate; over white it is nothing.
+   Light mode gets a heavier mix and a wider rail — the same signal, at the
+   contrast the surface needs. Dark mode is untouched. */
+.light-mode .lead-row.row-sentiment-positive {
+  background: color-mix(in srgb, var(--green) 15%, var(--panel));
+  border-left: 3px solid color-mix(in srgb, var(--green) 75%, transparent);
+}
+
+.light-mode .lead-row.row-sentiment-positive:hover,
+.light-mode .lead-row.row-sentiment-positive.row-selected {
+  background: color-mix(in srgb, var(--green) 26%, var(--panel));
+}
+
+.light-mode .lead-row.row-sentiment-neutral {
+  background: color-mix(in srgb, var(--amber) 15%, var(--panel));
+  border-left: 3px solid color-mix(in srgb, var(--amber) 70%, transparent);
+}
+
+.light-mode .lead-row.row-sentiment-neutral:hover,
+.light-mode .lead-row.row-sentiment-neutral.row-selected {
+  background: color-mix(in srgb, var(--amber) 26%, var(--panel));
+}
+
+.light-mode .lead-row.row-sentiment-negative {
+  background: color-mix(in srgb, var(--coral) 15%, var(--panel));
+  border-left: 3px solid color-mix(in srgb, var(--coral) 75%, transparent);
+}
+
+.light-mode .lead-row.row-sentiment-negative:hover,
+.light-mode .lead-row.row-sentiment-negative.row-selected {
+  background: color-mix(in srgb, var(--coral) 26%, var(--panel));
+}
