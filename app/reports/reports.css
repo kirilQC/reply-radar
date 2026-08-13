@@ -1885,12 +1885,12 @@ body.light-mode .prompt-dialog-backdrop {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
   overflow: hidden;
   color: #fff;
-  font-size: 14px;
+  font-size: 22px;
   font-style: normal;
   font-weight: 700;
 }
@@ -1998,8 +1998,8 @@ body.light-mode .prompt-dialog-backdrop {
 
 .hub-card h3 {
   margin: 0;
-  font-size: 14.5px;
-  font-weight: 620;
+  font-size: 19px;
+  font-weight: 650;
   letter-spacing: -0.01em;
 }
 
@@ -2107,11 +2107,11 @@ body.light-mode .prompt-dialog-backdrop {
 /* ------------------------- Authoring a template ------------------------- */
 
 .hub-add {
-  background: transparent;
-  border: 1px solid var(--report-line);
+  background: var(--report-brand);
+  border: 1px solid var(--report-brand);
   border-radius: 7px;
   padding: 5px 11px;
-  color: var(--report-ink-soft);
+  color: #fff;
   font-family: inherit;
   font-size: 10px;
   font-weight: 700;
@@ -2122,8 +2122,7 @@ body.light-mode .prompt-dialog-backdrop {
 }
 
 .hub-add:hover {
-  border-color: var(--report-brand);
-  color: var(--report-brand);
+  filter: brightness(1.12);
 }
 
 .hub-composer {
@@ -2669,4 +2668,180 @@ body.light-mode .prompt-dialog-backdrop {
     color: inherit;
     text-decoration: none;
   }
+}
+
+/* ------------------------- Speaking the week in ------------------------- */
+
+/*
+ * The dictation panel sits above the boxes it fills, so the relationship is read before it is
+ * used. It is deliberately quiet until it is recording: it is a shortcut past the typing, not the
+ * main way to write a report, and it must not look like a step that has to be completed.
+ */
+.voice-brief {
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--report-inset);
+  transition: border-color 140ms ease;
+}
+
+.voice-brief.is-listening {
+  border-color: var(--report-brand);
+}
+
+.voice-brief-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.voice-brief-head strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 640;
+}
+
+.voice-brief-head em {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--report-ink-soft);
+}
+
+.voice-brief-start,
+.voice-brief-stop,
+.voice-brief-fill,
+.voice-brief-clear {
+  flex: 0 0 auto;
+  border-radius: 7px;
+  padding: 7px 13px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.voice-brief-start,
+.voice-brief-fill {
+  background: var(--report-brand);
+  border-color: var(--report-brand);
+  color: #fff;
+}
+
+.voice-brief-start:hover,
+.voice-brief-fill:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.voice-brief-fill:disabled,
+.voice-brief-clear:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.voice-brief-clear {
+  background: transparent;
+  border-color: var(--report-line);
+  color: var(--report-ink-soft);
+}
+
+.voice-brief-stop {
+  background: transparent;
+  border-color: var(--report-brand);
+  color: var(--report-brand);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A pulse, because a recogniser that has quietly stopped listening looks exactly like one that
+   is listening to a pause. */
+.voice-brief-stop i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--report-brand);
+  animation: voice-brief-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes voice-brief-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.72);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-brief-stop i {
+    animation: none;
+  }
+}
+
+.voice-brief-label {
+  display: block;
+  margin: 12px 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--report-ink-soft);
+}
+
+.voice-brief-transcript {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  border: 1px solid var(--report-line);
+  border-radius: 8px;
+  background: var(--report-surface);
+  padding: 9px 12px;
+  color: var(--report-ink);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.voice-brief-transcript:focus {
+  outline: none;
+  border-color: var(--report-brand);
+}
+
+.voice-brief-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.voice-brief-actions span {
+  font-size: 10.5px;
+  color: var(--report-ink-soft);
+}
+
+.voice-brief-done,
+.voice-brief-error {
+  margin: 9px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.voice-brief-done {
+  color: var(--report-ink-soft);
+}
+
+.voice-brief-error {
+  color: #d9534f;
 }

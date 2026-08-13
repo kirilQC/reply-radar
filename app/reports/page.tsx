@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
+import VoiceBrief from "../components/VoiceBrief";
 import {
   BUILT_IN_TEMPLATES,
   CAMPAIGN_METRICS,
@@ -1252,10 +1253,6 @@ export default function ReportsPage() {
               <div className="hub-card hub-card-custom">
                 <button type="button" className="hub-card-open" onClick={openBuilder}>
                   <h3>Build your own report</h3>
-                  <p>
-                    Pick the sections yourself. The page count is tracked as you go, so you can see when a selection
-                    stops fitting.
-                  </p>
                   <div className="hub-card-meta">
                     <b>
                       {lastRunByTemplate.has(BUILD_YOUR_OWN_ID)
@@ -1485,6 +1482,19 @@ export default function ReportsPage() {
             {writtenFields.length > 0 && (
               <div className="config-group">
                 <span className="config-label">Your sections</span>
+                {/* Typing five boxes on a Friday is why a recap becomes a Monday recap. Speaking
+                    them is the same information in a fifth of the time, and the transcript is
+                    shown before a word of it reaches the form. */}
+                <VoiceBrief
+                  client={clientLabel}
+                  periodLabel={periodLabel(period)}
+                  sections={writtenFields.map((id) => ({
+                    id,
+                    label: WRITTEN_SECTION_PROMPTS[id].label,
+                    placeholder: WRITTEN_SECTION_PROMPTS[id].placeholder,
+                  }))}
+                  onFill={(values) => setWritten((current) => ({ ...current, ...values }))}
+                />
                 {writtenFields.map((id) => (
                   <div key={id} className="config-written">
                     <label className="config-written-label" htmlFor={`written-${id}`}>

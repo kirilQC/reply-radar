@@ -28,6 +28,13 @@ const engagementRuntime = (campaigns: CampaignMetric[]) => {
   return { label, since: `Since ${launchDate(new Date(first).toISOString())}` };
 };
 
+/** A day count written the way somebody would say it out loud. */
+const durationLabel = (days: number) => {
+  if (days < 31) return `${days}d`;
+  const months = Math.floor(days / 30.44);
+  return months < 12 ? `${months}mo` : `${Math.floor(months / 12)}y ${months % 12}mo`;
+};
+
 const sortOptions = [
   { id: "launch-desc", label: "Newest launch" },
   { id: "launch-asc", label: "Oldest launch" },
@@ -249,6 +256,50 @@ export default function AnalyticsPage() {
 
   const trend = data.trend ?? [];
   const max = Math.max(...trend, 1);
+  const allCampaigns = data.campaignMetrics ?? [];
+  // "Now" is the moment the data was fetched, not the moment React happened to render. It keeps
+  // these figures pure and it is the more honest answer anyway: they describe that snapshot.
+  const asOf = updatedAt ?? new Date(0);
+  const markFor = (workspaceId: string) => workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
+  /** Every campaign we hold, best reply count first, regardless of whose it is. */
+  const campaignLeaders = [...allCampaigns].sort((a, b) => b.replies - a.replies).slice(0, 8);
+  const campaignLeaderMax = Math.max(...campaignLeaders.map((row) => row.replies), 1);
+  /**
+   * How long each client has been with us, from the launch date of their first campaign.
+   *
+   * HeyReach is the only record of when work actually started — a workspace can be created
+   * weeks before anything goes out — so a client with no launch dates is left out rather than
+   * shown as a day old.
+   */
+  const engagements = workspaces
+    .map((workspace) => {
+      const stamps = allCampaigns
+        .filter((campaign) => campaign.workspaceId === workspace.id)
+        .map((campaign) => (campaign.launchedAt ? new Date(campaign.launchedAt).getTime() : NaN))
+        .filter((stamp) => Number.isFinite(stamp));
+      if (!stamps.length) return null;
+      const first = Math.min(...stamps);
+      return { workspace, first, days: Math.max(0, Math.floor((asOf.getTime() - first) / 86_400_000)) };
+    })
+    .filter((row): row is { workspace: WorkspaceDetail; first: number; days: number } => row !== null)
+    .sort((a, b) => b.days - a.days);
+  const longestEngagement = Math.max(...engagements.map((row) => row.days), 1);
+  const monthStart = new Date(asOf.getFullYear(), asOf.getMonth(), 1).getTime();
+  const launchedThisMonth = workspaces
+    .map((workspace) => ({
+      workspace,
+      count: allCampaigns.filter(
+        (campaign) =>
+          campaign.workspaceId === workspace.id &&
+          campaign.launchedAt !== null &&
+          new Date(campaign.launchedAt).getTime() >= monthStart,
+      ).length,
+    }))
+    .filter((row) => row.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const launchedTotal = launchedThisMonth.reduce((sum, row) => sum + row.count, 0);
+  const launchedMax = Math.max(...launchedThisMonth.map((row) => row.count), 1);
+  const thisMonthLabel = asOf.toLocaleDateString("en-US", { month: "long" });
   // The dates are stamped server-side so the bars stay labelled with real days rather than
   // "6d ago" offsets that quietly went wrong once the window grew past a week.
   const trendLabels = data.trendLabels ?? [];
@@ -260,21 +311,74 @@ export default function AnalyticsPage() {
       <CardTitle title="Client workspaces"/>
       <div className="analytics-client-grid">
         {workspaces.map((workspace) => {
-          const perf = (data.clientPerformance ?? []).find((row) => row.name === workspace.name);
           const campaigns = (data.campaignMetrics ?? []).filter((campaign) => campaign.workspaceId === workspace.id);
           return <button key={workspace.id} className="analytics-client-card" onClick={() => openClient(workspace.slug)}>
             <div className="analytics-client-card-top"><i style={workspace.logoUrl ? undefined : { background: workspace.accentColor || "var(--accent)" }}>{workspace.logoUrl ? <img src={workspace.logoUrl} alt="" /> : workspace.name[0]}</i></div>
             <h3>{workspace.name}</h3>
-            <div className="analytics-client-card-stats"><span>{(perf?.replies ?? 0).toLocaleString()} replies</span><span>{campaigns.length} campaigns</span></div>
+            <div className="analytics-client-card-stats"><span>{campaigns.length} campaigns</span></div>
           </button>;
         })}
         {!workspaces.length && <p className="empty-state">No workspaces found.</p>}
       </div>
     </section>
 
-    <section className="analytics-grid"><Ranking title="Client performance" subtitle="Stored conversations and replies" rows={data.clientPerformance ?? []} secondary={(row) => `${row.conversations ?? 0} conversations · ${row.messagesSent ?? 0} messages sent`}/><Ranking title="Campaign performance" subtitle="Replies attributed to each campaign" rows={data.campaigns ?? []} secondary={(row) => row.clients?.join(" · ") || "No client attribution"}/><Ranking title="Sender performance" subtitle="Replies by LinkedIn sender" rows={data.senders ?? []} secondary={(row) => row.clients?.join(" · ") || "No client attribution"}/></section>
+    <section className="analytics-grid">
+      <article className="analytics-card analytics-ranking">
+        <CardTitle title="Campaign performance across all clients" subtitle="Ranked by reply count"/>
+        {campaignLeaders.length ? campaignLeaders.map((row, index) => (
+          <div className="analytics-rank has-mark" key={row.campaignId}>
+            <b>{index + 1}</b>
+            <ClientMark workspace={markFor(row.workspaceId)} name={row.client}/>
+            <span>
+              <strong>{row.name}</strong>
+              <small>{row.client}</small>
+              <i><em style={{ width: `${(row.replies / campaignLeaderMax) * 100}%` }}/></i>
+            </span>
+            <data>{row.replies}</data>
+          </div>
+        )) : <p className="empty-state">No campaign data yet.</p>}
+      </article>
+
+      {/* Not a ranking of anything a client did — a ranking of how long we have been at it,
+          which is the context every other number on this page is read against. */}
+      <article className="analytics-card analytics-ranking">
+        <CardTitle title="Engagement duration" subtitle="Measured from each client's first campaign launch"/>
+        {engagements.length ? engagements.map((row) => (
+          <div className="analytics-rank has-mark no-index" key={row.workspace.id}>
+            <ClientMark workspace={row.workspace} name={row.workspace.name}/>
+            <span>
+              <strong>{row.workspace.name}</strong>
+              <small>Since {launchDate(new Date(row.first).toISOString())}</small>
+              <i><em style={{ width: `${(row.days / longestEngagement) * 100}%` }}/></i>
+            </span>
+            <data>{durationLabel(row.days)}</data>
+          </div>
+        )) : <p className="empty-state">No launch dates available from HeyReach.</p>}
+      </article>
+
+      <article className="analytics-card analytics-ranking">
+        <CardTitle title="Campaigns launched this month" subtitle={`${thisMonthLabel} to date, by client`}/>
+        <div className="analytics-launch-total">
+          <strong>{launchedTotal}</strong>
+          <span>launched across {launchedThisMonth.length} client{launchedThisMonth.length === 1 ? "" : "s"}</span>
+        </div>
+        {launchedThisMonth.length ? launchedThisMonth.map((row) => (
+          <div className="analytics-rank has-mark no-index" key={row.workspace.id}>
+            <ClientMark workspace={row.workspace} name={row.workspace.name}/>
+            <span>
+              <strong>{row.workspace.name}</strong>
+              <i><em style={{ width: `${(row.count / launchedMax) * 100}%` }}/></i>
+            </span>
+            <data>{row.count}</data>
+          </div>
+        )) : <p className="empty-state">Nothing launched yet this month.</p>}
+      </article>
+    </section>
   </main></section></div>;
 }
 function Kpi({ label, value, sub }: { label: string; value: string | number | undefined; sub?: string }) { return <div className="analytics-kpi"><span>{label}</span><strong>{value ?? "—"}</strong>{sub ? <small>{sub}</small> : null}</div>; }
 function CardTitle({ title, subtitle }: { title: string; subtitle?: string }) { return <header className="analytics-card-title"><h2>{title}</h2>{subtitle ? <p>{subtitle}</p> : null}</header>; }
-function Ranking({ title, subtitle, rows, secondary }: { title: string; subtitle: string; rows: Performance[]; secondary: (row: Performance) => string }) { const max = Math.max(...rows.map((row) => row.replies), 1); return <article className="analytics-card analytics-ranking"><CardTitle title={title} subtitle={subtitle}/>{rows.length ? rows.slice(0, 8).map((row, index) => <div className="analytics-rank" key={row.name}><b>{index + 1}</b><span><strong>{row.name}</strong><small>{secondary(row)}</small><i><em style={{ width: `${(row.replies/max)*100}%` }}/></i></span><data>{row.replies}</data></div>) : <p className="empty-state">No live data yet.</p>}</article>; }
+/** A client's logo at row scale, falling back to their accent colour and initial. */
+function ClientMark({ workspace, name }: { workspace: WorkspaceDetail | null; name: string }) {
+  return <i className="analytics-mark" style={workspace?.logoUrl ? undefined : { background: workspace?.accentColor || "var(--accent)" }} aria-hidden="true">{workspace?.logoUrl ? <img src={workspace.logoUrl} alt=""/> : (name || "?")[0].toUpperCase()}</i>;
+}
