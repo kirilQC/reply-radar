@@ -1898,3 +1898,238 @@ a.tag-outline-link:hover {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* ── The MCP tab ──────────────────────────────────────────────────────────────────────────────
+   A chat box wants the composer nailed to the bottom of the viewport and the transcript scrolling
+   above it, which is the one layout the rest of this app never needs — every other page is a
+   document that grows downwards and scrolls the window. So this page takes the viewport height less
+   the 64px topbar and owns its own overflow, rather than inheriting the page scroll. Without the
+   explicit height the composer drifts down the page as the conversation grows and you end up
+   scrolling to reach the input, which is the one thing a chat box must never make you do. */
+.mcp-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 64px);
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+
+/* The empty state is the only documentation this feature has, so it is vertically centred and
+   given room rather than tucked at the top like a hint. */
+.mcp-intro {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-bottom: 24px;
+}
+.mcp-intro h1 {
+  margin: 0 0 10px;
+  font-size: 30px;
+  letter-spacing: -0.05em;
+  font-weight: 670;
+}
+.mcp-intro p {
+  margin: 0 0 26px;
+  max-width: 560px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.mcp-prompts {
+  display: grid;
+  gap: 8px;
+}
+.mcp-prompt {
+  padding: 12px 14px;
+  text-align: left;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.mcp-prompt:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+
+.mcp-thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 26px 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+/* The question is a bubble and the answer is not. Boxing both makes the transcript read as a
+   dialogue of equals, when what a person wants is to skim their own questions and read the
+   answers — so the answer gets the full width and the plain background. */
+.mcp-turn.mcp-user {
+  align-self: flex-end;
+  max-width: 78%;
+  padding: 11px 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px 10px 3px 10px;
+}
+.mcp-turn.mcp-assistant {
+  max-width: 100%;
+}
+.mcp-body {
+  /* Answers arrive as plain text with real newlines in them; `pre-wrap` is what keeps a table or a
+     bulleted list looking like one without parsing markdown. */
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.mcp-failed .mcp-body {
+  color: var(--coral);
+}
+.mcp-working .mcp-body {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.mcp-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.mcp-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: mcp-pulse 1.1s ease-in-out infinite;
+}
+.mcp-dots i:nth-child(2) { animation-delay: 0.15s; }
+.mcp-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes mcp-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+/* The audit trail. Collapsed to a single quiet line, because it is there for the moment a number
+   looks wrong rather than to be read every time. */
+.mcp-steps {
+  margin-top: 11px;
+}
+.mcp-steps-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  color: var(--muted-2);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  font-size: 10px;
+}
+.mcp-steps-toggle:hover {
+  color: var(--muted);
+  border-color: var(--border);
+}
+.mcp-steps-toggle em {
+  color: var(--coral);
+  font-style: normal;
+}
+.mcp-steps ul {
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.mcp-steps li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  font-size: 10.5px;
+}
+.mcp-steps li b {
+  color: var(--muted);
+  font-weight: 650;
+}
+.mcp-steps li span {
+  color: var(--muted-2);
+}
+.mcp-steps li i {
+  flex-basis: 100%;
+  color: var(--coral);
+  font-style: normal;
+}
+.mcp-step-failed {
+  border-color: #3d2a2a;
+}
+
+.mcp-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  margin-bottom: 22px;
+  padding: 9px 9px 9px 13px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.mcp-composer:focus-within {
+  border-color: var(--accent);
+}
+.mcp-composer textarea {
+  flex: 1;
+  /* Grows with the text up to a limit, then scrolls. `field-sizing` does this without measuring in
+     JavaScript; browsers without it fall back to the single row the markup asks for, which is the
+     common case anyway. */
+  field-sizing: content;
+  max-height: 160px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+  padding: 5px 0;
+}
+.mcp-composer textarea::placeholder {
+  color: var(--muted-2);
+}
+.mcp-composer button {
+  flex: none;
+  height: 31px;
+  padding: 0 15px;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 650;
+}
+.mcp-composer button:disabled {
+  color: var(--muted-2);
+  background: var(--panel-2);
+  cursor: default;
+}
+.mcp-reset {
+  height: 27px;
+  padding: 0 10px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.mcp-reset:hover {
+  color: var(--text);
+  border-color: var(--muted-2);
+}

@@ -181,6 +181,35 @@ thresholds.
 
 ---
 
+## MCP
+
+The tab is **called MCP and is not one.** It is an Anthropic tool-use loop on our own server, named
+after the thing people already understand. Do not rename it to be technically correct.
+
+- **Model is `claude-sonnet-4-6`.** Everything else in the app runs Haiku; this reasons over many
+  tools across many turns and Haiku is not enough for it.
+- **Read-only, structurally.** No write function exists in `app/lib/heyreach-api.ts` and no mutating
+  tool exists in `app/lib/assistant-tools.ts`. `tests/heyreach-api.test.mjs` fails if one is added, so
+  reopening this is a deliberate act rather than a slip.
+- **No authentication.** Internal only, consistent with the rest of the app.
+- **It covers the whole product, not just HeyReach.** Our own tables answer reply content, scores,
+  tiers, who is waiting, and all-time cross-client totals.
+
+**Numbers come from one source per question, never averaged across the two.** `rr_messages` has no
+`workspace_id`, so per-client and windowed counts come from HeyReach, which is authoritative and
+supports date ranges; content, scoring and follow-up state come from our tables.
+
+Three HeyReach behaviours that will produce confidently wrong answers if forgotten:
+
+- **`leadsContacted` is zero on every per-campaign row** and only populated on the workspace total.
+  It is excluded from campaign metrics; `connectionsSent` is the number that answers it.
+- **`searchString` on `inbox/GetConversationsV2` matches the person's name, not message text.** It is
+  exposed to the model as `nameContains` for that reason. There is no message-content search.
+- **`filters` must be nested** in the conversations request body. Flattened, it is silently ignored and
+  returns the whole inbox.
+
+---
+
 ## Permanently out of scope
 
 Do not build these. They were considered and de-scoped:

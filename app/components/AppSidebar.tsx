@@ -13,6 +13,7 @@ const items = [
   ["/meetings", "Meetings", "calendar"],
   ["/analytics", "Analytics", "analytics"],
   ["/reports", "Reports", "reports"],
+  ["/mcp", "MCP", "mcp"],
   ["/os-brain", "OS Brain", "brain"],
   ["/health", "System health", "health"],
   ["/admin", "Configuration", "settings"],
@@ -28,6 +29,8 @@ const iconPaths: Record<string, string> = {
   settings: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7",
   database: "M5 5c0-2 14-2 14 0v14c0 2-14 2-14 0z M5 5c0 2 14 2 14 0 M5 12c0 2 14 2 14 0",
   brain: "M12 5a3 3 0 0 0-3 3 2.5 2.5 0 0 0-1 4.8V16a3 3 0 0 0 4 2.8 3 3 0 0 0 4-2.8v-3.2A2.5 2.5 0 0 0 15 8a3 3 0 0 0-3-3 M12 5v14",
+  // A speech bubble: the tab is a chat box whatever it is called.
+  mcp: "M21 12a8 8 0 0 1-8 8H8l-4 3v-5.2A8 8 0 0 1 13 4a8 8 0 0 1 8 8 M9 12h.01 M13 12h.01 M17 12h.01",
 };
 function SidebarIcon({ name }: { name: string }) {
   return (
