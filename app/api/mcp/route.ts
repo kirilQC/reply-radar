@@ -25,17 +25,33 @@
  * or delete a row, no matter how the question is phrased, because the capability does not exist in
  * the process. That is deliberately not enforced by asking the model nicely.
  *
- * ── The loop ────────────────────────────────────────────────────────────────────────────────────
- * Claude answers, asks for tools, reads the results, and answers again. Real questions need several
- * rounds — "how did Steadywell do this week" is a client lookup, then campaign metrics, then usually
- * the replies themselves — so this iterates rather than making one call. The ceiling exists because a
- * model that has misunderstood a tool will otherwise retry it until the request times out.
+ * ── Why this streams, and why it is allowed to take its time ─────────────────────────────────────
+ * The first version returned one JSON object at the end. It answered "which of Cotool's campaigns has
+ * the best reply rate" in three seconds off a single tool call, and the speed was the problem: the
+ * question deserved a check of scale and status before ranking anything, and there was no way to see
+ * that it had skipped that until the answer looked wrong.
+ *
+ * So two things changed together. The budget went up — more tool rounds, more tokens, a longer wall
+ * clock — because for this feature a slow right answer beats a fast plausible one, and thoroughness
+ * is now stated as the priority in the prompt rather than left to the model's taste. And the response
+ * became a stream, which is what makes the first change bearable: extended thinking and each tool
+ * call are pushed to the browser as they happen, so a question that takes ninety seconds shows ninety
+ * seconds of work instead of a spinner.
+ *
+ * Streaming also removes a real failure mode. A buffered response that exceeds the platform's limit
+ * is lost entirely; a stream has already delivered everything up to the cut.
  *
  * Tool failures are returned to the model as results, not thrown. "There is no client called Willo,
  * the clients are …" is something Claude can recover from in the next turn; a 502 is not.
  */
-import { NextResponse } from "next/server";
 import { TOOLS, runTool } from "../../lib/assistant-tools";
+import {
+  applyStreamEvent as applyEvent,
+  createStreamState,
+  finishStream,
+  parseFrame,
+  splitFrames,
+} from "../../../shared/anthropic-stream.mjs";
 
 /**
  * Sonnet rather than the Haiku the rest of the app uses.
@@ -48,19 +64,46 @@ import { TOOLS, runTool } from "../../lib/assistant-tools";
  */
 const MODEL = "claude-sonnet-4-6";
 /**
- * Enough for the questions people actually ask. Six was reached in testing only by a question that
- * spanned every client; past that the model is looping, not working.
+ * Deliberately generous. A question like "analyse every campaign we have ever launched" is one round
+ * per client to get metrics, more to check status and senders, and more again to read the replies
+ * behind a number that looks off — thirty rounds is a real research task, not a loop.
+ *
+ * The ceiling still exists, because a model that has misunderstood a tool will otherwise retry it
+ * until the platform kills the request, and a stream that dies mid-sentence is worse than one that
+ * stops and says why.
  */
-const MAX_TURNS = 10;
-const MAX_TOKENS = 4096;
-/** Long-running by design: ten tool rounds against HeyReach cannot finish in Vercel's ten-second default. */
-export const maxDuration = 120;
+const MAX_TURNS = 30;
+const MAX_TOKENS = 8_192;
+/**
+ * Extended thinking, on for two reasons. It measurably improves multi-step tool choice, which is the
+ * entire job here. And it is the only honest source for the running commentary the UI shows — the
+ * alternative would be inventing status lines on the client, which would describe what we assume the
+ * model is doing rather than what it is actually reasoning about.
+ */
+const THINKING_BUDGET = 3_072;
+/**
+ * Long-running by design. Vercel's limit depends on the plan; if a deployment is ever rejected for
+ * this value, lower it rather than trimming MAX_TURNS — the stream degrades gracefully at the cut,
+ * and the tool budget is what makes the answers right.
+ */
+export const maxDuration = 300;
 
 type Row = Record<string, unknown>;
 type Block = Row;
 type Turn = { role: "user" | "assistant"; content: string | Block[] };
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
+
+/**
+ * The reassembler is plain `.mjs`, so its callback parameter is inferred from a `() => {}` default and
+ * TS reads it as taking no arguments. Stated once here; `tests/anthropic-stream.test.mjs` is what
+ * actually holds the module to this signature.
+ */
+const applyStreamEvent = applyEvent as (
+  state: unknown,
+  event: Row,
+  onEvent?: (surfaced: Row) => void,
+) => void;
 
 /**
  * What Claude needs to know that the tool descriptions cannot say.
@@ -81,34 +124,27 @@ Rules that change the answer:
 - Only campaigns QC launched count. Every one is named with a client code and a number — CT003, SW019, W040. Campaigns without a code are the client's own attempts from before they hired QC, and the tools already exclude them. Never present an uncoded campaign as QC's work.
 - Active means running AND still contacting new leads. HeyReach reports a campaign as in progress while leads already in the sequence finish, so a campaign with no pending leads left is finished in every sense the client cares about, whatever HeyReach says.
 - Averages across clients mislead. Some clients get twenty replies a day and some get one; the mean of those describes nobody. Give the range, or the per-client figures, or say which client you mean.
-- Reply rates from heyreach_campaign_metrics are already percentages. Do not convert them again.
+- Reply rates from the HeyReach tools are already percentages. Do not convert them again.
+- replyRatePercent is HeyReach's own reply rate. You do not know its denominator, so never present it as a share of conversations started, messages sent or leads contacted, and never put it in a table column next to a count that implies one. If you want a rate against a specific denominator, compute it from the raw counts and say which two numbers you divided.
 - Weeks start on Monday. This is read as a working-week report.
 - Reply Radar excludes people who messaged the client first — those are not outbound and are not in the database. If someone cannot be found, that may be why.
+
+How thoroughly to work:
+- Thoroughness matters more than speed here. Taking two minutes and thirty tool calls to be right is correct; answering in three seconds off one lookup is not. Nobody is waiting on a stopwatch.
+- Never answer a question about "every", "all", "across our clients" or "which is best" from a single tool call. Enumerate: call list_clients, then query each client in turn.
+- Before ranking anything by a rate, look at the volume behind each rate and say so. A 75% reply rate on four conversations is noise and presenting it as the winner is a wrong answer even though the arithmetic is right.
+- When a number looks surprising, check it against a second source before reporting it. Our database and HeyReach are independent; that is what makes the check worth doing.
+- Ask for the rows you need. The list tools take a limit — if analysing hundreds of conversations is what the question requires, request hundreds rather than sampling the default and generalising.
+- Do not stop early because you have enough for a plausible answer. Stop when you have enough for a correct one.
 
 How to answer:
 - Use the tools. Never estimate a number you could have looked up, and never carry a number over from an earlier turn as though you had just checked it.
 - If a question names a client you have not resolved, call list_clients first.
 - State what you counted and over what period. "142 replies" and "142 replies across all clients since August 1" are different claims.
 - When a tool fails, say what failed and what you would need. Do not fill the gap with a guess.
-- Be brief. Tables for lists of things, prose for judgements. No preamble.
+- Markdown is rendered, so use it. Tables for anything with rows and columns, bold for the figure that answers the question, prose for judgement. Keep tables tight — the columns someone asked about, not every column you retrieved.
+- Be brief in prose and complete in data. No preamble, no restating the question.
 - You have read access only. If asked to send, pause, tag or change anything, say that this is read-only and describe what you would do instead.`;
-
-/** One Anthropic call. */
-async function ask(apiKey: string, messages: Turn[]): Promise<Row> {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system: SYSTEM, tools: TOOLS, messages }),
-    signal: AbortSignal.timeout(90_000),
-    cache: "no-store",
-  });
-  const payload = (await response.json().catch(() => ({}))) as Row;
-  if (!response.ok) {
-    const error = payload.error && typeof payload.error === "object" ? (payload.error as Row) : {};
-    throw new Error(text(error.message) || `Anthropic returned ${response.status}.`);
-  }
-  return payload;
-}
 
 /**
  * Trims the conversation the browser sent.
@@ -133,78 +169,174 @@ function history(raw: unknown): Turn[] {
   return messages;
 }
 
+/**
+ * One streamed Anthropic call, reassembled into the content array the next turn has to send back.
+ *
+ * Anthropic's stream arrives as deltas per content block; this rebuilds the blocks while handing each
+ * fragment to `onEvent` as it lands. Both halves matter: the fragments are the live commentary, and
+ * the rebuilt array is what the conversation is made of.
+ *
+ * Thinking blocks are reassembled with their `signature` intact. That is not optional — a thinking
+ * block replayed without its signature is rejected on the next request, which would break the loop at
+ * exactly the point where it starts using tools.
+ */
+async function streamTurn(
+  apiKey: string,
+  messages: Turn[],
+  onEvent: (event: Row) => void,
+): Promise<{ content: Block[]; stopReason: string; usage: { input: number; output: number } }> {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      system: SYSTEM,
+      tools: TOOLS,
+      messages,
+      // Temperature is deliberately unset: extended thinking requires the default.
+      thinking: { type: "enabled", budget_tokens: THINKING_BUDGET },
+      stream: true,
+    }),
+    signal: AbortSignal.timeout(240_000),
+    cache: "no-store",
+  });
+
+  if (!response.ok || !response.body) {
+    const payload = (await response.json().catch(() => ({}))) as Row;
+    const error = payload.error && typeof payload.error === "object" ? (payload.error as Row) : {};
+    throw new Error(text(error.message) || `Anthropic returned ${response.status}.`);
+  }
+
+  // The reassembly itself is in `shared/anthropic-stream.mjs` so it can be tested against recorded
+  // event sequences — it is the one part of this route that cannot be exercised without the live API
+  // and that fails silently when wrong.
+  const state = createStreamState();
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const { frames, rest } = splitFrames(buffer);
+    buffer = rest;
+    for (const frame of frames) {
+      const event = parseFrame(frame);
+      if (event) applyStreamEvent(state, event, onEvent);
+    }
+  }
+
+  return finishStream(state) as { content: Block[]; stopReason: string; usage: { input: number; output: number } };
+}
+
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return NextResponse.json({ ok: false, error: "ANTHROPIC_API_KEY is not configured." }, { status: 503 });
+  if (!apiKey) {
+    return Response.json({ ok: false, error: "ANTHROPIC_API_KEY is not configured." }, { status: 503 });
+  }
 
   const body = (await request.json().catch(() => ({}))) as Row;
   const messages = history(body.messages);
   if (!messages.length || messages.at(-1)?.role !== "user") {
-    return NextResponse.json({ ok: false, error: "Ask a question." }, { status: 400 });
+    return Response.json({ ok: false, error: "Ask a question." }, { status: 400 });
   }
 
-  /** What the assistant did, so the UI can show its working rather than asking for trust. */
-  const steps: Array<{ tool: string; input: Row; ok: boolean; detail: string }> = [];
-  let inputTokens = 0;
-  let outputTokens = 0;
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      /**
+       * One SSE frame. Wrapped in a try because the browser can close the tab mid-answer, and an
+       * enqueue on a closed controller throws — which would otherwise surface as a crash in the logs
+       * for something that is not a fault.
+       */
+      const send = (event: Row) => {
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          /* the reader is gone; nothing left to tell it */
+        }
+      };
 
-  try {
-    for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-      const payload = await ask(apiKey, messages);
-      const usage = payload.usage && typeof payload.usage === "object" ? (payload.usage as Row) : {};
-      inputTokens += Number(usage.input_tokens) || 0;
-      outputTokens += Number(usage.output_tokens) || 0;
+      const steps: Array<{ tool: string; input: Row; ok: boolean; detail: string }> = [];
+      let inputTokens = 0;
+      let outputTokens = 0;
 
-      const content = Array.isArray(payload.content) ? (payload.content as Block[]) : [];
-      const calls = content.filter((block) => block.type === "tool_use");
-      const said = content
-        .filter((block) => block.type === "text")
-        .map((block) => text(block.text))
-        .join("\n")
-        .trim();
+      try {
+        for (let turn = 0; turn < MAX_TURNS; turn += 1) {
+          const { content, usage } = await streamTurn(apiKey, messages, send);
+          inputTokens += usage.input;
+          outputTokens += usage.output;
 
-      if (!calls.length) {
-        return NextResponse.json({
-          ok: true,
-          reply: said || "I could not find an answer to that.",
+          const calls = content.filter((block) => block.type === "tool_use");
+          const said = content
+            .filter((block) => block.type === "text")
+            .map((block) => text(block.text))
+            .join("\n")
+            .trim();
+
+          if (!calls.length) {
+            send({
+              type: "done",
+              reply: said || "I could not find an answer to that.",
+              steps,
+              model: MODEL,
+              usage: { inputTokens, outputTokens },
+            });
+            controller.close();
+            return;
+          }
+
+          messages.push({ role: "assistant", content });
+          // Tools run together: a question spanning every client is one HeyReach call per client, and
+          // running them in sequence would multiply a cold start by the number of clients.
+          const results = await Promise.all(
+            calls.map(async (call) => {
+              const name = text(call.name);
+              const input = call.input && typeof call.input === "object" ? (call.input as Row) : {};
+              send({ type: "tool", tool: name, input });
+              try {
+                const result = await runTool(name, input);
+                steps.push({ tool: name, input, ok: true, detail: "" });
+                send({ type: "tool_done", tool: name, ok: true });
+                return { type: "tool_result", tool_use_id: text(call.id), content: JSON.stringify(result) };
+              } catch (error) {
+                const detail = error instanceof Error ? error.message : "The tool failed.";
+                steps.push({ tool: name, input, ok: false, detail });
+                send({ type: "tool_done", tool: name, ok: false, detail });
+                // Reported as a result, not an error: this is usually a recoverable mistake — a client
+                // name that does not exist, a date window with only one end — and the next turn fixes it.
+                return { type: "tool_result", tool_use_id: text(call.id), content: detail, is_error: true };
+              }
+            }),
+          );
+          messages.push({ role: "user", content: results });
+        }
+
+        send({
+          type: "failed",
+          error: `The assistant used all ${MAX_TURNS} of its tool rounds without reaching an answer. Try asking something narrower.`,
           steps,
-          model: MODEL,
-          usage: { inputTokens, outputTokens },
+        });
+      } catch (error) {
+        send({
+          type: "failed",
+          error: error instanceof Error ? error.message : "The assistant could not be reached.",
+          steps,
         });
       }
+      controller.close();
+    },
+  });
 
-      messages.push({ role: "assistant", content });
-      // Tools run together: a question spanning four clients is four independent HeyReach calls, and
-      // running them in sequence would multiply a cold start by four.
-      const results = await Promise.all(
-        calls.map(async (call) => {
-          const name = text(call.name);
-          const input = call.input && typeof call.input === "object" ? (call.input as Row) : {};
-          try {
-            const result = await runTool(name, input);
-            steps.push({ tool: name, input, ok: true, detail: "" });
-            return { type: "tool_result", tool_use_id: text(call.id), content: JSON.stringify(result) };
-          } catch (error) {
-            const detail = error instanceof Error ? error.message : "The tool failed.";
-            steps.push({ tool: name, input, ok: false, detail });
-            // Reported as a result, not an error: this is usually a recoverable mistake — a client
-            // name that does not exist, a date window with only one end — and the next turn fixes it.
-            return { type: "tool_result", tool_use_id: text(call.id), content: detail, is_error: true };
-          }
-        }),
-      );
-      messages.push({ role: "user", content: results });
-    }
-
-    return NextResponse.json({
-      ok: false,
-      error: `The assistant used all ${MAX_TURNS} of its tool rounds without reaching an answer. Try asking something narrower.`,
-      steps,
-    }, { status: 504 });
-  } catch (error) {
-    return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "The assistant could not be reached.", steps },
-      { status: 502 },
-    );
-  }
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      // Nginx and some proxies buffer streamed responses by default, which would hold every event
+      // until the answer finished and quietly undo the point of streaming.
+      "x-accel-buffering": "no",
+    },
+  });
 }

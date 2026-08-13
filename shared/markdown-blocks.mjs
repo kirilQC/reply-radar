@@ -1,0 +1,163 @@
+/**
+ * Turns the assistant's markdown into a structure a React component can render.
+ *
+ * The chat box used to print the model's reply as preformatted text, which meant a table arrived as
+ * a wall of pipes and `**CT50**` arrived with the asterisks showing. Asking the model to stop using
+ * markdown was the other option and it is the wrong one: a table is genuinely the right shape for
+ * "rank these campaigns", and prose is the right shape for the judgement underneath. So the model
+ * keeps writing markdown and this reads it.
+ *
+ * ── Why a parser lives in this repo at all ──────────────────────────────────────────────────────
+ * The app has no runtime dependencies beyond Next and React, and a markdown library is a large
+ * amount of code to carry for one screen. This handles the subset a language model actually emits —
+ * headings, paragraphs, bullets, numbered lists, GFM tables, fenced code, rules, and inline bold,
+ * italic, code and links — and nothing else. Anything unrecognised falls through as plain text,
+ * which is the only acceptable failure: an unhandled construct must look plain, never look broken.
+ *
+ * It is plain `.mjs` in `shared/` so the tests can import it directly, same as the other logic here.
+ */
+
+/** Inline markers, longest-first so `**bold**` is never mistaken for two italics. */
+const INLINE = /(\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\[[^\]\n]*\]\([^)\s]+\)|\*[^*\n]+\*|_[^_\n]+_)/g;
+
+/**
+ * Splits one line of text into styled spans.
+ *
+ * Returns a single text span for unstyled input rather than an empty array, because the renderer
+ * should never have to special-case "this paragraph had no formatting".
+ */
+export function parseInline(line) {
+  const source = typeof line === "string" ? line : "";
+  if (!source) return [];
+  const spans = [];
+  let cursor = 0;
+  for (const match of source.matchAll(INLINE)) {
+    const token = match[0];
+    if (match.index > cursor) spans.push({ kind: "text", text: source.slice(cursor, match.index) });
+    cursor = match.index + token.length;
+    if (token.startsWith("**") || token.startsWith("__")) {
+      spans.push({ kind: "bold", text: token.slice(2, -2) });
+    } else if (token.startsWith("`")) {
+      spans.push({ kind: "code", text: token.slice(1, -1) });
+    } else if (token.startsWith("[")) {
+      const split = token.indexOf("](");
+      spans.push({ kind: "link", text: token.slice(1, split), href: token.slice(split + 2, -1) });
+    } else {
+      spans.push({ kind: "italic", text: token.slice(1, -1) });
+    }
+  }
+  if (cursor < source.length) spans.push({ kind: "text", text: source.slice(cursor) });
+  return spans;
+}
+
+/** `| a | b |` → `["a", "b"]`. The outer pipes are optional in GFM, so they are trimmed if present. */
+const cells = (line) =>
+  line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+
+/** True for `|---|:--:|`, the line that makes the row above it a header rather than a paragraph. */
+const isTableRule = (line) =>
+  typeof line === "string" && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line);
+
+const LIST_ITEM = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
+
+/**
+ * Parses markdown into a flat list of blocks.
+ *
+ * Flat rather than a tree because nothing the model emits nests beyond an indented bullet, and list
+ * items carry their own `depth` for that. A real document model would be more correct and would earn
+ * none of it back here.
+ */
+export function parseBlocks(markdown) {
+  const lines = String(markdown ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const blocks = [];
+  let paragraph = [];
+
+  /** Paragraph lines accumulate until something else starts, so a soft-wrapped sentence stays one block. */
+  const flush = () => {
+    if (paragraph.length) blocks.push({ kind: "paragraph", spans: parseInline(paragraph.join(" ")) });
+    paragraph = [];
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+
+    // Fenced code, taken verbatim to the closing fence or the end of the answer. An unclosed fence
+    // is common in a truncated reply and must not swallow the rest as an error.
+    const fence = line.match(/^\s*```(\w*)\s*$/);
+    if (fence) {
+      flush();
+      const body = [];
+      index += 1;
+      while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) {
+        body.push(lines[index]);
+        index += 1;
+      }
+      blocks.push({ kind: "code", language: fence[1] || "", text: body.join("\n") });
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      flush();
+      blocks.push({ kind: "heading", level: heading[1].length, spans: parseInline(heading[2].trim()) });
+      continue;
+    }
+
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      flush();
+      blocks.push({ kind: "rule" });
+      continue;
+    }
+
+    // A table needs the rule line underneath it. Without that check a line of prose containing a
+    // pipe becomes a one-column table, which looks far worse than the pipe would have.
+    if (line.includes("|") && isTableRule(lines[index + 1])) {
+      flush();
+      const head = cells(line).map(parseInline);
+      const rows = [];
+      index += 2;
+      while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
+        rows.push(cells(lines[index]).map(parseInline));
+        index += 1;
+      }
+      index -= 1;
+      blocks.push({ kind: "table", head, rows });
+      continue;
+    }
+
+    const item = line.match(LIST_ITEM);
+    if (item) {
+      const ordered = /\d/.test(item[2]);
+      const depth = Math.min(Math.floor(item[1].length / 2), 2);
+      // Flushed before the run is inspected, so a paragraph sitting between two lists breaks them
+      // apart instead of the second silently joining the first.
+      flush();
+      const open = blocks.at(-1);
+      if (open && open.kind === "list" && open.ordered === ordered) {
+        open.items.push({ depth, spans: parseInline(item[3]) });
+      } else {
+        blocks.push({ kind: "list", ordered, items: [{ depth, spans: parseInline(item[3]) }] });
+      }
+      continue;
+    }
+
+    paragraph.push(line.trim());
+  }
+
+  flush();
+  return blocks;
+}
+
+/** The plain text of a span run, used by the CSV export and for copying an answer out. */
+export const spansToText = (spans) =>
+  (Array.isArray(spans) ? spans : []).map((span) => String(span?.text ?? "")).join("");

@@ -208,6 +208,34 @@ Three HeyReach behaviours that will produce confidently wrong answers if forgott
 - **`filters` must be nested** in the conversations request body. Flattened, it is silently ignored and
   returns the whole inbox.
 
+**Thoroughness beats speed, explicitly.** The first version answered "which of Cotool's campaigns has
+the best reply rate" in three seconds off one tool call, and being fast was the whole defect. Thirty
+turns and two minutes to be right is the intended behaviour. If a deploy rejects `maxDuration = 300`,
+lower that — never `MAX_TURNS`, which is what makes the answers correct.
+
+- **The response is a stream**, which is what makes the long budget bearable: thinking and each tool
+  call appear as they happen instead of the user watching a spinner. A buffered response that exceeds
+  the platform limit is also lost entirely, where a stream has already delivered everything up to the
+  cut.
+- **Extended thinking is on** (`budget_tokens` under `max_tokens`, temperature left unset). It is the
+  only honest source for the running commentary — the alternative is inventing status lines. Thinking
+  blocks must be replayed **with their `signature`**; without it the next request is rejected.
+- **`shared/anthropic-stream.mjs` exists because the reassembly fails quietly.** A tool argument glued
+  together wrong queries the wrong thing and reports a confident number for it. It is plain ESM with no
+  network so `tests/anthropic-stream.test.mjs` can drive it with recorded event sequences, including a
+  frame cut mid-way by a chunk boundary.
+- **Row budget is 300** (50 for inbox threads, which each carry a full conversation), and id lookups
+  are chunked so a 300-row answer is not 300 requests.
+- **HeyReach's rate fields have undocumented denominators.** On a live account `messageReplyRate` did
+  not reconcile against replies ÷ messages sent. They are exposed as HeyReach's own figures with an
+  instruction never to place them beside a count that implies a denominator; to rank by a rate, the
+  model divides two raw counts and names them.
+- **Answers are rendered markdown, and exportable.** `shared/markdown-blocks.mjs` parses to blocks so
+  tables and bold render rather than showing their pipes and asterisks. CSV is lifted out of the
+  answer's own tables rather than asking the model for a second machine-readable copy, which would
+  double the tokens and give two versions of the same numbers that could disagree. PDF is
+  `window.print()` with print CSS, as in Reports.
+
 ---
 
 ## Permanently out of scope

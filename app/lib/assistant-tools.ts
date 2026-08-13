@@ -11,7 +11,12 @@
  * per-client reply count over a date range would need either a PostgREST embed (unproven in this
  * repo — nothing else here uses one, and the deletion path removes messages explicitly rather than
  * trusting a cascade, which suggests the foreign key may not exist) or thousands of conversation ids
- * chunked into forty-id batches. Neither belongs behind a chat box that should answer in a second.
+ * chunked into fifty-id batches.
+ *
+ * Slowness is not the objection — this assistant is explicitly allowed to take its time. The
+ * objection is that HeyReach already computes those windowed counts and is the system of record for
+ * what was sent, so reconstructing them from our own message rows would be a second, less
+ * trustworthy answer to a question that already has an authoritative one.
  *
  * So the split is deliberate and it is by question, not by convenience:
  *
@@ -43,10 +48,40 @@ const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.map(object
 const text = (value: unknown) =>
   typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
 
-/** Bounds every list a tool can return. A model asking for 500 rows gets 50 and a better answer. */
-const MAX_ROWS = 50;
-const rowLimit = (value: unknown, fallback: number) =>
-  Math.min(Math.max(Number(value) || fallback, 1), MAX_ROWS);
+/**
+ * Bounds every list a tool can return.
+ *
+ * Three hundred rather than the fifty this started with, because "analyse every conversation from
+ * this client" is a question people actually ask and fifty rows silently turned it into "analyse a
+ * sample and generalise" — an answer that reads as authoritative and is not. Rows are cheap; a wrong
+ * conclusion drawn from a truncated list is not.
+ *
+ * There is still a ceiling, because past a few hundred conversations the thread bodies alone crowd
+ * out the model's context and the answer degrades for a different reason.
+ */
+const MAX_ROWS = 300;
+/**
+ * Threads make `heyreach_inbox_search` far heavier per row than the other list tools — every
+ * conversation arrives with its full message history — so it keeps the old, lower bound.
+ */
+const MAX_THREADS = 50;
+const rowLimit = (value: unknown, fallback: number, ceiling = MAX_ROWS) =>
+  Math.min(Math.max(Number(value) || fallback, 1), ceiling);
+
+/**
+ * PostgREST takes ids in the URL, so a request for three hundred of them is a request with an
+ * eleven-kilobyte query string — which some proxy between here and Supabase will refuse, usually by
+ * truncating rather than erroring. Fifty at a time, run together, keeps every URL short.
+ */
+const ID_BATCH = 50;
+
+async function dbByIds(query: (ids: string[]) => string, ids: string[]): Promise<Row[]> {
+  if (!ids.length) return [];
+  const batches: string[][] = [];
+  for (let start = 0; start < ids.length; start += ID_BATCH) batches.push(ids.slice(start, start + ID_BATCH));
+  const pages = await Promise.all(batches.map(async (batch) => rows(await db(query(batch)))));
+  return pages.flat();
+}
 
 function supabase() {
   const url = process.env.SUPABASE_URL;
@@ -122,9 +157,9 @@ async function connectedClient(name: unknown): Promise<Client> {
 /**
  * Attaches lead details and the latest reply body to a set of conversations.
  *
- * Two extra queries regardless of how many conversations there are, which is why every caller is
- * bounded to `MAX_ROWS` first — `in.(…)` with fifty ids is one request, with five thousand it is a
- * URL nobody accepts.
+ * Two batched queries regardless of how many conversations there are — leads, then messages — each
+ * split into fifty-id requests that run together. That is what lets a caller ask for three hundred
+ * conversations and get three hundred rather than a truncated URL's worth.
  */
 async function describeConversations(conversationRows: Row[]): Promise<Row[]> {
   if (!conversationRows.length) return [];
@@ -132,10 +167,18 @@ async function describeConversations(conversationRows: Row[]): Promise<Row[]> {
   const leadIds = [...new Set(conversationRows.map((row) => text(row.lead_id)).filter(Boolean))];
 
   const [leadRows, messageRows] = await Promise.all([
-    leadIds.length
-      ? db(`rr_leads?select=id,name,role,company,linkedin_profile_url,workspace_id&id=in.(${leadIds.join(",")})`)
-      : Promise.resolve([]),
-    db(`rr_messages?select=conversation_id,direction,body,sent_at&conversation_id=in.(${ids.join(",")})&order=sent_at.desc`),
+    dbByIds(
+      (batch) => `rr_leads?select=id,name,role,company,linkedin_profile_url,workspace_id&id=in.(${batch.join(",")})`,
+      leadIds,
+    ),
+    // Every message for these conversations, not just the newest: PostgREST has no per-group limit, so
+    // the newest is picked out below. Deliberately unbounded — a row cap here would drop whole
+    // conversations' messages rather than trimming each one, and a blank last reply looks like data.
+    dbByIds(
+      (batch) =>
+        `rr_messages?select=conversation_id,direction,body,sent_at&conversation_id=in.(${batch.join(",")})&order=sent_at.desc`,
+      ids,
+    ),
   ]);
   const leadById = new Map(rows(leadRows).map((row) => [text(row.id), row]));
   // Only the most recent message per conversation. The rest is what `read_conversation` is for, and
@@ -214,7 +257,7 @@ export const TOOLS: ToolDefinition[] = [
       type: "object",
       properties: {
         ...CLIENT_ARG,
-        limit: { type: "integer", description: `How many, up to ${MAX_ROWS}. Default 15.` },
+        limit: { type: "integer", description: `How many, up to ${MAX_ROWS}. Default 15. Ask for what the question needs — if it is about all of a client's replies, ask for hundreds rather than analysing the default and generalising.` },
         since: { type: "string", description: "ISO 8601 date; only conversations active on or after this." },
       },
     },
@@ -225,7 +268,7 @@ export const TOOLS: ToolDefinition[] = [
       "People who replied and have not been answered — the follow-up list. Oldest wait first, so the top of the list is the most overdue. Optionally scoped to one client. Use this for 'who needs following up', 'who are we ignoring', or a follow-up report.",
     input_schema: {
       type: "object",
-      properties: { ...CLIENT_ARG, limit: { type: "integer", description: `How many, up to ${MAX_ROWS}. Default 25.` } },
+      properties: { ...CLIENT_ARG, limit: { type: "integer", description: `How many, up to ${MAX_ROWS}. Default 25. For a complete follow-up report ask for the maximum rather than the default.` } },
     },
   },
   {
@@ -257,7 +300,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "heyreach_campaign_metrics",
     description:
-      "Per-campaign performance for one client from HeyReach: connections sent and accepted, messages sent, conversations started, replies received, leads contacted, leads auto-tagged interested, and the acceptance and reply rates. Optionally over a date window; both since and until must be given together. This is the authoritative source for one client's reply counts and rates. Rates are returned as percentages already converted for you.",
+      "Per-campaign performance for one client from HeyReach: connections sent and accepted, messages sent, conversations started, replies received, leads auto-tagged interested, and HeyReach's own acceptance and reply rates. Optionally over a date window; both since and until must be given together. This is the authoritative source for one client's reply counts. Rates come back as percentages already converted, but read the rateWarning in the result before ranking anything by one. Unique leads contacted is not available per campaign — heyreach_workspace_totals is the only place HeyReach reports it.",
     input_schema: { type: "object", properties: { ...CLIENT_ARG, ...WINDOW_ARGS }, required: ["client"] },
   },
   {
@@ -309,7 +352,7 @@ export const TOOLS: ToolDefinition[] = [
         nameContains: { type: "string", description: "Part of the person's name. Matches their name only, not what they wrote." },
         campaignIds: { type: "array", items: { type: "string" }, description: "Restrict to these HeyReach campaign ids." },
         unreadOnly: { type: "boolean", description: "Only conversations nobody has opened yet." },
-        limit: { type: "integer", description: `How many, up to ${MAX_ROWS}. Default 10.` },
+        limit: { type: "integer", description: `How many, up to ${MAX_THREADS}. Default 10. Lower than the other list tools because each conversation carries its whole message thread.` },
       },
       required: ["client"],
     },
@@ -407,10 +450,10 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const all = await clients();
       const clientById = new Map(all.map((c) => [c.id, c.name]));
       const leadIds = leadRows.map((row) => text(row.id)).filter(Boolean);
-      const conversationRows = rows(
-        await db(
-          `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction,score,tier&lead_id=in.(${leadIds.join(",")})&order=last_message_at.desc&limit=${MAX_ROWS}`,
-        ),
+      const conversationRows = await dbByIds(
+        (batch) =>
+          `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction,score,tier&lead_id=in.(${batch.join(",")})&order=last_message_at.desc&limit=${MAX_ROWS}`,
+        leadIds,
       );
       const described = await describeConversations(conversationRows);
       const byLead = new Map<string, Row[]>();
@@ -488,17 +531,19 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       return {
         client: client.name,
         window: since ? { since, until } : "all time",
-        note: "Only campaigns QC launched. Rates are percentages.",
+        note: "Only campaigns QC launched. Rates are percentages, already converted.",
+        rateWarning:
+          "replyRatePercent and acceptanceRatePercent are HeyReach's own figures and their denominators are not documented — on a live account the reply rate did not reconcile exactly against replies ÷ messagesSent. Report them as HeyReach's rates. Do not describe either as a share of conversationsStarted, messagesSent or leads contacted, and do not place them in a table column beside a count that implies a denominator. To rank by a rate you can defend, divide two of the raw counts below yourself and name them.",
         campaigns: ours.map((row) => ({
           id: row.campaignId,
           name: row.campaignName,
           connectionsSent: row.connectionsSent,
           connectionsAccepted: row.connectionsAccepted,
-          acceptanceRate: percent(row.connectionAcceptanceRate),
+          acceptanceRatePercent: percent(row.connectionAcceptanceRate),
           messagesSent: row.messagesSent,
           conversationsStarted: row.conversationsStarted,
           replies: row.messageReplies,
-          replyRate: percent(row.messageReplyRate),
+          replyRatePercent: percent(row.messageReplyRate),
           // `leadsContacted` is deliberately absent. HeyReach returns zero for it on every campaign
           // row — including one that had sent 881 connection requests — and only fills it in on the
           // workspace total. Passing that zero through would have the assistant reporting that a
@@ -578,13 +623,15 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         client: client.name,
         window: since ? { since, until } : "all time",
         note: "The client's whole HeyReach account, including any campaigns they ran before hiring QC. Rates are percentages.",
+        rateWarning:
+          "replyRatePercent and acceptanceRatePercent are HeyReach's own figures with undocumented denominators. Quote them as HeyReach's rates, or divide the raw counts yourself and say which two you used.",
         connectionsSent: stats.connectionsSent,
         connectionsAccepted: stats.connectionsAccepted,
-        acceptanceRate: percent(stats.connectionAcceptanceRate),
+        acceptanceRatePercent: percent(stats.connectionAcceptanceRate),
         messagesSent: stats.messagesSent,
         conversationsStarted: stats.conversationsStarted,
         replies: stats.messageReplies,
-        replyRate: percent(stats.messageReplyRate),
+        replyRatePercent: percent(stats.messageReplyRate),
         uniqueLeadsContacted: stats.leadsContacted,
         taggedInterested: stats.taggedInterested,
       };
@@ -604,7 +651,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
           // `seen: true` is a filter for *read* conversations, not the absence of one.
           ...(input.unreadOnly === true ? { seen: false } : {}),
         },
-        rowLimit(input.limit, 10),
+        rowLimit(input.limit, 10, MAX_THREADS),
       );
       return {
         client: client.name,
