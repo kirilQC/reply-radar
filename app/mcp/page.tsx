@@ -397,7 +397,7 @@ export default function McpPage() {
                     <b>{elapsed(seconds)}</b>
                   </div>
                   <Timeline entries={live.entries} live />
-                  {live.answer && <Markdown>{live.answer}</Markdown>}
+                  {live.answer && <Markdown live>{live.answer}</Markdown>}
                 </article>
               )}
               <div ref={endRef} />

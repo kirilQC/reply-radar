@@ -106,9 +106,18 @@ test("a fenced block is taken verbatim and an unclosed fence does not eat the an
 });
 
 test("unrecognised markdown degrades to plain text rather than to nothing", () => {
-  const blocks = parseBlocks("> a blockquote we do not handle");
-  assert.equal(blocks.length, 1);
-  assert.equal(spansToText(blocks[0].spans), "> a blockquote we do not handle");
+  // Blockquotes used to be the example here, and are now rendered as callouts. The case moved to
+  // constructs still outside the subset; the rule it stands for has not moved. Whatever we do not
+  // parse has to survive as readable text — never vanish, never render as debris.
+  const setext = parseBlocks("A title\n=======");
+  assert.equal(setext.length, 1);
+  assert.equal(spansToText(setext[0].spans), "A title =======");
+
+  const html = parseBlocks("<div class='x'>raw html</div>");
+  assert.equal(spansToText(html[0].spans), "<div class='x'>raw html</div>");
+
+  const footnote = parseBlocks("A claim.[^1]");
+  assert.equal(spansToText(footnote[0].spans), "A claim.[^1]");
 });
 
 test("empty input yields nothing rather than throwing", () => {

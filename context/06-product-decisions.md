@@ -230,6 +230,27 @@ lower that — never `MAX_TURNS`, which is what makes the answers correct.
   not reconcile against replies ÷ messages sent. They are exposed as HeyReach's own figures with an
   instruction never to place them beside a count that implies a denominator; to rank by a rate, the
   model divides two raw counts and names them.
+**The answer is a small report, not a chat message.** The model is instructed to lead with the answer,
+put the finding in a callout, pull out headline figures, show one visual, and close with the caveat.
+It draws by emitting a fenced ` ```chart ` or ` ```stats ` block whose body is JSON — not by calling a
+tool, because a tool call happens before the prose is written and the chart would land wherever the
+loop put it rather than where it belongs in the argument.
+
+- **Bars are measured from zero, always.** Scaling between a min and a max turns a one-point gap into
+  an empty bar beside a full one, which is a picture of a finding that does not exist. `split` is the
+  one exception and is measured against the total, because its parts sum to a whole.
+- **Charts are CSS, not SVG**, matching every other visualisation in the app. `.md-bars` is a single
+  grid with rows set to `display: contents`, so all bars share one axis — a grid per row silently
+  gives a row reading "8%" a wider track than one reading "12.5%", and then equal values draw as
+  unequal bars.
+- **Nothing is silently truncated or silently dropped.** Past twelve bars the remainder is counted and
+  reported; a point whose value will not parse keeps its label and draws no bar. Both alternatives
+  produce a chart that looks complete and is not.
+- **A malformed spec renders as visible JSON.** Ugly enough to get fixed, honest enough not to invent
+  a shape for data we could not read. While the turn is still streaming it shows a placeholder
+  instead, because mid-stream every spec is temporarily malformed.
+- **Print forces the bar colours through** (`print-color-adjust: exact`) and darkens the muted greys.
+  Browsers drop backgrounds when printing, which would otherwise print every chart as empty tracks.
 - **Answers are rendered markdown, and exportable.** `shared/markdown-blocks.mjs` parses to blocks so
   tables and bold render rather than showing their pipes and asterisks. CSV is lifted out of the
   answer's own tables rather than asking the model for a second machine-readable copy, which would

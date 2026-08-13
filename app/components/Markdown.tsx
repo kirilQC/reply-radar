@@ -14,12 +14,32 @@ import { parseBlocks as parse } from "../../shared/markdown-blocks.mjs";
 export type Span =
   | { kind: "text" | "bold" | "italic" | "code"; text: string }
   | { kind: "link"; text: string; href: string };
+export type ChartPoint = {
+  label: string;
+  note: string;
+  value: number | null;
+  display: string;
+  fraction: number;
+  negative: boolean;
+  tone: string;
+};
 export type Block =
   | { kind: "heading"; level: number; spans: Span[] }
   | { kind: "paragraph"; spans: Span[] }
+  | { kind: "callout"; spans: Span[] }
   | { kind: "list"; ordered: boolean; items: Array<{ depth: number; spans: Span[] }> }
   | { kind: "table"; head: Span[][]; rows: Span[][][] }
-  | { kind: "code"; language: string; text: string }
+  | { kind: "code"; language: string; text: string; closed: boolean }
+  | {
+      kind: "chart";
+      chart: "bar" | "column" | "split";
+      title: string;
+      caption: string;
+      unit: string;
+      hidden: number;
+      series: ChartPoint[];
+    }
+  | { kind: "stats"; items: Array<{ label: string; value: string; note: string; tone: string }> }
   | { kind: "rule" };
 
 /**
@@ -49,7 +69,105 @@ function Spans({ spans }: { spans: Span[] }) {
   );
 }
 
-function Rendered({ block }: { block: Block }) {
+/** A fraction as a CSS length. Kept off zero so a real but tiny value still shows something. */
+const track = (fraction: number) => `${fraction > 0 ? Math.max(fraction * 100, 1.5) : 0}%`;
+
+/** The spec's own tone if it gave one, otherwise coral for anything below zero. */
+const toneOf = (point: { tone: string; negative: boolean }) => point.tone || (point.negative ? "negative" : "");
+
+function Chart({ block }: { block: Extract<Block, { kind: "chart" }> }) {
+  const { series, chart } = block;
+  return (
+    <figure className="md-chart" data-chart={chart}>
+      {(block.title || block.caption) && (
+        <figcaption>
+          {block.title && <strong>{block.title}</strong>}
+          {block.caption && <span>{block.caption}</span>}
+        </figcaption>
+      )}
+
+      {chart === "column" && (
+        <div className="md-columns">
+          {series.map((point, index) => (
+            <div key={index} data-tone={toneOf(point) || undefined}>
+              <strong>{point.display}</strong>
+              <i style={{ height: track(point.fraction) }} />
+              <small title={point.label}>{point.label}</small>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {chart === "split" && (
+        <>
+          <div className="md-split">
+            {series.map((point, index) => (
+              <em key={index} data-slot={index % 5} style={{ width: track(point.fraction) }} />
+            ))}
+          </div>
+          <ul className="md-split-legend">
+            {series.map((point, index) => (
+              <li key={index}>
+                <i data-slot={index % 5} />
+                <span>{point.label}</span>
+                <data>{point.display}</data>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {chart === "bar" && (
+        <div className="md-bars">
+          {series.map((point, index) => (
+            <div className="md-bar" key={index}>
+              <span title={point.label}>
+                {point.label}
+                {point.note && <small>{point.note}</small>}
+              </span>
+              <i>
+                <em style={{ width: track(point.fraction) }} data-tone={toneOf(point) || undefined} />
+              </i>
+              <data>{point.display}</data>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Never silently truncated: a top-twelve shown as if it were everything is a wrong answer. */}
+      {block.hidden > 0 && <p className="md-chart-more">+{block.hidden} more not shown</p>}
+    </figure>
+  );
+}
+
+function Rendered({ block, live }: { block: Block; live: boolean }) {
+  if (block.kind === "chart") return <Chart block={block} />;
+  // A visual still arriving. Shown as a placeholder rather than as the JSON it currently is, and only
+  // while the turn is live — once the answer is finished, an unreadable spec goes back to being
+  // visible code, because then it is a real defect and hiding it would hide the numbers with it.
+  if (live && block.kind === "code" && !block.closed && (block.language === "chart" || block.language === "stats")) {
+    return <p className="md-drawing">Drawing {block.language === "stats" ? "figures" : "chart"}…</p>;
+  }
+  if (block.kind === "stats") {
+    return (
+      <div className="md-stats">
+        {block.items.map((item, index) => (
+          <div key={index} data-tone={item.tone || undefined}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+            {item.note && <small>{item.note}</small>}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (block.kind === "callout") {
+    return (
+      <aside className="md-callout">
+        <Spans spans={block.spans} />
+      </aside>
+    );
+  }
   if (block.kind === "heading") {
     // Clamped to h3–h5. The page already owns h1 and h2, and an answer that opens with an h1 would
     // outrank the page title it sits under.
@@ -118,12 +236,13 @@ function Rendered({ block }: { block: Block }) {
   return <hr />;
 }
 
-export default function Markdown({ children }: { children: string }) {
+/** `live` means the turn is still streaming, which only changes how an unfinished block is shown. */
+export default function Markdown({ children, live = false }: { children: string; live?: boolean }) {
   const blocks = parseBlocks(children);
   return (
     <div className="md">
       {blocks.map((block, index) => (
-        <Rendered block={block} key={index} />
+        <Rendered block={block} live={live} key={index} />
       ))}
     </div>
   );

@@ -15,7 +15,12 @@
  * which is the only acceptable failure: an unhandled construct must look plain, never look broken.
  *
  * It is plain `.mjs` in `shared/` so the tests can import it directly, same as the other logic here.
+ *
+ * The one construct here that is not markdown is the `chart` and `stats` fence, which the model uses
+ * to draw. Reading those specs is `answer-visuals.mjs`, because scaling a bar honestly is a separate
+ * problem from parsing a document and deserves its own tests.
  */
+import { parseVisual } from "./answer-visuals.mjs";
 
 /** Inline markers, longest-first so `**bold**` is never mistaken for two italics. */
 const INLINE = /(\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\[[^\]\n]*\]\([^)\s]+\)|\*[^*\n]+\*|_[^_\n]+_)/g;
@@ -76,11 +81,18 @@ export function parseBlocks(markdown) {
   const lines = String(markdown ?? "").replace(/\r\n?/g, "\n").split("\n");
   const blocks = [];
   let paragraph = [];
+  let quoted = [];
 
-  /** Paragraph lines accumulate until something else starts, so a soft-wrapped sentence stays one block. */
+  /**
+   * Runs of lines accumulate until something else starts, so a soft-wrapped sentence stays one block
+   * and a two-line callout stays one callout. A blank line flushes both, which is what makes two
+   * findings quoted one after the other stay two findings.
+   */
   const flush = () => {
     if (paragraph.length) blocks.push({ kind: "paragraph", spans: parseInline(paragraph.join(" ")) });
+    if (quoted.length) blocks.push({ kind: "callout", spans: parseInline(quoted.join(" ")) });
     paragraph = [];
+    quoted = [];
   };
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -102,9 +114,29 @@ export function parseBlocks(markdown) {
         body.push(lines[index]);
         index += 1;
       }
-      blocks.push({ kind: "code", language: fence[1] || "", text: body.join("\n") });
+      const language = fence[1] || "";
+      const source = body.join("\n");
+      // Whether the closing fence actually arrived. Mid-stream it has not, and a half-written chart
+      // spec is invalid JSON, so the renderer needs to tell "this is code" from "this is not finished
+      // yet" — otherwise the reader watches raw JSON scroll past before it snaps into a chart.
+      const closed = index < lines.length;
+      // A `chart` or `stats` fence is a visual; anything else, or a visual we cannot read, stays code.
+      // Falling back rather than failing means a malformed spec shows as visible JSON instead of
+      // taking the answer down with it.
+      const visual = parseVisual(language, source);
+      blocks.push(visual ?? { kind: "code", language, text: source, closed });
       continue;
     }
+
+    // Blockquotes carry the one-line finding the model wants read first, so they render as a callout
+    // rather than as indented prose.
+    const quote = line.match(/^\s*>\s?(.*)$/);
+    if (quote) {
+      if (paragraph.length) flush();
+      quoted.push(quote[1].trim());
+      continue;
+    }
+    if (quoted.length) flush();
 
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {

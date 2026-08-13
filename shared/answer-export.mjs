@@ -6,7 +6,10 @@
  * lifts them out rather than asking the model to produce a second machine-readable copy, which would
  * double the tokens and give two versions of the same numbers that could disagree.
  *
- * ── When there is no table ──────────────────────────────────────────────────────────────────────
+ * Charts export the same way, from the same principle: the bars were drawn from figures the answer
+ * already committed to, so the file restates those rather than a second set.
+ *
+ * ── When there is neither ───────────────────────────────────────────────────────────────────────
  * A judgement — "CT50 is the strongest at meaningful volume" — has no rows in it. Exporting nothing
  * would look broken, and inventing a shape for prose would be worse, so the prose is written out as
  * single-column lines under a `Answer` header. It opens in a spreadsheet, it is obviously not a
@@ -33,6 +36,31 @@ export function csvField(value) {
 const row = (fields) => fields.map(csvField).join(",");
 
 /**
+ * The rows hidden inside a block, or `null` if it holds none.
+ *
+ * Charts count. The bars are drawn from real figures, and an answer that made its point with a chart
+ * instead of a table would otherwise export as a paragraph — the numbers on screen, missing from the
+ * file. The chart's own title becomes the header so stacked ranges stay identifiable.
+ */
+function gridOf(block) {
+  if (block.kind === "table") return { head: block.head.map(spansToText), rows: block.rows.map((cells) => cells.map(spansToText)) };
+  if (block.kind === "chart") {
+    const notes = block.series.some((point) => point.note);
+    return {
+      title: block.title,
+      head: notes ? ["Label", "Value", "Note"] : ["Label", "Value"],
+      // The raw number, not the drawn one: a spreadsheet should get `24.2`, not `24.2%`.
+      rows: block.series.map((point) => {
+        const cells = [point.label, point.value === null ? "" : point.value];
+        return notes ? [...cells, point.note] : cells;
+      }),
+    };
+  }
+  if (block.kind === "stats") return { head: ["Label", "Value", "Note"], rows: block.items.map((item) => [item.label, item.value, item.note]) };
+  return null;
+}
+
+/**
  * Builds the CSV for one answer.
  *
  * `question` and `askedAt` are the provenance header. Multiple tables are written one after another
@@ -42,20 +70,21 @@ const row = (fields) => fields.map(csvField).join(",");
 export function answerToCsv({ question = "", answer = "", askedAt = "" } = {}) {
   const lines = [row(["Question", question]), row(["Asked", askedAt]), ""];
   const blocks = parseBlocks(answer);
-  const tables = blocks.filter((block) => block.kind === "table");
+  const grids = blocks.map(gridOf).filter(Boolean);
 
-  if (tables.length) {
-    tables.forEach((table, index) => {
+  if (grids.length) {
+    grids.forEach((grid, index) => {
       if (index > 0) lines.push("");
-      lines.push(row(table.head.map(spansToText)));
-      for (const cells of table.rows) lines.push(row(cells.map(spansToText)));
+      if (grid.title) lines.push(row([grid.title]));
+      lines.push(row(grid.head));
+      for (const cells of grid.rows) lines.push(row(cells));
     });
     return lines.join("\n");
   }
 
   lines.push(row(["Answer"]));
   for (const block of blocks) {
-    if (block.kind === "paragraph" || block.kind === "heading") lines.push(row([spansToText(block.spans)]));
+    if (block.kind === "paragraph" || block.kind === "heading" || block.kind === "callout") lines.push(row([spansToText(block.spans)]));
     else if (block.kind === "list") for (const item of block.items) lines.push(row([spansToText(item.spans)]));
     else if (block.kind === "code") for (const line of block.text.split("\n")) lines.push(row([line]));
   }

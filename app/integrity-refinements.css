@@ -2235,6 +2235,264 @@ a.tag-outline-link:hover {
   background: var(--panel);
 }
 
+/* ── Answer visuals ──────────────────────────────────────────────────────────────────────────────
+   Charts the assistant draws, plus the callout and stat row that give an answer a shape.
+
+   Built the way every other chart in this app is built: an element with a width or height set as a
+   percentage, not SVG. That keeps them selectable, printable and responsive for free, and it keeps
+   this consistent with the analytics dashboard, which is where these numbers are also read.
+
+   The analytics classes themselves are deliberately not reused. `.analytics-rank` is bound to a
+   dashboard grid — a fixed logo column, a fixed index column, dashboard type sizes — and gluing a
+   chat answer to that grid would make every future analytics tweak a chat regression. Same variables,
+   same idiom, separate rules. */
+.md-chart {
+  margin: 0 0 14px;
+  padding: 13px 14px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: var(--panel);
+}
+.md-chart figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+.md-chart figcaption strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+.md-chart figcaption span {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+/* Reported, not hidden: the renderer counts what it could not show and says so. */
+.md-chart-more {
+  margin: 10px 0 0;
+  color: var(--muted-2);
+  font-size: 10px;
+}
+
+/* A horizontal ranking. The label truncates and the value never does — the number is the point, and
+   a campaign name is recognisable from its code alone. */
+/* One grid for the whole chart, with each row dissolving into it via `display: contents`.
+
+   Not a grid per row, which is the obvious construction and is wrong: every row would size its own
+   columns, so a row whose value reads "8%" would get a wider track than one reading "12.5%", and two
+   bars of equal length would be drawn different lengths. The bars have to share an axis or they are
+   not comparable, which is the only thing a bar chart is for. */
+.md-bars {
+  display: grid;
+  grid-template-columns: minmax(72px, 30%) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px 11px;
+}
+.md-bar {
+  display: contents;
+}
+.md-bar > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.md-bar > span small {
+  display: block;
+  color: var(--muted-2);
+  font-size: 9.5px;
+}
+.md-bar > i {
+  height: 9px;
+  border-radius: 5px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.md-bar > i em {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: var(--accent);
+  /* Floored at a sliver by the renderer so a small real value is visible; a true zero gets nothing,
+     because a bar where there is no data reads as a small amount of something. */
+  min-width: 0;
+}
+.md-bar > data {
+  justify-self: end;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Kept under `.md` throughout. A bare [data-tone] rule would repaint every element in the app that
+   happens to carry the attribute. */
+.md-bar > i em[data-tone="negative"],
+.md-columns > div[data-tone="negative"] i {
+  background: var(--coral);
+}
+.md-bar > i em[data-tone="positive"],
+.md-columns > div[data-tone="positive"] i {
+  background: var(--green);
+}
+.md-bar > i em[data-tone="warn"],
+.md-columns > div[data-tone="warn"] i {
+  background: var(--amber);
+}
+
+/* Vertical bars, for time. Same construction as the analytics reply-momentum card: the value sits
+   above the bar and the label below it, so neither has to fit inside the bar. */
+.md-columns {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  align-items: end;
+  gap: 7px;
+  min-height: 116px;
+}
+.md-columns > div {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-items: end;
+  justify-items: center;
+  gap: 5px;
+  height: 116px;
+}
+.md-columns strong {
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.md-columns i {
+  width: min(30px, 82%);
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  background: var(--accent);
+  align-self: end;
+}
+.md-columns small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+/* One stacked bar for a composition, with the legend carrying the labels. Segments are not labelled
+   in place: a 6% slice has no room for a word and shrinking the type until it fits is how a chart
+   stops being readable. */
+.md-split {
+  display: flex;
+  gap: 2px;
+  height: 13px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.md-split em {
+  display: block;
+  height: 100%;
+}
+.md-split-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 11px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.md-split-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.md-split-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+.md-split-legend data {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* Five slots, cycled. Ordered so adjacent segments stay distinguishable rather than by any meaning —
+   a split of statuses has no inherent good and bad, so colouring one green would invent a verdict. */
+.md-split [data-slot="0"], .md-split-legend [data-slot="0"] { background: var(--accent); }
+.md-split [data-slot="1"], .md-split-legend [data-slot="1"] { background: var(--green); }
+.md-split [data-slot="2"], .md-split-legend [data-slot="2"] { background: var(--amber); }
+.md-split [data-slot="3"], .md-split-legend [data-slot="3"] { background: var(--coral); }
+.md-split [data-slot="4"], .md-split-legend [data-slot="4"] { background: var(--muted); }
+
+/* Headline figures. Wraps rather than scrolls, because a stat pushed off the edge is a stat nobody
+   reads, and there are never more than six. */
+.md-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.md-stats > div {
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.md-stats span {
+  display: block;
+  color: var(--muted);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.md-stats strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.md-stats small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-2);
+  font-size: 9.5px;
+}
+.md-stats > div[data-tone="positive"] strong { color: var(--green); }
+.md-stats > div[data-tone="negative"] strong { color: var(--coral); }
+.md-stats > div[data-tone="warn"] strong { color: var(--amber); }
+
+/* Stands in for a visual whose spec is still arriving. */
+.md-drawing {
+  margin: 0 0 13px;
+  color: var(--muted-2);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* The one line worth remembering. A left rule rather than a filled panel: the answer already sits on
+   a panel, and a box inside a box reads as an error message. */
+.md-callout {
+  margin: 0 0 13px;
+  padding: 2px 0 2px 13px;
+  border-left: 2px solid var(--accent);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+@media (max-width: 700px) {
+  /* The label column stops earning its width first; the bar and the number are the content. */
+  .md-bar {
+    grid-template-columns: minmax(58px, 34%) minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .md-columns small {
+    font-size: 8px;
+  }
+}
+
 /* Export sits under the answer, quiet until wanted. Most answers are read and not exported. */
 .mcp-export {
   display: flex;
@@ -2342,6 +2600,49 @@ a.tag-outline-link:hover {
   .mcp-turn.is-printing .md table,
   .mcp-turn.is-printing .md tr {
     page-break-inside: avoid;
+  }
+
+  /* Charts are backgrounds, and browsers drop backgrounds when printing. Left alone, every bar would
+     come out as an empty track — a chart of nothing, printed confidently. The bars are the data, so
+     they are forced through; the panels and tracks around them are not, so the page stays white. */
+  .mcp-turn.is-printing .md-bar > i em,
+  .mcp-turn.is-printing .md-columns i,
+  .mcp-turn.is-printing .md-split em,
+  .mcp-turn.is-printing .md-split-legend i {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .mcp-turn.is-printing .md-chart,
+  .mcp-turn.is-printing .md-stats > div {
+    background: none !important;
+    border-color: #ddd !important;
+    page-break-inside: avoid;
+  }
+  .mcp-turn.is-printing .md-bar > i,
+  .mcp-turn.is-printing .md-split {
+    background: #ececec !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .mcp-turn.is-printing .md-callout {
+    color: #111 !important;
+    border-left-color: #888 !important;
+    page-break-inside: avoid;
+  }
+  .mcp-turn.is-printing .md-stats strong,
+  .mcp-turn.is-printing .md-chart figcaption strong,
+  .mcp-turn.is-printing .md-bar > data {
+    color: #000 !important;
+  }
+  /* The muted greys are chosen against a dark panel and wash out to nothing on white. These carry the
+     sample sizes and periods — the caveats — so they are the last thing that should fade on paper. */
+  .mcp-turn.is-printing .md-chart figcaption span,
+  .mcp-turn.is-printing .md-bar > span small,
+  .mcp-turn.is-printing .md-columns small,
+  .mcp-turn.is-printing .md-chart-more,
+  .mcp-turn.is-printing .md-stats span,
+  .mcp-turn.is-printing .md-stats small {
+    color: #555 !important;
   }
 }
 
