@@ -65,11 +65,34 @@ create table if not exists rr_device_preferences (
 
 -- raw_data carries the whole HeyReach lead payload plus the `reply_radar` attribution block
 -- (campaign, sender, AI Ark enrichment), which is where the size of this table comes from.
+--
+-- The columns after raw_data are generated, not stored independently: they project the fields worth
+-- filtering, sorting and exporting out of the JSON, and Postgres keeps them in step automatically.
+-- raw_data stays authoritative and untouched, which matters because ingestion merge-spreads it to
+-- preserve cached drafts, sentiment and enrichment across syncs. PostgREST exposes generated columns
+-- read-only, so no existing write can collide with them.
+--
+-- Timestamps are deliberately absent here: casting text to timestamptz depends on the session
+-- timezone, so it is not immutable and cannot appear in a generated column. rr_leads_export below
+-- carries those instead.
 create table if not exists rr_leads (
   id uuid primary key default gen_random_uuid(), workspace_id uuid not null references rr_workspaces(id) on delete cascade,
   linkedin_profile_url text, linkedin_id text, name text, role text, company text,
   raw_data jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  icp_score integer generated always as ((raw_data->'reply_radar'->>'icp_score')::integer) stored,
+  icp_reason text generated always as (raw_data->'reply_radar'->>'icp_reason') stored,
+  ai_title text generated always as (raw_data->'reply_radar'->'ai_ark'->>'title') stored,
+  ai_company text generated always as (raw_data->'reply_radar'->'ai_ark'->'company'->'summary'->>'name') stored,
+  enrichment_status text generated always as (raw_data->'reply_radar'->>'enrichment_status') stored,
+  enrichment_error text generated always as (raw_data->'reply_radar'->>'enrichment_error') stored,
+  history_status text generated always as (raw_data->'reply_radar'->>'history_status') stored,
+  client_names text generated always as (raw_data->'reply_radar'->'rollup'->>'client_names') stored,
+  campaign_names text generated always as (raw_data->'reply_radar'->'rollup'->>'campaign_names') stored,
+  sender_names text generated always as (raw_data->'reply_radar'->'rollup'->>'sender_names') stored,
+  client_count integer generated always as ((raw_data->'reply_radar'->'rollup'->>'client_count')::integer) stored,
+  campaign_count integer generated always as ((raw_data->'reply_radar'->'rollup'->>'campaign_count')::integer) stored,
+  conversation_count integer generated always as ((raw_data->'reply_radar'->'rollup'->>'conversation_count')::integer) stored
 );
 -- last_refreshed_at is what lets the inbox skip re-syncing a conversation someone just synced. It
 -- is stamped on every refresh attempt that reaches HeyReach, message or no message.
@@ -161,6 +184,7 @@ create index if not exists rr_profile_workspaces_workspace_idx on rr_profile_wor
 -- rr_leads is filtered by workspace and by profile URL on every ingestion pass.
 create index if not exists rr_leads_workspace_idx on rr_leads(workspace_id);
 create index if not exists rr_leads_profile_url_idx on rr_leads(linkedin_profile_url);
+create index if not exists rr_leads_icp_score_idx on rr_leads(icp_score desc);
 create index if not exists rr_conversations_workspace_tier_idx on rr_conversations(workspace_id, tier);
 create index if not exists rr_conversations_last_message_idx on rr_conversations(last_message_at desc);
 create index if not exists rr_messages_sent_at_idx on rr_messages(sent_at desc);
@@ -202,3 +226,35 @@ alter table rr_webhook_events enable row level security;
 alter table rr_sync_runs enable row level security;
 alter table rr_audit_log enable row level security;
 alter table rr_reports enable row level security;
+
+-- A readable flattening of rr_leads for exports and ad-hoc queries: the client resolved to a name
+-- rather than a UUID, and the timestamps that generated columns cannot hold.
+--
+-- security_invoker is load-bearing. A view in `public` runs as its owner by default, which would let
+-- the anon key read straight through the row level security on the tables underneath it. Any view
+-- added here needs the same treatment.
+create or replace view rr_leads_export with (security_invoker = true) as
+select
+  w.name                                                          as client,
+  l.name, l.role, l.company,
+  l.ai_title, l.ai_company,
+  l.icp_score, l.icp_reason,
+  l.campaign_names, l.sender_names, l.client_names,
+  l.client_count, l.campaign_count, l.conversation_count,
+  l.enrichment_status, l.enrichment_error, l.history_status,
+  (l.raw_data->'reply_radar'->>'icp_scored_at')::timestamptz      as icp_scored_at,
+  (l.raw_data->'reply_radar'->>'history_fetched_at')::timestamptz as history_fetched_at,
+  l.linkedin_profile_url, l.linkedin_id, l.created_at, l.id
+from rr_leads l
+left join rr_workspaces w on w.id = l.workspace_id;
+revoke all on rr_leads_export from anon, authenticated;
+
+-- Retention for the worker's log. Heartbeat rows land once a minute and only the newest is ever
+-- read, so they go after a day; the poll and sync rows feed the admin audit page's date filter, so
+-- they get a fortnight. Without this the table reaches tens of thousands of rows and dwarfs the
+-- actual data. Scheduled hourly via pg_cron:
+--   select cron.schedule('rr-prune-sync-runs', '17 * * * *', 'select public.rr_prune_sync_runs()');
+create or replace function rr_prune_sync_runs() returns void language sql as $$
+  delete from public.rr_sync_runs where run_type = 'heartbeat'  and started_at < now() - interval '24 hours';
+  delete from public.rr_sync_runs where run_type <> 'heartbeat' and started_at < now() - interval '14 days';
+$$;
