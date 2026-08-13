@@ -167,6 +167,23 @@ html:not(.hydrated) body{visibility:hidden}
 .database-purge-names{color:var(--text)!important;font-style:italic}
 .database-purge-actions{display:flex;align-items:center;gap:14px}
 
+/* Blocking: the delete that survives the next reply. Sits below Delete lead in the danger zone, separated
+   by a rule because the two buttons are one click apart and do different things. */
+.database-block-note{margin:18px 0 14px!important;padding-top:16px;border-top:1px solid color-mix(in srgb,var(--coral) 18%,var(--border))}
+.database-block-lead-button{height:36px;padding:0 18px;border:1px solid var(--border);border-radius:7px;background:var(--panel-2);color:var(--text);font-size:11px;font-weight:650;cursor:pointer}
+.database-block-lead-button:hover:not(:disabled){border-color:var(--coral);color:var(--coral)}
+.database-block-lead-button:disabled{opacity:.45;cursor:default}
+/* The list of blocked people, inside the purge card: a name, what it was blocked over, and the only way
+   back off the list. */
+.database-blocked-list{list-style:none;margin:0 0 14px;padding:0;display:flex;flex-direction:column;gap:2px;max-height:280px;overflow-y:auto}
+.database-blocked-list li{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--border-soft)}
+.database-blocked-list li:last-child{border-bottom:none}
+.database-blocked-list li>span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.database-blocked-list strong{font-size:11px;font-weight:650;color:var(--text)}
+/* The profile URL is long and has nowhere to wrap to, so it is clipped rather than allowed to push the
+   Unblock button off the row. */
+.database-blocked-list small{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 /* Hide star column and adjust grid when follow-up score not shown */
 .row-star-cell{display:none}
 .table-head-followups,.table-head-followups~.lead-row{grid-template-columns:minmax(200px,1.6fr) minmax(0,.7fr) minmax(0,1fr) minmax(0,.85fr) minmax(0,.75fr) minmax(0,.45fr) minmax(0,.45fr) 70px!important}

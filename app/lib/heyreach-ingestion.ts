@@ -3,6 +3,8 @@ import { enrichLeadWithAiArk } from "./ai-ark-enrichment";
 import { isAiArkEnrichmentEnabled, leadRollup, mergeLeadAttributions } from "./lead-identity";
 import { writeAuditEvent } from "./audit-log";
 import { normalizePersonName } from "./person-name";
+import { blockedProfileKeys } from "./lead-blocklist";
+import { isBlockedProfile, profileKey } from "../../shared/blocklist.mjs";
 
 type SupabaseConfig = { url: string; key: string };
 
@@ -120,6 +122,48 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
   const eventId = eventRows?.[0]?.id;
 
   try {
+    /*
+     * Blocked people are turned away here, before the conversation history is fetched.
+     *
+     * This is the whole point of the block: deleting an unwanted reply worked, and then the next message
+     * arrived and this function rebuilt the person from the payload — new lead row, new conversation,
+     * back in the inbox. The check is at the top because the profile URL is already in the webhook
+     * envelope, so it costs one query and skips the HeyReach round trip entirely.
+     *
+     * The event row is still written first, and marked discarded rather than dropped, so a block that
+     * fires leaves a trace. Someone wondering why a reply never appeared can see the reason.
+     */
+    const blockedKeys = await blockedProfileKeys(config.url, config.key);
+    if (blockedKeys.size && isBlockedProfile(lead.profile_url, blockedKeys)) {
+      if (eventId) {
+        await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({
+            status: "discarded",
+            processed_at: new Date().toISOString(),
+            error_text: "This profile is on the block list — someone decided they are not a lead.",
+          }),
+        }).catch(() => null);
+      }
+      await writeAuditEvent(config, {
+        actor: "Supabase",
+        action: "conversation.discarded",
+        entityType: "conversation",
+        entityId: suppliedConversationId || "unknown",
+        details: {
+          source: "supabase",
+          status: "discarded",
+          workspaceId: workspace.id,
+          workspaceName: text(workspace.name) || text(workspace.slug),
+          reason: "blocked_profile",
+          profileKey: profileKey(lead.profile_url),
+          summary: "Skipped: this profile is on the block list.",
+        },
+      }).catch(() => null);
+      return { discarded: true, reason: "blocked_profile" as const };
+    }
+
     let historyError = "";
     const history = await fetchFullConversation(text(workspace.heyreach_api_key_ciphertext), payload).catch((error) => {
       historyError = error instanceof Error ? error.message : "HeyReach conversation history was unavailable";

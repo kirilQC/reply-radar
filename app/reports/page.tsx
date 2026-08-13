@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import {
@@ -288,6 +288,16 @@ export default function ReportsPage() {
    * else is running.
    */
   const [runPrompt, setRunPrompt] = useState("");
+
+  /**
+   * The prompt editor is a dialog, not a fold in the side panel.
+   *
+   * Editing it is a sit-down job — several paragraphs, read as a whole — and a 372px column cannot show
+   * enough of one to know where you are in it. Kept as its own flag rather than joining `openFolds`
+   * because a fold and a dialog behave differently: this one has to close on Escape and on the backdrop.
+   */
+  const [promptOpen, setPromptOpen] = useState(false);
+  const promptEdited = Boolean(template) && runPrompt.trim() !== (template?.prompt ?? "").trim();
 
   /**
    * The sections the account manager writes, which the app has no way to know: meetings booked, why a
@@ -1418,26 +1428,21 @@ export default function ReportsPage() {
             {/* Almost everything that makes one report read differently from another is in here, so it
                 is on the page rather than behind an edit-the-template detour. Tweaks apply to this run
                 only — the template everybody else runs is left alone. */}
+            {/* A dialog rather than a fold. A prompt is several paragraphs of prose that people rewrite in
+                place, and the fold gave it a six-line box in a 372px column — too narrow to see the
+                sentence being edited and too short to see the paragraph it belongs to. */}
             {template && (
-              <ConfigFold
-                id="prompt"
-                label="Edit prompt"
-                note={runPrompt.trim() === template.prompt.trim() ? "template default" : "edited for this run"}
-                open={openFolds.has("prompt")}
-                onToggle={toggleFold}
-              >
-                <textarea
-                  id="run-prompt"
-                  className="config-textarea config-prompt"
-                  value={runPrompt}
-                  onChange={(event) => setRunPrompt(event.target.value)}
-                />
-                <p className="config-hint">
-                  {runPrompt.trim() === template.prompt.trim()
-                    ? "The template's prompt. Edit it for this report without changing the template."
-                    : "Edited for this report only. The saved template is unchanged."}
-                </p>
-              </ConfigFold>
+              <div className="config-fold">
+                <button
+                  type="button"
+                  className="config-fold-head"
+                  onClick={() => setPromptOpen(true)}
+                >
+                  <span className="config-label">Edit prompt</span>
+                  <em>{promptEdited ? "edited for this run" : "template default"}</em>
+                  <i aria-hidden="true">↗</i>
+                </button>
+              </div>
             )}
 
             {/*
@@ -1718,6 +1723,116 @@ export default function ReportsPage() {
         </main>
         )}
       </section>
+
+      {/*
+        Rendered as a sibling of the whole reports column, not inside the config panel.
+        `.reports-main` clips its overflow so the two panes can scroll independently, and a dialog that
+        lived inside the panel would be a child of a 372px scroll container — which is the shape of the
+        problem this replaced.
+      */}
+      {promptOpen && template && (
+        <PromptDialog
+          prompt={runPrompt}
+          templatePrompt={template.prompt}
+          templateName={template.name}
+          edited={promptEdited}
+          onChange={setRunPrompt}
+          onClose={() => setPromptOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The full-size prompt editor.
+ *
+ * There is no save step and no cancel. The prompt is already the live value for this run — the dialog is
+ * a bigger window onto it, not a form — so closing it is not a decision and Escape or the backdrop is
+ * enough. "Restore template default" is the only undo anyone asked for, and it is exact rather than a
+ * history of keystrokes.
+ */
+function PromptDialog({
+  prompt,
+  templatePrompt,
+  templateName,
+  edited,
+  onChange,
+  onClose,
+}: {
+  prompt: string;
+  templatePrompt: string;
+  templateName: string;
+  edited: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+}) {
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    // The page behind must not scroll while a dialog is over it; restored on close either way.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    // Focused on open so the prompt can be edited without a click first. Done with a ref rather than
+    // autoFocus, which the a11y rules reject and which fires before the dialog has laid out.
+    textRef.current?.focus();
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [onClose]);
+
+  return (
+    <div className="prompt-dialog-backdrop">
+      {/*
+        The click-anywhere-to-close target is a real button behind the panel rather than a handler on the
+        backdrop itself. Two reasons: a div with a click handler is not reachable by keyboard, and a
+        handler on the wrapper would fire when a text selection started in the textarea and ended outside
+        it — dismissing the editor mid-edit.
+      */}
+      <button type="button" className="prompt-dialog-scrim" onClick={onClose} aria-label="Close prompt editor" />
+      <div className="prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="prompt-dialog-title">
+        <header className="prompt-dialog-head">
+          <div>
+            <h2 id="prompt-dialog-title">Edit prompt</h2>
+            <p>
+              {edited
+                ? `Edited for this report only. “${templateName}” is unchanged for everyone else.`
+                : `The prompt saved with “${templateName}”. Editing it here applies to this report only.`}
+            </p>
+          </div>
+          <button type="button" className="prompt-dialog-close" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </header>
+
+        <textarea
+          ref={textRef}
+          id="run-prompt"
+          className="prompt-dialog-text"
+          value={prompt}
+          onChange={(event) => onChange(event.target.value)}
+          spellCheck={false}
+        />
+
+        <footer className="prompt-dialog-foot">
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => onChange(templatePrompt)}
+            disabled={!edited}
+          >
+            Restore template default
+          </button>
+          <button type="button" className="primary-button" onClick={onClose}>
+            Done
+          </button>
+        </footer>
+      </div>
     </div>
   );
 }

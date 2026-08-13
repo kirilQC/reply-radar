@@ -25,6 +25,22 @@
   --report-positive: var(--green);
   background: var(--report-canvas);
   color: var(--report-ink);
+  /*
+   * The report scrolls, the app does not.
+   *
+   * A generated PDF is several 11in sheets, so before this the document scroll was the page scroll — and
+   * scrolling to page three took the client picker, the section list and the whole left-hand nav up and
+   * off the screen with it, leaving no way back but scrolling all the way up again. Pinning this column
+   * to the viewport and letting the two panes inside it scroll on their own keeps the nav and the
+   * configurator where they were put.
+   *
+   * Scoped to the reports page rather than fixed in .app-shell: every other page is a single column that
+   * genuinely wants the document scroll.
+   */
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /*
@@ -50,15 +66,23 @@ body.light-mode .reports-main {
   display: grid;
   grid-template-columns: 372px minmax(0, 1fr);
   gap: 24px;
-  padding: 24px 28px 64px;
-  align-items: start;
+  padding: 24px 28px;
+  /* Both columns run the full height and scroll internally, so they stretch rather than start. min-height
+     lets them actually shrink to the grid: without it a grid item's automatic minimum is its content, and
+     the overflow would escape upward into the page again. */
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.reports-shell > * {
+  min-height: 0;
 }
 
 /* ------------------------- Configurator ------------------------- */
 
 .reports-configurator {
-  position: sticky;
-  top: 20px;
   background: var(--report-surface);
   border: 1px solid var(--report-line);
   border-radius: 14px;
@@ -69,7 +93,7 @@ body.light-mode .reports-main {
   flex-direction: column;
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--report-ink);
-  max-height: calc(100vh - 40px);
+  /* The grid row already gives this the viewport height; it scrolls itself rather than the page. */
   overflow-y: auto;
 }
 
@@ -592,12 +616,135 @@ body.light-mode .reports-main {
   letter-spacing: 0.01em;
 }
 
-/* Taller than the other boxes: the prompt is a few paragraphs and scrolling a five-line window to
-   tweak one sentence is the reason people would avoid editing it. */
-.config-prompt {
-  min-height: 200px;
+/* ------------------------- Prompt dialog ------------------------- */
+
+/*
+ * The prompt used to be a 200px box inside the 372px config column, which is not enough of a paragraph to
+ * edit one sentence of it with any confidence. It is a dialog now, sized to the viewport.
+ */
+.prompt-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(8, 9, 14, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+/* Fills the backdrop behind the panel, so clicking off the dialog closes it. Invisible: the tint is on
+   the backdrop, and this only needs to be a target. */
+.prompt-dialog-scrim {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: default;
+}
+
+.prompt-dialog {
+  position: relative;
+  width: min(980px, 100%);
+  /* Tall, but never taller than the screen — the textarea below is what gives up the height. */
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--report-surface);
+  border: 1px solid var(--report-line);
+  border-radius: 16px;
+  padding: 22px 24px 20px;
+  box-shadow: 0 24px 64px rgba(8, 9, 14, 0.35);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--report-ink);
+}
+
+.prompt-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.prompt-dialog-head h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.prompt-dialog-head p {
+  margin: 0;
   font-size: 12.5px;
   line-height: 1.5;
+  color: var(--report-ink-soft);
+  max-width: 68ch;
+}
+
+.prompt-dialog-close {
+  margin-left: auto;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--report-line);
+  background: var(--report-inset);
+  color: var(--report-ink-soft);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.prompt-dialog-close:hover {
+  color: var(--report-ink);
+  border-color: var(--report-ink-faint);
+}
+
+.prompt-dialog-text {
+  /* flex + min-height:0 so this is the element that absorbs the available height and scrolls, rather than
+     pushing the footer buttons off the bottom of the dialog. */
+  flex: 1;
+  min-height: 240px;
+  resize: none;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--report-inset);
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  color: var(--report-ink);
+  font-family: "SF Mono", ui-monospace, "Menlo", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.prompt-dialog-text:focus {
+  outline: none;
+  border-color: var(--report-brand);
+}
+
+.prompt-dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prompt-dialog-foot .primary-button {
+  background: var(--report-brand);
+  color: var(--report-canvas);
+  border: none;
+  border-radius: 10px;
+  padding: 9px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.prompt-dialog-foot .text-button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .config-generate {
@@ -680,9 +827,13 @@ body.light-mode .reports-main {
   display: flex;
   flex-direction: column;
   gap: 24px;
-  /* Matches the configurator, so the two columns start and end together instead of leaving the taller
-     one running on past a short canvas. */
-  min-height: calc(100vh - 40px);
+  /*
+   * The scroll container for the document itself. A four-sheet PDF is taller than any screen, and this is
+   * the pane that absorbs that — the padding is on the inside so the last sheet clears the bottom edge
+   * instead of ending flush against it.
+   */
+  overflow-y: auto;
+  padding-bottom: 40px;
 }
 
 /*
@@ -1591,13 +1742,29 @@ body.light-mode .reports-main {
 /* ------------------------- Responsive (screen only) ------------------------- */
 
 @media (max-width: 1180px) {
+  /*
+   * Stacked, the page scroll comes back.
+   *
+   * Two panes each pinned to the viewport only works side by side. In one column they would need a
+   * viewport each, and the shell's `overflow: hidden` would clip whichever lost — so the pinning is
+   * released here and the document scrolls as it did before, which is the right behaviour on a narrow
+   * screen anyway.
+   */
+  .reports-main {
+    height: auto;
+    display: block;
+    overflow: visible;
+  }
+
   .reports-shell {
     grid-template-columns: 1fr;
+    padding-bottom: 64px;
+    overflow: visible;
   }
 
   .reports-configurator {
-    position: static;
     max-height: none;
+    overflow: visible;
   }
 
   /* Stacked, the panel no longer scrolls, so there is nothing for the footer to stick to. */
@@ -1606,7 +1773,8 @@ body.light-mode .reports-main {
   }
 
   .reports-canvas {
-    min-height: 0;
+    overflow: visible;
+    padding-bottom: 0;
   }
 }
 
@@ -1631,11 +1799,25 @@ body.light-mode .reports-main {
    Hub landing — choosing a report before configuring one.
    ============================================================ */
 
+/*
+ * The client and template picker — the other thing that can be inside .reports-main.
+ *
+ * That column is pinned to the viewport with `overflow: hidden` so the builder's two panes scroll
+ * independently, which means every view inside it has to claim its share of the height and scroll itself.
+ * Without this the client grid was simply clipped at the fold with no way to reach the rest.
+ */
 .reports-hub {
   padding: 30px 34px 80px;
   max-width: 1180px;
   margin: 0 auto;
   color: var(--report-ink);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* max-width plus `margin: 0 auto` centres the content; as a flex child it also needs to be allowed to
+     use the full width it is given, or the auto margins resolve against the flex basis instead. */
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .hub-lede h1 {
@@ -2257,13 +2439,21 @@ body.light-mode .reports-main {
 
   .print-hide,
   .app-sidebar,
-  .topbar {
+  .topbar,
+  .prompt-dialog-backdrop {
     display: none !important;
   }
 
   /*
    * .app-shell and .main-area sit outside .reports-main and so cannot see the report variables. They
    * are made transparent rather than coloured, letting the body colour above show through.
+   */
+  /*
+   * height and overflow are undone here, not just display and colour.
+   *
+   * On screen this column is pinned to the viewport with `overflow: hidden` so the sheets scroll without
+   * taking the nav with them. Printing through that would hand the printer one screen's worth of report
+   * and clip the rest — the paper is the scroll container here, so every ancestor has to open back up.
    */
   .app-shell,
   .main-area,
@@ -2274,13 +2464,19 @@ body.light-mode .reports-main {
     padding: 0 !important;
     margin: 0 !important;
     grid-template-columns: none !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 
-  /* The screen height the canvas holds so it sits level with the configurator would print as a blank
-     sheet before the cover page. */
+  /* The inner scroller, and the padding that keeps the last sheet off the bottom edge on screen — which
+     would print as a strip of dead space after the final page. */
   .reports-canvas {
     gap: 0 !important;
     min-height: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
   }
 
   .report-document {

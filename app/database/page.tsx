@@ -60,6 +60,9 @@ type PurgePreview = {
   hasMore: boolean;
   deleted?: { leads: number; conversations: number; messages: number };
 };
+/** Mirrors the shape /api/database/blocked returns. Declared here like Detail and PurgePreview, rather
+    than imported from the server lib, so this client file pulls in no server code. */
+type BlockedLead = { profileKey: string; name: string; reason: string; blockedAt: string };
 
 const initials = (name: string) =>
   name
@@ -206,6 +209,15 @@ export default function DatabasePage() {
   const [purge, setPurge] = useState<PurgePreview | null>(null);
   const [purgeBusy, setPurgeBusy] = useState<"" | "preview" | "delete">("");
   const [purgeError, setPurgeError] = useState("");
+  /**
+   * The block list, fetched only when someone asks to see it.
+   *
+   * `null` means "not opened", which is different from an empty array meaning "nobody is blocked" — the
+   * panel has to be able to say the second thing.
+   */
+  const [blocked, setBlocked] = useState<BlockedLead[] | null>(null);
+  const [blockedBusy, setBlockedBusy] = useState(false);
+  const [blockBusy, setBlockBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -415,6 +427,83 @@ export default function DatabasePage() {
     }
   };
 
+  const loadBlocked = async () => {
+    setBlockedBusy(true);
+    setPurgeError("");
+    try {
+      const response = await fetch("/api/database/blocked", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(String(payload.error || "Could not read the block list."));
+      setBlocked(Array.isArray(payload.blocked) ? payload.blocked : []);
+    } catch (blockedError) {
+      setPurgeError(blockedError instanceof Error ? blockedError.message : "Could not read the block list.");
+    } finally {
+      setBlockedBusy(false);
+    }
+  };
+
+  /**
+   * Unblocking does not bring anyone back — the records went with the block. It only stops us refusing
+   * their next reply, which the confirmation says so that nobody clicks it expecting a restore.
+   */
+  const unblock = async (entry: BlockedLead) => {
+    const name = entry.name || entry.profileKey;
+    if (
+      !window.confirm(
+        `Unblock ${name}? Their old conversations were deleted and do not come back — this only means their next reply will be stored again.`,
+      )
+    )
+      return;
+    setBlockedBusy(true);
+    try {
+      const response = await fetch(`/api/database/blocked?profileKey=${encodeURIComponent(entry.profileKey)}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(String(payload.error || "Unblock failed"));
+      setBlocked((current) => (current ?? []).filter((item) => item.profileKey !== entry.profileKey));
+    } catch (unblockError) {
+      setPurgeError(unblockError instanceof Error ? unblockError.message : "Could not unblock this profile.");
+    } finally {
+      setBlockedBusy(false);
+    }
+  };
+
+  /**
+   * Blocking is a delete that survives the next reply.
+   *
+   * The confirmation has to say that, because the two buttons look interchangeable and are not: delete
+   * clears the records, block clears them and refuses this profile at ingestion from then on. It also has
+   * to name the person, since the whole reason for the feature is that the wrong people keep coming back
+   * and getting these two mixed up would silently hide a real lead.
+   */
+  const blockLead = async (leadId: string) => {
+    const name = String(detail?.lead?.name ?? "").trim() || "this person";
+    const conversationCount = detail?.conversations?.length ?? 0;
+    if (
+      !window.confirm(
+        `Block ${name}? This deletes ${conversationCount} conversation${conversationCount === 1 ? "" : "s"} and every message, and any future reply from their LinkedIn profile will be refused instead of appearing in the inbox. You can unblock them from "Blocked profiles".`,
+      )
+    )
+      return;
+    setBlockBusy(true);
+    try {
+      const response = await fetch(`/api/database/leads/${leadId}/block`, { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(String(payload.error || "Block failed"));
+      setSelectedId(null);
+      setDetail(null);
+      // Refreshed rather than patched locally: the block list is the record of what happened, and a count
+      // assembled on the client would be a second opinion about it.
+      if (blocked) void loadBlocked();
+      void load(false);
+    } catch (blockError) {
+      setError(blockError instanceof Error ? blockError.message : "Could not block this lead.");
+    } finally {
+      setBlockBusy(false);
+    }
+  };
+
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("lead");
     if (/^[0-9a-f-]{36}$/i.test(requested || ""))
@@ -477,9 +566,45 @@ export default function DatabasePage() {
                     : `${totalLeads.toLocaleString()} total lead${totalLeads === 1 ? "" : "s"} in the database`}
               </div>
             </div>
-            <div className="database-heading-actions"><button className="secondary-button" onClick={() => void runPurge(false)} disabled={Boolean(purgeBusy)}>{purgeBusy === "preview" ? "Checking…" : "Find inbound-first leads"}</button><button className="secondary-button" onClick={exportCsv} disabled={exporting}>{exporting ? "Exporting…" : "Export CSV ↓"}</button><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
+            <div className="database-heading-actions"><button className="secondary-button" onClick={() => void runPurge(false)} disabled={Boolean(purgeBusy)}>{purgeBusy === "preview" ? "Checking…" : "Find inbound-first leads"}</button><button className="secondary-button" onClick={() => (blocked ? setBlocked(null) : void loadBlocked())} disabled={blockedBusy}>{blockedBusy ? "Loading…" : blocked ? "Hide blocked" : "Blocked profiles"}</button><button className="secondary-button" onClick={exportCsv} disabled={exporting}>{exporting ? "Exporting…" : "Export CSV ↓"}</button><button className="secondary-button" onClick={() => load(false)}>Refresh ↻</button></div>
           </div>
           {purgeError && <div className="database-error">{purgeError}</div>}
+          {/*
+            The only way off the block list.
+            Blocking is one click behind one confirmation and it deletes the records that would let you
+            find the person again, so without this a mis-click would be permanent. Reuses the purge card,
+            which is the same kind of thing: a panel that appears when asked and closes when done.
+          */}
+          {blocked && (
+            <section className="database-purge-card">
+              <h2>Blocked profiles</h2>
+              {blocked.length === 0 ? (
+                <p>Nobody is blocked. Blocking someone from their lead record stops their future replies being stored.</p>
+              ) : (
+                <>
+                  <p>
+                    {blocked.length} profile{blocked.length === 1 ? "" : "s"} refused at ingestion. Replies from
+                    {blocked.length === 1 ? " this profile is" : " these profiles are"} discarded instead of appearing
+                    in the inbox. Unblocking does not restore deleted conversations.
+                  </p>
+                  <ul className="database-blocked-list">
+                    {blocked.map((entry) => (
+                      <li key={entry.profileKey}>
+                        <span>
+                          <strong>{entry.name || entry.profileKey}</strong>
+                          <small>{entry.reason || entry.profileKey}</small>
+                        </span>
+                        <button className="text-button" onClick={() => void unblock(entry)} disabled={blockedBusy}>
+                          Unblock
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              <button className="secondary-button" onClick={() => setBlocked(null)}>Close</button>
+            </section>
+          )}
           {purge && (
             <section className="database-purge-card">
               {purge.deleted ? (
@@ -687,7 +812,11 @@ export default function DatabasePage() {
               {detailLoading ? (
                 <DatabaseSkeleton />
               ) : detail && detailTab === "overview" ? (
-                <LeadOverview detail={detail} onDelete={() => selectedId && deleteLead(selectedId)} />
+                <LeadOverview
+                  detail={detail}
+                  onDelete={() => selectedId && deleteLead(selectedId)}
+                  onBlock={() => !blockBusy && selectedId && void blockLead(selectedId)}
+                />
               ) : detail && detailTab === "activity" ? (
                 <LeadActivity detail={detail} onLoadOlder={loadOlderMessages} />
               ) : null}
@@ -712,7 +841,17 @@ function DatabaseDropdown({ label, value, placeholder, options, onChange, disabl
   </div>;
 }
 
-function LeadOverview({ detail, onDelete }: { detail: Detail; onDelete?: () => void }) {
+function LeadOverview({
+  detail,
+  onDelete,
+  onBlock,
+}: {
+  detail: Detail;
+  onDelete?: () => void;
+  onBlock?: () => void;
+}) {
+  // The block list is keyed on this, so its absence is what decides whether blocking is possible at all.
+  const profileUrl = String(detail.lead.linkedin_profile_url ?? "").trim();
   const raw =
     detail.lead.raw_data && typeof detail.lead.raw_data === "object"
       ? (detail.lead.raw_data as Record<string, unknown>)
@@ -940,6 +1079,21 @@ function LeadOverview({ detail, onDelete }: { detail: Detail; onDelete?: () => v
           <h3>Danger zone</h3>
           <p>Permanently delete this lead and all their conversations and messages. This action cannot be undone.</p>
           <button className="database-delete-lead-button" onClick={onDelete}>Delete lead</button>
+          {/* Block sits under delete because it is the stronger version of it: deleting someone who is not
+              a lead only lasts until their next reply rebuilds them, and this is the button that makes it
+              stick. It needs a profile URL to recognise them by, so without one it is not offered. */}
+          {onBlock && (
+            <>
+              <p className="database-block-note">
+                {profileUrl
+                  ? "Block them as well if they are not a lead at all — a friend of the client, a recruiter, anyone whose replies keep coming back after a delete. Blocking deletes these records and refuses every future reply from this profile."
+                  : "Blocking needs a LinkedIn profile URL to recognise this person by next time, and this record does not have one. Deleting is all that is available."}
+              </p>
+              <button className="database-block-lead-button" onClick={onBlock} disabled={!profileUrl}>
+                Block lead
+              </button>
+            </>
+          )}
         </section>
       )}
     </div>
