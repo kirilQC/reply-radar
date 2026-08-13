@@ -206,6 +206,8 @@ export default function DatabasePage() {
    */
   const [blocked, setBlocked] = useState<BlockedLead[] | null>(null);
   const [blockedBusy, setBlockedBusy] = useState(false);
+  // Loaded regardless, so the closed fold can carry the count. Reading it is one small request.
+  const [blockedOpen, setBlockedOpen] = useState(false);
   const [blockBusy, setBlockBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -458,7 +460,7 @@ export default function DatabasePage() {
     const conversationCount = detail?.conversations?.length ?? 0;
     if (
       !window.confirm(
-        `Block ${name}? This deletes ${conversationCount} conversation${conversationCount === 1 ? "" : "s"} and every message, and any future reply from their LinkedIn profile will be refused instead of appearing in the inbox. You can unblock them from "Blocked profiles" at the bottom of this page.`,
+        `Block ${name}? This deletes ${conversationCount} conversation${conversationCount === 1 ? "" : "s"} and every message, and any future reply from their LinkedIn profile will be refused instead of appearing in the inbox. You can unblock them from the "Blocked leads" button at the bottom of the lead database.`,
       )
     )
       return;
@@ -470,7 +472,9 @@ export default function DatabasePage() {
       setSelectedId(null);
       setDetail(null);
       // Refreshed rather than patched locally: the block list is the record of what happened, and an entry
-      // assembled on the client would be a second opinion about it.
+      // assembled on the client would be a second opinion about it. Opened at the same time, because the
+      // lead has just vanished from the table and this is where they went.
+      setBlockedOpen(true);
       void loadBlocked();
       void load(false);
     } catch (blockError) {
@@ -670,42 +674,60 @@ export default function DatabasePage() {
           {/*
             The only way off the block list, and the only place blocked people are visible at all.
 
-            It sits under the table rather than behind a button because blocking is one click behind one
-            confirmation and it deletes the records that would otherwise let you find the person again — so
-            a mis-click needs to be recoverable without knowing that a panel exists. Below the leads is the
-            right place for it: it is a footnote about who is missing from the list above.
+            Folded shut, because on almost every visit the answer is "nobody new", and an open list of
+            people deliberately excluded is not what the lead database is for. The count is on the button
+            so the fold still answers the only question worth asking without being opened — and the button
+            has to stay findable, since blocking is one confirmation away from deleting the very records
+            that would let you look the person up again.
           */}
-          <section className="database-blocked-card" aria-label="Blocked profiles">
-            <h2>Blocked profiles</h2>
-            {blockedError ? (
-              <p className="database-blocked-error">{blockedError}</p>
-            ) : blocked == null ? (
-              <p>Reading the block list…</p>
-            ) : blocked.length === 0 ? (
-              <p>Nobody is blocked. Blocking someone from their lead record deletes their records and stops their future replies being stored.</p>
-            ) : (
-              <>
-                <p>
-                  {blocked.length} profile{blocked.length === 1 ? "" : "s"} refused at ingestion —
-                  {blocked.length === 1 ? " their replies are" : " their replies are"} discarded instead of
-                  appearing in the inbox. Unblocking does not restore deleted conversations; it only means the
-                  next reply is stored again.
-                </p>
-                <ul className="database-blocked-list">
-                  {blocked.map((entry) => (
-                    <li key={entry.profileKey}>
-                      <span>
-                        <strong>{entry.name || entry.profileKey}</strong>
-                        <small>{entry.reason || entry.profileKey}</small>
-                      </span>
-                      <button className="text-button" onClick={() => void unblock(entry)} disabled={blockedBusy}>
-                        Unblock
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
+          <section className="database-blocked-card" aria-label="Blocked leads">
+            <button
+              type="button"
+              className="database-blocked-toggle"
+              onClick={() => setBlockedOpen((open) => !open)}
+              aria-expanded={blockedOpen}
+            >
+              <span>Blocked leads</span>
+              <em>
+                {blockedError
+                  ? "unavailable"
+                  : blocked == null
+                    ? "reading…"
+                    : blocked.length === 0
+                      ? "nobody blocked"
+                      : `${blocked.length} blocked`}
+              </em>
+              <i aria-hidden="true">{blockedOpen ? "−" : "+"}</i>
+            </button>
+            {blockedOpen &&
+              (blockedError ? (
+                <p className="database-blocked-error">{blockedError}</p>
+              ) : blocked == null ? (
+                <p>Reading the block list…</p>
+              ) : blocked.length === 0 ? (
+                <p>Nobody is blocked. Blocking someone from their lead record deletes their records and stops their future replies being stored.</p>
+              ) : (
+                <>
+                  <p>
+                    {blocked.length} profile{blocked.length === 1 ? "" : "s"} refused at ingestion — their
+                    replies are discarded instead of appearing in the inbox. Unblocking does not restore
+                    deleted conversations; it only means the next reply is stored again.
+                  </p>
+                  <ul className="database-blocked-list">
+                    {blocked.map((entry) => (
+                      <li key={entry.profileKey}>
+                        <span>
+                          <strong>{entry.name || entry.profileKey}</strong>
+                          <small>{entry.reason || entry.profileKey}</small>
+                        </span>
+                        <button className="text-button" onClick={() => void unblock(entry)} disabled={blockedBusy}>
+                          Unblock
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ))}
           </section>
         </main>
       </section>
@@ -853,9 +875,26 @@ function LeadOverview({
   const company = asObject(enrichment.company);
   const companySummary = asObject(company.summary);
   const companyLinks = asObject(company.link);
+  /**
+   * HeyReach's own copy of the company and title, read straight off the stored payload.
+   *
+   * Ingestion now writes these into the lead's own columns, but rows stored before it did are still in
+   * the table with both columns empty, and the payload they came in with is right here. Both spellings
+   * are tried because the webhook and the inbox API disagree about them.
+   */
+  const heyReachField = (keys: string[]) => {
+    for (const key of keys) {
+      const value = raw[key];
+      const resolved = value && typeof value === "object" ? text(asObject(value).name) : text(value);
+      if (resolved) return resolved;
+    }
+    return "";
+  };
+  const heyReachCompany = heyReachField(["company_name", "companyName", "company", "currentCompany"]);
+  const heyReachRole = heyReachField(["position", "title", "job_title", "jobTitle", "headline", "occupation"]);
   const currentCompanyName = text(
     companySummary.name || company.name || detail.lead.company,
-  );
+  ) || heyReachCompany;
   const companyWebsite = externalUrl(companyLinks.website || raw.company_url);
   const companyLinkedIn = externalUrl(companyLinks.linkedin);
   const companyIndustry = text(
@@ -872,7 +911,7 @@ function LeadOverview({
         : "";
   const contactFields = [
     ["Full name", detail.lead.name],
-    ["Current role", detail.lead.role || enrichment.title],
+    ["Current role", detail.lead.role || enrichment.title || heyReachRole],
     ["Company", currentCompanyName],
     ["Email", raw.email_address || raw.custom_email || raw.enriched_email],
     ["Location", locationText(raw.location || enrichment.location)],

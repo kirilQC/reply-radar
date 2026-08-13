@@ -246,12 +246,14 @@ export type PdfTheme = {
 /**
  * How the cover sheet is dressed.
  *
- * `brand` floods it in the accent, which is what an agency deck looks like. `light` is the same layout on
- * paper stock, for a client who prints. `minimal` drops the flood and the rules and leaves the lockup, for
- * a reader who finds a full-bleed cover on a weekly recap overdressed. The layout is common to all three —
- * a cover that rearranged itself per style would be three covers to keep working.
+ * `brand` floods it in a gradient from violet into the accent, which is what an agency deck looks like.
+ * `solid` is that flood flat, so the accent is the only colour on the cover — the one a brand guideline
+ * that forbids gradients still allows. `light` is the same layout on paper stock, for a client who prints.
+ * `minimal` drops the flood and the rules and leaves the lockup, for a reader who finds a full-bleed cover
+ * on a weekly recap overdressed. The layout is common to all four — a cover that rearranged itself per
+ * style would be four covers to keep working.
  */
-export type PdfCoverStyle = "brand" | "light" | "minimal";
+export type PdfCoverStyle = "brand" | "solid" | "light" | "minimal";
 
 /** Headings in a display serif, as the report has always used, or in the body sans. */
 export type PdfHeadingFont = "serif" | "sans";
@@ -310,7 +312,8 @@ export function normalisePdfTheme(raw: unknown): PdfTheme {
   const density = value.density;
   return {
     accent: /^#[0-9a-f]{3,8}$/i.test(accent) ? accent : "",
-    coverStyle: coverStyle === "light" || coverStyle === "minimal" ? coverStyle : "brand",
+    coverStyle:
+      coverStyle === "solid" || coverStyle === "light" || coverStyle === "minimal" ? coverStyle : "brand",
     headingFont: headingFont === "sans" ? "sans" : "serif",
     density: density === "compact" ? "compact" : "comfortable",
   };
@@ -447,7 +450,7 @@ questions: what happened, and what's next.
 - Attribute a win to something repeatable — the second follow-up, an event list, a rewritten opener —
   rather than to luck.
 - A number that moved the wrong way gets one bullet and one clause of cause, then you move on. No
-  apology. If a rate dipped because volume tripled, say both in the same bullet.
+  apology, and no bullet whose subject is the fall — see TONE below.
 
 "campaignBullets": []. The app prints the campaign lines itself, with whichever figures the account
 manager ticked for this report. The only time you fill this is when live campaign status was unavailable,
@@ -460,8 +463,20 @@ live from reply activity, because a campaign with no replies looks identical to 
 on them, with an owner where the data gives you one. Return [] if the account manager wrote their own
 priorities; theirs are used instead of yours, unedited.
 
-"close": one line of warm close — a next step or a note about the Monday call. Not a sign-off: the app
-signs every email as QC Growth, so a name here would be signed twice.
+"close": one line of warm close — a next step we are taking, or something specific to look forward to. Not
+a sign-off: the app signs every email as QC Growth, so a name here would be signed twice. Never a proposal
+to sit down and work out what went wrong.
+
+TONE — the client's confidence in the work is part of what they are paying for:
+- Never write a sentence whose subject is a problem. Not "the dip", not "the drop", not "a slower week",
+  not "unfortunately", not "something to look at", and never "let's dig into". The client is reading a
+  report on work they commissioned; they must not be the person being told bad news about it.
+- This is not licence to invent or inflate, and it never overrides the rule about using only the supplied
+  numbers. A figure that fell is still printed exactly as it is. What changes is what the sentence is
+  *about*: the cause and the next move rather than the fall. "Sends ran lighter Monday while the rewritten
+  opener went in, and were back at full volume from Tuesday" carries the same fact as "volume dipped on
+  Monday" and leaves the reader informed instead of worried.
+- If something needs fixing, it is already being fixed. Say what is being done, not that it needs doing.
 
 RULES:
 - Your blocks come to about 100-150 words together. Five sharp bullets beat fifteen complete ones. If a

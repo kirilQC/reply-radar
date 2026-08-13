@@ -31,6 +31,17 @@ type Sender = { id: string; name: string };
 export type CampaignSource = "" | "webhook" | "membership" | "derived";
 export type CampaignAttribution = { id: string; name: string; source: CampaignSource };
 
+/**
+ * The company and title HeyReach itself knows about the lead.
+ *
+ * Enrichment is the better source when it works, but it does not always work, and a lead with no
+ * company and no title on screen is worse than one carrying HeyReach's version of them — HeyReach has
+ * both for every lead it imported. Collected here rather than read at the call site because the two
+ * places a lead arrives from spell the same fields differently: the webhook envelope is snake_case
+ * and the inbox API is camelCase, and reading only one of them is how these ended up blank.
+ */
+export type HeyReachLeadProfile = { company: string; role: string };
+
 type HistoryResult = {
   conversationExternalId: string;
   messages: ConversationMessage[];
@@ -38,6 +49,7 @@ type HistoryResult = {
   fetchedAt: string;
   conversationSummary: JsonObject;
   campaign: CampaignAttribution;
+  leadProfile: HeyReachLeadProfile;
 };
 
 const apiBase = process.env.HEYREACH_API_BASE ?? "https://api.heyreach.io/api/public";
@@ -105,6 +117,30 @@ function senderFromPayload(payload: JsonObject): Sender {
     id: text(sender.id),
     name: text(sender.full_name) || text(sender.fullName) || [text(sender.first_name ?? sender.firstName), text(sender.last_name ?? sender.lastName)].filter(Boolean).join(" ") || "Unknown sender",
   };
+}
+
+const COMPANY_KEYS = ["company_name", "companyName", "company", "current_company", "currentCompany", "organization"];
+const ROLE_KEYS = ["position", "title", "job_title", "jobTitle", "headline", "occupation", "current_position", "currentPosition"];
+
+/**
+ * Reads company and title out of the webhook's lead and, failing that, out of the inbox record for the
+ * same person. The conversation carries its own copy of the correspondent, which is the one that
+ * survives when the webhook envelope is thin.
+ */
+export function heyReachLeadProfile(lead: JsonObject, conversationSummary: JsonObject): HeyReachLeadProfile {
+  const correspondent = object(
+    first(conversationSummary, ["correspondent", "correspondentProfile", "lead", "leadProfile", "profile"]),
+  );
+  const named = (keys: string[]) => {
+    for (const source of [lead, correspondent]) {
+      const value = first(source, keys);
+      // A company can arrive as an object rather than a string, in which case its name is the field.
+      const resolved = typeof value === "object" && value !== null ? text(first(object(value), ["name", "title"])) : text(value);
+      if (resolved) return resolved;
+    }
+    return "";
+  };
+  return { company: named(COMPANY_KEYS), role: named(ROLE_KEYS) };
 }
 
 export function isHeyReachValidationPayload(payload: JsonObject) {
@@ -187,6 +223,7 @@ export function conversationFromWebhook(payload: JsonObject): HistoryResult {
     fetchedAt: new Date().toISOString(),
     conversationSummary: {},
     campaign,
+    leadProfile: heyReachLeadProfile(lead, {}),
   };
 }
 
@@ -307,5 +344,5 @@ export async function fetchFullConversation(apiKey: string, payload: JsonObject)
       : embeddedCampaign.name || embeddedCampaign.id
         ? { ...embeddedCampaign, source: "derived" }
         : { id: "", name: "", source: "" };
-  return { conversationExternalId, messages: mergeConversationMessages(history, recent), sender: resolvedSender, fetchedAt: new Date().toISOString(), conversationSummary: conversation, campaign: resolvedCampaign };
+  return { conversationExternalId, messages: mergeConversationMessages(history, recent), sender: resolvedSender, fetchedAt: new Date().toISOString(), conversationSummary: conversation, campaign: resolvedCampaign, leadProfile: heyReachLeadProfile(lead, conversation) };
 }

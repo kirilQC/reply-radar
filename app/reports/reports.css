@@ -9,8 +9,14 @@
  * distinctions the app UI does not: the sheet must read as raised above the canvas behind it, and table
  * furniture needs a third weight of ink. Mapping onto the app variables means the report follows the
  * appearance toggle in the topbar for free, in both directions.
+ *
+ * Declared on the prompt dialog as well as the page. The dialog is rendered outside .reports-main — it
+ * has to be, or the pinned, overflow-hidden configurator column would clip it — and a custom property
+ * only reaches descendants, so every one of these resolved to nothing there: no surface, no border, no
+ * tint. That is what "the prompt editor has no background" was.
  */
-.reports-main {
+.reports-main,
+.prompt-dialog-backdrop {
   --report-canvas: var(--bg);
   --report-surface: var(--panel);
   --report-inset: var(--panel-2);
@@ -23,6 +29,9 @@
   --report-negative: var(--coral);
   --report-negative-bg: #2c1d20;
   --report-positive: var(--green);
+}
+
+.reports-main {
   background: var(--report-canvas);
   color: var(--report-ink);
   /*
@@ -47,7 +56,8 @@
  * In light mode the original cream-and-navy document palette is the better one, so it comes back rather
  * than being derived from the light app variables — a document wants warmer paper than a UI does.
  */
-body.light-mode .reports-main {
+body.light-mode .reports-main,
+body.light-mode .prompt-dialog-backdrop {
   --report-canvas: #f4f2ec;
   --report-surface: #ffffff;
   --report-inset: #fbf9f3;
@@ -724,6 +734,34 @@ body.light-mode .reports-main {
   border-color: var(--report-brand);
 }
 
+/* Shut by default: it is reference, not a control. Open, it scrolls on its own rather than pushing the
+   editable prompt out of the dialog. */
+.prompt-dialog-fixed {
+  flex: none;
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+  background: var(--report-inset);
+}
+
+.prompt-dialog-fixed summary {
+  padding: 9px 14px;
+  font-size: 12px;
+  color: var(--report-ink-soft);
+  cursor: pointer;
+}
+
+.prompt-dialog-fixed pre {
+  margin: 0;
+  padding: 0 14px 14px;
+  max-height: 30vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: "SF Mono", ui-monospace, "Menlo", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--report-ink-faint);
+}
+
 .prompt-dialog-foot {
   display: flex;
   align-items: center;
@@ -968,12 +1006,10 @@ body.light-mode .reports-main {
   object-fit: contain;
 }
 
-/* Our own mark is a white wordmark on transparent, so it needs no help; a client's is usually drawn for a
-   white page and would disappear into the flood, hence the plate behind it. */
+/* The client's mark sits on the flood unplated. It used to have a white rectangle behind it, on the theory
+   that a logo drawn for a white page would otherwise disappear — but the plate is what you see rather than
+   the logo, and a cover with a white box stuck to it looks unfinished next to our own wordmark. */
 .report-cover-mark-client {
-  background: #ffffff;
-  border-radius: 4px;
-  padding: 6px 10px;
   box-sizing: content-box;
 }
 
@@ -1008,15 +1044,14 @@ body.light-mode .reports-main {
   max-width: 5.6in;
 }
 
-/* The rule reads as the join between the title and who it is for, which is why it hangs off the client
-   name rather than sitting under the title. */
+/* No rule between the title and the client name. It was there to read as a join, and it read as an
+   underline under the title instead — spacing does the same job without drawing a line across the cover. */
 .report-cover-client {
   font-size: 19pt;
   font-weight: 600;
   color: inherit;
   margin: 0;
-  padding-top: 18px;
-  border-top: 2px solid rgba(255, 255, 255, 0.45);
+  padding-top: 14px;
   max-width: 5.6in;
 }
 
@@ -1058,6 +1093,17 @@ body.light-mode .reports-main {
 /* ------------------------- Cover styles ------------------------- */
 
 /*
+ * `solid` is the brand cover with the ramp taken out: one flat colour edge to edge.
+ *
+ * The gradient stays as `brand` because it is the better default, but a gradient is also the one thing a
+ * brand guideline usually forbids — and with a custom accent it ramps from a fixed violet into that accent,
+ * so the colour you picked is only half of what prints. Flat, the accent is the cover.
+ */
+.report-document[data-cover="solid"] .report-cover {
+  background: var(--report-brand);
+}
+
+/*
  * `light` is the same cover on paper stock, for a client who prints rather than reads on screen. Every
  * white-on-flood value is restated against ink here rather than being made a variable, because there are
  * only two schemes and a variable for each would be four indirections to read one colour.
@@ -1071,10 +1117,6 @@ body.light-mode .reports-main {
   background: color-mix(in srgb, var(--report-brand) 8%, transparent);
 }
 
-.report-document[data-cover="light"] .report-cover-mark-client {
-  background: transparent;
-  padding: 0;
-}
 
 .report-document[data-cover="light"] .report-cover-lockup-rule {
   background: var(--report-line);
@@ -1085,9 +1127,6 @@ body.light-mode .reports-main {
   color: var(--report-brand);
 }
 
-.report-document[data-cover="light"] .report-cover-client {
-  border-top-color: var(--report-brand);
-}
 
 .report-document[data-cover="light"] .report-cover-footer {
   border-top-color: var(--report-line);
@@ -1108,10 +1147,6 @@ body.light-mode .reports-main {
   display: none;
 }
 
-.report-document[data-cover="minimal"] .report-cover-mark-client {
-  background: transparent;
-  padding: 0;
-}
 
 .report-document[data-cover="minimal"] .report-cover-lockup-rule {
   background: var(--report-line);
@@ -1127,7 +1162,6 @@ body.light-mode .reports-main {
 }
 
 .report-document[data-cover="minimal"] .report-cover-client {
-  border-top: none;
   padding-top: 0;
   color: var(--report-brand);
 }
@@ -2525,6 +2559,10 @@ body.light-mode .reports-main {
    */
   .report-cover {
     background: linear-gradient(160deg, var(--report-brand-deep) 0%, var(--report-brand) 100%) !important;
+  }
+
+  .report-document[data-cover="solid"] .report-cover {
+    background: var(--report-brand) !important;
   }
 
   .report-document[data-cover="light"] .report-cover,

@@ -245,7 +245,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     const aiArk = cachedEnrichment
       ? cachedEnrichment
       : enrichmentEnabled && profileUrl
-        ? await enrichLeadWithAiArk(config, workspace.id, profileUrl, text(lead.company_name)).catch((error) => {
+        ? await enrichLeadWithAiArk(config, workspace.id, profileUrl, history.leadProfile.company).catch((error) => {
             enrichmentError = error instanceof Error ? error.message : "AI Ark enrichment failed";
             return null;
           })
@@ -286,9 +286,18 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     const aiArkCompany = object(object(aiArk?.company).summary);
     const positionGroups = Array.isArray(aiArk?.positionGroups) ? aiArk.positionGroups.map(object) : [];
     const currentPositionCompany = object(positionGroups.find((group) => !text(object(group.date).end))?.company);
-    const resolvedCompany = text(lead.company_name) || text(aiArkCompany.name) || text(currentPositionCompany.name) || text(existingLead?.company);
+    /**
+     * Enrichment first, HeyReach second, and never nothing.
+     *
+     * AI Ark is the better record when it answers — it knows the legal entity, the industry and the
+     * size, and the drawer is built around it. It does not always answer, and when it did not the lead
+     * used to arrive with no company and no title at all, which is the one outcome that is never right:
+     * HeyReach has both for every lead it imported, so there is always something truthful to show.
+     */
+    const resolvedCompany = text(aiArkCompany.name) || text(currentPositionCompany.name) || history.leadProfile.company || text(existingLead?.company);
+    const resolvedRole = text(aiArk?.title) || history.leadProfile.role || text(existingLead?.role);
     const suppliedName = text(lead.full_name) || [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ");
-    const leadRow = await saveLead(config, text(existingLead?.id), { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: profileUrl || null, name: normalizePersonName(suppliedName), role: text(lead.position) || text(existingLead?.role), company: resolvedCompany, raw_data: { ...stableRaw, ...lead, full_name: normalizePersonName(suppliedName), company_name: resolvedCompany || null, profile_url: profileUrl || text(lead.profile_url) || null, reply_radar: { ...stableMetadata, history_fetched_at: history.fetchedAt, history_status: historyError ? "webhook_fallback" : "complete", ...(historyError ? { history_error: historyError.slice(0, 1_000) } : {}), attributions: mergeLeadAttributions(priorAttributionsWithoutPlaceholder, attribution), enrichment_status: aiArk ? "enriched" : enrichmentEnabled ? "unavailable" : "disabled", ...(enrichmentError ? { enrichment_error: enrichmentError.slice(0, 1_000) } : {}), ...(aiArk ? { ai_ark: aiArk } : {}) } } });
+    const leadRow = await saveLead(config, text(existingLead?.id), { workspace_id: workspace.id, linkedin_id: leadExternalId, linkedin_profile_url: profileUrl || null, name: normalizePersonName(suppliedName), role: resolvedRole, company: resolvedCompany, raw_data: { ...stableRaw, ...lead, full_name: normalizePersonName(suppliedName), company_name: resolvedCompany || null, profile_url: profileUrl || text(lead.profile_url) || null, reply_radar: { ...stableMetadata, history_fetched_at: history.fetchedAt, history_status: historyError ? "webhook_fallback" : "complete", ...(historyError ? { history_error: historyError.slice(0, 1_000) } : {}), attributions: mergeLeadAttributions(priorAttributionsWithoutPlaceholder, attribution), enrichment_status: aiArk ? "enriched" : enrichmentEnabled ? "unavailable" : "disabled", ...(enrichmentError ? { enrichment_error: enrichmentError.slice(0, 1_000) } : {}), ...(aiArk ? { ai_ark: aiArk } : {}) } } });
     const leadId = String(leadRow?.id ?? "");
     if (!leadId) throw new Error("Lead upsert returned no id.");
     await syncIdentityRollup(config, profileUrl);

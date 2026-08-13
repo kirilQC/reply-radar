@@ -7,6 +7,22 @@ const field = (value: unknown, key: string) =>
     ? (value as Row)[key]
     : undefined;
 
+/**
+ * The first of `keys` that the stored HeyReach payload actually has a value for.
+ *
+ * Last resort behind the lead's own columns and enrichment, and worth having because a lead stored
+ * before those columns were filled in still carries the payload it arrived with. Both spellings are
+ * tried: the webhook envelope is snake_case and the inbox API is camelCase.
+ */
+const heyReachField = (raw: Row, keys: string[]) => {
+  for (const key of keys) {
+    const value = raw[key];
+    const resolved = value && typeof value === "object" ? field(value, "name") : value;
+    if (typeof resolved === "string" && resolved.trim()) return resolved.trim();
+  }
+  return "";
+};
+
 async function get(url: string, key: string, path: string) {
   const response = await fetch(`${url}/rest/v1/${path}`, {
     headers: { apikey: key, Authorization: `Bearer ${key}` },
@@ -262,8 +278,13 @@ export async function GET(request: Request) {
       return {
         id: lead.id,
         name: normalizePersonName(lead.name),
-        role: lead.role || enrichment.title || "",
-        company: lead.company || companySummary.name || enrichmentCompany.name || currentPositionCompany || "",
+        role: lead.role || enrichment.title || heyReachField(raw, ["position", "title", "job_title", "jobTitle", "headline", "occupation"]),
+        company:
+          lead.company ||
+          companySummary.name ||
+          enrichmentCompany.name ||
+          currentPositionCompany ||
+          heyReachField(raw, ["company_name", "companyName", "company", "currentCompany"]),
         linkedinId: lead.linkedin_id ?? null,
         profileUrl: lead.linkedin_profile_url ?? null,
         photoUrl: enrichment.profilePhotoSource ?? enrichment.profilePhotoUrl ?? null,

@@ -6,6 +6,7 @@ import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import {
   BUILT_IN_TEMPLATES,
   CAMPAIGN_METRICS,
+  COMPOSE_SYSTEM_PROMPT,
   DEFAULT_CAMPAIGN_METRICS,
   DEFAULT_PDF_THEME,
   isWrittenSection,
@@ -183,7 +184,8 @@ const DEFAULT_SECTIONS: SectionId[] = [
 const BUILD_YOUR_OWN_ID = "build-your-own";
 
 const COVER_STYLE_LABELS: Record<PdfTheme["coverStyle"], string> = {
-  brand: "Brand",
+  brand: "Gradient",
+  solid: "Solid",
   light: "Light",
   minimal: "Minimal",
 };
@@ -1431,7 +1433,7 @@ export default function ReportsPage() {
             {/* A dialog rather than a fold. A prompt is several paragraphs of prose that people rewrite in
                 place, and the fold gave it a six-line box in a 372px column — too narrow to see the
                 sentence being edited and too short to see the paragraph it belongs to. */}
-            {template && (
+            {template ? (
               <div className="config-fold">
                 <button
                   type="button"
@@ -1443,6 +1445,13 @@ export default function ReportsPage() {
                   <i aria-hidden="true">↗</i>
                 </button>
               </div>
+            ) : (
+              // Said out loud rather than left as a missing button. Looking for the prompt behind a
+              // build-your-own report and finding no prompt anywhere reads as a bug; it is the design.
+              <p className="config-hint">
+                No prompt: a build-your-own report writes its summary from the numbers. Pick a template if
+                you want the write-up, and its prompt, to be Claude&apos;s.
+              </p>
             )}
 
             {/*
@@ -1510,7 +1519,7 @@ export default function ReportsPage() {
 
                   <span className="config-label">Cover</span>
                   <div className="theme-choices">
-                    {(["brand", "light", "minimal"] as const).map((style) => (
+                    {(["brand", "solid", "light", "minimal"] as const).map((style) => (
                       <button
                         key={style}
                         type="button"
@@ -1802,7 +1811,8 @@ function PromptDialog({
             <p>
               {edited
                 ? `Edited for this report only. “${templateName}” is unchanged for everyone else.`
-                : `The prompt saved with “${templateName}”. Editing it here applies to this report only.`}
+                : `The prompt saved with “${templateName}”. Editing it here applies to this report only.`}{" "}
+              The same prompt writes the email and the PDF&apos;s executive summary.
             </p>
           </div>
           <button type="button" className="prompt-dialog-close" onClick={onClose} aria-label="Close">
@@ -1818,6 +1828,18 @@ function PromptDialog({
           onChange={(event) => onChange(event.target.value)}
           spellCheck={false}
         />
+
+        {/*
+          What is above is only half of what Claude is sent. The other half is the contract — no invented
+          numbers, the JSON shape, who writes the campaign lines — and it is not editable on purpose:
+          somebody writing a new template must not be able to delete the rule that stops the report making
+          figures up. It is shown anyway, because "the exact prompt that was used" has to mean the whole
+          thing, and a rule you cannot see is a rule you will write against by accident.
+        */}
+        <details className="prompt-dialog-fixed">
+          <summary>Sent with it, every time — the rules that override this prompt</summary>
+          <pre>{COMPOSE_SYSTEM_PROMPT}</pre>
+        </details>
 
         <footer className="prompt-dialog-foot">
           <button
