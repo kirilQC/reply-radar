@@ -103,10 +103,10 @@ const defaultLayout: LayoutPrefs = {
   showDetail: true,
   compact: false,
   metrics: ["totalReplies", "acceptanceRate", "avgRepliesCampaign", "positiveRate", "needsReply"],
+  // Every inbox opens on these two until someone adds their own.
   graphs: [
     { id: "replies-by-day", title: "Replies per day", x: "day", y: "replies", kind: "area" },
     { id: "sentiment-mix", title: "Sentiment mix", x: "sentiment", y: "conversations", kind: "donut" },
-    { id: "client-load", title: "Conversations by client", x: "client", y: "conversations", kind: "hbars" },
   ],
   paneSplit: 62,
   starredLeadIds: [],
@@ -339,6 +339,7 @@ export function InboxPage() {
     [filter, setFilter] = useState("today"),
     [sort, setSort] = useState("score-desc"),
     [search, setSearch] = useState(""),
+    [searchOpen, setSearchOpen] = useState(false),
     [theme, setTheme] = useState("midnight"),
     [sidebarOpen, setSidebarOpen] = useState(false);
   const [layoutPrefs, setLayoutPrefs] = useState(defaultLayout);
@@ -405,6 +406,7 @@ export function InboxPage() {
   const paneGridRef = useRef<HTMLDivElement>(null);
   const paneSplitRef = useRef(defaultLayout.paneSplit);
   const threadEndRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const showToast = (msg: string) => {
     setToastMessage(msg);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -899,10 +901,12 @@ export function InboxPage() {
       return leads
         .filter(
           (lead) =>
+            // The placeholder promises campaigns, so search them — plus the role
+            // and the sender, which is how people actually look a reply up.
             (!search ||
-              `${lead.name} ${lead.company} ${lead.client}`
+              `${lead.name} ${lead.company} ${lead.client} ${lead.campaignName ?? ""} ${lead.senderName} ${lead.role}`
                 .toLowerCase()
-                .includes(search.toLowerCase())) &&
+                .includes(search.trim().toLowerCase())) &&
             (!assignedClients || assignedClients.includes(lead.client)) &&
             !excludedClients.includes(lead.client) &&
             (!campaignFilter || lead.campaignName === campaignFilter) &&
@@ -1081,6 +1085,20 @@ export function InboxPage() {
     // itself would refire on every setLeads and cause an inbox-wide loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleIdsKey]);
+  // Names the range the charts are actually drawn over, so a reader can tell at a
+  // glance whether a flat line means a quiet day or a quiet quarter.
+  const analyticsRangeLabel =
+    filter === "today"
+      ? "Today"
+      : filter === "week"
+        ? "This week"
+        : filter === "follow-ups"
+          ? "Replies needing follow-up · all time"
+          : filter === "Starred"
+            ? "Starred replies · all time"
+            : ["Hot", "Warm", "Nurture"].includes(filter)
+              ? `${filter} replies · all time`
+              : "All replies · all time";
   const liveMetric = (metric: (typeof metricCatalog)[number]) => {
     const averages = analytics?.campaignAverages;
     const filterLabel = filter === "today" ? "today" : filter === "week" ? "this week" : filter === "follow-ups" ? "needing follow-up" : "total";
@@ -1638,7 +1656,7 @@ export function InboxPage() {
               <InboxAnalytics
                 graphs={layoutPrefs.graphs}
                 leads={filtered}
-                filterLabel={filter === "All" ? "this inbox" : filter}
+                filterLabel={analyticsRangeLabel}
                 timeZone={appearance.timeZone}
                 loading={inboxLoading}
                 onChange={(graphs) =>
@@ -1680,14 +1698,50 @@ export function InboxPage() {
                   </h2>
                 </div>
                 <div className="queue-tools">
-                  <label className="search queue-search queue-search-wide">
-                    <Icon name="search" />
+                  {/* Collapsed to its icon so the filter row has room to breathe.
+                      A live query keeps it open, so results never disappear
+                      behind a button the user has to remember to press. */}
+                  <div
+                    className={`queue-search-shell ${searchOpen || search ? "is-open" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="queue-search-toggle"
+                      aria-label={
+                        searchOpen || search ? "Clear and close search" : "Search replies"
+                      }
+                      aria-expanded={searchOpen || Boolean(search)}
+                      onClick={() => {
+                        if (searchOpen || search) {
+                          setSearch("");
+                          setSearchOpen(false);
+                          return;
+                        }
+                        setSearchOpen(true);
+                        requestAnimationFrame(() => searchInputRef.current?.focus());
+                      }}
+                    >
+                      <Icon name="search" />
+                    </button>
                     <input
+                      ref={searchInputRef}
+                      className="queue-search-input"
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
+                      onBlur={() => {
+                        if (!search) setSearchOpen(false);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          setSearch("");
+                          setSearchOpen(false);
+                        }
+                      }}
                       placeholder="Search leads, companies, campaigns…"
+                      aria-label="Search replies"
+                      tabIndex={searchOpen || search ? 0 : -1}
                     />
-                  </label>
+                  </div>
                   <div className="segmented">
                     {[
                       ["Today", "today"],
@@ -2511,13 +2565,12 @@ function InboxAnalytics({
     <section className="inbox-analytics-section">
       <div className="inbox-analytics-heading">
         <div>
-          <span>INBOX ANALYTICS</span>
-          <h2>Conversation trends</h2>
-          <p>
-            {loading
-              ? "Loading synced conversations…"
-              : `Live across ${leads.length.toLocaleString()} conversation${leads.length === 1 ? "" : "s"} in ${filterLabel}. Charts follow your current filters.`}
-          </p>
+          <h2>Client analytics</h2>
+          {/* The charts are drawn from the already-filtered queue, so name the
+              range instead of restating the row count nobody was reading. */}
+          <span className="inbox-analytics-range">
+            {loading ? "Loading…" : filterLabel}
+          </span>
         </div>
         <div className="graph-toolbar">
           <button

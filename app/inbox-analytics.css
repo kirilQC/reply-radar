@@ -18,20 +18,21 @@
   flex-direction: column;
   gap: 5px;
 }
-.inbox-analytics-heading > div:first-child > span {
-  color: var(--accent);
-  font-size: 9px;
-  letter-spacing: 0.13em;
-  font-weight: 750;
-}
 .inbox-analytics-heading h2 {
   margin: 0;
   font-size: 15px;
 }
-.inbox-analytics-heading p {
-  margin: 0;
-  color: var(--muted-2);
-  font-size: 10px;
+/* Quietly states which range the charts cover — it follows the queue filter. */
+.inbox-analytics-heading .inbox-analytics-range {
+  align-self: start;
+  padding: 3px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 20px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
 }
 .graph-toolbar {
   display: flex;
@@ -353,13 +354,18 @@
 .inbox-donut-chart {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-top: auto;
+  justify-content: start;
+  gap: 18px;
+  /* Fill whatever height the card ended up with — a taller neighbour in the same
+     grid row used to leave the ring stranded in the bottom-left corner. */
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 0;
 }
 .inbox-donut-chart svg {
-  flex: 0 0 118px;
-  width: 118px;
-  height: 118px;
+  flex: 0 0 auto;
+  width: 128px;
+  height: 128px;
   transform: rotate(-90deg);
 }
 .inbox-donut-chart .donut-track {
@@ -367,10 +373,15 @@
   stroke: color-mix(in srgb, var(--border) 50%, transparent);
   stroke-width: 16;
 }
+/* Stroke is left to the palette classes below, which are single-class selectors —
+   naming the colour here as well would outrank them and paint every slice accent,
+   so the ring disagreed with its own legend. */
 .inbox-donut-chart .donut-slice {
   fill: none;
-  stroke: var(--accent);
   stroke-width: 16;
+}
+.donut-slice {
+  stroke: var(--accent);
 }
 .inbox-donut-chart .donut-total,
 .inbox-donut-chart .donut-caption {

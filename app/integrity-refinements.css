@@ -1133,3 +1133,62 @@
     height: auto;
   }
 }
+
+/* Queue search: an icon at rest, a full field once you mean it. The shell owns
+   the border so the width animates as one piece instead of the input appearing
+   to grow out of the button. */
+.queue-search-shell {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  width: 31px;
+  height: 31px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #12151c;
+  overflow: hidden;
+  transition: width 0.18s ease;
+}
+.light-mode .queue-search-shell {
+  background: #fff;
+}
+.queue-search-shell.is-open {
+  width: 290px;
+}
+.queue-search-shell:focus-within {
+  border-color: var(--accent);
+}
+.queue-search-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 29px;
+  width: 29px;
+  height: 29px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-2);
+  cursor: pointer;
+}
+.queue-search-toggle:hover {
+  color: var(--text);
+}
+.queue-search-shell.is-open .queue-search-toggle {
+  color: var(--accent);
+}
+.queue-search-input {
+  /* Zero-width rather than `display: none` so focus() lands on a real box and the
+     collapse transition has something to animate. */
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+}
+.queue-search-shell.is-open .queue-search-input {
+  padding-right: 9px;
+}
