@@ -14,6 +14,7 @@ create table if not exists rr_workspaces (
 
 create table if not exists rr_profiles (
   id uuid primary key default gen_random_uuid(), name text not null default '', avatar_url text,
+  title text, linkedin_url text,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 create table if not exists rr_profile_workspaces (

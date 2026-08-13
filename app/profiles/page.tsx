@@ -5,7 +5,24 @@ import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 
 const initialProfiles: Array<{ slug: string; name: string; role: string; clients: string[]; color: string; initials: string }> = [];
-type Profile = (typeof initialProfiles)[number] & { photo?: string };
+type Profile = (typeof initialProfiles)[number] & { photo?: string; title?: string; linkedinUrl?: string };
+
+/** A client as the picker needs it: enough to draw the same card the dashboard draws. */
+type ClientOption = { name: string; slug: string; logoUrl: string; tone: string };
+
+const toClientOptions = (rows: unknown): ClientOption[] =>
+  (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const item = row as { name?: string; slug?: string; logo_url?: string; accent_color?: string };
+      return {
+        name: String(item.name ?? ""),
+        slug: String(item.slug ?? ""),
+        logoUrl: String(item.logo_url ?? ""),
+        tone: String(item.accent_color || "#8b7cff"),
+      };
+    })
+    .filter((item) => item.name)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 
 export default function ProfilesPage() {
   const [profileSlug] = useState(() =>
@@ -14,14 +31,14 @@ export default function ProfilesPage() {
       : null,
   );
   const [profiles, setProfiles] = useState<Profile[]>(initialProfiles);
-  const [workspaceNames, setWorkspaceNames] = useState<string[]>([]);
+  const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
   useEffect(() => {
     const hydrate = () => {
       try {
         const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
         if (savedProfiles) setProfiles(JSON.parse(savedProfiles));
         const savedWorkspaces = window.localStorage.getItem("reply-radar-workspaces:v2");
-        if (savedWorkspaces) setWorkspaceNames((JSON.parse(savedWorkspaces) as Array<{ name?: string }>).map((item) => item.name ?? "").filter(Boolean));
+        if (savedWorkspaces) setClientOptions(toClientOptions(JSON.parse(savedWorkspaces)));
       } catch {
         // Keep the empty state when storage is unavailable or malformed.
       }
@@ -37,8 +54,7 @@ export default function ProfilesPage() {
     void fetch("/api/admin/workspaces", { cache: "no-store" }).then(async (response) => {
       const payload = await response.json().catch(() => ({}));
       if (response.ok && Array.isArray(payload.workspaces)) {
-        const names = payload.workspaces.map((item: { name?: string }) => item.name ?? "").filter(Boolean);
-        setWorkspaceNames(names);
+        setClientOptions(toClientOptions(payload.workspaces));
         window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(payload.workspaces));
       }
     }).catch(() => undefined);
@@ -74,7 +90,7 @@ export default function ProfilesPage() {
           </div>
           <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
-        {profile ? <ProfileEditor profile={profile} liveClients={workspaceNames} /> : <ProfileIndex />}
+        {profile ? <ProfileEditor profile={profile} liveClients={clientOptions} /> : <ProfileIndex />}
       </section>
     </div>
   );
@@ -166,21 +182,28 @@ function ProfileEditor({
   liveClients,
 }: {
   profile: Profile;
-  liveClients: string[];
+  liveClients: ClientOption[];
 }) {
   const [name, setName] = useState(profile.name);
+  const [title, setTitle] = useState(profile.title ?? "");
+  const [linkedinUrl, setLinkedinUrl] = useState(profile.linkedinUrl ?? "");
   const [photo, setPhoto] = useState<string | null>(profile.photo ?? null);
   const [assigned, setAssigned] = useState(profile.clients);
   const [saveError, setSaveError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-  const allClients = liveClients.length ? liveClients : profile.clients;
+  // Before the workspace list loads, whatever this profile is already assigned to is the only
+  // thing we know about — shown as plain cards so an edit never silently drops an assignment.
+  const allClients: ClientOption[] = liveClients.length
+    ? liveClients
+    : profile.clients.map((client) => ({ name: client, slug: "", logoUrl: "", tone: "#8b7cff" }));
+  const clientNames = allClients.map((client) => client.name);
   useEffect(() => {
     // Keep removed workspaces out of an open profile editor.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAssigned((current) => current.filter((client) => allClients.includes(client)));
+    setAssigned((current) => current.filter((client) => clientNames.includes(client)));
     // The joined list is the stable identity of the workspace options.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveClients.join("|")]);
+  }, [clientNames.join("|")]);
   const onPhoto = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -206,7 +229,9 @@ function ProfileEditor({
     const savedProfile = {
       ...profile,
       name: normalizedName,
-      role: profile.role || "Teammate",
+      title: title.trim(),
+      linkedinUrl: linkedinUrl.trim(),
+      role: title.trim() || "Teammate",
       clients: assigned,
       initials: initials || "?",
       ...(photo ? { photo } : {}),
@@ -220,7 +245,7 @@ function ProfileEditor({
         return [];
       }
     })();
-    void fetch("/api/admin/profiles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.slug === "new" ? undefined : profile.slug, name: normalizedName, photo, clients: assigned }) }).then(async (response) => {
+    void fetch("/api/admin/profiles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.slug === "new" ? undefined : profile.slug, name: normalizedName, title: title.trim(), linkedinUrl: linkedinUrl.trim(), photo, clients: assigned }) }).then(async (response) => {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) { setSaveError(String(payload.error ?? "Could not save this profile.")); return; }
       const savedId = String(payload.profile?.id ?? savedProfile.slug);
@@ -285,29 +310,54 @@ function ProfileEditor({
               onChange={(event) => setName(event.target.value)}
             />
           </label>
+          <label className="profile-field">
+            TITLE
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Account Manager"
+            />
+          </label>
+          <label className="profile-field">
+            LINKEDIN URL
+            <input
+              value={linkedinUrl}
+              onChange={(event) => setLinkedinUrl(event.target.value)}
+              placeholder="https://www.linkedin.com/in/…"
+              inputMode="url"
+            />
+          </label>
         </section>
         <section className="profile-editor-panel">
-          <h2>Assigned clients</h2>
+          <h2>Client directory</h2>
           <p className="panel-help">
-            These clients appear in this teammate’s Inbox view.
+            Pick the clients to attach to this profile. They are the ones that appear in this
+            teammate’s Inbox view.
           </p>
-          <div className="assigned-client-options">
-            {allClients.map((client) => (
-              <label
-                key={client}
-                className={`assigned-client-option ${assigned.includes(client) ? "checked" : ""}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={assigned.includes(client)}
-                  onChange={() => toggleClient(client)}
-                />
-                <span>{client}</span>
-                <small>
-                  {assigned.includes(client) ? "Assigned" : "Not assigned"}
-                </small>
-              </label>
-            ))}
+          {/* The same cards as the dashboard's client directory, because that is how everyone here
+              already recognises a client — by its logo, not by reading a list of names. */}
+          <div className="client-picker-grid">
+            {allClients.map((client) => {
+              const isAssigned = assigned.includes(client.name);
+              return (
+                <button
+                  type="button"
+                  key={client.slug || client.name}
+                  className={`client-picker-card ${isAssigned ? "selected" : ""}`}
+                  aria-pressed={isAssigned}
+                  onClick={() => toggleClient(client.name)}
+                >
+                  <i style={client.logoUrl ? undefined : { background: client.tone }}>
+                    {client.logoUrl ? <img src={client.logoUrl} alt="" /> : client.name[0]}
+                  </i>
+                  <span className="client-picker-name">{client.name}</span>
+                  <span className="client-picker-check" aria-hidden="true">✓</span>
+                </button>
+              );
+            })}
+            {!allClients.length && (
+              <p className="panel-help">No client workspaces exist yet.</p>
+            )}
           </div>
         </section>
       </div>

@@ -166,22 +166,30 @@ async function refreshConversation(
     }
   }
 
-  // Update conversation last_message_at and record refresh time
+  // Update conversation last_message_at and record refresh time.
+  //
+  // The stamp is unconditional now that the client skips anything refreshed inside the last
+  // fifteen minutes. It used to be written only when the chatroom had messages, so an empty
+  // chatroom was reported as refreshed to the caller (`lastRefreshedAt` below) while the row
+  // stayed blank — fresh for this page, stale again on the next load, refreshed forever. The
+  // message columns still only move when there is a message to move them to.
   const latestMessage = [...messages].sort((a, b) => b.sentAt.localeCompare(a.sentAt))[0];
-  if (latestMessage) {
-    await db(url, key,
-      `rr_conversations?id=eq.${encodeURIComponent(conversationId)}`,
-      {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({
-          last_message_at: latestMessage.sentAt,
-          last_message_direction: latestMessage.direction,
-          last_refreshed_at: now,
-        }),
-      },
-    );
-  }
+  await db(url, key,
+    `rr_conversations?id=eq.${encodeURIComponent(conversationId)}`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        ...(latestMessage
+          ? {
+              last_message_at: latestMessage.sentAt,
+              last_message_direction: latestMessage.direction,
+            }
+          : {}),
+        last_refreshed_at: now,
+      }),
+    },
+  );
 
   // A refresh pulls the whole chatroom, which is precisely what a webhook-only ingest was missing.
   // Recording that unblocks the judgement about who started the conversation, which abstains until

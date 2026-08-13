@@ -198,7 +198,21 @@ export async function POST(request: Request) {
     : "";
 
   const reasonInstruction = "reason (ONE sentence, 20 words maximum, saying why this latest inbound reply deserves attention — no preamble, no restating the message, no second sentence)";
-  const userContent = `${mode === "analyze" ? `Return ONLY valid JSON with three string fields: draft (a concise, professional reply the sender could use), ${reasonInstruction}, and sentiment (exactly positive, neutral, or negative). Do not use markdown. ` : ""}${regenerateNudge}${toneContext}${instruction}\n\nConversation:\n${thread.map((item: { direction?: string; body?: string }) => `${item.direction ?? "message"}: ${item.body ?? ""}`).join("\n")}`;
+
+  /**
+   * A draft is a starting point, not an outgoing message — and it was quietly inventing the parts
+   * it could not know. It offered a lead two specific meeting slots ("Monday, 8/16: 2pm ET or
+   * Tuesday, 8/17: 10am ET") that came from nowhere: no calendar, no availability, nothing in the
+   * thread. Read quickly, that is a draft you send and then have to walk back.
+   *
+   * So anything only the human sender can supply — times, prices, dates, links, names, headcounts,
+   * commitments — is left as a bracketed blank they fill in. Fewer words on screen than a
+   * confident guess, and the guess is the expensive one.
+   */
+  const noFabricationRule =
+    "\n\nNever invent facts. Do not state availability, dates, times, prices, deadlines, numbers, links, documents, names or commitments unless they appear explicitly in the conversation above or in the client context. Where the reply needs a detail only the sender can supply, leave a short bracketed placeholder in its place — for example \"I'm free (insert time here)\", \"pricing starts at (insert price here)\", \"here's the (insert link here)\" — and write the rest of the sentence around it normally. Placeholders are expected and preferred over a plausible guess. Never fill a placeholder with an example value.\n";
+
+  const userContent = `${mode === "analyze" ? `Return ONLY valid JSON with three string fields: draft (a concise, professional reply the sender could use), ${reasonInstruction}, and sentiment (exactly positive, neutral, or negative). Do not use markdown. ` : ""}${noFabricationRule}${regenerateNudge}${toneContext}${instruction}\n\nConversation:\n${thread.map((item: { direction?: string; body?: string }) => `${item.direction ?? "message"}: ${item.body ?? ""}`).join("\n")}`;
 
   const requestBody = (m: string) => JSON.stringify({
     model: m,

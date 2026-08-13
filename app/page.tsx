@@ -251,6 +251,16 @@ const nav = [
   ["health", "System health", ""],
 ];
 const DEFAULT_FOLLOW_UP_THRESHOLD = 50;
+/**
+ * How long a synced conversation counts as fresh.
+ *
+ * Opening an inbox refreshes the visible rows against HeyReach, which is a round trip per
+ * conversation. People move between client inboxes constantly, and the old window was sixty
+ * seconds, so most of those trips were re-fetching a conversation someone had just fetched.
+ * Fifteen minutes is well inside the time it takes anyone to work a queue, and the window is
+ * measured against the server's own `last_refreshed_at`, so it holds across reloads and tabs.
+ */
+const REFRESH_WINDOW_MS = 15 * 60_000;
 const followUpBand = (score: number): "hot" | "warm" | "cold" | "nurture" => {
   if (score >= 75) return "hot";
   if (score >= 50) return "warm";
@@ -354,7 +364,9 @@ export function InboxPage() {
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [templateDraft, setTemplateDraft] = useState({ name: "", value: "" });
   const [aiDraft, setAiDraft] = useState("");
-  const [aiReason, setAiReason] = useState("");
+  // An already-answered conversation hides the composer, because the usual next move is to wait.
+  // Sometimes it isn't — a nudge is overdue — so the "replied to" line opens the box on click.
+  const [composeAnyway, setComposeAnyway] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [inboxSyncing, setInboxSyncing] = useState(false);
@@ -365,6 +377,16 @@ export function InboxPage() {
   const [lastInboxSync, setLastInboxSync] = useState<string>("");
   const [toastMessage, setToastMessage] = useState("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * When this tab last *asked* about a conversation, id → epoch ms.
+   *
+   * `last_refreshed_at` on the row answers "is this fresh" for everything that syncs cleanly.
+   * This covers what it cannot: a conversation the server declines to stamp — a workspace with no
+   * HeyReach key, a lead with no account id, HeyReach unreachable — is never fresh, so it would be
+   * re-attempted every time the visible set changed. Timestamps rather than a plain set, so
+   * nothing is skipped permanently: once the window lapses it is tried again like anything else.
+   */
+  const refreshAttemptsRef = useRef(new Map<string, number>());
   const [workspaceAi, setWorkspaceAi] = useState({ model: "", brief: "", systemPrompt: "", id: "", icpPrompt: "", followUpPrompt: "", followUpThreshold: DEFAULT_FOLLOW_UP_THRESHOLD });
   const followUpThreshold = workspaceAi.followUpThreshold ?? DEFAULT_FOLLOW_UP_THRESHOLD;
   const [workspaceDirectory, setWorkspaceDirectory] = useState<
@@ -944,22 +966,29 @@ export function InboxPage() {
   const visibleLeads = filtered.slice(0, visibleLeadCount);
   // Keep the rows on the screen — and the "already-replied" check next to each
   // name — accurate against HeyReach. Scoped to what the user can actually see
-  // (up to /api/conversations/refresh's cap of 50 IDs) and gated by a 60 s
-  // staleness window so filter juggling and see-more clicks don't re-hit
-  // HeyReach for conversations we just synced. A global inbox poll was
-  // rejected because this page will run at high volume across dozens of
-  // clients; the freshness signal lives per-conversation ("Last synced X @ Y"
-  // in the drawer) rather than as a background refetch loop.
+  // (up to /api/conversations/refresh's cap of 50 IDs) and gated by the
+  // freshness window below. A global inbox poll was rejected because this page
+  // will run at high volume across dozens of clients; the freshness signal
+  // lives per-conversation ("Last synced X @ Y" in the drawer) rather than as a
+  // background refetch loop.
   const visibleIdsKey = visibleLeads.map((lead) => lead.id).join(",");
   useEffect(() => {
     if (!visibleIdsKey) return;
-    const cutoff = Date.now() - 60_000;
+    const now = Date.now();
+    const cutoff = now - REFRESH_WINDOW_MS;
+    const attempts = refreshAttemptsRef.current;
     const staleIds = visibleLeads
       .filter((lead) => {
+        // What the server last recorded. Durable, so hopping between two inboxes,
+        // or reloading the page, does not re-sync what was just synced.
         const stampedAt = lead.lastRefreshedAt
           ? Date.parse(lead.lastRefreshedAt)
           : 0;
-        return !stampedAt || stampedAt < cutoff;
+        if (stampedAt && stampedAt >= cutoff) return false;
+        // And what this tab has already asked about, which covers the conversations
+        // the server cannot stamp — no HeyReach key, no account id, HeyReach down.
+        // Without this they would be retried on every filter click.
+        return (attempts.get(lead.id) ?? 0) < cutoff;
       })
       .map((lead) => lead.id)
       .slice(0, 50);
@@ -976,6 +1005,9 @@ export function InboxPage() {
         for (let offset = 0; offset < staleIds.length; offset += BATCH_SIZE) {
           if (cancelled) return;
           const batch = staleIds.slice(offset, offset + BATCH_SIZE);
+          // Marked as the batch goes out, not up front: if the user switches inbox
+          // mid-sync the batches that never left are still eligible next time.
+          for (const id of batch) attempts.set(id, Date.now());
           try {
             const response = await fetch("/api/conversations/refresh", {
               method: "POST",
@@ -1109,6 +1141,7 @@ export function InboxPage() {
   const scoredRef = useRef({ icp: new Set<string>(), followUp: new Set<string>() });
   useEffect(() => {
     activeConversationRef.current = current.id;
+    setComposeAnyway(false);
   }, [current.id]);
   useEffect(() => {
     if (current.id === "empty") return;
@@ -1131,7 +1164,6 @@ export function InboxPage() {
       const analyzedTime = new Date(current.analyzedAt).getTime();
       if (analyzedTime > latestInboundTime) {
         setAiDraft(current.cachedDraft);
-        setAiReason(current.cachedReason || "This lead sent a new reply that is ready for review.");
         return;
       }
     }
@@ -1154,11 +1186,9 @@ export function InboxPage() {
       // The user may have moved on while this was in flight; the newer request owns the pane.
       if (activeConversationRef.current !== conversationId) return;
       setAiDraft(draft);
-      setAiReason(reason);
     } else {
       if (activeConversationRef.current !== conversationId) return;
       setAiDraft("");
-      setAiReason("AI review is temporarily unavailable. The new reply is still ready for manual review.");
     }
     setAiLoading(false);
   };
@@ -1183,7 +1213,6 @@ export function InboxPage() {
   };
   useEffect(() => {
     setAiDraft("");
-    setAiReason("");
     setTemplatesOpen(false);
     if (!selectedWorkspaceSlug) { setMessagingDocUrl(""); setQuickTemplates([]); setWorkspaceAi({ model: "", brief: "", systemPrompt: "", id: "", icpPrompt: "", followUpPrompt: "", followUpThreshold: DEFAULT_FOLLOW_UP_THRESHOLD }); return; }
     let cancelled = false;
@@ -2021,17 +2050,6 @@ export function InboxPage() {
                       </p>
                     )}
                   </div>
-                  <div className="reason-box">
-                    <span className="reason-icon">✦</span>
-                    <div>
-                      <small>WHY THIS IS FLAGGED</small>
-                      {/* Titled as well as clamped: reasons written before there was a length cap are
-                          still in the database at full length, and hover is how you read the rest. */}
-                      <p title={aiLoading ? undefined : aiReason || current.reason || undefined}>
-                        {aiLoading ? "Anthropic is reviewing this conversation…" : aiReason || current.reason}
-                      </p>
-                    </div>
-                  </div>
                   {/* Only in the Follow-ups view. Everywhere else this is a second paragraph of prose
                       above the thread saying much what the flag reason already said, and the thread is
                       what the pane is for. The urgency score still rides on every row's score pill. */}
@@ -2083,11 +2101,16 @@ export function InboxPage() {
                         <button type="button" onClick={() => void generateAiReview(workspaceAi, true)} disabled={aiLoading}>{aiLoading ? "Generating…" : "Regenerate ↻"}</button>
                       </div>
                     </div>
-                    {current.messages.at(-1)?.direction === "outbound" ? (
-                      <div className="composer-replied-state" role="status" aria-live="polite">
+                    {current.messages.at(-1)?.direction === "outbound" && !composeAnyway ? (
+                      <button
+                        type="button"
+                        className="composer-replied-state"
+                        onClick={() => setComposeAnyway(true)}
+                        title="Write a follow-up anyway"
+                      >
                         <span className="responded-check composer-responded-check" aria-hidden="true">✓</span>
-                        <p>Lead has been replied to!</p>
-                      </div>
+                        <span>Lead has been replied to!</span>
+                      </button>
                     ) : (
                       <textarea
                         value={aiDraft}
