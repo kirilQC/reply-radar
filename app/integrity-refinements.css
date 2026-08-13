@@ -774,3 +774,47 @@
   background: var(--panel) !important;
   color: var(--text) !important;
 }
+
+/* ----------------------------------------------------------------------------
+   "Why this is flagged": one line of label and explanation, not three.
+   The strip sat above the thread as a stacked label-then-paragraph block, which
+   cost two lines of height before a single word of the flag reason. The label is
+   now a lead-in on the same line, and the whole thing is clamped to two lines as
+   a backstop — the length cap is enforced when the reason is generated, but every
+   reason written before that cap existed is still in the database at full length.
+   Scoped away from the follow-up box, whose urgency line must not be clamped off.
+   ------------------------------------------------------------------------- */
+.reason-box:not(.follow-up-reason-box) {
+  padding: 7px 14px;
+  gap: 7px;
+  align-items: baseline;
+}
+
+.reason-box:not(.follow-up-reason-box) .reason-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.reason-box:not(.follow-up-reason-box) > div {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.reason-box:not(.follow-up-reason-box) small {
+  display: inline;
+}
+
+.reason-box:not(.follow-up-reason-box) small:after {
+  content: " ·";
+  letter-spacing: 0;
+}
+
+.reason-box:not(.follow-up-reason-box) p {
+  display: inline;
+  margin: 0;
+  color: var(--muted);
+}

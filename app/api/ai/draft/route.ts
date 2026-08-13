@@ -130,6 +130,21 @@ async function fetchLeadHeadline(conversationId: string | undefined): Promise<{ 
   }
 }
 
+/** Hard ceiling for the flag explanation. Two lines in the strip above the thread, and no more. */
+const REASON_MAX = 150;
+
+function clampReason(value: unknown) {
+  const reason = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+  if (!reason) return "";
+  // First sentence only. The trailing lookahead keeps "8 a.m." and "Inc." from ending the sentence.
+  const firstSentence = reason.match(/^.*?[.!?](?=\s+[A-Z]|$)/)?.[0] ?? reason;
+  const trimmed = firstSentence.trim();
+  if (trimmed.length <= REASON_MAX) return trimmed;
+  const cut = trimmed.slice(0, REASON_MAX);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > REASON_MAX * 0.6 ? cut.slice(0, lastSpace) : cut).replace(/[,;:.\s]+$/, "")}…`;
+}
+
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   if (!process.env.ANTHROPIC_API_KEY) return NextResponse.json({ ok: false, error: "ANTHROPIC_API_KEY is not configured." }, { status: 503 });
@@ -164,12 +179,31 @@ export async function POST(request: Request) {
     ? String(body.system)
     : undefined;
 
-  const userContent = `${mode === "analyze" ? "Return ONLY valid JSON with three string fields: draft (a concise, professional reply the sender could use), reason (one plain-English sentence explaining why this latest inbound reply deserves attention), and sentiment (exactly positive, neutral, or negative). Do not use markdown. " : ""}${toneContext}${instruction}\n\nConversation:\n${thread.map((item: { direction?: string; body?: string }) => `${item.direction ?? "message"}: ${item.body ?? ""}`).join("\n")}`;
+  /**
+   * A regenerate is a request for a different answer, and it was not getting one.
+   *
+   * Temperature was pinned at 0, so asking twice about an unchanged conversation returned the same
+   * draft — pressing the button looked broken. The reason line *did* appear to change, which is the
+   * tell: it is generated after the draft in the JSON, and temperature-0 inference is not bit-exact,
+   * so what drift there is shows up later in the sequence. The draft, coming first, was the most
+   * stable thing in the response.
+   *
+   * The automatic first pass stays at 0 — it is cached against the reply and should be stable. Only an
+   * explicit regenerate loosens up, and it is told out loud that it is rewriting, because a warmer
+   * temperature alone tends to reword rather than rethink.
+   */
+  const regenerate = body.regenerate === true;
+  const regenerateNudge = regenerate
+    ? "\n\nThis is a REGENERATE: a draft for this conversation was already produced and the user rejected it. Write a genuinely different reply — a different opening, a different structure, a different way into the same goal. Do not lightly reword the obvious answer.\n"
+    : "";
+
+  const reasonInstruction = "reason (ONE sentence, 20 words maximum, saying why this latest inbound reply deserves attention — no preamble, no restating the message, no second sentence)";
+  const userContent = `${mode === "analyze" ? `Return ONLY valid JSON with three string fields: draft (a concise, professional reply the sender could use), ${reasonInstruction}, and sentiment (exactly positive, neutral, or negative). Do not use markdown. ` : ""}${regenerateNudge}${toneContext}${instruction}\n\nConversation:\n${thread.map((item: { direction?: string; body?: string }) => `${item.direction ?? "message"}: ${item.body ?? ""}`).join("\n")}`;
 
   const requestBody = (m: string) => JSON.stringify({
     model: m,
     max_tokens: body.maxTokens ?? 500,
-    temperature: body.temperature ?? 0,
+    temperature: body.temperature ?? (regenerate ? 1 : 0),
     ...(systemPrompt ? { system: systemPrompt } : {}),
     messages: [{ role: "user", content: userContent }],
   });
@@ -190,6 +224,11 @@ export async function POST(request: Request) {
     let analysis: { draft?: string; reason?: string; sentiment?: string } = {};
     if (mode === "analyze") {
       try { analysis = JSON.parse(text.replace(/^```json\s*|\s*```$/g, "")); } catch { analysis = { draft: text, reason: "This lead sent a new reply that is ready for review." }; }
+      // Enforced here rather than left to the prompt, because this line sits above the thread in a
+      // fixed strip and a model that decides to write three sentences pushes the conversation itself
+      // off screen. Cut at the first sentence, then hard-trim on a word boundary if that one sentence
+      // is still a paragraph.
+      analysis.reason = clampReason(analysis.reason);
     }
     if (response.ok && mode === "analyze" && typeof body.conversationId === "string" && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
       const store = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };

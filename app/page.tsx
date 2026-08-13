@@ -1091,7 +1091,7 @@ export function InboxPage() {
     const response = await fetch("/api/ai/draft", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, campaignName: current.campaignName || undefined, thread: current.messages, instruction: ai.brief ? `Client context: ${ai.brief}` : "" }),
+      body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, campaignName: current.campaignName || undefined, thread: current.messages, regenerate: forceRegenerate, instruction: ai.brief ? `Client context: ${ai.brief}` : "" }),
     }).catch(() => null);
     const payload = await response?.json().catch(() => ({}));
     if (response?.ok) {
@@ -1958,7 +1958,11 @@ export function InboxPage() {
                     <span className="reason-icon">✦</span>
                     <div>
                       <small>WHY THIS IS FLAGGED</small>
-                      <p>{aiLoading ? "Anthropic is reviewing this conversation…" : aiReason || current.reason}</p>
+                      {/* Titled as well as clamped: reasons written before there was a length cap are
+                          still in the database at full length, and hover is how you read the rest. */}
+                      <p title={aiLoading ? undefined : aiReason || current.reason || undefined}>
+                        {aiLoading ? "Anthropic is reviewing this conversation…" : aiReason || current.reason}
+                      </p>
                     </div>
                   </div>
                   {/* Only in the Follow-ups view. Everywhere else this is a second paragraph of prose
