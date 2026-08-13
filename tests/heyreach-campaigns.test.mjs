@@ -121,34 +121,51 @@ test("a campaign HeyReach still calls in progress is complete once the list is e
 test("each state lands in its own list and drafts stay out of all of them", () => {
   const pending = { progressStats: { totalUsers: 10, totalUsersPending: 10 } };
   const status = summariseCampaigns([
-    { id: 1, name: "Live", status: "IN_PROGRESS", ...pending },
-    { id: 2, name: "Next week", status: "SCHEDULED", ...pending },
-    { id: 3, name: "Held", status: "PAUSED", ...pending },
-    { id: 4, name: "Done", status: "FINISHED" },
-    { id: 5, name: "Never launched", status: "DRAFT", ...pending },
+    { id: 1, name: "CT001: Live", status: "IN_PROGRESS", ...pending },
+    { id: 2, name: "CT002: Next week", status: "SCHEDULED", ...pending },
+    { id: 3, name: "CT003: Held", status: "PAUSED", ...pending },
+    { id: 4, name: "CT004: Done", status: "FINISHED" },
+    { id: 5, name: "CT005: Never launched", status: "DRAFT", ...pending },
   ]);
-  assert.deepEqual(status.active.map((row) => row.name), ["Live"]);
-  assert.deepEqual(status.scheduled.map((row) => row.name), ["Next week"]);
-  assert.deepEqual(status.paused.map((row) => row.name), ["Held"]);
+  assert.deepEqual(status.active.map((row) => row.name), ["CT001: Live"]);
+  assert.deepEqual(status.scheduled.map((row) => row.name), ["CT002: Next week"]);
+  assert.deepEqual(status.paused.map((row) => row.name), ["CT003: Held"]);
   // Closed and draft campaigns are counted but never listed: a client hears about neither, and a draft
   // with a full list must not be dressed up as active.
-  assert.deepEqual(allCampaigns(status).map((row) => row.name), ["Live", "Next week", "Held"]);
+  assert.deepEqual(allCampaigns(status).map((row) => row.name), ["CT001: Live", "CT002: Next week", "CT003: Held"]);
   assert.equal(status.total, 5);
+});
+
+test("a campaign the client launched before hiring us is not reported at all", () => {
+  // The whole point of the code prefix. These four ran before the engagement, and counting them would
+  // credit us with work we did not do — and, through `launchedAt`, back-date the engagement itself.
+  const pending = { progressStats: { totalUsers: 10, totalUsersPending: 10 } };
+  const status = summariseCampaigns([
+    { id: 1, name: "CT001: Ours", status: "IN_PROGRESS", ...pending },
+    { id: 2, name: "Cotool Linkedin Followers", status: "IN_PROGRESS", ...pending },
+    { id: 3, name: "Max-Test", status: "IN_PROGRESS", ...pending },
+    { id: 4, name: "BH CISO & Security Leaders", status: "PAUSED", ...pending },
+    { id: 5, name: "AWS re:invent 2025 New", status: "FINISHED" },
+  ]);
+  assert.deepEqual(status.active.map((row) => row.name), ["CT001: Ours"]);
+  // Not merely unlisted — uncounted. A total of five would put four of the client's own campaigns into
+  // the "campaigns we ran" figure at the top of the report.
+  assert.equal(status.total, 1);
 });
 
 test("active campaigns are listed newest first", () => {
   const status = summariseCampaigns([
-    { id: 1, name: "Older", status: "IN_PROGRESS", startedAt: "2026-06-01T00:00:00Z", progressStats: { totalUsersPending: 5 } },
-    { id: 2, name: "Newest", status: "IN_PROGRESS", startedAt: "2026-08-09T00:00:00Z", progressStats: { totalUsersPending: 5 } },
+    { id: 1, name: "CT006: Older", status: "IN_PROGRESS", startedAt: "2026-06-01T00:00:00Z", progressStats: { totalUsersPending: 5 } },
+    { id: 2, name: "CT007: Newest", status: "IN_PROGRESS", startedAt: "2026-08-09T00:00:00Z", progressStats: { totalUsersPending: 5 } },
   ]);
-  assert.deepEqual(status.active.map((row) => row.name), ["Newest", "Older"]);
+  assert.deepEqual(status.active.map((row) => row.name), ["CT007: Newest", "CT006: Older"]);
 });
 
 test("an unknown status with work left is reported rather than dropped", () => {
   const status = summariseCampaigns([
-    { id: 9, name: "Mystery", status: "WARMING_UP", progressStats: { totalUsersPending: 40 } },
+    { id: 9, name: "CT008: Mystery", status: "WARMING_UP", progressStats: { totalUsersPending: 40 } },
   ]);
-  assert.deepEqual(status.active.map((row) => row.name), ["Mystery"]);
+  assert.deepEqual(status.active.map((row) => row.name), ["CT008: Mystery"]);
   assert.deepEqual(status.unrecognised, ["WARMING_UP"]);
 });
 
@@ -185,12 +202,12 @@ test("the name index is what joins live status onto reply-derived campaign rows"
 
 test("toggling campaigns narrows the report, and no selection means all of them", () => {
   const status = summariseCampaigns([
-    { id: 1, name: "Live A", status: "IN_PROGRESS", progressStats: { totalUsersPending: 5 } },
-    { id: 2, name: "Live B", status: "IN_PROGRESS", progressStats: { totalUsersPending: 5 } },
-    { id: 3, name: "Held", status: "PAUSED", progressStats: { totalUsersPending: 5 } },
+    { id: 1, name: "CT010: Live A", status: "IN_PROGRESS", progressStats: { totalUsersPending: 5 } },
+    { id: 2, name: "CT011: Live B", status: "IN_PROGRESS", progressStats: { totalUsersPending: 5 } },
+    { id: 3, name: "CT003: Held", status: "PAUSED", progressStats: { totalUsersPending: 5 } },
   ]);
-  assert.deepEqual(selectCampaigns(status, ["2", "3"]).active.map((row) => row.name), ["Live B"]);
-  assert.deepEqual(selectCampaigns(status, ["2", "3"]).paused.map((row) => row.name), ["Held"]);
+  assert.deepEqual(selectCampaigns(status, ["2", "3"]).active.map((row) => row.name), ["CT011: Live B"]);
+  assert.deepEqual(selectCampaigns(status, ["2", "3"]).paused.map((row) => row.name), ["CT003: Held"]);
   // Absent selection is a caller that never saw the toggles; it gets the whole picture.
   assert.equal(allCampaigns(selectCampaigns(status, null)).length, 3);
   assert.equal(allCampaigns(selectCampaigns(status, undefined)).length, 3);
@@ -234,7 +251,7 @@ test("senders are counted from the payload and turned into a runway", () => {
 
 test("a campaign HeyReach lists no senders for reports an unknown runway, not a finished one", () => {
   const [row] = summariseCampaigns([
-    { id: 78, name: "Nobody assigned", status: "IN_PROGRESS", progressStats: { totalUsersPending: 500 } },
+    { id: 78, name: "CT012: Nobody assigned", status: "IN_PROGRESS", progressStats: { totalUsersPending: 500 } },
   ]).active;
   assert.equal(row.senders, 0);
   assert.equal(row.daysLeftInSending, null);
@@ -253,7 +270,7 @@ test("the sender list is counted whichever shape HeyReach sends it in", () => {
   ];
   for (const shape of shapes) {
     const [row] = summariseCampaigns([
-      { id: 1, name: "Live", status: "IN_PROGRESS", progressStats: { totalUsersPending: 100 }, ...shape },
+      { id: 1, name: "CT001: Live", status: "IN_PROGRESS", progressStats: { totalUsersPending: 100 }, ...shape },
     ]).active;
     assert.equal(row.senders, 2, `${JSON.stringify(shape)} should count two senders`);
     assert.equal(row.daysLeftInSending, 2);

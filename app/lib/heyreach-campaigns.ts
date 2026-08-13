@@ -24,7 +24,14 @@
  * Failure is a first-class outcome. A missing key or an unreachable HeyReach must leave the report
  * saying "status unknown" rather than "nothing is running", because those two read the same to a
  * client and only one of them is true.
+ *
+ * ── Whose campaigns ─────────────────────────────────────────────────────────────────────────────
+ * Only ours. Several clients tried outbound themselves before the engagement and those campaigns sit
+ * in the same account behind the same key; `shared/campaign-code.mjs` holds the rule that tells them
+ * apart, and this file drops everything that fails it.
  */
+
+import { isOurCampaign } from "../../shared/campaign-code.mjs";
 
 type Row = Record<string, unknown>;
 
@@ -290,6 +297,10 @@ export function summariseCampaigns(
     const id = text(row.id ?? row.campaignId);
     const name = text(row.name ?? row.campaignName);
     if (!id && !name) continue;
+    // Clients who ran their own outbound before hiring us still have those campaigns in the same
+    // account. Reporting on them would credit or blame us for work we never touched, so the naming
+    // convention decides. See `shared/campaign-code.mjs` for why the pattern is looser than "XX001".
+    if (!isOurCampaign(name)) continue;
 
     const status = text(row.status);
     const reported = classifyReportedState(status);

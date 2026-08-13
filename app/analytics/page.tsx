@@ -6,7 +6,7 @@ import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 
 type Performance = { name: string; replies: number; messages?: number; messagesSent?: number; conversations?: number; clients?: string[] };
-type CampaignMetric = { workspaceId: string; client: string; campaignId: string; name: string; connectionsSent: number; connectionsAccepted: number; replies: number; messagesStarted: number; acceptanceRate: number; replyRate: number; positiveReplies: number; positiveReplyRate: number; launchedAt: string | null; status: string | null };
+type CampaignMetric = { workspaceId: string; client: string; campaignId: string; name: string; connectionsSent: number; connectionsAccepted: number; replies: number; replies7d?: number; messagesStarted: number; acceptanceRate: number; replyRate: number; positiveReplies: number; positiveReplyRate: number; launchedAt: string | null; status: string | null };
 type WorkspaceDetail = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type AnalyticsData = { status?: string; totalReplies?: number; messagesSent?: number; activeConversations?: number; replies7d?: number; trend?: number[]; trendLabels?: string[]; averageDailyReplies?: number; campaignMetrics?: CampaignMetric[]; campaignAverages?: { replyRate: number; acceptanceRate: number; positiveReplyRate: number }; clientPerformance?: Performance[]; campaigns?: Performance[]; senders?: Performance[]; workspaceDetails?: WorkspaceDetail[] };
 
@@ -261,9 +261,21 @@ export default function AnalyticsPage() {
   // these figures pure and it is the more honest answer anyway: they describe that snapshot.
   const asOf = updatedAt ?? new Date(0);
   const markFor = (workspaceId: string) => workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
-  /** Every campaign we hold, best reply count first, regardless of whose it is. */
-  const campaignLeaders = [...allCampaigns].sort((a, b) => b.replies - a.replies).slice(0, 8);
-  const campaignLeaderMax = Math.max(...campaignLeaders.map((row) => row.replies), 1);
+  /**
+   * Every campaign we hold, busiest week first, regardless of whose it is.
+   *
+   * Ranked on the last seven days rather than lifetime replies. A lifetime ranking is won permanently
+   * by whichever campaign ran longest, so the card slowly stopped changing and stopped being worth
+   * looking at — the question it should answer is which campaigns are working *now*.
+   *
+   * Ties on the week are broken by lifetime replies, so a quiet week still lists the campaigns with a
+   * track record above ones that have never produced anything.
+   */
+  const weekly = (row: CampaignMetric) => row.replies7d ?? 0;
+  const campaignLeaders = [...allCampaigns]
+    .sort((a, b) => weekly(b) - weekly(a) || b.replies - a.replies)
+    .slice(0, 8);
+  const campaignLeaderMax = Math.max(...campaignLeaders.map(weekly), 1);
   /**
    * How long each client has been with us, from the launch date of their first campaign.
    *
@@ -304,8 +316,8 @@ export default function AnalyticsPage() {
   // "6d ago" offsets that quietly went wrong once the window grew past a week.
   const trendLabels = data.trendLabels ?? [];
   return <div className="app-shell"><AppSidebar/><section className="main-area"><header className="topbar"><Crumb trail={[{ label: "Analytics" }]} /><div className="top-actions"><GlobalAppearanceControl /></div></header><main className="analytics-dashboard"><header className="analytics-hero"><div><h1>Analytics</h1></div><div className="analytics-live"><i /> Live data{updatedAt ? ` · updated ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</div></header>
-    <section className="analytics-kpis"><Kpi label="All-time replies" value={(data.totalReplies ?? 0).toLocaleString()} sub="Across all clients"/><Kpi label="Average reply rate" value={`${(data.campaignAverages?.replyRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average acceptance rate" value={`${(data.campaignAverages?.acceptanceRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average positive reply rate" value={`${(data.campaignAverages?.positiveReplyRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average daily replies" value={(data.averageDailyReplies ?? 0).toFixed(1)} sub="Across all clients"/></section>
-    <section className="analytics-primary"><article className="analytics-card analytics-trend"><CardTitle title="Reply momentum" subtitle="Replies over the last 14 days, across all clients"/><div className="analytics-bars">{trend.map((value, index) => <div key={index}><strong>{value}</strong><i style={{ height: `${Math.max(4, (value / max) * 100)}%` }}/><small>{trendLabels[index]}</small></div>)}</div></article></section>
+    <section className="analytics-kpis"><Kpi label="All-time replies" value={(data.totalReplies ?? 0).toLocaleString()} sub="Across all clients"/><Kpi label="Average reply rate" value={`${(data.campaignAverages?.replyRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average acceptance rate" value={`${(data.campaignAverages?.acceptanceRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average positive reply rate" value={`${(data.campaignAverages?.positiveReplyRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average daily replies" value={(data.averageDailyReplies ?? 0).toFixed(1)} sub="Last 7 full days"/></section>
+    <section className="analytics-primary"><article className="analytics-card analytics-trend"><CardTitle title="Reply momentum"/><div className="analytics-bars">{trend.map((value, index) => <div key={index}><strong>{value}</strong><i style={{ height: `${Math.max(4, (value / max) * 100)}%` }}/><small>{trendLabels[index]}</small></div>)}</div></article></section>
 
     <section className="analytics-clients-section">
       <CardTitle title="Client workspaces"/>
@@ -324,7 +336,7 @@ export default function AnalyticsPage() {
 
     <section className="analytics-grid">
       <article className="analytics-card analytics-ranking">
-        <CardTitle title="Campaign performance across all clients" subtitle="Ranked by reply count"/>
+        <CardTitle title="Campaign performance across all clients" subtitle="Replies in the last 7 days"/>
         {campaignLeaders.length ? campaignLeaders.map((row, index) => (
           <div className="analytics-rank has-mark" key={row.campaignId}>
             <b>{index + 1}</b>
@@ -332,9 +344,9 @@ export default function AnalyticsPage() {
             <span>
               <strong>{row.name}</strong>
               <small>{row.client}</small>
-              <i><em style={{ width: `${(row.replies / campaignLeaderMax) * 100}%` }}/></i>
+              <i><em style={{ width: `${(weekly(row) / campaignLeaderMax) * 100}%` }}/></i>
             </span>
-            <data>{row.replies}</data>
+            <data>{weekly(row)}</data>
           </div>
         )) : <p className="empty-state">No campaign data yet.</p>}
       </article>

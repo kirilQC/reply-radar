@@ -61,6 +61,30 @@ The same standard produced `/api/analytics/summary` rather than reusing `/api/an
 
 ---
 
+## Only campaigns we launched are ours to report on
+
+**Reported as:** "the client engagement duration is wrong for a few clients … some of these clients
+tried to do outbound in heyreach before they hired us, so sometimes we have campaigns that predate
+us. ALL of the campaigns we launch have the same style of prefix … thats how we know which campaigns
+are ours."
+
+**Therefore:** every campaign QC launches is named with a short client code and a sequence number —
+`CT003`, `SW019`, `W040`. Campaigns without one belong to the client's own pre-engagement attempts and
+are dropped where the HeyReach payload is read, so nothing downstream can count them. The rule lives
+in `shared/campaign-code.mjs` and applies to new campaigns automatically; the only maintenance is
+naming ours correctly in HeyReach.
+
+The pattern is deliberately looser than the convention as stated, because the live accounts are not
+uniform — one to three letters, an optional colon, two or three digits. The reasoning, and the real
+campaign names that forced each allowance, are in that file's header. It is a rule about *whose work
+this is*, so widening it to rescue an oddly-named campaign is worse than renaming the campaign.
+
+**Known casualties, to be renamed in HeyReach rather than coded around:** Cotool's "Cotool Linkedin
+Followers", "Maxwell ICP Campaign (new)" and "Max ICP campaign" are ours but carry no code, so they
+are currently excluded.
+
+---
+
 ## The home page
 
 **Asked for:** "the analytics at the top are so bare bones. can you please make it better. i want to

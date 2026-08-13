@@ -1797,13 +1797,28 @@ a.tag-outline-link:hover {
   white-space: nowrap;
 }
 
+/* The client cards and the three ranking cards below them are separate questions — who we work
+   with, then how the work is going. Butted together with only the grid's own 14px between them
+   they read as one continuous block and the eye runs straight past the boundary. */
+.analytics-clients-section {
+  margin-bottom: 30px;
+}
+
+/* Air between a ranking card's heading and its first row. The row's own 15px of vertical padding
+   was the entire gap, which put the title at the same rhythm as the data and made it look like
+   another entry in the list rather than the label for it. */
+.analytics-ranking .analytics-card-title {
+  margin-bottom: 16px;
+}
+
 /* The headline for "campaigns launched this month": the total is the answer, the per-client
-   rows underneath are the working. */
+   rows underneath are the working. The bottom margin is the wider of the two on purpose — the
+   total is a heading in its own right, so it needs more space below it than above. */
 .analytics-launch-total {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  margin: 18px 0 4px;
+  margin: 4px 0 22px;
 }
 .analytics-launch-total strong {
   font-size: 40px;

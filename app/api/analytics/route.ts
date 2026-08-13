@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { queryByIds } from "../../lib/chunk-query";
+import { ourCampaigns } from "../../../shared/campaign-code.mjs";
 
 type Row = Record<string, unknown>;
 type CampaignMetric = {
   workspaceId: string; client: string; campaignId: string; name: string;
   connectionsSent: number; connectionsAccepted: number; replies: number;
+  /** Replies we stored in the last seven days. The lifetime `replies` figure cannot answer "this week". */
+  replies7d: number;
   messagesStarted: number; acceptanceRate: number; replyRate: number;
   positiveReplies: number; positiveReplyRate: number;
   launchedAt: string | null; status: string | null;
@@ -58,7 +61,9 @@ async function heyReachCampaignStats(workspace: Row) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`HeyReach campaign stats returned ${response.status} for ${workspace.name}.`);
-  const rows = Array.isArray(payload?.overallStats) ? payload.overallStats as Row[] : [];
+  // A client's own pre-engagement campaigns share this API key. They are dropped here, at the edge,
+  // so that nothing downstream — engagement duration most of all — can quietly count them as our work.
+  const rows = ourCampaigns(Array.isArray(payload?.overallStats) ? payload.overallStats as Row[] : [], (row) => row.campaignName);
   campaignCache.set(workspaceId, { expires: Date.now() + 5 * 60_000, rows });
   // No `metadata` key: `rr_sync_runs` has never had that column, so this insert has been
   // 400ing for its whole life and `writeSupabase`'s .catch swallowed it — the campaign-metrics
@@ -76,6 +81,10 @@ async function heyReachCampaignStats(workspace: Row) {
  * Campaign launch dates only exist on the campaign records themselves, not on the stats
  * rollup, so the two have to be joined. Names follow an "XX001:" convention but the number
  * is not a reliable launch order, so the real `startedAt` is always used.
+ *
+ * The convention does decide *whose* campaign it is — see `shared/campaign-code.mjs`. This list is
+ * where the engagement-duration bug lived: a client's own 2024 experiment supplied the earliest
+ * `startedAt` and so became the date we claimed to have started working with them.
  */
 async function heyReachCampaignList(workspace: Row) {
   const workspaceId = String(workspace.id);
@@ -97,9 +106,11 @@ async function heyReachCampaignList(workspace: Row) {
     if (!response?.ok) break;
     const payload = await response.json().catch(() => ({}));
     const items = Array.isArray(payload?.items) ? (payload.items as Row[]) : [];
-    rows.push(...items);
-    const total = Number(payload?.totalCount ?? rows.length);
-    if (items.length < pageSize || rows.length >= total) break;
+    rows.push(...ourCampaigns(items, (row) => row.name));
+    // Paging is judged on what HeyReach returned, not on what survived the filter: comparing a
+    // filtered length against `totalCount` would stop early and lose later pages.
+    const total = Number(payload?.totalCount ?? 0);
+    if (items.length < pageSize || offset + items.length >= total) break;
   }
   campaignListCache.set(workspaceId, { expires: Date.now() + 10 * 60_000, rows });
   return rows;
@@ -158,17 +169,25 @@ export async function GET(request: Request) {
     });
     const trendLabels = trendDays.map((day) => day.toLocaleDateString("en-US", { month: "numeric", day: "numeric" }));
     /**
-     * Replies per day across every client, over the span we actually hold data for.
+     * Replies per day across every client, over the trailing week.
      *
-     * Dividing by a fixed window would understate a client we onboarded last week, so the
-     * divisor is the number of days from the first stored reply to today.
+     * This used to divide every reply we hold by the age of the oldest one. That reads as a lifetime
+     * average, but it is not one: the divisor grew by a day every day while the numerator only counted
+     * replies still in the tables, so the figure fell forever and showed 1.5/day on a week that was
+     * actually running above thirty. Backfilled history made it worse — one reply imported from six
+     * months ago moved the divisor by 180 days and the numerator by one.
+     *
+     * Seven days fixes the denominator to something the number can be checked against by eye: it is the
+     * sum of seven specific bars in the chart above, divided by seven. Days with no replies still count,
+     * because a quiet Sunday is a real part of the week's rate.
+     *
+     * Those seven are the ones *before* today, not including it. Today is a few hours old whenever the
+     * page is opened, and counting a part-day as a whole one drops the average every morning.
      */
-    const firstReplyAt = inbound.reduce((earliest, row) => {
-      const timestamp = new Date(String(row.sent_at)).getTime();
-      return Number.isFinite(timestamp) && timestamp < earliest ? timestamp : earliest;
-    }, Number.POSITIVE_INFINITY);
-    const daysCovered = Number.isFinite(firstReplyAt) ? Math.max(1, Math.ceil((now - firstReplyAt) / 86_400_000)) : 1;
-    const averageDailyReplies = inbound.length ? inbound.length / daysCovered : 0;
+    const completeDays = trend.slice(-8, -1);
+    const averageDailyReplies = completeDays.length
+      ? completeDays.reduce((sum, value) => sum + value, 0) / completeDays.length
+      : 0;
     const queueMix = conversations.reduce<{ hot: number; warm: number; nurture: number }>((result, row) => {
       const tier = String(row.tier || "nurture").toLowerCase();
       if (tier === "hot" || tier === "warm" || tier === "nurture") result[tier] += 1;
@@ -207,19 +226,31 @@ export async function GET(request: Request) {
     }
     const averageResponseMinutes = responseTimes.length ? Math.round(responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length / 60_000) : null;
     const positiveByCampaign = new Map<string, number>();
+    /**
+     * Replies per campaign over the trailing week, so the campaign ranking can be read as "what is
+     * working now" rather than "what has ever worked". HeyReach's own reply counts are lifetime — the
+     * stats call is pinned to 2020 — so a recency window has to come from our own tables.
+     */
+    const recentByCampaign = new Map<string, number>();
     for (const message of inbound) {
       const radar = object(object(message.raw_data).reply_radar);
-      if (String(radar.sentiment ?? "").toLowerCase() !== "positive") continue;
       const name = String(object(radar.campaign).name ?? "");
+      if (!name) continue;
       const workspaceId = conversationWorkspace.get(String(message.conversation_id)) ?? "";
       const key = `${workspaceId}:${name}`;
-      if (name) positiveByCampaign.set(key, (positiveByCampaign.get(key) ?? 0) + 1);
+      if (String(radar.sentiment ?? "").toLowerCase() === "positive") {
+        positiveByCampaign.set(key, (positiveByCampaign.get(key) ?? 0) + 1);
+      }
+      if (new Date(String(message.sent_at)).getTime() >= weekAgo) {
+        recentByCampaign.set(key, (recentByCampaign.get(key) ?? 0) + 1);
+      }
     }
     const campaignMetrics: CampaignMetric[] = campaignResponses.flatMap(({ workspace, rows, launchById, launchByName }) => rows.map((row) => {
       const accepted = Number(row.connectionsAccepted ?? 0);
       const replies = Number(row.totalMessageReplies ?? 0) + Number(row.totalInmailReplies ?? 0);
       const name = String(row.campaignName ?? `Campaign ${row.campaignId ?? ""}`).trim();
       const positiveReplies = positiveByCampaign.get(`${String(workspace.id)}:${name}`) ?? 0;
+      const replies7d = recentByCampaign.get(`${String(workspace.id)}:${name}`) ?? 0;
       const hasProviderAcceptanceRate = row.connectionAcceptanceRate !== null && row.connectionAcceptanceRate !== undefined && String(row.connectionAcceptanceRate).trim() !== "";
       const providerAcceptanceRate = Number(row.connectionAcceptanceRate);
       const acceptanceRate = hasProviderAcceptanceRate && Number.isFinite(providerAcceptanceRate)
@@ -234,7 +265,7 @@ export async function GET(request: Request) {
       return {
         workspaceId: String(workspace.id), client: String(workspace.name), campaignId: String(row.campaignId ?? ""), name,
         connectionsSent: Number(row.connectionsSent ?? 0), connectionsAccepted: accepted,
-        replies, messagesStarted: Number(row.totalMessageStarted ?? 0) + Number(row.totalInmailStarted ?? 0),
+        replies, replies7d, messagesStarted: Number(row.totalMessageStarted ?? 0) + Number(row.totalInmailStarted ?? 0),
         acceptanceRate,
         replyRate: accepted ? replies / accepted * 100 : 0,
         positiveReplies, positiveReplyRate: accepted ? positiveReplies / accepted * 100 : 0,
