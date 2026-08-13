@@ -60,11 +60,14 @@ async function heyReachCampaignStats(workspace: Row) {
   if (!response.ok) throw new Error(`HeyReach campaign stats returned ${response.status} for ${workspace.name}.`);
   const rows = Array.isArray(payload?.overallStats) ? payload.overallStats as Row[] : [];
   campaignCache.set(workspaceId, { expires: Date.now() + 5 * 60_000, rows });
+  // No `metadata` key: `rr_sync_runs` has never had that column, so this insert has been
+  // 400ing for its whole life and `writeSupabase`'s .catch swallowed it — the campaign-metrics
+  // row never reached the audit feed. The counts below are the part anyone reads, and stashing
+  // the full HeyReach payload per poll is what made this table 97% of the database.
   void writeSupabase("rr_sync_runs", {
     workspace_id: workspaceId, source: "heyreach", run_type: "campaign_metrics", status: "success",
     started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
     records_seen: rows.length, records_written: rows.length,
-    metadata: { overallStats: rows, fetchedAt: new Date().toISOString() },
   });
   return rows;
 }
