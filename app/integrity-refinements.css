@@ -662,3 +662,115 @@
     font-size: 24px;
   }
 }
+
+/* ============================================================================
+   Conversation pane: one palette, and the accent used for emphasis only.
+   ----------------------------------------------------------------------------
+   The pane read as two unrelated designs stacked on top of each other: purple
+   message bubbles under an orange draft box. Neither was a choice. The bubbles
+   were written as literal hexes (#292452, #3c365e, #8982bb) back when the
+   default accent happened to be purple, so they were never wired to the theme
+   at all — while the composer fills itself with `--accent-2`, which is derived
+   from the accent the user picked. Change the accent to orange and the two
+   halves come apart, because only one half was ever listening.
+
+   Everything below reads from the theme, so the pane holds together at any
+   accent. The rule it follows: surfaces stay neutral, and the accent appears
+   only where something is being pointed at — the sender's own bubble, the
+   latest reply, the section labels, the send button. A large saturated fill
+   was the whole reason the draft box shouted.
+   ========================================================================= */
+
+.reason-box {
+  background: var(--panel-2);
+}
+
+/* Them: plain. Us: tinted. Same family, different weight — which is a quieter
+   way to say who is speaking than giving each side its own colour. */
+.bubble.inbound {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text);
+}
+
+.bubble.outbound {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--text);
+}
+
+.bubble.inbound time,
+.bubble.outbound time {
+  color: var(--muted-2);
+}
+
+.bubble.outbound .message-author,
+.bubble.inbound .message-author {
+  color: color-mix(in srgb, var(--accent) 65%, var(--text));
+}
+
+/* The lead's avatar sat on a hard purple disc. It only ever needs to be the
+   plate the photo lands on. */
+.bubble.inbound > span {
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  color: var(--muted);
+}
+
+/* Still the thing you look at first, without the full saturated outline and the
+   doubled glow that made it the loudest object on screen. */
+.bubble.latest-inbound {
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent) !important;
+  box-shadow: 0 6px 18px #0000002e;
+}
+
+.bubble.latest-inbound:after {
+  color: color-mix(in srgb, var(--accent) 60%, var(--muted));
+  font-weight: 700;
+}
+
+/* The draft box: a neutral surface with an accent hairline along the top, so it
+   reads as the place you write rather than a coloured slab. */
+.composer {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--border) !important;
+  border-top: 2px solid color-mix(in srgb, var(--accent) 55%, transparent) !important;
+  border-radius: 10px !important;
+  overflow: hidden;
+}
+
+.composer-top,
+.composer-foot {
+  border-color: var(--border-soft) !important;
+}
+
+.composer-top button {
+  color: var(--muted);
+}
+
+.composer-top button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.composer textarea {
+  color: var(--text);
+}
+
+.composer textarea::placeholder {
+  color: var(--muted-2);
+}
+
+.send-button span {
+  color: #ffffffa8;
+}
+
+/* Light mode kept its own literal tints for these two, both of them violet. */
+.light-mode .reason-box,
+.light-mode .composer {
+  background: var(--panel-2) !important;
+}
+
+.light-mode .bubble.inbound {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}

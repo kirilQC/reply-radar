@@ -1961,7 +1961,10 @@ export function InboxPage() {
                       <p>{aiLoading ? "Anthropic is reviewing this conversation…" : aiReason || current.reason}</p>
                     </div>
                   </div>
-                  {current.followUpReason && (current.followUpUrgency ?? 0) >= followUpThreshold && (
+                  {/* Only in the Follow-ups view. Everywhere else this is a second paragraph of prose
+                      above the thread saying much what the flag reason already said, and the thread is
+                      what the pane is for. The urgency score still rides on every row's score pill. */}
+                  {filter === "follow-ups" && current.followUpReason && (current.followUpUrgency ?? 0) >= followUpThreshold && (
                     <div className="reason-box follow-up-reason-box">
                       <span className="reason-icon">⏰</span>
                       <div>
