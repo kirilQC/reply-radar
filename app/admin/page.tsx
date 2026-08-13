@@ -295,15 +295,13 @@ export default function AdminPage() {
                                     ? "Audit log"
                                     : "System health"}
                   </h1>
-                  {!(active === "workspaces" && workspaceOpen) && active !== "workspaces" && active !== "audit" && <p>
+                  {!(active === "workspaces" && workspaceOpen) && active !== "workspaces" && active !== "audit" && active !== "feedback" && <p>
                     {active === "ai"
                           ? "Tune the Anthropic drafting context for every client."
                           : active === "scoring"
                             ? "Make follow-up urgency explainable and client-specific."
                             : active === "heartbeat"
                               ? "Live pulse checks for credentials, webhooks, and sync freshness."
-                              : active === "feedback"
-                                ? "Report a bug or send an idea. Leave your name off and it stays anonymous."
                               : active === "audit"
                                 ? ""
                             : active === "theme"
@@ -739,6 +737,14 @@ function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload |
   );
 }
 
+type FeedbackEvent = {
+  id: string;
+  author: string;
+  comment: string;
+  /** Null when the update was a comment that did not move the report along. */
+  status: string | null;
+  createdAt: string;
+};
 type FeedbackItem = {
   id: string;
   kind: string;
@@ -746,6 +752,9 @@ type FeedbackItem = {
   submittedBy: string | null;
   page: string | null;
   status: string;
+  screenshot: string | null;
+  /** Every signed update since it was reported, oldest first. */
+  history: FeedbackEvent[];
   createdAt: string;
   updatedAt: string;
 };
@@ -760,6 +769,44 @@ const feedbackKinds = [
   ["idea", "Idea"],
   ["other", "Something else"],
 ] as const;
+const feedbackStageLabel = (status: string) => feedbackStages.find(([value]) => value === status)?.[1] ?? status;
+/** Where the sign-off name is kept, so nobody types it again on every update. */
+const FEEDBACK_AUTHOR_KEY = "reply-radar-feedback-author";
+
+/**
+ * Reads an image file as a data URL small enough to live in a text column.
+ *
+ * A screenshot off a modern display is several megabytes, and none of that resolution survives
+ * being looked at in a card, so it is redrawn at a sane width and re-encoded as JPEG. Doing it
+ * in the browser means the upload is already the size it will be stored at.
+ */
+const readScreenshot = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("That image could not be read."));
+    reader.onload = () => {
+      const source = String(reader.result);
+      const image = new Image();
+      image.onerror = () => reject(new Error("That image could not be read."));
+      image.onload = () => {
+        const scale = Math.min(1, 1600 / (image.width || 1));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        // No 2D context is not worth an error path: the original is already in hand, and the
+        // server's size cap is the thing that actually protects the table.
+        if (!context) {
+          resolve(source);
+          return;
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      image.src = source;
+    };
+    reader.readAsDataURL(file);
+  });
 
 function FeedbackView() {
   const [items, setItems] = useState<FeedbackItem[]>([]);
@@ -772,6 +819,17 @@ function FeedbackView() {
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
+  const [shot, setShot] = useState("");
+  const [expanded, setExpanded] = useState("");
+  /** Which report's update form is open. Only one at a time — these are written one by one. */
+  const [logOpen, setLogOpen] = useState("");
+  const [logComment, setLogComment] = useState("");
+  const [logStatus, setLogStatus] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [author, setAuthor] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem(FEEDBACK_AUTHOR_KEY) ?? "";
+  });
 
   const load = async () => {
     try {
@@ -799,11 +857,12 @@ function FeedbackView() {
         headers: { "content-type": "application/json" },
         // Only send a name when the reporter opted in, so the anonymous path never
         // depends on the server ignoring a value we shipped anyway.
-        body: JSON.stringify({ kind, message, submittedBy: signed ? name : "", page: window.location.pathname }),
+        body: JSON.stringify({ kind, message, submittedBy: signed ? name : "", page: window.location.pathname, screenshot: shot }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) throw new Error(payload.error || "Submitting failed.");
       setMessage("");
+      setShot("");
       setSent(true);
       window.setTimeout(() => setSent(false), 4000);
       await load();
@@ -814,12 +873,50 @@ function FeedbackView() {
     }
   };
 
-  const setStage = async (item: FeedbackItem, status: string) => {
-    // Optimistic, because the only thing a failed PATCH costs is a stale badge and
-    // the next load corrects it.
-    setItems((current) => current.map((row) => (row.id === item.id ? { ...row, status } : row)));
-    const response = await fetch("/api/feedback", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: item.id, status }) });
-    if (!response.ok) void load();
+  const pickShot = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      setShot(await readScreenshot(file));
+    } catch (shotError) {
+      setError(shotError instanceof Error ? shotError.message : "That image could not be read.");
+    }
+  };
+
+  const openLog = (item: FeedbackItem) => {
+    // The form opens on where the report already stands, so posting a comment without touching
+    // the buttons does not silently look like a status change.
+    setLogOpen(item.id);
+    setLogStatus(item.status);
+    setLogComment("");
+  };
+
+  /**
+   * Posts a signed update. Not optimistic: the whole value of the log is that what is on screen
+   * is what was recorded, so the row is replaced with what the server actually stored.
+   */
+  const postUpdate = async (item: FeedbackItem) => {
+    const moved = logStatus && logStatus !== item.status ? logStatus : "";
+    if (!author.trim() || posting || (!moved && !logComment.trim())) return;
+    setPosting(true);
+    try {
+      const response = await fetch("/api/feedback", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: item.id, status: moved, comment: logComment, author }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "The update could not be saved.");
+      window.localStorage.setItem(FEEDBACK_AUTHOR_KEY, author.trim());
+      if (payload.item) setItems((current) => current.map((row) => (row.id === item.id ? payload.item : row)));
+      else await load();
+      setLogOpen("");
+      setLogComment("");
+      setError("");
+    } catch (postError) {
+      setError(postError instanceof Error ? postError.message : "The update could not be saved.");
+    } finally {
+      setPosting(false);
+    }
   };
   const remove = async (item: FeedbackItem) => {
     setItems((current) => current.filter((row) => row.id !== item.id));
@@ -831,7 +928,7 @@ function FeedbackView() {
   return (
     <div className="feedback-view">
       <section className="admin-panel">
-        <div className="panel-heading"><div><h2>Send feedback</h2><p>Bugs, rough edges, ideas — anything. Your name is only attached if you add it.</p></div></div>
+        <div className="panel-heading"><div><h2>Send feedback</h2></div></div>
         <div className="feedback-form">
           <div className="feedback-kind">
             {feedbackKinds.map(([value, label]) => (
@@ -839,6 +936,20 @@ function FeedbackView() {
             ))}
           </div>
           <label className="field-label">WHAT HAPPENED<textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={6} placeholder="What were you doing, what did you expect, and what happened instead?" /></label>
+          <div className="feedback-attach">
+            {/* The file input is inside its own label, which is both the accessible name and the
+                thing that gets styled — a bare file input cannot be made to look like anything. */}
+            <label className="feedback-attach-button">
+              {shot ? "Replace screenshot" : "Attach a screenshot"}
+              <input type="file" accept="image/*" onChange={(event) => void pickShot(event.target.files?.[0])} />
+            </label>
+            {shot && (
+              <span className="feedback-attach-preview">
+                <img src={shot} alt="The screenshot attached to this report" />
+                <button type="button" onClick={() => setShot("")} aria-label="Remove the screenshot">×</button>
+              </span>
+            )}
+          </div>
           <div className="feedback-identity">
             <button type="button" className={`feedback-anon-toggle ${signed ? "" : "anonymous"}`} onClick={() => setSigned((value) => !value)}>
               {signed ? "Signing this" : "Staying anonymous"}
@@ -872,18 +983,71 @@ function FeedbackView() {
                 <button type="button" className="feedback-delete" aria-label="Delete this feedback" onClick={() => void remove(item)}>×</button>
               </header>
               <p>{item.message}</p>
+              {item.screenshot && (
+                // Clicking the shot gives it the full width of the card. A data URL cannot be
+                // opened in a tab, so growing in place is the only way to see the detail.
+                <button
+                  type="button"
+                  className={`feedback-shot ${expanded === item.id ? "is-expanded" : ""}`}
+                  onClick={() => setExpanded((current) => (current === item.id ? "" : item.id))}
+                  aria-label={expanded === item.id ? "Shrink the screenshot" : "Enlarge the screenshot"}
+                >
+                  <img src={item.screenshot} alt="The screenshot attached to this report" />
+                </button>
+              )}
+              {item.history.length > 0 && (
+                <ol className="feedback-log">
+                  {item.history.map((entry) => (
+                    <li key={entry.id}>
+                      <span className="feedback-log-head">
+                        <b>{entry.author}</b>
+                        {entry.status && <span className={`feedback-log-move stage-${entry.status}`}>{feedbackStageLabel(entry.status)}</span>}
+                        <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
+                      </span>
+                      {entry.comment && <p>{entry.comment}</p>}
+                    </li>
+                  ))}
+                </ol>
+              )}
               <footer>
-                {feedbackStages.map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={item.status === value ? "selected" : ""}
-                    onClick={() => void setStage(item, value)}
-                  >
-                    {label}
-                  </button>
-                ))}
+                <span className={`feedback-stage stage-${item.status}`}>{feedbackStageLabel(item.status)}</span>
+                <button
+                  type="button"
+                  className="feedback-update-toggle"
+                  onClick={() => (logOpen === item.id ? setLogOpen("") : openLog(item))}
+                >
+                  {logOpen === item.id ? "Cancel" : "Add update"}
+                </button>
               </footer>
+              {logOpen === item.id && (
+                <div className="feedback-update">
+                  <div className="feedback-kind">
+                    {feedbackStages.map(([value, label]) => (
+                      <button key={value} type="button" className={logStatus === value ? "selected" : ""} onClick={() => setLogStatus(value)}>{label}</button>
+                    ))}
+                  </div>
+                  <textarea
+                    value={logComment}
+                    onChange={(event) => setLogComment(event.target.value)}
+                    rows={3}
+                    placeholder="What you found, what changed, what is left to do."
+                    aria-label="Update comment"
+                  />
+                  <div className="feedback-identity">
+                    <input value={author} onChange={(event) => setAuthor(event.target.value)} placeholder="Signed by" aria-label="Sign this update with your name" />
+                    <button
+                      type="button"
+                      className="primary-button"
+                      // A name is required, and so is something to record: an update that neither
+                      // moves the status nor says anything would be an empty line in the history.
+                      disabled={posting || !author.trim() || (!logComment.trim() && logStatus === item.status)}
+                      onClick={() => void postUpdate(item)}
+                    >
+                      {posting ? "Posting…" : "Post update"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </article>
           ))}
         </div>

@@ -1868,6 +1868,39 @@ body.light-mode .prompt-dialog-backdrop {
   max-width: 62ch;
 }
 
+/* The logo sits beside the name rather than above it, so the two read as one heading and the
+   client is confirmed at a glance before anything is written for them. */
+.hub-lede-client {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hub-lede-client h1 {
+  margin: 0;
+}
+
+.hub-lede-logo {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.hub-lede-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .hub-group-label {
   display: flex;
   align-items: baseline;
@@ -2235,6 +2268,24 @@ body.light-mode .prompt-dialog-backdrop {
 .hub-saved-row time {
   color: var(--report-ink-soft);
   font-variant-numeric: tabular-nums;
+}
+
+/* Spans the list so it reads as the next row of the archive rather than a control floating
+   underneath it. */
+.hub-saved-more {
+  padding: 11px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--report-ink-soft);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hub-saved-more:hover {
+  background: var(--report-inset);
+  color: var(--report-ink);
 }
 
 .hub-empty {

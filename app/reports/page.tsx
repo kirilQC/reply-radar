@@ -222,6 +222,8 @@ const applySectionChoices = (layout: SectionId[][], includeBestReplies: boolean)
     ? layout
     : layout.map((page) => page.filter((id) => id !== "best-replies")).filter((page) => page.length);
 
+/** How many past reports are listed before the "view more" row. */
+const SAVED_PAGE_SIZE = 5;
 const PERIOD_OPTIONS: Period[] = ["daily", "weekly", "monthly", "quarterly", "all-time", "custom"];
 const periodLabel = (value: Period) => (value === "all-time" ? "All time" : value[0].toUpperCase() + value.slice(1));
 
@@ -229,6 +231,13 @@ const formatDate = (value: string, timeZone = "America/New_York") =>
   new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone }).format(new Date(value));
 const formatShort = (value: string, timeZone = "America/New_York") =>
   new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone }).format(new Date(value));
+/**
+ * The numeric stamp used where a date is a reference point rather than prose — "8/13".
+ * A template card is scanned, not read, and a spelled-out month there pushed the rest of the
+ * card's meta line out of view.
+ */
+const formatRunDate = (value: string, timeZone = "America/New_York") =>
+  new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric", timeZone }).format(new Date(value));
 const num = (value: number) => Math.round(value).toLocaleString();
 const pct = (value: number) => `${value.toFixed(1)}%`;
 
@@ -249,6 +258,11 @@ export default function ReportsPage() {
 
   // Authoring a template: a name and a prompt, which is all a template really is.
   const [composerOpen, setComposerOpen] = useState(false);
+  /**
+   * How much of the archive is on screen. A client with a year of history would otherwise bury
+   * the templates above it, and the recent reports are the ones anyone reopens.
+   */
+  const [savedShown, setSavedShown] = useState(SAVED_PAGE_SIZE);
   const [draftName, setDraftName] = useState("");
   const [draftSummary, setDraftSummary] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
@@ -535,6 +549,9 @@ export default function ReportsPage() {
     setComposerOpen(false);
     setTemplateError("");
     clearCampaigns();
+    // Each client's archive starts from the top, rather than inheriting how far somebody
+    // had scrolled through the previous one.
+    setSavedShown(SAVED_PAGE_SIZE);
     setView("hub");
   };
 
@@ -1070,7 +1087,20 @@ export default function ReportsPage() {
             <button type="button" className="config-back" onClick={backToClients}>
               ← All clients
             </button>
-            <div className="hub-lede">
+            <div className="hub-lede hub-lede-client">
+              {/* The logo is the fastest confirmation that you are about to write to the right
+                  client, which matters more here than anywhere else on the site. */}
+              {activeWorkspace && (
+                <i
+                  className="hub-lede-logo"
+                  style={activeWorkspace.logo_url ? undefined : { background: activeWorkspace.accent_color || "var(--report-brand)" }}
+                  aria-hidden="true"
+                >
+                  {activeWorkspace.logo_url
+                    ? <img src={activeWorkspace.logo_url} alt="" />
+                    : activeWorkspace.name.slice(0, 1).toUpperCase()}
+                </i>
+              )}
               <h1>{clientLabel}</h1>
             </div>
 
@@ -1184,10 +1214,11 @@ export default function ReportsPage() {
                     {/* The card is a container rather than a button so the delete control can sit beside the
                         open control instead of nested inside it, which no browser would accept. */}
                     <button type="button" className="hub-card-open" onClick={() => openTemplate(option)}>
+                      {/* The card is a name and a status line. What the template is for is a
+                          paragraph, and it belongs on the screen where you are about to run it. */}
                       <h3>{option.name}</h3>
-                      <p>{option.summary || "No description."}</p>
                       <div className="hub-card-meta">
-                        <b>{lastRun ? `Last run ${formatDate(lastRun)}` : "Never run"}</b>
+                        <b>{lastRun ? `Last run ${formatRunDate(lastRun)}` : "Never run"}</b>
                         <span>·</span>
                         <span>{periodLabel(option.defaultPeriod)}</span>
                         <span>·</span>
@@ -1228,7 +1259,7 @@ export default function ReportsPage() {
                   <div className="hub-card-meta">
                     <b>
                       {lastRunByTemplate.has(BUILD_YOUR_OWN_ID)
-                        ? `Last run ${formatDate(lastRunByTemplate.get(BUILD_YOUR_OWN_ID) as string)}`
+                        ? `Last run ${formatRunDate(lastRunByTemplate.get(BUILD_YOUR_OWN_ID) as string)}`
                         : "Never run"}
                     </b>
                     <span>·</span>
@@ -1246,7 +1277,7 @@ export default function ReportsPage() {
             </div>
             {clientReports.length ? (
               <div className="hub-saved-list">
-                {clientReports.map((row) => (
+                {clientReports.slice(0, savedShown).map((row) => (
                   // The row that opens a report and the button that deletes it have to be siblings:
                   // one cannot be nested inside the other, so the entry is the wrapper.
                   <div key={row.id} className="hub-saved-entry">
@@ -1271,6 +1302,15 @@ export default function ReportsPage() {
                     </button>
                   </div>
                 ))}
+                {clientReports.length > savedShown && (
+                  <button
+                    type="button"
+                    className="hub-saved-more"
+                    onClick={() => setSavedShown((shown) => shown + SAVED_PAGE_SIZE)}
+                  >
+                    View {Math.min(SAVED_PAGE_SIZE, clientReports.length - savedShown)} more
+                  </button>
+                )}
               </div>
             ) : (
               <div className="hub-empty">
@@ -1295,10 +1335,12 @@ export default function ReportsPage() {
             </button>
             <div className="config-heading">
               <h2>{template ? template.name : "Build your own report"}</h2>
-              {/* Only the builder gets a line of explanation, because only the builder has a rule that is
-                  not obvious from the controls. A template's screen explaining itself was three lines of
-                  reassurance above the thing it was describing. */}
-              {!template && (
+              {/* One line of explanation, whichever screen this is: the template's own description, or
+                  the builder's page rule. This is the point at which you are deciding to run the thing,
+                  so it is where knowing what it produces is worth the space. */}
+              {template ? (
+                template.summary ? <p>{template.summary}</p> : null
+              ) : (
                 <p>
                   Choose the sections you want. The report is capped at three pages, so heavier sections
                   cost more of the budget.

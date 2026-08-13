@@ -417,7 +417,7 @@ available. The one exception is when it was not: then, and only then, return a s
 export const BUILT_IN_TEMPLATES: ReportTemplate[] = [
   {
     id: "weekly-recap",
-    name: "Weekly client recap",
+    name: "Tarsi's EOW Report Tempalte",
     summary: "The Friday EOW email — recap, active campaigns, priorities. Modelled on the recaps that land.",
     defaultPeriod: "weekly",
     // This one is a mail, not a deck. The sections still exist behind it for anyone who wants the PDF.

@@ -188,8 +188,23 @@ create table if not exists rr_feedback (
   submitted_by text,
   page text,
   status text not null default 'new' check (status in ('new', 'viewed', 'working', 'fixed')),
+  -- The attached screenshot, inline as a data URL. The browser downscales before it uploads, so
+  -- this is a few hundred kilobytes rather than a raw capture, and no storage bucket is needed.
+  screenshot text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+-- The history of a report: every status move and every comment, each signed. `status` is null on
+-- an update that commented without moving the report along. Deleting the report takes its log
+-- with it, since a log about nothing is not a record of anything.
+create table if not exists rr_feedback_events (
+  id uuid primary key default gen_random_uuid(),
+  feedback_id uuid not null references rr_feedback(id) on delete cascade,
+  author text not null,
+  comment text,
+  status text check (status in ('new', 'viewed', 'working', 'fixed')),
+  created_at timestamptz not null default now()
 );
 
 create index if not exists rr_workspaces_created_idx on rr_workspaces(created_at);
@@ -211,6 +226,7 @@ create index if not exists rr_audit_log_created_idx on rr_audit_log(created_at d
 create index if not exists rr_reports_workspace_generated_idx on rr_reports(workspace_id, generated_at desc);
 create index if not exists rr_reports_generated_idx on rr_reports(generated_at desc);
 create index if not exists rr_feedback_status_created_idx on rr_feedback(status, created_at desc);
+create index if not exists rr_feedback_events_feedback_idx on rr_feedback_events(feedback_id, created_at);
 
 create or replace function rr_set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at = now(); return new; end; $$;
 drop trigger if exists rr_workspaces_updated_at on rr_workspaces;
@@ -243,6 +259,7 @@ alter table rr_sync_runs enable row level security;
 alter table rr_audit_log enable row level security;
 alter table rr_reports enable row level security;
 alter table rr_feedback enable row level security;
+alter table rr_feedback_events enable row level security;
 
 -- A readable flattening of rr_leads for exports and ad-hoc queries: the client resolved to a name
 -- rather than a UUID, and the timestamps that generated columns cannot hold.
