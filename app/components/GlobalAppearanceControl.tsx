@@ -70,7 +70,7 @@ export default function GlobalAppearanceControl() {
 
   return (
     <>
-      <button className="icon-button theme-toggle" aria-label="Customize appearance" title="Customize appearance" onClick={() => setOpen((value) => !value)}>◐</button>
+      <button className="icon-button theme-toggle" data-popover-toggle aria-label="Customize appearance" title="Customize appearance" onClick={() => setOpen((value) => !value)}>◐</button>
       {open && <AppearancePanel prefs={appearance} onChange={setAppearance} onSave={save} />}
     </>
   );

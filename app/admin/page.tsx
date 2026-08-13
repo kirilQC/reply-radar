@@ -4,7 +4,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
+import Crumb from "../components/Crumb";
 import { defaultFollowUpPrompt, defaultIcpPrompt, FOLLOW_UP_TEMPLATES, ICP_TEMPLATES, MIN_CLIENT_BRIEF_LENGTH, type ScoringTemplate, templateLabel } from "../lib/scoring-templates";
+
+/** What the breadcrumb calls each configuration section. */
+const adminSectionLabels: Record<string, string> = {
+  workspaces: "Client directory",
+  "ai-hub": "AI",
+  ai: "AI context",
+  scoring: "Scoring engine",
+  heartbeat: "Heartbeat",
+  feedback: "Feedback",
+  audit: "Audit log",
+  theme: "Theme studio",
+};
 
 type ClientWorkspace = {
   id?: string;
@@ -215,9 +228,19 @@ export default function AdminPage() {
       <section className="main-area">
         <main className={`admin-shell admin-theme-${themePreset}`}>
           <header className="admin-topbar">
-            <div className="admin-breadcrumb admin-configuration-title">
-              Configuration{active === "workspaces" && workspaceOpen ? <><span>/</span> {client.name || "New workspace"}</> : active !== "workspaces" ? <><span>/</span> {active === "ai-hub" ? "AI" : active === "ai" ? "AI context" : active === "scoring" ? "Scoring engine" : active === "heartbeat" ? "Heartbeat" : active === "feedback" ? "Feedback" : active === "audit" ? "Audit log" : "Theme studio"}</> : null}
-            </div>
+            <Crumb
+              trail={[
+                { label: "Configuration", href: "/admin" },
+                ...(active === "workspaces"
+                  ? workspaceOpen
+                    ? [
+                        { label: "Client directory", href: "/admin", onClick: (event: React.MouseEvent) => { event.preventDefault(); setWorkspaceOpen(false); } },
+                        { label: client.name || "New workspace" },
+                      ]
+                    : [{ label: "Client directory" }]
+                  : [{ label: adminSectionLabels[active] ?? "Theme studio" }]),
+              ]}
+            />
             <div className="admin-top-actions">
               <GlobalAppearanceControl />
             </div>

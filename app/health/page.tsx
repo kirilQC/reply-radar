@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
+import Crumb from "../components/Crumb";
 
 type Service = {
   id: string;
@@ -147,10 +148,7 @@ export default function HealthPage() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <div className="crumb">
-            <span>Reply Radar</span>
-            <strong>› System health</strong>
-          </div>
+          <Crumb trail={[{ label: "System health" }]} />
           <div className="top-actions">
             <GlobalAppearanceControl />
           </div>

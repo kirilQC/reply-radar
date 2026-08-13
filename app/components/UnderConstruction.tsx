@@ -2,6 +2,7 @@
 
 import AppSidebar from "./AppSidebar";
 import GlobalAppearanceControl from "./GlobalAppearanceControl";
+import Crumb from "./Crumb";
 
 /**
  * A page that exists so its nav tab exists.
@@ -17,10 +18,7 @@ export default function UnderConstruction({ title, purpose }: { title: string; p
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <div className="crumb">
-            <span>Reply Radar</span>
-            <strong>› {title}</strong>
-          </div>
+          <Crumb trail={[{ label: title }]} />
           <div className="top-actions">
             <GlobalAppearanceControl />
           </div>

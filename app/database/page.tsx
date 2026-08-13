@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
+import Crumb from "../components/Crumb";
 
 type Workspace = {
   id: string;
@@ -524,10 +525,7 @@ export default function DatabasePage() {
       <AppSidebar />
       <section className="main-area database-main">
         <header className="topbar">
-          <div className="crumb">
-            <span>Reply Radar</span>
-            <strong>› Lead database</strong>
-          </div>
+          <Crumb trail={[{ label: "Lead database" }]} />
           <div className="top-actions">
             <GlobalAppearanceControl />
           </div>

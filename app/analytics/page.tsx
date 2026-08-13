@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
+import Crumb from "../components/Crumb";
 
 type Performance = { name: string; replies: number; messages?: number; messagesSent?: number; conversations?: number; clients?: string[] };
 type CampaignMetric = { workspaceId: string; client: string; campaignId: string; name: string; connectionsSent: number; connectionsAccepted: number; replies: number; messagesStarted: number; acceptanceRate: number; replyRate: number; positiveReplies: number; positiveReplyRate: number; launchedAt: string | null; status: string | null };
@@ -152,7 +153,7 @@ export default function AnalyticsPage() {
     const rootHost = host.startsWith(`${clientDetail.slug}.`) ? host.slice(clientDetail.slug.length + 1) : host;
     const shareUrl = `${clientDetail.slug}.${rootHost}`;
     return <div className="app-shell"><AppSidebar/><section className="main-area">
-      <header className="topbar"><div className="crumb"><span>Reply Radar</span><span> › <a className="crumb-link" href="/analytics" onClick={(event) => { event.preventDefault(); openClient(null); }}>Analytics</a></span><strong> › {clientDetail.name}</strong></div><div className="top-actions"><GlobalAppearanceControl /></div></header>
+      <header className="topbar"><Crumb trail={[{ label: "Analytics", href: "/analytics", onClick: (event) => { event.preventDefault(); openClient(null); } }, { label: clientDetail.name }]} /><div className="top-actions"><GlobalAppearanceControl /></div></header>
       <main className="analytics-dashboard">
         <header className="analytics-hero client-hero">
           <div className="client-hero-identity">
@@ -250,7 +251,7 @@ export default function AnalyticsPage() {
   const trend = data.trend ?? [];
   const max = Math.max(...trend, 1);
   const trendLabels = ["6d ago", "5d ago", "4d ago", "3d ago", "2d ago", "Yesterday", "Today"];
-  return <div className="app-shell"><AppSidebar/><section className="main-area"><header className="topbar"><div className="crumb"><span>Reply Radar</span><strong>› Analytics</strong></div><div className="top-actions"><GlobalAppearanceControl /></div></header><main className="analytics-dashboard"><header className="analytics-hero"><div><h1>Analytics</h1><p>Live performance across every stored HeyReach conversation.</p></div><div className="analytics-live"><i /> Live data{updatedAt ? ` · updated ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</div></header>
+  return <div className="app-shell"><AppSidebar/><section className="main-area"><header className="topbar"><Crumb trail={[{ label: "Analytics" }]} /><div className="top-actions"><GlobalAppearanceControl /></div></header><main className="analytics-dashboard"><header className="analytics-hero"><div><h1>Analytics</h1><p>Live performance across every stored HeyReach conversation.</p></div><div className="analytics-live"><i /> Live data{updatedAt ? ` · updated ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</div></header>
     <section className="analytics-kpis"><Kpi label="All-time replies" value={(data.totalReplies ?? 0).toLocaleString()}/><Kpi label="Average reply rate" value={`${(data.campaignAverages?.replyRate ?? 0).toFixed(1)}%`}/><Kpi label="Average acceptance rate" value={`${(data.campaignAverages?.acceptanceRate ?? 0).toFixed(1)}%`}/><Kpi label="Average positive reply rate" value={`${(data.campaignAverages?.positiveReplyRate ?? 0).toFixed(1)}%`}/><Kpi label="Average response time" value={responseTime(data.averageResponseMinutes)}/></section>
     <section className="analytics-primary"><article className="analytics-card analytics-trend"><CardTitle title="Reply momentum" subtitle="Replies over the last seven days"/><div className="analytics-bars">{trend.map((value, index) => <div key={index}><strong>{value}</strong><i style={{ height: `${Math.max(4, (value / max) * 100)}%` }}/><small>{trendLabels[index]}</small></div>)}</div></article><article className="analytics-card"><CardTitle title="Queue mix" subtitle="Current conversation priorities"/><div className="queue-mix-list"><Mix label="Hot" value={data.queueMix?.hot ?? 0} tone="hot"/><Mix label="Warm" value={data.queueMix?.warm ?? 0} tone="warm"/><Mix label="Nurture" value={data.queueMix?.nurture ?? 0} tone="nurture"/></div></article></section>
 

@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardHome from "./components/DashboardHome";
 import AppSidebar from "./components/AppSidebar";
+import Crumb from "./components/Crumb";
+import { usePopoverDismiss } from "./lib/use-popover-dismiss";
 import AppearancePanel, {
   type AppearancePrefs,
 } from "./components/AppearancePanel";
@@ -75,6 +77,8 @@ type LayoutPrefs = {
   graphs: GraphConfig[];
   paneSplit: number;
   starredLeadIds: string[];
+  /** Which generation of the stock graphs this layout was last written against. */
+  defaultsRevision?: number;
 };
 type GraphKind = "line" | "area" | "bars" | "hbars" | "donut";
 /** A graph is a dimension (x) crossed with a measure (y) — both are user-selectable. */
@@ -96,6 +100,12 @@ type AnalyticsSnapshot = {
   campaignAverages?: { replyRate: number; acceptanceRate: number; positiveReplyRate: number };
 };
 type QuickTemplate = { id: string; name: string; value: string };
+/**
+ * Bumped whenever the stock graphs change and every inbox is meant to get them, including
+ * ones somebody had already customised. A saved layout carries the revision it was written
+ * against, so the reset below happens exactly once per inbox and later edits stand.
+ */
+const layoutDefaultsRevision = 2;
 const defaultLayout: LayoutPrefs = {
   order: ["metrics", "queue", "analytics"],
   showMetrics: true,
@@ -103,14 +113,19 @@ const defaultLayout: LayoutPrefs = {
   showDetail: true,
   compact: false,
   metrics: ["totalReplies", "needsReply", "acceptanceRate", "avgRepliesCampaign", "positiveRate"],
-  // Every inbox opens on these two until someone adds their own.
+  // Every inbox opens on these two until someone changes them.
   graphs: [
-    { id: "replies-by-day", title: "Replies per day", x: "day", y: "replies", kind: "area" },
-    { id: "sentiment-mix", title: "Sentiment mix", x: "sentiment", y: "conversations", kind: "donut" },
+    { id: "replies-by-day", title: "Reply volume", x: "day", y: "replies", kind: "area" },
+    { id: "replies-by-campaign", title: "Replies by campaign", x: "campaign", y: "replies", kind: "bars" },
   ],
   paneSplit: 62,
   starredLeadIds: [],
+  defaultsRevision: layoutDefaultsRevision,
 };
+const applyGraphDefaults = (layout: LayoutPrefs): LayoutPrefs =>
+  layout.defaultsRevision === layoutDefaultsRevision
+    ? layout
+    : { ...layout, graphs: defaultLayout.graphs };
 const clientCampaignMetricIds = [
   "totalReplies",
   "acceptanceRate",
@@ -363,6 +378,10 @@ export function InboxPage() {
   const [messagingDocUrl, setMessagingDocUrl] = useState("");
   const [quickTemplates, setQuickTemplates] = useState<QuickTemplate[]>([]);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  // Templates save themselves as they are added, so clicking away just closes the notepad.
+  const notepadRef = usePopoverDismiss<HTMLDivElement>(() =>
+    setTemplatesOpen(false),
+  );
   const [templateDraft, setTemplateDraft] = useState({ name: "", value: "" });
   const [aiDraft, setAiDraft] = useState("");
   // An already-answered conversation hides the composer, because the usual next move is to wait.
@@ -620,7 +639,7 @@ export function InboxPage() {
             ["metrics", "analytics", "queue"].includes(item),
           ) as LayoutPrefs["order"];
           if (clientParam) nextLayout.metrics = clientCampaignMetricIds;
-          setLayoutPrefs(nextLayout);
+          setLayoutPrefs(applyGraphDefaults(nextLayout));
         }
         if (parsed?.appearance) {
           const nextAppearance = { ...defaultAppearance, ...parsed.appearance };
@@ -645,17 +664,23 @@ export function InboxPage() {
       .then((payload) => {
         if (cancelled || !payload?.preferences) return;
         if (payload.preferences.layout)
-          setLayoutPrefs((current) => ({
-            ...current,
-            ...payload.preferences.layout,
-            ...(clientParam ? { metrics: clientCampaignMetricIds } : {}),
-            starredLeadIds: Array.isArray(
-              payload.preferences.layout.starredLeadIds,
-            )
-              ? payload.preferences.layout.starredLeadIds.map(String)
-              : current.starredLeadIds,
-            graphs: normalizeGraphs(payload.preferences.layout.graphs),
-          }));
+          setLayoutPrefs((current) =>
+            applyGraphDefaults({
+              ...current,
+              ...payload.preferences.layout,
+              ...(clientParam ? { metrics: clientCampaignMetricIds } : {}),
+              starredLeadIds: Array.isArray(
+                payload.preferences.layout.starredLeadIds,
+              )
+                ? payload.preferences.layout.starredLeadIds.map(String)
+                : current.starredLeadIds,
+              graphs: normalizeGraphs(payload.preferences.layout.graphs),
+              // Read off the stored row rather than inherited from `current`, which the
+              // local-cache pass above may already have stamped.
+              defaultsRevision:
+                Number(payload.preferences.layout.defaultsRevision) || 0,
+            }),
+          );
         if (payload.preferences.appearance)
           setAppearance((current) => ({
             ...current,
@@ -1416,13 +1441,12 @@ export function InboxPage() {
           <button className="mobile-menu" onClick={() => setSidebarOpen(true)}>
             ☰
           </button>
-          <div className="crumb">
-            <span>Reply Radar</span>
-            <Icon name="chevron" />
-            <strong>
-              {profileName ?? (clientParam ? clientName : "General inbox")}
-            </strong>
-          </div>
+          <Crumb
+            trail={[
+              { label: "Inbox", href: "/inbox" },
+              { label: profileName ?? (clientParam ? clientName : "General inbox") },
+            ]}
+          />
           <div className="top-actions">
             {messagingDocUrl && (
               <a className="icon-button messaging-doc-shortcut" href={messagingDocUrl} target="_blank" rel="noreferrer" aria-label="Open client messaging document" title="Open client messaging document">▤</a>
@@ -1430,6 +1454,7 @@ export function InboxPage() {
             <div className="notepad-dropdown-wrap">
               <button
                 className="icon-button notepad-toggle"
+                data-popover-toggle
                 aria-label="Quick templates notepad"
                 title="Quick templates notepad"
                 onClick={() => setTemplatesOpen((open) => !open)}
@@ -1437,7 +1462,7 @@ export function InboxPage() {
                 ≡
               </button>
               {templatesOpen && (
-                <div className="notepad-dropdown">
+                <div className="notepad-dropdown" ref={notepadRef}>
                   <div className="notepad-header">
                     <strong>Quick Templates</strong>
                     <button type="button" onClick={() => setTemplatesOpen(false)}>×</button>
@@ -1474,6 +1499,7 @@ export function InboxPage() {
             )}
             <button
               className="icon-button layout-button"
+              data-popover-toggle
               aria-label="Customize inbox layout"
               title="Customize inbox layout"
               onClick={() => {
@@ -1485,6 +1511,7 @@ export function InboxPage() {
             </button>
             <button
               className="icon-button theme-toggle"
+              data-popover-toggle
               aria-label="Customize appearance"
               title="Customize appearance"
               onClick={() => {
@@ -1661,9 +1688,17 @@ export function InboxPage() {
                 filterLabel={analyticsRangeLabel}
                 timeZone={appearance.timeZone}
                 loading={inboxLoading}
-                onChange={(graphs) =>
-                  setLayoutPrefs({ ...layoutPrefs, graphs })
-                }
+                onChange={(graphs) => {
+                  // Touching the graphs opts this inbox out of the defaults reset, so it has
+                  // to be written now — otherwise the next load would undo the edit.
+                  const next = {
+                    ...layoutPrefs,
+                    graphs,
+                    defaultsRevision: layoutDefaultsRevision,
+                  };
+                  setLayoutPrefs(next);
+                  savePreferences(next, appearance);
+                }}
               />
             </div>
             <div
@@ -2662,33 +2697,18 @@ function InboxAnalytics({
       )}
       <div className="inbox-graph-grid">
         {graphs.map((graph, index) => {
-          const dimension = graphDimensions.find((item) => item.id === graph.x);
           const measure = graphMeasures.find((item) => item.id === graph.y);
           const points = buildSeries(leads, graph.x, graph.y, timeZone);
-          const total = points.reduce((sum, point) => sum + point.value, 0);
-          const headline =
-            measure?.format === "count"
-              ? formatMeasure(total, "count")
-              : points.length
-                ? formatMeasure(total / points.length, measure?.format ?? "count")
-                : "—";
           return (
             <article
               className={`inbox-graph-card kind-${graph.kind}`}
               key={graph.id}
             >
               <div className="inbox-graph-card-heading">
-                <div>
-                  <span>
-                    {measure?.label ?? graph.y} by{" "}
-                    {(dimension?.label ?? graph.x).toLowerCase()}
-                  </span>
-                  <strong>{graph.title}</strong>
-                </div>
+                {/* The card carries the title its owner gave it and nothing else — the axes
+                    are readable off the chart, and the running total was never asked for. */}
+                <strong>{graph.title}</strong>
                 <div className="inbox-graph-card-actions">
-                  <b title={measure?.format === "count" ? "Total" : "Average"}>
-                    {headline}
-                  </b>
                   <button
                     aria-label="Move left"
                     disabled={index === 0}
@@ -2892,12 +2912,16 @@ function GraphVisual({
     );
   }
 
+  // Column charts label every bar, because a bar with no name under it reads as a gap in the
+  // data. Once there are more than a handful the names are tilted instead of thinned out,
+  // which costs a little height and buys room for a legible label per bar.
+  const tilted = kind === "bars" && points.length > 5;
   const width = 460;
-  const height = 176;
+  const height = tilted ? 206 : 176;
   const padLeft = 40;
   const padRight = 10;
   const padTop = 12;
-  const padBottom = 28;
+  const padBottom = tilted ? 58 : 28;
   const plotWidth = width - padLeft - padRight;
   const plotHeight = height - padTop - padBottom;
   const max = niceMax(Math.max(...points.map((point) => point.value)));
@@ -2906,8 +2930,9 @@ function GraphVisual({
     value: max * ratio,
     y: padTop + plotHeight * (1 - ratio),
   }));
-  // Only label every nth category when the axis would otherwise collide.
-  const labelStep = Math.ceil(points.length / 8);
+  // Only label every nth category when the axis would otherwise collide. Columns are exempt:
+  // they carry one label each, tilted if need be.
+  const labelStep = kind === "bars" ? 1 : Math.ceil(points.length / 8);
 
   if (kind === "bars") {
     const slot = plotWidth / points.length;
@@ -2947,17 +2972,28 @@ function GraphVisual({
               >
                 <title>{`${point.label}: ${formatMeasure(point.value, format)}`}</title>
               </rect>
-              {index % labelStep === 0 && (
-                <text
-                  className="chart-axis chart-axis-x"
-                  x={padLeft + slot * index + slot / 2}
-                  y={height - 9}
-                >
-                  {point.label.length > 10
-                    ? `${point.label.slice(0, 9)}…`
-                    : point.label}
-                </text>
-              )}
+              {index % labelStep === 0 &&
+                (() => {
+                  const anchorX = padLeft + slot * index + slot / 2;
+                  const anchorY = height - padBottom + (tilted ? 14 : 19);
+                  const limit = tilted ? 16 : 10;
+                  return (
+                    <text
+                      className={`chart-axis chart-axis-x ${tilted ? "is-tilted" : ""}`}
+                      x={anchorX}
+                      y={anchorY}
+                      transform={
+                        tilted
+                          ? `rotate(-38 ${anchorX} ${anchorY})`
+                          : undefined
+                      }
+                    >
+                      {point.label.length > limit
+                        ? `${point.label.slice(0, limit - 1)}…`
+                        : point.label}
+                    </text>
+                  );
+                })()}
             </g>
           );
         })}
@@ -3064,8 +3100,10 @@ function LayoutPanel({
     }
     setDraggedMetric(null);
   };
+  // Clicking away commits, the same as the Save button below.
+  const popoverRef = usePopoverDismiss<HTMLDivElement>(onSave);
   return (
-    <div className="customize-popover layout-popover">
+    <div className="customize-popover layout-popover" ref={popoverRef}>
       <div className="customize-popover-heading">
         <div>
           <strong>Inbox layout</strong>

@@ -1,5 +1,7 @@
 "use client";
 
+import { usePopoverDismiss } from "../lib/use-popover-dismiss";
+
 export type AppearancePrefs = {
   mode: "midnight" | "light";
   zoom: number;
@@ -18,8 +20,11 @@ export default function AppearancePanel({
   onChange: (prefs: AppearancePrefs) => void;
   onSave: () => void;
 }) {
+  // Clicking away from a settings panel is how people mean to commit it, so dismissal and
+  // save are the same action here.
+  const ref = usePopoverDismiss<HTMLDivElement>(onSave);
   return (
-    <div className="customize-popover appearance-popover">
+    <div className="customize-popover appearance-popover" ref={ref}>
       <div className="customize-popover-heading">
         <div><strong>Appearance</strong><small>Saved to this profile and device.</small></div>
         <span>◐</span>

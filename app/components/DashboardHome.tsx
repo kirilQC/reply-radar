@@ -2,6 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import AppSidebar from "./AppSidebar";
+import Crumb from "./Crumb";
 import AppearancePanel, { type AppearancePrefs } from "./AppearancePanel";
 import { useEffect, useState } from "react";
 import {
@@ -136,9 +137,12 @@ export default function DashboardHome() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <a className="crumb dashboard-brand" href="https://www.qcgrowth.com/" target="_blank" rel="noreferrer">QC Growth</a>
+          <Crumb trail={[{ label: "Dashboard" }]} />
+          {/* The wordmark is centred over the bar rather than sitting in the trail, so the
+              breadcrumb reads the same here as on every other page. */}
+          <a className="dashboard-brand" href="https://www.qcgrowth.com/" target="_blank" rel="noreferrer">QC Growth</a>
           <div className="top-actions">
-            <button className="icon-button theme-toggle" aria-label="Customize appearance" title="Customize appearance" onClick={() => setAppearanceOpen((open) => !open)}>◐</button>
+            <button className="icon-button theme-toggle" data-popover-toggle aria-label="Customize appearance" title="Customize appearance" onClick={() => setAppearanceOpen((open) => !open)}>◐</button>
             {appearanceOpen && <AppearancePanel prefs={appearance} onChange={setAppearance} onSave={saveAppearance} />}
           </div>
         </header>

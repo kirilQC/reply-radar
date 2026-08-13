@@ -13,24 +13,28 @@
   gap: 18px;
   margin-bottom: 15px;
 }
+/* Heading and range sit on one line, which lets the heading carry more weight without the
+   section growing a second row. */
 .inbox-analytics-heading > div:first-child {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 .inbox-analytics-heading h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 19px;
+  letter-spacing: -0.01em;
 }
 /* Quietly states which range the charts cover — it follows the queue filter. */
 .inbox-analytics-heading .inbox-analytics-range {
-  align-self: start;
-  padding: 3px 8px;
+  flex: 0 0 auto;
+  padding: 3px 9px;
   border: 1px solid var(--border-soft);
   border-radius: 20px;
   background: var(--panel-2);
   color: var(--muted);
-  font-size: 9px;
+  font-size: 9.5px;
   font-weight: 650;
   letter-spacing: 0.02em;
 }
@@ -164,34 +168,19 @@
   gap: 10px;
   margin-bottom: 10px;
 }
-.inbox-graph-card-heading > div:first-child {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.inbox-graph-card-heading span {
-  color: var(--muted-2);
-  font-size: 8px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
 .inbox-graph-card-heading strong {
-  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
   font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .inbox-graph-card-actions {
   display: flex;
   align-items: center;
   gap: 2px;
   flex: 0 0 auto;
-}
-.inbox-graph-card-actions b {
-  margin-right: 5px;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 750;
-  font-variant-numeric: tabular-nums;
 }
 .inbox-graph-card-actions button {
   display: grid;
@@ -272,6 +261,10 @@
 }
 .inbox-chart .chart-axis-x {
   text-anchor: middle;
+}
+/* Tilted column labels hang from their right edge so each one points at its own bar. */
+.inbox-chart .chart-axis-x.is-tilted {
+  text-anchor: end;
 }
 .inbox-chart .chart-area {
   fill: color-mix(in srgb, var(--accent) 20%, transparent);

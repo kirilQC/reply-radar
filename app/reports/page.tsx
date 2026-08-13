@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
+import Crumb from "../components/Crumb";
 import {
   BUILT_IN_TEMPLATES,
   CAMPAIGN_METRICS,
@@ -1016,10 +1017,7 @@ export default function ReportsPage() {
       <AppSidebar />
       <section className="main-area reports-main">
         <header className="topbar print-hide">
-          <div className="crumb">
-            <span>Reply Radar</span>
-            <strong>› Reports</strong>
-          </div>
+          <Crumb trail={[{ label: "Reports" }]} />
           <div className="top-actions">
             <GlobalAppearanceControl />
           </div>

@@ -57,11 +57,18 @@ export default function AppSidebar() {
     } catch { return []; }
   });
   const [clientsLoading, setClientsLoading] = useState(true);
-  const [collapsed, setCollapsed] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.localStorage.getItem("reply-radar-sidebar") === "collapsed",
-  );
+  // The dashboard is where you go to pick something, so the nav is open; everywhere else you
+  // are already working in the page and the nav is out of the way. Each context remembers its
+  // own toggle, so choosing otherwise on a working page does not reopen it on every page.
+  const home = pathname === "/";
+  const collapseKey = home
+    ? "reply-radar-sidebar:home"
+    : "reply-radar-sidebar:page";
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return !home;
+    const stored = window.localStorage.getItem(collapseKey);
+    return stored ? stored === "collapsed" : !home;
+  });
   useEffect(() => {
     // URL selection is client-only state for static navigation.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -95,11 +102,21 @@ export default function AppSidebar() {
     return () => { window.removeEventListener("storage", onStorage); window.removeEventListener("reply-radar-workspaces-changed", onStorage); };
   }, []);
   useEffect(() => {
+    // Navigating between pages does not remount this, so the new context's default has to be
+    // re-read rather than inherited from the page we came from.
+    const stored = window.localStorage.getItem(collapseKey);
+    setCollapsed(stored ? stored === "collapsed" : !home);
+  }, [collapseKey, home]);
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    // Written here rather than in an effect so a route change cannot save the previous
+    // page's state against the new page's key.
     window.localStorage.setItem(
-      "reply-radar-sidebar",
-      collapsed ? "collapsed" : "expanded",
+      collapseKey,
+      next ? "collapsed" : "expanded",
     );
-  }, [collapsed]);
+  };
   return (
     <aside
       className={`sidebar app-sidebar ${collapsed ? "sidebar-collapsed" : ""}`}
@@ -121,7 +138,7 @@ export default function AppSidebar() {
         </Link>
         <button
           className="sidebar-collapse"
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={toggle}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? "→" : "←"}

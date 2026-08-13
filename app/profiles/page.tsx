@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
+import Crumb from "../components/Crumb";
 
 const initialProfiles: Array<{ slug: string; name: string; role: string; clients: string[]; color: string; initials: string }> = [];
 type Profile = (typeof initialProfiles)[number] & { photo?: string; title?: string; linkedinUrl?: string };
@@ -83,11 +84,13 @@ export default function ProfilesPage() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <div className="crumb">
-            <span>Reply Radar</span>
-            <span className="crumb-chevron" aria-hidden="true">›</span>
-            <strong>{profile ? profile.name || "New profile" : "Profiles"}</strong>
-          </div>
+          <Crumb
+            trail={
+              profile
+                ? [{ label: "Profiles", href: "/profiles" }, { label: profile.name || "New profile" }]
+                : [{ label: "Profiles" }]
+            }
+          />
           <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         {profile ? <ProfileEditor profile={profile} liveClients={clientOptions} /> : <ProfileIndex />}

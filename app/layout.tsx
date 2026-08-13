@@ -22,7 +22,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    // Dark is the product's own look rather than a follow of the OS setting, so it is stamped
+    // on the document before any preference loads. Light only arrives from an explicit choice.
+    <html lang="en" data-appearance-mode="midnight">
       <body><PreferenceBootstrap />{children}</body>
     </html>
   );
