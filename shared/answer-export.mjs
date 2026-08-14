@@ -36,6 +36,17 @@ export function csvField(value) {
 const row = (fields) => fields.map(csvField).join(",");
 
 /**
+ * A grid that did not come from an answer.
+ *
+ * Separate from `answerToCsv` for a reason worth stating: an exported HeyReach lead list is fetched,
+ * written and handed to the browser without the model ever seeing the rows. Two thousand people are
+ * not something to spend context on, and more to the point a list retyped by a language model is not
+ * the list — it is a very good imitation of it, and nobody looking at the file would be able to tell.
+ */
+export const rowsToCsv = (head, records) =>
+  [row(head), ...(Array.isArray(records) ? records : []).map(row)].join("\n");
+
+/**
  * The rows hidden inside a block, or `null` if it holds none.
  *
  * Charts count. The bars are drawn from real figures, and an answer that made its point with a chart

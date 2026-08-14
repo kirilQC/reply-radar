@@ -12,7 +12,7 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import { parseBlocks as parse } from "../../shared/markdown-blocks.mjs";
+import { parseBlocks as parse, splitSettled as split } from "../../shared/markdown-blocks.mjs";
 
 export type Span =
   | { kind: "text" | "bold" | "italic" | "code"; text: string }
@@ -43,7 +43,17 @@ export type Block =
       series: ChartPoint[];
     }
   | { kind: "stats"; items: Array<{ label: string; value: string; note: string; tone: string }> }
+  | { kind: "export"; formats: string[] }
   | { kind: "rule" };
+
+/**
+ * What an `export` block does when clicked, and which answer it belongs to.
+ *
+ * Threaded as two stable values rather than one closure per message because a fresh arrow function
+ * per render would defeat the memo below, which is the whole reason a long answer types smoothly.
+ */
+export type ExportHandler = (key: number, format: string) => void;
+type Wiring = { onExport?: ExportHandler; exportKey?: number };
 
 /**
  * The shape is asserted once, here, because the parser is plain `.mjs` and infers as `any[]`.
@@ -51,6 +61,7 @@ export type Block =
  * actually holds the parser to this contract.
  */
 const parseBlocks = parse as (markdown: string) => Block[];
+const splitSettled = split as (markdown: string) => { settled: string; tail: string };
 
 function Spans({ spans }: { spans: Span[] }) {
   return (
@@ -143,8 +154,24 @@ function Chart({ block }: { block: Extract<Block, { kind: "chart" }> }) {
   );
 }
 
-function Rendered({ block, live }: { block: Block; live: boolean }) {
+const FORMAT_LABEL: Record<string, string> = { csv: "Download CSV", pdf: "Download PDF" };
+
+function Rendered({ block, live, onExport, exportKey }: { block: Block; live: boolean } & Wiring) {
   if (block.kind === "chart") return <Chart block={block} />;
+  if (block.kind === "export") {
+    // Nothing to click when there is no handler — an answer printed to PDF or copied out should not
+    // carry a dead button into the file.
+    if (!onExport || exportKey === undefined) return null;
+    return (
+      <div className="md-export print-hide">
+        {block.formats.map((format) => (
+          <button key={format} type="button" onClick={() => onExport(exportKey, format)}>
+            {FORMAT_LABEL[format] ?? format.toUpperCase()}
+          </button>
+        ))}
+      </div>
+    );
+  }
   // A visual still arriving. Shown as a placeholder rather than as the JSON it currently is, and only
   // while the turn is live — once the answer is finished, an unreadable spec goes back to being
   // visible code, because then it is a real defect and hiding it would hide the numbers with it.
@@ -240,21 +267,55 @@ function Rendered({ block, live }: { block: Block; live: boolean }) {
 }
 
 /**
- * `live` means the turn is still streaming, which only changes how an unfinished block is shown.
+ * A run of markdown as elements, memoised on the source text.
  *
- * Memoised, and the parse memoised inside it, for one specific reason: while an answer streams, the
- * page holding this re-renders on every painted frame, and that re-render reaches every *earlier*
- * answer in the conversation too. Without this, asking a tenth question re-parsed the previous nine
- * answers sixty times a second for as long as the tenth took to arrive, which is why a long
- * conversation typed more slowly than a fresh one — the lag grew with the transcript, not the answer.
+ * Returning a fragment rather than a wrapper keeps every block a direct child of `.md`, which the
+ * first-child and last-child margin rules depend on.
  */
-const Markdown = memo(function Markdown({ children, live = false }: { children: string; live?: boolean }) {
-  const blocks = useMemo(() => parseBlocks(children), [children]);
+const Blocks = memo(function Blocks({ markdown, live, onExport, exportKey }: { markdown: string; live: boolean } & Wiring) {
+  const blocks = useMemo(() => parseBlocks(markdown), [markdown]);
+  return (
+    <>
+      {blocks.map((block, index) => (
+        <Rendered block={block} live={live} onExport={onExport} exportKey={exportKey} key={index} />
+      ))}
+    </>
+  );
+});
+
+/**
+ * `live` means the turn is still streaming, which changes two things.
+ *
+ * The visible one is how an unfinished block is shown. The one that matters more is that a streaming
+ * answer is split at the last blank line and rendered as two runs, because the cost of typing an
+ * answer out is not parsing it — it is React re-diffing everything already on screen sixty times a
+ * second. A finished forty-row table is a thousand-odd fibers, and re-checking all of them on every
+ * frame is what made long answers crawl while short ones felt fine.
+ *
+ * Splitting turns that into a bail-out: the settled run's only prop is a string that does not change
+ * between blank lines, so React skips it entirely and each frame only touches the paragraph or the
+ * handful of rows still being written. The settled run re-renders once per completed block instead of
+ * once per frame.
+ *
+ * The outer memo covers the same problem across turns: the page re-renders on every painted frame, so
+ * without it, asking a tenth question would re-parse the previous nine answers for as long as the
+ * tenth took to arrive — lag that grew with the transcript rather than with the answer.
+ */
+const Markdown = memo(function Markdown({
+  children,
+  live = false,
+  onExport,
+  exportKey,
+}: { children: string; live?: boolean } & Wiring) {
+  const { settled, tail } = useMemo(
+    () => (live ? splitSettled(children) : { settled: "", tail: children }),
+    [children, live],
+  );
   return (
     <div className="md">
-      {blocks.map((block, index) => (
-        <Rendered block={block} live={live} key={index} />
-      ))}
+      {/* Never live: `splitSettled` will not cut inside an open fence, so nothing here is unfinished. */}
+      {settled ? <Blocks markdown={settled} live={false} onExport={onExport} exportKey={exportKey} /> : null}
+      <Blocks markdown={tail} live={live} onExport={onExport} exportKey={exportKey} />
     </div>
   );
 });

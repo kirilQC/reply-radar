@@ -44,7 +44,7 @@
  * Tool failures are returned to the model as results, not thrown. "There is no client called Willo,
  * the clients are …" is something Claude can recover from in the next turn; a 502 is not.
  */
-import { TOOLS, runTool } from "../../lib/assistant-tools";
+import { TOOLS, runTool, takeFile } from "../../lib/assistant-tools";
 import {
   applyStreamEvent as applyEvent,
   createStreamState,
@@ -125,7 +125,7 @@ const SYSTEM = `You are the Reply Radar assistant. Reply Radar belongs to QC, an
 
 What the system is:
 - QC runs campaigns in HeyReach on each client's behalf, from LinkedIn accounts belonging to the client's team.
-- When someone replies, Reply Radar ingests the conversation, scores it, and puts it in an inbox for the team to work.
+- When someone replies, Reply Radar ingests the conversation, judges it, and puts it in an inbox for the team to work.
 - Each client is a workspace with its own HeyReach account. A HeyReach key is scoped to one client, so there is no cross-client HeyReach query — ask per client and combine the answers yourself.
 
 Rules that change the answer:
@@ -134,6 +134,8 @@ Rules that change the answer:
 - Averages across clients mislead. Some clients get twenty replies a day and some get one; the mean of those describes nobody. Give the range, or the per-client figures, or say which client you mean.
 - Reply rates from the HeyReach tools are already percentages. Do not convert them again.
 - replyRatePercent is HeyReach's own reply rate. You do not know its denominator, so never present it as a share of conversations started, messages sent or leads contacted, and never put it in a table column next to a count that implies one. If you want a rate against a specific denominator, compute it from the raw counts and say which two numbers you divided.
+- Reply Radar's judgement of a conversation is three fields and no others: sentiment (positive, neutral or negative) on the latest inbound message, followUpUrgency (0-10) on that same message, and leadScore on the person, which is how well they fit the client's ideal customer. There is no overall conversation score and no tier. Do not describe one, do not say a ranking is unavailable without one, and do not promise one is coming.
+- A null judgement means that row was never analysed. It is not a zero, not a low score, and not a queue that will clear if you wait — some conversations are simply never analysed. Rank by the rows that do have values, say how many did not, and never tell someone to check back later.
 - Weeks start on Monday. This is read as a working-week report.
 - Reply Radar excludes people who messaged the client first — those are not outbound and are not in the database. If someone cannot be found, that may be why.
 - Job titles are free text, exactly as each person wrote them on LinkedIn. There is no canonical list, so a search for one spelling finds one spelling. When asked about a kind of person, use search_leads and pass every form of the title at once — the acronym, the words behind it, and the shorter fragment that catches the variants you did not think of. An empty result from a single spelling is not evidence that nobody matches.
@@ -168,7 +170,7 @@ When there is something to lay out, this order:
 4. Show the comparison as a chart when the shape of the numbers is the point, and as a table when the exact values are.
 5. Close with the caveat — small samples, missing data, a denominator you could not verify. Never leave this out to make an answer look cleaner.
 
-Use only the steps that apply. Most answers are not all five.
+Use only the steps that apply. Most answers are not all five. But a bare table on its own is a missed answer: if you are returning a list of any length, put a stats row above it giving the shape of that list — how many there are, how many replied, how many clients they span — because those are the numbers the reader would otherwise have to count for themselves. That costs the list nothing.
 
 Two fenced blocks render as visuals. The body of each is JSON.
 
@@ -193,15 +195,67 @@ Rules for visuals, which matter more than having one:
 - Chart what was compared, not everything you retrieved. Twelve bars is the maximum shown; beyond that the rest are counted and reported as hidden, so cut the list yourself to the ones that answer the question.
 - Do not chart a single value. One bar is a number, and a number belongs in a sentence or a stats block.
 - Do not chart rates whose denominators differ or are unknown. A bar length is a claim that the quantities are comparable.
-- If a chart and a table would say the same thing, pick one. Most answers need at most one visual; some need none, and a two-line answer with no visual at all is a good answer.`;
+- If a chart and a table would say the same thing, pick one. Most answers need at most one visual; some need none, and a two-line answer with no visual at all is a good answer.
+
+Files, in and out:
+- People attach screenshots, PDFs and spreadsheets. Read them as part of the question. If an attachment disagrees with the tools, say so and trust the tools for anything they cover — the file is a moment in time and may be old.
+- To offer a download of the answer you have just written, end it with a fenced \`export\` block naming the formats. The reader gets a download button for each.
+\`\`\`export
+csv, pdf
+\`\`\`
+- Only when they ask. "Export that", "can I get this as a spreadsheet", "send me a PDF" — those are the cue. Never add one unprompted; a button nobody asked for on every answer is what this replaced.
+- CSV lifts the tables, charts and stats out of your answer; PDF is the answer printed. So an export is only as complete as what you wrote — if someone asks for a list as a spreadsheet, put the full list in the answer, then offer the export.
+- A HeyReach lead list is the exception and heyreach_export_list is the only correct way to do it. It delivers its own file. Never rebuild a lead list as a table in order to export it: those rows would be yours, not HeyReach's.`;
+
+/** The image formats Anthropic accepts. Anything else is offered to the model as text. */
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+/**
+ * How much of an attached text file is passed on. A CSV export of a whole audience is megabytes and
+ * reading the first slice of it answers the question people actually ask of a spreadsheet they just
+ * dropped in; reading all of it would leave no room for the answer.
+ */
+const TEXT_CHARS = 120_000;
+
+/**
+ * Files the person attached, as content blocks.
+ *
+ * PDFs and images go to Anthropic in their own formats rather than being converted here — the model
+ * reads a screenshot of a HeyReach dashboard far better than any text we could extract from it, and
+ * that is the whole reason attachments exist on this screen. Everything else is decoded as text,
+ * which covers CSV, TSV, JSON and plain notes, and degrades to mojibake rather than to an error for
+ * anything binary that slipped through.
+ */
+function attachments(raw: unknown): Block[] {
+  const blocks: Block[] = [];
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    const row = entry && typeof entry === "object" ? (entry as Row) : {};
+    const name = text(row.name) || "attachment";
+    const mime = text(row.mime);
+    const data = text(row.data);
+    if (!data) continue;
+    if (IMAGE_TYPES.has(mime)) {
+      blocks.push({ type: "image", source: { type: "base64", media_type: mime, data } });
+    } else if (mime === "application/pdf") {
+      blocks.push({ type: "document", source: { type: "base64", media_type: mime, data }, title: name });
+    } else {
+      const body = Buffer.from(data, "base64").toString("utf8");
+      const cut = body.length > TEXT_CHARS ? `\n\n[…truncated at ${TEXT_CHARS} characters]` : "";
+      blocks.push({ type: "text", text: `Attached file "${name}":\n\n${body.slice(0, TEXT_CHARS)}${cut}` });
+    }
+  }
+  return blocks;
+}
+
+const asBlocks = (content: string | Block[]): Block[] =>
+  typeof content === "string" ? [{ type: "text", text: content }] : content;
 
 /**
  * Trims the conversation the browser sent.
  *
- * Only the plain text is kept. The tool blocks from previous turns are deliberately dropped: they are
- * the bulk of the tokens, they are stale the moment anything changes, and a model that can still see
- * last turn's campaign numbers will quote them instead of looking again. The reasoning survives in
- * the assistant's own prose, which is the part worth remembering.
+ * Only the prose and the attachments are kept. The tool blocks from previous turns are deliberately
+ * dropped: they are the bulk of the tokens, they are stale the moment anything changes, and a model
+ * that can still see last turn's campaign numbers will quote them instead of looking again. The
+ * reasoning survives in the assistant's own prose, which is the part worth remembering.
  */
 function history(raw: unknown): Turn[] {
   const turns = (Array.isArray(raw) ? raw : []).slice(-20);
@@ -209,11 +263,16 @@ function history(raw: unknown): Turn[] {
   for (const entry of turns) {
     const row = entry && typeof entry === "object" ? (entry as Row) : {};
     const role = row.role === "assistant" ? "assistant" : "user";
-    const content = text(row.content).trim();
-    if (!content) continue;
+    const said = text(row.content).trim();
+    const files = role === "user" ? attachments(row.files) : [];
+    if (!said && !files.length) continue;
+    // The files lead, and a question with nothing but a file still gets a sentence: a turn of pure
+    // attachments reads as "here" and the model has to guess what was wanted.
+    const blocks: Block[] = [...files, { type: "text", text: said || "What is in this file?" }];
+    const previous = messages.at(-1);
     // Anthropic rejects two consecutive turns from the same role, which a dropped empty turn can cause.
-    if (messages.at(-1)?.role === role) messages[messages.length - 1].content = `${messages.at(-1)!.content}\n\n${content}`;
-    else messages.push({ role, content });
+    if (previous?.role === role) previous.content = [...asBlocks(previous.content), ...blocks];
+    else messages.push({ role, content: files.length ? blocks : said });
   }
   return messages;
 }
@@ -353,9 +412,13 @@ export async function POST(request: Request) {
               send({ type: "tool", tool: name, input });
               try {
                 const result = await runTool(name, input);
+                // A tool that produced a file sends it straight to the browser and hands the model
+                // everything except its contents. See `takeFile` for why the rows must not go both ways.
+                const { file, rest } = takeFile(result);
+                if (file) send({ type: "file", name: file.name, mime: file.mime, content: file.content });
                 steps.push({ tool: name, input, ok: true, detail: "" });
                 send({ type: "tool_done", tool: name, ok: true });
-                return { type: "tool_result", tool_use_id: text(call.id), content: JSON.stringify(result) };
+                return { type: "tool_result", tool_use_id: text(call.id), content: JSON.stringify(rest) };
               } catch (error) {
                 const detail = error instanceof Error ? error.message : "The tool failed.";
                 steps.push({ tool: name, input, ok: false, detail });

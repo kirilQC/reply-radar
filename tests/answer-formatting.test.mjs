@@ -9,7 +9,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseBlocks, parseInline, spansToText } from "../shared/markdown-blocks.mjs";
+import { parseBlocks, parseInline, spansToText, splitSettled } from "../shared/markdown-blocks.mjs";
 import { answerToCsv, csvField, exportFilename } from "../shared/answer-export.mjs";
 
 /** Verbatim from the MCP tab, answering "Which of Cotool's campaigns has the best reply rate?". */
@@ -158,6 +158,54 @@ test("two tables stack rather than merge", () => {
   assert.ok(lines.includes("a"));
   assert.ok(lines.includes("b,c"));
   assert.ok(lines.includes("2,3"));
+});
+
+/**
+ * The split that makes a streaming answer cheap to redraw. What is asserted is the property the
+ * renderer relies on: the settled half must be a prefix that later characters cannot revise, and
+ * putting the two halves back together must give the original answer exactly.
+ */
+test("nothing is settled until a blank line has landed", () => {
+  const partial = "Here are the campaigns";
+  assert.deepEqual(splitSettled(partial), { settled: "", tail: partial });
+  // Still nothing: the last line is the one being written, so a trailing newline is not a boundary.
+  assert.equal(splitSettled("Here are the campaigns\n").settled, "");
+});
+
+test("a growing table stays whole in the tail while the paragraph above it settles", () => {
+  const answer = "Top performers.\n\n| Campaign | Rate |\n|---|---|\n| CT001 | 75% |\n| CT002 | 4";
+  const { settled, tail } = splitSettled(answer);
+  assert.equal(settled, "Top performers.\n");
+  assert.ok(tail.startsWith("| Campaign |"));
+  // The half-written row is still in the part that gets re-parsed, so it cannot be frozen mid-cell.
+  assert.ok(tail.endsWith("| CT002 | 4"));
+  assert.equal(`${settled}\n${tail}`, answer);
+});
+
+test("a blank line inside an open fence is not a boundary", () => {
+  // Cutting here would hand the renderer two halves of a JSON spec and it would draw neither.
+  const answer = 'Numbers.\n\n```chart\n{\n  "chart": "bar",\n\n  "series": [';
+  const { settled, tail } = splitSettled(answer);
+  assert.equal(settled, "Numbers.\n");
+  assert.ok(tail.startsWith("```chart"));
+  assert.equal(`${settled}\n${tail}`, answer);
+});
+
+test("a closed fence settles like anything else, so the next block starts clean", () => {
+  const answer = '```chart\n{"chart":"bar"}\n```\n\nAnd the reason is';
+  const { settled, tail } = splitSettled(answer);
+  assert.equal(settled, '```chart\n{"chart":"bar"}\n```\n');
+  assert.equal(tail, "And the reason is");
+});
+
+test("the two halves always rebuild the answer, whatever the boundary", () => {
+  const answer = "One.\n\nTwo.\n\n- a\n- b\n\nThree";
+  // Every prefix of a streaming answer is itself a valid input, so all of them are checked.
+  for (let length = 1; length <= answer.length; length += 1) {
+    const partial = answer.slice(0, length);
+    const { settled, tail } = splitSettled(partial);
+    assert.equal(settled ? `${settled}\n${tail}` : tail, partial);
+  }
 });
 
 test("the filename says what the file is", () => {

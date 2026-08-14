@@ -19,13 +19,25 @@
  * replies" is indistinguishable from one that guessed, and the first wrong number destroys trust in
  * every right one — so every answer keeps the receipts for the number in it.
  *
- * ── Why answers can be exported ─────────────────────────────────────────────────────────────────
- * The output of "rank these campaigns" or "who needs following up" is usually on its way into a sheet
- * or a client email. CSV lifts the tables straight out of the answer; PDF is the browser's own print
- * path, which is how the Reports tab already does it.
+ * ── Why exports are asked for rather than always offered ────────────────────────────────────────
+ * The output of "rank these campaigns" or "who needs following up" is often on its way into a sheet
+ * or a client email — but most answers are not, and a row of Copy/CSV/PDF buttons under every one of
+ * them was three pieces of permanent furniture serving an occasional need. So the assistant offers
+ * the download instead, by ending an answer with an `export` fence when it was asked to, and the
+ * buttons appear on that answer only. CSV lifts the tables out of the answer; PDF is the browser's
+ * own print path, which is how the Reports tab already does it.
+ *
+ * A HeyReach lead list does not work that way and must not: `heyreach_export_list` builds the file on
+ * the server and streams it here as its own event, so the rows never pass through the model. Those
+ * arrive as a download attached to the answer rather than as a button that regenerates it.
+ *
+ * ── Attachments ─────────────────────────────────────────────────────────────────────────────────
+ * Questions frequently start with something the person already has: a client's spreadsheet, a PDF
+ * brief, a screenshot of a HeyReach screen that does not match what we are reporting. Those go up as
+ * base64 and Anthropic reads them natively, which is far better than anything we could extract here.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
@@ -38,26 +50,64 @@ import { parseFrame, splitFrames } from "../../shared/anthropic-stream.mjs";
 type Entry =
   | { kind: "thinking"; text: string }
   | { kind: "tool"; tool: string; input: Record<string, unknown>; ok: boolean | null; detail: string };
+/** Something the person attached, already base64 so it can be posted as JSON. */
+type Attached = { name: string; mime: string; data: string };
+/** Something a tool built and sent down, ready to save. */
+type Delivered = { name: string; mime: string; content: string };
 type Message = {
   role: "user" | "assistant";
   content: string;
   entries?: Entry[];
+  attached?: Attached[];
+  files?: Delivered[];
   failed?: boolean;
   askedAt?: string;
 };
 
 /**
+ * Roughly three megabytes of actual file, since base64 costs a third.
+ *
+ * The real limit is the platform's request body, and the whole conversation is re-posted on every
+ * turn — so this is a budget for the question, not for one file.
+ */
+const MAX_ATTACHED = 4_000_000;
+const ACCEPTS = "image/png,image/jpeg,image/gif,image/webp,application/pdf,.csv,.tsv,.txt,.md,.json";
+
+/** A file as base64, without the data-URL prefix the API does not want. */
+const asBase64 = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+    reader.onerror = () => reject(new Error(`${file.name} could not be read.`));
+    reader.readAsDataURL(file);
+  });
+
+/** Saves a blob under a name. The one way anything leaves this page. */
+function save(name: string, mime: string, body: string) {
+  const url = URL.createObjectURL(new Blob([body], { type: mime }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+/** `48213` → `47 KB`. Files are sized in the chip because "leads.csv" alone says nothing about it. */
+const sizeOf = (bytes: number) =>
+  bytes < 1024 ? `${Math.round(bytes)} B` : bytes < 1_048_576 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1_048_576).toFixed(1)} MB`;
+
+/**
  * Openers, chosen to teach the surface rather than to demo it.
  *
  * Each one exercises a different part — live HeyReach status, our stored replies, a search of the
- * database by title, a cross-client total, a comparison — because the question people cannot guess is
- * what this thing can be asked, and five examples answer that faster than any description.
+ * database by title, a file export, a cross-client comparison — because the question people cannot
+ * guess is what this thing can be asked, and five examples answer that faster than any description.
  */
 const PROMPTS = [
   "What campaigns are live for Steadywell right now, and when do they run out of leads?",
   "Who replied and hasn't been followed up with yet? Oldest first.",
   "List every CISO in our database and say which ones have replied.",
-  "How many replies have we had this month across all clients?",
+  "Export Steadywell's biggest lead list as a CSV.",
   "Compare every client's reply performance and tell me who needs attention.",
 ];
 
@@ -124,6 +174,8 @@ export default function McpPage() {
   const startedAt = useRef(0);
   const [openTrail, setOpenTrail] = useState<number | null>(null);
   const [printing, setPrinting] = useState<number | null>(null);
+  const [attached, setAttached] = useState<Attached[]>([]);
+  const [attachNote, setAttachNote] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -156,14 +208,48 @@ export default function McpPage() {
   }, [thinking]);
   const seconds = Math.max(0, Math.floor((now - startedAt.current) / 1000));
 
+  /**
+   * Takes files onto the next question.
+   *
+   * Refused rather than truncated when the budget runs out, and said out loud: a file silently
+   * dropped would be a question answered from less than the person handed over, which is worse than
+   * a question that does not send.
+   */
+  const attach = async (picked: FileList | null) => {
+    if (!picked?.length) return;
+    const read = await Promise.all(
+      Array.from(picked).map(async (file) => ({
+        name: file.name,
+        // Some browsers report nothing for a .csv dragged out of a mail client.
+        mime: file.type || "text/plain",
+        data: await asBase64(file),
+      })),
+    );
+    const next = [...attached];
+    let refused = "";
+    for (const file of read) {
+      if (!file.data || next.some((held) => held.name === file.name)) continue;
+      const total = next.reduce((sum, held) => sum + held.data.length, 0) + file.data.length;
+      if (total > MAX_ATTACHED) refused = `${file.name} does not fit. About 3 MB of files can ride along with one question.`;
+      else next.push(file);
+    }
+    setAttached(next);
+    setAttachNote(refused);
+  };
+
   const send = async (raw: string) => {
     const asked = raw.trim();
-    if (!asked || thinking) return;
+    if ((!asked && !attached.length) || thinking) return;
     // The history posted to the server is the one on screen plus this question. Built here rather
     // than read back from state because a state update is not visible to the request that follows it.
-    const history = [...messages, { role: "user" as const, content: asked, askedAt: new Date().toISOString() }];
+    const history = [
+      ...messages,
+      { role: "user" as const, content: asked, attached, askedAt: new Date().toISOString() },
+    ];
     setMessages(history);
     setQuestion("");
+    setAttached([]);
+    setAttachNote("");
     setThinking(true);
     setLive({ entries: [], answer: "" });
     startedAt.current = Date.now();
@@ -177,6 +263,8 @@ export default function McpPage() {
      * written from these on each event purely to redraw.
      */
     const entries: Entry[] = [];
+    /** Files tools built during the turn. They belong to the answer, so they land with it. */
+    const produced: Delivered[] = [];
     let answer = "";
     /** Consecutive thinking deltas belong to one thought; a tool call ends it. */
     let openThought: { kind: "thinking"; text: string } | null = null;
@@ -191,8 +279,8 @@ export default function McpPage() {
      *
      * This is the smaller half of the smoothness fix. Parsing a whole answer measures around 80ms
      * spread across its entire arrival, so the parser was never the problem; the cost was in what
-     * each commit dragged along with it, which is what the memo on `Markdown` and the scrolling
-     * above address.
+     * each commit dragged along with it — every row of a growing table re-diffed on every frame — and
+     * that is what the split in `Markdown` addresses.
      */
     let frame = 0;
     const paint = () => {
@@ -207,7 +295,9 @@ export default function McpPage() {
       const response = await fetch("/api/mcp", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages: history.map(({ role, content }) => ({ role, content })) }),
+        body: JSON.stringify({
+          messages: history.map(({ role, content, attached: files }) => ({ role, content, files })),
+        }),
       });
       if (!response.body) throw new Error("The assistant returned nothing.");
 
@@ -263,11 +353,20 @@ export default function McpPage() {
               pending.detail = String(event.detail ?? "");
             }
             paint();
+          } else if (event.type === "file") {
+            // Built by a tool and streamed down whole, because the rows in it were deliberately kept
+            // out of the model's context — this is the only copy, and it is the real one.
+            produced.push({
+              name: String(event.name ?? "export.csv"),
+              mime: String(event.mime ?? "text/csv;charset=utf-8"),
+              content: String(event.content ?? ""),
+            });
           } else if (event.type === "done") {
             finish({
               role: "assistant",
               content: String(event.reply ?? ""),
               entries: [...entries],
+              files: [...produced],
               askedAt: new Date().toISOString(),
             });
           } else if (event.type === "failed") {
@@ -275,6 +374,7 @@ export default function McpPage() {
               role: "assistant",
               content: String(event.error ?? "The assistant could not finish."),
               entries: [...entries],
+              files: [...produced],
               failed: true,
               askedAt: new Date().toISOString(),
             });
@@ -290,6 +390,7 @@ export default function McpPage() {
           role: "assistant",
           content: answer || "The answer stopped part-way through. Ask again, or narrow the question.",
           entries: [...entries],
+          files: [...produced],
           failed: !answer,
           askedAt: new Date().toISOString(),
         });
@@ -321,34 +422,43 @@ export default function McpPage() {
     return "";
   };
 
-  const downloadCsv = (index: number) => {
-    const message = messages[index];
-    const asked = questionFor(index);
-    const csv = answerToCsv({ question: asked, answer: message.content, askedAt: message.askedAt ?? "" });
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = exportFilename(asked, message.askedAt ?? "", "csv");
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
   /**
-   * Prints one answer.
+   * Exporting one answer, from the button its own `export` block drew.
    *
-   * The whole page is hidden by print CSS except the turn marked `is-printing`, so the PDF is the
-   * answer and its question rather than a screenshot of a chat app. Cleared on the next tick after
-   * `print()` returns, which is when the dialog has closed.
+   * One callback for both formats, and memoised on the transcript rather than rebuilt per message,
+   * because an arrow function created inside the render loop would change identity on every painted
+   * frame and defeat the memo on `Markdown` — which is precisely what makes a long answer type
+   * smoothly. It is stable for the whole of a streaming turn, since `messages` does not change until
+   * the answer lands.
+   *
+   * PDF is the browser's print path: the page is hidden by print CSS except the turn marked
+   * `is-printing`, so the file is the answer and its question rather than a screenshot of a chat app.
+   * `printing` is cleared on the tick after `print()` returns, which is when the dialog has closed.
    */
-  const downloadPdf = (index: number) => {
-    setPrinting(index);
-    window.setTimeout(() => {
-      window.print();
-      setPrinting(null);
-    }, 60);
-  };
-
-  const copyAnswer = (index: number) => void navigator.clipboard?.writeText(messages[index].content);
+  const exportAnswer = useCallback(
+    (index: number, format: string) => {
+      const message = messages[index];
+      if (!message) return;
+      if (format === "pdf") {
+        setPrinting(index);
+        window.setTimeout(() => {
+          window.print();
+          setPrinting(null);
+        }, 60);
+        return;
+      }
+      let asked = "";
+      for (let step = index - 1; step >= 0; step -= 1) {
+        if (messages[step].role === "user") {
+          asked = messages[step].content;
+          break;
+        }
+      }
+      const csv = answerToCsv({ question: asked, answer: message.content, askedAt: message.askedAt ?? "" });
+      save(exportFilename(asked, message.askedAt ?? "", "csv"), "text/csv;charset=utf-8", csv);
+    },
+    [messages],
+  );
 
   const liveCount = useMemo(() => live.entries.filter((entry) => entry.kind === "tool").length, [live.entries]);
 
@@ -375,8 +485,10 @@ export default function McpPage() {
               <p>
                 Live HeyReach campaigns, senders, sequences and lists for every client, plus everyone
                 in Reply Radar&apos;s own database — searchable by job title or company — with their
-                replies, scores and follow-ups. Read-only: nothing here can send, pause or change
-                anything. Bigger questions take longer on purpose; you can watch the lookups as they run.
+                replies, scores and follow-ups. Attach a screenshot, PDF or spreadsheet and it will
+                read that too, and ask for any answer as a CSV or a PDF. Read-only: nothing here can
+                send, pause or change anything. Bigger questions take longer on purpose; you can watch
+                the lookups as they run.
               </p>
               <div className="mcp-prompts">
                 {PROMPTS.map((prompt) => (
@@ -413,18 +525,41 @@ export default function McpPage() {
                   )}
 
                   {message.role === "assistant" ? (
-                    <Markdown>{message.content}</Markdown>
+                    <Markdown onExport={exportAnswer} exportKey={index}>
+                      {message.content}
+                    </Markdown>
                   ) : (
                     <div className="mcp-body">{message.content}</div>
                   )}
 
-                  {message.role === "assistant" && !message.failed && message.content && (
-                    <div className="mcp-export print-hide">
-                      <button onClick={() => copyAnswer(index)}>Copy</button>
-                      <button onClick={() => downloadCsv(index)}>CSV</button>
-                      <button onClick={() => downloadPdf(index)}>PDF</button>
+                  {/* What the person attached, and what a tool built. Both are files hanging off a
+                      turn, so they look the same; only the direction differs. */}
+                  {message.attached?.length ? (
+                    <div className="mcp-files print-hide">
+                      {message.attached.map((file) => (
+                        <span className="mcp-file" key={file.name}>
+                          <b>{file.name}</b>
+                          <small>{sizeOf(file.data.length * 0.75)}</small>
+                        </span>
+                      ))}
                     </div>
-                  )}
+                  ) : null}
+
+                  {message.files?.length ? (
+                    <div className="mcp-files print-hide">
+                      {message.files.map((file) => (
+                        <button
+                          className="mcp-file is-download"
+                          key={file.name}
+                          type="button"
+                          onClick={() => save(file.name, file.mime, file.content)}
+                        >
+                          <b>{file.name}</b>
+                          <small>{sizeOf(file.content.length)} · download</small>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </article>
               ))}
 
@@ -453,7 +588,46 @@ export default function McpPage() {
               event.preventDefault();
               void send(question);
             }}
+            // Dropping a file on the box is how most people will do this, and it is the same path as
+            // the button. The dragover handler exists only to stop the browser opening the file.
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              void attach(event.dataTransfer.files);
+            }}
           >
+            {(attached.length > 0 || attachNote) && (
+              <div className="mcp-attached">
+                {attached.map((file) => (
+                  <span className="mcp-file" key={file.name}>
+                    <b>{file.name}</b>
+                    <small>{sizeOf(file.data.length * 0.75)}</small>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${file.name}`}
+                      onClick={() => setAttached(attached.filter((held) => held.name !== file.name))}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {attachNote && <em>{attachNote}</em>}
+              </div>
+            )}
+            <label className="mcp-attach" title="Attach a screenshot, PDF or spreadsheet">
+              <input
+                type="file"
+                multiple
+                accept={ACCEPTS}
+                onChange={(event) => {
+                  void attach(event.target.files);
+                  // Cleared so picking the same file twice in a row still fires a change.
+                  event.target.value = "";
+                }}
+              />
+              <span aria-hidden="true">+</span>
+              <span className="mcp-attach-label">Attach</span>
+            </label>
             <textarea
               ref={inputRef}
               rows={1}
@@ -469,7 +643,7 @@ export default function McpPage() {
                 }
               }}
             />
-            <button type="submit" disabled={thinking || !question.trim()}>
+            <button type="submit" disabled={thinking || (!question.trim() && attached.length === 0)}>
               {thinking ? "Working" : "Ask"}
             </button>
           </form>

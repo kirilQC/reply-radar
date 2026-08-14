@@ -192,8 +192,8 @@ after the thing people already understand. Do not rename it to be technically co
   tool exists in `app/lib/assistant-tools.ts`. `tests/heyreach-api.test.mjs` fails if one is added, so
   reopening this is a deliberate act rather than a slip.
 - **No authentication.** Internal only, consistent with the rest of the app.
-- **It covers the whole product, not just HeyReach.** Our own tables answer reply content, scores,
-  tiers, who is waiting, and all-time cross-client totals.
+- **It covers the whole product, not just HeyReach.** Our own tables answer reply content, Reply
+  Radar's judgement of each reply, who is waiting, and all-time cross-client totals.
 
 **Numbers come from one source per question, never averaged across the two.** `rr_messages` has no
 `workspace_id`, so per-client and windowed counts come from HeyReach, which is authoritative and
@@ -286,11 +286,44 @@ than a fresh one; and the follow-the-tail scroll is instant rather than smooth, 
 smooth scroll fifty times a second makes the page hunt instead of follow. Neither scroll drags the
 page back down if the reader has scrolled up.
 
+- **A streaming answer is split at the last blank line and rendered as two runs** (`splitSettled`).
+  Even memoised and frame-limited, it was still laggy, because the real cost is React reconciling the
+  *whole* growing answer sixty times a second — a finished forty-row table is around a thousand fibers
+  and every one was re-checked per frame, which is why the lag grew with the answer rather than being
+  constant. Once a blank line has landed nothing above it can be revised by later characters, so the
+  settled run's only prop is a string that does not change and React skips it entirely. Fences are the
+  one exception and are tracked, because a split inside an open ` ```chart ` would cut a JSON spec in
+  half. `Blocks` returns a fragment, not a wrapper, so every block stays a direct child of `.md` and
+  the first-child margin rules still apply.
 - **Answers are rendered markdown, and exportable.** `shared/markdown-blocks.mjs` parses to blocks so
   tables and bold render rather than showing their pipes and asterisks. CSV is lifted out of the
   answer's own tables rather than asking the model for a second machine-readable copy, which would
   double the tokens and give two versions of the same numbers that could disagree. PDF is
   `window.print()` with print CSS, as in Reports.
+- **Export is offered when asked for, not permanently.** The Copy/CSV/PDF row under every answer was
+  three buttons of furniture on answers nobody exports. The model now emits an ` ```export ` fence
+  naming the formats when the question implies one, and that renders as buttons. The handler is
+  threaded as `onExport` plus a numeric `exportKey` rather than a closure per message, deliberately:
+  a fresh arrow function per render would defeat the memo above and reintroduce the lag it shipped
+  beside.
+
+**A lead list exported as CSV must never pass through the model.** `heyreach_export_list` builds the
+file on the server and returns it beside the tool result under a `__file` key that `takeFile` strips
+before the result is sent to Claude; the model sees a summary and is told it cannot reproduce the
+rows. A list retyped by a language model is not the list — it is a very good imitation of one, and
+nobody looking at the file could tell.
+
+**Attachments go to the model as native content blocks.** Images and PDFs as base64 `image`/
+`document` blocks, everything else decoded to text, capped so a large file is refused rather than
+silently truncated. Files lead the turn they were attached to, before the question.
+
+**`rr_conversations.score` and `.tier` are dead columns and nothing has ever written to them.** The
+assistant read them and produced the worst kind of wrong answer: asked for the best replies of the
+day, it reported that "the scoring engine hasn't processed today's conversations yet" and ranked them
+by reading the text itself. Nothing was behind schedule and nothing was ever going to arrive. What the
+pipeline actually writes is nested in `raw_data.reply_radar` — `sentiment`, `followup_urgency` and
+`followup_reason` on the message, `icp_score` on the lead — which is what the inbox already ranks by,
+and now what the assistant reads, so the two cannot disagree. Null there means unanalysed, not zero.
 
 ---
 

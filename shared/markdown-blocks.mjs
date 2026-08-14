@@ -71,6 +71,37 @@ const isTableRule = (line) =>
 const LIST_ITEM = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
 
 /**
+ * Splits a partly-written answer into the part that can no longer change and the part still arriving.
+ *
+ * This exists for one reason: while an answer streams, the naive render re-renders the whole thing on
+ * every frame. Reconciling a growing forty-row table sixty times a second is what made typing feel
+ * laggy — and the lag got worse the longer the answer, because the settled part being redrawn kept
+ * growing. Parsing was never the cost; redrawing finished output was.
+ *
+ * A blank line is the boundary, because every block this parser produces is terminated by one. Once
+ * a blank line has landed, nothing above it can be revised by later characters — a table cannot gain
+ * another row, a paragraph cannot gain another sentence.
+ *
+ * The one exception is a fence, which legitimately contains blank lines. A split inside an open
+ * ```chart would cut a JSON spec in half and render both halves as garbage, so fences are tracked and
+ * a blank line inside one is not a boundary.
+ */
+export function splitSettled(markdown) {
+  const source = String(markdown ?? "").replace(/\r\n?/g, "\n");
+  const lines = source.split("\n");
+  let fenced = false;
+  let boundary = 0;
+  // The final line is excluded: it is the one currently being written, and a trailing "\n" would
+  // otherwise make an unfinished line look settled.
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    if (/^\s*(```|~~~)/.test(lines[index])) fenced = !fenced;
+    else if (!fenced && !lines[index].trim()) boundary = index + 1;
+  }
+  if (!boundary) return { settled: "", tail: source };
+  return { settled: lines.slice(0, boundary).join("\n"), tail: lines.slice(boundary).join("\n") };
+}
+
+/**
  * Parses markdown into a flat list of blocks.
  *
  * Flat rather than a tree because nothing the model emits nests beyond an indented bullet, and list
@@ -120,6 +151,16 @@ export function parseBlocks(markdown) {
       // spec is invalid JSON, so the renderer needs to tell "this is code" from "this is not finished
       // yet" — otherwise the reader watches raw JSON scroll past before it snaps into a chart.
       const closed = index < lines.length;
+      // `export` is a directive rather than a visual: it turns into download buttons for the answer it
+      // ends. Only once the closing fence has landed, because a button that appears mid-word and then
+      // changes what it offers is worse than one that appears a second late.
+      if (language === "export" && closed) {
+        const formats = [...new Set(source.toLowerCase().match(/csv|pdf/g) ?? [])];
+        if (formats.length) {
+          blocks.push({ kind: "export", formats });
+          continue;
+        }
+      }
       // A `chart` or `stats` fence is a visual; anything else, or a visual we cannot read, stays code.
       // Falling back rather than failing means a malformed spec shows as visible JSON instead of
       // taking the answer down with it.

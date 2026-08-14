@@ -22,7 +22,7 @@
  *
  * - **Counts per client, per campaign, over a window** come from HeyReach, which computes them
  *   itself in one call and is the system of record for what was sent.
- * - **Reply content, scores, tiers and who is waiting on us** come from our tables, because HeyReach
+ * - **Reply content, the AI's read of it, and who is waiting on us** come from our tables, because HeyReach
  *   does not know about any of that.
  * - **All-time and to-date totals across every client** come from our tables with `count=exact`,
  *   exactly as the home page does, so the assistant and the dashboard can never disagree.
@@ -39,9 +39,29 @@ import { campaignStatusFor } from "./heyreach-campaigns";
 import { countRows } from "./rest-count";
 import { isOurCampaign } from "../../shared/campaign-code.mjs";
 import { containsAny } from "../../shared/postgrest-filter.mjs";
+import { exportFilename, rowsToCsv } from "../../shared/answer-export.mjs";
 import * as heyreach from "./heyreach-api";
 
 type Row = Record<string, unknown>;
+
+/** A file a tool produced, on its way to the browser. */
+export type ToolFile = { name: string; mime: string; content: string };
+
+/**
+ * How a file travels past the model rather than through it.
+ *
+ * A tool result is JSON that lands in the model's context, and a two-thousand-row CSV must not. A
+ * result carrying this key has the file lifted off it by the route, sent to the browser as its own
+ * event, and deleted from what the model is shown — which is also the only way the downloaded rows
+ * are guaranteed to be the rows HeyReach returned rather than a very convincing retyping of them.
+ */
+const FILE_KEY = "__file";
+
+export function takeFile(result: unknown): { file: ToolFile | null; rest: unknown } {
+  if (!result || typeof result !== "object" || !(FILE_KEY in result)) return { file: null, rest: result };
+  const { [FILE_KEY]: file, ...rest } = result as Row & { [FILE_KEY]: ToolFile };
+  return { file, rest };
+}
 
 const object = (value: unknown): Row =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {};
@@ -75,6 +95,13 @@ const rowLimit = (value: unknown, fallback: number, ceiling = MAX_ROWS) =>
  * truncating rather than erroring. Fifty at a time, run together, keeps every URL short.
  */
 const ID_BATCH = 50;
+
+/**
+ * The ceiling on an exported file, which is far above `MAX_ROWS` because none of these rows are read
+ * by the model. A lead list is routinely a few thousand people and half of one is not the list; the
+ * only cost is the sequential walk through HeyReach's pages, which the export is allowed to take.
+ */
+const EXPORT_ROWS = 5_000;
 
 async function dbByIds(query: (ids: string[]) => string, ids: string[]): Promise<Row[]> {
   if (!ids.length) return [];
@@ -156,6 +183,31 @@ async function connectedClient(name: unknown): Promise<Client> {
 /* ── Conversations, enriched with the person behind them ─────────────────────────────────────── */
 
 /**
+ * Where Reply Radar's AI judgements actually live.
+ *
+ * `rr_conversations` has `score` and `tier` columns and this used to read them, which produced the
+ * worst kind of wrong answer: asked for the best replies of the day, the assistant reported that
+ * "the scoring engine hasn't processed today's conversations yet" and ranked them by reading the
+ * text itself. Nothing was behind schedule. Those two columns are left over from an earlier design
+ * and nothing in the codebase has ever written to them, so they are null for every row that has ever
+ * existed and always will be — a fact no amount of waiting changes.
+ *
+ * What the pipeline does produce is nested inside `raw_data.reply_radar`: sentiment and follow-up
+ * urgency on the message, ICP score on the lead. Those are the same fields the inbox ranks by, which
+ * is the point — the assistant and the inbox should never disagree about who is worth answering.
+ */
+const judgement = (row: Row): Row => {
+  const raw = object(row.raw_data);
+  return object(raw.reply_radar);
+};
+
+/** The pipeline writes "positive" | "neutral" | "negative"; anything else is not an opinion. */
+const sentimentOf = (value: unknown) => {
+  const said = text(value).toLowerCase();
+  return ["positive", "neutral", "negative"].includes(said) ? said : null;
+};
+
+/**
  * Attaches lead details and the latest reply body to a set of conversations.
  *
  * Two batched queries regardless of how many conversations there are — leads, then messages — each
@@ -169,7 +221,7 @@ async function describeConversations(conversationRows: Row[]): Promise<Row[]> {
 
   const [leadRows, messageRows] = await Promise.all([
     dbByIds(
-      (batch) => `rr_leads?select=id,name,role,company,linkedin_profile_url,workspace_id&id=in.(${batch.join(",")})`,
+      (batch) => `rr_leads?select=id,name,role,company,linkedin_profile_url,workspace_id,raw_data&id=in.(${batch.join(",")})`,
       leadIds,
     ),
     // Every message for these conversations, not just the newest: PostgREST has no per-group limit, so
@@ -177,7 +229,7 @@ async function describeConversations(conversationRows: Row[]): Promise<Row[]> {
     // conversations' messages rather than trimming each one, and a blank last reply looks like data.
     dbByIds(
       (batch) =>
-        `rr_messages?select=conversation_id,direction,body,sent_at&conversation_id=in.(${batch.join(",")})&order=sent_at.desc`,
+        `rr_messages?select=conversation_id,direction,body,sent_at,raw_data&conversation_id=in.(${batch.join(",")})&order=sent_at.desc`,
       ids,
     ),
   ]);
@@ -185,14 +237,21 @@ async function describeConversations(conversationRows: Row[]): Promise<Row[]> {
   // Only the most recent message per conversation. The rest is what `read_conversation` is for, and
   // returning whole threads here would flood the context with sequences the question never asked about.
   const latest = new Map<string, Row>();
+  // The newest *inbound* message separately, because that is the one the pipeline judged. When we
+  // sent the last message, the sentiment on it would be our own draft's, not the lead's opinion.
+  const latestInbound = new Map<string, Row>();
   for (const message of rows(messageRows)) {
     const key = text(message.conversation_id);
     if (!latest.has(key)) latest.set(key, message);
+    if (text(message.direction) === "inbound" && !latestInbound.has(key)) latestInbound.set(key, message);
   }
 
   return conversationRows.map((row) => {
     const lead = leadById.get(text(row.lead_id)) ?? {};
     const message = latest.get(text(row.id)) ?? {};
+    const judged = judgement(latestInbound.get(text(row.id)) ?? {});
+    const leadJudged = judgement(lead);
+    const icp = leadJudged.icp_score;
     return {
       conversationId: text(row.id),
       name: text(lead.name),
@@ -202,8 +261,13 @@ async function describeConversations(conversationRows: Row[]): Promise<Row[]> {
       lastMessageAt: text(row.last_message_at),
       lastMessageFrom: text(row.last_message_direction) === "inbound" ? "lead" : "us",
       lastMessage: text(message.body).slice(0, 600),
-      score: row.score ?? null,
-      tier: text(row.tier) || null,
+      sentiment: sentimentOf(judged.sentiment),
+      // 0–10, and only meaningful once the pipeline has looked: an unanalysed reply reports null
+      // rather than 0, because zero urgency and no opinion are opposite things to rank on.
+      followUpUrgency: text(judged.followup_analyzed_at) ? Number(judged.followup_urgency) || 0 : null,
+      followUpReason: text(judged.followup_reason) || null,
+      leadScore: icp === undefined || icp === null ? null : Number(icp) || 0,
+      leadScoreReason: text(leadJudged.icp_reason) || null,
     };
   });
 }
@@ -221,7 +285,7 @@ async function conversationsFor(
     awaitingUs ? AWAITING_US : "",
     since ? `last_message_at=gte.${encodeURIComponent(since)}` : "",
   ].filter(Boolean);
-  const path = `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction,score,tier${filters.length ? `&${filters.join("&")}` : ""}&order=${order}&limit=${limit}`;
+  const path = `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction${filters.length ? `&${filters.join("&")}` : ""}&order=${order}&limit=${limit}`;
   return describeConversations(rows(await db(path)));
 }
 
@@ -254,7 +318,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "recent_replies",
     description:
-      "The most recent conversations, newest first, with the lead's name, role, company, LinkedIn URL, their latest message, and Reply Radar's score and tier. Optionally scoped to one client. This is the tool for 'what came in', 'show me recent replies', or any question about what people actually said.",
+      "The most recent conversations, newest first, with the lead's name, role, company, LinkedIn URL, their latest message, and Reply Radar's own read of it: the sentiment of their reply, how urgently it needs a follow-up (0-10), and the lead's ICP score. Any of those can be null, which means the pipeline has not analysed that row yet — it does not mean zero, and it must never be reported as a low score. Optionally scoped to one client. This is the tool for 'what came in', 'show me recent replies', or any question about what people actually said.",
     input_schema: {
       type: "object",
       properties: {
@@ -276,7 +340,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "find_person",
     description:
-      "Find ONE named individual by name or LinkedIn profile URL across every client, with their full conversation history including every score and tier. Use this when a question names a person. For a question about a kind of person rather than a named one — every CISO, everyone at Stripe, all the VPs of Engineering — use search_leads instead; this tool cannot match a job title.",
+      "Find ONE named individual by name or LinkedIn profile URL across every client, with their full conversation history and Reply Radar's read of each reply. Use this when a question names a person. For a question about a kind of person rather than a named one — every CISO, everyone at Stripe, all the VPs of Engineering — use search_leads instead; this tool cannot match a job title.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "A person's name, or their LinkedIn profile URL." } },
@@ -286,7 +350,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "search_leads",
     description:
-      "Search everyone in Reply Radar's own database by job title, company or name. This is the tool for \"list the CISOs in our database\", \"who do we have at Stripe\", \"every VP of Engineering we have replied to\" — any question about a category of person rather than a named one. Matching is case-insensitive substring, so \"security\" finds \"Head of Security\". Give role as a LIST of every spelling of the title, because titles are free text as the person wrote them on LinkedIn: for CISOs pass [\"CISO\", \"Chief Information Security Officer\", \"Chief Security Officer\"], and anyone matching any of them is returned. Searches people, never message text. Returns the exact total match count as well as the rows, so you can always say how many there are even when the list is capped.",
+      "Search everyone in Reply Radar's own database by job title, company or name. This is the tool for \"list the CISOs in our database\", \"who do we have at Stripe\", \"every VP of Engineering we have replied to\" — any question about a category of person rather than a named one. Matching is case-insensitive substring, so \"security\" finds \"Head of Security\". Give role as a LIST of every spelling of the title, because titles are free text as the person wrote them on LinkedIn: for CISOs pass [\"CISO\", \"Chief Information Security Officer\", \"Chief Security Officer\"], and anyone matching any of them is returned. Searches people, never message text. Returns the exact total match count as well as the rows, so you can always say how many there are even when the list is capped. Each person carries a leadScore, which is how well they fit the client's ideal customer; it is null for anyone who has not been analysed, which is not the same as a low score.",
     input_schema: {
       type: "object",
       properties: {
@@ -364,6 +428,21 @@ export const TOOLS: ToolDefinition[] = [
     description:
       "The lead lists in one client's HeyReach account: name, whether it holds people or companies, how many are on it, when it was built, and which campaigns use it. Use this for questions about audience size or where a campaign's leads came from.",
     input_schema: { type: "object", properties: { ...CLIENT_ARG }, required: ["client"] },
+  },
+  {
+    name: "heyreach_export_list",
+    description:
+      "Download one client's HeyReach lead list as a CSV file. Returns everyone on the list with their name, job title, company, location, LinkedIn URL and email where HeyReach has one. Identify the list by listId from heyreach_lists, or by listName and it will be matched. IMPORTANT: the file is built here and delivered to the browser directly — the rows are deliberately not returned to you, so do not attempt to reproduce, summarise row-by-row or re-tabulate them. Report what was exported, how many rows it has, and that it is ready to download. Use this whenever someone asks to export, download or get a list, an audience or a set of leads as a spreadsheet.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...CLIENT_ARG,
+        listId: { type: "string", description: "HeyReach list id, from heyreach_lists." },
+        listName: { type: "string", description: "Part of the list's name, if you do not have its id." },
+        limit: { type: "integer", description: `How many people, up to ${EXPORT_ROWS}. Defaults to the whole list.` },
+      },
+      required: ["client"],
+    },
   },
   {
     name: "heyreach_workspace_totals",
@@ -482,7 +561,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const leadIds = leadRows.map((row) => text(row.id)).filter(Boolean);
       const conversationRows = await dbByIds(
         (batch) =>
-          `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction,score,tier&lead_id=in.(${batch.join(",")})&order=last_message_at.desc&limit=${MAX_ROWS}`,
+          `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction&lead_id=in.(${batch.join(",")})&order=last_message_at.desc&limit=${MAX_ROWS}`,
         leadIds,
       );
       const described = await describeConversations(conversationRows);
@@ -524,7 +603,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       // The count is asked for separately and without the limit, so an answer can say "312 people
       // match, here are the first 300" instead of presenting a capped list as the whole population.
       const [leadRows, total] = await Promise.all([
-        db(`rr_leads?select=id,name,role,company,linkedin_profile_url,workspace_id&${filters}&order=created_at.desc&limit=${limit}`).then(rows),
+        db(`rr_leads?select=id,name,role,company,linkedin_profile_url,workspace_id,raw_data&${filters}&order=created_at.desc&limit=${limit}`).then(rows),
         countRows(url, key, `rr_leads?select=id&${filters}`),
       ]);
       if (!leadRows.length) {
@@ -542,7 +621,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       // know who replied and how they scored, not what they said; read_conversation is for that.
       const conversationRows = await dbByIds(
         (batch) =>
-          `rr_conversations?select=id,lead_id,last_message_at,last_message_direction,score,tier&lead_id=in.(${batch.join(",")})&order=last_message_at.desc`,
+          `rr_conversations?select=id,lead_id,last_message_at,last_message_direction&lead_id=in.(${batch.join(",")})&order=last_message_at.desc`,
         leadIds,
       );
       const newest = new Map<string, Row>();
@@ -554,6 +633,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const people = leadRows
         .map((row) => {
           const conversation = newest.get(text(row.id));
+          const icp = judgement(row).icp_score;
           return {
             name: text(row.name),
             role: text(row.role),
@@ -564,8 +644,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
             conversationId: conversation ? text(conversation.id) : null,
             lastMessageAt: conversation ? text(conversation.last_message_at) : null,
             awaitingUs: conversation ? text(conversation.last_message_direction) === "inbound" : false,
-            score: conversation?.score ?? null,
-            tier: conversation ? text(conversation.tier) || null : null,
+            leadScore: icp === undefined || icp === null ? null : Number(icp) || 0,
           };
         })
         .filter((person) => (input.repliedOnly === true ? person.replied : true));
@@ -717,6 +796,72 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
           createdAt: row.createdAt,
           usedByCampaigns: row.campaignIds.length,
         })),
+      };
+    }
+
+    case "heyreach_export_list": {
+      const client = await connectedClient(input.client);
+      const wanted = text(input.listName);
+      const listId = text(input.listId);
+      const all = await heyreach.lists(client.apiKey);
+      // Resolved here rather than trusted, because an id the model half-remembered from an earlier
+      // turn would otherwise export the wrong client's audience with no sign that anything was wrong.
+      let chosen = all.items.find((row) => row.id === listId);
+      if (!chosen && wanted) {
+        const needle = wanted.toLowerCase();
+        const matched = all.items.filter((row) => row.name.toLowerCase().includes(needle));
+        if (matched.length > 1) {
+          throw new Error(
+            `Several of ${client.name}'s lists match "${wanted}": ${matched.map((row) => `${row.name} (${row.id})`).join(", ")}. Give listId.`,
+          );
+        }
+        chosen = matched[0];
+      }
+      if (!chosen) {
+        throw new Error(
+          `No such list. ${client.name}'s lists are: ${all.items.map((row) => `${row.name} (${row.id})`).join(", ") || "none"}.`,
+        );
+      }
+
+      const cap = rowLimit(input.limit, EXPORT_ROWS, EXPORT_ROWS);
+      const companies = chosen.type === "COMPANY_LIST";
+      const page = companies
+        ? await heyreach.companiesInList(client.apiKey, chosen.id, cap)
+        : await heyreach.leadsInList(client.apiKey, chosen.id, cap);
+
+      const head = companies
+        ? ["Company", "Industry", "Location", "Employees", "Website", "LinkedIn"]
+        : ["Name", "Job title", "Company", "Location", "LinkedIn", "Email"];
+      const grid = page.items.map((row) =>
+        companies
+          ? [text(row.name) || text(row.companyName), text(row.industry), text(row.location), text(row.companySize), text(row.website), text(row.linkedInUrl) || text(row.profileUrl)]
+          : [
+              [text(row.firstName), text(row.lastName)].filter(Boolean).join(" ") || text(row.fullName),
+              text(row.position) || text(row.headline) || text(row.summary),
+              text(row.companyName) || text(row.company),
+              text(row.location),
+              text(row.profileUrl) || text(row.linkedInUrl),
+              text(row.emailAddress) || text(row.email),
+            ],
+      );
+
+      return {
+        client: client.name,
+        list: chosen.name,
+        listId: chosen.id,
+        holds: companies ? "companies" : "people",
+        onList: chosen.size,
+        exported: grid.length,
+        // Said explicitly, because a list capped at the ceiling looks complete in the file and the
+        // person forwarding it has no other way to find out that it is not.
+        complete: grid.length >= chosen.size || grid.length < cap,
+        columns: head,
+        delivered: "The CSV has been sent to the browser and is ready to download beneath your answer. Its rows are not available to you — say what was exported and how many, and do not list the people.",
+        [FILE_KEY]: {
+          name: exportFilename(`${client.name} ${chosen.name}`, "", "csv"),
+          mime: "text/csv;charset=utf-8",
+          content: rowsToCsv(head, grid),
+        } satisfies ToolFile,
       };
     }
 
