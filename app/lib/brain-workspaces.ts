@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 /**
  * Reply Radar's own clients, in the shape the QC Brain needs to recognise them.
  *

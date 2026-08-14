@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 /**
  * Packing report sections onto a fixed number of printed pages.
  *
@@ -77,6 +80,8 @@ export const SECTION_WEIGHTS = {
   "reply-timing": 3,
   "sample-replies": 6,
   "what-we-did": 4,
+  // One line per deal, and a client with more than five or six live deals from us is not the common case.
+  "deal-progress": 4,
   priorities: 4,
   "warm-close": 2,
 };

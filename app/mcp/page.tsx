@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 "use client";
 
 /**
@@ -138,13 +141,93 @@ const PROMPTS: { group: string; prompt: string }[] = [
 /** Prompts somebody saved for themselves. Personal and per-machine, so the browser is the store. */
 const SAVED_KEY = "reply-radar-mcp-prompts:v1";
 
-const readSaved = (): string[] => {
+/**
+ * A saved prompt, with the short name it is recognised by.
+ *
+ * The prompts worth saving are the long ones — a paragraph of instructions somebody worked out once —
+ * and a paragraph makes a terrible button. So the title is what the tile shows and the prompt is what
+ * gets sent, which also means two prompts about the same client are told apart at a glance instead of
+ * by reading four lines of near-identical text.
+ */
+type SavedPrompt = { title: string; prompt: string };
+
+/**
+ * Reads them back, in either shape.
+ *
+ * Prompts saved before titles existed are bare strings. They are kept and shown under their own text
+ * rather than dropped or migrated behind a version bump: somebody's saved prompt disappearing because
+ * the format changed is a worse outcome than an untitled tile.
+ */
+const readSaved = (): SavedPrompt[] => {
   if (typeof window === "undefined") return [];
   try {
     const held = JSON.parse(window.localStorage.getItem(SAVED_KEY) ?? "[]");
-    return Array.isArray(held) ? held.filter((entry) => typeof entry === "string") : [];
+    if (!Array.isArray(held)) return [];
+    return held
+      .map((entry) => {
+        if (typeof entry === "string") return { title: "", prompt: entry };
+        if (entry && typeof entry === "object" && typeof entry.prompt === "string") {
+          return { title: typeof entry.title === "string" ? entry.title : "", prompt: entry.prompt };
+        }
+        return null;
+      })
+      .filter((entry): entry is SavedPrompt => Boolean(entry?.prompt.trim()));
   } catch {
     return [];
+  }
+};
+
+/**
+ * The transcript, kept across a change of tab.
+ *
+ * ── Why it is kept at all ───────────────────────────────────────────────────────────────────────
+ * The transcript lived in React state and nowhere else, so leaving for the Inbox to look something up
+ * threw the conversation away — including answers that took a minute each to produce. Nobody expects
+ * a chat to work that way, and the recovery is to ask the same questions again.
+ *
+ * ── Why `sessionStorage`, not `localStorage`, and not the server ─────────────────────────────────
+ * Session storage is scoped to one tab of one browser, which is exactly the lifetime asked for: it
+ * survives navigating away and back, and it is gone when the tab is closed. It is also why two people
+ * on this page cannot see each other's chat — the store is on their own machine, in their own tab, so
+ * there is no shared conversation to collide over. A server-side session would have to be keyed by
+ * something, and this page has no sign-in to key it by.
+ *
+ * ── Why it is trimmed when it will not fit ──────────────────────────────────────────────────────
+ * A turn carries its whole timeline, its attachments as base64, and any file a tool built, so a long
+ * conversation about lead lists is megabytes. The quota is a few, and a browser that refuses the write
+ * throws. Rather than lose the lot, the oldest turns are dropped until it fits — a conversation missing
+ * its first exchange is still worth having, which an empty one is not.
+ */
+const CHAT_KEY = "reply-radar-mcp-chat:v1";
+
+const readChat = (): Message[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const held = JSON.parse(window.sessionStorage.getItem(CHAT_KEY) ?? "[]");
+    if (!Array.isArray(held)) return [];
+    return held.filter(
+      (entry): entry is Message =>
+        Boolean(entry) && (entry.role === "user" || entry.role === "assistant") && typeof entry.content === "string",
+    );
+  } catch {
+    return [];
+  }
+};
+
+const keepChat = (messages: Message[]) => {
+  if (typeof window === "undefined") return;
+  for (let from = 0; from < messages.length; from += 1) {
+    try {
+      window.sessionStorage.setItem(CHAT_KEY, JSON.stringify(messages.slice(from)));
+      return;
+    } catch {
+      /* Too big. Drop the oldest turn and try again. */
+    }
+  }
+  try {
+    window.sessionStorage.removeItem(CHAT_KEY);
+  } catch {
+    /* A store that refuses both writing and clearing is a store we simply do without. */
   }
 };
 
@@ -332,7 +415,7 @@ const Turn = memo(function Turn({
 });
 
 export default function McpPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(readChat);
   const [question, setQuestion] = useState("");
   const [thinking, setThinking] = useState(false);
   /** The turn in progress: what it has done so far and what it has started writing. */
@@ -350,8 +433,9 @@ export default function McpPage() {
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const [saved, setSaved] = useState<string[]>(readSaved);
+  const [saved, setSaved] = useState<SavedPrompt[]>(readSaved);
   const [adding, setAdding] = useState("");
+  const [addingTitle, setAddingTitle] = useState("");
   const [composing, setComposing] = useState(false);
 
   /**
@@ -409,8 +493,11 @@ export default function McpPage() {
   const keepPrompt = useCallback(() => {
     const wanted = adding.trim();
     if (!wanted) return;
+    // A title is optional, because insisting on one turns saving a prompt into filling in a form. The
+    // first few words of the prompt are a serviceable name and the tooltip carries the whole thing.
+    const entry = { title: addingTitle.trim(), prompt: wanted };
     setSaved((held) => {
-      const next = held.includes(wanted) ? held : [...held, wanted];
+      const next = held.some((one) => one.prompt === wanted) ? held : [...held, entry];
       try {
         window.localStorage.setItem(SAVED_KEY, JSON.stringify(next));
       } catch {
@@ -419,12 +506,13 @@ export default function McpPage() {
       return next;
     });
     setAdding("");
+    setAddingTitle("");
     setComposing(false);
-  }, [adding]);
+  }, [adding, addingTitle]);
 
   const dropPrompt = useCallback((prompt: string) => {
     setSaved((held) => {
-      const next = held.filter((entry) => entry !== prompt);
+      const next = held.filter((entry) => entry.prompt !== prompt);
       try {
         window.localStorage.setItem(SAVED_KEY, JSON.stringify(next));
       } catch {
@@ -449,6 +537,12 @@ export default function McpPage() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages]);
+
+  // Written on every finished turn rather than on every token, because only whole turns are in
+  // `messages` — the one in flight is in `live` and is not worth persisting half of.
+  useEffect(() => {
+    keepChat(messages);
   }, [messages]);
 
   /**
@@ -782,15 +876,19 @@ export default function McpPage() {
                 <div className="mcp-promptset">
                   <h2>Yours</h2>
                   <div className="mcp-prompts">
-                    {saved.map((prompt) => (
-                      <div key={prompt} className="mcp-prompt is-saved">
-                        <button onClick={() => void send(prompt)}>{prompt}</button>
+                    {saved.map((entry) => (
+                      <div key={entry.prompt} className="mcp-prompt is-saved">
+                        {/* The title on the tile, the prompt on hover. A saved prompt is usually a
+                            paragraph, and a paragraph in a button is unreadable at any size. */}
+                        <button onClick={() => void send(entry.prompt)} title={entry.prompt}>
+                          {entry.title || entry.prompt}
+                        </button>
                         <button
                           className="mcp-prompt-drop"
                           type="button"
-                          aria-label={`Forget "${prompt}"`}
+                          aria-label={`Forget "${entry.title || entry.prompt}"`}
                           title="Forget this prompt"
-                          onClick={() => dropPrompt(prompt)}
+                          onClick={() => dropPrompt(entry.prompt)}
                         >
                           ×
                         </button>
@@ -832,17 +930,34 @@ export default function McpPage() {
                     ref={(node) => {
                       node?.focus();
                     }}
+                    className="mcp-promptadd-title"
+                    value={addingTitle}
+                    placeholder="Name it"
+                    onChange={(event) => setAddingTitle(event.target.value)}
+                    aria-label="A name for this prompt"
+                  />
+                  <textarea
+                    /* A box rather than a line, because the prompts worth saving are the long ones and
+                       a single-line input showed forty characters of a paragraph while you wrote it. */
+                    className="mcp-promptadd-body"
+                    rows={3}
                     value={adding}
                     placeholder="The question you ask often, written out in full"
                     onChange={(event) => setAdding(event.target.value)}
                     aria-label="A prompt to save"
                   />
-                  <button type="submit" disabled={!adding.trim()}>
-                    Save
-                  </button>
-                  <button type="button" className="is-quiet" onClick={() => { setComposing(false); setAdding(""); }}>
-                    Cancel
-                  </button>
+                  <div className="mcp-promptadd-tools">
+                    <button type="submit" disabled={!adding.trim()}>
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="is-quiet"
+                      onClick={() => { setComposing(false); setAdding(""); setAddingTitle(""); }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </form>
               ) : (
                 <button className="mcp-promptnew" type="button" onClick={() => setComposing(true)}>

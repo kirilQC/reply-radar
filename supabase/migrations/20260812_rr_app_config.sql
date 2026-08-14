@@ -1,3 +1,6 @@
+-- Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+-- Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 -- Reply Radar: a real key/value table for small app-wide lists.
 --
 -- Why this exists. Three routes have been written against `rr_global_config` as though it were a

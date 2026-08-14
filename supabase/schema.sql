@@ -1,3 +1,6 @@
+-- Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+-- Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 -- Reply Radar isolated schema.
 -- Every object is prefixed rr_ so this script does not alter existing project tables.
 --

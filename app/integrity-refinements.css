@@ -1,3 +1,6 @@
+/* Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+   Reply Radar — proprietary. Not licensed for redistribution or resale. */
+
 /* Lead record readability and complete conversation history */
 .database-overview > section > h3 {
   font-size: 18px !important;
@@ -760,8 +763,88 @@
   color: var(--muted-2);
 }
 
-.send-button span {
-  color: #ffffffa8;
+/* ----------------------------------------------------------------------------
+   Sending a reply: the one control on this page that cannot be undone.
+   The first press only opens the confirmation, so the plain button is styled no
+   louder than it was. The confirmation is what looks different — tinted, boxed,
+   and physically separated — because it needs to read as a question rather than
+   as the same button moving. Nothing here is disabled-by-default any more: the
+   button is live whenever there is text to send.
+   -------------------------------------------------------------------------- */
+
+.send-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.composer-foot span {
+  color: var(--muted-2);
+}
+
+/* Named the lead, named the sender, then two buttons. Laid out as a block rather
+   than a row so "Yes, send it" never sits where "Send reply" just was. */
+.composer-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0 10px 10px;
+  padding: 11px 12px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 9px;
+}
+
+.composer-confirm p {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.composer-confirm b {
+  font-weight: 650;
+}
+
+.composer-confirm-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.send-button.is-confirm {
+  height: 28px;
+  padding: 0 13px;
+  font-size: 11px;
+}
+
+.composer-cancel {
+  height: 28px;
+  padding: 0 11px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.composer-cancel:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Why it did not go out, in the composer rather than in a toast that vanishes —
+   the reader is about to decide whether to try again. */
+.composer-senderror {
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  color: var(--danger, #f87171);
+  background: color-mix(in srgb, #f87171 12%, transparent);
+  border: 1px solid color-mix(in srgb, #f87171 34%, transparent);
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 /* Light mode kept its own literal tints for these two, both of them violet. */
@@ -1801,6 +1884,24 @@ a.tag-outline-link:hover {
    The commit log in the feedback tab. Rows are divided rather than boxed: these are entries in one
    continuous history, and giving each its own card would make twenty commits look like twenty
    unrelated notices. */
+/* The number of commits, at the size of a headline figure rather than a caption. Tabular figures so a
+   count that ticks past a round number does not shift the words beside it. */
+.release-count {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.release-count b {
+  color: var(--text);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
 .release-list {
   margin: 0;
   padding: 0;
@@ -2032,13 +2133,16 @@ a.tag-outline-link:hover {
   color: var(--text);
   border-color: var(--accent);
 }
+/* Name above body, stacked, because a prompt worth saving is a paragraph and a paragraph beside a
+   name on one row gives each of them half a line. */
 .mcp-promptadd {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: center;
+  max-width: 560px;
 }
-.mcp-promptadd input {
-  flex: 1;
+.mcp-promptadd input,
+.mcp-promptadd textarea {
   min-width: 0;
   padding: 10px 12px;
   color: var(--text);
@@ -2046,6 +2150,18 @@ a.tag-outline-link:hover {
   border: 1px solid var(--accent);
   border-radius: 8px;
   font-size: 12px;
+  font-family: inherit;
+}
+.mcp-promptadd-title {
+  font-weight: 600;
+}
+.mcp-promptadd-body {
+  resize: vertical;
+  line-height: 1.5;
+}
+.mcp-promptadd-tools {
+  display: flex;
+  gap: 8px;
 }
 .mcp-promptadd button {
   padding: 10px 14px;
@@ -3367,11 +3483,6 @@ a.tag-outline-link:hover {
   font-size: 12px;
   line-height: 1.5;
 }
-.brain-heading {
-  margin: 32px 0 4px;
-  font-size: 15px;
-  letter-spacing: -0.025em;
-}
 /* A client's mark: their real logo if one is committed at clients/<name>/logo.png, and otherwise
    their initials on a colour derived from the folder name. The fallback is deterministic rather
    than random so a client is the same colour on every screen and every machine — which is what
@@ -3511,15 +3622,7 @@ span.brain-mark.is-lg {
   }
 }
 
-/* What somebody does with a client once they have read the folder: get the whole thing as one
-   document, or go and look at what the campaigns are doing. Full-width row under the documents,
-   because both are about the client rather than about any one file. */
-.brain-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 20px;
-}
+/* The bar above a generated document: print it, or put it away. */
 .brain-action {
   display: inline-flex;
   align-items: center;
@@ -3679,6 +3782,24 @@ span.brain-mark.is-lg {
 .brain-doccard.is-other .brain-doccard-icon svg {
   width: 15px;
   height: 15px;
+}
+/* The two tiles that make a document rather than open one. In the grid because what they produce is
+   a document about this client, tinted because pressing one spends a minute and some money and the
+   other twelve tiles do not. */
+.brain-doccard.is-make {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  text-decoration: none;
+}
+.brain-doccard.is-make .brain-doccard-icon {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.brain-doccard.is-make:disabled {
+  opacity: 0.65;
+  cursor: default;
 }
 
 /* Read-mostly is a choice, so the way to do the other thing has to be said somewhere. The end of a

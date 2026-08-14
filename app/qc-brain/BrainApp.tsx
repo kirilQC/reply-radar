@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 "use client";
 
 /**
@@ -568,19 +571,35 @@ function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (
   const [writing, setWriting] = useState(false);
   const [icpError, setIcpError] = useState("");
 
+  /**
+   * Asks for the document until the server says it is finished.
+   *
+   * Three to five pages is more writing than one serverless function is allowed to live for, so the
+   * route hands back as much as it managed plus `more`, and each pass continues the last. The sheet is
+   * opened on the first reply rather than at the end, so the wait is spent reading the first page
+   * instead of watching a disabled button — which is what "the button does nothing" actually was.
+   */
   const makeIcp = useCallback(async () => {
     if (!detail) return;
     setWriting(true);
     setIcpError("");
+    setIcp("");
     try {
-      const response = await fetch("/api/brain/icp", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ client: detail.client }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!body?.ok) throw new Error(body?.error || "That document could not be written.");
-      setIcp(String(body.markdown ?? ""));
+      let sofar = "";
+      let chunk = 0;
+      for (;;) {
+        const response = await fetch("/api/brain/icp", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ client: detail.client, sofar, chunk }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!body?.ok) throw new Error(body?.error || "That document could not be written.");
+        sofar = String(body.markdown ?? "");
+        chunk = Number(body.chunk ?? chunk + 1);
+        setIcp(sofar);
+        if (!body.more) break;
+      }
     } catch (problem) {
       setIcpError(problem instanceof Error ? problem.message : "That document could not be written.");
     } finally {
@@ -638,11 +657,11 @@ function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (
         </p>
       )}
 
-      <h2 className="brain-heading">Documents</h2>
       {/* Name, and nothing else. The one-line description of what an ICP is belongs to somebody's
           first week and was on the tile for ever after; the date a file last changed is a fact about
           the repository rather than about the client, and it is on the document itself when you open
-          one. What is left is a menu, which is the only thing anybody does here. */}
+          one. What is left is a menu, which is the only thing anybody does here. And a menu does not
+          need a heading that says "Documents" above a grid of documents. */}
       <div className="brain-docgrid">
         {detail.docs.map((entry) => (
           <button
@@ -671,17 +690,23 @@ function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (
             <span className="brain-doccard-label">{file.title}</span>
           </button>
         ))}
-      </div>
 
-      {/* The two things people leave this page to do. Under the documents rather than in the header,
-          because both are about the whole client and neither is where anybody starts. */}
-      <div className="brain-actions">
-        <button className="brain-action is-primary" onClick={() => void makeIcp()} disabled={writing}>
-          {writing ? `Writing the ICP document for ${detail.label}…` : `Generate ICP document for ${detail.label}`}
+        {/* The two things people leave this page to do, as tiles in the same grid rather than a row of
+            buttons under it. Both produce a document about this client, which is what every other tile
+            here does — the only difference is that these two do not exist until somebody asks, and a
+            separate strip of actions implied they belonged to a different part of the page. */}
+        <button className="brain-doccard is-make" onClick={() => void makeIcp()} disabled={writing}>
+          <span className="brain-doccard-icon" aria-hidden="true">
+            <DocIcon slot="write" />
+          </span>
+          <span className="brain-doccard-label">{writing ? "Writing the ICP document…" : "Generate ICP document"}</span>
         </button>
         {detail.workspace && (
-          <a className="brain-action" href={`/analytics?client=${encodeURIComponent(detail.workspace.slug)}`}>
-            See client analytics
+          <a className="brain-doccard is-make" href={`/analytics?client=${encodeURIComponent(detail.workspace.slug)}`}>
+            <span className="brain-doccard-icon" aria-hidden="true">
+              <DocIcon slot="analytics" />
+            </span>
+            <span className="brain-doccard-label">See client analytics</span>
           </a>
         )}
       </div>
@@ -709,6 +734,8 @@ function DocIcon({ slot }: { slot: string }) {
     engagement: "M4 19V9m5 10V5m5 14v-7m5 7V8",
     crm: "M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3m0 0v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3",
     dnc: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18m-6.4 2.6 12.8 12.8",
+    write: "M4 20h16M6 15.5V17h1.5l9-9L15 6.5zM14.2 5.3l1.5-1.5 2.5 2.5-1.5 1.5",
+    analytics: "M4 20h16M7 20v-6M12 20V8M17 20v-9",
   };
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">

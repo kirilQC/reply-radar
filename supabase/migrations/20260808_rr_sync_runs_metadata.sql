@@ -1,3 +1,6 @@
+-- Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+-- Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 -- Safe additive migration for an rr_sync_runs table created from an earlier schema.
 -- These statements only add missing columns to the Reply Radar table.
 alter table if exists rr_sync_runs add column if not exists source text;

@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -5,6 +8,7 @@ import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import VoiceBrief from "../components/VoiceBrief";
+import CallTranscript from "../components/CallTranscript";
 import {
   BUILT_IN_TEMPLATES,
   CAMPAIGN_METRICS,
@@ -1495,6 +1499,18 @@ export default function ReportsPage() {
                   }))}
                   onFill={(values) => setWritten((current) => ({ ...current, ...values }))}
                 />
+                {/* And the shorter path again: the call this recap is about already happened, and
+                    every meeting tool here writes it down. Pasting that beats saying it twice. */}
+                <CallTranscript
+                  client={clientLabel}
+                  periodLabel={periodLabel(period)}
+                  sections={writtenFields.map((id) => ({
+                    id,
+                    label: WRITTEN_SECTION_PROMPTS[id].label,
+                    placeholder: WRITTEN_SECTION_PROMPTS[id].placeholder,
+                  }))}
+                  onFill={(values) => setWritten((current) => ({ ...current, ...values }))}
+                />
                 {writtenFields.map((id) => (
                   <div key={id} className="config-written">
                     <label className="config-written-label" htmlFor={`written-${id}`}>
@@ -2123,6 +2139,7 @@ const SECTION_TITLES: Record<SectionId, string> = {
   "reply-timing": "Reply timing",
   "sample-replies": "Sample positive replies",
   "what-we-did": "What we did this week",
+  "deal-progress": "Deal progress",
   priorities: "Priorities for next week",
   "warm-close": "Where we are",
 };

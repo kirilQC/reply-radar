@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 import BrainApp from "../BrainApp";
 import { brainConfigured, brainTree } from "../../lib/brain";
 import { workspacesByFolder } from "../../lib/brain-workspaces";

@@ -1,3 +1,6 @@
+-- Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+-- Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 -- Reply Radar: permanent storage for generated client reports.
 --
 -- Safe to run more than once. Written additively (create if not exists / add column if not exists)

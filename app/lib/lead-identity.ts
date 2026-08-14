@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 export type JsonObject = Record<string, unknown>;
 
 const text = (value: unknown) => typeof value === "string" ? value.trim() : "";

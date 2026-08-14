@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 /**
  * Laying out every document in the brain, without anybody opening it.
  *
@@ -20,7 +23,7 @@
  * nothing here, for ever, which is what makes running this on a schedule affordable.
  *
  * ── Why it stops before it is finished ──────────────────────────────────────────────────────────
- * A render is a model call of up to a couple of minutes and there are hundreds of documents, so no
+ * A render is a model call of up to forty seconds and there are hundreds of documents, so no
  * single invocation can clear the list — a serverless function that tried would be killed halfway and
  * the work in flight would be lost. Instead it works to a deadline comfortably inside the platform's
  * limit, then returns `remaining`. The caller comes back. That makes progress durable at the row level:
@@ -31,16 +34,23 @@ import { brainConfigured, brainFile, brainTree } from "../../../lib/brain";
 import { renderBrainDoc, storedRenderShas } from "../../../lib/brain-render";
 import { fileKind } from "../../../../shared/brain-structure.mjs";
 
-export const maxDuration = 300;
+/**
+ * Sixty, because that is what the plan gives. Asking for three hundred does not fail loudly, it is
+ * silently clamped — so a deadline set inside an imagined 300s ceiling is not a deadline at all, and
+ * every pass that took longer than a minute was killed with its response still unwritten.
+ */
+export const maxDuration = 60;
 
 /**
  * When to stop taking new documents on.
  *
- * Well inside the 300s ceiling, because the check happens before a render starts and a long one can
- * still run for the best part of three minutes after passing it. Overshooting the platform limit does
- * not just lose that document — it loses the response, so the caller never learns what is left.
+ * Twelve seconds, which looks absurdly early against a sixty-second function and is not: the check
+ * happens *before* a render starts, and a render is allowed forty. Twelve plus forty plus the file read
+ * lands inside the ceiling; thirty would not. Overshooting does not just lose that document — it loses
+ * the response, so the caller never learns what is left and stops asking. Fewer documents per pass and
+ * more passes is the correct trade, because the page already loops on `remaining`.
  */
-const DEADLINE_MS = 150_000;
+const DEADLINE_MS = 12_000;
 
 /**
  * How many at once.

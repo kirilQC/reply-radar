@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 import { NextResponse } from "next/server";
 import { DEFAULT_SENTIMENT_PROMPT } from "../../../lib/reply-sentiment";
 import { DEFAULT_ICP_DOC_PROMPT, ICP_DOC_PROMPT_KEY } from "../../../lib/brain-icp";

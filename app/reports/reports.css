@@ -1,3 +1,6 @@
+/* Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+   Reply Radar — proprietary. Not licensed for redistribution or resale. */
+
 /* ============================================================
    Reply Radar — Report Hub
    ============================================================ */
@@ -2843,5 +2846,144 @@ body.light-mode .prompt-dialog-backdrop {
 }
 
 .voice-brief-error {
+  color: #d9534f;
+}
+
+/* ---------------------------------------------------------------------------
+   Fill from a call transcript.
+
+   Sits directly under "Talk it through" and is built to look like its sibling
+   rather than like a second feature: same box, same head, same buttons. The one
+   difference is that it starts collapsed — an always-open textarea the height of
+   a transcript would push the actual form off the screen, and most weeks the
+   dictation button is the one that gets pressed.
+   ------------------------------------------------------------------------- */
+
+.call-transcript {
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--report-inset);
+  transition: border-color 140ms ease;
+}
+
+.call-transcript.is-open {
+  border-color: var(--report-brand);
+}
+
+.call-transcript-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.call-transcript-head strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 640;
+}
+
+.call-transcript-head em {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--report-ink-soft);
+}
+
+.call-transcript-toggle,
+.call-transcript-fill,
+.call-transcript-clear {
+  flex: 0 0 auto;
+  border-radius: 7px;
+  padding: 7px 13px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.call-transcript-fill {
+  background: var(--report-brand);
+  border-color: var(--report-brand);
+  color: #fff;
+}
+
+.call-transcript-fill:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.call-transcript-toggle,
+.call-transcript-clear {
+  background: transparent;
+  border-color: var(--report-line);
+  color: var(--report-ink-soft);
+}
+
+.call-transcript-toggle:hover {
+  border-color: var(--report-brand);
+  color: var(--report-brand);
+}
+
+/* Not `cursor: wait` on the fill button: unlike dictation this one is also
+   disabled before anything has been pasted, which is not a wait. */
+.call-transcript-fill:disabled,
+.call-transcript-clear:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Taller than the dictation box because what goes in it is an hour of two people
+   talking, and a four-line window on that is unreadable to check. */
+.call-transcript-box {
+  width: 100%;
+  min-height: 150px;
+  margin-top: 11px;
+  resize: vertical;
+  border: 1px solid var(--report-line);
+  border-radius: 8px;
+  background: var(--report-surface);
+  padding: 9px 12px;
+  color: var(--report-ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.call-transcript-box:focus {
+  outline: none;
+  border-color: var(--report-brand);
+}
+
+.call-transcript-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.call-transcript-actions span {
+  font-size: 10.5px;
+  color: var(--report-ink-soft);
+}
+
+.call-transcript-done,
+.call-transcript-error {
+  margin: 9px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.call-transcript-done {
+  color: var(--report-ink-soft);
+}
+
+.call-transcript-error {
   color: #d9534f;
 }

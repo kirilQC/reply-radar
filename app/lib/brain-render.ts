@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 /**
  * Laying a brain document out again so somebody reads it.
  *
@@ -64,6 +67,17 @@ const RENDER_VERSION = 3;
  * shown a shortened document that looks complete.
  */
 const MAX_SOURCE = 24_000;
+
+/**
+ * How long one layout may take before it is abandoned.
+ *
+ * This used to be three minutes, on the theory that the route had five. The route has sixty seconds —
+ * the plan clamps it — so a render allowed to run for a hundred and eighty was never abandoned by this
+ * timeout at all: the invocation was killed first, which loses the response as well as the work, so the
+ * caller learns nothing and the reader watches a spinner. Cut to fit inside the function, so a document
+ * that will not lay out in time comes back as an error somebody can see and retry.
+ */
+const RENDER_TIMEOUT_MS = 40_000;
 
 export type BrainRender = {
   path: string;
@@ -287,7 +301,7 @@ async function askForLayout(path: string, text: string): Promise<BrainRender> {
       system: SYSTEM,
       messages: [{ role: "user", content: `File: ${path}\n\n---\n\n${source}` }],
     }),
-    signal: AbortSignal.timeout(180_000),
+    signal: AbortSignal.timeout(RENDER_TIMEOUT_MS),
   });
   const payload = (await response.json().catch(() => ({}))) as Row;
   if (!response.ok) {

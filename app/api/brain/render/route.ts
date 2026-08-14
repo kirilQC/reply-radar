@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 /**
  * The readable layout of one brain document.
  *
@@ -14,8 +17,13 @@ import { brainConfigured, brainFile } from "../../../lib/brain";
 import { renderBrainDoc } from "../../../lib/brain-render";
 import { fileKind } from "../../../../shared/brain-structure.mjs";
 
-/** A long document is a couple of minutes of model output. The platform default would cut it off. */
-export const maxDuration = 300;
+/**
+ * Sixty, which is the ceiling this account actually has. `300` asks for something the plan does not
+ * sell and is quietly clamped rather than refused, so declaring it only made the real limit invisible.
+ * The model call is bounded inside this so a document too long to lay out returns an error the reader
+ * can see, instead of the invocation dying with nothing written.
+ */
+export const maxDuration = 60;
 
 type Row = Record<string, unknown>;
 

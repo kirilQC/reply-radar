@@ -1,3 +1,6 @@
+-- Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+-- Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 -- Reply Radar: people we refuse to ingest.
 --
 -- Why this exists. Deleting an unwanted reply — the client's friend, a recruiter, someone who is not a

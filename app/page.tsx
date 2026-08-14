@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect */
 
@@ -425,6 +428,20 @@ export function InboxPage() {
   // An already-answered conversation hides the composer, because the usual next move is to wait.
   // Sometimes it isn't — a nudge is overdue — so the "replied to" line opens the box on click.
   const [composeAnyway, setComposeAnyway] = useState(false);
+  /**
+   * Sending a reply, which is the one irreversible thing this page does.
+   *
+   * `armed` holds the id of the conversation whose send button has been pressed once. Nothing goes out
+   * on that press — it swaps the button for a confirmation that names the person and the sender, and
+   * only the second press on that confirmation calls the route. Two deliberate presses is the whole
+   * safety design on this side: there is no keyboard shortcut, no send-on-enter, and the confirmation
+   * is a different element in a different place, so a double click on the first button cannot land on
+   * the second. It disarms whenever the draft or the selected lead changes, because a confirmation
+   * left standing over text that has since been edited is a confirmation of something else.
+   */
+  const [armed, setArmed] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [inboxSyncing, setInboxSyncing] = useState(false);
@@ -1233,6 +1250,10 @@ export function InboxPage() {
   useEffect(() => {
     activeConversationRef.current = current.id;
     setComposeAnyway(false);
+    // A confirmation belongs to one lead. Carrying it across a selection change is how somebody
+    // confirms a send for the person they were reading a moment ago.
+    setArmed("");
+    setSendError("");
   }, [current.id]);
   useEffect(() => {
     if (current.id === "empty") return;
@@ -1282,6 +1303,57 @@ export function InboxPage() {
       setAiDraft("");
     }
     setAiLoading(false);
+  };
+  /**
+   * Sends the draft, exactly as it stands, to this lead on LinkedIn.
+   *
+   * Only ever called from the confirmation button, and it checks that for itself rather than trusting
+   * the caller: `armed` must already name this conversation. The text is passed straight through — no
+   * signature, no template, no tidying — because the point of a human in the loop is that what was
+   * read is what was sent.
+   *
+   * On success the message is appended locally rather than waiting for a sync. The lead's thread
+   * showing nothing after a successful send is what makes somebody press the button again.
+   */
+  const sendReply = async () => {
+    const conversationId = current.id;
+    const message = aiDraft.trim();
+    if (sending || conversationId === "empty" || armed !== conversationId || !message) return;
+    setSending(true);
+    setSendError("");
+    const response = await fetch("/api/conversations/reply", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ conversationId, message, confirm: "send" }),
+    }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    if (response?.ok && payload?.ok) {
+      const sentAt = String(payload.sentAt ?? new Date().toISOString());
+      setLeads((prev) =>
+        prev.map((lead) =>
+          lead.id === conversationId
+            ? {
+                ...lead,
+                messages: [
+                  ...lead.messages,
+                  { id: `sent-${sentAt}`, body: message, direction: "outbound", sentAt, authorName: lead.senderName },
+                ],
+                lastMessageAt: sentAt,
+                preview: message,
+              }
+            : lead,
+        ),
+      );
+      setAiDraft("");
+      setArmed("");
+      setComposeAnyway(false);
+      showToast(`Reply sent to ${current.name}.`);
+    } else {
+      setSendError(String(payload?.error ?? "That reply could not be sent."));
+      // Disarmed on failure too. Whatever went wrong, the next attempt is a fresh decision.
+      setArmed("");
+    }
+    setSending(false);
   };
   // Sentiment is scored once, when the reply lands, and then never revisited — which is the right
   // default until the classification rules change, at which point the stored verdict is an old
@@ -2263,21 +2335,52 @@ export function InboxPage() {
                     ) : (
                       <textarea
                         value={aiDraft}
-                        onChange={(event) => setAiDraft(event.target.value)}
+                        onChange={(event) => {
+                          setAiDraft(event.target.value);
+                          // Editing the draft withdraws the confirmation. What was about to be sent is
+                          // no longer what is written, and the reader has not agreed to the new text.
+                          setArmed("");
+                        }}
                         placeholder={aiLoading ? "Generating a draft…" : "Anthropic draft will appear here."}
                       />
                     )}
-                    <div className="composer-foot">
-                      <span>Beta safety mode · sending disabled</span>
-                      <button
-                        className="send-button"
-                        type="button"
-                        disabled
-                        title="Sending is disabled during beta testing"
-                      >
-                        Send reply <span>⌘↵</span>
-                      </button>
-                    </div>
+                    {sendError && <p className="composer-senderror">{sendError}</p>}
+                    {/* Two presses, on two different controls, in two different places.
+                        The first press sends nothing at all — it only opens the confirmation below,
+                        which names the lead and the account the message will appear to come from. A
+                        double click on "Send reply" therefore cannot send: the second click lands on a
+                        button that did not exist when the first one went down. There is deliberately no
+                        keyboard shortcut, which is why the old ⌘↵ hint is gone — it was never wired, and
+                        a hint for an unbound key is an invitation to fire something by accident. */}
+                    {armed === current.id ? (
+                      <div className="composer-confirm">
+                        <p>
+                          Send this to <b>{current.name}</b>
+                          {current.company ? ` at ${current.company}` : ""} from <b>{current.senderName}</b>?
+                        </p>
+                        <div className="composer-confirm-tools">
+                          <button type="button" className="send-button is-confirm" onClick={() => void sendReply()} disabled={sending}>
+                            {sending ? "Sending…" : "Yes, send it"}
+                          </button>
+                          <button type="button" className="composer-cancel" onClick={() => setArmed("")} disabled={sending}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="composer-foot">
+                        <span>Sent word for word, to this lead on LinkedIn.</span>
+                        <button
+                          className="send-button"
+                          type="button"
+                          onClick={() => setArmed(current.id)}
+                          disabled={sending || !aiDraft.trim() || current.id === "empty"}
+                          title={aiDraft.trim() ? "Review and confirm before this goes out" : "There is nothing written to send"}
+                        >
+                          Send reply
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="thread-refresh-bar">
                     <small className="last-refreshed">

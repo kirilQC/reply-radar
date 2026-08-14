@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 /**
  * The one document a client's brain folder never contains: all of it, at once.
  *
@@ -25,6 +28,7 @@
  * page break is worse than the table it replaced. Headings, tables, bullets and blockquotes are what a
  * browser's print engine handles well, so those are what the instructions ask for.
  */
+import { parseFrame, splitFrames } from "../../shared/anthropic-stream.mjs";
 import { readConfig } from "./app-config";
 
 const MODEL = "claude-sonnet-4-6";
@@ -40,8 +44,28 @@ export const ICP_DOC_PROMPT_KEY = "icp_doc_prompt";
  */
 const MAX_SOURCE = 90_000;
 
-/** Roughly three to five printed pages of prose and tables. */
-const MAX_OUTPUT = 8_000;
+/**
+ * How much is written per request, and how long a request will spend writing.
+ *
+ * ── Why this is not one call ─────────────────────────────────────────────────────────────────────
+ * Three to five printed pages is around eight thousand tokens, which takes a model something like two
+ * minutes to write. A serverless function does not live that long: the ceiling is sixty seconds unless
+ * the account is on a plan that raises it, and asking for `maxDuration = 300` does not buy the time, it
+ * just gets clamped. So the first version of this asked for the whole document in one call and was
+ * killed every single time, several seconds after the button stopped looking like it had been pressed.
+ *
+ * So the document is written across as many requests as it takes, each one continuing where the last
+ * stopped. The continuation is Anthropic's assistant prefill: the text written so far is handed back as
+ * the start of the model's own turn, so it carries straight on from the half-finished sentence rather
+ * than being asked to summarise itself again. That keeps the seams invisible and — the part that matters
+ * — is indifferent to what the prompt says, which it has to be, because the prompt is edited by hand and
+ * cannot be assumed to have any particular number of sections in it.
+ */
+const CHUNK_OUTPUT = 2_600;
+/** Well inside a sixty-second ceiling, leaving room for the request and the reply to travel. */
+const CHUNK_BUDGET_MS = 38_000;
+/** A guard on the loop, not a feature: a document this long means the model is not converging. */
+const MAX_CHUNKS = 8;
 
 export const DEFAULT_ICP_DOC_PROMPT = `You are writing the ideal customer profile document for one client of a B2B outbound growth agency. You will be given every file the agency holds on that client — the brief, the ICP notes, personas, tone of voice, engagement rules, call notes, CRM exports, whatever exists. Some of it will be contradictory, out of date or half-written.
 
@@ -109,7 +133,10 @@ export function assembleSources(sources: IcpSource[], budget = MAX_SOURCE) {
 }
 
 /**
- * Writes the document.
+ * Writes as much of the document as fits in one request, streaming it out as it arrives.
+ *
+ * `sofar` is the document as it stands; pass `""` to begin. `done` says whether the model finished of
+ * its own accord — when it is false the caller comes back with the returned markdown as the new `sofar`.
  *
  * `temperature: 0.2` rather than the flat 0 the layout renderer uses. That one is a transformation of a
  * document into a better-shaped copy of itself, where two different answers would both be wrong. This
@@ -119,41 +146,91 @@ export async function writeIcpDoc({
   label,
   sources,
   prompt,
+  sofar = "",
+  onText,
 }: {
   label: string;
   sources: IcpSource[];
   prompt: string;
-}): Promise<{ markdown: string; model: string; trimmed: string[]; files: number }> {
+  sofar?: string;
+  onText?: (text: string) => void;
+}): Promise<{ markdown: string; done: boolean; model: string; trimmed: string[]; files: number }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured, so the document cannot be written.");
 
   const { transcript, trimmed } = assembleSources(sources);
   if (!transcript) throw new Error(`There is nothing written about ${label} in the brain to build a document from.`);
 
+  const messages: { role: "user" | "assistant"; content: string }[] = [
+    { role: "user", content: `Client: ${label}\n\nEvery file the brain holds on them follows.\n\n---\n\n${transcript}` },
+  ];
+  // Anthropic rejects a prefilled turn that ends in whitespace, and the continuation has to resume
+  // mid-sentence, so the trailing newline a chunk usually ends on is trimmed and handed back as-is.
+  const written = sofar.trimEnd();
+  if (written) messages.push({ role: "assistant", content: written });
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: MAX_OUTPUT,
+      max_tokens: CHUNK_OUTPUT,
       temperature: 0.2,
       system: prompt,
-      messages: [{ role: "user", content: `Client: ${label}\n\nEvery file the brain holds on them follows.\n\n---\n\n${transcript}` }],
+      messages,
+      stream: true,
     }),
-    signal: AbortSignal.timeout(240_000),
+    signal: AbortSignal.timeout(CHUNK_BUDGET_MS + 10_000),
   });
-  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
+
+  if (!response.ok || !response.body) {
+    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     const error = (payload.error && typeof payload.error === "object" ? (payload.error as Record<string, unknown>) : {}) as Record<string, unknown>;
     throw new Error(String(error.message ?? `The model returned ${response.status}.`));
   }
-  const blocks = Array.isArray(payload.content) ? (payload.content as Record<string, unknown>[]) : [];
-  const markdown = blocks
-    .filter((block) => block.type === "text")
-    .map((block) => String(block.text ?? ""))
-    .join("")
-    .trim();
-  if (!markdown) throw new Error("The model returned nothing to show.");
 
-  return { markdown, model: MODEL, trimmed, files: sources.length };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const started = Date.now();
+  let buffer = "";
+  let fresh = "";
+  let stop = "";
+  reading: for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const { frames, rest } = splitFrames(buffer) as { frames: string[]; rest: string };
+    buffer = rest;
+    for (const frame of frames) {
+      const event = parseFrame(frame) as Record<string, unknown> | null;
+      if (!event) continue;
+      if (event.type === "content_block_delta") {
+        const delta = (event.delta ?? {}) as Record<string, unknown>;
+        if (delta.type === "text_delta") {
+          const text = String(delta.text ?? "");
+          fresh += text;
+          onText?.(text);
+        }
+      } else if (event.type === "message_delta") {
+        const delta = (event.delta ?? {}) as Record<string, unknown>;
+        stop = String(delta.stop_reason ?? "");
+      }
+    }
+    // Stopping on our own clock rather than the platform's. Everything streamed so far is kept and
+    // continued next request, where being killed mid-write would have lost the whole document.
+    if (Date.now() - started > CHUNK_BUDGET_MS) {
+      await reader.cancel().catch(() => {});
+      break reading;
+    }
+  }
+
+  const markdown = `${written}${fresh}`;
+  if (!markdown.trim()) throw new Error("The model returned nothing to show.");
+  // `end_turn` is the only reason that means finished. `max_tokens` and a cancelled read both mean
+  // there is more to write, and an empty chunk means the model had nothing left to add anyway.
+  const done = stop === "end_turn" || stop === "stop_sequence" || !fresh.trim();
+  return { markdown, done, model: MODEL, trimmed, files: sources.length };
 }
+
+/** How many continuations the route is willing to make before it stops asking. */
+export const ICP_MAX_CHUNKS = MAX_CHUNKS;

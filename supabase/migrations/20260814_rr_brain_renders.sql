@@ -1,3 +1,6 @@
+-- Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+-- Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 -- Reply Radar: the readable layouts of QC Brain documents.
 --
 -- The brain's documents are markdown written for a text editor, and the app asks a model to lay one

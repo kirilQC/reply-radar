@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 /**
  * Report templates: the sections a report contains, and the prompt Claude follows to write it.
  *
@@ -34,6 +37,7 @@ export type SectionId =
   | "reply-timing"
   | "sample-replies"
   | "what-we-did"
+  | "deal-progress"
   | "priorities"
   | "warm-close";
 
@@ -50,6 +54,7 @@ export const WRITTEN_SECTIONS = [
   "recap",
   "booked-meetings",
   "what-we-did",
+  "deal-progress",
   "priorities",
   "warm-close",
 ] as const;
@@ -84,6 +89,20 @@ export const WRITTEN_SECTION_PROMPTS: Record<WrittenSectionId, { label: string; 
   "booked-meetings": {
     label: "Booked meetings",
     placeholder: "Who is on the calendar, when, and with whom. One line each.",
+  },
+  /**
+   * What happened to the meetings we booked before this week.
+   *
+   * Every other section here describes activity: replies received, meetings set, work done. None of them
+   * answers the question a client actually asks in the third month, which is whether any of it turned
+   * into revenue — a deal moving from a first call to a proposal is the only evidence that the top of
+   * the funnel is worth paying for. It lives in the client's CRM and in the account manager's head, so
+   * like everything else in this list it is asked for rather than computed.
+   */
+  "deal-progress": {
+    label: "Deal progress",
+    placeholder:
+      "Where the opportunities we sourced now stand — moved to proposal, gone quiet, signed, lost. One line each, with the company named.",
   },
   priorities: {
     label: "Priorities for next week",
@@ -136,6 +155,11 @@ export const SECTIONS: SectionDef[] = [
   { id: "reply-timing", label: "Reply timing", blurb: "Hour-of-day heatmap in client's timezone" },
   { id: "sample-replies", label: "Sample positive replies", blurb: "Six verbatim positive replies for evidence" },
   { id: "what-we-did", label: "What we did this week", blurb: "Your own list of the work done" },
+  {
+    id: "deal-progress",
+    label: "Deal progress",
+    blurb: "Where the deals we sourced now stand — your own list, since it lives in their CRM",
+  },
   { id: "priorities", label: "Priorities for next week", blurb: "Your own list of what happens next" },
   { id: "warm-close", label: "Warm close", blurb: "Your own sign-off" },
 ];
@@ -417,7 +441,7 @@ available. The one exception is when it was not: then, and only then, return a s
 export const BUILT_IN_TEMPLATES: ReportTemplate[] = [
   {
     id: "weekly-recap",
-    name: "Tarsi's EOW Report Tempalte",
+    name: "Tarsi's EOW Report Template",
     summary: "The Friday EOW email — recap, active campaigns, priorities. Modelled on the recaps that land.",
     defaultPeriod: "weekly",
     // This one is a mail, not a deck. The sections still exist behind it for anyone who wants the PDF.

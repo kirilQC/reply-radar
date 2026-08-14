@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 const KNOWN_CREDENTIALS = new Set(
   [
     "CISSP", "CISA", "CPA", "PHD", "MD", "MBA", "PMP", "CSM", "CISM",

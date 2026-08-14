@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 import { defineConfig, globalIgnores } from "eslint/config";
 import eslint from "@eslint/js";
 import next from "@next/eslint-plugin-next";

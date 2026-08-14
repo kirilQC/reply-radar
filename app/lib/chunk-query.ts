@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 /**
  * PostgREST filters live in the URL, so `id=in.(...)` grows with the number of ids and
  * eventually returns a 414 that takes the whole endpoint down. Batch the ids instead.

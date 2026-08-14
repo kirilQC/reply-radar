@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../lib/person-name";
 import { queryByIds } from "../../lib/chunk-query";

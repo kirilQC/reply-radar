@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 import { after, NextResponse } from "next/server";
 import { ingestHeyReachWebhook } from "../../../../../lib/heyreach-ingestion";
 import { isHeyReachValidationPayload } from "../../../../../lib/heyreach-conversation";

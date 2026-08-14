@@ -1,3 +1,6 @@
+/* Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+   Reply Radar — proprietary. Not licensed for redistribution or resale. */
+
 /* Minor presentation overrides kept separate so future visual adjustments stay easy to iterate. */
 .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .metrics-section{grid-template-columns:repeat(var(--metric-count,3),minmax(0,1fr));width:100%}.metric-picker-heading{display:flex;justify-content:space-between;align-items:center;margin:14px 0 2px;padding-top:12px;border-top:1px solid var(--border-soft)}.metric-picker-heading strong{font-size:10px}.metric-picker-heading small{color:var(--muted-2);font-size:9px}.metric-picker{max-height:190px;overflow:auto}

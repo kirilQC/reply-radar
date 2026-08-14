@@ -1,0 +1,12 @@
+Reply Radar
+Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+
+Copyright (c) Kiril Ivlev. All rights reserved.
+
+This software and its source code are proprietary. No licence is granted to copy,
+modify, distribute, sublicense, sell, host or otherwise make use of any part of it,
+in original or derived form, without the express written permission of the author.
+
+Every source file in this repository carries the same authorship line in its first
+two lines. `npm run watermark:check` verifies that none is missing. Their removal
+does not transfer ownership of anything.

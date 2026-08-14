@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 /**
  * The client's ICP document, written from their whole folder.
  *
@@ -12,17 +15,29 @@
  */
 import { NextResponse } from "next/server";
 import { brainConfigured, brainFiles, brainTree } from "../../../lib/brain";
-import { icpDocPrompt, writeIcpDoc } from "../../../lib/brain-icp";
+import { ICP_MAX_CHUNKS, icpDocPrompt, writeIcpDoc } from "../../../lib/brain-icp";
 import { workspacesByFolder, type BrainWorkspace } from "../../../lib/brain-workspaces";
 import { clientLabel, clientSkeleton, fileKind } from "../../../../shared/brain-structure.mjs";
 
-export const maxDuration = 300;
+/**
+ * Sixty, not three hundred. A plan that does not allow a longer function does not fail the request, it
+ * clamps the ceiling and kills the work at sixty seconds — which is exactly what was happening, and is
+ * why the button appeared to do nothing at all. The writing is chunked to fit well inside this, and the
+ * page comes back for the rest.
+ */
+export const maxDuration = 60;
 
 type Skeleton = { client: string; label: string; docs: { found: string; present: boolean }[]; extras: string[] };
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const client = typeof body.client === "string" ? body.client.trim() : "";
+  /** The document as it stands. Empty on the first request, and the model's own text after that. */
+  const sofar = typeof body.sofar === "string" ? body.sofar : "";
+  const chunk = Number.isFinite(Number(body.chunk)) ? Math.max(0, Math.floor(Number(body.chunk))) : 0;
+  if (chunk >= ICP_MAX_CHUNKS) {
+    return NextResponse.json({ ok: false, error: "That document did not finish in a reasonable number of passes." }, { status: 400 });
+  }
 
   if (!client) return NextResponse.json({ ok: false, error: "No client was asked for." }, { status: 400 });
   if (client.includes("/") || client.includes("..")) {
@@ -53,8 +68,18 @@ export async function POST(request: Request) {
     const sources = wanted.filter((path) => byPath.has(path)).map((path) => ({ path, text: byPath.get(path) ?? "" }));
 
     const label = linked.get(skeleton.client)?.name || skeleton.label || String(clientLabel(client));
-    const written = await writeIcpDoc({ label, sources, prompt });
-    return NextResponse.json({ ok: true, client: skeleton.client, label, ...written, sources: sources.map((source) => source.path) });
+    const written = await writeIcpDoc({ label, sources, prompt, sofar });
+    return NextResponse.json({
+      ok: true,
+      client: skeleton.client,
+      label,
+      ...written,
+      // How many more times the page may come back before it should stop asking. Counted here so the
+      // limit lives with the thing that knows what a request costs.
+      chunk: chunk + 1,
+      more: !written.done && chunk + 1 < ICP_MAX_CHUNKS,
+      sources: sources.map((source) => source.path),
+    });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "That document could not be written." },

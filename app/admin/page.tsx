@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages, jsx-a11y/label-has-associated-control, react/no-unescaped-entities, react-hooks/set-state-in-effect */
 
@@ -899,8 +902,16 @@ function ReleaseHistory() {
         <div>
           <h2>Release history</h2>
           {/* The count is every commit on the branch, not the length of the list below it — the list
-              is one page of the most recent, and saying "5 changes" would undersell the project. */}
-          <p>{total ? `${total.toLocaleString()} change${total === 1 ? "" : "s"} shipped.` : "Every change to Reply Radar, newest first."}</p>
+              is one page of the most recent, and saying "5 changes" would undersell the project. It is
+              set as a figure rather than a sentence because it is the one number on this panel worth
+              reading, and in body copy it was the same size as the word "shipped" beside it. */}
+          {total ? (
+            <p className="release-count">
+              <b>{total.toLocaleString()}</b> change{total === 1 ? "" : "s"} shipped
+            </p>
+          ) : (
+            <p>Every change to Reply Radar, newest first.</p>
+          )}
         </div>
         <a className="filter-button" href={repoUrl} target="_blank" rel="noreferrer">View the repo</a>
       </div>
@@ -1086,7 +1097,6 @@ function FeedbackView() {
           {sent && <p className="feedback-sent" role="status">Thanks — that landed.</p>}
         </div>
       </section>
-      <ReleaseHistory />
       <section className="admin-panel">
         <div className="panel-heading">
           <div><h2>Submitted feedback</h2><p>{items.length} item{items.length === 1 ? "" : "s"}. Move each one along as you work through it.</p></div>
@@ -1177,6 +1187,10 @@ function FeedbackView() {
           ))}
         </div>
       </section>
+      {/* Below the reports rather than above them. Somebody opening this tab came to file something or
+          to check on what they filed; what shipped is the answer to "was it fixed", which is a question
+          you only have after reading the item. */}
+      <ReleaseHistory />
     </div>
   );
 }

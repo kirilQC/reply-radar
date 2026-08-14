@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 import { createHash } from "node:crypto";
 import { NEAR_DUPLICATE_MS, directionFor, extractMessageRows, messageKey, syntheticMessageId } from "../../shared/message-identity.mjs";
 

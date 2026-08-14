@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 import { conversationFromWebhook, fetchFullConversation, messageKey, type ConversationMessage, type JsonObject } from "./heyreach-conversation";
 import { enrichLeadWithAiArk } from "./ai-ark-enrichment";
 import { isAiArkEnrichmentEnabled, leadRollup, mergeLeadAttributions } from "./lead-identity";
