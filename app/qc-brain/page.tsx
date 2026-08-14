@@ -241,7 +241,12 @@ export default function QcBrainPage() {
 
           {error && <p className="brain-error">{error}</p>}
 
-          {searchOpen ? (
+          {/*
+            When the index failed and nothing arrived, the error is the whole screen. Rendering the
+            body underneath it says "no clients found in the repository", which is a different and
+            wrong claim — the repository was never reached.
+          */}
+          {error && !clients.length ? null : searchOpen ? (
             <Results
               hits={hits}
               searching={searching}

@@ -37,7 +37,8 @@ export async function GET(request: Request) {
       {
         ok: false,
         repoUrl: BRAIN_URL,
-        error: "The QC Brain is not connected yet. Add BRAIN_GITHUB_TOKEN in Vercel — a GitHub token with read access to the repo.",
+        error:
+          "The QC Brain is not connected yet. Add BRAIN_GITHUB_TOKEN in Vercel — a GitHub token with Contents and Pull requests access to the repo — and then redeploy, because Vercel only gives a new variable to a new deployment.",
       },
       { status: 503 },
     );
