@@ -306,6 +306,43 @@ page back down if the reader has scrolled up.
   threaded as `onExport` plus a numeric `exportKey` rather than a closure per message, deliberately:
   a fresh arrow function per render would defeat the memo above and reintroduce the lag it shipped
   beside.
+- **The memo boundary that actually mattered is the table row.** After two failed attempts the third
+  started with a measurement instead of a hypothesis, and it disproved both earlier ones: on a
+  200-row answer `splitSettled` settled **68 characters and left 28,642 in the tail**, because a
+  markdown table contains no blank line and the split has nothing to cut at. Long lists are the
+  answers this feature exists to produce, so the boundary had to go lower. Each row and each list
+  item now carries the raw line it was parsed from as a memo key and parses its own cells, turning a
+  frame from re-diffing every cell into one string comparison per row. `Turn` is memoised for the
+  same reason at the other end of the scale — the tenth question was redrawing the nine answers above
+  it sixty times a second, which is why the tab got slower the longer it was used.
+- **The follow-the-tail scroll is throttled to roughly six times a second, not once per frame.**
+  Reading `scrollHeight` forces the layout React has just invalidated to be recomputed synchronously
+  and `scrollIntoView` invalidates it again — a full-page reflow per frame, on a document holding a
+  growing table. The layout cost was the same order as the render cost it was chasing.
+- **The page vetoes which download buttons an answer may draw, not the model.** Two things are
+  invisible from inside the model's own output: whether its prose actually contains a grid — a CSV
+  holding the question and one sentence of judgement is a file nobody wanted — and whether a real
+  file was already streamed down beside the answer, which produced a second, worse *Download CSV*
+  next to the true one, offering to rebuild a lead list out of prose. `answerHasRows` and the
+  presence of delivered files decide it, passed down as a comma-joined **string** so that the prop
+  itself cannot break the memo.
+
+**The running commentary is interleaved with the lookups, not concatenated onto the answer.** A
+question needing four lookups is four round trips and the model writes a sentence before each one.
+Those used to be appended to the same answer buffer, which produced two failures at once: the
+sentences ran together with no space where one turn ended and the next began — `…find the right
+one!Found it —` — and a stack of lookups sat above a paragraph trying to introduce them one at a
+time. Each sentence is now closed into a `note` entry the moment a tool call starts, so it sits
+directly above the lookup it explains, and the missing space is fixed as a consequence of the
+structure rather than by patching whitespace. The system prompt asks for one short sentence before
+each round of calls, and for the answer itself only after the last one.
+
+**A delivered list is filtered by re-exporting it, never by editing the file.** "Just the CTOs from
+that list" was answered with "I can't filter a file I've already given you", which was true and
+useless. `heyreach_export_list` takes `titleContains`, `companyContains` and `nameContains`, re-fetches
+from HeyReach, filters server-side and delivers a second file — so the rows still never touch the
+model. An empty result reports how many rows were searched and says job titles are free text, rather
+than implying nobody matches.
 
 **A lead list exported as CSV must never pass through the model.** `heyreach_export_list` builds the
 file on the server and returns it beside the tool result under a `__file` key that `takeFile` strips

@@ -29,8 +29,11 @@ const iconPaths: Record<string, string> = {
   settings: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7",
   database: "M5 5c0-2 14-2 14 0v14c0 2-14 2-14 0z M5 5c0 2 14 2 14 0 M5 12c0 2 14 2 14 0",
   brain: "M12 5a3 3 0 0 0-3 3 2.5 2.5 0 0 0-1 4.8V16a3 3 0 0 0 4 2.8 3 3 0 0 0 4-2.8v-3.2A2.5 2.5 0 0 0 15 8a3 3 0 0 0-3-3 M12 5v14",
-  // A speech bubble: the tab is a chat box whatever it is called.
-  mcp: "M21 12a8 8 0 0 1-8 8H8l-4 3v-5.2A8 8 0 0 1 13 4a8 8 0 0 1 8 8 M9 12h.01 M13 12h.01 M17 12h.01",
+  // A sparkle. This was a speech bubble with three dots in it, which was wrong twice over: the arcs
+  // never closed cleanly against the tail so it read as a lopsided blob, and a chat bubble beside an
+  // Inbox tab says "messages" rather than "ask this anything". The sparkle is the one glyph everyone
+  // already reads as an assistant, and nothing else in the rail is round-and-pointed.
+  mcp: "M11 4c0 3.9 3.1 7 7 7-3.9 0-7 3.1-7 7 0-3.9-3.1-7-7-7 3.9 0 7-3.1 7-7z M19 15c0 1.7 1.3 3 3 3-1.7 0-3 1.3-3 3 0-1.7-1.3-3-3-3 1.7 0 3-1.3 3-3z",
 };
 function SidebarIcon({ name }: { name: string }) {
   return (

@@ -12,7 +12,12 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import { parseBlocks as parse, splitSettled as split } from "../../shared/markdown-blocks.mjs";
+import {
+  cells as splitCells,
+  parseBlocks as parse,
+  parseInline as inline,
+  splitSettled as split,
+} from "../../shared/markdown-blocks.mjs";
 
 export type Span =
   | { kind: "text" | "bold" | "italic" | "code"; text: string }
@@ -30,8 +35,8 @@ export type Block =
   | { kind: "heading"; level: number; spans: Span[] }
   | { kind: "paragraph"; spans: Span[] }
   | { kind: "callout"; spans: Span[] }
-  | { kind: "list"; ordered: boolean; items: Array<{ depth: number; spans: Span[] }> }
-  | { kind: "table"; head: Span[][]; rows: Span[][][] }
+  | { kind: "list"; ordered: boolean; items: Array<{ depth: number; spans: Span[]; source: string }> }
+  | { kind: "table"; head: Span[][]; rows: Span[][][]; sources: string[] }
   | { kind: "code"; language: string; text: string; closed: boolean }
   | {
       kind: "chart";
@@ -53,7 +58,15 @@ export type Block =
  * per render would defeat the memo below, which is the whole reason a long answer types smoothly.
  */
 export type ExportHandler = (key: number, format: string) => void;
-type Wiring = { onExport?: ExportHandler; exportKey?: number };
+/**
+ * `offer` is the formats this particular answer can honestly produce, comma-joined.
+ *
+ * A string rather than an array so that passing it does not create a new object every render and
+ * defeat the memo. The model asks for what it thinks is useful; the page knows what is actually
+ * behind the answer — whether it contains any rows, and whether a real file was already delivered
+ * alongside it — and that veto is applied here.
+ */
+type Wiring = { onExport?: ExportHandler; exportKey?: number; offer?: string };
 
 /**
  * The shape is asserted once, here, because the parser is plain `.mjs` and infers as `any[]`.
@@ -62,6 +75,8 @@ type Wiring = { onExport?: ExportHandler; exportKey?: number };
  */
 const parseBlocks = parse as (markdown: string) => Block[];
 const splitSettled = split as (markdown: string) => { settled: string; tail: string };
+const cells = splitCells as (line: string) => string[];
+const parseInline = inline as (line: string) => Span[];
 
 function Spans({ spans }: { spans: Span[] }) {
   return (
@@ -82,6 +97,46 @@ function Spans({ spans }: { spans: Span[] }) {
     </>
   );
 }
+
+/**
+ * One table row, and one list item, each memoised on the single line of markdown it came from.
+ *
+ * This is where the streaming lag actually lived, and it is worth being precise about why, because two
+ * earlier attempts missed it. Parsing is not the cost — a 200-row table parses in 0.4ms, so even at
+ * sixty frames a second the parser accounts for about 2% of a core. The cost is React re-diffing the
+ * output: 200 rows of six columns is roughly 3,600 elements, and every one of them was being walked on
+ * every frame while the table was still growing.
+ *
+ * The settled/tail split above cannot help here, which is the part that was missed. It cuts at a blank
+ * line, and a markdown table contains none — so for the answers this feature exists to produce, a
+ * long ranked list, the entire table lands in the "still arriving" half and none of it is ever
+ * treated as finished. Measured on a 200-row table: 68 characters settled, 28,642 in the tail.
+ *
+ * So the boundary has to be the row. Each one takes a string that stops changing the moment the next
+ * row starts, which turns a frame from 3,600 element diffs into 200 string comparisons. It parses its
+ * own cells rather than being handed them, so that no work is done for a row that has not changed.
+ */
+const Row = memo(function Row({ source }: { source: string }) {
+  const parsed = useMemo(() => cells(source).map(parseInline), [source]);
+  return (
+    <tr>
+      {parsed.map((cell, index) => (
+        <td key={index}>
+          <Spans spans={cell} />
+        </td>
+      ))}
+    </tr>
+  );
+});
+
+const Item = memo(function Item({ source, depth }: { source: string; depth: number }) {
+  const parsed = useMemo(() => parseInline(source), [source]);
+  return (
+    <li data-depth={depth}>
+      <Spans spans={parsed} />
+    </li>
+  );
+});
 
 /** A fraction as a CSS length. Kept off zero so a real but tiny value still shows something. */
 const track = (fraction: number) => `${fraction > 0 ? Math.max(fraction * 100, 1.5) : 0}%`;
@@ -156,15 +211,17 @@ function Chart({ block }: { block: Extract<Block, { kind: "chart" }> }) {
 
 const FORMAT_LABEL: Record<string, string> = { csv: "Download CSV", pdf: "Download PDF" };
 
-function Rendered({ block, live, onExport, exportKey }: { block: Block; live: boolean } & Wiring) {
+function Rendered({ block, live, onExport, exportKey, offer }: { block: Block; live: boolean } & Wiring) {
   if (block.kind === "chart") return <Chart block={block} />;
   if (block.kind === "export") {
     // Nothing to click when there is no handler — an answer printed to PDF or copied out should not
     // carry a dead button into the file.
     if (!onExport || exportKey === undefined) return null;
+    const allowed = block.formats.filter((format) => (offer ?? "csv,pdf").split(",").includes(format));
+    if (!allowed.length) return null;
     return (
       <div className="md-export print-hide">
-        {block.formats.map((format) => (
+        {allowed.map((format) => (
           <button key={format} type="button" onClick={() => onExport(exportKey, format)}>
             {FORMAT_LABEL[format] ?? format.toUpperCase()}
           </button>
@@ -220,9 +277,7 @@ function Rendered({ block, live, onExport, exportKey }: { block: Block; live: bo
     return (
       <Tag>
         {block.items.map((item, index) => (
-          <li key={index} data-depth={item.depth}>
-            <Spans spans={item.spans} />
-          </li>
+          <Item key={index} source={item.source} depth={item.depth} />
         ))}
       </Tag>
     );
@@ -242,14 +297,8 @@ function Rendered({ block, live, onExport, exportKey }: { block: Block; live: bo
             </tr>
           </thead>
           <tbody>
-            {block.rows.map((cells, rowIndex) => (
-              <tr key={rowIndex}>
-                {cells.map((cell, index) => (
-                  <td key={index}>
-                    <Spans spans={cell} />
-                  </td>
-                ))}
-              </tr>
+            {block.sources.map((source, rowIndex) => (
+              <Row key={rowIndex} source={source} />
             ))}
           </tbody>
         </table>
@@ -272,12 +321,12 @@ function Rendered({ block, live, onExport, exportKey }: { block: Block; live: bo
  * Returning a fragment rather than a wrapper keeps every block a direct child of `.md`, which the
  * first-child and last-child margin rules depend on.
  */
-const Blocks = memo(function Blocks({ markdown, live, onExport, exportKey }: { markdown: string; live: boolean } & Wiring) {
+const Blocks = memo(function Blocks({ markdown, live, onExport, exportKey, offer }: { markdown: string; live: boolean } & Wiring) {
   const blocks = useMemo(() => parseBlocks(markdown), [markdown]);
   return (
     <>
       {blocks.map((block, index) => (
-        <Rendered block={block} live={live} onExport={onExport} exportKey={exportKey} key={index} />
+        <Rendered block={block} live={live} onExport={onExport} exportKey={exportKey} offer={offer} key={index} />
       ))}
     </>
   );
@@ -286,16 +335,15 @@ const Blocks = memo(function Blocks({ markdown, live, onExport, exportKey }: { m
 /**
  * `live` means the turn is still streaming, which changes two things.
  *
- * The visible one is how an unfinished block is shown. The one that matters more is that a streaming
- * answer is split at the last blank line and rendered as two runs, because the cost of typing an
- * answer out is not parsing it — it is React re-diffing everything already on screen sixty times a
- * second. A finished forty-row table is a thousand-odd fibers, and re-checking all of them on every
- * frame is what made long answers crawl while short ones felt fine.
+ * The visible one is how an unfinished block is shown. The other is that a streaming answer is split
+ * at the last blank line and rendered as two runs, because the cost of typing an answer out is not
+ * parsing it — it is React re-diffing everything already on screen sixty times a second.
  *
  * Splitting turns that into a bail-out: the settled run's only prop is a string that does not change
- * between blank lines, so React skips it entirely and each frame only touches the paragraph or the
- * handful of rows still being written. The settled run re-renders once per completed block instead of
- * once per frame.
+ * between blank lines, so React skips it entirely. It is worth being clear about what this does and
+ * does not buy, though. It settles prose. It does nothing for a table, which has no blank line in it
+ * and is exactly the shape a long answer here takes — that case is carried by the per-row memo above,
+ * and this split is what keeps the paragraphs around it from being redrawn too.
  *
  * The outer memo covers the same problem across turns: the page re-renders on every painted frame, so
  * without it, asking a tenth question would re-parse the previous nine answers for as long as the
@@ -306,6 +354,7 @@ const Markdown = memo(function Markdown({
   live = false,
   onExport,
   exportKey,
+  offer,
 }: { children: string; live?: boolean } & Wiring) {
   const { settled, tail } = useMemo(
     () => (live ? splitSettled(children) : { settled: "", tail: children }),
@@ -314,8 +363,8 @@ const Markdown = memo(function Markdown({
   return (
     <div className="md">
       {/* Never live: `splitSettled` will not cut inside an open fence, so nothing here is unfinished. */}
-      {settled ? <Blocks markdown={settled} live={false} onExport={onExport} exportKey={exportKey} /> : null}
-      <Blocks markdown={tail} live={live} onExport={onExport} exportKey={exportKey} />
+      {settled ? <Blocks markdown={settled} live={false} onExport={onExport} exportKey={exportKey} offer={offer} /> : null}
+      <Blocks markdown={tail} live={live} onExport={onExport} exportKey={exportKey} offer={offer} />
     </div>
   );
 });

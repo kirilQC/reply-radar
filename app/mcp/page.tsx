@@ -37,18 +37,31 @@
  * base64 and Anthropic reads them natively, which is far better than anything we could extract here.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import Markdown from "../components/Markdown";
-import { answerToCsv, exportFilename } from "../../shared/answer-export.mjs";
+import { answerHasRows, answerToCsv, exportFilename } from "../../shared/answer-export.mjs";
 // The same wire format the route reads from Anthropic, so the same two helpers parse it.
 import { parseFrame, splitFrames } from "../../shared/anthropic-stream.mjs";
 
-/** One thing the assistant did, in the order it did it. */
+/**
+ * One thing the assistant did, in the order it did it.
+ *
+ * `note` is the part that took a redesign to get right. A question needing four lookups is four
+ * round trips, and the model writes a sentence before each one — "let me pull up Steadywell's lists
+ * first". Those sentences used to be concatenated onto the answer, which produced two bad outcomes at
+ * once: the words ran together without so much as a space where one turn ended and the next began
+ * ("…find the right one!Found it —"), and the running commentary was stranded in a block underneath
+ * a stack of lookups it was supposed to be introducing.
+ *
+ * Keeping them as entries puts each sentence back beside the lookup it explains, in the order it was
+ * written, and the separation falls out for free because a note ends where a tool call begins.
+ */
 type Entry =
   | { kind: "thinking"; text: string }
+  | { kind: "note"; text: string }
   | { kind: "tool"; tool: string; input: Record<string, unknown>; ok: boolean | null; detail: string };
 /** Something the person attached, already base64 so it can be posted as JSON. */
 type Attached = { name: string; mime: string; data: string };
@@ -131,34 +144,165 @@ const elapsed = (seconds: number) =>
  *
  * Thinking is clamped to a few lines while it streams so a long deliberation cannot push the answer
  * off the screen; the full text is there once it is opened.
+ *
+ * Memoised because it is re-rendered on every painted frame of a streaming turn, and the entries it
+ * draws only change when a lookup starts or finishes. The array identity is new each frame, so this
+ * bails on the entries' length and the state of the last one — the only things that can have moved.
  */
-function Timeline({ entries, live }: { entries: Entry[]; live: boolean }) {
-  return (
-    <ol className={`mcp-timeline ${live ? "is-live" : ""}`}>
-      {entries.map((entry, index) => {
-        if (entry.kind === "thinking") {
+const Timeline = memo(
+  function Timeline({ entries, live }: { entries: Entry[]; live: boolean }) {
+    return (
+      <ol className={`mcp-timeline ${live ? "is-live" : ""}`}>
+        {entries.map((entry, index) => {
+          if (entry.kind === "thinking") {
+            return (
+              <li className="mcp-thought" key={index}>
+                <span className="mcp-thought-mark" aria-hidden="true" />
+                <p>{entry.text}</p>
+              </li>
+            );
+          }
+          // The sentence the model wrote on its way to the next lookup. Rendered as markdown because
+          // it is written as markdown — it names campaigns in bold and lists in shorthand.
+          if (entry.kind === "note") {
+            return (
+              <li className="mcp-note" key={index}>
+                <Markdown>{entry.text}</Markdown>
+              </li>
+            );
+          }
+          const state = entry.ok === null ? "running" : entry.ok ? "done" : "failed";
           return (
-            <li className="mcp-thought" key={index}>
-              <span className="mcp-thought-mark" aria-hidden="true" />
-              <p>{entry.text}</p>
+            <li className={`mcp-lookup is-${state}`} key={index}>
+              <span className="mcp-lookup-mark" aria-hidden="true" />
+              <div>
+                <b>{toolLabel(entry.tool)}</b>
+                {toolArgs(entry.input) && <span>{toolArgs(entry.input)}</span>}
+                {entry.ok === false && <i>{entry.detail}</i>}
+              </div>
             </li>
           );
-        }
-        const state = entry.ok === null ? "running" : entry.ok ? "done" : "failed";
-        return (
-          <li className={`mcp-lookup is-${state}`} key={index}>
-            <span className="mcp-lookup-mark" aria-hidden="true" />
-            <div>
-              <b>{toolLabel(entry.tool)}</b>
-              {toolArgs(entry.input) && <span>{toolArgs(entry.input)}</span>}
-              {entry.ok === false && <i>{entry.detail}</i>}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
+        })}
+      </ol>
+    );
+  },
+  (before, after) => before.live === after.live && signature(before.entries) === signature(after.entries),
+);
+
+/**
+ * What about a timeline can still change, as one short string.
+ *
+ * Comparing whole entries would be wrong in a way that is easy to miss: tools run in parallel and
+ * finish in whatever order their APIs answer, so a verdict frequently lands on an entry that is not
+ * the last one. Checking only the newest entry would leave the first of two concurrent lookups
+ * spinning forever. Walking all of them is a few dozen string appends per frame, which is nothing
+ * next to what it saves.
+ */
+const signature = (entries: Entry[]) =>
+  entries.map((entry) => (entry.kind === "tool" ? `t${entry.ok}` : `${entry.kind}${entry.text.length}`)).join("|");
+
+const hasRows = answerHasRows as (answer: string) => boolean;
+
+/**
+ * One finished turn in the transcript.
+ *
+ * Memoised, and this is the largest single part of making a long answer type smoothly. A turn that
+ * has already landed cannot change while the next one streams, but React was re-rendering every one
+ * of them on every painted frame — so the tenth question in a conversation was redrawing the nine
+ * answers above it sixty times a second, and the tab got slower the longer you used it. Everything
+ * this takes is a string, a number or a boolean, or a callback held stable by the page, so the
+ * comparison below is cheap and a settled turn does no work at all.
+ */
+const Turn = memo(function Turn({
+  message,
+  index,
+  asked,
+  open,
+  printing,
+  onToggle,
+  onExport,
+}: {
+  message: Message;
+  index: number;
+  asked: string;
+  open: boolean;
+  printing: boolean;
+  onToggle: (index: number) => void;
+  onExport: (index: number, format: string) => void;
+}) {
+  const lookups = message.entries?.filter((entry) => entry.kind === "tool") ?? [];
+  /**
+   * Which download buttons this answer is allowed to draw.
+   *
+   * The model asks for them by ending an answer with an `export` fence, but it is a poor judge of
+   * two things it cannot see. It does not know whether its own prose actually contains a table — a
+   * CSV holding nothing but the question and one sentence of judgement is a file nobody wanted — and
+   * it does not know that a lead list it exported was streamed down as a real file, so offering to
+   * rebuild that from the answer text produced a second, worse Download CSV button beside the true
+   * one. The page knows both, so the veto lives here.
+   */
+  const offer = useMemo(
+    () => (!message.files?.length && hasRows(message.content) ? "csv,pdf" : "pdf"),
+    [message.content, message.files],
   );
-}
+
+  return (
+    <article
+      className={`mcp-turn mcp-${message.role}${message.failed ? " mcp-failed" : ""}${printing ? " is-printing" : ""}`}
+    >
+      {/* The question rides along in the print output; on screen the bubble above already says it. */}
+      {message.role === "assistant" && <p className="mcp-print-question">{asked}</p>}
+
+      {message.role === "assistant" && lookups.length > 0 && (
+        <div className="mcp-trail print-hide">
+          <button className="mcp-trail-toggle" onClick={() => onToggle(index)}>
+            {lookups.length} lookups
+            {lookups.some((entry) => entry.kind === "tool" && entry.ok === false) && <em> · 1 or more failed</em>}
+            <span aria-hidden="true">{open ? "▴" : "▾"}</span>
+          </button>
+          {open && <Timeline entries={message.entries ?? []} live={false} />}
+        </div>
+      )}
+
+      {message.role === "assistant" ? (
+        <Markdown onExport={onExport} exportKey={index} offer={offer}>
+          {message.content}
+        </Markdown>
+      ) : (
+        <div className="mcp-body">{message.content}</div>
+      )}
+
+      {/* What the person attached, and what a tool built. Both are files hanging off a turn, so they
+          look the same; only the direction differs. */}
+      {message.attached?.length ? (
+        <div className="mcp-files print-hide">
+          {message.attached.map((file) => (
+            <span className="mcp-file" key={file.name}>
+              <b>{file.name}</b>
+              <small>{sizeOf(file.data.length * 0.75)}</small>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {message.files?.length ? (
+        <div className="mcp-files print-hide">
+          {message.files.map((file) => (
+            <button
+              className="mcp-file is-download"
+              key={file.name}
+              type="button"
+              onClick={() => save(file.name, file.mime, file.content)}
+            >
+              <b>{file.name}</b>
+              <small>{sizeOf(file.content.length)} · download</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+});
 
 export default function McpPage() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -196,8 +340,21 @@ export default function McpPage() {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
+  /**
+   * Following the tail, at most a few times a second.
+   *
+   * This ran once per painted frame, and both halves of it are expensive in the same way: reading
+   * `scrollHeight` forces the layout React has just invalidated to be recomputed synchronously, and
+   * `scrollIntoView` invalidates it again. Sixty of those a second, on a document holding a growing
+   * table, is a reflow of the whole page per frame — the layout cost was as large as the render cost
+   * it was chasing. Six a second is indistinguishable to read and leaves the frame budget alone.
+   */
+  const followedAt = useRef(0);
   useEffect(() => {
-    if (!thinking || !nearBottom()) return;
+    if (!thinking) return;
+    if (Date.now() - followedAt.current < 160) return;
+    if (!nearBottom()) return;
+    followedAt.current = Date.now();
     endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [live, thinking]);
 
@@ -333,6 +490,13 @@ export default function McpPage() {
             paint();
           } else if (event.type === "tool") {
             openThought = null;
+            // A lookup is starting, so whatever the model has written since the last one is finished:
+            // it becomes a note above this call, and the answer buffer starts again. Without this the
+            // sentences from every round trip were concatenated into one block — running together
+            // without a space where one turn ended and the next began — and sat underneath a stack of
+            // lookups they were each meant to introduce.
+            if (answer.trim()) entries.push({ kind: "note", text: answer.trim() });
+            answer = "";
             entries.push({
               kind: "tool",
               tool: String(event.tool ?? ""),
@@ -416,6 +580,18 @@ export default function McpPage() {
     }
   };
 
+  /**
+   * Opening and closing one turn's receipts.
+   *
+   * A `useCallback` with no dependencies, reading the previous value rather than closing over it, so
+   * the identity never changes — a new function here would be a new prop on every turn on every
+   * painted frame, which would undo the memo on `Turn` entirely.
+   */
+  const toggleTrail = useCallback(
+    (index: number) => setOpenTrail((current) => (current === index ? null : index)),
+    [],
+  );
+
   /** The question an answer belongs to, for the export header and the filename. */
   const questionFor = (index: number) => {
     for (let step = index - 1; step >= 0; step -= 1) if (messages[step].role === "user") return messages[step].content;
@@ -470,8 +646,14 @@ export default function McpPage() {
           <Crumb trail={[{ label: "MCP" }]} />
           <div className="top-actions">
             {messages.length > 0 && !thinking && (
-              <button className="mcp-reset" onClick={() => { setMessages([]); setOpenTrail(null); }}>
-                New conversation
+              <button
+                className="mcp-reset"
+                type="button"
+                title="New conversation"
+                aria-label="New conversation"
+                onClick={() => { setMessages([]); setOpenTrail(null); }}
+              >
+                <span aria-hidden="true">+</span>
               </button>
             )}
             <GlobalAppearanceControl />
@@ -501,66 +683,16 @@ export default function McpPage() {
           ) : (
             <div className="mcp-thread">
               {messages.map((message, index) => (
-                <article
-                  className={`mcp-turn mcp-${message.role}${message.failed ? " mcp-failed" : ""}${printing === index ? " is-printing" : ""}`}
+                <Turn
                   key={index}
-                >
-                  {/* The question rides along in the print output; on screen the bubble above already says it. */}
-                  {message.role === "assistant" && <p className="mcp-print-question">{questionFor(index)}</p>}
-
-                  {message.role === "assistant" && message.entries && message.entries.length > 0 && (
-                    <div className="mcp-trail print-hide">
-                      <button
-                        className="mcp-trail-toggle"
-                        onClick={() => setOpenTrail(openTrail === index ? null : index)}
-                      >
-                        {message.entries.filter((entry) => entry.kind === "tool").length} lookups
-                        {message.entries.some((entry) => entry.kind === "tool" && entry.ok === false) && (
-                          <em> · 1 or more failed</em>
-                        )}
-                        <span aria-hidden="true">{openTrail === index ? "▴" : "▾"}</span>
-                      </button>
-                      {openTrail === index && <Timeline entries={message.entries} live={false} />}
-                    </div>
-                  )}
-
-                  {message.role === "assistant" ? (
-                    <Markdown onExport={exportAnswer} exportKey={index}>
-                      {message.content}
-                    </Markdown>
-                  ) : (
-                    <div className="mcp-body">{message.content}</div>
-                  )}
-
-                  {/* What the person attached, and what a tool built. Both are files hanging off a
-                      turn, so they look the same; only the direction differs. */}
-                  {message.attached?.length ? (
-                    <div className="mcp-files print-hide">
-                      {message.attached.map((file) => (
-                        <span className="mcp-file" key={file.name}>
-                          <b>{file.name}</b>
-                          <small>{sizeOf(file.data.length * 0.75)}</small>
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {message.files?.length ? (
-                    <div className="mcp-files print-hide">
-                      {message.files.map((file) => (
-                        <button
-                          className="mcp-file is-download"
-                          key={file.name}
-                          type="button"
-                          onClick={() => save(file.name, file.mime, file.content)}
-                        >
-                          <b>{file.name}</b>
-                          <small>{sizeOf(file.content.length)} · download</small>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
+                  message={message}
+                  index={index}
+                  asked={questionFor(index)}
+                  open={openTrail === index}
+                  printing={printing === index}
+                  onToggle={toggleTrail}
+                  onExport={exportAnswer}
+                />
               ))}
 
               {thinking && (
@@ -596,24 +728,9 @@ export default function McpPage() {
               void attach(event.dataTransfer.files);
             }}
           >
-            {(attached.length > 0 || attachNote) && (
-              <div className="mcp-attached">
-                {attached.map((file) => (
-                  <span className="mcp-file" key={file.name}>
-                    <b>{file.name}</b>
-                    <small>{sizeOf(file.data.length * 0.75)}</small>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${file.name}`}
-                      onClick={() => setAttached(attached.filter((held) => held.name !== file.name))}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                {attachNote && <em>{attachNote}</em>}
-              </div>
-            )}
+            {/* Outside the input rather than inside it. Attaching is a different act from typing —
+                it happens before the question, not during it — and a control sitting inside the
+                field's border reads as part of the sentence you are writing. */}
             <label className="mcp-attach" title="Attach a screenshot, PDF or spreadsheet">
               <input
                 type="file"
@@ -625,27 +742,50 @@ export default function McpPage() {
                   event.target.value = "";
                 }}
               />
-              <span aria-hidden="true">+</span>
-              <span className="mcp-attach-label">Attach</span>
+              {/* A paperclip, not a plus: the plus now means a new conversation and one glyph cannot
+                  mean two things on the same screen. */}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20 11.5 12.2 19.3a5 5 0 0 1-7.1-7.1l8.2-8.2a3.4 3.4 0 0 1 4.8 4.8l-8.1 8.1a1.8 1.8 0 0 1-2.5-2.5l7.4-7.4" />
+              </svg>
             </label>
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={question}
-              placeholder="Ask about campaigns, replies, clients, or anyone in the database"
-              onChange={(event) => setQuestion(event.target.value)}
-              // Enter sends; Shift+Enter breaks the line. This is a question box, and the multi-line
-              // case is rare enough that making it the default would cost a keystroke every time.
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void send(question);
-                }
-              }}
-            />
-            <button type="submit" disabled={thinking || (!question.trim() && attached.length === 0)}>
-              {thinking ? "Working" : "Ask"}
-            </button>
+            <div className="mcp-composer-bar">
+              {(attached.length > 0 || attachNote) && (
+                <div className="mcp-attached">
+                  {attached.map((file) => (
+                    <span className="mcp-file" key={file.name}>
+                      <b>{file.name}</b>
+                      <small>{sizeOf(file.data.length * 0.75)}</small>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => setAttached(attached.filter((held) => held.name !== file.name))}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {attachNote && <em>{attachNote}</em>}
+                </div>
+              )}
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={question}
+                placeholder="Ask about campaigns, replies, clients, or anyone in the database"
+                onChange={(event) => setQuestion(event.target.value)}
+                // Enter sends; Shift+Enter breaks the line. This is a question box, and the multi-line
+                // case is rare enough that making it the default would cost a keystroke every time.
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void send(question);
+                  }
+                }}
+              />
+              <button type="submit" disabled={thinking || (!question.trim() && attached.length === 0)}>
+                {thinking ? "Working" : "Ask"}
+              </button>
+            </div>
           </form>
         </main>
       </section>

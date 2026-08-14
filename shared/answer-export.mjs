@@ -72,6 +72,17 @@ function gridOf(block) {
 }
 
 /**
+ * Whether an answer holds anything a spreadsheet could usefully open.
+ *
+ * The prose fallback below is the right behaviour when someone exports an answer that happens to end
+ * in a paragraph, but it is the wrong thing to *offer*: a CSV whose entire content is the question
+ * and one sentence of prose is a file nobody wanted, and one was being offered on answers whose rows
+ * had already been delivered as a real file. So the button is only drawn when there is a grid behind
+ * it, and the fallback stays for the case where the export was asked for anyway.
+ */
+export const answerHasRows = (answer) => parseBlocks(answer).some((block) => gridOf(block) !== null);
+
+/**
  * Builds the CSV for one answer.
  *
  * `question` and `askedAt` are the provenance header. Multiple tables are written one after another

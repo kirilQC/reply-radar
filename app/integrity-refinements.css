@@ -2079,6 +2079,36 @@ a.tag-outline-link:hover {
   -webkit-line-clamp: 4;
   overflow: hidden;
 }
+/* What the model said on its way to the next lookup.
+   This is the fix for an answer arriving as one undifferentiated block. A question needing four
+   lookups is four round trips and the model writes a sentence before each — those used to be
+   concatenated into the final answer, so a stack of lookups sat above a paragraph that was trying to
+   introduce them one at a time, and the sentences ran together without a space between turns.
+   Set in body colour with no marker, because unlike a thought this is addressed to the reader: it is
+   the assistant saying what it is about to do, and the lookup it explains is the next line down. */
+.mcp-note {
+  color: var(--text);
+  font-size: 12px;
+}
+.mcp-note .md {
+  display: grid;
+  gap: 6px;
+}
+.mcp-note .md p,
+.mcp-note .md li {
+  font-size: 12px;
+  line-height: 1.6;
+}
+/* A note is prose, not a finding. Anything heavier than that belongs to the answer, and letting a
+   heading or a chart render mid-timeline would make the working look like the conclusion. */
+.mcp-note .md h1,
+.mcp-note .md h2,
+.mcp-note .md h3,
+.mcp-note .md h4 {
+  font-size: 12px;
+  margin: 0;
+  color: var(--text);
+}
 .mcp-lookup > div {
   display: flex;
   flex-wrap: wrap;
@@ -2614,19 +2644,20 @@ a.tag-outline-link:hover {
   font-style: normal;
 }
 
-/* The attach control is the file input's own label, which is the only way to style one. */
+/* The attach control is the file input's own label, which is the only way to style one. Square and
+   the same height as the box beside it, so the pair reads as one row rather than a button that
+   fell out of the field. */
 .mcp-attach {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
   flex: 0 0 auto;
-  align-self: flex-end;
-  padding: 7px 11px;
+  width: 43px;
+  height: 43px;
   color: var(--muted-2);
-  background: transparent;
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
-  font-size: 11px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
   cursor: pointer;
 }
 .mcp-attach:hover {
@@ -2636,14 +2667,9 @@ a.tag-outline-link:hover {
 .mcp-attach input {
   display: none;
 }
-.mcp-attach span[aria-hidden="true"] {
-  font-size: 14px;
-  line-height: 1;
-}
-@media (max-width: 640px) {
-  .mcp-attach-label {
-    display: none;
-  }
+.mcp-attach svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* The question, printed above its answer. Hidden on screen because the bubble above already says
@@ -2789,19 +2815,28 @@ a.tag-outline-link:hover {
   }
 }
 
+/* The form is now just a row: the attach control on the left with nothing around it, and the input
+   itself in the bordered box beside it. Previously the attach button lived inside that border, which
+   made it look like part of the question being typed. */
 .mcp-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+.mcp-composer-bar {
+  flex: 1;
   display: flex;
   /* Wraps so the attached-files row can claim a full line above the input rather than squeezing it. */
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 9px;
-  margin-bottom: 22px;
   padding: 9px 9px 9px 13px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
 }
-.mcp-composer:focus-within {
+.mcp-composer-bar:focus-within {
   border-color: var(--accent);
 }
 .mcp-composer textarea {
@@ -2825,7 +2860,7 @@ a.tag-outline-link:hover {
 }
 /* Direct child only: the remove control on an attached file is also a button in here, and it is not
    the send button. */
-.mcp-composer > button {
+.mcp-composer-bar > button {
   flex: none;
   height: 31px;
   padding: 0 15px;
@@ -2835,21 +2870,33 @@ a.tag-outline-link:hover {
   font-size: 11px;
   font-weight: 650;
 }
-.mcp-composer > button:disabled {
+.mcp-composer-bar > button:disabled {
   color: var(--muted-2);
   background: var(--panel-2);
   cursor: default;
 }
+/* A "+" rather than the words "New conversation". The action is the single most obvious thing you
+   could want from a chat screen, it sits in a top bar where everything else is an icon, and the
+   sentence was the widest thing in that bar for no return. Accent-filled because it is the only
+   thing up there you can do. */
 .mcp-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
   height: 27px;
-  padding: 0 10px;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 11px;
+  padding: 0;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 50%;
+  font-size: 16px;
+  line-height: 1;
+}
+.mcp-reset span {
+  /* Optically centred: a "+" glyph sits low in its em box in most faces. */
+  margin-top: -1px;
 }
 .mcp-reset:hover {
-  color: var(--text);
-  border-color: var(--muted-2);
+  filter: brightness(1.1);
 }

@@ -68,6 +68,8 @@ const object = (value: unknown): Row =>
 const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.map(object) : []);
 const text = (value: unknown) =>
   typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+/** A list-of-strings argument, tolerating the single string a model sometimes sends instead. */
+const strings = (value: unknown) => (Array.isArray(value) ? value : [value]).map(text).filter(Boolean);
 
 /**
  * Bounds every list a tool can return.
@@ -432,7 +434,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "heyreach_export_list",
     description:
-      "Download one client's HeyReach lead list as a CSV file. Returns everyone on the list with their name, job title, company, location, LinkedIn URL and email where HeyReach has one. Identify the list by listId from heyreach_lists, or by listName and it will be matched. IMPORTANT: the file is built here and delivered to the browser directly — the rows are deliberately not returned to you, so do not attempt to reproduce, summarise row-by-row or re-tabulate them. Report what was exported, how many rows it has, and that it is ready to download. Use this whenever someone asks to export, download or get a list, an audience or a set of leads as a spreadsheet.",
+      "Download one client's HeyReach lead list as a CSV file. Returns everyone on the list with their name, job title, company, location, LinkedIn URL and email where HeyReach has one. Identify the list by listId from heyreach_lists, or by listName and it will be matched. IMPORTANT: the file is built here and delivered to the browser directly — the rows are deliberately not returned to you, so do not attempt to reproduce, summarise row-by-row or re-tabulate them. Report what was exported, how many rows it has, and that it is ready to download. Use this whenever someone asks to export, download or get a list, an audience or a set of leads as a spreadsheet. To narrow a list — a file you already delivered, or a new one — call this again for the same list with titleContains, companyContains or nameContains. That is the ONLY way to filter an exported list, because you never held its rows; it re-fetches from HeyReach, filters there, and delivers a second file. Never tell someone a delivered list cannot be filtered.",
     input_schema: {
       type: "object",
       properties: {
@@ -440,6 +442,22 @@ export const TOOLS: ToolDefinition[] = [
         listId: { type: "string", description: "HeyReach list id, from heyreach_lists." },
         listName: { type: "string", description: "Part of the list's name, if you do not have its id." },
         limit: { type: "integer", description: `How many people, up to ${EXPORT_ROWS}. Defaults to the whole list.` },
+        titleContains: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Keep only people whose job title contains any of these. Titles are free text, so pass every spelling — for chief executives, [\"CEO\", \"Chief Executive\", \"Founder\"]. Ignored for company lists.",
+        },
+        companyContains: {
+          type: "array",
+          items: { type: "string" },
+          description: "Keep only rows whose company name contains any of these.",
+        },
+        nameContains: {
+          type: "array",
+          items: { type: "string" },
+          description: "Keep only rows whose person or company name contains any of these.",
+        },
       },
       required: ["client"],
     },
@@ -832,7 +850,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const head = companies
         ? ["Company", "Industry", "Location", "Employees", "Website", "LinkedIn"]
         : ["Name", "Job title", "Company", "Location", "LinkedIn", "Email"];
-      const grid = page.items.map((row) =>
+      const everyone = page.items.map((row) =>
         companies
           ? [text(row.name) || text(row.companyName), text(row.industry), text(row.location), text(row.companySize), text(row.website), text(row.linkedInUrl) || text(row.profileUrl)]
           : [
@@ -845,20 +863,62 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
             ],
       );
 
+      /**
+       * Narrowing happens here rather than in the answer, and that is the whole point.
+       *
+       * Someone gets a list of 218 and asks to see only the CEOs. The obvious move — filter the file
+       * we just sent — is impossible by design, because the rows were never returned to the model.
+       * The honest alternative is to go back to HeyReach and export a smaller file, which is what
+       * this does. It costs one more request and produces a file with the same provenance as the
+       * first, instead of a table the model typed out from memory it does not have.
+       *
+       * Matching is case-insensitive substring against any of the terms given, the same rule as
+       * search_leads, and for the same reason: a job title is whatever the person typed on LinkedIn.
+       */
+      const filters: Array<{ label: string; column: number; terms: string[] }> = [
+        { label: "title", column: 1, terms: strings(input.titleContains) },
+        { label: "company", column: 2, terms: strings(input.companyContains) },
+        { label: "name", column: 0, terms: strings(input.nameContains) },
+      ].filter((rule) => rule.terms.length > 0);
+
+      const grid = filters.length
+        ? everyone.filter((row) =>
+            filters.every((rule) => {
+              const field = String(row[rule.column] ?? "").toLowerCase();
+              return rule.terms.some((term) => field.includes(term.toLowerCase()));
+            }),
+          )
+        : everyone;
+
+      const narrowed = filters.map((rule) => `${rule.label}: ${rule.terms.join(", ")}`).join("; ");
+      // The filter goes in the filename so a narrowed export does not land in the Downloads folder
+      // looking exactly like the full one it came from.
+      const label = [client.name, chosen.name, filters.flatMap((rule) => rule.terms).join(" ")]
+        .filter(Boolean)
+        .join(" ");
+
+      if (filters.length && !grid.length) {
+        throw new Error(
+          `Nothing on ${chosen.name} matches ${narrowed}. ${everyone.length} rows were searched. Job titles are free text — try more spellings, or ask for the whole list.`,
+        );
+      }
+
       return {
         client: client.name,
         list: chosen.name,
         listId: chosen.id,
         holds: companies ? "companies" : "people",
         onList: chosen.size,
+        searched: everyone.length,
+        filteredBy: narrowed || "nothing — this is the whole list",
         exported: grid.length,
         // Said explicitly, because a list capped at the ceiling looks complete in the file and the
         // person forwarding it has no other way to find out that it is not.
-        complete: grid.length >= chosen.size || grid.length < cap,
+        complete: everyone.length >= chosen.size || everyone.length < cap,
         columns: head,
-        delivered: "The CSV has been sent to the browser and is ready to download beneath your answer. Its rows are not available to you — say what was exported and how many, and do not list the people.",
+        delivered: "The CSV has been sent to the browser and is ready to download beneath your answer. Its rows are not available to you — say what was exported and how many, and do not list the people. Do not add an export block: the file already exists.",
         [FILE_KEY]: {
-          name: exportFilename(`${client.name} ${chosen.name}`, "", "csv"),
+          name: exportFilename(label, "", "csv"),
           mime: "text/csv;charset=utf-8",
           content: rowsToCsv(head, grid),
         } satisfies ToolFile,

@@ -10,7 +10,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseBlocks, parseInline, spansToText, splitSettled } from "../shared/markdown-blocks.mjs";
-import { answerToCsv, csvField, exportFilename } from "../shared/answer-export.mjs";
+import { answerHasRows, answerToCsv, csvField, exportFilename } from "../shared/answer-export.mjs";
 
 /** Verbatim from the MCP tab, answering "Which of Cotool's campaigns has the best reply rate?". */
 const ANSWER = `Filtering out campaigns with very small sample sizes (fewer than 10 conversations started, where rates are statistically noisy), here are the top performers by reply rate:
@@ -206,6 +206,45 @@ test("the two halves always rebuild the answer, whatever the boundary", () => {
     const { settled, tail } = splitSettled(partial);
     assert.equal(settled ? `${settled}\n${tail}` : tail, partial);
   }
+});
+
+/**
+ * The per-row memo key. `splitSettled` cannot help a table — a table contains no blank line, so on a
+ * two-hundred-row answer it settled 68 characters and left 28,000 in the part being re-diffed every
+ * frame. The renderer's boundary is therefore the row, and it needs a value that is stable for a row
+ * that has not changed. These assert that value exists and that it survives the row growing.
+ */
+test("every table row carries the raw line it was parsed from", () => {
+  const [table] = parseBlocks("| Campaign | Rate |\n|---|---|\n| CT001 | 75% |\n| CT002 | 12% |");
+  assert.deepEqual(table.sources, ["| CT001 | 75% |", "| CT002 | 12% |"]);
+  // One per row, and the parsed cells still there for the CSV export to read.
+  assert.equal(table.sources.length, table.rows.length);
+});
+
+test("a row already on screen keeps the same key when the table grows", () => {
+  const head = "| Campaign | Rate |\n|---|---|\n| CT001 | 75% |";
+  const before = parseBlocks(head)[0].sources;
+  const after = parseBlocks(`${head}\n| CT002 | 12% |`)[0].sources;
+  // The whole point: React must be able to see that row one is untouched.
+  assert.equal(after[0], before[0]);
+});
+
+test("every list item carries its own source line", () => {
+  const [list] = parseBlocks("- one\n- two\n- three");
+  assert.deepEqual(list.items.map((item) => item.source), ["one", "two", "three"]);
+});
+
+/**
+ * What decides whether a Download CSV button is drawn at all. The model asks for the button; it is a
+ * poor judge of whether its own answer has anything a spreadsheet could open.
+ */
+test("an answer holds rows only when something in it is actually a grid", () => {
+  assert.equal(answerHasRows("| Campaign | Rate |\n|---|---|\n| CT001 | 75% |"), true);
+  assert.equal(answerHasRows('```chart\n{"chart":"bar","series":[{"label":"CT001","value":12}]}\n```'), true);
+  assert.equal(answerHasRows('```stats\n{"items":[{"label":"Replies","value":"479"}]}\n```'), true);
+  // Prose and bullets still export, but a file containing one sentence is not something to offer.
+  assert.equal(answerHasRows("CT50 is the strongest at meaningful volume.\n\n- and it is holding"), false);
+  assert.equal(answerHasRows(""), false);
 });
 
 test("the filename says what the file is", () => {

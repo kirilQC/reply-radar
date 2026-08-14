@@ -55,8 +55,13 @@ export function parseInline(line) {
   return spans;
 }
 
-/** `| a | b |` → `["a", "b"]`. The outer pipes are optional in GFM, so they are trimmed if present. */
-const cells = (line) =>
+/**
+ * `| a | b |` → `["a", "b"]`. The outer pipes are optional in GFM, so they are trimmed if present.
+ *
+ * Exported because the renderer splits a row lazily, inside a memoised component, rather than reading
+ * the pre-parsed cells — see the `sources` note on the table block below.
+ */
+export const cells = (line) =>
   line
     .trim()
     .replace(/^\|/, "")
@@ -85,6 +90,12 @@ const LIST_ITEM = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
  * The one exception is a fence, which legitimately contains blank lines. A split inside an open
  * ```chart would cut a JSON spec in half and render both halves as garbage, so fences are tracked and
  * a blank line inside one is not a boundary.
+ *
+ * What this does NOT help with, and it is the case that matters most: a table has no blank line in
+ * it, so a growing hundred-row table settles nothing at all — measured at 68 characters settled
+ * against 28,642 still arriving. Long lists are the answers this feature exists to produce, so the
+ * boundary that actually carries the load is the per-row one in `Markdown.tsx`, and this handles the
+ * prose around it.
  */
 export function splitSettled(markdown) {
   const source = String(markdown ?? "").replace(/\r\n?/g, "\n");
@@ -198,13 +209,20 @@ export function parseBlocks(markdown) {
       flush();
       const head = cells(line).map(parseInline);
       const rows = [];
+      // The raw line for each row, kept beside the parsed cells purely as a memo key for the
+      // renderer. A table is the one block that grows a row at a time while an answer streams, and
+      // it is also the one with no blank line in it — so the settled/tail split cannot help here and
+      // the boundary has to be per row. `rows` is what the CSV export reads; `sources` is what tells
+      // React that row 47 has not changed since the last frame.
+      const sources = [];
       index += 2;
       while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
         rows.push(cells(lines[index]).map(parseInline));
+        sources.push(lines[index]);
         index += 1;
       }
       index -= 1;
-      blocks.push({ kind: "table", head, rows });
+      blocks.push({ kind: "table", head, rows, sources });
       continue;
     }
 
@@ -215,12 +233,12 @@ export function parseBlocks(markdown) {
       // Flushed before the run is inspected, so a paragraph sitting between two lists breaks them
       // apart instead of the second silently joining the first.
       flush();
+      // `source` is the memo key, for the same reason table rows carry one: a long list grows an item
+      // at a time and every item above the new one is unchanged.
+      const entry = { depth, spans: parseInline(item[3]), source: item[3] };
       const open = blocks.at(-1);
-      if (open && open.kind === "list" && open.ordered === ordered) {
-        open.items.push({ depth, spans: parseInline(item[3]) });
-      } else {
-        blocks.push({ kind: "list", ordered, items: [{ depth, spans: parseInline(item[3]) }] });
-      }
+      if (open && open.kind === "list" && open.ordered === ordered) open.items.push(entry);
+      else blocks.push({ kind: "list", ordered, items: [entry] });
       continue;
     }
 
