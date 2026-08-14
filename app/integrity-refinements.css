@@ -3017,28 +3017,36 @@ span.brain-mark.is-lg {
    question attached to it, and eighteen of them at once is a wall of noise. */
 .brain-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
-  gap: 11px;
+  grid-template-columns: repeat(auto-fill, minmax(252px, 1fr));
+  gap: 12px;
 }
 .brain-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 15px;
+  gap: 15px;
+  padding: 18px 19px;
   text-align: left;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 11px;
 }
 .brain-card:hover {
   border-color: var(--accent);
 }
+.brain-card .brain-mark {
+  width: 54px;
+  height: 54px;
+  border-radius: 12px;
+}
+.brain-card span.brain-mark {
+  font-size: 17px;
+}
 .brain-card-name {
   min-width: 0;
-  font-size: 13.5px;
+  font-size: 15.5px;
   font-weight: 640;
-  letter-spacing: -0.02em;
-  line-height: 1.3;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
 }
 /* The coverage meter. Colour carries the same meaning as the number beside it rather than a
    different one: green only at complete, warm only when more than half is missing, and the
@@ -3063,29 +3071,182 @@ span.brain-mark.is-lg {
   background: var(--amber);
 }
 /* ── A client's home page ─────────────────────────────────────────────────────────────────── */
-.brain-home-head {
+
+/* Two questions, kept apart. The left half says who this client is and the right half says how
+   ready we are to work on them, and the previous version stacked both into one column under the
+   logo — so a name, a file count, a progress bar and a status dot all arrived as one paragraph and
+   none of them read as an answer to anything. */
+.brain-hero {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  padding-bottom: 4px;
+  align-items: flex-start;
+  gap: 28px;
+  padding: 22px 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 13px;
 }
-.brain-home-title {
-  min-width: 0;
+.brain-hero-who {
+  display: flex;
+  align-items: flex-start;
+  gap: 17px;
   flex: 1;
-  max-width: 420px;
+  min-width: 0;
 }
-.brain-home-title h1 {
-  margin: 0 0 5px;
-  font-size: 25px;
+.brain-hero-words {
+  min-width: 0;
+}
+.brain-hero-words h1 {
+  margin: 2px 0 7px;
+  font-size: 27px;
   font-weight: 670;
   letter-spacing: -0.045em;
-  line-height: 1.1;
+  line-height: 1.05;
 }
-.brain-home-facts {
+.brain-hero-summary {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--text-2, var(--muted));
+  font-size: 13px;
+  line-height: 1.62;
+}
+.brain-hero-summary.is-empty {
+  color: var(--muted-2);
+  font-style: italic;
+}
+/* Website, industry, headcount — the details that are pure lookup, in a row rather than in the
+   sentence, because nobody reads a paragraph to find a URL. */
+.brain-hero-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin: 14px 0 0;
+}
+.brain-hero-facts dt {
+  color: var(--muted-2);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.brain-hero-facts dd {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.brain-hero-state {
+  flex: 0 0 auto;
+  width: 216px;
+  padding-left: 24px;
+  border-left: 1px solid var(--border-soft);
+}
+.brain-hero-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
   margin: 0 0 8px;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 11px;
+}
+.brain-hero-stat b {
+  font-size: 19px;
+  font-weight: 660;
+  letter-spacing: -0.03em;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
+}
+.brain-hero-stat.is-quiet {
+  margin-top: 12px;
+}
+.brain-hero-stat.is-quiet b {
+  font-size: 15px;
+  color: var(--muted);
+}
+@media (max-width: 900px) {
+  .brain-hero {
+    flex-direction: column;
+    gap: 18px;
+  }
+  .brain-hero-state {
+    width: 100%;
+    padding: 16px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--border-soft);
+  }
+}
+
+/* A client's own routines, as things to run rather than files to read. */
+.brain-skillrow {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.brain-skillchip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.brain-skillchip:hover {
+  border-color: var(--accent);
+}
+.brain-skillchip-cmd {
+  color: var(--accent);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 600;
+}
+.brain-skillchip-blurb {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+/* The rest of a client's files, folded. Forty call notes listed in full is the file tree this
+   surface exists to replace, and it was the last thing on the page pushing everything useful up
+   the scroll. One folder opens at a time; the counts are the part you read at a glance. */
+.brain-shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 14px;
+}
+.brain-shelf-group {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.brain-shelf-group.is-open {
+  border-color: var(--border-strong, var(--accent));
+}
+.brain-shelf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 15px;
+  text-align: left;
+}
+.brain-shelf-head:hover .brain-shelf-name {
+  color: var(--accent);
+}
+.brain-shelf-name {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.brain-shelf-count {
+  color: var(--muted-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.brain-shelf-group .brain-more-list {
+  padding: 0 8px 8px;
 }
 /* The gaps, named in a sentence. Somebody who came here to write the missing one should be able
    to read which it is, not audit seven cards to work it out. Amber and not red: an unwritten ICP
@@ -3199,31 +3360,31 @@ a.brain-home-link:hover {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 11px;
 }
+/* Name and count only. The descriptions under these four were the explanation you needed once and
+   then read past for ever, and four of them under a wall of clients read as more page to get
+   through rather than as help. */
 .brain-area {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 14px 16px;
+  gap: 6px;
+  padding: 18px 19px;
   text-align: left;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 11px;
 }
 .brain-area:hover {
   border-color: var(--accent);
 }
 .brain-area-name {
-  font-size: 12.5px;
-  font-weight: 630;
-}
-.brain-area-blurb {
-  color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.5;
+  font-size: 15.5px;
+  font-weight: 640;
+  letter-spacing: -0.025em;
 }
 .brain-area-count {
-  color: var(--muted-2);
-  font-size: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The seven slots, as tabs. Every client shows all seven whether or not they exist, which is the

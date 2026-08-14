@@ -668,7 +668,9 @@ export default function McpPage() {
                 Live HeyReach campaigns, senders, sequences and lists for every client, plus everyone
                 in Reply Radar&apos;s own database — searchable by job title or company — with their
                 replies, scores and follow-ups. It also reads the QC Brain, so it can answer why a
-                campaign is written the way it is and then tell you whether it worked. Attach a
+                campaign is written the way it is and then tell you whether it worked — and it can
+                run the Brain&apos;s skills, so asking for a weekly report gets you QC&apos;s
+                weekly report rather than one it made up. Attach a
                 screenshot, PDF or spreadsheet and it will read that too, and ask for any answer as a
                 CSV or a PDF. Nothing here can send, pause or change anything; the one exception is
                 that it can propose an edit to the Brain, which opens a pull request for someone to

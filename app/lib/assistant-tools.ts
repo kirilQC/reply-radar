@@ -49,11 +49,14 @@ import { isOurCampaign } from "../../shared/campaign-code.mjs";
 import { containsAny } from "../../shared/postgrest-filter.mjs";
 import { exportFilename, rowsToCsv } from "../../shared/answer-export.mjs";
 import * as heyreach from "./heyreach-api";
-import { BRAIN_URL, brainConfigured, brainCorpus, brainFile, brainTree, forgetBrainTree, proposeBrainEdit } from "./brain";
+import { BRAIN_URL, brainConfigured, brainCorpus, brainFile, brainFiles, brainTree, forgetBrainTree, proposeBrainEdit } from "./brain";
 import { searchBrain } from "../../shared/brain-search.mjs";
-import { clientLabel, clientOf, clientSkeleton, clientsIn, fileKind, fileTitle, isReadable } from "../../shared/brain-structure.mjs";
+import { clientLabel, clientOf, clientSkeleton, clientsIn, fileKind, fileTitle, isReadable, parseSkill, skillClient } from "../../shared/brain-structure.mjs";
 
 type Row = Record<string, unknown>;
+
+/** Where the brain keeps its slash commands, the same folder Claude Code reads them from. */
+const COMMANDS = ".claude/commands/";
 
 /** A file a tool produced, on its way to the browser. */
 export type ToolFile = { name: string; mime: string; content: string };
@@ -551,6 +554,18 @@ export const TOOLS: ToolDefinition[] = [
         sha: { type: "string", description: "The sha from brain_read. Omit only when the file does not exist yet." },
       },
       required: ["path", "text", "summary"],
+    },
+  },
+  {
+    name: "brain_skills",
+    description:
+      "The routines QC has already written down: the slash commands in the QC Brain, like /willow-weekly or /account-research. Each one is a set of instructions somebody worked out once so nobody has to work it out again. Call with no arguments to list them all with a line each. Call with a name to get that skill's full instructions, which you should then carry out yourself using your other tools — the instructions are for you to follow, not to show to the person. Check here first whenever someone asks for a report, a research pass, a weekly summary or anything that sounds like a routine, because doing it QC's established way is almost always better than inventing a way.",
+    input_schema: {
+      type: "object",
+      properties: {
+        skill: { type: "string", description: "The command to fetch in full, with or without the slash, e.g. \"willow-weekly\" or \"/account-research\". Omit to list every skill." },
+        client: { type: "string", description: "Optional: when listing, restrict to skills belonging to one client, e.g. \"willow\"." },
+      },
     },
   },
 ];
@@ -1168,6 +1183,62 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         number: pull.number,
         branch: pull.branch,
         note: "This is a pull request, not a saved change. Give the person the link and tell them it needs merging before anyone else's Claude Code will see it.",
+      };
+    }
+
+    /**
+     * The skills, and the reason the chat has them at all.
+     *
+     * A skill is a prompt somebody wrote once — the steps for a weekly client report, an account
+     * research pass — and until now the only way to run one was to type it into Claude Code. But the
+     * instructions are just markdown, and this assistant has the same tools those instructions
+     * assume. So listing them and handing back the body is the whole implementation: the model reads
+     * the steps and carries them out, exactly as Claude Code does.
+     *
+     * The body is returned to the model, not to the person. A skill is a set of instructions, and
+     * printing the instructions instead of following them is the obvious failure here, so the note
+     * says so where the model cannot miss it.
+     */
+    case "brain_skills": {
+      if (!brainConfigured()) throw new Error("The QC Brain is not connected, so its skills cannot be read.");
+      const tree = await brainTree();
+      const paths = tree.map((file) => file.path);
+      const clients = clientsIn(paths) as string[];
+      const commandPaths = paths.filter((path) => path.startsWith(COMMANDS) && path.endsWith(".md"));
+
+      const wanted = text(input.skill).replace(/^\//, "").replace(/\.md$/i, "").toLowerCase();
+      if (wanted) {
+        const found = commandPaths.find((path) => (path.split("/").pop() ?? "").replace(/\.md$/i, "").toLowerCase() === wanted);
+        if (!found) {
+          const names = commandPaths.map((path) => `/${(path.split("/").pop() ?? "").replace(/\.md$/i, "")}`);
+          throw new Error(`There is no skill called "${wanted}". The skills are: ${names.join(", ")}.`);
+        }
+        const doc = await brainFile(found);
+        const parsed = parseSkill(doc.path, doc.text) as { name: string; command: string; blurb: string };
+        return {
+          skill: parsed.command,
+          name: parsed.name,
+          path: doc.path,
+          instructions: doc.text,
+          note: "These are instructions for you to follow, not text to show the person. Carry out the steps yourself with your other tools, and if a step needs something you cannot do, say which step and why.",
+        };
+      }
+
+      const docs = await brainFiles(commandPaths, 8);
+      const only = text(input.client).toLowerCase();
+      const skills = docs
+        .map((doc) => {
+          const parsed = parseSkill(doc.path, doc.text) as { name: string; command: string; blurb: string };
+          const owner = String(skillClient(parsed.name, clients) ?? "");
+          return { command: parsed.command, does: parsed.blurb, client: owner ? String(clientLabel(owner)) : "", folder: owner };
+        })
+        .filter((skill) => !only || skill.folder.toLowerCase() === only || skill.client.toLowerCase() === only)
+        .sort((a, b) => a.command.localeCompare(b.command));
+
+      return {
+        // The folder was only ever there to match `client=willow` against; the model gets the label.
+        skills: skills.map((skill) => ({ command: skill.command, does: skill.does, client: skill.client })),
+        note: "Call brain_skills again with a skill name to get its full instructions, then carry them out yourself.",
       };
     }
 

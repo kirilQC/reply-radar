@@ -354,6 +354,87 @@ export function skillClient(name, clients) {
 }
 
 /**
+ * A client's brief, read down to the two things a landing page can show.
+ *
+ * ── Why this is worth extracting ────────────────────────────────────────────────────────────────
+ * Someone arriving at a client's page usually does not know the client. The brief answers "who are
+ * these people" in its first paragraph and then spends two thousand words on things you only want
+ * once you are already oriented, so the page opens the brief and shows nothing, and orientation
+ * costs a click and a scroll. Lifting the opening paragraph out costs nothing and removes that step.
+ *
+ * ── What counts as the summary ──────────────────────────────────────────────────────────────────
+ * The first paragraph of ordinary prose. Frontmatter, headings, badges, HTML, quotes, code fences,
+ * tables and bullet lists are all skipped, because none of them read as a sentence about a company —
+ * a landing page opening with `| Field | Value |` is worse than one opening with nothing. Consecutive
+ * prose lines are joined, since markdown paragraphs are commonly hard-wrapped.
+ *
+ * ── The facts ───────────────────────────────────────────────────────────────────────────────────
+ * `- **Website:** acme.com` and `**Industry:** Fintech` are how these briefs carry the handful of
+ * details that are pure lookup. They are pulled out separately because they belong in a row of small
+ * labelled values rather than buried in a paragraph, and because a brief that leads with six of them
+ * would otherwise produce a summary made of one.
+ */
+export function briefSummary(text, limit = 340) {
+  const body = String(text ?? "").replace(/^---\n[\s\S]*?\n---\n?/, "");
+  const facts = [];
+  const seen = new Set();
+  const sentences = [];
+  let fenced = false;
+  let started = false;
+
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("```")) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+
+    // `- **Website:** acme.com`, with a short label and a value that is not itself a sentence.
+    const fact = /^[-*]?\s*\*\*(.{2,28}?):?\*\*:?\s+(.{1,80})$/.exec(line);
+    if (fact) {
+      const label = fact[1].trim();
+      const value = fact[2].trim().replace(/[.*_`]+$/g, "");
+      const key = lower(label);
+      if (value && !seen.has(key)) {
+        seen.add(key);
+        facts.push({ label, value });
+      }
+      continue;
+    }
+
+    // A blank line ends the paragraph, but only once one has begun — the gap between the title and
+    // the first sentence is a blank line too.
+    if (!line) {
+      if (started) break;
+      continue;
+    }
+    if (line.startsWith("#") || line.startsWith("<") || line.startsWith(">") || line.startsWith("|") || /^[-*+]\s/.test(line) || /^\d+\.\s/.test(line) || /^[-=]{3,}$/.test(line)) {
+      if (started) break;
+      continue;
+    }
+    started = true;
+    sentences.push(line);
+  }
+
+  let summary = sentences
+    .join(" ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Cut at a sentence rather than mid-word: a summary that stops after a full stop reads as written,
+  // and one that stops after an ellipsis reads as truncated.
+  if (summary.length > limit) {
+    const cut = summary.slice(0, limit);
+    const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+    summary = stop > limit * 0.4 ? cut.slice(0, stop + 1) : `${cut.slice(0, cut.lastIndexOf(" ")).trimEnd()}…`;
+  }
+
+  return { summary, facts: facts.slice(0, 4) };
+}
+
+/**
  * The top-level areas of the repo that are not clients.
  *
  * Named and described here rather than in the page, because "what is `verticals/` for" is exactly

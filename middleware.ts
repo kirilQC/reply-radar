@@ -1,10 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Gives every client a subdomain for their analytics page: `acme.example.com` is rewritten
- * to `/analytics?client=acme`. Requires a wildcard `*.<root domain>` DNS record pointing at
- * the deployment plus the wildcard domain added in Vercel; until then the equivalent
- * `/analytics?client=<slug>` path keeps working unchanged.
+ * Gives every client a subdomain: `acme.example.com` is rewritten to `/analytics?client=acme`, and
+ * `acme.example.com/qc-brain` to that client's page in the QC Brain. Requires a wildcard
+ * `*.<root domain>` DNS record pointing at the deployment plus the wildcard domain added in Vercel;
+ * until then the equivalent `/analytics?client=<slug>` and `/qc-brain/<slug>` paths work unchanged,
+ * which is why the rewrite is a shortcut to a real URL rather than the only way to reach one.
  *
  * ROOT_DOMAIN (e.g. "replyradar.app") tells the rewrite which leading label is the client.
  */
@@ -27,9 +28,16 @@ export function middleware(request: NextRequest) {
     url.searchParams.set("client", slug);
     return NextResponse.rewrite(url);
   }
+  // The brain's directory on a client's own subdomain means that client, not the wall of everyone.
+  // The slug here is the workspace slug; the page resolves it to a brain folder through the tether,
+  // because the two names agree for most clients and quietly disagree for some.
+  if (url.pathname === "/qc-brain") {
+    url.pathname = `/qc-brain/${slug}`;
+    return NextResponse.rewrite(url);
+  }
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/", "/analytics"],
+  matcher: ["/", "/analytics", "/qc-brain"],
 };

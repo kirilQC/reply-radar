@@ -16,6 +16,7 @@ import {
   BRAIN_AREAS,
   CLIENT_DOCS,
   agoLabel,
+  briefSummary,
   campaignCodesIn,
   clientHue,
   clientInitials,
@@ -248,4 +249,70 @@ test("a logo is found only inside the client's own folder", () => {
   assert.equal(clientLogoIn(paths, "webrix"), "");
   assert.equal(clientLogoIn(paths, "nobody"), "");
   assert.equal(clientLogoIn([], "willow"), "");
+});
+
+/**
+ * The summary is the first thing anyone sees on a client's page, and it is lifted from a document
+ * nobody wrote with that in mind. Every one of these is a real shape a README takes: a title above
+ * the prose, a hard-wrapped paragraph, a table of details, a badge line, a bullet list of facts.
+ * Getting one wrong does not error — it puts `| Field | Value |` at the top of a client's page.
+ */
+test("the summary is the first real paragraph, not the title above it", () => {
+  const { summary } = briefSummary("# Willow\n\nWillow sells payroll software to mid-market\nconstruction firms in the UK.\n\n## ICP\n\nSomething else entirely.\n");
+  assert.equal(summary, "Willow sells payroll software to mid-market construction firms in the UK.");
+});
+
+test("frontmatter, badges, tables and lists never become the summary", () => {
+  const brief = [
+    "---",
+    "client: willow",
+    "---",
+    "",
+    "# Willow",
+    "",
+    '<img src="logo.png" />',
+    "",
+    "| Field | Value |",
+    "| --- | --- |",
+    "| Seats | 40 |",
+    "",
+    "> A quote from the founder.",
+    "",
+    "- Founded 2019",
+    "",
+    "Willow is a payroll platform.",
+  ].join("\n");
+  assert.equal(briefSummary(brief).summary, "Willow is a payroll platform.");
+});
+
+test("labelled details are lifted out as facts rather than left in the prose", () => {
+  const { summary, facts } = briefSummary("# Webrix\n\n- **Website:** webrix.io\n- **Industry:** Construction tech\n\nWebrix builds site-management software.\n");
+  assert.equal(summary, "Webrix builds site-management software.");
+  assert.deepEqual(facts, [
+    { label: "Website", value: "webrix.io" },
+    { label: "Industry", value: "Construction tech" },
+  ]);
+});
+
+test("markdown links and emphasis are read as the words they wrap", () => {
+  const { summary } = briefSummary("Willow (**[willow.com](https://willow.com)**) sells to _builders_.");
+  assert.equal(summary, "Willow (willow.com) sells to builders.");
+});
+
+test("a long summary is cut at a sentence, and a long sentence is cut with an ellipsis", () => {
+  const sentences = "Willow sells payroll software. It serves construction firms. It was founded in 2019. It has forty staff.";
+  const cut = briefSummary(sentences, 60).summary;
+  assert.ok(cut.endsWith("."), cut);
+  assert.ok(cut.length <= 60, cut);
+  assert.ok(!cut.includes("forty staff"), cut);
+
+  const oneSentence = briefSummary(`Willow ${"very ".repeat(40)}long`, 60).summary;
+  assert.ok(oneSentence.endsWith("…"), oneSentence);
+  assert.ok(oneSentence.length <= 61, oneSentence);
+});
+
+test("a brief that is only headings gives an empty summary rather than a heading", () => {
+  assert.deepEqual(briefSummary("# Willow\n\n## ICP\n\n### Personas\n"), { summary: "", facts: [] });
+  assert.deepEqual(briefSummary(""), { summary: "", facts: [] });
+  assert.deepEqual(briefSummary(undefined), { summary: "", facts: [] });
 });
