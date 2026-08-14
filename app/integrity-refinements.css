@@ -2900,3 +2900,673 @@ a.tag-outline-link:hover {
 .mcp-reset:hover {
   filter: brightness(1.1);
 }
+
+/* ── QC Brain ─────────────────────────────────────────────────────────────────────────────────
+   A reading surface for a repository of prose, which is a different problem from every other
+   screen in this app. Everywhere else the job is to show a lot of rows densely; here the job is
+   to make a few hundred words comfortable to read and to make an absence as visible as a
+   presence. So this is wider on the outside and narrower on the inside than the dashboard: a
+   1180px page for the index grids, but the document column is held to a readable measure.
+
+   Every meter and bar below is a div with a width, not an SVG. Same rule as the rest of the app. */
+.brain-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 26px 36px 70px;
+}
+.brain-repo-link {
+  color: var(--muted);
+  font-size: 11px;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.brain-repo-link:hover {
+  color: var(--text);
+}
+
+/* Search sits above everything on every screen rather than in the top bar, because it is the
+   primary way into this repo for anyone who does not already know the folder layout — which is
+   the entire audience. A 250px box in a corner would say the opposite. */
+.brain-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 26px;
+}
+.brain-search-input {
+  flex: 1;
+  height: 42px;
+  padding: 0 15px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: 0;
+  font-size: 13px;
+}
+.brain-search-input:focus {
+  border-color: var(--accent);
+}
+.brain-search-input::placeholder {
+  color: var(--muted-2);
+}
+.brain-search-state {
+  flex: none;
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+.brain-quiet {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.brain-quiet a,
+.brain-proposed a {
+  color: var(--accent);
+}
+.brain-error {
+  color: var(--coral);
+  background: #2a1c1b;
+  border: 1px solid #4a2b28;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.brain-heading {
+  margin: 32px 0 4px;
+  font-size: 15px;
+  letter-spacing: -0.025em;
+}
+.brain-sub {
+  margin: 0 0 16px;
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+.brain-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 11px;
+}
+.brain-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 15px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.brain-stat-value {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+}
+.brain-stat-label {
+  font-size: 11px;
+}
+.brain-stat-note {
+  color: var(--muted-2);
+  font-size: 10px;
+}
+
+.brain-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 11px;
+}
+.brain-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 15px 16px 14px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.brain-card:hover {
+  border-color: var(--accent);
+}
+.brain-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.brain-card-name {
+  font-size: 14px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+}
+.brain-card-count {
+  color: var(--muted-2);
+  font-size: 10px;
+}
+/* The coverage meter. Colour carries the same meaning as the number beside it rather than a
+   different one: green only at complete, warm only when more than half is missing, and the
+   ordinary accent in between — so the eye can sort the grid without reading any of it. */
+.brain-meter {
+  display: block;
+  height: 4px;
+  background: var(--panel-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.brain-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+.brain-meter-fill.is-full {
+  background: var(--green);
+}
+.brain-meter-fill.is-thin {
+  background: var(--amber);
+}
+.brain-card-cover {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.brain-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+/* A missing document is drawn, not omitted. It is struck through and dimmed rather than left out,
+   because the whole reason for a fixed skeleton is that an absence is the useful signal — and an
+   absence you cannot see is not a signal at all. */
+.brain-chip {
+  color: var(--muted-2);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 9px;
+  text-decoration: line-through;
+  text-decoration-color: var(--border);
+}
+.brain-chip.is-present {
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid transparent;
+  text-decoration: none;
+}
+
+.brain-areas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 11px;
+}
+.brain-area {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px 16px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.brain-area:hover {
+  border-color: var(--accent);
+}
+.brain-area-name {
+  font-size: 12.5px;
+  font-weight: 630;
+}
+.brain-area-blurb {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.brain-area-count {
+  color: var(--muted-2);
+  font-size: 10px;
+}
+
+/* The seven slots, as tabs. Every client shows all seven whether or not they exist, which is the
+   point: a disabled tab reading "Personas —" is a job somebody has to do, and a list that only
+   showed what was there would never mention it. */
+.brain-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 18px;
+}
+.brain-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px;
+  color: var(--muted);
+  background: transparent;
+  border-radius: 7px;
+  font-size: 11.5px;
+}
+.brain-tab:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.brain-tab.is-open {
+  color: var(--text);
+  background: var(--panel-2);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.brain-tab.is-missing {
+  color: var(--muted-2);
+  cursor: default;
+}
+.brain-tab-flag {
+  color: var(--muted-2);
+  font-size: 10px;
+}
+.brain-tab-flag.is-stale {
+  color: var(--amber);
+  font-size: 18px;
+  line-height: 0;
+}
+
+.brain-more {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px 24px;
+  padding: 4px 0 20px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.brain-more-folder {
+  margin: 0 0 6px;
+  color: var(--muted-2);
+  font-size: 9px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  font-weight: 650;
+}
+.brain-more-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.brain-more-file {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  color: var(--muted);
+  background: transparent;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 11.5px;
+}
+.brain-more-file:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.brain-more-file.is-open {
+  color: var(--text);
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.brain-more-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Only shown when it is not markdown, because "doc" on every row would be noise and the point of
+   the label is to warn that clicking opens GitHub rather than a page. */
+.brain-more-kind {
+  flex: none;
+  color: var(--muted-2);
+  font-size: 9px;
+}
+.brain-more-file .brain-more-kind:not(:empty) {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.brain-split {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.brain-filelist {
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.brain-pane {
+  min-width: 0;
+}
+
+.brain-doc-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+}
+.brain-doc-path {
+  color: var(--muted-2);
+  font-size: 10.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brain-doc-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+.brain-doc-age {
+  color: var(--muted-2);
+  font-size: 10px;
+}
+.brain-doc-link {
+  color: var(--muted);
+  font-size: 10.5px;
+  text-decoration: none;
+}
+.brain-doc-link:hover {
+  color: var(--text);
+}
+.brain-doc-edit {
+  height: 27px;
+  padding: 0 12px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.brain-doc-edit:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+/* The document column is held to a readable measure. Prose set across 1180px is unreadable no
+   matter how good it is, and the rest of the app being dense tables is not a reason to make this
+   one dense too. */
+.brain-doc .md {
+  max-width: 760px;
+}
+.brain-proposed {
+  color: #b9e9d7;
+  background: #111c1b;
+  border: 1px solid #203832;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.brain-proposed a {
+  color: var(--green);
+}
+
+/* The join. This is the one thing here that no docs site could show, so it sits above the prose
+   rather than under it — the numbers are the reason someone opened the strategy note. */
+.brain-campaigns {
+  margin: 4px 0 22px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  max-width: 760px;
+}
+.brain-campaigns-head {
+  margin: 0 0 12px;
+  color: var(--muted-2);
+  font-size: 9px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  font-weight: 650;
+}
+.brain-campaign-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 11px;
+}
+.brain-campaign {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  grid-template-areas: "name bar" "figures bar";
+  gap: 3px 14px;
+  align-items: center;
+}
+.brain-campaign-name {
+  grid-area: name;
+  font-size: 11.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brain-campaign-figures {
+  grid-area: figures;
+  color: var(--muted-2);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.brain-campaign-bar {
+  grid-area: bar;
+  display: block;
+  height: 5px;
+  background: var(--panel-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.brain-campaign-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.brain-editor {
+  max-width: 900px;
+}
+.brain-editor-text {
+  width: 100%;
+  min-height: 480px;
+  padding: 16px;
+  resize: vertical;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.brain-editor-text:focus {
+  border-color: var(--accent);
+}
+.brain-editor-foot {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.brain-editor-summary {
+  flex: 1;
+  height: 33px;
+  padding: 0 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: 0;
+  font-size: 11.5px;
+}
+.brain-editor-summary:focus {
+  border-color: var(--accent);
+}
+.brain-editor-cancel,
+.brain-editor-save {
+  flex: none;
+  height: 33px;
+  padding: 0 15px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 620;
+}
+.brain-editor-cancel {
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+.brain-editor-save {
+  color: #fff;
+  background: var(--accent);
+}
+.brain-editor-save:disabled,
+.brain-editor-cancel:disabled {
+  color: var(--muted-2);
+  background: var(--panel-2);
+  cursor: default;
+}
+.brain-editor-note {
+  margin: 10px 0 0;
+  max-width: 640px;
+  color: var(--muted-2);
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+
+.brain-skill {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 10px;
+  text-align: left;
+  background: transparent;
+  border-radius: 7px;
+}
+.brain-skill:hover,
+.brain-skill.is-open {
+  background: var(--panel-2);
+}
+.brain-skill.is-open {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.brain-skill-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.brain-skill-command {
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 620;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.brain-skill-client {
+  flex: none;
+  color: var(--muted-2);
+  font-size: 9px;
+}
+.brain-skill-blurb {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.brain-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-width: 860px;
+}
+.brain-result {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 13px 15px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.brain-result:hover {
+  border-color: var(--accent);
+}
+.brain-result-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.brain-result-title {
+  font-size: 12.5px;
+  font-weight: 630;
+}
+.brain-result-client {
+  flex: none;
+  color: var(--muted-2);
+  font-size: 10px;
+}
+/* The snippet is often the whole answer — someone searching for a phrase frequently never opens
+   the file — so it is set as readable prose rather than as a caption. */
+.brain-result-snippet {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.brain-result-path {
+  color: var(--muted-2);
+  font-size: 9.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@media (max-width: 900px) {
+  .brain-page {
+    padding: 20px 18px 60px;
+  }
+  .brain-summary {
+    grid-template-columns: 1fr;
+  }
+  .brain-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .brain-filelist {
+    position: static;
+    max-height: 260px;
+  }
+}
+
+.light-mode .brain-error {
+  color: #a3392c;
+  background: #fdf1ef;
+  border-color: #f2cfc9;
+}
+.light-mode .brain-proposed {
+  color: #1d6a52;
+  background: #eefaf5;
+  border-color: #c6e8dc;
+}

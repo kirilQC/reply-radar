@@ -667,10 +667,12 @@ export default function McpPage() {
               <p>
                 Live HeyReach campaigns, senders, sequences and lists for every client, plus everyone
                 in Reply Radar&apos;s own database — searchable by job title or company — with their
-                replies, scores and follow-ups. Attach a screenshot, PDF or spreadsheet and it will
-                read that too, and ask for any answer as a CSV or a PDF. Read-only: nothing here can
-                send, pause or change anything. Bigger questions take longer on purpose; you can watch
-                the lookups as they run.
+                replies, scores and follow-ups. It also reads the QC Brain, so it can answer why a
+                campaign is written the way it is and then tell you whether it worked. Attach a
+                screenshot, PDF or spreadsheet and it will read that too, and ask for any answer as a
+                CSV or a PDF. Nothing here can send, pause or change anything; the one exception is
+                that it can propose an edit to the Brain, which opens a pull request for someone to
+                review. Bigger questions take longer on purpose; you can watch the lookups as they run.
               </p>
               <div className="mcp-prompts">
                 {PROMPTS.map((prompt) => (

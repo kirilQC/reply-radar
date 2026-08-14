@@ -364,6 +364,80 @@ and now what the assistant reads, so the two cannot disagree. Null there means u
 
 ---
 
+## QC Brain
+
+The QC Brain is `jsbiv18/qc-growth-os`, a private GitHub repository every person at QC points their
+Claude Code at. A few hundred markdown files: each client's ICP, personas, tone of voice, engagement
+plan, pipeline notes and call notes, plus QC's own playbooks, vertical research and slash commands.
+The `/qc-brain` tab is a reading and editing surface for it. It was called "OS Brain" in the
+navigation and is now called "QC Brain" everywhere.
+
+**Building this in Reply Radar rather than improving the docs site rests on one thing: the campaign
+code join.** A prettier reader for a GitHub repo is worth something but not much. What no docs site
+can do is know that `CT003` in a strategy note is a live campaign with 108 conversations and a 53.7%
+reply rate, because the strategy lives in GitHub and the numbers live in HeyReach and Reply Radar is
+the only place both are reachable. Every other feature here is in service of that one.
+
+**The join is a string comparison, so both sides normalise through `shared/campaign-code.mjs`.**
+Codes are 1–3 letters, an optional colon, then 2–3 digits: `CT003`, `CT:010`, `Ct007`, `W040`,
+`CT50`. Digits are never padded, because `CT50` and `CT050` are two different live campaigns. The
+extractor is deliberately strict — a loose pattern turns dates, version numbers and `SOC2` into dead
+links throughout the prose — and a code that matches nothing silently stays plain text rather than
+becoming a broken row.
+
+**Writes are pull requests, never commits to `main`.** This is the most consequential decision in the
+feature. Everyone's Claude Code reads this repo, so a bad edit does not affect one reader — it
+silently becomes the shared truth for the whole agency, and nothing about a wrong ICP announces
+itself. A pull request costs one click to merge and makes every change reviewable and revertible.
+The button says "Propose change" because that is what it does. This applies to the MCP tool as well
+as the page.
+
+**The Contents API SHA is optimistic locking, not a formality.** It travels out with the text and
+back on save; a stale one comes back as a 409 and is reported as "someone else changed this", which
+is the only thing standing between two people editing the same client brief and one silently losing
+their work.
+
+**The page shows a fixed skeleton per client, not a file listing.** GitHub already lists files. The
+question nobody can answer today is "is this client written up well enough for anyone to work on
+them", and a missing ICP is the most useful thing on the page — which cannot be shown by listing what
+is there. Coverage forgives a missing do-not-contact list, because most clients have none and a
+number nobody can ever reach is a number everyone learns to ignore. The index sorts
+least-complete-first so it answers "where is the work" without scrolling.
+
+**Missing and stale are shown differently** — an em dash against a document nobody has written, an
+amber dot against one nobody has touched in months. They call for different work.
+
+**Search is an in-memory corpus, not GitHub's code search.** `/search/code` is one request instead of
+three hundred and was the obvious choice until the details: ten requests a minute, indexing on
+GitHub's schedule so a file saved a minute ago is unfindable, and ranking tuned for source rather
+than prose. A search that cannot find what someone just wrote is worse than a slow one. The corpus is
+a couple of megabytes, cached ten minutes, and the first search after a cold start pays for all of
+them. If the repo ever reaches thousands of files this has to become a real index; the honest signal
+will be `brainCorpus` getting slow.
+
+**Ranking is path over title over heading over body**, with body frequency capped, because "willow
+icp" means one document and a body-weighted search buries it under forty call notes. Ties break on
+path so the same query gives the same order twice.
+
+**A brain folder with no matching Reply Radar workspace is a normal answer, not an error.** Many
+folders are prospects and dormant accounts that were never set up here, and a red box on half the
+pages trains people to ignore it.
+
+**`BRAIN_GITHUB_TOKEN` is preferred over `GITHUB_TOKEN` and the feature is inert without one.**
+The two are different jobs — `GITHUB_TOKEN` is an optional rate-limit lift on a public repo, and
+silently falling back to a token without access to the brain would turn missing configuration into a
+confusing 404. GitHub returns 404 rather than 403 for a private repo a token cannot see, so that case
+is translated into a sentence naming the likely cause.
+
+**The page has no authentication, and the content is client-confidential.** Explicitly accepted, in
+line with the standing decision below.
+
+**`brain_write` is the only tool in the assistant that is not read-only.** It cannot send, pause or
+change anything — all it can do is open a pull request. The system prompt requires the model to say
+it has *proposed* a change and never that a file was saved, and to propose only when asked.
+
+---
+
 ## Permanently out of scope
 
 Do not build these. They were considered and de-scoped:

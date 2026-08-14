@@ -7,7 +7,7 @@ import Crumb from "./Crumb";
 /**
  * A page that exists so its nav tab exists.
  *
- * Meetings and OS Brain were asked for ahead of being built, and the reason to ship the empty shell
+ * Meetings was asked for ahead of being built, and the reason to ship the empty shell
  * now is that the tab is the commitment: it fixes the route, so nothing has to be renamed later, and
  * anyone clicking it gets an answer instead of a 404. It says what the page will do rather than just
  * "coming soon", because the person reading it is usually checking whether they missed a feature.

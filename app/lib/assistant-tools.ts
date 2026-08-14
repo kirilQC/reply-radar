@@ -3,8 +3,16 @@
  *
  * This is the whole of what the chat box can do. Claude receives the definitions below, asks for one
  * by name, and `runTool` answers — there is no path from a typed question to anything not listed
- * here. That is the security model: not an instruction telling the model to behave, but an allowlist
- * with no write operation in it. Adding a tool is a deliberate act; a cleverly worded prompt is not.
+ * here. That is the security model: not an instruction telling the model to behave, but an allowlist.
+ * Adding a tool is a deliberate act; a cleverly worded prompt is not.
+ *
+ * ── The one tool that is not read-only ──────────────────────────────────────────────────────────
+ * `brain_write` is the single exception, and it is a narrow one: it cannot send a message, pause a
+ * campaign or touch a database. All it can do is open a pull request against the QC Brain repo, which
+ * a person then has to merge. That is deliberate — the brain is what every teammate's Claude Code
+ * reads, so a wrong edit becomes everybody's truth silently, and nothing about a wrong ICP announces
+ * itself. A proposal that sits until somebody looks at it is the correct shape for a model's write
+ * access to shared memory. Nothing else in this file writes anywhere.
  *
  * ── Why the numbers come from two different places ──────────────────────────────────────────────
  * `rr_messages` has no `workspace_id`. It hangs off `rr_conversations`, which has one, so a
@@ -41,6 +49,9 @@ import { isOurCampaign } from "../../shared/campaign-code.mjs";
 import { containsAny } from "../../shared/postgrest-filter.mjs";
 import { exportFilename, rowsToCsv } from "../../shared/answer-export.mjs";
 import * as heyreach from "./heyreach-api";
+import { BRAIN_URL, brainConfigured, brainCorpus, brainFile, brainTree, forgetBrainTree, proposeBrainEdit } from "./brain";
+import { searchBrain } from "../../shared/brain-search.mjs";
+import { clientLabel, clientOf, clientSkeleton, clientsIn, fileKind, fileTitle, isReadable } from "../../shared/brain-structure.mjs";
 
 type Row = Record<string, unknown>;
 
@@ -492,6 +503,54 @@ export const TOOLS: ToolDefinition[] = [
       type: "object",
       properties: { ...CLIENT_ARG, profileUrl: { type: "string", description: "Their LinkedIn profile URL." } },
       required: ["client", "profileUrl"],
+    },
+  },
+  {
+    name: "brain_search",
+    description:
+      "Search the QC Brain — the shared GitHub repository holding every client's ICP, personas, tone of voice, engagement plan and call notes, plus QC's own playbooks and vertical research. This is the tool for any question about strategy, positioning, who a client sells to, what we decided, or why a campaign is written the way it is. Reply Radar's other tools know what happened; the brain knows what we intended. Returns the best-matching files with a snippet and the path to read in full. Every word in the query must appear in a file for it to match, so keep queries to two or three words.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Two or three words, e.g. \"willow icp\" or \"security vertical\". Longer phrases narrow to nothing." },
+        client: { type: "string", description: "Optional: restrict to one client's folder, e.g. \"willow\"." },
+        limit: { type: "integer", description: "How many files, up to 20. Default 8." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "brain_read",
+    description:
+      "Read one file from the QC Brain in full, by its path. Call brain_search or brain_client first to find the path — guessing one wastes a call. Also returns the SHA needed by brain_write, so read a file before proposing a change to it.",
+    input_schema: {
+      type: "object",
+      properties: { path: { type: "string", description: "Repository path, e.g. \"clients/willow/account/icp.md\"." } },
+      required: ["path"],
+    },
+  },
+  {
+    name: "brain_client",
+    description:
+      "One client's shape in the QC Brain: which of the standard documents exist (brief, ICP, personas, voice, engagement, pipeline, do-not-contact), which are missing, and every other file we hold on them. Call this to orient before reading, and to answer \"what do we know about X\" or \"what is missing for X\". With no client named, returns every client in the brain.",
+    input_schema: {
+      type: "object",
+      properties: { client: { type: "string", description: "Folder name or client name, e.g. \"willow\" or \"Bluevia Health\". Omit for the full list." } },
+    },
+  },
+  {
+    name: "brain_write",
+    description:
+      "Propose a change to a markdown file in the QC Brain. This does NOT save anything — it opens a pull request that a person must review and merge, and it returns that pull request's URL. Say so plainly when you report back; never tell someone their file has been updated. Pass the file's full new text, not a diff or a fragment: whatever is passed becomes the entire file, so read it with brain_read first and return the complete document with your change made. Pass the sha brain_read gave you, which is what stops you overwriting an edit somebody made in the meantime; omit it only when creating a file that does not exist yet.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Repository path ending in .md, e.g. \"clients/willow/account/icp.md\"." },
+        text: { type: "string", description: "The complete new contents of the file. Not a diff. Not just the changed section." },
+        summary: { type: "string", description: "One line saying what changed and why. Becomes the pull request title, so write it for the person reviewing it." },
+        sha: { type: "string", description: "The sha from brain_read. Omit only when the file does not exist yet." },
+      },
+      required: ["path", "text", "summary"],
     },
   },
 ];
@@ -1004,6 +1063,111 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         profile,
         tags,
         lists: memberships.items.map((row) => ({ id: row.id, name: row.name, size: row.size })),
+      };
+    }
+
+    case "brain_search": {
+      const query = text(input.query);
+      if (!query) throw new Error("A search query is required.");
+      const only = text(input.client).toLowerCase();
+      const tree = await brainTree();
+      const paths = tree
+        .map((file) => file.path)
+        .filter((path) => isReadable(path))
+        // Filtering the paths rather than the results, because the corpus is cached whole and the
+        // scoped search should still be one pass over it.
+        .filter((path) => !only || String(clientOf(path)).toLowerCase() === only);
+      if (!paths.length) {
+        return { query, client: only, results: [], note: only ? `There is no client folder called "${only}" in the brain.` : "" };
+      }
+      const docs = (await brainCorpus(tree.map((file) => file.path).filter((path) => isReadable(path))))
+        .filter((doc) => paths.includes(doc.path))
+        .map((doc) => ({ ...doc, title: String(fileTitle(doc.path)) }));
+      const wanted = Math.min(Math.max(Number(input.limit) || 8, 1), 20);
+      const results = (searchBrain(docs, query, wanted) as { path: string; title: string; snippet: string }[]).map((hit) => ({
+        path: hit.path,
+        title: hit.title,
+        client: String(clientLabel(clientOf(hit.path))),
+        snippet: hit.snippet,
+        url: `${BRAIN_URL}/blob/main/${hit.path}`,
+      }));
+      return {
+        query,
+        results,
+        // Said out loud because an empty result from a three-word query means the words were too
+        // specific, not that the brain has nothing on the subject.
+        note: results.length ? "Call brain_read with a path to see any of these in full." : "Nothing matched every word. Try fewer, more common words.",
+      };
+    }
+
+    case "brain_read": {
+      const path = text(input.path);
+      if (!path) throw new Error("A file path is required.");
+      if (path.includes("..") || path.startsWith("/")) throw new Error("That is not a path inside the brain.");
+      if (!isReadable(path)) {
+        return { path, readable: false, kind: String(fileKind(path)), url: `${BRAIN_URL}/blob/main/${path}`, note: "That file is not text. Link to it rather than quoting it." };
+      }
+      const doc = await brainFile(path);
+      return {
+        path,
+        title: String(fileTitle(path)),
+        client: String(clientLabel(clientOf(path))),
+        sha: doc.sha,
+        url: doc.url,
+        text: doc.text,
+      };
+    }
+
+    case "brain_client": {
+      const tree = await brainTree();
+      const paths = tree.map((file) => file.path);
+      const all = clientsIn(paths) as string[];
+      const asked = text(input.client);
+      if (!asked) {
+        return { clients: all.map((folder) => ({ folder, name: String(clientLabel(folder)) })) };
+      }
+      const wanted = asked.toLowerCase();
+      // A person says "Bluevia Health"; the repo says `bluevia-health`. Both have to land.
+      const folder = all.find((one) => one.toLowerCase() === wanted || String(clientLabel(one)).toLowerCase() === wanted);
+      if (!folder) {
+        throw new Error(`There is no client called "${asked}" in the brain. The clients are: ${all.map((one) => clientLabel(one)).join(", ")}.`);
+      }
+      const skeleton = clientSkeleton(folder, paths) as {
+        docs: { key: string; label: string; found: string; present: boolean }[];
+        extras: string[];
+      };
+      return {
+        client: String(clientLabel(folder)),
+        folder,
+        documents: skeleton.docs.map((doc) => ({ name: doc.label, path: doc.found, written: doc.present })),
+        // Named separately from the skeleton because "we have never written their ICP" is usually the
+        // most important fact on this response, and a model reading a list of paths will not notice it.
+        missing: skeleton.docs.filter((doc) => !doc.present).map((doc) => doc.label),
+        otherFiles: skeleton.extras,
+      };
+    }
+
+    case "brain_write": {
+      if (!brainConfigured()) throw new Error("The QC Brain is not connected, so nothing can be proposed.");
+      const path = text(input.path);
+      const body = typeof input.text === "string" ? input.text : "";
+      const summary = text(input.summary);
+      if (!path || path.includes("..") || path.startsWith("/")) throw new Error("That is not a path inside the brain.");
+      if (fileKind(path) !== "doc") throw new Error("Only markdown files can be proposed through here.");
+      if (!summary) throw new Error("A one-line summary is required — it becomes the pull request title.");
+      // An empty body would be a deletion dressed up as an edit, and a model that lost its place
+      // mid-thought is far likelier than someone genuinely asking to empty a file.
+      if (!body.trim()) throw new Error("The new contents are empty. Deleting a file is done in GitHub, deliberately.");
+      const pull = await proposeBrainEdit({ path, text: body, sha: text(input.sha), summary, author: "Reply Radar MCP" });
+      forgetBrainTree();
+      return {
+        proposed: true,
+        saved: false,
+        path,
+        pullRequest: pull.url,
+        number: pull.number,
+        branch: pull.branch,
+        note: "This is a pull request, not a saved change. Give the person the link and tell them it needs merging before anyone else's Claude Code will see it.",
       };
     }
 

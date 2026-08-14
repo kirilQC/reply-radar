@@ -14,7 +14,7 @@ const items = [
   ["/analytics", "Analytics", "analytics"],
   ["/reports", "Reports", "reports"],
   ["/mcp", "MCP", "mcp"],
-  ["/os-brain", "OS Brain", "brain"],
+  ["/qc-brain", "QC Brain", "brain"],
   ["/health", "System health", "health"],
   ["/admin", "Configuration", "settings"],
 ] as const;
