@@ -4,14 +4,13 @@
 import { NextResponse } from "next/server";
 import { isAiArkEnrichmentEnabled } from "../../../lib/lead-identity";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { isOurWebhookUrl, publicBaseUrl, webhookUrlFor } from "../../../lib/public-url";
 
 function supabaseConfig() {
   return { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
 }
-const webhookBaseUrl = "https://reply-radar-mauve.vercel.app";
-const webhookUrlFor = (slug: unknown) => `${webhookBaseUrl}/api/webhooks/heyreach/${String(slug ?? "")}`;
 
-export async function GET() {
+export async function GET(request: Request) {
   const { url, key } = supabaseConfig();
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
@@ -19,7 +18,11 @@ export async function GET() {
   // Permit the UI to keep working while the additive migration is being run.
   if (!response.ok) response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,logo_url,accent_color,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&order=name.asc`, { headers, cache: "no-store" });
   const rows = await response.json();
-  const workspaces = Array.isArray(rows) ? rows.map((row) => ({ ...row, webhook_url: !row.webhook_url || String(row.webhook_url).startsWith("https://replyradar.app/") ? webhookUrlFor(row.slug) : row.webhook_url, key_configured: Boolean(row.heyreach_api_key_ciphertext), ai_ark_enrichment_enabled: Boolean(row.guardrails?.ai_ark_enrichment_enabled), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined })) : rows;
+  // Recomputed, not just read: a workspace configured before the domain moved holds the old address,
+  // and the address is the one thing on this screen that somebody copies into another company's
+  // dashboard. Anything already pointing at us is left exactly as it is.
+  const base = publicBaseUrl(request);
+  const workspaces = Array.isArray(rows) ? rows.map((row) => ({ ...row, webhook_url: isOurWebhookUrl(row.webhook_url, base) ? row.webhook_url : webhookUrlFor(row.slug, request), key_configured: Boolean(row.heyreach_api_key_ciphertext), ai_ark_enrichment_enabled: Boolean(row.guardrails?.ai_ark_enrichment_enabled), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined })) : rows;
   return NextResponse.json({ ok: response.ok, workspaces, aiArkConfigured: Boolean(process.env.AI_ARK_API_KEY), aiArkEnrichmentEnabled: isAiArkEnrichmentEnabled() }, { status: response.ok ? 200 : response.status });
 }
 
@@ -28,7 +31,7 @@ export async function POST(request: Request) {
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const payload = await request.json();
   const existingGuardrails = payload.guardrails && typeof payload.guardrails === "object" && !Array.isArray(payload.guardrails) ? payload.guardrails : {};
-  const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, brain_folder: payload.brainFolder || null, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ?? null, custom_system_prompt: payload.systemPrompt ?? null, logo_url: payload.logoUrl ?? null, accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null, webhook_url: webhookUrlFor(payload.slug), guardrails: existingGuardrails };
+  const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, brain_folder: payload.brainFolder || null, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ?? null, custom_system_prompt: payload.systemPrompt ?? null, logo_url: payload.logoUrl ?? null, accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null, webhook_url: webhookUrlFor(payload.slug, request), guardrails: existingGuardrails };
   if (typeof payload.heyreachApiKey === "string" && payload.heyreachApiKey.trim()) record.heyreach_api_key_ciphertext = payload.heyreachApiKey.trim();
   const previousSlug = typeof payload.previousSlug === "string" ? payload.previousSlug.trim() : "";
   const id = typeof payload.id === "string" ? payload.id.trim() : "";

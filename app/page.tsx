@@ -2369,7 +2369,6 @@ export function InboxPage() {
                       </div>
                     ) : (
                       <div className="composer-foot">
-                        <span>Sent word for word, to this lead on LinkedIn.</span>
                         <button
                           className="send-button"
                           type="button"

@@ -772,13 +772,26 @@
    button is live whenever there is text to send.
    -------------------------------------------------------------------------- */
 
+/* The whole width of the composer, and the only thing in its row. It shared that
+   row with a line of prose explaining what pressing it would do — the sort of
+   caption a control needs only when it is too small to be read as the point of
+   the pane. A button this size says it without the sentence. */
+.composer-foot {
+  justify-content: stretch !important;
+  padding: 10px !important;
+}
+
+.composer-foot .send-button {
+  flex: 1;
+  height: 38px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
 .send-button:disabled {
   opacity: 0.45;
   cursor: default;
-}
-
-.composer-foot span {
-  color: var(--muted-2);
 }
 
 /* Named the lead, named the sender, then two buttons. Laid out as a block rather
@@ -812,14 +825,15 @@
 }
 
 .send-button.is-confirm {
-  height: 28px;
-  padding: 0 13px;
-  font-size: 11px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 12.5px;
 }
 
 .composer-cancel {
-  height: 28px;
-  padding: 0 11px;
+  height: 34px;
+  padding: 0 13px;
   color: var(--muted);
   background: none;
   border: 1px solid var(--border);

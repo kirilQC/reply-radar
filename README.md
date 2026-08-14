@@ -145,13 +145,14 @@ Server-side only. The Supabase service-role key must never reach a browser bundl
 |---|---|
 | `ANTHROPIC_API_KEY` | |
 | `AI_ARK_API_KEY` | The worker enriches through `/api/ai/enrich`, so the key belongs here, not on Render. |
-| `ROOT_DOMAIN` | Optional. Enables `acme.example.com` → `/analytics?client=acme`. Needs wildcard DNS plus the wildcard domain added in Vercel. Until then `/analytics?client=<slug>` works unchanged. |
+| `ROOT_DOMAIN` | `replyradar.dev`. Enables `acme.replyradar.dev` → `/analytics?client=acme`. Needs a wildcard `*.replyradar.dev` DNS record plus the wildcard domain added in Vercel. Until then `/analytics?client=<slug>` works unchanged. A bare hostname, no scheme. |
+| `APP_BASE_URL` | Optional here. `https://replyradar.dev`. Only used to build the HeyReach webhook address shown in the admin console — set it if the app is ever served on a host that is not the public one, otherwise `ROOT_DOMAIN` and the request's own host cover it. |
 
 **Render**
 
 | Variable | Default | Notes |
 |---|---|---|
-| `APP_BASE_URL` | — | Public URL of the Vercel deployment; a bare hostname is accepted. Without it the AI sweep logs that it is skipped and the rest of the worker carries on. |
+| `APP_BASE_URL` | — | `https://replyradar.dev`. A bare hostname is accepted. Without it the AI sweep logs that it is skipped and the rest of the worker carries on. |
 | `POLL_INTERVAL_SECONDS` | `120` | Floor of 30. |
 | `AI_BATCH_SIZE` | `10` | Conversations through the AI pipeline per client per cycle. |
 | `AI_CONCURRENCY` | `4` | Conversations analysed at once. |

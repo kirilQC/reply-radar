@@ -240,8 +240,12 @@ export default function AdminPage() {
     };
     reader.readAsDataURL(file);
   };
+  // No fallback address. The server fills this in from the domain it is actually being served on, so
+  // a literal here would only ever be a stale second opinion — and the failure it caused would be a
+  // client's replies quietly not arriving, which nobody notices for a week.
   const copyWebhook = () => {
-    void navigator.clipboard?.writeText(client.webhookUrl || `https://reply-radar-mauve.vercel.app/api/webhooks/heyreach/${client.slug}`);
+    if (!client.webhookUrl) return;
+    void navigator.clipboard?.writeText(client.webhookUrl);
     showSavedConfirmation();
   };
   return (
@@ -425,11 +429,11 @@ export default function AdminPage() {
                       <div className="endpoint-box">
                         <div>
                           <small>WEBHOOK ENDPOINT</small>
-                          <code>
-                            {client.webhookUrl || `https://reply-radar-mauve.vercel.app/api/webhooks/heyreach/${client.slug || ""}`}
-                          </code>
+                          <code>{client.webhookUrl || "Save this client to generate its endpoint."}</code>
                         </div>
-                        <button onClick={copyWebhook}>Copy</button>
+                        <button onClick={copyWebhook} disabled={!client.webhookUrl}>
+                          Copy
+                        </button>
                       </div>
                       <div className="panel-actions">
                         <button className="text-button" onClick={() => setActive("audit")}>

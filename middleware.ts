@@ -10,7 +10,18 @@ import { NextResponse, type NextRequest } from "next/server";
  * until then the equivalent `/analytics?client=<slug>` and `/qc-brain/<slug>` paths work unchanged,
  * which is why the rewrite is a shortcut to a real URL rather than the only way to reach one.
  *
- * ROOT_DOMAIN (e.g. "replyradar.app") tells the rewrite which leading label is the client.
+ * ROOT_DOMAIN is the apex this app answers on — "replyradar.dev" — and it is what tells the rewrite
+ * which leading label is the client. A bare hostname with no scheme and no trailing slash; the
+ * comparison below is string equality against the Host header, so anything else fails to match and
+ * the rewrite silently never fires.
+ */
+
+/**
+ * Labels that are never a client.
+ *
+ * `www` is the one that matters in practice: `www.replyradar.dev` is the same site, and without this
+ * it would be read as a workspace called "www" and rewritten to an analytics page for a client that
+ * does not exist. The rest are reserved against a future subdomain rather than a present one.
  */
 const RESERVED = new Set(["www", "app", "api", "admin", "vercel", "localhost"]);
 

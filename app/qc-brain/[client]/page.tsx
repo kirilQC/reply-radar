@@ -7,7 +7,7 @@ import { workspacesByFolder } from "../../lib/brain-workspaces";
 import { clientsIn } from "../../../shared/brain-structure.mjs";
 
 /**
- * A client's own address: `/qc-brain/willow`, or `willow.replyradar.app/qc-brain`.
+ * A client's own address: `/qc-brain/willow`, or `willow.replyradar.dev/qc-brain`.
  *
  * ── Why a client needs a URL at all ─────────────────────────────────────────────────────────────
  * The rest of this tab is one component switching a `view` field, which is right — every screen is

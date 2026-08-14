@@ -56,6 +56,21 @@ const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** LinkedIn direct messages carry no subject. HeyReach wants the field regardless. */
 const SUBJECT = "";
 
+/**
+ * The real HeyReach chatroom id, out of the one we store.
+ *
+ * `rr_conversations.heyreach_conversation_id` is not always HeyReach's id. One chatroom can be
+ * attributed to two campaigns or two senders inside the same workspace, and the row is unique on
+ * (workspace, conversation) — so ingestion suffixes the id with the campaign and sender to keep both
+ * attributions as separate rows (`app/lib/heyreach-ingestion.ts`). The prefix before the first `::`
+ * is HeyReach's own id by construction.
+ *
+ * This matters more here than anywhere else that reads the column. A read given a suffixed id gets a
+ * 404 and falls back to a lookup by profile URL; a *send* given one has nothing to fall back to, and
+ * the failure would land on the one action a person has just confirmed they want to happen.
+ */
+const chatroomId = (stored: string) => stored.split("::")[0];
+
 async function db(url: string, key: string, path: string, options: RequestInit = {}) {
   const response = await fetch(`${url}/rest/v1/${path}`, {
     ...options,
@@ -107,7 +122,7 @@ export async function POST(request: Request) {
     const conversation = conversations[0];
     if (!conversation) return NextResponse.json({ ok: false, error: "That conversation no longer exists." }, { status: 404 });
 
-    const heyreachConversationId = text(conversation.heyreach_conversation_id);
+    const heyreachConversationId = chatroomId(text(conversation.heyreach_conversation_id));
     const accountId = text(conversation.account_id);
     if (!heyreachConversationId || !accountId) {
       return NextResponse.json(
