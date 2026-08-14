@@ -1937,11 +1937,28 @@ a.tag-outline-link:hover {
   font-size: 12.5px;
   line-height: 1.6;
 }
+/* Fifteen prompts in one column would be a wall to read top to bottom. Grouped by what they are
+   about and laid out two-across, each heading is a place to stop scanning, so somebody looking for a
+   reply question never reads the campaign ones. */
+.mcp-promptset {
+  margin-bottom: 22px;
+}
+.mcp-promptset h2 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 620;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
 .mcp-prompts {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(288px, 1fr));
   gap: 8px;
 }
 .mcp-prompt {
+  display: flex;
+  align-items: stretch;
   padding: 12px 14px;
   text-align: left;
   color: var(--muted);
@@ -1955,6 +1972,78 @@ a.tag-outline-link:hover {
   color: var(--text);
   border-color: var(--accent);
   background: var(--panel-2);
+}
+/* A saved prompt is a button with a second button riding on it, so the padding moves inward and the
+   card itself stops being the clickable thing. */
+.mcp-prompt.is-saved {
+  padding: 0;
+  gap: 0;
+}
+.mcp-prompt.is-saved > button:first-child {
+  flex: 1;
+  padding: 12px 4px 12px 14px;
+  text-align: left;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+.mcp-prompt-drop {
+  width: 26px;
+  flex: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+}
+.mcp-prompt.is-saved:hover .mcp-prompt-drop {
+  opacity: 1;
+}
+.mcp-prompt-drop:hover {
+  color: var(--text);
+}
+.mcp-promptnew {
+  padding: 10px 14px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 11.5px;
+}
+.mcp-promptnew:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.mcp-promptadd {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.mcp-promptadd input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.mcp-promptadd button {
+  padding: 10px 14px;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.mcp-promptadd button:disabled {
+  opacity: 0.45;
+}
+.mcp-promptadd button.is-quiet {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  font-weight: 500;
 }
 
 .mcp-thread {
@@ -2819,10 +2908,63 @@ a.tag-outline-link:hover {
    itself in the bordered box beside it. Previously the attach button lived inside that border, which
    made it look like part of the question being typed. */
 .mcp-composer {
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 8px;
   margin-bottom: 22px;
+}
+
+/* The skill menu floats above the box rather than pushing it down the page: the line you are typing
+   must not move while the list under it changes on every keystroke. It is anchored to the bottom so
+   it grows upward, and capped so twenty commands scroll instead of covering the transcript. */
+.mcp-slash {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 264px;
+  overflow-y: auto;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 14px 34px rgb(0 0 0 / 0.32);
+}
+.mcp-slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  border-radius: 7px;
+}
+.mcp-slash-item.is-on {
+  background: var(--panel-2);
+}
+.mcp-slash-name {
+  flex: none;
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 600;
+}
+.mcp-slash-item.is-on .mcp-slash-name {
+  color: var(--accent);
+}
+.mcp-slash-blurb {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mcp-composer-bar {
   flex: 1;
@@ -3305,60 +3447,136 @@ a.brain-home-link:hover {
 
 .brain-docgrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
   gap: 11px;
   margin-top: 14px;
 }
-/* A missing document is drawn, not omitted — dashed and flat rather than left out. The whole
-   reason for a fixed skeleton is that an absence is the useful signal, and an absence you cannot
-   see is not a signal at all. */
+/* A menu, not a page of reading. The line explaining what an ICP is stays as the hover title, since
+   it is worth exactly one look; the glyph does the telling-apart from then on.
+
+   A missing document is drawn, not omitted — dashed and flat rather than left out. The whole reason
+   for a fixed skeleton is that an absence is the useful signal, and an absence you cannot see is not
+   a signal at all. */
 .brain-doccard {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 13px 15px;
-  min-height: 96px;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 15px 16px 14px;
   text-align: left;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 11px;
 }
 .brain-doccard:hover:not(:disabled) {
   border-color: var(--accent);
+}
+.brain-doccard:hover:not(:disabled) .brain-doccard-icon {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .brain-doccard.is-missing {
   background: transparent;
   border-style: dashed;
   cursor: default;
 }
+.brain-doccard-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 9px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+}
+.brain-doccard-icon svg {
+  width: 17px;
+  height: 17px;
+}
+.brain-doccard.is-missing .brain-doccard-icon {
+  color: var(--muted-2);
+  background: transparent;
+  border-style: dashed;
+}
 .brain-doccard-label {
-  font-size: 12.5px;
-  font-weight: 630;
+  font-size: 13.5px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
 }
 .brain-doccard.is-missing .brain-doccard-label {
   color: var(--muted);
 }
-.brain-doccard-blurb {
-  flex: 1;
-  color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.5;
-}
-.brain-doccard.is-missing .brain-doccard-blurb {
-  color: var(--muted-2);
-}
 .brain-doccard-age {
   color: var(--muted-2);
-  font-size: 10px;
+  font-size: 10.5px;
 }
 .brain-doccard-age.is-stale {
   color: var(--amber);
 }
 
+/* Read-mostly is a choice, so the way to do the other thing has to be said somewhere. The end of a
+   client's page is where somebody has finished looking and still has the question they came with. */
+.brain-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 22px;
+  margin-top: 34px;
+  padding: 19px 22px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.brain-ask > div {
+  flex: 1;
+  min-width: 260px;
+}
+.brain-ask h3 {
+  margin: 0 0 5px;
+  font-size: 14px;
+  font-weight: 640;
+  letter-spacing: -0.025em;
+}
+.brain-ask p {
+  margin: 0;
+  max-width: 66ch;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.brain-ask-go {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 33px;
+  padding: 0 17px;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.brain-ask-go:hover {
+  filter: brightness(1.08);
+}
+.brain-ask-hint {
+  flex: 1 0 100%;
+  color: var(--muted-2);
+  font-size: 10.5px;
+}
+
+/* A clear break, not a wider row. Without a heading between them the only thing saying "these four
+   are a different kind of thing from the eighteen above" is the gap, so it has to be a real one. */
 .brain-areas {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 11px;
+  gap: 12px;
+  margin-top: 34px;
+  padding-top: 30px;
+  border-top: 1px solid var(--border-soft);
 }
 /* Name and count only. The descriptions under these four were the explanation you needed once and
    then read past for ever, and four of them under a wall of clients read as more page to get

@@ -110,19 +110,49 @@ const sizeOf = (bytes: number) =>
   bytes < 1024 ? `${Math.round(bytes)} B` : bytes < 1_048_576 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1_048_576).toFixed(1)} MB`;
 
 /**
- * Openers, chosen to teach the surface rather than to demo it.
+ * Openers, which are the description now that the paragraph is gone.
  *
- * Each one exercises a different part — live HeyReach status, our stored replies, a search of the
- * database by title, a file export, a cross-client comparison — because the question people cannot
- * guess is what this thing can be asked, and five examples answer that faster than any description.
+ * A page that opens with an empty box and no examples is a page nobody knows what to ask, and the
+ * paragraph explaining it was read once and scrolled past for ever after. These say the same thing
+ * by being clickable: between them they cover live HeyReach status, our stored replies, searching
+ * the database by title, exporting a file, reading the brain, and comparing clients — so what this
+ * can be asked is learned by using it rather than by reading about it.
+ *
+ * Grouped, because fifteen ungrouped sentences is a wall. The group name is the part you scan.
  */
-const PROMPTS = [
-  "What campaigns are live for Steadywell right now, and when do they run out of leads?",
-  "Who replied and hasn't been followed up with yet? Oldest first.",
-  "List every CISO in our database and say which ones have replied.",
-  "Export Steadywell's biggest lead list as a CSV.",
-  "Compare every client's reply performance and tell me who needs attention.",
+const PROMPTS: { group: string; prompt: string }[] = [
+  { group: "Campaigns", prompt: "What campaigns are live for Steadywell right now, and when do they run out of leads?" },
+  { group: "Campaigns", prompt: "Which campaigns have the worst reply rate, and what do their first messages have in common?" },
+  { group: "Campaigns", prompt: "Which senders are underused this week, and how many more invites could they send?" },
+  { group: "Campaigns", prompt: "Compare every client's reply performance and tell me who needs attention." },
+  { group: "Replies", prompt: "Who replied and hasn't been followed up with yet? Oldest first." },
+  { group: "Replies", prompt: "Show me every positive reply from the last 14 days, with the lead's title and company." },
+  { group: "Replies", prompt: "Which leads replied more than once and never got an answer from us?" },
+  { group: "Database", prompt: "List every CISO in our database and say which ones have replied." },
+  { group: "Database", prompt: "Which accounts appear in more than one client's campaigns?" },
+  { group: "Database", prompt: "Export Steadywell's biggest lead list as a CSV." },
+  { group: "QC Brain", prompt: "What does the brain say Willow's ICP is, and do the leads we are actually contacting match it?" },
+  { group: "QC Brain", prompt: "Which clients have no ICP, personas or voice guide written in the QC Brain?" },
+  { group: "QC Brain", prompt: "Summarise every call note for Willow from the last month." },
+  { group: "Reporting", prompt: "Draft a weekly update for Steadywell: what ran, what replied, what needs a decision." },
+  { group: "Reporting", prompt: "Break down our meetings booked by client and by month this year." },
 ];
+
+/** Prompts somebody saved for themselves. Personal and per-machine, so the browser is the store. */
+const SAVED_KEY = "reply-radar-mcp-prompts:v1";
+
+const readSaved = (): string[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const held = JSON.parse(window.localStorage.getItem(SAVED_KEY) ?? "[]");
+    return Array.isArray(held) ? held.filter((entry) => typeof entry === "string") : [];
+  } catch {
+    return [];
+  }
+};
+
+/** A slash command in the QC Brain, as the menu above the box needs it. */
+type BrainSkill = { name: string; command: string; blurb: string; clientLabel: string };
 
 /** A tool name as a person would say it: `heyreach_campaign_metrics` → "HeyReach campaign metrics". */
 const toolLabel = (name: string) =>
@@ -322,6 +352,90 @@ export default function McpPage() {
   const [attachNote, setAttachNote] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const [saved, setSaved] = useState<string[]>(readSaved);
+  const [adding, setAdding] = useState("");
+  const [composing, setComposing] = useState(false);
+
+  /**
+   * The QC Brain's slash commands, offered above the box.
+   *
+   * ── Why a menu and not a list somewhere ─────────────────────────────────────────────────────────
+   * These routines are the leverage in the brain and they are invisible: you learn `/willow-weekly`
+   * exists because somebody mentions it. The assistant can already run them, which is worth nothing
+   * to a person who cannot name one. Typing `/` is how everyone already expects to find out.
+   *
+   * ── Fetched on the first slash, not on load ─────────────────────────────────────────────────────
+   * Listing them means reading every command file out of GitHub, which is not a cost to pay on a page
+   * somebody opened to ask about reply rates. `asked` is a ref rather than state so the first
+   * keystroke does not cause a render on its way to a fetch.
+   */
+  const [skills, setSkills] = useState<BrainSkill[]>([]);
+  const askedForSkills = useRef(false);
+  const [pick, setPick] = useState(0);
+  const [menuOff, setMenuOff] = useState(false);
+
+  // A command and nothing else: the menu is a way to *choose* one, so it closes the moment the line
+  // becomes a sentence. A trailing space after picking is what closes it.
+  const typed = /^\/([a-z0-9-]*)$/i.exec(question);
+  const filter = typed ? typed[1].toLowerCase() : null;
+  const matches = useMemo(
+    () => (filter === null ? [] : skills.filter((skill) => skill.name.toLowerCase().includes(filter))),
+    [filter, skills],
+  );
+  const menuOpen = filter !== null && !menuOff && matches.length > 0;
+  const active = matches.length ? Math.min(pick, matches.length - 1) : 0;
+
+  const type = useCallback(
+    (value: string) => {
+      setQuestion(value);
+      setMenuOff(false);
+      setPick(0);
+      if (value.startsWith("/") && !askedForSkills.current) {
+        askedForSkills.current = true;
+        fetch("/api/brain/skills", { cache: "no-store" })
+          .then((response) => response.json())
+          .then((body) => setSkills(Array.isArray(body?.skills) ? body.skills : []))
+          .catch(() => setSkills([]));
+      }
+    },
+    [],
+  );
+
+  const choose = useCallback((skill: BrainSkill) => {
+    // The trailing space both closes the menu and leaves the caret where you would add an argument.
+    setQuestion(`${skill.command} `);
+    setMenuOff(false);
+    inputRef.current?.focus();
+  }, []);
+
+  const keepPrompt = useCallback(() => {
+    const wanted = adding.trim();
+    if (!wanted) return;
+    setSaved((held) => {
+      const next = held.includes(wanted) ? held : [...held, wanted];
+      try {
+        window.localStorage.setItem(SAVED_KEY, JSON.stringify(next));
+      } catch {
+        /* A full or blocked store is not worth an error message over a saved prompt. */
+      }
+      return next;
+    });
+    setAdding("");
+    setComposing(false);
+  }, [adding]);
+
+  const dropPrompt = useCallback((prompt: string) => {
+    setSaved((held) => {
+      const next = held.filter((entry) => entry !== prompt);
+      try {
+        window.localStorage.setItem(SAVED_KEY, JSON.stringify(next));
+      } catch {
+        /* As above. */
+      }
+      return next;
+    });
+  }, []);
 
   /**
    * Scrolling, split in two because the two cases want opposite behaviour.
@@ -664,25 +778,75 @@ export default function McpPage() {
           {messages.length === 0 ? (
             <div className="mcp-intro">
               <h1>Ask anything</h1>
-              <p>
-                Live HeyReach campaigns, senders, sequences and lists for every client, plus everyone
-                in Reply Radar&apos;s own database — searchable by job title or company — with their
-                replies, scores and follow-ups. It also reads the QC Brain, so it can answer why a
-                campaign is written the way it is and then tell you whether it worked — and it can
-                run the Brain&apos;s skills, so asking for a weekly report gets you QC&apos;s
-                weekly report rather than one it made up. Attach a
-                screenshot, PDF or spreadsheet and it will read that too, and ask for any answer as a
-                CSV or a PDF. Nothing here can send, pause or change anything; the one exception is
-                that it can propose an edit to the Brain, which opens a pull request for someone to
-                review. Bigger questions take longer on purpose; you can watch the lookups as they run.
-              </p>
-              <div className="mcp-prompts">
-                {PROMPTS.map((prompt) => (
-                  <button key={prompt} className="mcp-prompt" onClick={() => void send(prompt)}>
-                    {prompt}
+              {/* The examples are the explanation. A paragraph describing what this could be asked
+                  was read once and scrolled past for ever; fifteen questions you can click say the
+                  same thing and leave you one click from an answer. */}
+              {saved.length > 0 && (
+                <div className="mcp-promptset">
+                  <h2>Yours</h2>
+                  <div className="mcp-prompts">
+                    {saved.map((prompt) => (
+                      <div key={prompt} className="mcp-prompt is-saved">
+                        <button onClick={() => void send(prompt)}>{prompt}</button>
+                        <button
+                          className="mcp-prompt-drop"
+                          type="button"
+                          aria-label={`Forget "${prompt}"`}
+                          title="Forget this prompt"
+                          onClick={() => dropPrompt(prompt)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {[...new Set(PROMPTS.map((entry) => entry.group))].map((group) => (
+                <div key={group} className="mcp-promptset">
+                  <h2>{group}</h2>
+                  <div className="mcp-prompts">
+                    {PROMPTS.filter((entry) => entry.group === group).map((entry) => (
+                      <button key={entry.prompt} className="mcp-prompt" onClick={() => void send(entry.prompt)}>
+                        {entry.prompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {composing ? (
+                <form
+                  className="mcp-promptadd"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    keepPrompt();
+                  }}
+                >
+                  <input
+                    /* Focused on mount: the button that opened this form was where the cursor already
+                       was, so anything else means a second click to start typing. */
+                    ref={(node) => {
+                      node?.focus();
+                    }}
+                    value={adding}
+                    placeholder="The question you ask often, written out in full"
+                    onChange={(event) => setAdding(event.target.value)}
+                    aria-label="A prompt to save"
+                  />
+                  <button type="submit" disabled={!adding.trim()}>
+                    Save
                   </button>
-                ))}
-              </div>
+                  <button type="button" className="is-quiet" onClick={() => { setComposing(false); setAdding(""); }}>
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <button className="mcp-promptnew" type="button" onClick={() => setComposing(true)}>
+                  + Save a prompt of your own
+                </button>
+              )}
             </div>
           ) : (
             <div className="mcp-thread">
@@ -752,6 +916,32 @@ export default function McpPage() {
                 <path d="M20 11.5 12.2 19.3a5 5 0 0 1-7.1-7.1l8.2-8.2a3.4 3.4 0 0 1 4.8 4.8l-8.1 8.1a1.8 1.8 0 0 1-2.5-2.5l7.4-7.4" />
               </svg>
             </label>
+            {/* The skills, above the box the way every other slash menu in the world sits. Anchored
+                to the composer rather than to the caret: the command is always the whole line here,
+                so there is only ever one place it could belong. */}
+            {menuOpen && (
+              <div className="mcp-slash" role="listbox" aria-label="QC Brain skills">
+                {matches.map((skill, index) => (
+                  <button
+                    key={skill.name}
+                    type="button"
+                    role="option"
+                    aria-selected={index === active}
+                    className={`mcp-slash-item${index === active ? " is-on" : ""}`}
+                    // Pointer down, not click: clicking blurs the textarea first and the menu would
+                    // be gone before the click landed.
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      choose(skill);
+                    }}
+                    onMouseEnter={() => setPick(index)}
+                  >
+                    <span className="mcp-slash-name">{skill.name}</span>
+                    <span className="mcp-slash-blurb">{skill.blurb || skill.clientLabel}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="mcp-composer-bar">
               {(attached.length > 0 || attachNote) && (
                 <div className="mcp-attached">
@@ -775,11 +965,35 @@ export default function McpPage() {
                 ref={inputRef}
                 rows={1}
                 value={question}
-                placeholder="Ask about campaigns, replies, clients, or anyone in the database"
-                onChange={(event) => setQuestion(event.target.value)}
+                placeholder="Ask about campaigns, replies, the database or the QC Brain — or type / for a skill"
+                onChange={(event) => type(event.target.value)}
                 // Enter sends; Shift+Enter breaks the line. This is a question box, and the multi-line
                 // case is rare enough that making it the default would cost a keystroke every time.
+                // While the skill menu is open the same keys drive it, which is what everyone expects
+                // of a menu that appeared under their cursor.
                 onKeyDown={(event) => {
+                  if (menuOpen) {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setPick((current) => (Math.min(current, matches.length - 1) + 1) % matches.length);
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setPick((current) => (Math.min(current, matches.length - 1) + matches.length - 1) % matches.length);
+                      return;
+                    }
+                    if (event.key === "Enter" || event.key === "Tab") {
+                      event.preventDefault();
+                      choose(matches[active]);
+                      return;
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setMenuOff(true);
+                      return;
+                    }
+                  }
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     void send(question);

@@ -348,7 +348,6 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
           ) : view === "client" ? (
             <ClientHome
               detail={detail}
-              campaigns={campaigns}
               onOpen={(path) => {
                 setOpenPath(path);
                 setView("doc");
@@ -418,7 +417,8 @@ function Index({
       </div>
 
       {/* Four destinations, with no heading over them. The heading said only that these were not
-          clients, which the wall of clients above had already said. */}
+          clients, which the wall of clients above had already said — so the gap does that job
+          instead, and has to be wide enough to read as a break rather than as a wider row. */}
       <div className="brain-areas">
         {areas.map((entry) => (
           <button
@@ -431,6 +431,8 @@ function Index({
           </button>
         ))}
       </div>
+
+      <AskTheBrain />
     </>
   );
 }
@@ -470,15 +472,7 @@ function ClientMark({ label, logo, slug, size }: { label: string; logo: string; 
  * document that happens to mention a code, because "how is this client actually doing" is a question
  * about the client and not about one file.
  */
-function ClientHome({
-  detail,
-  campaigns,
-  onOpen,
-}: {
-  detail: ClientDetail | null;
-  campaigns: Campaign[];
-  onOpen: (path: string) => void;
-}) {
+function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (path: string) => void }) {
   if (!detail) return <p className="brain-quiet">Opening…</p>;
 
   const missing = detail.docs.filter((entry) => !entry.present && entry.key !== "dnc");
@@ -565,6 +559,9 @@ function ClientHome({
 
       <h2 className="brain-heading">Start here</h2>
       <p className="brain-sub">The seven documents every client is supposed to have.</p>
+      {/* Name and state, and nothing else. The one-line description of what an ICP is belongs to
+          somebody's first week, and it was on the tile for ever after — seven of them turned a menu
+          into a page of reading when the only thing anybody does here is pick one. */}
       <div className="brain-docgrid">
         {detail.docs.map((entry) => {
           const age = stale(entry.updated);
@@ -574,11 +571,14 @@ function ClientHome({
               className={`brain-doccard${entry.present ? "" : " is-missing"}`}
               onClick={() => entry.present && onOpen(entry.path)}
               disabled={!entry.present}
+              title={entry.blurb}
             >
+              <span className="brain-doccard-icon" aria-hidden="true">
+                <DocIcon slot={entry.key} />
+              </span>
               <span className="brain-doccard-label">{entry.label}</span>
-              <span className="brain-doccard-blurb">{entry.blurb}</span>
               <span className={`brain-doccard-age${age.stale ? " is-stale" : ""}`}>
-                {entry.present ? (entry.updated ? `Changed ${ago(entry.updated)}` : "In the repo") : "Not written"}
+                {entry.present ? (entry.updated ? ago(entry.updated) : "In the repo") : "Not written"}
               </span>
             </button>
           );
@@ -602,13 +602,65 @@ function ClientHome({
         </>
       )}
 
-      <CampaignStrip campaigns={campaigns} heading="Campaigns running for them now" />
-
       {/* Folded away. Forty call notes listed in full turned a landing page into a file tree, which
           is the thing this whole surface exists to not be — so the folders are shown with their
           counts and open one at a time. */}
       {extras > 0 && <Shelf groups={detail.groups} total={extras} onOpen={onOpen} />}
+
+      <AskTheBrain client={detail.label} />
     </div>
+  );
+}
+
+/**
+ * One glyph per slot, so seven tiles are told apart by shape before they are read.
+ *
+ * Line drawings rather than filled shapes, at one weight, because these sit at the size where a
+ * detailed icon becomes a smudge and the only job they have is to be different from each other.
+ */
+function DocIcon({ slot }: { slot: string }) {
+  const paths: Record<string, string> = {
+    brief: "M6 3h8l4 4v14H6zM14 3v4h4",
+    icp: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16m0 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8m0 3.4a.6.6 0 1 0 0 1.2.6.6 0 0 0 0-1.2",
+    personas: "M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11m-6 9v-1.2C3 15.6 5.7 14 9 14s6 1.6 6 4.8V20M17 5.2a3.2 3.2 0 0 1 0 6.2m3.9 8.6v-1.1c0-2.3-1.3-3.8-3.4-4.5",
+    voice: "M12 4a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3M6 11.5a6 6 0 0 0 12 0M12 17.5V21",
+    engagement: "M4 19V9m5 10V5m5 14v-7m5 7V8",
+    crm: "M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3m0 0v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3",
+    dnc: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18m-6.4 2.6 12.8 12.8",
+  };
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d={paths[slot] ?? paths.brief} />
+    </svg>
+  );
+}
+
+/**
+ * Where to go when reading is not enough.
+ *
+ * This surface is deliberately read-mostly: it opens a document and, with the editor, proposes a
+ * change to one you already found. Everything else people want — "which clients have no ICP", "does
+ * what we wrote match who we are actually contacting", writing a file nobody has opened yet — is a
+ * question rather than a click, and the chat is the thing that answers questions. Saying so at the
+ * bottom of a client's page is the moment it is wanted, which a line in a settings screen is not.
+ */
+function AskTheBrain({ client }: { client?: string }) {
+  return (
+    <aside className="brain-ask">
+      <div>
+        <h3>Ask the brain instead of browsing it</h3>
+        <p>
+          The MCP chat reads every file here and can write to it — searching across clients, checking
+          what we wrote against what we are actually running, and proposing an edit as a pull request.
+        </p>
+      </div>
+      <a className="brain-ask-go" href="/mcp">
+        Open MCP chat
+      </a>
+      <span className="brain-ask-hint">
+        {client ? `Try “What does the brain say about ${client}?”` : "Type / in the chat to run one of the brain’s skills"}
+      </span>
+    </aside>
   );
 }
 
