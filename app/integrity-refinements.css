@@ -2609,6 +2609,244 @@ a.tag-outline-link:hover {
 .md-stats > div[data-tone="negative"] strong { color: var(--coral); }
 .md-stats > div[data-tone="warn"] strong { color: var(--amber); }
 
+/* ── Territory, as tiles ──────────────────────────────────────────────────────────────────────────
+   Every ICP names states, and a comma-separated line of them is the thing nobody reads. Equal tiles
+   rather than an outline: no projection, no asset, no licence, and — the actual argument — Montana
+   stops looking like the point and Rhode Island stops looking like a rounding error.
+
+   Divs on a grid, so it prints, scales with the column and needs no SVG. */
+.md-map {
+  margin: 0 0 16px;
+}
+.md-map figcaption,
+.md-cards figcaption,
+.md-steps figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 9px;
+  margin-bottom: 9px;
+  font-size: 11px;
+}
+.md-map figcaption strong,
+.md-cards figcaption,
+.md-steps figcaption {
+  font-size: 11.5px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+}
+.md-map figcaption span {
+  color: var(--muted-2);
+  font-size: 10.5px;
+}
+.md-map-grid {
+  display: grid;
+  gap: 3px;
+  max-width: 460px;
+}
+/* Aspect-ratio on the tile rather than a fixed height, so the map is as wide as the column allows and
+   the tiles stay square at every width instead of stretching into bricks. */
+.md-map-tile {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 640;
+  letter-spacing: 0.02em;
+  cursor: default;
+}
+/* Named tones only, and they mean intensity rather than verdict — a state we sell into is not "good". */
+.md-map-tile[data-tone="strong"] {
+  color: #fff;
+  background: var(--accent);
+  border-color: transparent;
+}
+.md-map-tile[data-tone="positive"] {
+  color: #fff;
+  background: var(--green);
+  border-color: transparent;
+}
+.md-map-tile[data-tone="warm"],
+.md-map-tile[data-tone="negative"] {
+  color: #fff;
+  background: var(--amber);
+  border-color: transparent;
+}
+.md-map-tile[data-tone="cool"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.md-map-tile[data-tone="quiet"] {
+  color: var(--muted-2);
+  background: transparent;
+  border-style: dashed;
+}
+/* Anywhere the grid does not know. Listed, never dropped: a coverage map missing Ontario reads as a
+   complete one, which is the single thing a visual here is not allowed to do. */
+.md-map-rest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 9px 0 0;
+}
+.md-map-rest span {
+  padding: 3px 8px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 20px;
+  font-size: 10px;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────────────────────────────
+   The shape these documents reach for most and format worst: four personas written as four runs of
+   bold label and nested bullets, which arrives as one paragraph and is skimmed as one. Side by side,
+   the same four are comparable at a glance, which is what they were always for. */
+.md-cards {
+  margin: 0 0 16px;
+}
+.md-cards > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(216px, 1fr));
+  gap: 9px;
+}
+.md-cards article {
+  padding: 13px 15px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.md-cards article[data-tone="strong"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.md-cards header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.md-cards h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.md-cards header b {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-radius: 20px;
+  font-size: 9.5px;
+  font-weight: 600;
+}
+.md-cards .md-cards-sub {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.md-cards ul {
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.md-cards li {
+  position: relative;
+  margin: 0;
+  padding: 0 0 0 12px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.md-cards li::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 2px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--muted-2);
+}
+
+/* ── Steps ────────────────────────────────────────────────────────────────────────────────────────
+   Down the page rather than across it. A cadence is five to nine steps with a sentence each, and a
+   horizontal timeline of those either wraps into nonsense or truncates the sentences. */
+.md-steps {
+  margin: 0 0 16px;
+}
+.md-steps ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.md-steps li {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  margin: 0;
+  padding: 0 0 14px;
+}
+/* The connector, drawn by the row above it so the last step does not trail a line into nothing. */
+.md-steps li:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  top: 24px;
+  bottom: 2px;
+  left: 11px;
+  width: 1px;
+  background: var(--border);
+}
+.md-steps li:last-child {
+  padding-bottom: 0;
+}
+.md-steps i {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 50%;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.md-steps li[data-tone="strong"] i {
+  color: #fff;
+  background: var(--accent);
+  border-color: transparent;
+}
+.md-steps strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 9px;
+  padding-top: 3px;
+  font-size: 12.5px;
+  font-weight: 620;
+}
+.md-steps strong span {
+  color: var(--muted-2);
+  font-size: 10px;
+  font-weight: 550;
+}
+.md-steps p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
 /* Stands in for a visual whose spec is still arriving. */
 .md-drawing {
   margin: 0 0 13px;
@@ -3190,34 +3428,12 @@ span.brain-mark.is-lg {
   letter-spacing: -0.025em;
   line-height: 1.25;
 }
-/* The coverage meter. Colour carries the same meaning as the number beside it rather than a
-   different one: green only at complete, warm only when more than half is missing, and the
-   ordinary accent in between — so the eye can sort the grid without reading any of it. */
-.brain-meter {
-  display: block;
-  height: 4px;
-  background: var(--panel-2);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.brain-meter-fill {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  border-radius: 3px;
-}
-.brain-meter-fill.is-full {
-  background: var(--green);
-}
-.brain-meter-fill.is-thin {
-  background: var(--amber);
-}
 /* ── A client's home page ─────────────────────────────────────────────────────────────────── */
 
-/* Two questions, kept apart. The left half says who this client is and the right half says how
-   ready we are to work on them, and the previous version stacked both into one column under the
-   logo — so a name, a file count, a progress bar and a status dot all arrived as one paragraph and
-   none of them read as an answer to anything. */
+/* Who the client is, and only that. This used to be half a header, with a coverage meter, a file
+   count and a Reply Radar status dot in a column to the right of it — four different answers to
+   four questions nobody had asked, above the one thing people come here to do, which is open a
+   document. */
 .brain-hero {
   display: flex;
   align-items: flex-start;
@@ -3275,44 +3491,10 @@ span.brain-mark.is-lg {
   font-size: 12px;
   line-height: 1.4;
 }
-.brain-hero-state {
-  flex: 0 0 auto;
-  width: 216px;
-  padding-left: 24px;
-  border-left: 1px solid var(--border-soft);
-}
-.brain-hero-stat {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-.brain-hero-stat b {
-  font-size: 19px;
-  font-weight: 660;
-  letter-spacing: -0.03em;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.brain-hero-stat.is-quiet {
-  margin-top: 12px;
-}
-.brain-hero-stat.is-quiet b {
-  font-size: 15px;
-  color: var(--muted);
-}
 @media (max-width: 900px) {
   .brain-hero {
     flex-direction: column;
     gap: 18px;
-  }
-  .brain-hero-state {
-    width: 100%;
-    padding: 16px 0 0;
-    border-left: 0;
-    border-top: 1px solid var(--border-soft);
   }
 }
 
@@ -3348,48 +3530,6 @@ span.brain-mark.is-lg {
   line-height: 1.5;
 }
 
-/* The rest of a client's files, folded. Forty call notes listed in full is the file tree this
-   surface exists to replace, and it was the last thing on the page pushing everything useful up
-   the scroll. One folder opens at a time; the counts are the part you read at a glance. */
-.brain-shelf {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  margin-top: 14px;
-}
-.brain-shelf-group {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  overflow: hidden;
-}
-.brain-shelf-group.is-open {
-  border-color: var(--border-strong, var(--accent));
-}
-.brain-shelf-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 12px 15px;
-  text-align: left;
-}
-.brain-shelf-head:hover .brain-shelf-name {
-  color: var(--accent);
-}
-.brain-shelf-name {
-  font-size: 12.5px;
-  font-weight: 600;
-}
-.brain-shelf-count {
-  color: var(--muted-2);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-.brain-shelf-group .brain-more-list {
-  padding: 0 8px 8px;
-}
 /* The gaps, named in a sentence. Somebody who came here to write the missing one should be able
    to read which it is, not audit seven cards to work it out. Amber and not red: an unwritten ICP
    is work outstanding, not a fault, and the page should not shout at whoever opened it. */
@@ -3417,32 +3557,6 @@ span.brain-mark.is-lg {
   color: var(--muted-2);
   font-size: 10px;
   line-height: 1.55;
-}
-
-/* Where the client sits in Reply Radar, said on their brain page. A folder with no workspace is a
-   prospect or a dormant account, which is worth knowing before acting on anything written there. */
-.brain-home-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-top: 9px;
-  color: var(--muted);
-  font-size: 10.5px;
-  text-decoration: none;
-}
-.brain-home-link i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 7px #55c7a288;
-}
-.brain-home-link i.is-off {
-  background: var(--muted-2);
-  box-shadow: none;
-}
-a.brain-home-link:hover {
-  color: var(--accent);
 }
 
 .brain-docgrid {
@@ -3508,12 +3622,27 @@ a.brain-home-link:hover {
 .brain-doccard.is-missing .brain-doccard-label {
   color: var(--muted);
 }
-.brain-doccard-age {
-  color: var(--muted-2);
-  font-size: 10.5px;
+/* The rest of the folder, in the same grid as the seven slots but not competing with them. A call
+   note is a real document worth one click; it is not one of the things a client is supposed to have,
+   and the weight of the title is what says so. */
+.brain-doccard.is-other .brain-doccard-label {
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.4;
+  color: var(--muted);
 }
-.brain-doccard-age.is-stale {
-  color: var(--amber);
+.brain-doccard.is-other:hover .brain-doccard-label {
+  color: var(--text);
+}
+.brain-doccard.is-other .brain-doccard-icon {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 8px;
+  color: var(--muted-2);
+}
+.brain-doccard.is-other .brain-doccard-icon svg {
+  width: 15px;
+  height: 15px;
 }
 
 /* Read-mostly is a choice, so the way to do the other thing has to be said somewhere. The end of a
@@ -3525,7 +3654,6 @@ a.brain-home-link:hover {
   display: flex;
   align-items: center;
   gap: 18px;
-  max-width: 620px;
   margin-top: 34px;
   padding: 15px 18px;
   background: var(--panel);
@@ -3807,6 +3935,15 @@ a.brain-home-link:hover {
 .brain-doc-making {
   color: var(--muted-2);
   font-size: 10px;
+}
+/* A layout is made once and kept, which means the only way to get a different one is to ask. Quiet,
+   because it spends thirty seconds and some money, and nobody should press it by accident. */
+.brain-doc-redo {
+  color: var(--muted-2);
+  font-size: 11px;
+}
+.brain-doc-redo:hover {
+  color: var(--accent);
 }
 .brain-doc-warn {
   display: flex;

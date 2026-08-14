@@ -68,6 +68,29 @@ function gridOf(block) {
     };
   }
   if (block.kind === "stats") return { head: ["Label", "Value", "Note"], rows: block.items.map((item) => [item.label, item.value, item.note]) };
+  // The same argument as charts, for the same reason: these are all lists of things wearing a layout,
+  // and an export that dropped them would be missing content that is plainly on the screen.
+  if (block.kind === "map") {
+    return {
+      title: block.title,
+      head: ["Place", "Note"],
+      rows: [...block.states, ...block.elsewhere].map((place) => [place.label || place.code, place.note]),
+    };
+  }
+  if (block.kind === "cards") {
+    return {
+      title: block.title,
+      head: ["Title", "Subtitle", "Tag", "Detail"],
+      rows: block.items.map((item) => [item.title, item.subtitle, item.badge, item.lines.join("; ")]),
+    };
+  }
+  if (block.kind === "timeline") {
+    return {
+      title: block.title,
+      head: ["Step", "When", "Detail"],
+      rows: block.steps.map((step) => [step.label, step.when, step.body]),
+    };
+  }
   return null;
 }
 

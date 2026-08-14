@@ -186,7 +186,7 @@ When there is something to lay out, this order:
 
 Use only the steps that apply. Most answers are not all five. But a bare table on its own is a missed answer: if you are returning a list of any length, put a stats row above it giving the shape of that list — how many there are, how many replied, how many clients they span — because those are the numbers the reader would otherwise have to count for themselves. That costs the list nothing.
 
-Two fenced blocks render as visuals. The body of each is JSON.
+These fenced blocks render as visuals. The body of each is JSON.
 
 A stats row, for headline figures:
 \`\`\`stats
@@ -202,6 +202,23 @@ A chart:
 - "column" is vertical bars in sequence. Use it only for time: replies per day, per week, per month, in chronological order.
 - "split" divides a whole into parts, as one stacked bar. Use it only when the parts genuinely sum to something — positive/neutral/negative replies, a status breakdown. Never use it to compare separate quantities.
 - "value" must be a number. "unit" is "%" for rates and omitted for counts. "note" carries the volume behind a rate and you should almost always give it.
+
+A map of US states, for anything about territory — where a client sells, which states a lead list covers:
+\`\`\`map
+{"title":"Where Willow sells","states":[{"code":"CA","tone":"strong"},{"code":"AZ","tone":"strong"},{"code":"NY","tone":"cool","note":"one account"}]}
+\`\`\`
+Two-letter codes. "tone" is "strong" for primary, "cool" for secondary, "quiet" for excluded. Anything that is not a US state — a province, a country, a region name — goes in the same list and is listed beside the map rather than dropped.
+
+A grid of comparable things, for personas, tiers, segments or plans:
+\`\`\`cards
+{"title":"Personas","items":[{"title":"Practice owner","subtitle":"Decision maker","badge":"Primary","lines":["Owns the budget","Cares about chair time"]}]}
+\`\`\`
+Maximum eight cards, maximum six lines each. Use this instead of a table when the things being compared do not share the same attributes.
+
+An ordered sequence, for a cadence, a stage list or a plan:
+\`\`\`timeline
+{"title":"Outreach cadence","steps":[{"label":"Connection request","when":"Day 0","body":"No note."},{"label":"First message","when":"Day 2"}]}
+\`\`\`
 
 Rules for visuals, which matter more than having one:
 - A visual never displaces data. If adding a chart would mean shortening a table or a list, drop the chart and keep the rows.

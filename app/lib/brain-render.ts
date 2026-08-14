@@ -58,6 +58,15 @@ export type BrainRender = {
   warnings: { figures: string[]; coverage: number; thin: boolean };
   renderedAt: string;
   cached: boolean;
+  /**
+   * Whether this layout is now in the store.
+   *
+   * Said out loud because the alternative is a feature that looks broken in exactly the way it was
+   * complained about: with no table to write to, every reader pays for a fresh layout and the promise
+   * that it is done once is quietly false. False here means the page tells somebody to run the migration
+   * rather than leaving them to notice the bill.
+   */
+  stored: boolean;
 };
 
 type Row = Record<string, unknown>;
@@ -102,15 +111,23 @@ export async function cachedRender(path: string, sha: string): Promise<BrainRend
     },
     renderedAt: String(row.rendered_at ?? ""),
     cached: true,
+    stored: true,
   };
 }
 
-/** Keeps a layout. Silent on failure: this is a saving, and the reader already has their page. */
-async function keepRender(path: string, sha: string, render: BrainRender): Promise<void> {
+/**
+ * Keeps a layout, and says whether it managed to.
+ *
+ * A failure here never fails the request — the reader has their page and the saving is for the next
+ * person. But it is reported rather than swallowed, because the one failure that matters is the table
+ * not existing, and that turns "laid out once" into "laid out on every open" with nothing on screen
+ * to say so.
+ */
+async function keepRender(path: string, sha: string, render: BrainRender): Promise<boolean> {
   const held = store();
   const head = headers({ Prefer: "resolution=merge-duplicates,return=minimal" });
-  if (!held || !head) return;
-  await fetch(`${held.url}/rest/v1/${TABLE}`, {
+  if (!held || !head) return false;
+  const response = await fetch(`${held.url}/rest/v1/${TABLE}`, {
     method: "POST",
     headers: head,
     body: JSON.stringify({
@@ -122,6 +139,7 @@ async function keepRender(path: string, sha: string, render: BrainRender): Promi
       rendered_at: new Date().toISOString(),
     }),
   }).catch(() => null);
+  return response?.ok === true;
 }
 
 /** Drops the kept layout for a path, so the next reader gets a fresh one. */
@@ -136,38 +154,70 @@ export async function forgetRender(path: string): Promise<void> {
 }
 
 /**
- * What the model is told, and it is nearly all prohibition.
+ * What the model is told.
  *
- * The temptation this has to defeat is specific and strong: asked to make a document visual, a model
- * will reach for the visual the document nearly supports. It will average two rates into a third, put
- * an "estimated" column on a table, invent a fourth persona to balance a three-column layout, and
- * round 1,998 to 2,000 because it reads better. Each of those is a lie in a file that people quote in
- * client calls, and none of them look like lies.
+ * ── Why this is written as a demand and not as a permission ─────────────────────────────────────
+ * The first version of this prompt led with its prohibitions and offered the visuals as things the
+ * model *may* use. The result was the source document with slightly better headings — put beside the
+ * original it was hard to tell which was which. A model reading a page of "never do this" concludes,
+ * correctly, that the safest output is the input, and safety is not what this feature is for.
  *
- * The positive half is short because the renderer is what makes it possible: the fences named here are
- * ones the app already draws, so "put the figures in a row" is a real instruction rather than a wish.
+ * So the order is inverted. The mandate comes first and it is compulsory: pick the shapes the document
+ * already is, and draw them. The prohibitions still follow, unchanged, because the failure they guard
+ * against is worse than a dull layout — but they are guardrails on a job, not the job.
+ *
+ * ── Why the visual list is specific ─────────────────────────────────────────────────────────────
+ * "Be more visual" gets a wall of bullets. Every fence named below is one the app already draws as CSS
+ * — `Markdown.tsx` renders `stats`, `chart`, `map`, `cards` and `timeline` — so each line is a real
+ * instruction with a real result rather than a hope. The mapping from prose shape to fence is spelled
+ * out for the same reason: the model's difficulty is not drawing a table, it is noticing that the four
+ * paragraphs in front of it were four personas all along.
  */
-const SYSTEM = `You lay out documents. You are given one markdown document from an internal knowledge base and you return the same document laid out so a person will actually read it.
+const SYSTEM = `You are given one markdown document from an internal agency knowledge base. It is correct, it is useful, and nobody reads it, because it is a wall of bold labels and nested bullets. Your job is to lay it out again so that somebody opening it can see what is in it in five seconds.
 
-This is a formatting job. It is not a writing job, an editing job or a summarising job.
+Reproducing the document with tidier headings is a failure. If your output could be mistaken for the input, you have not done the job. Restructure aggressively — the shapes are already in the text, and your task is to find them and draw them.
 
-Absolute rules:
-- Every fact, name, number, place, bullet and caveat in the source must survive in your output. Losing one is a failure.
+## Find these shapes and convert them, every time they appear
+
+1. **Repeated things with the same attributes** — personas, tiers, competitors, tools, channels, segments, plans. These are a TABLE or a \`cards\` block. Never leave them as prose or as bullets.
+2. **Any number the document states** — rates, counts, prices, headcounts, cycle lengths, quotas. The three to six that matter most go in a \`stats\` row near the top.
+3. **Quantities the document compares** — reply rates across tracks, revenue by segment, volumes by month. That is a \`chart\`.
+4. **Places** — states, regions, territory priorities, "we sell into X, Y and Z". That is a \`map\`.
+5. **Anything ordered** — a cadence, an onboarding sequence, a sales stage list, a week-by-week plan, "first… then… finally". That is a \`timeline\`.
+6. **The one or two lines that change what somebody does** — a rule, a hard no, a positioning sentence. Pull each into its own blockquote.
+7. **Definitions and label/value pairs** — a two-column table.
+
+Then give the document real headings in its own words, so the whole thing can be skimmed, and put a horizontal rule between major parts.
+
+## The blocks you can draw
+
+A fenced code block with one of these language tags renders as a visual. The body must be valid JSON on the lines after the tag.
+
+\`stats\` — a row of headline figures. Values are strings copied exactly as the source writes them. Max six.
+{"items":[{"label":"Reply rate","value":"24.2%","note":"ortho track"},{"label":"Avg deal","value":"$4,000"}]}
+
+\`chart\` — type is "bar" (ranking), "column" (a few values side by side) or "split" (parts of one whole).
+{"type":"bar","title":"Reply rate by track","unit":"%","series":[{"label":"Ortho","value":24.2},{"label":"Perio","value":11.8,"note":"paused"}]}
+
+\`map\` — US states as tiles. Two-letter codes. tone is "strong" for priority, "cool" for secondary, "quiet" for excluded. Anything that is not a US state (a province, a country, a region name) goes in the same list and is listed beside the map.
+{"title":"Where they sell","states":[{"code":"CA","tone":"strong"},{"code":"AZ","tone":"strong"},{"code":"NY","tone":"cool","note":"one account"}]}
+
+\`cards\` — a grid of comparable things. Max eight, max six lines each.
+{"title":"Personas","items":[{"title":"Practice owner","subtitle":"Decision maker","badge":"Primary","tone":"strong","lines":["Owns budget","Cares about chair time"]}]}
+
+\`timeline\` — ordered steps.
+{"title":"Outreach cadence","steps":[{"label":"Connection request","when":"Day 0","body":"No note."},{"label":"First message","when":"Day 2"}]}
+
+## Rules that are not negotiable
+
+- Every fact, name, number, place, bullet and caveat in the source must survive somewhere in your output. Restructuring is required; losing content is a failure.
 - Add nothing. No new facts, no examples, no estimates, no averages, no totals you calculated, no advice, no commentary, no "note:" additions, no filler to balance a layout.
 - Never change a number. Not its value, not its rounding, not its unit. 1,998 stays 1,998.
-- Never invent a figure to complete a visual. If the document does not contain the numbers a chart would need, do not draw the chart.
+- Never invent a figure to complete a visual. If the document does not state the numbers a chart needs, do not draw that chart — draw a different shape instead. An empty slot in a layout is fine; a made-up number is not.
 - Keep every campaign code (like CT50, WLW-Q3) exactly as written — other parts of the app match on them.
-- Keep the document's own wording wherever it carries meaning. You may split a run-on line, promote a bold label to a heading, and turn a list of pairs into a table. You may not paraphrase a definition or reword a rule.
-- No HTML. Markdown only.
-
-What good output looks like:
-- A short title, then the document's own structure as real headings, so it can be skimmed.
-- Tables where the source is already a list of things with the same attributes — personas, tiers, tools, competitors.
-- Blockquotes for the one or two lines that change what somebody does.
-- Bold for the labels that are already labels, and nothing else in bold.
-- A row of headline figures where the document states figures, using a fenced block tagged \`stats\` containing JSON: {"items":[{"label":"Reply rate","value":"24.2%","note":"ortho track"}]}. Values are copied as strings, exactly as the source writes them. Maximum six.
-- A bar chart only where the source compares quantities it actually states, using a fenced block tagged \`chart\` containing JSON: {"type":"bar","title":"...","unit":"%","series":[{"label":"...","value":24.2}]}. Every value must appear in the source.
-- Horizontal rules between major parts, used sparingly.
+- Keep the document's own wording wherever it carries meaning. You may split a run-on line, promote a bold label to a heading, move a sentence into a table cell, and reorder sections so the summary is first. You may not paraphrase a definition or reword a rule.
+- Bold only what was already a label. If everything is bold, nothing is.
+- No HTML, and no images or logos — you have no URLs, and an invented one is a broken image.
 
 Return the laid-out markdown and nothing else. No preamble, no explanation of what you changed, and do not wrap the whole document in a code fence.`;
 
@@ -211,6 +261,7 @@ async function askForLayout(path: string, text: string): Promise<BrainRender> {
     warnings: checked,
     renderedAt: new Date().toISOString(),
     cached: false,
+    stored: false,
   };
 }
 
@@ -236,6 +287,6 @@ export async function renderBrainDoc({
     if (kept) return kept;
   }
   const made = await askForLayout(path, text);
-  await keepRender(path, sha, made);
-  return made;
+  const stored = await keepRender(path, sha, made);
+  return { ...made, stored };
 }

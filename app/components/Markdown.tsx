@@ -48,6 +48,21 @@ export type Block =
       series: ChartPoint[];
     }
   | { kind: "stats"; items: Array<{ label: string; value: string; note: string; tone: string }> }
+  | {
+      kind: "map";
+      title: string;
+      caption: string;
+      columns: number;
+      rows: number;
+      states: Array<{ code: string; label: string; note: string; tone: string; row: number; column: number }>;
+      elsewhere: Array<{ code: string; label: string; note: string; tone: string }>;
+    }
+  | {
+      kind: "cards";
+      title: string;
+      items: Array<{ title: string; subtitle: string; badge: string; tone: string; lines: string[] }>;
+    }
+  | { kind: "timeline"; title: string; steps: Array<{ label: string; when: string; body: string; tone: string }> }
   | { kind: "export"; formats: string[] }
   | { kind: "rule" };
 
@@ -209,10 +224,113 @@ function Chart({ block }: { block: Extract<Block, { kind: "chart" }> }) {
   );
 }
 
+/**
+ * The tile map. Grid placement only — every tile is one div at the row and column the parser gave it.
+ *
+ * The states not on the grid follow it as chips rather than being dropped, because a coverage picture
+ * that quietly omits Ontario reads as a complete one.
+ */
+function Territory({ block }: { block: Extract<Block, { kind: "map" }> }) {
+  return (
+    <figure className="md-map">
+      {(block.title || block.caption) && (
+        <figcaption>
+          {block.title && <strong>{block.title}</strong>}
+          {block.caption && <span>{block.caption}</span>}
+        </figcaption>
+      )}
+      <div
+        className="md-map-grid"
+        style={{ gridTemplateColumns: `repeat(${block.columns}, 1fr)`, gridTemplateRows: `repeat(${block.rows}, 1fr)` }}
+      >
+        {block.states.map((state) => (
+          <span
+            key={state.code}
+            className="md-map-tile"
+            data-tone={state.tone || undefined}
+            style={{ gridRow: state.row, gridColumn: state.column }}
+            title={[state.label || state.code, state.note].filter(Boolean).join(" — ")}
+          >
+            {state.code}
+          </span>
+        ))}
+      </div>
+      {block.elsewhere.length > 0 && (
+        <p className="md-map-rest">
+          {block.elsewhere.map((place) => (
+            <span key={place.code} data-tone={place.tone || undefined} title={place.note || undefined}>
+              {place.label}
+            </span>
+          ))}
+        </p>
+      )}
+    </figure>
+  );
+}
+
+function Cards({ block }: { block: Extract<Block, { kind: "cards" }> }) {
+  return (
+    <figure className="md-cards">
+      {block.title && <figcaption>{block.title}</figcaption>}
+      <div>
+        {block.items.map((item, index) => (
+          <article key={index} data-tone={item.tone || undefined}>
+            <header>
+              <h4>{item.title}</h4>
+              {item.badge && <b>{item.badge}</b>}
+            </header>
+            {item.subtitle && <p className="md-cards-sub">{item.subtitle}</p>}
+            {item.lines.length > 0 && (
+              <ul>
+                {item.lines.map((line, at) => (
+                  <li key={at}>{line}</li>
+                ))}
+              </ul>
+            )}
+          </article>
+        ))}
+      </div>
+    </figure>
+  );
+}
+
+function Timeline({ block }: { block: Extract<Block, { kind: "timeline" }> }) {
+  return (
+    <figure className="md-steps">
+      {block.title && <figcaption>{block.title}</figcaption>}
+      <ol>
+        {block.steps.map((step, index) => (
+          <li key={index} data-tone={step.tone || undefined}>
+            <i>{index + 1}</i>
+            <div>
+              <strong>
+                {step.label}
+                {step.when && <span>{step.when}</span>}
+              </strong>
+              {step.body && <p>{step.body}</p>}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </figure>
+  );
+}
+
+const DRAWING: Record<string, string> = {
+  stats: "figures",
+  chart: "chart",
+  map: "map",
+  cards: "cards",
+  timeline: "steps",
+};
+
 const FORMAT_LABEL: Record<string, string> = { csv: "Download CSV", pdf: "Download PDF" };
 
 function Rendered({ block, live, onExport, exportKey, offer }: { block: Block; live: boolean } & Wiring) {
   if (block.kind === "chart") return <Chart block={block} />;
+  if (block.kind === "map") return <Territory block={block} />;
+  if (block.kind === "cards") return <Cards block={block} />;
+  if (block.kind === "timeline") return <Timeline block={block} />;
   if (block.kind === "export") {
     // Nothing to click when there is no handler — an answer printed to PDF or copied out should not
     // carry a dead button into the file.
@@ -232,8 +350,8 @@ function Rendered({ block, live, onExport, exportKey, offer }: { block: Block; l
   // A visual still arriving. Shown as a placeholder rather than as the JSON it currently is, and only
   // while the turn is live — once the answer is finished, an unreadable spec goes back to being
   // visible code, because then it is a real defect and hiding it would hide the numbers with it.
-  if (live && block.kind === "code" && !block.closed && (block.language === "chart" || block.language === "stats")) {
-    return <p className="md-drawing">Drawing {block.language === "stats" ? "figures" : "chart"}…</p>;
+  if (live && block.kind === "code" && !block.closed && DRAWING[block.language]) {
+    return <p className="md-drawing">Drawing {DRAWING[block.language]}…</p>;
   }
   if (block.kind === "stats") {
     return (

@@ -35,6 +35,47 @@ const MAX_POINTS = 12;
 
 const CHART_TYPES = new Set(["bar", "column", "split"]);
 
+/**
+ * The United States as a grid of equal tiles, west to east and north to south.
+ *
+ * Every ICP in the brain names territory — "CA, AZ, NV and TX", "the Northeast except NY" — and until
+ * now that arrived as a comma-separated line you skim past. A tile map answers "where are we selling"
+ * in one look, and a *tile* map rather than a real one for two reasons: an outline of the country is an
+ * SVG asset with a projection and a licence, and, more usefully, equal tiles do not make Montana look
+ * like the point and Rhode Island look like a rounding error.
+ *
+ * Read as text so the layout can be checked by looking at it. Twelve columns per row, `.` for water.
+ */
+const US_TILES = [
+  "AK .  .  .  .  .  .  .  .  .  .  ME",
+  ".  WA .  MT ND MN WI MI .  NY VT NH",
+  ".  OR ID WY SD IA IL IN OH PA NJ MA",
+  ".  CA NV UT CO NE MO KY WV VA MD CT",
+  ".  .  AZ NM KS AR TN NC SC DC DE RI",
+  ".  .  .  .  OK LA MS AL GA .  .  .",
+  "HI .  .  .  TX .  .  .  .  FL .  .",
+];
+
+/** `{ CA: { row, column } }`, built once from the picture above. */
+const US_GRID = (() => {
+  const at = {};
+  US_TILES.forEach((line, index) => {
+    line
+      .trim()
+      .split(/\s+/)
+      .forEach((code, column) => {
+        if (code !== ".") at[code] = { row: index + 1, column: column + 1 };
+      });
+  });
+  return at;
+})();
+
+export const US_COLUMNS = 12;
+export const US_ROWS = US_TILES.length;
+
+/** The tones a spec may ask for. Anything else is dropped rather than passed through to a CSS hook. */
+const TONES = new Set(["strong", "warm", "cool", "quiet", "negative", "positive"]);
+
 const text = (value) => (typeof value === "string" ? value.trim() : "");
 const finite = (value) => (typeof value === "number" && Number.isFinite(value) ? value : null);
 
@@ -155,6 +196,99 @@ export function parseStats(body) {
   return items.length ? { kind: "stats", items: items.slice(0, 6) } : null;
 }
 
+const tone = (value) => (TONES.has(text(value).toLowerCase()) ? text(value).toLowerCase() : "");
+
+/**
+ * A territory map: the states a document names, placed on the tile grid.
+ *
+ * States the grid does not know — provinces, countries, "EMEA" — are not dropped. They come back in
+ * `elsewhere` and the renderer lists them beside the map, because a coverage picture missing Ontario is
+ * a wrong answer that looks complete, and this file's whole position is that silence is the one thing a
+ * visual may not do.
+ */
+export function parseMap(body) {
+  const spec = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+  const rows = Array.isArray(body) ? body : Array.isArray(spec.states) ? spec.states : Array.isArray(spec.items) ? spec.items : [];
+  const placed = [];
+  const elsewhere = [];
+  const seen = new Set();
+  for (const raw of rows) {
+    const item = raw && typeof raw === "object" ? raw : { code: raw };
+    const code = text(item.code) || text(item.state) || text(item.label);
+    const key = code.toUpperCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const entry = { code: key, note: text(item.note) || text(item.value), tone: tone(item.tone) };
+    const spot = US_GRID[key];
+    if (spot) placed.push({ ...entry, ...spot, label: text(item.label) && text(item.label) !== code ? text(item.label) : "" });
+    else elsewhere.push({ ...entry, label: text(item.label) || code });
+  }
+  if (!placed.length && !elsewhere.length) return null;
+  return {
+    kind: "map",
+    title: text(spec.title),
+    caption: text(spec.caption) || text(spec.note),
+    states: placed,
+    elsewhere,
+    columns: US_COLUMNS,
+    rows: US_ROWS,
+  };
+}
+
+/**
+ * A row of cards: the personas, tiers or tracks a document defines.
+ *
+ * The shape a brain document reaches for most and formats worst — four personas as four runs of bold
+ * label and nested bullets, which reads as one paragraph and gets skimmed as one. Three or four lines
+ * per card, because a card that holds a paragraph is a paragraph with a border.
+ */
+export function parseCards(body) {
+  const spec = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+  const rows = Array.isArray(body) ? body : Array.isArray(spec.items) ? spec.items : Array.isArray(spec.cards) ? spec.cards : [];
+  const items = rows
+    .map((raw) => {
+      const item = raw && typeof raw === "object" ? raw : { title: raw };
+      const lines = Array.isArray(item.lines) ? item.lines : Array.isArray(item.points) ? item.points : [];
+      return {
+        title: text(item.title) || text(item.label) || text(item.name),
+        subtitle: text(item.subtitle) || text(item.role),
+        badge: text(item.badge) || text(item.tag),
+        tone: tone(item.tone),
+        lines: lines.map((line) => (line && typeof line === "object" ? `${text(line.label)}: ${text(line.value)}` : text(line))).filter(Boolean).slice(0, 6),
+      };
+    })
+    .filter((item) => item.title || item.lines.length);
+  return items.length ? { kind: "cards", title: text(spec.title), items: items.slice(0, 8) } : null;
+}
+
+/**
+ * An ordered sequence: a cadence, a stage list, an onboarding run.
+ *
+ * Numbered so the order is the point, and drawn down the page rather than across it, because these are
+ * usually five to nine steps with a sentence each and a horizontal one would either wrap or truncate.
+ */
+export function parseTimeline(body) {
+  const spec = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+  const rows = Array.isArray(body) ? body : Array.isArray(spec.steps) ? spec.steps : Array.isArray(spec.items) ? spec.items : [];
+  const steps = rows
+    .map((raw) => {
+      const item = raw && typeof raw === "object" ? raw : { label: raw };
+      return {
+        label: text(item.label) || text(item.title) || text(item.name),
+        when: text(item.when) || text(item.day) || text(item.date),
+        body: text(item.body) || text(item.detail) || text(item.note),
+        tone: tone(item.tone),
+      };
+    })
+    .filter((step) => step.label || step.body);
+  return steps.length ? { kind: "timeline", title: text(spec.title), steps: steps.slice(0, 12) } : null;
+}
+
+const READERS = { chart: parseChart, stats: parseStats, map: parseMap, cards: parseCards, timeline: parseTimeline };
+
+/** The fence tags that render as something other than code, for the renderer's mid-stream placeholder. */
+export const VISUAL_TAGS = Object.keys(READERS);
+
 /**
  * Interprets a fenced block, or returns `null` to leave it as code.
  *
@@ -162,13 +296,13 @@ export function parseStats(body) {
  * still renders, with the spec visible as the code it is.
  */
 export function parseVisual(language, source) {
-  const tag = text(language).toLowerCase();
-  if (tag !== "chart" && tag !== "stats") return null;
+  const read = READERS[text(language).toLowerCase()];
+  if (!read) return null;
   let body;
   try {
     body = JSON.parse(String(source ?? ""));
   } catch {
     return null;
   }
-  return tag === "chart" ? parseChart(body) : parseStats(body);
+  return read(body);
 }

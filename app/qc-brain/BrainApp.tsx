@@ -76,7 +76,7 @@ type Hit = { path: string; title: string; snippet: string; client: string; clien
  * much shorter than the file — both are shown to the reader rather than acted on here. `failed` carries
  * the reason there is no layout, which is why this is one shape rather than a layout and an error.
  */
-type Layout = { path: string; markdown: string; figures: string[]; thin: boolean; failed: string };
+type Layout = { path: string; markdown: string; figures: string[]; thin: boolean; failed: string; stored: boolean };
 type Row = Record<string, unknown>;
 type Skill = { name: string; path: string; command: string; blurb: string; client: string; clientLabel: string; url: string };
 
@@ -485,8 +485,11 @@ function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (
   if (!detail) return <p className="brain-quiet">Opening…</p>;
 
   const missing = detail.docs.filter((entry) => !entry.present && entry.key !== "dnc");
-  const extras = detail.groups.reduce((sum, group) => sum + group.files.length, 0);
-  const percent = Math.round(detail.coverage.fraction * 100);
+  // Every other file in the client's folder, flattened out of its folders and into the same grid as
+  // the seven core ones. The folders were a second, quieter directory below the first: a call note
+  // and an ICP are both "a document about this client", and which subfolder somebody happened to
+  // commit one into is not a fact worth two clicks.
+  const rest = detail.groups.flatMap((group) => group.files.map((file) => ({ ...file, folder: group.folder })));
 
   return (
     <div className="brain-home">
@@ -519,43 +522,6 @@ function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (
             )}
           </div>
         </div>
-
-        {/* The state of the account, kept apart from the description of it. Two different questions
-            — "who are they" and "are we ready to work on them" — and mixing them was most of what
-            made this page hard to read. */}
-        <aside className="brain-hero-state">
-          <p className="brain-hero-stat">
-            <b>
-              {detail.coverage.have}/{detail.coverage.total}
-            </b>
-            core documents written
-          </p>
-          <span className="brain-meter" aria-hidden="true">
-            <span
-              className={`brain-meter-fill${percent === 100 ? " is-full" : percent < 50 ? " is-thin" : ""}`}
-              style={{ width: `${percent}%` }}
-            />
-          </span>
-          <p className="brain-hero-stat is-quiet">
-            <b>{detail.files}</b>
-            files in the brain
-          </p>
-          {/* The other half of this client. A folder with no workspace behind it is a prospect or a
-              dormant account, and that is worth knowing before acting on anything written here. */}
-          {detail.workspace ? (
-            <a className="brain-home-link" href={`/admin?client=${encodeURIComponent(detail.workspace.slug)}`}>
-              <i className={detail.workspace.connected ? "" : "is-off"} />
-              {detail.workspace.connected
-                ? `Live in Reply Radar as ${detail.workspace.name}`
-                : `In Reply Radar as ${detail.workspace.name}, not connected to HeyReach`}
-            </a>
-          ) : (
-            <span className="brain-home-link">
-              <i className="is-off" />
-              Not set up in Reply Radar
-            </span>
-          )}
-        </aside>
       </header>
 
       {/* Named in a sentence, not left as an absence to be inferred from a grid. Somebody who came
@@ -566,32 +532,39 @@ function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (
         </p>
       )}
 
-      <h2 className="brain-heading">Start here</h2>
-      <p className="brain-sub">The seven documents every client is supposed to have.</p>
-      {/* Name and state, and nothing else. The one-line description of what an ICP is belongs to
-          somebody's first week, and it was on the tile for ever after — seven of them turned a menu
-          into a page of reading when the only thing anybody does here is pick one. */}
+      <h2 className="brain-heading">Documents</h2>
+      {/* Name, and nothing else. The one-line description of what an ICP is belongs to somebody's
+          first week and was on the tile for ever after; the date a file last changed is a fact about
+          the repository rather than about the client, and it is on the document itself when you open
+          one. What is left is a menu, which is the only thing anybody does here. */}
       <div className="brain-docgrid">
-        {detail.docs.map((entry) => {
-          const age = stale(entry.updated);
-          return (
-            <button
-              key={entry.key}
-              className={`brain-doccard${entry.present ? "" : " is-missing"}`}
-              onClick={() => entry.present && onOpen(entry.path)}
-              disabled={!entry.present}
-              title={entry.blurb}
-            >
-              <span className="brain-doccard-icon" aria-hidden="true">
-                <DocIcon slot={entry.key} />
-              </span>
-              <span className="brain-doccard-label">{entry.label}</span>
-              <span className={`brain-doccard-age${age.stale ? " is-stale" : ""}`}>
-                {entry.present ? (entry.updated ? ago(entry.updated) : "In the repo") : "Not written"}
-              </span>
-            </button>
-          );
-        })}
+        {detail.docs.map((entry) => (
+          <button
+            key={entry.key}
+            className={`brain-doccard${entry.present ? "" : " is-missing"}`}
+            onClick={() => entry.present && onOpen(entry.path)}
+            disabled={!entry.present}
+            title={entry.blurb}
+          >
+            <span className="brain-doccard-icon" aria-hidden="true">
+              <DocIcon slot={entry.key} />
+            </span>
+            <span className="brain-doccard-label">{entry.label}</span>
+          </button>
+        ))}
+        {rest.map((file) => (
+          <button
+            key={file.path}
+            className="brain-doccard is-other"
+            onClick={() => onOpen(file.path)}
+            title={file.folder ? `${file.folder}/${file.name}` : file.name}
+          >
+            <span className="brain-doccard-icon" aria-hidden="true">
+              <KindIcon kind={kindOf(file.path)} />
+            </span>
+            <span className="brain-doccard-label">{file.title}</span>
+          </button>
+        ))}
       </div>
 
       {/* The routines written for this client specifically. The least findable thing in the repo and
@@ -610,11 +583,6 @@ function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (
           </div>
         </>
       )}
-
-      {/* Folded away. Forty call notes listed in full turned a landing page into a file tree, which
-          is the thing this whole surface exists to not be — so the folders are shown with their
-          counts and open one at a time. */}
-      {extras > 0 && <Shelf groups={detail.groups} total={extras} onOpen={onOpen} />}
 
       <AskTheBrain client={detail.label} />
     </div>
@@ -669,42 +637,26 @@ function AskTheBrain({ client }: { client?: string }) {
   );
 }
 
-/** Everything that is not a core document, one folder open at a time. */
-function Shelf({ groups, total, onOpen }: { groups: Group[]; total: number; onOpen: (path: string) => void }) {
-  const [open, setOpen] = useState("");
+/**
+ * One glyph per file type, for the files that are not one of the seven slots.
+ *
+ * The core documents get a glyph that says what the document is *about*; these get one that says
+ * what it *is*, because a call note and a lead export sit in the same grid and the useful distinction
+ * between them is that one opens as prose and the other as a table.
+ */
+function KindIcon({ kind }: { kind: string }) {
+  const paths: Record<string, string> = {
+    doc: "M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h4",
+    table: "M4 6h16v12H4zM4 10h16M10 10v8M15 10v8",
+    image: "M4 5h16v14H4zm3.5 6.5a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2M4 16l4.5-4 4 3.5L16 12l4 4",
+    pdf: "M6 3h8l4 4v14H6zM14 3v4h4M9.5 17v-5h1.6a1.4 1.4 0 0 1 0 2.8H9.5",
+    data: "M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3m0 0v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7",
+    script: "M9 8l-4 4 4 4m6-8 4 4-4 4",
+  };
   return (
-    <>
-      <h2 className="brain-heading">Everything else</h2>
-      <p className="brain-sub">
-        {total} more {total === 1 ? "file" : "files"}, by folder.
-      </p>
-      <div className="brain-shelf">
-        {groups.map((group) => {
-          const name = group.folder || "Loose files";
-          const isOpen = open === name;
-          return (
-            <div key={name} className={`brain-shelf-group${isOpen ? " is-open" : ""}`}>
-              <button className="brain-shelf-head" onClick={() => setOpen(isOpen ? "" : name)} aria-expanded={isOpen}>
-                <span className="brain-shelf-name">{name}</span>
-                <span className="brain-shelf-count">{group.files.length}</span>
-              </button>
-              {isOpen && (
-                <ul className="brain-more-list">
-                  {group.files.map((file) => (
-                    <li key={file.path}>
-                      <button className="brain-more-file" onClick={() => onOpen(file.path)}>
-                        <span className="brain-more-title">{file.title}</span>
-                        <span className="brain-more-kind">{kindOf(file.path)}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d={paths[kind] ?? paths.doc} />
+    </svg>
   );
 }
 
@@ -895,6 +847,7 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
         figures: Array.isArray(warnings.figures) ? warnings.figures.map(String) : [],
         thin: warnings.thin === true,
         failed: "",
+        stored: render.stored !== false,
       });
     } catch (problem) {
       // A failure is stored rather than retried: the original is right there, and a page that keeps
@@ -905,6 +858,7 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
         figures: [],
         thin: false,
         failed: problem instanceof Error ? problem.message : "This document could not be laid out.",
+        stored: true,
       });
     }
   }, []);
@@ -984,6 +938,17 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
               </button>
             </span>
           )}
+          {/* A layout is made once and kept, so the way to get a different one has to be a real
+              button rather than something that appears only when the check complained. */}
+          {layout && !layout.failed && !editing && (
+            <button
+              className="brain-doc-redo"
+              onClick={again}
+              title="Lay this document out again from scratch, and keep the new one"
+            >
+              Regenerate
+            </button>
+          )}
           {doc.updated && <span className="brain-doc-age">Changed {ago(doc.updated)}</span>}
           <a className="brain-doc-link" href={doc.url} target="_blank" rel="noreferrer">
             GitHub
@@ -1025,6 +990,16 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
           <button className="brain-doc-again" onClick={again}>
             Lay it out again
           </button>
+        </p>
+      )}
+
+      {/* The layout is supposed to be made once and kept. If the store is not there it is made every
+          time somebody opens the file, which is slow and costs money on every read — so it is said
+          here rather than left to be inferred from the wait. */}
+      {layout && !layout.failed && !layout.stored && (
+        <p className="brain-doc-warn">
+          This layout could not be saved, so it will be made again the next time anybody opens this file. The{" "}
+          <code>rr_brain_renders</code> table is missing.
         </p>
       )}
 
