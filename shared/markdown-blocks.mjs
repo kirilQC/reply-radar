@@ -113,6 +113,45 @@ export function splitSettled(markdown) {
 }
 
 /**
+ * Balances the emphasis marks a half-written line has left open. For a streaming tail only.
+ *
+ * A bold phrase arrives as `**`, then the words, then the closing `**`, so for as long as it takes to
+ * type the words the reader sees the asterisks themselves — "Steadywell has **3 truly active campaigns"
+ * — and they vanish a moment later. It is a small thing that makes the whole answer look like it is
+ * malfunctioning while it arrives.
+ *
+ * Closing the mark instead means the words appear bold from the first one, which is what they are about
+ * to be anyway. Lines inside a fence are left completely alone: an asterisk appended to half a line of
+ * JSON would break the spec that the lenient reader is otherwise about to make sense of.
+ */
+export function closeMarks(markdown) {
+  const lines = String(markdown ?? "").replace(/\r\n?/g, "\n").split("\n");
+  let fenced = false;
+  return lines
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) {
+        fenced = !fenced;
+        return line;
+      }
+      if (fenced) return line;
+      // An open code span is closed and nothing else is touched: the asterisks inside it are literal,
+      // and balancing them would put marks into text that is meant to show exactly what it says.
+      if ((line.match(/`/g) ?? []).length % 2) return `${line}\``;
+      // A trailing run of asterisks is a mark only half typed — either the second star of an opening
+      // `**`, or the first of the closing one. It is dropped and then whatever is left is balanced,
+      // which resolves both: an opening mark with nothing after it yet disappears until it has content,
+      // and a half-arrived closing mark is completed.
+      const base = line.replace(/\*+$/, "");
+      const bold = base.split("**").length - 1;
+      const italic = (base.split("**").join("").match(/\*/g) ?? []).length;
+      if (bold % 2) return `${base}**`;
+      if (italic % 2) return `${base}*`;
+      return base;
+    })
+    .join("\n");
+}
+
+/**
  * Parses markdown into a flat list of blocks.
  *
  * Flat rather than a tree because nothing the model emits nests beyond an indented bullet, and list
@@ -175,7 +214,10 @@ export function parseBlocks(markdown) {
       // A `chart` or `stats` fence is a visual; anything else, or a visual we cannot read, stays code.
       // Falling back rather than failing means a malformed spec shows as visible JSON instead of
       // taking the answer down with it.
-      const visual = parseVisual(language, source);
+      //
+      // While the fence is still open the spec is read leniently, so a visual builds up a card or a row
+      // at a time as it arrives instead of waiting for the closing fence and appearing all at once.
+      const visual = parseVisual(language, source, !closed);
       blocks.push(visual ?? { kind: "code", language, text: source, closed });
       continue;
     }

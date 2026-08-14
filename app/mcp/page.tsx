@@ -118,22 +118,19 @@ const sizeOf = (bytes: number) =>
  * the database by title, exporting a file, reading the brain, and comparing clients — so what this
  * can be asked is learned by using it rather than by reading about it.
  *
- * Grouped, because fifteen ungrouped sentences is a wall. The group name is the part you scan.
+ * Two per group, which is the smallest number that still shows a group is a category rather than a
+ * single question. It was four, and fifteen openers made the page taller than the screen for no gain:
+ * nobody reads the fourth example, and the six things worth demonstrating are all still here.
  */
 const PROMPTS: { group: string; prompt: string }[] = [
   { group: "Campaigns", prompt: "What campaigns are live for Steadywell right now, and when do they run out of leads?" },
-  { group: "Campaigns", prompt: "Which campaigns have the worst reply rate, and what do their first messages have in common?" },
-  { group: "Campaigns", prompt: "Which senders are underused this week, and how many more invites could they send?" },
   { group: "Campaigns", prompt: "Compare every client's reply performance and tell me who needs attention." },
   { group: "Replies", prompt: "Who replied and hasn't been followed up with yet? Oldest first." },
   { group: "Replies", prompt: "Show me every positive reply from the last 14 days, with the lead's title and company." },
-  { group: "Replies", prompt: "Which leads replied more than once and never got an answer from us?" },
   { group: "Database", prompt: "List every CISO in our database and say which ones have replied." },
-  { group: "Database", prompt: "Which accounts appear in more than one client's campaigns?" },
   { group: "Database", prompt: "Export Steadywell's biggest lead list as a CSV." },
   { group: "QC Brain", prompt: "What does the brain say Willow's ICP is, and do the leads we are actually contacting match it?" },
   { group: "QC Brain", prompt: "Which clients have no ICP, personas or voice guide written in the QC Brain?" },
-  { group: "QC Brain", prompt: "Summarise every call note for Willow from the last month." },
   { group: "Reporting", prompt: "Draft a weekly update for Steadywell: what ran, what replied, what needs a decision." },
   { group: "Reporting", prompt: "Break down our meetings booked by client and by month this year." },
 ];
@@ -803,18 +800,23 @@ export default function McpPage() {
                 </div>
               )}
 
-              {[...new Set(PROMPTS.map((entry) => entry.group))].map((group) => (
-                <div key={group} className="mcp-promptset">
-                  <h2>{group}</h2>
-                  <div className="mcp-prompts">
-                    {PROMPTS.filter((entry) => entry.group === group).map((entry) => (
-                      <button key={entry.prompt} className="mcp-prompt" onClick={() => void send(entry.prompt)}>
-                        {entry.prompt}
-                      </button>
-                    ))}
+              {/* The groups sit beside each other rather than under each other. Stacked, five of them
+                  ran past the bottom of the screen, so the last two were only ever found by scrolling
+                  a page whose whole purpose is to be read at a glance. */}
+              <div className="mcp-promptgrid">
+                {[...new Set(PROMPTS.map((entry) => entry.group))].map((group) => (
+                  <div key={group} className="mcp-promptset">
+                    <h2>{group}</h2>
+                    <div className="mcp-prompts">
+                      {PROMPTS.filter((entry) => entry.group === group).map((entry) => (
+                        <button key={entry.prompt} className="mcp-prompt" onClick={() => void send(entry.prompt)}>
+                          {entry.prompt}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
 
               {composing ? (
                 <form

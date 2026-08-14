@@ -14,6 +14,7 @@
 import { memo, useMemo } from "react";
 import {
   cells as splitCells,
+  closeMarks as balance,
   parseBlocks as parse,
   parseInline as inline,
   splitSettled as split,
@@ -90,6 +91,7 @@ type Wiring = { onExport?: ExportHandler; exportKey?: number; offer?: string };
  */
 const parseBlocks = parse as (markdown: string) => Block[];
 const splitSettled = split as (markdown: string) => { settled: string; tail: string };
+const closeMarks = balance as (markdown: string) => string;
 const cells = splitCells as (line: string) => string[];
 const parseInline = inline as (line: string) => Span[];
 
@@ -479,10 +481,13 @@ const Markdown = memo(function Markdown({
   exportKey,
   offer,
 }: { children: string; live?: boolean } & Wiring) {
-  const { settled, tail } = useMemo(
-    () => (live ? splitSettled(children) : { settled: "", tail: children }),
-    [children, live],
-  );
+  const { settled, tail } = useMemo(() => {
+    if (!live) return { settled: "", tail: children };
+    const cut = splitSettled(children);
+    // Only the tail is balanced. The settled half is finished text by definition, so an unclosed mark
+    // in it is the model's own and showing it is correct.
+    return { settled: cut.settled, tail: closeMarks(cut.tail) };
+  }, [children, live]);
   return (
     <div className="md">
       {/* Never live: `splitSettled` will not cut inside an open fence, so nothing here is unfinished. */}

@@ -290,19 +290,87 @@ const READERS = { chart: parseChart, stats: parseStats, map: parseMap, cards: pa
 export const VISUAL_TAGS = Object.keys(READERS);
 
 /**
+ * The largest valid JSON document contained in a half-arrived one, or `""` if there is not one yet.
+ *
+ * A spec is written by the model a token at a time, so for the second or two it takes to arrive it is
+ * invalid JSON and reads as nothing at all. That is the single worst stretch of watching an answer
+ * appear: the screen holds one static line of placeholder text while four stat cards' worth of numbers
+ * stream past invisibly, and then the whole visual snaps into existence at once. Everybody who has
+ * described this feature as "laggy" has been describing this, not the frame rate.
+ *
+ * So the incomplete tail is discarded and the brackets it left open are closed, which turns a spec that
+ * is three cards in into a valid spec for three cards. One pass: track whether we are inside a string,
+ * remember the last point where a value had just finished — a closing bracket, or the comma before the
+ * next element — and remember the bracket stack as it stood there, because that is what has to be
+ * closed once the tail is cut off.
+ */
+export function closeJson(source) {
+  const body = String(source ?? "");
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+  /** How much of the text is safe to keep, and what was still open at that point. */
+  let cut = 0;
+  let cutStack = [];
+  /** The last character that was not whitespace, which is how a complete element is recognised. */
+  let previous = "";
+  for (let index = 0; index < body.length; index += 1) {
+    const letter = body[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (letter === "\\") escaped = true;
+      else if (letter === '"') inString = false;
+      previous = letter;
+      continue;
+    }
+    if (letter === '"') {
+      inString = true;
+    } else if (letter === "{" || letter === "[") {
+      stack.push(letter === "{" ? "}" : "]");
+    } else if (letter === "}" || letter === "]") {
+      stack.pop();
+      // A value has just closed, so everything up to here is a complete element.
+      cut = index + 1;
+      cutStack = [...stack];
+    } else if (letter === "," && (previous === "}" || previous === "]")) {
+      // Only a comma that follows a closed element. A comma inside a half-written object would cut in
+      // the middle of one — which parses, but as a card carrying its label and no number, so the number
+      // would appear a moment after the card. Whole elements only, one at a time.
+      cut = index;
+      cutStack = [...stack];
+    }
+    if (letter.trim()) previous = letter;
+  }
+  if (!cut) return "";
+  return body.slice(0, cut) + cutStack.reverse().join("");
+}
+
+/**
  * Interprets a fenced block, or returns `null` to leave it as code.
  *
  * Called from the markdown parser, which owns the decision about what to do with the null: the answer
  * still renders, with the spec visible as the code it is.
+ *
+ * `partial` is for a spec whose closing fence has not arrived. It is off by default because a finished
+ * spec that will not parse is a real defect, and quietly rendering the half of it that does parse would
+ * hide numbers rather than show them.
  */
-export function parseVisual(language, source) {
+export function parseVisual(language, source, partial = false) {
   const read = READERS[text(language).toLowerCase()];
   if (!read) return null;
-  let body;
+  const body = String(source ?? "");
+  let parsed;
   try {
-    body = JSON.parse(String(source ?? ""));
+    parsed = JSON.parse(body);
   } catch {
-    return null;
+    if (!partial) return null;
+    const closed = closeJson(body);
+    if (!closed) return null;
+    try {
+      parsed = JSON.parse(closed);
+    } catch {
+      return null;
+    }
   }
-  return read(body);
+  return read(parsed);
 }

@@ -1906,11 +1906,16 @@ a.tag-outline-link:hover {
    the 64px topbar and owns its own overflow, rather than inheriting the page scroll. Without the
    explicit height the composer drifts down the page as the conversation grows and you end up
    scrolling to reach the input, which is the one thing a chat box must never make you do. */
+/* 900px was a reading measure borrowed from prose, and the answers here are not prose — they are stat
+   cards, tables of campaigns and senders, and charts. Those were being squeezed into a column with a
+   third of the window empty on either side, which made every table scroll sideways inside a page that
+   had the room to show it. 1180px is wide enough for a six-column table at a readable size and still
+   short enough a line of text does not run away from the eye. */
 .mcp-page {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 64px);
-  max-width: 900px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 0 28px;
 }
@@ -1937,9 +1942,23 @@ a.tag-outline-link:hover {
   font-size: 12.5px;
   line-height: 1.6;
 }
-/* Fifteen prompts in one column would be a wall to read top to bottom. Grouped by what they are
-   about and laid out two-across, each heading is a place to stop scanning, so somebody looking for a
-   reply question never reads the campaign ones. */
+/* The groups across, their questions down. Five groups stacked made the empty state taller than the
+   viewport; as columns they fit in two rows and the whole set is visible without scrolling, which is
+   the only way a set of examples does its job. */
+.mcp-promptgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px 22px;
+  margin-bottom: 22px;
+}
+.mcp-promptgrid .mcp-promptset {
+  margin-bottom: 0;
+}
+.mcp-promptgrid .mcp-prompts {
+  grid-template-columns: 1fr;
+}
+/* Grouped by what they are about, so each heading is a place to stop scanning and somebody looking for
+   a reply question never reads the campaign ones. */
 .mcp-promptset {
   margin-bottom: 22px;
 }

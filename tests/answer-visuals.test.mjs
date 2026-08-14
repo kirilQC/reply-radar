@@ -11,7 +11,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatValue, parseChart, parseStats, parseVisual } from "../shared/answer-visuals.mjs";
+import { closeJson, formatValue, parseChart, parseStats, parseVisual } from "../shared/answer-visuals.mjs";
 import { parseBlocks } from "../shared/markdown-blocks.mjs";
 import { answerToCsv } from "../shared/answer-export.mjs";
 
@@ -207,4 +207,47 @@ test("a table still wins the export, and a chart beside it stacks", () => {
   const blocks = csv.split("\n\n");
   assert.match(blocks[1], /Campaign,Replies/);
   assert.match(blocks[2], /Label,Value/);
+});
+
+/**
+ * A visual that arrives a token at a time.
+ *
+ * These cover the stretch of a streaming answer that reads as frozen: the spec is invalid JSON for as
+ * long as it takes to write, so nothing appeared until the closing fence landed and then everything did
+ * at once. What is being asserted is that a spec three cards in renders three cards.
+ */
+test("a half-arrived spec keeps the elements that are complete", () => {
+  const whole = '{"items":[{"label":"Active campaigns","value":3},{"label":"Pending leads","value":1113},{"label":"Senders","value":2}]}';
+  // Every prefix is either unreadable or a truthful prefix of the finished visual — never wrong numbers.
+  const counts = new Set();
+  for (let end = 1; end < whole.length; end += 1) {
+    const partial = parseVisual("stats", whole.slice(0, end), true);
+    if (!partial) continue;
+    assert.equal(partial.kind, "stats");
+    counts.add(partial.items.length);
+    const finished = parseStats(JSON.parse(whole));
+    // Whatever it shows must match the finished visual card for card, so nothing has to be redrawn.
+    assert.deepEqual(partial.items, finished.items.slice(0, partial.items.length));
+  }
+  // It genuinely builds up rather than jumping from nothing to all three.
+  assert.deepEqual([...counts].sort(), [1, 2, 3]);
+});
+
+test("a finished spec that will not parse is still left as code", () => {
+  // The lenient reader is for an open fence only. A closed spec that is broken is a real defect, and
+  // showing half its numbers would hide the rest.
+  assert.equal(parseVisual("stats", '{"items":[{"label":"A","value":1},'), null);
+});
+
+test("closing a truncated spec never invents a value", () => {
+  // A card whose number has not arrived yet is not a card, so there is nothing to show.
+  assert.equal(closeJson('{"items":[{"label":"A"'), "");
+  assert.equal(closeJson('{"items":[{"label":"A",'), "");
+  assert.equal(closeJson('{"items":[{"label":"A","value":1}'), '{"items":[{"label":"A","value":1}]}');
+  assert.equal(closeJson('{"items":[{"label":"A","value":1},{"lab'), '{"items":[{"label":"A","value":1}]}');
+  // A brace inside a string is not a bracket.
+  assert.equal(closeJson('{"items":[{"label":"A }] {","value":1}'), '{"items":[{"label":"A }] {","value":1}]}');
+  // Nothing complete yet.
+  assert.equal(closeJson('{"items":[{"lab'), "");
+  assert.equal(closeJson(""), "");
 });

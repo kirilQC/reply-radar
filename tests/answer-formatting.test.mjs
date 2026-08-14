@@ -9,7 +9,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseBlocks, parseInline, spansToText, splitSettled } from "../shared/markdown-blocks.mjs";
+import { closeMarks, parseBlocks, parseInline, spansToText, splitSettled } from "../shared/markdown-blocks.mjs";
 import { answerHasRows, answerToCsv, csvField, exportFilename } from "../shared/answer-export.mjs";
 
 /** Verbatim from the MCP tab, answering "Which of Cotool's campaigns has the best reply rate?". */
@@ -253,4 +253,36 @@ test("the filename says what the file is", () => {
     "reply-radar-which-of-cotools-campaigns-has-the-2026-08-13.csv",
   );
   assert.match(exportFilename("", "", "pdf"), /^reply-radar-answer-\d{4}-\d{2}-\d{2}\.pdf$/);
+});
+
+/**
+ * The asterisks a bold phrase shows while it is being typed.
+ *
+ * `**` arrives, then the words, then the closing `**`, so mid-stream the reader sees the marks — the
+ * recorded symptom was "Steadywell has **3 truly active campaigns" sitting on screen. Closing the mark
+ * renders the words bold from the first one, which is what they are about to be.
+ */
+test("an unclosed bold mark is closed rather than shown", () => {
+  assert.equal(closeMarks("Steadywell has **3"), "Steadywell has **3**");
+  assert.equal(spansToText(parseInline(closeMarks("Steadywell has **3"))), "Steadywell has 3");
+  // Already balanced text is returned untouched.
+  assert.equal(closeMarks("Steadywell has **3 campaigns** live"), "Steadywell has **3 campaigns** live");
+  assert.equal(closeMarks("no marks at all"), "no marks at all");
+  // An unclosed code span too, and before the asterisks so it cannot swallow them.
+  assert.equal(closeMarks("run `npm test"), "run `npm test`");
+});
+
+test("balancing leaves a fenced spec completely alone", () => {
+  // An asterisk appended to half a line of JSON would break the spec the lenient reader is about to
+  // make sense of, so anything between fences is untouched.
+  const streaming = 'Here it is:\n\n```stats\n{"items":[{"label":"A **B","value":1}\n';
+  assert.equal(closeMarks(streaming), streaming);
+});
+
+test("every prefix of a bold phrase parses to clean text", () => {
+  const line = "Only **SW020 Clinical** has runway";
+  for (let end = 1; end <= line.length; end += 1) {
+    // Whatever is on screen mid-word, it never contains a raw asterisk.
+    assert.ok(!spansToText(parseInline(closeMarks(line.slice(0, end)))).includes("*"));
+  }
 });
