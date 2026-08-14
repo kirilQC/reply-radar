@@ -2,6 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { writeAuditEvent } from "./audit-log";
+import { briefedSystemPrompt } from "./client-context";
 import { mergeMessageRadar } from "./message-radar";
 
 type SupabaseConfig = { url: string; key: string };
@@ -99,22 +100,21 @@ TIE-BREAKERS:
 
 Reply with exactly one word: positive, neutral, or negative.`;
 
-async function getConfiguredPrompt(config: SupabaseConfig, workspaceId?: string): Promise<string> {
+/**
+ * The sentiment rules, with the client's brief in front of them.
+ *
+ * This used to read `custom_system_prompt` here with `slug=eq.<workspaceId>` — a filter that matches
+ * nothing when the caller passes a uuid, which the worker always does. So the client-specific half of
+ * this prompt was silently absent for every reply the worker classified, which is nearly all of them.
+ * The shared loader takes an id or a slug and covers both.
+ *
+ * Client context earns its place in even this small a call. "Is that the deployed version or staging?"
+ * reads as a neutral technical aside until you know the client sells deployment tooling, at which
+ * point it is a buying question.
+ */
+async function getConfiguredPrompt(workspaceId?: string): Promise<string> {
   try {
-    // Try workspace's custom_system_prompt first
-    if (workspaceId) {
-      const response = await fetch(
-        `${config.url}/rest/v1/rr_workspaces?select=custom_system_prompt&slug=eq.${encodeURIComponent(workspaceId)}&limit=1`,
-        { headers: { apikey: config.key, Authorization: `Bearer ${config.key}` }, cache: "no-store" },
-      );
-      if (response.ok) {
-        const rows = await response.json().catch(() => []);
-        if (Array.isArray(rows) && rows.length && rows[0].custom_system_prompt) {
-          // Workspace has a custom prompt — prepend the sentiment classification rules
-          return `${DEFAULT_SENTIMENT_PROMPT}\n\nAdditional client-specific context:\n${String(rows[0].custom_system_prompt)}`;
-        }
-      }
-    }
+    return await briefedSystemPrompt(DEFAULT_SENTIMENT_PROMPT, workspaceId);
   } catch { /* use default */ }
   return DEFAULT_SENTIMENT_PROMPT;
 }
@@ -149,7 +149,7 @@ export async function classifyLatestReply(
   // an older version of the prompt keeps that verdict forever otherwise.
   if (!meta?.force && ["positive", "neutral", "negative"].includes(String(latestRadar.sentiment).toLowerCase())) { console.log(`[sentiment] Already classified as ${latestRadar.sentiment} for ${conversationId}`); return; }
 
-  const systemPrompt = await getConfiguredPrompt(config, workspaceId);
+  const systemPrompt = await getConfiguredPrompt(workspaceId);
   const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
   const DEPRECATED = new Set(["claude-3-5-haiku-latest", "claude-3-5-haiku-20241022", "claude-3-haiku-20240307"]);
   const configuredModel = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;

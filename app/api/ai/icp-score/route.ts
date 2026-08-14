@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { clientContext, withClientContext } from "../../../lib/client-context";
 import { defaultIcpPrompt } from "../../../lib/scoring-templates";
 
 type Row = Record<string, unknown>;
@@ -26,7 +27,11 @@ export async function POST(request: Request) {
   // The ICP criteria say which titles and industries to reward; the brief says what the client
   // actually sells. Without it a prompt like "score higher when their remit includes the problem the
   // client solves" has no problem to reason about, so the score would be seniority guesswork.
-  const clientBrief = typeof body.clientBrief === "string" ? body.clientBrief.trim() : "";
+  //
+  // Still accepted from the body, because the browser already has the brief on screen and passing it
+  // saves a read — but no longer depended on. A caller that omits it gets the stored brief instead of
+  // silently scoring against nothing.
+  const passedBrief = typeof body.clientBrief === "string" ? body.clientBrief.trim() : "";
   if (!leadId) return NextResponse.json({ ok: false, error: "leadId required" }, { status: 400 });
 
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" };
@@ -58,10 +63,13 @@ export async function POST(request: Request) {
     company.name ? `Company details: ${company.name}${company.industry ? ` (${company.industry})` : ""}${company.employeeCount ? `, ${company.employeeCount} employees` : ""}` : null,
   ].filter(Boolean).join("\n");
 
-  const briefSection = clientBrief
-    ? `\n\nAbout the client you are scoring for — read this first, every judgement below depends on it:\n${clientBrief}`
+  const briefSection = passedBrief
+    ? `\n\nAbout the client you are scoring for — read this first, every judgement below depends on it:\n${passedBrief}`
     : "";
-  const systemPrompt = `You are an ICP (Ideal Customer Profile) scoring assistant. Score this lead from 0-100 based on how well they match the client's ICP.${briefSection}\n\nClient ICP criteria:\n${icpPrompt}\n\nReturn ONLY valid JSON with two fields: score (integer 0-100) and reason (one sentence explaining the score).`;
+  const systemPrompt = withClientContext(
+    `You are an ICP (Ideal Customer Profile) scoring assistant. Score this lead from 0-100 based on how well they match the client's ICP.${briefSection}\n\nClient ICP criteria:\n${icpPrompt}\n\nReturn ONLY valid JSON with two fields: score (integer 0-100) and reason (one sentence explaining the score).`,
+    passedBrief ? "" : await clientContext(workspaceId),
+  );
 
   const FALLBACK_MODEL = "claude-haiku-4-5-20251001";
   const model = process.env.ANTHROPIC_MODEL || FALLBACK_MODEL;

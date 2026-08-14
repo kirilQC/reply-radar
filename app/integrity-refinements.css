@@ -4600,3 +4600,12 @@ span.brain-mark.is-lg {
     border-left-color: #888 !important;
   }
 }
+
+/* The character count under the client brief. A quiet number, not a warning — it is only
+   interesting when it approaches the point where the tail stops being sent. */
+.brief-count {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  color: var(--muted, #8b8b96);
+  text-align: right;
+}

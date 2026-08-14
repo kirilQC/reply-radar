@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { briefedSystemPrompt } from "../../../lib/client-context";
 import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
 import { defaultFollowUpPrompt } from "../../../lib/scoring-templates";
 
@@ -38,7 +39,13 @@ export async function POST(request: Request) {
     });
   }
 
-  const systemPrompt = `You are a follow-up urgency scorer for LinkedIn sales conversations. Score urgency 0-100 based on the client's criteria.${sentiment ? `\n\nThe lead's latest reply reads as ${sentiment}.` : ""}\n\nClient follow-up criteria:\n${followUpPrompt}\n\nReturn ONLY valid JSON: { "urgency": <0-100>, "reason": "<one sentence>" }. If no follow-up is needed, return urgency 0 with a reason.`;
+  // Urgency is not a property of the words in the thread — it depends on whether this lead is someone
+  // the client wants. "Send me pricing" from a target account and from a student are the same sentence
+  // and different scores, and only the brief knows which is which.
+  const systemPrompt = await briefedSystemPrompt(
+    `You are a follow-up urgency scorer for LinkedIn sales conversations. Score urgency 0-100 based on the client's criteria.${sentiment ? `\n\nThe lead's latest reply reads as ${sentiment}.` : ""}\n\nClient follow-up criteria:\n${followUpPrompt}\n\nReturn ONLY valid JSON: { "urgency": <0-100>, "reason": "<one sentence>" }. If no follow-up is needed, return urgency 0 with a reason.`,
+    workspaceId,
+  );
 
   const threadText = thread.map((item: { direction?: string; body?: string; sentAt?: string }) =>
     `[${item.sentAt ?? ""}] ${item.direction ?? "message"}: ${item.body ?? ""}`

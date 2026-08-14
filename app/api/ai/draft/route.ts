@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { clientContext, withClientContext } from "../../../lib/client-context";
 import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
 
 type Row = Record<string, unknown>;
@@ -178,9 +179,11 @@ export async function POST(request: Request) {
   const conversationIdParam = typeof body.conversationId === "string" ? body.conversationId : "";
   const { leadTitle, leadCompany } = mode === "analyze" ? await fetchLeadHeadline(conversationIdParam) : { leadTitle: "", leadCompany: "" };
 
-  const systemPrompt = body.system
-    ? String(body.system)
-    : undefined;
+  // The client's brief goes in front of whatever prompt the caller supplied, and stands on its own if
+  // none was. Writing in somebody's name with no idea who they are is the whole reason this is loaded
+  // here rather than trusted to arrive in the body.
+  const briefed = withClientContext(body.system ? String(body.system) : "", await clientContext(workspaceId));
+  const systemPrompt = briefed || undefined;
 
   /**
    * A regenerate is a request for a different answer, and it was not getting one.

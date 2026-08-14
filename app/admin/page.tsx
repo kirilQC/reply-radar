@@ -1775,7 +1775,11 @@ function AiHubView() {
             <div className="client-config-sections">
               <section className="admin-panel client-config-section">
                 <div className="panel-heading"><div><h2>Client brief & documents</h2><p>Give the AI all the context about this client. This feeds into ICP scoring, follow-up scoring, and reply drafts.</p></div></div>
-                <label className="field-label">CLIENT BRIEF<textarea value={clientBrief} onChange={(event) => setClientBrief(event.target.value)} placeholder="Tell the AI everything about this client: what they do, who their ideal customer is, their value proposition, competitive advantages, tone of voice, and any important context." rows={6} style={{ minHeight: 150 }} /></label>
+                {/* Deep, not tall-ish. What goes in here is the output of /client-summary in the QC
+                    Growth OS, which runs to thousands of words — six rows made a correct paste look
+                    like a mistake, and the first instinct on seeing a full box overflow is to trim it. */}
+                <label className="field-label">CLIENT BRIEF<textarea value={clientBrief} onChange={(event) => setClientBrief(event.target.value)} placeholder="Paste the output of /client-summary from the QC Growth OS. Longer is better — every ICP score, follow-up score and draft for this client reads it." rows={18} style={{ minHeight: 380 }} /></label>
+                {briefLength > 0 && <p className="brief-count">{briefLength.toLocaleString()} characters{briefLength > 24000 ? " · only the first 24,000 reach the AI" : ""}</p>}
                 <button className="upload-zone" type="button"><span style={{ fontSize: 20 }}>＋</span><div><strong>Upload client documents</strong><small>PDF, DOCX, TXT · stored in Supabase Storage</small></div></button>
               </section>
               <section className={`admin-panel client-config-section${icpLocked ? " section-locked" : ""}`}>

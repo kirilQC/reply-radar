@@ -329,6 +329,16 @@ export const TOOLS: ToolDefinition[] = [
     input_schema: { type: "object", properties: {} },
   },
   {
+    name: "client_summary",
+    description:
+      "The client's own briefing as configured in Reply Radar: what they sell, who they sell to, their ICP, their positioning and how they want to sound. This is the background every scoring and drafting run for that client already uses, so reading it is how you reason about the same client the pipeline does rather than from the company name alone. Call it before writing copy for a client, before judging whether a lead or a list fits, and before explaining why a lead scored the way it did. Returns whether a briefing exists — an empty one means nobody has pasted the /client-summary output into that client's configuration yet, which is worth saying plainly instead of guessing at the answer.",
+    input_schema: {
+      type: "object",
+      properties: { client: { type: "string", description: "Client name or slug, e.g. \"willow\" or \"Bluevia Health\"." } },
+      required: ["client"],
+    },
+  },
+  {
     name: "database_totals",
     description:
       "Exact all-time totals across every client: leads, conversations, replies received, and clients. Also accepts a window to count replies received in a period. These are counted in Reply Radar's own database and match the dashboard exactly. They are NOT per client — for one client's numbers use heyreach_campaign_metrics.",
@@ -590,6 +600,27 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     case "list_clients": {
       const all = await clients();
       return all.map(({ apiKey, id, ...rest }) => ({ ...rest, heyreachConnected: Boolean(apiKey), id }));
+    }
+
+    case "client_summary": {
+      const client = await resolveClient(input.client);
+      const rows_ = rows(
+        await db(`rr_workspaces?select=client_brief,custom_system_prompt&id=eq.${encodeURIComponent(client.id)}&limit=1`),
+      );
+      const brief = text(rows_[0]?.client_brief);
+      const voice = text(rows_[0]?.custom_system_prompt);
+      return {
+        client: client.name,
+        slug: client.slug,
+        configured: Boolean(brief || voice),
+        summary: brief || null,
+        voice: voice || null,
+        // Said out loud rather than left as an empty string, because "no briefing" and "a briefing
+        // that says nothing useful" call for different answers and the model cannot tell them apart.
+        note: brief || voice
+          ? undefined
+          : "Nobody has filled in this client's briefing yet. Say so rather than inferring what they sell — the /client-summary command in the QC Growth OS generates it and it is pasted into the client's AI configuration.",
+      };
     }
 
     case "database_totals": {
