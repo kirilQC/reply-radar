@@ -18,6 +18,8 @@ create table if not exists rr_workspaces (
   guardrails jsonb not null default '{}'::jsonb, theme_tokens jsonb not null default '{}'::jsonb,
   custom_scoring jsonb not null default '{}'::jsonb, logo_url text, accent_color text,
   timezone text not null default 'America/New_York', website_url text,
+  -- Which QC Brain folder this client is, when the name-based guess is wrong. See shared/brain-link.mjs.
+  brain_folder text,
   last_webhook_received_at timestamptz, last_successful_poll_at timestamptz, last_reconciled_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );

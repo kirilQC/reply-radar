@@ -3106,6 +3106,42 @@ span.brain-mark.is-lg {
   border-color: #eeddb8;
 }
 
+/* The tether, said in the admin console. Quiet on purpose: it is a correct guess almost always, and
+   a loud confirmation prompt on eighteen clients that are already right would train people to click
+   past it — which is exactly what you do not want on the one client where it is wrong. */
+.brain-link-note {
+  margin: -8px 0 4px;
+  color: var(--muted-2);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+/* Where the client sits in Reply Radar, said on their brain page. A folder with no workspace is a
+   prospect or a dormant account, which is worth knowing before acting on anything written there. */
+.brain-home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-decoration: none;
+}
+.brain-home-link i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 7px #55c7a288;
+}
+.brain-home-link i.is-off {
+  background: var(--muted-2);
+  box-shadow: none;
+}
+a.brain-home-link:hover {
+  color: var(--accent);
+}
+
 .brain-docgrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));

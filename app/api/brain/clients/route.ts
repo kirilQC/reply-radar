@@ -19,10 +19,18 @@
  */
 import { NextResponse } from "next/server";
 import { BRAIN_URL, brainConfigured, brainLastTouched, brainTree } from "../../../lib/brain";
+import { workspacesByFolder, type BrainWorkspace } from "../../../lib/brain-workspaces";
 import { BRAIN_AREAS, clientLabel, clientLogoIn, clientSkeleton, clientsIn, coverage, fileTitle, groupByFolder } from "../../../../shared/brain-structure.mjs";
 
-/** A logo the browser can actually load, or nothing. The repo is private, so it cannot be a raw URL. */
-const logoFor = (client: string, paths: string[]) => {
+/**
+ * A logo the browser can actually load, or nothing.
+ *
+ * Reply Radar's own copy first — every client set up here already has one, uploaded through the
+ * admin console, and it is already in the row this route read. A committed `logo.*` in the repo is
+ * the fallback and has to be proxied, because the repo is private and an `<img src>` has no token.
+ */
+const logoFor = (client: string, paths: string[], workspace?: BrainWorkspace) => {
+  if (workspace?.logo) return workspace.logo;
   const found = String(clientLogoIn(paths, client));
   return found ? `/api/brain/logo?path=${encodeURIComponent(found)}` : "";
 };
@@ -81,14 +89,24 @@ export async function GET(request: Request) {
       if (!skeleton.docs.some((doc) => doc.present) && !skeleton.extras.length) {
         return NextResponse.json({ ok: false, error: `There is nothing under clients/${only} in the brain.` }, { status: 404 });
       }
-      const touched = await brainLastTouched(skeleton.docs.map((doc) => doc.found).filter(Boolean));
+      const [touched, linked] = await Promise.all([
+        brainLastTouched(skeleton.docs.map((doc) => doc.found).filter(Boolean)),
+        workspacesByFolder(clientsIn(paths) as string[]),
+      ]);
+      const workspace = linked.get(skeleton.client);
       return NextResponse.json({
         ok: true,
         repoUrl: BRAIN_URL,
         client: {
           client: skeleton.client,
           label: skeleton.label,
-          logo: logoFor(skeleton.client, paths),
+          logo: logoFor(skeleton.client, paths, workspace),
+          // The other half of this client. Named on the page so somebody can tell a client we run
+          // campaigns for from a prospect we only ever wrote notes about — a distinction the brain
+          // alone cannot make, and the reason for tethering the two systems at all.
+          workspace: workspace
+            ? { name: workspace.name, slug: workspace.slug, connected: workspace.connected, how: workspace.how }
+            : null,
           files: skeleton.extras.length + skeleton.docs.filter((doc) => doc.present).length,
           docs: skeleton.docs.map((doc) => ({
             key: doc.key,
@@ -110,11 +128,19 @@ export async function GET(request: Request) {
     // The index is a wall of names, so it carries names. Coverage and file counts belong on the
     // client's own page, where there is room to say what they mean — a bare "4 of 6" on a tile is a
     // number without a question attached to it.
-    const clients = clientsIn(paths).map((client: string) => ({
-      client,
-      label: String(clientLabel(client)),
-      logo: logoFor(client, paths),
-    }));
+    const folders = clientsIn(paths) as string[];
+    const linked = await workspacesByFolder(folders);
+    const clients = folders.map((client: string) => {
+      const workspace = linked.get(client);
+      return {
+        client,
+        // A workspace's display name wins over the folder name, because the workspace name is the
+        // one the team says out loud and the folder name is whatever somebody typed once.
+        label: workspace?.name || String(clientLabel(client)),
+        logo: logoFor(client, paths, workspace),
+        live: Boolean(workspace),
+      };
+    });
 
     const areas = BRAIN_AREAS.map((area: { key: string; label: string; prefix: string; blurb: string }) => ({
       ...area,

@@ -6,6 +6,7 @@ import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import { defaultFollowUpPrompt, defaultIcpPrompt, FOLLOW_UP_TEMPLATES, ICP_TEMPLATES, MIN_CLIENT_BRIEF_LENGTH, type ScoringTemplate, templateLabel } from "../lib/scoring-templates";
+import { brainFolderFor } from "../../shared/brain-link.mjs";
 
 /** What the breadcrumb calls each configuration section. */
 const adminSectionLabels: Record<string, string> = {
@@ -35,6 +36,7 @@ type ClientWorkspace = {
   keyConfigured?: boolean;
   logoUrl?: string;
   website?: string;
+  brainFolder?: string;
   anthropicModel?: string;
   systemPrompt?: string;
   webhookUrl?: string;
@@ -81,7 +83,7 @@ export default function AdminPage() {
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))] ?? { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced" };
-  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "" });
+  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "" });
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -103,7 +105,7 @@ export default function AdminPage() {
             status: item.last_successful_poll_at ? "Connected" : "Not configured", tone: String(item.accent_color ?? "var(--accent)"),
             lastSync: String(item.last_successful_poll_at ?? "not synced"), createdAt: String(item.created_at ?? ""),
             brief: String(item.client_brief ?? ""), apiKey: "", apiKeyMasked: String(item.heyreach_api_key_masked ?? ""), timezone: String(item.timezone ?? "America/New_York"), website: String(item.website_url ?? ""), anthropicModel: String(item.anthropic_model ?? ""), systemPrompt: String(item.custom_system_prompt ?? ""), webhookUrl: String(item.webhook_url ?? ""), keyConfigured: Boolean(item.key_configured),
-            logoUrl: String(item.logo_url ?? ""),
+            logoUrl: String(item.logo_url ?? ""), brainFolder: String(item.brain_folder ?? ""),
             guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {},
           }));
           setWorkspaceClients(hydratedClients);
@@ -128,7 +130,7 @@ export default function AdminPage() {
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "" });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -147,7 +149,7 @@ export default function AdminPage() {
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
     const mutationIdentity = isNewWorkspace ? { create: true } : { id: client.id, previousSlug: client.slug };
     const nextGuardrails = { ...(client.guardrails ?? {}), messaging_doc_url: workspaceDraft.messagingDocUrl.trim() };
-    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
+    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
     if (!response?.ok) {
       const detail = await response?.json().catch(() => ({}));
       setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
@@ -158,7 +160,7 @@ export default function AdminPage() {
     const payload = await response.json().catch(() => ({}));
     const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] : null;
     const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
     setWorkspaceClients(next);
     setWorkspaceDraft((draft) => ({ ...draft, apiKey: "" }));
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
@@ -198,6 +200,23 @@ export default function AdminPage() {
       .then((payload: HeartbeatPayload) => setHeartbeat(payload))
       .catch(() => setHeartbeat({ status: "error", services: [], clients: [] }));
   }, [active, heartbeatRefresh]);
+  /**
+   * The folders in the QC Brain, so a person can say which one this client is.
+   *
+   * The two systems named the same companies independently and mostly agree, so the guess below is
+   * right for most clients and silently wrong for the rest. Silently wrong is the bad case — it puts
+   * one client's campaign figures under another client's strategy note — so the guess is shown as a
+   * guess and can be overruled here, once, permanently.
+   */
+  const [brainFolders, setBrainFolders] = useState<string[]>([]);
+  useEffect(() => {
+    if (active !== "workspaces") return;
+    fetch("/api/brain/clients", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload) => setBrainFolders(Array.isArray(payload?.clients) ? payload.clients.map((item: { client: string }) => item.client) : []))
+      .catch(() => setBrainFolders([]));
+  }, [active]);
+  const guessedFolder = brainFolderFor({ slug: workspaceDraft.slug, name: workspaceDraft.name, brainFolder: "" }, brainFolders) as { folder: string; how: string };
   const accentColor = accentOverrides[client.slug] ?? client.tone;
   const workspaceLogo = logos[client.slug] ?? client.logoUrl ?? "";
   const setAccentColor = (value: string) =>
@@ -214,7 +233,7 @@ export default function AdminPage() {
       setWorkspaceClients(next);
       window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
       window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
-      void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, previousSlug: client.slug, name: client.name, slug: client.slug, clientBrief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", websiteUrl: client.website ?? "", anthropicModel: client.anthropicModel ?? null, logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) });
+      void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, previousSlug: client.slug, name: client.name, slug: client.slug, clientBrief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", websiteUrl: client.website ?? "", brainFolder: client.brainFolder ?? "", anthropicModel: client.anthropicModel ?? null, logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) });
     };
     reader.readAsDataURL(file);
   };
@@ -452,7 +471,32 @@ export default function AdminPage() {
                           WORKSPACE SLUG
                           <input value={workspaceDraft.slug} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slug: event.target.value }))} placeholder="Enter workspace slug" />
                         </label>
+                        <label className="field-label">
+                          QC BRAIN FOLDER
+                          <select value={workspaceDraft.brainFolder} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, brainFolder: event.target.value }))}>
+                            <option value="">
+                              {guessedFolder.folder ? `Matched automatically — clients/${guessedFolder.folder}` : "No folder matched this name"}
+                            </option>
+                            {brainFolders.map((folder) => (
+                              <option key={folder} value={folder}>clients/{folder}</option>
+                            ))}
+                          </select>
+                        </label>
                       </div>
+                      <p className="brain-link-note">
+                        {/* Named plainly, because the consequence of getting it wrong is invisible: the
+                            wrong client's reply rates would appear under this client's strategy notes,
+                            and nothing on the page would look broken. */}
+                        {workspaceDraft.brainFolder
+                          ? `This workspace is pinned to clients/${workspaceDraft.brainFolder} in the QC Brain. Its context, campaign figures and logo are joined there.`
+                          : guessedFolder.folder
+                            ? guessedFolder.how === "loose"
+                              ? `Guessed from the name — clients/${guessedFolder.folder}. The names are close but not identical, so it is worth confirming.`
+                              : `Matched on the ${guessedFolder.how === "slug" ? "slug" : "display name"} — clients/${guessedFolder.folder}. Pick a folder above only if that is wrong.`
+                            : brainFolders.length
+                              ? "Nothing in the QC Brain matches this name. Pick the folder this client is written up in, if there is one."
+                              : "The QC Brain has not been reached, so folders cannot be listed yet."}
+                      </p>
                     </section>
                   </div>}
                     {workspaceOpen && <div className="client-config-sections">

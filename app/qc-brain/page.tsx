@@ -43,7 +43,8 @@ type IndexClient = { client: string; label: string; logo: string };
 type Area = { key: string; label: string; prefix: string; blurb: string; files: number };
 type Doc = { key: string; label: string; blurb: string; path: string; present: boolean; updated: string };
 type Group = { folder: string; files: { path: string; name: string; title: string }[] };
-type ClientDetail = { client: string; label: string; logo: string; files: number; docs: Doc[]; groups: Group[]; coverage: Coverage };
+type Workspace = { name: string; slug: string; connected: boolean; how: string };
+type ClientDetail = { client: string; label: string; logo: string; files: number; workspace: Workspace | null; docs: Doc[]; groups: Group[]; coverage: Coverage };
 type Campaign = { code: string; id: string; name: string; conversationsStarted: number; replies: number; replyRate: number };
 type FileDoc = { path: string; kind: string; title: string; text: string; sha: string; url: string; codes: string[]; updated: string };
 type Hit = { path: string; title: string; snippet: string; client: string; clientLabel: string; url: string };
@@ -424,6 +425,21 @@ function ClientHome({
               style={{ width: `${percent}%` }}
             />
           </span>
+          {/* The other half of this client. A folder with no workspace behind it is a prospect or a
+              dormant account, and that is worth knowing before acting on anything written here. */}
+          {detail.workspace ? (
+            <a className="brain-home-link" href={`/admin?client=${encodeURIComponent(detail.workspace.slug)}`}>
+              <i className={detail.workspace.connected ? "" : "is-off"} />
+              {detail.workspace.connected
+                ? `Live in Reply Radar as ${detail.workspace.name}`
+                : `Set up in Reply Radar as ${detail.workspace.name}, but not connected to HeyReach`}
+            </a>
+          ) : (
+            <span className="brain-home-link">
+              <i className="is-off" />
+              Not set up in Reply Radar
+            </span>
+          )}
         </div>
       </header>
 

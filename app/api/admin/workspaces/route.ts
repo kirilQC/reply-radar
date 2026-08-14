@@ -12,7 +12,7 @@ export async function GET() {
   const { url, key } = supabaseConfig();
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  let response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&order=name.asc`, { headers, cache: "no-store" });
+  let response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,brain_folder,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&order=name.asc`, { headers, cache: "no-store" });
   // Permit the UI to keep working while the additive migration is being run.
   if (!response.ok) response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,logo_url,accent_color,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&order=name.asc`, { headers, cache: "no-store" });
   const rows = await response.json();
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const payload = await request.json();
   const existingGuardrails = payload.guardrails && typeof payload.guardrails === "object" && !Array.isArray(payload.guardrails) ? payload.guardrails : {};
-  const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ?? null, custom_system_prompt: payload.systemPrompt ?? null, logo_url: payload.logoUrl ?? null, accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null, webhook_url: webhookUrlFor(payload.slug), guardrails: existingGuardrails };
+  const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, brain_folder: payload.brainFolder || null, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ?? null, custom_system_prompt: payload.systemPrompt ?? null, logo_url: payload.logoUrl ?? null, accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null, webhook_url: webhookUrlFor(payload.slug), guardrails: existingGuardrails };
   if (typeof payload.heyreachApiKey === "string" && payload.heyreachApiKey.trim()) record.heyreach_api_key_ciphertext = payload.heyreachApiKey.trim();
   const previousSlug = typeof payload.previousSlug === "string" ? payload.previousSlug.trim() : "";
   const id = typeof payload.id === "string" ? payload.id.trim() : "";
@@ -37,6 +37,7 @@ export async function POST(request: Request) {
       const legacyRecord = { ...record };
       delete legacyRecord.timezone;
       delete legacyRecord.website_url;
+      delete legacyRecord.brain_folder;
       patched = await fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(legacyRecord) });
     }
     const patchText = await patched.text();
@@ -53,6 +54,7 @@ export async function POST(request: Request) {
     const legacyRecord = { ...record };
     delete legacyRecord.timezone;
     delete legacyRecord.website_url;
+    delete legacyRecord.brain_folder;
     response = await fetch(`${url}/rest/v1/rr_workspaces?on_conflict=slug`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(legacyRecord) });
   }
   const body = await response.text();
