@@ -37,7 +37,7 @@
  * address follows the screen; it does not drive it.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
@@ -69,6 +69,15 @@ type ClientDetail = {
 type Campaign = { code: string; id: string; name: string; conversationsStarted: number; replies: number; replyRate: number };
 type FileDoc = { path: string; kind: string; title: string; text: string; sha: string; url: string; codes: string[]; updated: string };
 type Hit = { path: string; title: string; snippet: string; client: string; clientLabel: string; url: string };
+/**
+ * A document laid out to be read, and what the check made of it.
+ *
+ * `figures` are quantities the layout states that its source does not, and `thin` means the layout is
+ * much shorter than the file — both are shown to the reader rather than acted on here. `failed` carries
+ * the reason there is no layout, which is why this is one shape rather than a layout and an error.
+ */
+type Layout = { path: string; markdown: string; figures: string[]; thin: boolean; failed: string };
+type Row = Record<string, unknown>;
 type Skill = { name: string; path: string; command: string; blurb: string; client: string; clientLabel: string; url: string };
 
 const ago = agoLabel as (iso: string, now?: number) => string;
@@ -649,17 +658,13 @@ function AskTheBrain({ client }: { client?: string }) {
     <aside className="brain-ask">
       <div>
         <h3>Ask the brain instead of browsing it</h3>
-        <p>
-          The MCP chat reads every file here and can write to it — searching across clients, checking
-          what we wrote against what we are actually running, and proposing an edit as a pull request.
-        </p>
+        <span className="brain-ask-hint">
+          {client ? `Try “What does the brain say about ${client}?”` : "Type / in the chat to run one of the brain’s skills"}
+        </span>
       </div>
       <a className="brain-ask-go" href="/mcp">
         Open MCP chat
       </a>
-      <span className="brain-ask-hint">
-        {client ? `Try “What does the brain say about ${client}?”` : "Type / in the chat to run one of the brain’s skills"}
-      </span>
     </aside>
   );
 }
@@ -828,6 +833,18 @@ function ClientDoc({
  * The campaign strip is the join, and it shows only codes that matched a campaign that exists. An
  * invented code from the extractor silently stays plain text rather than becoming a dead row, which
  * is what lets the extractor be generous enough to catch every real one.
+ *
+ * ── Why the readable layout is what you see first ────────────────────────────────────────────────
+ * These documents are correct and unread. They are written in a text editor by whoever was on the
+ * call, and they arrive as a grey column of bold labels and nested bullets — so the app asks a model
+ * to lay one out again the moment somebody opens it, with headings, tables and the figures pulled out
+ * as figures. Nothing is rewritten in the repository; this is a reading surface over the same file,
+ * and `Original` is always one click away in the bar above.
+ *
+ * The original is not a fallback for a failure — it is the thing being displayed, and the layout is an
+ * opinion about it. That is why the toggle is permanent rather than a debug affordance, why editing
+ * always edits the source text, and why anything the check in `shared/brain-render.mjs` finds is said
+ * out loud instead of being absorbed.
  */
 function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string; campaigns: Campaign[] }) {
   /**
@@ -841,12 +858,67 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
   const [pull, setPull] = useState<{ path: string; url: string; number: number } | null>(null);
   const [saving, setSaving] = useState(false);
 
+  /** The layout, keyed by its path for the same reason the draft is. `failed` means show the source. */
+  const [layouts, setLayouts] = useState<Layout | null>(null);
+  /** The path whose original the reader asked to see, which is how "Original" stays a comparison. */
+  const [source, setSource] = useState("");
+  /** Which path has already been asked for, so the effect below fires once per document, not per render. */
+  const requested = useRef("");
+
   const path = doc?.path ?? "";
   const editing = session && session.path === path ? session : null;
   const proposed = pull && pull.path === path ? pull : null;
 
   const wanted = new Set(doc?.codes ?? []);
   const mentioned = wanted.size ? campaigns.filter((campaign) => wanted.has(campaign.code)) : [];
+
+  const layout = layouts && layouts.path === path ? layouts : null;
+  const readable = doc?.kind === "doc" && !!path;
+  /** Nothing yet and no failure yet means it is still being made. A derivation, so no effect writes it. */
+  const making = readable && !layout;
+  const showing = layout && !layout.failed && source !== path;
+
+  const askForLayout = useCallback(async (want: string, force: boolean) => {
+    try {
+      const response = await fetch("/api/brain/render", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: want, force }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!body?.ok) throw new Error(body?.error || "This document could not be laid out.");
+      const render = (body.render ?? {}) as Row;
+      const warnings = (render.warnings ?? {}) as Row;
+      setLayouts({
+        path: want,
+        markdown: String(render.markdown ?? ""),
+        figures: Array.isArray(warnings.figures) ? warnings.figures.map(String) : [],
+        thin: warnings.thin === true,
+        failed: "",
+      });
+    } catch (problem) {
+      // A failure is stored rather than retried: the original is right there, and a page that keeps
+      // asking a model that just refused is a page that costs money to leave open.
+      setLayouts({
+        path: want,
+        markdown: "",
+        figures: [],
+        thin: false,
+        failed: problem instanceof Error ? problem.message : "This document could not be laid out.",
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!readable || requested.current === path) return;
+    requested.current = path;
+    void askForLayout(path, false);
+  }, [askForLayout, path, readable]);
+
+  const again = useCallback(() => {
+    setLayouts(null);
+    void askForLayout(path, true);
+  }, [askForLayout, path]);
 
   const propose = async () => {
     if (!doc || !editing) return;
@@ -891,6 +963,27 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
       <div className="brain-doc-bar">
         <span className="brain-doc-path">{doc.path}</span>
         <span className="brain-doc-actions">
+          {making && !editing && <span className="brain-doc-making">Laying this out…</span>}
+          {/* Two views of one file, so they are one control rather than two buttons. Hidden while
+              editing, because the thing being edited is the source and there is nothing to choose. */}
+          {layout && !layout.failed && !editing && (
+            <span className="brain-doc-views" role="group" aria-label="How to show this document">
+              <button
+                className={`brain-doc-view${showing ? " is-on" : ""}`}
+                onClick={() => setSource("")}
+                title="The same file, laid out to be read. Nothing in the repository is changed."
+              >
+                Readable
+              </button>
+              <button
+                className={`brain-doc-view${showing ? "" : " is-on"}`}
+                onClick={() => setSource(path)}
+                title="The file exactly as it is committed"
+              >
+                Original
+              </button>
+            </span>
+          )}
           {doc.updated && <span className="brain-doc-age">Changed {ago(doc.updated)}</span>}
           <a className="brain-doc-link" href={doc.url} target="_blank" rel="noreferrer">
             GitHub
@@ -917,6 +1010,23 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
       )}
 
       {!editing && <CampaignStrip campaigns={mentioned} heading="Campaigns this mentions, as they are actually doing" />}
+
+      {/* Everything the check found, said in the open. A layout that has drifted from its source is
+          worse than no layout, so a reader is told rather than left to notice. */}
+      {layout && !layout.failed && showing && (layout.figures.length > 0 || layout.thin) && (
+        <p className="brain-doc-warn">
+          {layout.figures.length > 0 && (
+            <>
+              {layout.figures.length === 1 ? "One figure here is" : `${layout.figures.length} figures here are`} not in the
+              file itself ({layout.figures.join(", ")}). Read the original before quoting them.{" "}
+            </>
+          )}
+          {layout.thin && <>This layout is much shorter than the file, so the original has more in it. </>}
+          <button className="brain-doc-again" onClick={again}>
+            Lay it out again
+          </button>
+        </p>
+      )}
 
       {editing ? (
         <div className="brain-editor">
@@ -953,7 +1063,10 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
           </p>
         </div>
       ) : (
-        <Markdown>{doc.text}</Markdown>
+        // The layout when there is one and it was asked for; the file itself otherwise. A failed
+        // layout shows the file with no explanation of its own — the document is still readable, and
+        // the reason it could not be laid out is not the reader's problem to solve.
+        <Markdown>{showing ? layout.markdown : doc.text}</Markdown>
       )}
     </div>
   );

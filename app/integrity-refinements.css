@@ -3518,33 +3518,29 @@ a.brain-home-link:hover {
 
 /* Read-mostly is a choice, so the way to do the other thing has to be said somewhere. The end of a
    client's page is where somebody has finished looking and still has the question they came with. */
+/* A signpost, not a section: the paragraph explaining what the chat could do was three lines to say
+   what the heading and the button already say, so what is left is narrow enough to read as one line
+   of furniture at the bottom of the page. */
 .brain-ask {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 22px;
+  gap: 18px;
+  max-width: 620px;
   margin-top: 34px;
-  padding: 19px 22px;
+  padding: 15px 18px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
 }
 .brain-ask > div {
   flex: 1;
-  min-width: 260px;
+  min-width: 0;
 }
 .brain-ask h3 {
-  margin: 0 0 5px;
-  font-size: 14px;
+  margin: 0 0 3px;
+  font-size: 13.5px;
   font-weight: 640;
   letter-spacing: -0.025em;
-}
-.brain-ask p {
-  margin: 0;
-  max-width: 66ch;
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.6;
 }
 .brain-ask-go {
   flex: 0 0 auto;
@@ -3563,9 +3559,12 @@ a.brain-home-link:hover {
   filter: brightness(1.08);
 }
 .brain-ask-hint {
-  flex: 1 0 100%;
+  display: block;
   color: var(--muted-2);
   font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* A clear break, not a wider row. Without a heading between them the only thing saying "these four
@@ -3776,6 +3775,59 @@ a.brain-home-link:hover {
 .brain-doc-edit:hover {
   color: var(--text);
   border-color: var(--accent);
+}
+
+/* Readable and Original are two views of one file, so they are one segmented control: two separate
+   buttons would read as two actions, and one of them is always already taken. */
+.brain-doc-views {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.brain-doc-view {
+  height: 21px;
+  padding: 0 9px;
+  color: var(--muted-2);
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 550;
+}
+.brain-doc-view:hover {
+  color: var(--text);
+}
+.brain-doc-view.is-on {
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
+}
+/* Deliberately a line of text rather than a spinner. The document is not blocked on this — it is
+   there, in the shape it was committed in, and this is a note that a nicer one is coming. */
+.brain-doc-making {
+  color: var(--muted-2);
+  font-size: 10px;
+}
+.brain-doc-warn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 760px;
+  margin: 0 0 16px;
+  padding: 10px 13px;
+  color: #e8d3a8;
+  background: #1b1710;
+  border: 1px solid #3a3020;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.brain-doc-again {
+  color: inherit;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 /* The document column is held to a readable measure. Prose set across 1180px is unreadable no
    matter how good it is, and the rest of the app being dense tables is not a reason to make this
