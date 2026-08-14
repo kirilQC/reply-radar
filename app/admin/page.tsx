@@ -1277,6 +1277,8 @@ type AiConfig = {
   anthropic: { configured: boolean; maskedKey: string | null; model: string };
   globalSentimentPrompt: string;
   defaultSentimentPrompt: string;
+  icpDocPrompt: string;
+  defaultIcpDocPrompt: string;
   workspaceAi: { name: string; slug: string; brief: string; model: string; icpPrompt: string; followUpPrompt: string; replyPrompt: string; sentimentPrompt: string; followUpThreshold?: number } | null;
   workspaces: Array<{ id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; hasBrief: boolean }>;
 };
@@ -1488,6 +1490,9 @@ function AiHubView() {
   const [globalPrompt, setGlobalPrompt] = useState("");
   const [promptSaved, setPromptSaved] = useState(false);
   const [promptError, setPromptError] = useState("");
+  const [icpDoc, setIcpDoc] = useState("");
+  const [icpDocSaved, setIcpDocSaved] = useState(false);
+  const [icpDocError, setIcpDocError] = useState("");
   const [clientBrief, setClientBrief] = useState("");
   const [icpPrompt, setIcpPrompt] = useState("");
   const [followUpPrompt, setFollowUpPrompt] = useState("");
@@ -1532,6 +1537,7 @@ function AiHubView() {
       .then((payload: AiConfig) => {
         setConfig(payload);
         setGlobalPrompt(String(payload.globalSentimentPrompt ?? ""));
+        setIcpDoc(String(payload.icpDocPrompt ?? ""));
         if (payload.workspaceAi) {
           setClientBrief(payload.workspaceAi.brief);
           // A client with nothing stored is shown the same defaults the scoring routes fall back to,
@@ -1598,6 +1604,23 @@ function AiHubView() {
     }
     setPromptSaved(true);
     setTimeout(() => setPromptSaved(false), 2500);
+  };
+
+  /** The instructions the QC Brain's "Generate ICP document" button runs on. */
+  const saveIcpDocPrompt = async () => {
+    setIcpDocError("");
+    const response = await fetch("/api/ai/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "save_icp_doc_prompt", value: icpDoc }),
+    }).catch(() => null);
+    const payload = (await response?.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!payload?.ok) {
+      setIcpDocError(payload?.error || "Could not save the prompt.");
+      return;
+    }
+    setIcpDocSaved(true);
+    setTimeout(() => setIcpDocSaved(false), 2500);
   };
 
   const saveClientAi = async () => {
@@ -1697,6 +1720,19 @@ function AiHubView() {
         </label>
         {promptError && <p className="form-error" role="alert">{promptError}</p>}
         <button className="text-button" onClick={() => setGlobalPrompt(config?.defaultSentimentPrompt ?? "")}>Reset to default prompt</button>
+      </section>
+
+      {/* What a client's ICP document says is a positioning decision rather than a technical one, so the
+          instructions live here and the button in the QC Brain reads whatever is saved. */}
+      <section className="admin-panel">
+        <div className="panel-heading"><div><h2>Create ICP doc prompt</h2><p>Run by “Generate ICP document” on a client’s QC Brain page. Every file the brain holds on that client is handed over with it.</p></div>
+          <button className="primary-button" onClick={saveIcpDocPrompt}>{icpDocSaved ? "Saved ✓" : "Save prompt"}</button>
+        </div>
+        <label className="field-label">CREATE ICP DOC PROMPT
+          <textarea value={icpDoc} onChange={(event) => setIcpDoc(event.target.value)} rows={16} style={{ minHeight: 360 }} />
+        </label>
+        {icpDocError && <p className="form-error" role="alert">{icpDocError}</p>}
+        <button className="text-button" onClick={() => setIcpDoc(config?.defaultIcpDocPrompt ?? "")}>Reset to default prompt</button>
       </section>
     </>}
 

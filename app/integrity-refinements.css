@@ -3353,12 +3353,6 @@ a.tag-outline-link:hover {
   font-size: 15px;
   letter-spacing: -0.025em;
 }
-.brain-sub {
-  margin: 0 0 16px;
-  color: var(--muted-2);
-  font-size: 11px;
-}
-
 /* A client's mark: their real logo if one is committed at clients/<name>/logo.png, and otherwise
    their initials on a colour derived from the folder name. The fallback is deterministic rather
    than random so a client is the same colour on every screen and every machine — which is what
@@ -3498,36 +3492,59 @@ span.brain-mark.is-lg {
   }
 }
 
-/* A client's own routines, as things to run rather than files to read. */
-.brain-skillrow {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
-  gap: 10px;
-  margin-top: 14px;
-}
-.brain-skillchip {
+/* What somebody does with a client once they have read the folder: get the whole thing as one
+   document, or go and look at what the campaigns are doing. Full-width row under the documents,
+   because both are about the client rather than about any one file. */
+.brain-actions {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-  text-align: left;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+.brain-action {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 18px;
+  color: var(--text);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 550;
+  text-decoration: none;
 }
-.brain-skillchip:hover {
+.brain-action:hover {
   border-color: var(--accent);
 }
-.brain-skillchip-cmd {
-  color: var(--accent);
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
-  font-weight: 600;
+.brain-action.is-primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
 }
-.brain-skillchip-blurb {
+.brain-action.is-primary:hover {
+  filter: brightness(1.08);
+}
+.brain-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+  filter: none;
+}
+
+/* A count in the top bar while the repository is being laid out behind the page. Quiet on purpose:
+   it is progress on work nobody asked for at this moment, and the only reason to show it at all is
+   that a document opened in the next minute may still be the plain file. */
+.brain-warm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
   color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.5;
+  background: var(--panel-2);
+  border-radius: 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The gaps, named in a sentence. Somebody who came here to write the missing one should be able
@@ -3776,53 +3793,102 @@ span.brain-mark.is-lg {
   font-size: 18px;
   line-height: 0;
 }
-
-.brain-more {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px 24px;
-  padding: 4px 0 20px;
-  margin-bottom: 18px;
-  border-bottom: 1px solid var(--border-soft);
+/* The way out, and the only box in the strip that is not a place in the strip — so it is separated
+   by a rule rather than by being a different colour, which would make leaving look like the
+   emphasised thing to do. */
+.brain-tab.is-home {
+  margin-right: 6px;
+  padding-right: 16px;
+  border-right: 1px solid var(--border);
+  border-radius: 7px 0 0 7px;
+  font-weight: 550;
 }
-.brain-more-folder {
-  margin: 0 0 6px;
+
+.brain-split {
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+/*
+  The menu down the side of an area.
+  ─────────────────────────────────
+  This was the panel that used to open behind a "More" button, reused as a sidebar, and it read as
+  one: 11.5px rows two pixels apart under nine-pixel folder headings, thirty of them in a column with
+  no separation, so `company/` — the biggest folder in the repo — arrived as a grey mass. Nothing was
+  wrong with it except that it was unreadable, which for a menu is the whole job.
+
+  So: rows tall enough to hit, real space between folders, a heading that reads as a heading, and a
+  scrollbar that is visible enough to tell you there is more below without becoming furniture.
+*/
+.brain-filelist {
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+  padding-right: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.brain-filelist::-webkit-scrollbar {
+  width: 8px;
+}
+.brain-filelist::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.brain-filelist::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-2);
+}
+.brain-filelist > div + div {
+  margin-top: 22px;
+}
+.brain-filelist-folder {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 0 8px;
+  padding: 4px 0 6px;
   color: var(--muted-2);
-  font-size: 9px;
-  letter-spacing: 0.11em;
+  background: var(--bg);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   font-weight: 650;
 }
-.brain-more-list {
+.brain-filelist-items {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 2px;
+  gap: 3px;
 }
-.brain-more-file {
+.brain-filelist-file {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  padding: 6px 8px;
+  min-height: 34px;
+  padding: 8px 10px;
   color: var(--muted);
   background: transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   text-align: left;
-  font-size: 11.5px;
+  font-size: 12px;
+  line-height: 1.35;
 }
-.brain-more-file:hover {
+.brain-filelist-file:hover {
   color: var(--text);
   background: var(--panel-2);
 }
-.brain-more-file.is-open {
+.brain-filelist-file.is-open {
   color: var(--text);
   background: var(--panel-2);
   box-shadow: inset 2px 0 0 var(--accent);
 }
-.brain-more-title {
+.brain-filelist-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3830,28 +3896,14 @@ span.brain-mark.is-lg {
 }
 /* Only shown when it is not markdown, because "doc" on every row would be noise and the point of
    the label is to warn that clicking opens GitHub rather than a page. */
-.brain-more-kind {
+.brain-filelist-kind {
   flex: none;
   color: var(--muted-2);
   font-size: 9px;
 }
-.brain-more-file .brain-more-kind:not(:empty) {
+.brain-filelist-file .brain-filelist-kind:not(:empty) {
   text-transform: uppercase;
   letter-spacing: 0.06em;
-}
-
-.brain-split {
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: 28px;
-  align-items: start;
-}
-.brain-filelist {
-  position: sticky;
-  top: 20px;
-  max-height: calc(100vh - 140px);
-  overflow-y: auto;
-  padding-right: 4px;
 }
 .brain-pane {
   min-width: 0;
@@ -4235,4 +4287,162 @@ span.brain-mark.is-lg {
   color: #1d6a52;
   background: #eefaf5;
   border-color: #c6e8dc;
+}
+
+/*
+  The generated ICP document.
+  ──────────────────────────
+  An overlay rather than a page, because it is not a place — it is one answer somebody asked for, and
+  giving it a route would promise it persists. It sits over the client's page so closing it returns to
+  exactly what was on screen, and it is scrollable and centred on a column the width of a page, so what
+  is read here is what comes out of the printer.
+*/
+.brain-icp {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.brain-icp-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.brain-icp-name {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.brain-icp-tools {
+  display: flex;
+  gap: 8px;
+}
+.brain-icp-sheet {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 32px 28px 80px;
+}
+/* A document five pages long needs a title that outranks its sections, which the shared markdown
+   renderer deliberately does not give it — every heading level above three collapses into one tag so
+   that an answer in a chat cannot outrank the page it sits on. The level the author wrote survives as
+   an attribute, and here it is worth using. */
+.brain-icp-sheet .md [data-level="1"] {
+  margin: 0 0 6px;
+  font-size: 26px;
+  letter-spacing: -0.03em;
+}
+.brain-icp-sheet .md [data-level="2"] {
+  margin-top: 34px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 17px;
+}
+.brain-icp-sheet .md [data-level="3"] {
+  margin-top: 22px;
+  font-size: 13.5px;
+}
+
+@media print {
+  /* Everything that is not the document, gone — including the bar that holds the button that started
+     the print, which would otherwise be the first thing on page one. */
+  body:has(.brain-icp) .app-sidebar,
+  body:has(.brain-icp) .topbar,
+  /* The client's own page is the overlay's parent, so it is emptied of its siblings rather than
+     hidden — hiding an ancestor takes the document down with it, whatever the rules below say. */
+  body:has(.brain-icp) .brain-home > *:not(.brain-icp),
+  body:has(.brain-icp) .brain-icp-bar {
+    display: none !important;
+  }
+  /* The shell is a fixed-height flex layout with its scrolling inside; on paper that prints one
+     screenful and stops. */
+  body:has(.brain-icp) .app-shell,
+  body:has(.brain-icp) .main-area,
+  body:has(.brain-icp) .brain-page,
+  body:has(.brain-icp) .brain-home,
+  body:has(.brain-icp) .brain-icp,
+  body:has(.brain-icp) .brain-icp-sheet {
+    position: static !important;
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    max-width: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+  }
+  body:has(.brain-icp) {
+    background: #fff !important;
+  }
+  .brain-icp-sheet,
+  .brain-icp-sheet .md {
+    color: #111 !important;
+    font-size: 11pt;
+  }
+  .brain-icp-sheet .md [data-level="1"] {
+    font-size: 20pt;
+  }
+  /* Each numbered section starts a page. Eight sections over four pages otherwise break wherever the
+     prose happens to land, and a document sent to a client should not open a page mid-sentence under a
+     heading left on the one before. */
+  .brain-icp-sheet .md [data-level="2"] {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0 !important;
+    font-size: 14pt;
+    page-break-before: always;
+    page-break-after: avoid;
+  }
+  .brain-icp-sheet .md [data-level="2"]:first-of-type {
+    page-break-before: avoid;
+  }
+  .brain-icp-sheet .md [data-level="3"] {
+    font-size: 12pt;
+    page-break-after: avoid;
+  }
+  .brain-icp-sheet .md strong,
+  .brain-icp-sheet .md h3,
+  .brain-icp-sheet .md h4,
+  .brain-icp-sheet .md h5 {
+    color: #000 !important;
+  }
+  .brain-icp-sheet .md-table-wrap {
+    overflow: visible !important;
+    border-color: #bbb !important;
+  }
+  .brain-icp-sheet .md th {
+    color: #000 !important;
+    background: #f2f2f2 !important;
+    border-color: #bbb !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .brain-icp-sheet .md td {
+    color: #222 !important;
+    border-color: #ddd !important;
+  }
+  .brain-icp-sheet .md td:first-child {
+    color: #000 !important;
+  }
+  /* A table or a rule that splits across a break loses its heading and stops making sense. */
+  .brain-icp-sheet .md table,
+  .brain-icp-sheet .md tr,
+  .brain-icp-sheet .md-callout {
+    page-break-inside: avoid;
+  }
+  .brain-icp-sheet .md-callout {
+    color: #111 !important;
+    border-left-color: #888 !important;
+  }
 }

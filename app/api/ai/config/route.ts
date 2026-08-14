@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { DEFAULT_SENTIMENT_PROMPT } from "../../../lib/reply-sentiment";
-import { explainConfigError, readConfigPrefix, writeConfig } from "../../../lib/app-config";
+import { DEFAULT_ICP_DOC_PROMPT, ICP_DOC_PROMPT_KEY } from "../../../lib/brain-icp";
+import { explainConfigError, readConfig, readConfigPrefix, writeConfig } from "../../../lib/app-config";
 
 type Row = Record<string, unknown>;
 
@@ -30,6 +31,10 @@ export async function GET(request: Request) {
     // The global sentiment prompt and every client's override, in one read. A failure here is not fatal:
     // the built-in default is what the scorer falls back to anyway.
     const prompts = await readConfigPrefix(SENTIMENT_PREFIX).catch(() => new Map<string, unknown>());
+    // The instructions the QC Brain's "Generate ICP document" button runs on. Read here rather than
+    // from its own endpoint because this is the screen that edits it, and a second round trip to fill
+    // one textarea is a second thing that can fail.
+    const icpDoc = asPrompt(await readConfig(ICP_DOC_PROMPT_KEY).catch(() => "")) || DEFAULT_ICP_DOC_PROMPT;
 
     const globalPrompt = asPrompt(prompts.get(SENTIMENT_PREFIX)) || DEFAULT_SENTIMENT_PROMPT;
     const workspacePrompt = workspace ? asPrompt(prompts.get(sentimentKey(workspace))) || null : null;
@@ -72,6 +77,8 @@ export async function GET(request: Request) {
       anthropic: { configured: Boolean(anthropicKey), maskedKey, model: anthropicModel },
       globalSentimentPrompt: globalPrompt,
       defaultSentimentPrompt: DEFAULT_SENTIMENT_PROMPT,
+      icpDocPrompt: icpDoc,
+      defaultIcpDocPrompt: DEFAULT_ICP_DOC_PROMPT,
       workspaceAi,
       workspaces: allWorkspaces,
     });
@@ -96,6 +103,18 @@ export async function POST(request: Request) {
       try {
         const scope = typeof workspace === "string" && workspace.trim() ? workspace.trim() : null;
         await writeConfig(sentimentKey(scope), typeof value === "string" ? value : "");
+      } catch (error) {
+        return NextResponse.json(
+          { ok: false, error: explainConfigError(error, "Could not save the prompt.") },
+          { status: 502 },
+        );
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "save_icp_doc_prompt") {
+      try {
+        await writeConfig(ICP_DOC_PROMPT_KEY, typeof value === "string" ? value : "");
       } catch (error) {
         return NextResponse.json(
           { ok: false, error: explainConfigError(error, "Could not save the prompt.") },

@@ -378,7 +378,12 @@ function Rendered({ block, live, onExport, exportKey, offer }: { block: Block; l
     // outrank the page title it sits under.
     const Tag = (["h3", "h3", "h3", "h4", "h5", "h5"] as const)[block.level - 1] ?? "h4";
     return (
-      <Tag>
+      // The level the author wrote, kept as an attribute because the clamp above throws it away and
+      // three of the six levels come out as the same tag. That is right for an answer in a chat, where
+      // the outline is short and the page owns the top of it, and wrong for anything standing on its
+      // own — a five-page document whose title is the same size as its sections has no shape. A
+      // surface that needs the distinction can style it; nothing about the default changes.
+      <Tag data-level={block.level}>
         <Spans spans={block.spans} />
       </Tag>
     );

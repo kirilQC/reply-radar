@@ -18,30 +18,9 @@
  * free, and sharing the route keeps one definition of what a client is.
  */
 import { NextResponse } from "next/server";
-import { BRAIN_URL, brainConfigured, brainFile, brainFiles, brainLastTouched, brainTree } from "../../../lib/brain";
+import { BRAIN_URL, brainConfigured, brainFile, brainLastTouched, brainTree } from "../../../lib/brain";
 import { workspacesByFolder, type BrainWorkspace } from "../../../lib/brain-workspaces";
-import { BRAIN_AREAS, briefSummary, clientLabel, clientLogoIn, clientSkeleton, clientsIn, coverage, fileTitle, groupByFolder, parseSkill, skillClient } from "../../../../shared/brain-structure.mjs";
-
-const COMMANDS = ".claude/commands/";
-
-/**
- * The slash commands written for this one client.
- *
- * They are the most useful thing in the repo and the least findable — you learn `/willow-weekly`
- * exists because somebody says so in Slack. Named from the filename alone, so only this client's
- * two or three files are ever fetched rather than all twenty to draw one page.
- */
-async function skillsFor(client: string, paths: string[], clients: string[]) {
-  const mine = paths.filter(
-    (path) => path.startsWith(COMMANDS) && path.endsWith(".md") && skillClient(path.split("/").pop()?.replace(/\.md$/i, ""), clients) === client,
-  );
-  if (!mine.length) return [];
-  const docs = await brainFiles(mine, 4).catch(() => []);
-  return docs
-    .map((doc) => parseSkill(doc.path, doc.text) as { command: string; blurb: string; path: string })
-    .map(({ command, blurb, path }) => ({ command, blurb, path }))
-    .sort((a, b) => a.command.localeCompare(b.command));
-}
+import { BRAIN_AREAS, briefSummary, clientLabel, clientLogoIn, clientSkeleton, clientsIn, coverage, fileTitle, groupByFolder } from "../../../../shared/brain-structure.mjs";
 
 /**
  * A logo the browser can actually load, or nothing.
@@ -114,11 +93,14 @@ export async function GET(request: Request) {
       // anything. One extra file fetch, cached like every other, and only on a client's own page.
       const briefPath = skeleton.docs.find((doc) => doc.key === "brief" && doc.present)?.found ?? "";
       const folderNames = clientsIn(paths) as string[];
-      const [touched, linked, brief, skills] = await Promise.all([
+      // The client's own slash commands used to be read here for a row of chips on their page. They
+      // came off the page — a routine is something you run in Claude Code, and a chip that opens the
+      // markdown behind it was not what anybody wanted from it — so three file reads per client page
+      // came off with them. Every command is still listed under Skills.
+      const [touched, linked, brief] = await Promise.all([
         brainLastTouched(skeleton.docs.map((doc) => doc.found).filter(Boolean)),
         workspacesByFolder(folderNames),
         briefPath ? brainFile(briefPath).catch(() => null) : Promise.resolve(null),
-        skillsFor(skeleton.client, paths, folderNames),
       ]);
       const workspace = linked.get(skeleton.client);
       const { summary, facts } = briefSummary(brief?.text ?? "") as { summary: string; facts: { label: string; value: string }[] };
@@ -132,7 +114,6 @@ export async function GET(request: Request) {
           summary,
           facts,
           briefPath,
-          skills,
           // The other half of this client. Named on the page so somebody can tell a client we run
           // campaigns for from a prospect we only ever wrote notes about — a distinction the brain
           // alone cannot make, and the reason for tethering the two systems at all.

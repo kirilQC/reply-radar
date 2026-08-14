@@ -51,7 +51,6 @@ type Doc = { key: string; label: string; blurb: string; path: string; present: b
 type Group = { folder: string; files: { path: string; name: string; title: string }[] };
 type Workspace = { name: string; slug: string; connected: boolean; how: string };
 type Fact = { label: string; value: string };
-type ClientSkill = { command: string; blurb: string; path: string };
 type ClientDetail = {
   client: string;
   label: string;
@@ -59,7 +58,6 @@ type ClientDetail = {
   summary: string;
   facts: Fact[];
   briefPath: string;
-  skills: ClientSkill[];
   files: number;
   workspace: Workspace | null;
   docs: Doc[];
@@ -108,7 +106,7 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
 
   const [detail, setDetail] = useState<ClientDetail | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [area, setArea] = useState<{ label: string; blurb: string; groups: Group[] } | null>(null);
+  const [area, setArea] = useState<{ label: string; blurb: string; prefix: string; groups: Group[] } | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
 
   /**
@@ -139,6 +137,48 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
       })
       .catch((problem: Error) => setError(problem.message))
       .finally(() => setLoading(false));
+  }, []);
+
+  /**
+   * How many documents in the whole repository are still waiting to be laid out.
+   *
+   * ── Why the page pushes this at all ─────────────────────────────────────────────────────────────
+   * The layouts are built on the server on a schedule, which is where that work belongs: documents are
+   * added to the brain every week and nobody should have to open a page to make one readable. But a
+   * schedule has a gap in it, and the moment somebody notices is the moment they open this tab looking
+   * for something. So arriving here asks what is outstanding — two requests and no model calls — and
+   * then keeps a pass running while there is a backlog. Two people doing this at once is not a problem:
+   * a layout is written once and keyed by the file's SHA, so the second walk finds the first one's work.
+   *
+   * -1 means nobody has asked yet, which is different from zero and must not read as "all done".
+   */
+  const [backlog, setBacklog] = useState(-1);
+  /** Fires once per mount. The effect must not start a second walk when React re-runs it in dev. */
+  const walking = useRef(false);
+
+  useEffect(() => {
+    if (walking.current) return;
+    walking.current = true;
+
+    // Each pass stops at its own deadline and reports what is left. `rendered` of zero is the guard
+    // against looping for ever over a document that fails every time it is tried.
+    const pass = async (): Promise<void> => {
+      const body = (await fetch("/api/brain/warm", { method: "POST" })
+        .then((response) => response.json())
+        .catch(() => null)) as Row | null;
+      const remaining = Number(body?.remaining ?? 0);
+      setBacklog(body?.ok ? remaining : 0);
+      if (body?.ok && remaining > 0 && Number(body.rendered ?? 0) > 0) await pass();
+    };
+
+    void fetch("/api/brain/warm?check=1")
+      .then((response) => response.json())
+      .then((body: Row) => {
+        const remaining = Number(body?.remaining ?? 0);
+        setBacklog(body?.ok ? remaining : 0);
+        if (body?.ok && remaining > 0) return pass();
+      })
+      .catch(() => setBacklog(0));
   }, []);
 
   /** The address bar, moved to match the screen. No navigation: nothing here needs re-rendering. */
@@ -219,6 +259,16 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
     showIndex();
     travel("/qc-brain");
   }, [showIndex, travel]);
+
+  /**
+   * Back to the client whose document is open. Their detail is already in hand, so this is a view
+   * change and not a fetch — and the open path is dropped, or returning would leave a document
+   * highlighted on a page that no longer shows one.
+   */
+  const backToClient = useCallback(() => {
+    setOpenPath("");
+    setView("client");
+  }, []);
 
   // Landing straight on a client's URL. The view is already "client"; only the data is missing.
   useEffect(() => {
@@ -327,6 +377,10 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
               onChange={(event) => setQuery(event.target.value)}
               aria-label="Search the QC Brain"
             />
+            {/* Only while there is one. A count, because the work is real and a document opened in the
+                next minute may still be the plain file — which is worth knowing and not worth a
+                sentence. */}
+            {backlog > 0 && <span className="brain-warm">Laying out {backlog} documents</span>}
             <a className="brain-repo-link" href={repoUrl} target="_blank" rel="noreferrer">
               Open in GitHub
             </a>
@@ -368,13 +422,34 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
               campaigns={campaigns}
               openPath={openPath}
               onOpen={setOpenPath}
+              onHome={backToClient}
               doc={doc}
               docError={docError}
             />
           ) : view === "area" ? (
-            <AreaView area={area} openPath={openPath} onOpen={setOpenPath} doc={doc} docError={docError} />
+            <AreaView
+              area={area}
+              areas={areas}
+              openPath={openPath}
+              onOpen={setOpenPath}
+              onArea={openArea}
+              onSkills={openSkills}
+              onHome={home}
+              doc={doc}
+              docError={docError}
+            />
           ) : view === "skills" ? (
-            <SkillList skills={skills} openPath={openPath} onOpen={setOpenPath} doc={doc} docError={docError} />
+            <SkillList
+              skills={skills}
+              areas={areas}
+              openPath={openPath}
+              onOpen={setOpenPath}
+              onArea={openArea}
+              onSkills={openSkills}
+              onHome={home}
+              doc={doc}
+              docError={docError}
+            />
           ) : (
             <Reader doc={doc} error={docError} campaigns={[]} />
           )}
@@ -482,6 +557,37 @@ function ClientMark({ label, logo, slug, size }: { label: string; logo: string; 
  * about the client and not about one file.
  */
 function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (path: string) => void }) {
+  /**
+   * The generated document, held here rather than fetched into a route of its own.
+   *
+   * It is not a file and it is not in the brain — it is one answer to one question somebody asked a
+   * minute ago, and giving it a URL would imply it is a thing that persists and can be linked to. It
+   * prints, and if somebody wants it again they press the button again.
+   */
+  const [icp, setIcp] = useState("");
+  const [writing, setWriting] = useState(false);
+  const [icpError, setIcpError] = useState("");
+
+  const makeIcp = useCallback(async () => {
+    if (!detail) return;
+    setWriting(true);
+    setIcpError("");
+    try {
+      const response = await fetch("/api/brain/icp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ client: detail.client }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!body?.ok) throw new Error(body?.error || "That document could not be written.");
+      setIcp(String(body.markdown ?? ""));
+    } catch (problem) {
+      setIcpError(problem instanceof Error ? problem.message : "That document could not be written.");
+    } finally {
+      setWriting(false);
+    }
+  }, [detail]);
+
   if (!detail) return <p className="brain-quiet">Opening…</p>;
 
   const missing = detail.docs.filter((entry) => !entry.present && entry.key !== "dnc");
@@ -567,24 +673,23 @@ function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (
         ))}
       </div>
 
-      {/* The routines written for this client specifically. The least findable thing in the repo and
-          close to the most useful: you learn `/willow-weekly` exists because somebody mentions it. */}
-      {detail.skills.length > 0 && (
-        <>
-          <h2 className="brain-heading">Their routines</h2>
-          <p className="brain-sub">Ask for any of these in the MCP chat, or run them from Claude Code.</p>
-          <div className="brain-skillrow">
-            {detail.skills.map((skill) => (
-              <button key={skill.path} className="brain-skillchip" onClick={() => onOpen(skill.path)}>
-                <span className="brain-skillchip-cmd">{skill.command}</span>
-                {skill.blurb && <span className="brain-skillchip-blurb">{skill.blurb}</span>}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      {/* The two things people leave this page to do. Under the documents rather than in the header,
+          because both are about the whole client and neither is where anybody starts. */}
+      <div className="brain-actions">
+        <button className="brain-action is-primary" onClick={() => void makeIcp()} disabled={writing}>
+          {writing ? `Writing the ICP document for ${detail.label}…` : `Generate ICP document for ${detail.label}`}
+        </button>
+        {detail.workspace && (
+          <a className="brain-action" href={`/analytics?client=${encodeURIComponent(detail.workspace.slug)}`}>
+            See client analytics
+          </a>
+        )}
+      </div>
+      {icpError && <p className="brain-error">{icpError}</p>}
 
       <AskTheBrain client={detail.label} />
+
+      {icp && <IcpSheet label={detail.label} markdown={icp} onClose={() => setIcp("")} />}
     </div>
   );
 }
@@ -634,6 +739,41 @@ function AskTheBrain({ client }: { client?: string }) {
         Open MCP chat
       </a>
     </aside>
+  );
+}
+
+/**
+ * The generated ICP document, on top of the page, ready to print.
+ *
+ * ── Why this is a print rather than a file ──────────────────────────────────────────────────────
+ * The ask was a PDF, and the browser already has a very good one. Every library that would produce a
+ * file here is a runtime dependency, a second layout engine and a second set of bugs, in exchange for
+ * output worse than what `window.print()` gives — which uses the same engine that just rendered the
+ * document, so the tables and the type in the file are the ones on the screen. The print rules in the
+ * stylesheet hide the app around it and set the page to black-on-white at a readable size.
+ *
+ * It is shown before it is printed on purpose. This document is written by a model from files that
+ * contradict each other in places, and it is going to be read as fact by whoever it is sent to. The
+ * person who asked for it should see it first.
+ */
+function IcpSheet({ label, markdown, onClose }: { label: string; markdown: string; onClose: () => void }) {
+  return (
+    <div className="brain-icp" role="dialog" aria-label={`ICP document for ${label}`}>
+      <div className="brain-icp-bar">
+        <span className="brain-icp-name">{label} · ICP document</span>
+        <div className="brain-icp-tools">
+          <button className="brain-action is-primary" onClick={() => window.print()}>
+            Save as PDF
+          </button>
+          <button className="brain-action" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+      <div className="brain-icp-sheet">
+        <Markdown>{markdown}</Markdown>
+      </div>
+    </div>
   );
 }
 
@@ -693,12 +833,22 @@ function CampaignStrip({ campaigns, heading }: { campaigns: Campaign[]; heading:
   );
 }
 
-/** Reading one of a client's documents, with the rest of them still one click away. */
+/**
+ * Reading one of a client's documents, with everything else they have still one click away.
+ *
+ * ── Why every file is in the strip ──────────────────────────────────────────────────────────────
+ * The seven core documents were tabs and everything else was behind a "More (14)" button that opened a
+ * panel of folder headings. That is two clicks and a mode to reach a call note, and it made the strip
+ * lie about what the client has: the tabs implied seven documents and the number in brackets was the
+ * only hint that most of the folder was elsewhere. A client's files are all the same kind of thing to
+ * somebody reading them, so they are all in the same strip, in the same shape, one click each.
+ */
 function ClientDoc({
   detail,
   campaigns,
   openPath,
   onOpen,
+  onHome,
   doc,
   docError,
 }: {
@@ -706,17 +856,22 @@ function ClientDoc({
   campaigns: Campaign[];
   openPath: string;
   onOpen: (path: string) => void;
+  onHome: () => void;
   doc: FileDoc | null;
   docError: string;
 }) {
-  const [more, setMore] = useState(false);
   if (!detail) return <p className="brain-quiet">Opening…</p>;
 
-  const extras = detail.groups.reduce((sum, group) => sum + group.files.length, 0);
+  const rest = detail.groups.flatMap((group) => group.files);
 
   return (
     <div className="brain-client">
       <nav className="brain-tabs" aria-label="Documents">
+        {/* First, because it is the way out. Reading a document is where people end up, and until now
+            the only way back to the client was the breadcrumb at the top of the page. */}
+        <button className="brain-tab is-home" onClick={onHome}>
+          Homepage
+        </button>
         {detail.docs.map((entry) => {
           const age = stale(entry.updated);
           return (
@@ -739,38 +894,17 @@ function ClientDoc({
             </button>
           );
         })}
-        {extras > 0 && (
-          <button className={`brain-tab brain-tab-more${more ? " is-open" : ""}`} onClick={() => setMore((open) => !open)}>
-            More ({extras})
+        {rest.map((file) => (
+          <button
+            key={file.path}
+            className={`brain-tab${openPath === file.path ? " is-open" : ""}`}
+            onClick={() => onOpen(file.path)}
+            title={file.name}
+          >
+            {file.title}
           </button>
-        )}
+        ))}
       </nav>
-
-      {more && (
-        <div className="brain-more">
-          {detail.groups.map((group) => (
-            <div key={group.folder} className="brain-more-group">
-              {group.folder && <h3 className="brain-more-folder">{group.folder}</h3>}
-              <ul className="brain-more-list">
-                {group.files.map((file) => (
-                  <li key={file.path}>
-                    <button
-                      className={`brain-more-file${openPath === file.path ? " is-open" : ""}`}
-                      onClick={() => {
-                        onOpen(file.path);
-                        setMore(false);
-                      }}
-                    >
-                      <span className="brain-more-title">{file.title}</span>
-                      <span className="brain-more-kind">{kindOf(file.path)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
 
       <Reader doc={doc} error={docError} campaigns={campaigns} />
     </div>
@@ -1064,13 +1198,13 @@ function FileList({
     <nav className="brain-filelist" aria-label={label}>
       {groups.map((group) => (
         <div key={group.folder}>
-          {group.folder && <h3 className="brain-more-folder">{group.folder}</h3>}
-          <ul className="brain-more-list">
+          {group.folder && <h3 className="brain-filelist-folder">{group.folder}</h3>}
+          <ul className="brain-filelist-items">
             {group.files.map((file) => (
               <li key={file.path}>
-                <button className={`brain-more-file${openPath === file.path ? " is-open" : ""}`} onClick={() => onOpen(file.path)}>
-                  <span className="brain-more-title">{file.title}</span>
-                  <span className="brain-more-kind">{kindOf(file.path)}</span>
+                <button className={`brain-filelist-file${openPath === file.path ? " is-open" : ""}`} onClick={() => onOpen(file.path)}>
+                  <span className="brain-filelist-title">{file.title}</span>
+                  <span className="brain-filelist-kind">{kindOf(file.path)}</span>
                 </button>
               </li>
             ))}
@@ -1081,23 +1215,73 @@ function FileList({
   );
 }
 
+/**
+ * The parts of the brain that are not a client, as a strip you can move along.
+ *
+ * The areas were reachable only from the directory, so going from `company/` to `verticals/` meant
+ * going back out and in again — two clicks and a page to look at, to do the thing anybody comparing
+ * two folders does constantly. They are five destinations that sit at the same level, which is what a
+ * strip of boxes is for, and it is the same strip a client's documents get for the same reason.
+ */
+function AreaTabs({
+  areas,
+  current,
+  onArea,
+  onSkills,
+  onHome,
+}: {
+  areas: Area[];
+  current: string;
+  onArea: (prefix: string) => void;
+  onSkills: () => void;
+  onHome: () => void;
+}) {
+  return (
+    <nav className="brain-tabs" aria-label="The brain">
+      <button className="brain-tab is-home" onClick={onHome}>
+        Homepage
+      </button>
+      {areas.map((area) => (
+        <button
+          key={area.key}
+          className={`brain-tab${current === area.prefix ? " is-open" : ""}`}
+          onClick={() => onArea(area.prefix)}
+        >
+          {area.label}
+        </button>
+      ))}
+      <button className={`brain-tab${current === "skills" ? " is-open" : ""}`} onClick={onSkills}>
+        Skills
+      </button>
+    </nav>
+  );
+}
+
 function AreaView({
   area,
+  areas,
   openPath,
   onOpen,
+  onArea,
+  onSkills,
+  onHome,
   doc,
   docError,
 }: {
-  area: { label: string; blurb: string; groups: Group[] } | null;
+  area: { label: string; blurb: string; prefix: string; groups: Group[] } | null;
+  areas: Area[];
   openPath: string;
   onOpen: (path: string) => void;
+  onArea: (prefix: string) => void;
+  onSkills: () => void;
+  onHome: () => void;
   doc: FileDoc | null;
   docError: string;
 }) {
   if (!area) return <p className="brain-quiet">Opening…</p>;
   return (
     <div className="brain-area-view">
-      <p className="brain-sub">{area.blurb}</p>
+      <AreaTabs areas={areas} current={area.prefix} onArea={onArea} onSkills={onSkills} onHome={onHome} />
       <div className="brain-split">
         <FileList groups={area.groups} openPath={openPath} onOpen={onOpen} label={area.label} />
         <div className="brain-pane">
@@ -1116,27 +1300,32 @@ function AreaView({
  */
 function SkillList({
   skills,
+  areas,
   openPath,
   onOpen,
+  onArea,
+  onSkills,
+  onHome,
   doc,
   docError,
 }: {
   skills: Skill[];
+  areas: Area[];
   openPath: string;
   onOpen: (path: string) => void;
+  onArea: (prefix: string) => void;
+  onSkills: () => void;
+  onHome: () => void;
   doc: FileDoc | null;
   docError: string;
 }) {
-  if (!skills.length) return <p className="brain-quiet">Reading the commands…</p>;
   return (
     <div className="brain-area-view">
-      <p className="brain-sub">
-        Type any of these into Claude Code with the QC Brain connected. Each one is a routine somebody has
-        already worked out.
-      </p>
+      <AreaTabs areas={areas} current="skills" onArea={onArea} onSkills={onSkills} onHome={onHome} />
+      {!skills.length && <p className="brain-quiet">Reading the commands…</p>}
       <div className="brain-split">
         <nav className="brain-filelist" aria-label="Skills">
-          <ul className="brain-more-list">
+          <ul className="brain-filelist-items">
             {skills.map((skill) => (
               <li key={skill.path}>
                 <button className={`brain-skill${openPath === skill.path ? " is-open" : ""}`} onClick={() => onOpen(skill.path)}>

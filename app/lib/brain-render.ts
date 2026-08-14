@@ -41,6 +41,21 @@ const TABLE = "rr_brain_renders";
 export const RENDER_MIGRATION = "supabase/migrations/20260814_rr_brain_renders.sql";
 
 /**
+ * Which generation of the instructions below produced a layout.
+ *
+ * The SHA answers "is this a layout of the current text", which is the only question that mattered
+ * while the prompt was fixed. It is not the only question: the first version of the prompt returned
+ * the source document with tidier headings, and every one of those layouts still matched its SHA
+ * perfectly — so a better prompt would have shipped to nobody, because every document already had a
+ * cached answer and nothing would ever ask again.
+ *
+ * Bumping this number is how a change to the instructions reaches documents that were already laid
+ * out. It rides in the `warnings` json, so it costs no column and no migration, and a row written by
+ * an older version reads as a miss and is replaced the next time anything walks the repository.
+ */
+const RENDER_VERSION = 3;
+
+/**
  * Documents longer than this are laid out from their first part only.
  *
  * A handful of call-note archives run to tens of thousands of words, and asking for the whole thing
@@ -100,6 +115,7 @@ export async function cachedRender(path: string, sha: string): Promise<BrainRend
   const row = rows[0];
   if (!row || String(row.source_sha ?? "") !== sha || !String(row.markdown ?? "")) return null;
   const warnings = (row.warnings && typeof row.warnings === "object" ? row.warnings : {}) as Row;
+  if (Number(warnings.version ?? 0) !== RENDER_VERSION) return null;
   return {
     path,
     markdown: String(row.markdown),
@@ -135,11 +151,40 @@ async function keepRender(path: string, sha: string, render: BrainRender): Promi
       source_sha: sha,
       markdown: render.markdown,
       model: render.model,
-      warnings: render.warnings,
+      warnings: { ...render.warnings, version: RENDER_VERSION },
       rendered_at: new Date().toISOString(),
     }),
   }).catch(() => null);
   return response?.ok === true;
+}
+
+/**
+ * Every layout already in the store that is still current: path to the SHA it was made from.
+ *
+ * The point of this is that deciding what still needs doing costs one request instead of one per
+ * document. The repository listing already carries every file's blob SHA, so a walk over the whole
+ * brain can work out its own backlog from two round trips and never fetch a file it is not about to
+ * lay out. Rows written by an older prompt version are left out, which is what makes them get redone.
+ *
+ * An unreachable store returns an empty map — the caller then thinks everything needs rendering, which
+ * is wrong but harmless: `renderBrainDoc` checks again per document and will not double-spend.
+ */
+export async function storedRenderShas(): Promise<Map<string, string>> {
+  const held = store();
+  const head = headers();
+  const found = new Map<string, string>();
+  if (!held || !head) return found;
+  const query = `${TABLE}?select=path,source_sha,warnings&limit=5000`;
+  const response = await fetch(`${held.url}/rest/v1/${query}`, { headers: head, cache: "no-store" }).catch(() => null);
+  if (!response?.ok) return found;
+  for (const row of ((await response.json().catch(() => [])) as Row[]) ?? []) {
+    const warnings = (row.warnings && typeof row.warnings === "object" ? row.warnings : {}) as Row;
+    if (Number(warnings.version ?? 0) !== RENDER_VERSION) continue;
+    const path = String(row.path ?? "");
+    const sha = String(row.source_sha ?? "");
+    if (path && sha) found.set(path, sha);
+  }
+  return found;
 }
 
 /** Drops the kept layout for a path, so the next reader gets a fresh one. */
