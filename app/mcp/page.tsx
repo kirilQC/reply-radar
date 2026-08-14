@@ -49,13 +49,14 @@ type Message = {
 /**
  * Openers, chosen to teach the surface rather than to demo it.
  *
- * Each one exercises a different part — live HeyReach status, our stored replies, a cross-client
- * total, a per-person lookup — because the question people cannot guess is what this thing can be
- * asked, and four examples answer that faster than any description.
+ * Each one exercises a different part — live HeyReach status, our stored replies, a search of the
+ * database by title, a cross-client total, a comparison — because the question people cannot guess is
+ * what this thing can be asked, and five examples answer that faster than any description.
  */
 const PROMPTS = [
   "What campaigns are live for Steadywell right now, and when do they run out of leads?",
   "Who replied and hasn't been followed up with yet? Oldest first.",
+  "List every CISO in our database and say which ones have replied.",
   "How many replies have we had this month across all clients?",
   "Compare every client's reply performance and tell me who needs attention.",
 ];
@@ -126,9 +127,27 @@ export default function McpPage() {
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  /**
+   * Scrolling, split in two because the two cases want opposite behaviour.
+   *
+   * A finished turn is a jump the reader did not ask for, so it is animated. The streaming tail is
+   * not a jump at all — it is a line growing — and animating it was the single worst part of watching
+   * an answer arrive: every token restarted a smooth scroll that had not finished the last one, so
+   * the page hunted instead of following. Instant, once per painted frame, is what reads as smooth.
+   *
+   * Neither one drags the page back if the reader has scrolled up to re-read something.
+   */
+  const nearBottom = () =>
+    window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 240;
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, live]);
+  }, [messages]);
+
+  useEffect(() => {
+    if (!thinking || !nearBottom()) return;
+    endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [live, thinking]);
 
   useEffect(() => {
     if (!thinking) return;
@@ -162,7 +181,27 @@ export default function McpPage() {
     /** Consecutive thinking deltas belong to one thought; a tool call ends it. */
     let openThought: { kind: "thinking"; text: string } | null = null;
 
-    const paint = () => setLive({ entries: [...entries], answer });
+    /**
+     * Redraw at most once a frame.
+     *
+     * Deltas arrive in bursts — several within a millisecond, then a pause — and setting state on
+     * every one meant a commit the screen had no chance to show. Coalescing into the next animation
+     * frame caps the redraws at the refresh rate, which costs nothing in latency because a frame is
+     * the fastest anything can become visible anyway.
+     *
+     * This is the smaller half of the smoothness fix. Parsing a whole answer measures around 80ms
+     * spread across its entire arrival, so the parser was never the problem; the cost was in what
+     * each commit dragged along with it, which is what the memo on `Markdown` and the scrolling
+     * above address.
+     */
+    let frame = 0;
+    const paint = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setLive({ entries: [...entries], answer });
+      });
+    };
 
     try {
       const response = await fetch("/api/mcp", {
@@ -267,6 +306,9 @@ export default function McpPage() {
         },
       ]);
     } finally {
+      // Cancelled before the live turn is cleared, or a frame queued by the last delta would land
+      // afterwards and put the half-written answer back underneath the finished one.
+      if (frame) cancelAnimationFrame(frame);
       setThinking(false);
       setLive({ entries: [], answer: "" });
       inputRef.current?.focus();
@@ -331,8 +373,9 @@ export default function McpPage() {
             <div className="mcp-intro">
               <h1>Ask anything</h1>
               <p>
-                Live HeyReach campaigns, senders, sequences and lists, plus every reply, score and
-                follow-up Reply Radar has stored. Read-only — nothing here can send, pause or change
+                Live HeyReach campaigns, senders, sequences and lists for every client, plus everyone
+                in Reply Radar&apos;s own database — searchable by job title or company — with their
+                replies, scores and follow-ups. Read-only: nothing here can send, pause or change
                 anything. Bigger questions take longer on purpose; you can watch the lookups as they run.
               </p>
               <div className="mcp-prompts">

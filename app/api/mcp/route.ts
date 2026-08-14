@@ -73,7 +73,15 @@ const MODEL = "claude-sonnet-4-6";
  * stops and says why.
  */
 const MAX_TURNS = 30;
-const MAX_TOKENS = 8_192;
+/**
+ * The ceiling on one turn's output, thinking included.
+ *
+ * Raised from 8,192, which was quietly too small for the answers this feature is for. "List every
+ * CISO in the database" is a hundred-row table; with the thinking budget taken off the top, that was
+ * close enough to the limit to be cut off — and a truncated answer does not announce itself, it just
+ * stops, mid-row or mid-chart-spec, looking like a rendering bug rather than a budget.
+ */
+const MAX_TOKENS = 16_384;
 /**
  * Extended thinking, on for two reasons. It measurably improves multi-step tool choice, which is the
  * entire job here. And it is the only honest source for the running commentary the UI shows — the
@@ -128,6 +136,7 @@ Rules that change the answer:
 - replyRatePercent is HeyReach's own reply rate. You do not know its denominator, so never present it as a share of conversations started, messages sent or leads contacted, and never put it in a table column next to a count that implies one. If you want a rate against a specific denominator, compute it from the raw counts and say which two numbers you divided.
 - Weeks start on Monday. This is read as a working-week report.
 - Reply Radar excludes people who messaged the client first — those are not outbound and are not in the database. If someone cannot be found, that may be why.
+- Job titles are free text, exactly as each person wrote them on LinkedIn. There is no canonical list, so a search for one spelling finds one spelling. When asked about a kind of person, use search_leads and pass every form of the title at once — the acronym, the words behind it, and the shorter fragment that catches the variants you did not think of. An empty result from a single spelling is not evidence that nobody matches.
 
 How thoroughly to work:
 - Thoroughness matters more than speed here. Taking two minutes and thirty tool calls to be right is correct; answering in three seconds off one lookup is not. Nobody is waiting on a stopwatch.
@@ -147,13 +156,19 @@ How to answer:
 - You have read access only. If asked to send, pause, tag or change anything, say that this is read-only and describe what you would do instead.
 
 How to lay an answer out:
-You are not writing a chat message, you are producing a small report that someone will read, export and forward. Build it in this order.
+The layout serves the answer and never replaces it. Someone will read this, export it and forward it, so it should be presented like a small report — but a beautifully arranged answer to a question nobody asked is a failure, and a plain list that answers the question exactly is a success.
+
+Above all: if the question asks for a list, the list is the answer. "Which CISOs are in our database", "who is awaiting a reply", "what campaigns are live" want the rows themselves — every one you found, in a table, with the columns someone would actually use. Never compress rows into a summary, never replace them with a chart, and never show the top few of a list that was asked for in full. If you had to cap the list, say how many there are in total and how many you have shown.
+
+When there is something to lay out, this order:
 
 1. Lead with the answer in one or two sentences. The person asked a question; the first line answers it.
-2. Put the finding worth remembering in a blockquote. A line starting with "> " renders as a highlighted callout. Use one per answer, never more.
+2. Put the finding worth remembering in a blockquote. A line starting with "> " renders as a highlighted callout. At most one per answer, and none is fine.
 3. Show the headline figures as a stats block, when there are two to six of them worth pulling out.
 4. Show the comparison as a chart when the shape of the numbers is the point, and as a table when the exact values are.
 5. Close with the caveat — small samples, missing data, a denominator you could not verify. Never leave this out to make an answer look cleaner.
+
+Use only the steps that apply. Most answers are not all five.
 
 Two fenced blocks render as visuals. The body of each is JSON.
 
@@ -173,6 +188,7 @@ A chart:
 - "value" must be a number. "unit" is "%" for rates and omitted for counts. "note" carries the volume behind a rate and you should almost always give it.
 
 Rules for visuals, which matter more than having one:
+- A visual never displaces data. If adding a chart would mean shortening a table or a list, drop the chart and keep the rows.
 - A chart restates numbers that are already in your answer. Never put a figure in a chart that the prose or table does not also support, and never round differently between the two.
 - Chart what was compared, not everything you retrieved. Twelve bars is the maximum shown; beyond that the rest are counted and reported as hidden, so cut the list yourself to the ones that answer the question.
 - Do not chart a single value. One bar is a number, and a number belongs in a sentence or a stats block.
@@ -297,7 +313,7 @@ export async function POST(request: Request) {
 
       try {
         for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-          const { content, usage } = await streamTurn(apiKey, messages, send);
+          const { content, usage, stopReason } = await streamTurn(apiKey, messages, send);
           inputTokens += usage.input;
           outputTokens += usage.output;
 
@@ -309,9 +325,16 @@ export async function POST(request: Request) {
             .trim();
 
           if (!calls.length) {
+            // A turn that ended because it ran out of room stops mid-sentence and looks finished.
+            // Saying so is the difference between a partial answer and a wrong one — the reader
+            // otherwise has no way to know the table they are about to forward is missing its tail.
+            const cut =
+              stopReason === "max_tokens"
+                ? "\n\n---\n\n*This answer was cut off at the length limit. Ask for a narrower slice — one client, or a shorter period — to see the rest.*"
+                : "";
             send({
               type: "done",
-              reply: said || "I could not find an answer to that.",
+              reply: said ? `${said}${cut}` : "I could not find an answer to that.",
               steps,
               model: MODEL,
               usage: { inputTokens, outputTokens },

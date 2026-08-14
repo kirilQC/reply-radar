@@ -230,8 +230,34 @@ lower that — never `MAX_TURNS`, which is what makes the answers correct.
   not reconcile against replies ÷ messages sent. They are exposed as HeyReach's own figures with an
   instruction never to place them beside a count that implies a denominator; to rank by a rate, the
   model divides two raw counts and names them.
-**The answer is a small report, not a chat message.** The model is instructed to lead with the answer,
-put the finding in a callout, pull out headline figures, show one visual, and close with the caveat.
+**People are searchable by job title, not just by name.** `find_person` matches one named individual;
+`search_leads` answers "every CISO in our database", "who do we have at Stripe". Added after "list the
+CISOs in our database" gave a good answer one day and a bad one the next — there was no tool for it, so
+the model was brute-forcing `recent_replies` and eyeballing roles, which worked or did not depending on
+how many rows it happened to pull. An intermittently right answer is worse than a missing tool, because
+nothing signals which one you got.
+
+- **Titles are free text**, exactly as each person typed them on LinkedIn, so `role` takes a *list* of
+  spellings and matches any of them. The model is told to always pass the acronym and the words behind
+  it. A single-spelling search returning nothing is not evidence that nobody matches.
+- **The filter is built in `shared/postgrest-filter.mjs`, quoted and stripped.** PostgREST's grammar is
+  commas, brackets, dots and asterisks, and job titles contain all four — "VP, Security (EMEA)",
+  "V.P. of Engineering". Unquoted, those do not error; they parse as a *different valid filter* and
+  return a confidently wrong list. Tested character-for-character.
+- **The exact match count comes back beside the rows**, so a capped list is never presented as the
+  whole population.
+
+**The answer is a small report — but the report never displaces the answer.** The model is instructed
+to lead with the answer, put the finding in a callout, pull out headline figures, show one visual, and
+close with the caveat. The first version of that instruction was too strong and a question asking for a
+list got a summary and a chart instead of the rows. It now says explicitly that when a list is asked
+for the list *is* the answer, that a visual sits beside rows and never instead of them, and that most
+answers use only some of the five steps.
+
+- **`MAX_TOKENS` is 16,384 and truncation is announced.** At 8,192 a hundred-row table ran out of room
+  and simply stopped, mid-row, which is indistinguishable from a rendering bug. The route reads
+  `stop_reason` and appends a line saying the answer was cut off.
+
 It draws by emitting a fenced ` ```chart ` or ` ```stats ` block whose body is JSON — not by calling a
 tool, because a tool call happens before the prose is written and the chart would land wherever the
 loop put it rather than where it belongs in the argument.
@@ -251,6 +277,15 @@ loop put it rather than where it belongs in the argument.
   instead, because mid-stream every spec is temporarily malformed.
 - **Print forces the bar colours through** (`print-color-adjust: exact`) and darkens the muted greys.
   Browsers drop backgrounds when printing, which would otherwise print every chart as empty tracks.
+**Streaming text has to be cheap to redraw, and the cost is not the parser.** Parsing a whole answer
+measures around 80ms spread across its entire arrival. What made typing feel laggy was what each
+redraw dragged with it, so three things changed: the answer repaints once per animation frame rather
+than once per delta; `Markdown` is memoised, because the page re-renders on every frame and that was
+re-parsing every *earlier* answer in the conversation too, making a long transcript type more slowly
+than a fresh one; and the follow-the-tail scroll is instant rather than smooth, since restarting a
+smooth scroll fifty times a second makes the page hunt instead of follow. Neither scroll drags the
+page back down if the reader has scrolled up.
+
 - **Answers are rendered markdown, and exportable.** `shared/markdown-blocks.mjs` parses to blocks so
   tables and bold render rather than showing their pipes and asterisks. CSV is lifted out of the
   answer's own tables rather than asking the model for a second machine-readable copy, which would

@@ -38,6 +38,7 @@
 import { campaignStatusFor } from "./heyreach-campaigns";
 import { countRows } from "./rest-count";
 import { isOurCampaign } from "../../shared/campaign-code.mjs";
+import { containsAny } from "../../shared/postgrest-filter.mjs";
 import * as heyreach from "./heyreach-api";
 
 type Row = Record<string, unknown>;
@@ -210,6 +211,7 @@ async function describeConversations(conversationRows: Row[]): Promise<Row[]> {
 /** `last_message_direction=eq.inbound` — the lead spoke last, so the ball is with us. */
 const AWAITING_US = "last_message_direction=eq.inbound";
 
+
 async function conversationsFor(
   client: Client | null,
   { order, limit, since, awaitingUs }: { order: string; limit: number; since?: string; awaitingUs?: boolean },
@@ -274,11 +276,39 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "find_person",
     description:
-      "Find someone by name or LinkedIn profile URL across every client. Returns which client they belong to, their role and company, and each conversation with them including score and tier. Use this when a question names a person.",
+      "Find ONE named individual by name or LinkedIn profile URL across every client, with their full conversation history including every score and tier. Use this when a question names a person. For a question about a kind of person rather than a named one — every CISO, everyone at Stripe, all the VPs of Engineering — use search_leads instead; this tool cannot match a job title.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "A person's name, or their LinkedIn profile URL." } },
       required: ["query"],
+    },
+  },
+  {
+    name: "search_leads",
+    description:
+      "Search everyone in Reply Radar's own database by job title, company or name. This is the tool for \"list the CISOs in our database\", \"who do we have at Stripe\", \"every VP of Engineering we have replied to\" — any question about a category of person rather than a named one. Matching is case-insensitive substring, so \"security\" finds \"Head of Security\". Give role as a LIST of every spelling of the title, because titles are free text as the person wrote them on LinkedIn: for CISOs pass [\"CISO\", \"Chief Information Security Officer\", \"Chief Security Officer\"], and anyone matching any of them is returned. Searches people, never message text. Returns the exact total match count as well as the rows, so you can always say how many there are even when the list is capped.",
+    input_schema: {
+      type: "object",
+      properties: {
+        role: {
+          type: "array",
+          items: { type: "string" },
+          description: "Job-title fragments. Anyone whose title contains ANY of them matches. Always pass every spelling and abbreviation of the title you mean, including the acronym and the words behind it.",
+        },
+        company: {
+          type: "array",
+          items: { type: "string" },
+          description: "Company-name fragments. Anyone at a company containing ANY of them matches.",
+        },
+        name: {
+          type: "array",
+          items: { type: "string" },
+          description: "Name fragments. Anyone whose name contains ANY of them matches.",
+        },
+        ...CLIENT_ARG,
+        repliedOnly: { type: "boolean", description: "Only people who have actually replied to us. Off by default, which includes everyone in the database whether or not they ever answered." },
+        limit: { type: "integer", description: `How many rows, up to ${MAX_ROWS}. Default 100. The total count is returned regardless of this.` },
+      },
     },
   },
   {
@@ -471,6 +501,88 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
           client: clientById.get(text(row.workspace_id)) ?? "",
           conversations: byLead.get(text(row.id)) ?? [],
         })),
+      };
+    }
+
+    case "search_leads": {
+      const conditions = [
+        containsAny("role", input.role),
+        containsAny("company", input.company),
+        containsAny("name", input.name),
+      ].filter(Boolean);
+      if (!conditions.length) throw new Error("Give at least one of role, company or name to search for.");
+      const client = text(input.client) ? await resolveClient(input.client) : null;
+      const filters = [
+        `and=(${conditions.join(",")})`,
+        client ? `workspace_id=eq.${encodeURIComponent(client.id)}` : "",
+      ]
+        .filter(Boolean)
+        .join("&");
+
+      const limit = rowLimit(input.limit, 100);
+      const { url, key } = supabase();
+      // The count is asked for separately and without the limit, so an answer can say "312 people
+      // match, here are the first 300" instead of presenting a capped list as the whole population.
+      const [leadRows, total] = await Promise.all([
+        db(`rr_leads?select=id,name,role,company,linkedin_profile_url,workspace_id&${filters}&order=created_at.desc&limit=${limit}`).then(rows),
+        countRows(url, key, `rr_leads?select=id&${filters}`),
+      ]);
+      if (!leadRows.length) {
+        return {
+          matched: 0,
+          note: "Nobody in the database matches that. Titles are free text as people wrote them on LinkedIn, so try more spellings — the acronym and the words behind it — or a shorter fragment before concluding there are none.",
+        };
+      }
+
+      const all = await clients();
+      const clientById = new Map(all.map((entry) => [entry.id, entry.name]));
+      const leadIds = leadRows.map((row) => text(row.id)).filter(Boolean);
+      // Just the conversation rows, not `describeConversations` — that pulls every message body for
+      // every thread, which for three hundred people is the whole inbox. A list of people needs to
+      // know who replied and how they scored, not what they said; read_conversation is for that.
+      const conversationRows = await dbByIds(
+        (batch) =>
+          `rr_conversations?select=id,lead_id,last_message_at,last_message_direction,score,tier&lead_id=in.(${batch.join(",")})&order=last_message_at.desc`,
+        leadIds,
+      );
+      const newest = new Map<string, Row>();
+      for (const row of conversationRows) {
+        const key = text(row.lead_id);
+        if (!newest.has(key)) newest.set(key, row);
+      }
+
+      const people = leadRows
+        .map((row) => {
+          const conversation = newest.get(text(row.id));
+          return {
+            name: text(row.name),
+            role: text(row.role),
+            company: text(row.company),
+            profileUrl: text(row.linkedin_profile_url),
+            client: clientById.get(text(row.workspace_id)) ?? "",
+            replied: Boolean(conversation),
+            conversationId: conversation ? text(conversation.id) : null,
+            lastMessageAt: conversation ? text(conversation.last_message_at) : null,
+            awaitingUs: conversation ? text(conversation.last_message_direction) === "inbound" : false,
+            score: conversation?.score ?? null,
+            tier: conversation ? text(conversation.tier) || null : null,
+          };
+        })
+        .filter((person) => (input.repliedOnly === true ? person.replied : true));
+
+      // PostgREST can decline to give a count. Reporting `matched` as null then is deliberate: the
+      // model must not be able to read a missing total as "no more than what you see".
+      const capped = total === null ? leadRows.length === limit : total > leadRows.length;
+      return {
+        matched: total,
+        returned: people.length,
+        client: client?.name ?? "all clients",
+        ...(capped
+          ? {
+              note: `${total === null ? "More" : `${total} people match, and more`} than the ${leadRows.length} listed here; these are the most recently added. Raise limit for the rest.`,
+            }
+          : {}),
+        people,
       };
     }
 

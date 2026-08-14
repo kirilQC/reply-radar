@@ -9,6 +9,9 @@
  * and losing the conversation to navigate to one would be a poor trade.
  */
 
+"use client";
+
+import { memo, useMemo } from "react";
 import { parseBlocks as parse } from "../../shared/markdown-blocks.mjs";
 
 export type Span =
@@ -236,9 +239,17 @@ function Rendered({ block, live }: { block: Block; live: boolean }) {
   return <hr />;
 }
 
-/** `live` means the turn is still streaming, which only changes how an unfinished block is shown. */
-export default function Markdown({ children, live = false }: { children: string; live?: boolean }) {
-  const blocks = parseBlocks(children);
+/**
+ * `live` means the turn is still streaming, which only changes how an unfinished block is shown.
+ *
+ * Memoised, and the parse memoised inside it, for one specific reason: while an answer streams, the
+ * page holding this re-renders on every painted frame, and that re-render reaches every *earlier*
+ * answer in the conversation too. Without this, asking a tenth question re-parsed the previous nine
+ * answers sixty times a second for as long as the tenth took to arrive, which is why a long
+ * conversation typed more slowly than a fresh one — the lag grew with the transcript, not the answer.
+ */
+const Markdown = memo(function Markdown({ children, live = false }: { children: string; live?: boolean }) {
+  const blocks = useMemo(() => parseBlocks(children), [children]);
   return (
     <div className="md">
       {blocks.map((block, index) => (
@@ -246,4 +257,6 @@ export default function Markdown({ children, live = false }: { children: string;
       ))}
     </div>
   );
-}
+});
+
+export default Markdown;
