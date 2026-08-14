@@ -2926,36 +2926,28 @@ a.tag-outline-link:hover {
   color: var(--text);
 }
 
-/* Search sits above everything on every screen rather than in the top bar, because it is the
-   primary way into this repo for anyone who does not already know the folder layout — which is
-   the entire audience. A 250px box in a corner would say the opposite. */
-.brain-search {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 26px;
-}
+/* Search lives in the top bar, matching the height and weight of the app's own search everywhere
+   else, so it is reachable from a document as well as from the index. Keeping it out of the page
+   body is what lets the index be nothing but clients — which is the whole point of that screen. */
 .brain-search-input {
-  flex: 1;
-  height: 42px;
-  padding: 0 15px;
+  width: 230px;
+  height: 31px;
+  padding: 0 10px;
   color: var(--text);
-  background: var(--panel);
+  background: #12151c;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 6px;
   outline: 0;
-  font-size: 13px;
+  font-size: 11px;
 }
 .brain-search-input:focus {
   border-color: var(--accent);
 }
 .brain-search-input::placeholder {
-  color: var(--muted-2);
+  color: #656c7b;
 }
-.brain-search-state {
-  flex: none;
-  color: var(--muted-2);
-  font-size: 11px;
+.light-mode .brain-search-input {
+  background: #fff;
 }
 
 .brain-quiet {
@@ -2987,44 +2979,52 @@ a.tag-outline-link:hover {
   font-size: 11px;
 }
 
-.brain-summary {
+/* A client's mark: their real logo if one is committed at clients/<name>/logo.png, and otherwise
+   their initials on a colour derived from the folder name. The fallback is deterministic rather
+   than random so a client is the same colour on every screen and every machine — which is what
+   makes it recognisable at a glance, and the only thing a monogram has going for it. */
+.brain-mark {
+  flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 11px;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: contain;
+  /* White behind a logo, always. Client logos are drawn for white backgrounds and a good half of
+     them are dark ink on transparency, which would vanish into this app's panel. */
+  background: #fff;
+  overflow: hidden;
 }
-.brain-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 15px 16px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 9px;
+span.brain-mark {
+  color: #fff;
+  background: hsl(var(--mark-hue, 250) 42% 46%);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
-.brain-stat-value {
-  font-size: 26px;
-  font-weight: 650;
-  letter-spacing: -0.045em;
-  font-variant-numeric: tabular-nums;
+.brain-mark.is-lg {
+  width: 62px;
+  height: 62px;
+  border-radius: 13px;
 }
-.brain-stat-label {
-  font-size: 11px;
-}
-.brain-stat-note {
-  color: var(--muted-2);
-  font-size: 10px;
+span.brain-mark.is-lg {
+  font-size: 20px;
 }
 
+/* The index carries names and faces, nothing else. Coverage and counts moved to the client's own
+   page, where there is room to say what they mean; a bare "4 of 6" on a tile is a number with no
+   question attached to it, and eighteen of them at once is a wall of noise. */
 .brain-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
   gap: 11px;
 }
 .brain-card {
   display: flex;
-  flex-direction: column;
-  gap: 9px;
-  padding: 15px 16px 14px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 15px;
   text-align: left;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -3033,20 +3033,12 @@ a.tag-outline-link:hover {
 .brain-card:hover {
   border-color: var(--accent);
 }
-.brain-card-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
 .brain-card-name {
-  font-size: 14px;
+  min-width: 0;
+  font-size: 13.5px;
   font-weight: 640;
   letter-spacing: -0.02em;
-}
-.brain-card-count {
-  color: var(--muted-2);
-  font-size: 10px;
+  line-height: 1.3;
 }
 /* The coverage meter. Colour carries the same meaning as the number beside it rather than a
    different one: green only at complete, warm only when more than half is missing, and the
@@ -3070,33 +3062,100 @@ a.tag-outline-link:hover {
 .brain-meter-fill.is-thin {
   background: var(--amber);
 }
-.brain-card-cover {
+/* ── A client's home page ─────────────────────────────────────────────────────────────────── */
+.brain-home-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 4px;
+}
+.brain-home-title {
+  min-width: 0;
+  flex: 1;
+  max-width: 420px;
+}
+.brain-home-title h1 {
+  margin: 0 0 5px;
+  font-size: 25px;
+  font-weight: 670;
+  letter-spacing: -0.045em;
+  line-height: 1.1;
+}
+.brain-home-facts {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+/* The gaps, named in a sentence. Somebody who came here to write the missing one should be able
+   to read which it is, not audit seven cards to work it out. Amber and not red: an unwritten ICP
+   is work outstanding, not a fault, and the page should not shout at whoever opened it. */
+.brain-home-missing {
+  margin: 18px 0 0;
+  color: var(--amber);
+  background: #241f16;
+  border: 1px solid #3d3220;
+  border-radius: 8px;
+  padding: 10px 13px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.light-mode .brain-home-missing {
+  color: #8a6516;
+  background: #fdf7e9;
+  border-color: #eeddb8;
+}
+
+.brain-docgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
+  gap: 11px;
+  margin-top: 14px;
+}
+/* A missing document is drawn, not omitted — dashed and flat rather than left out. The whole
+   reason for a fixed skeleton is that an absence is the useful signal, and an absence you cannot
+   see is not a signal at all. */
+.brain-doccard {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 13px 15px;
+  min-height: 96px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.brain-doccard:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.brain-doccard.is-missing {
+  background: transparent;
+  border-style: dashed;
+  cursor: default;
+}
+.brain-doccard-label {
+  font-size: 12.5px;
+  font-weight: 630;
+}
+.brain-doccard.is-missing .brain-doccard-label {
+  color: var(--muted);
+}
+.brain-doccard-blurb {
+  flex: 1;
   color: var(--muted);
   font-size: 10.5px;
+  line-height: 1.5;
 }
-.brain-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-/* A missing document is drawn, not omitted. It is struck through and dimmed rather than left out,
-   because the whole reason for a fixed skeleton is that an absence is the useful signal — and an
-   absence you cannot see is not a signal at all. */
-.brain-chip {
+.brain-doccard.is-missing .brain-doccard-blurb {
   color: var(--muted-2);
-  background: transparent;
-  border: 1px dashed var(--border);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 9px;
-  text-decoration: line-through;
-  text-decoration-color: var(--border);
 }
-.brain-chip.is-present {
-  color: var(--muted);
-  background: var(--panel-2);
-  border: 1px solid transparent;
-  text-decoration: none;
+.brain-doccard-age {
+  color: var(--muted-2);
+  font-size: 10px;
+}
+.brain-doccard-age.is-stale {
+  color: var(--amber);
 }
 
 .brain-areas {
@@ -3548,8 +3607,11 @@ a.tag-outline-link:hover {
   .brain-page {
     padding: 20px 18px 60px;
   }
-  .brain-summary {
-    grid-template-columns: 1fr;
+  .brain-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .brain-search-input {
+    width: 130px;
   }
   .brain-split {
     grid-template-columns: minmax(0, 1fr);

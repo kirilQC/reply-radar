@@ -36,14 +36,14 @@ import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import Markdown from "../components/Markdown";
-import { agoLabel, fileKind, staleness } from "../../shared/brain-structure.mjs";
+import { agoLabel, clientHue, clientInitials, fileKind, staleness } from "../../shared/brain-structure.mjs";
 
 type Coverage = { have: number; total: number; fraction: number };
-type IndexClient = { client: string; label: string; docs: { key: string; label: string; path: string; present: boolean }[]; files: number; coverage: Coverage };
+type IndexClient = { client: string; label: string; logo: string };
 type Area = { key: string; label: string; prefix: string; blurb: string; files: number };
 type Doc = { key: string; label: string; blurb: string; path: string; present: boolean; updated: string };
 type Group = { folder: string; files: { path: string; name: string; title: string }[] };
-type ClientDetail = { client: string; label: string; docs: Doc[]; groups: Group[]; coverage: Coverage };
+type ClientDetail = { client: string; label: string; logo: string; files: number; docs: Doc[]; groups: Group[]; coverage: Coverage };
 type Campaign = { code: string; id: string; name: string; conversationsStarted: number; replies: number; replyRate: number };
 type FileDoc = { path: string; kind: string; title: string; text: string; sha: string; url: string; codes: string[]; updated: string };
 type Hit = { path: string; title: string; snippet: string; client: string; clientLabel: string; url: string };
@@ -52,6 +52,8 @@ type Skill = { name: string; path: string; command: string; blurb: string; clien
 const ago = agoLabel as (iso: string, now?: number) => string;
 const stale = staleness as (iso: string, now?: number) => { days: number | null; stale: boolean };
 const kindOf = fileKind as (path: string) => string;
+const initials = clientInitials as (label: string) => string;
+const hue = clientHue as (name: string) => number;
 
 const json = async (url: string) => {
   const response = await fetch(url, { cache: "no-store" });
@@ -61,13 +63,16 @@ const json = async (url: string) => {
 };
 
 export default function QcBrainPage() {
-  const [view, setView] = useState<"index" | "client" | "area" | "skills" | "solo">("index");
+  // "client" is a client's home page and "doc" is reading one of their files. They were one screen
+  // and are now two, because a home page that is really a document viewer with a tab strip on top
+  // gives a client no place to put anything that is not a document — their campaign figures, what is
+  // missing, how much there is.
+  const [view, setView] = useState<"index" | "client" | "doc" | "area" | "skills" | "solo">("index");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [clients, setClients] = useState<IndexClient[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
-  const [total, setTotal] = useState(0);
   const [repoUrl, setRepoUrl] = useState("https://github.com/jsbiv18/qc-growth-os");
 
   const [detail, setDetail] = useState<ClientDetail | null>(null);
@@ -99,7 +104,6 @@ export default function QcBrainPage() {
       .then((body) => {
         setClients(body.clients ?? []);
         setAreas(body.areas ?? []);
-        setTotal(body.total ?? 0);
         if (body.repoUrl) setRepoUrl(body.repoUrl);
       })
       .catch((problem: Error) => setError(problem.message))
@@ -113,13 +117,10 @@ export default function QcBrainPage() {
     setCampaigns([]);
     setOpenPath("");
     setError("");
+    // No document is opened. The client's own page is the destination now, not a staging post on the
+    // way to their brief.
     json(`/api/brain/clients?client=${encodeURIComponent(slug)}`)
-      .then((body) => {
-        setDetail(body.client);
-        // The first document that exists, so the page opens on something rather than on a chooser.
-        const first = (body.client?.docs ?? []).find((entry: Doc) => entry.present) as Doc | undefined;
-        if (first) setOpenPath(first.path);
-      })
+      .then((body) => setDetail(body.client))
       .catch((problem: Error) => setError(problem.message));
     // Campaign figures come from HeyReach and take seconds. Fetched alongside rather than before, so
     // the documents are readable while the numbers are still on their way.
@@ -201,10 +202,21 @@ export default function QcBrainPage() {
       event.preventDefault();
       home();
     };
-    if (view === "client" && detail) return [{ label: "QC Brain", href: "/qc-brain", onClick: back }, { label: detail.label }];
-    if (view === "area" && area) return [{ label: "QC Brain", href: "/qc-brain", onClick: back }, { label: area.label }];
-    if (view === "skills") return [{ label: "QC Brain", href: "/qc-brain", onClick: back }, { label: "Skills" }];
-    if (view === "solo") return [{ label: "QC Brain", href: "/qc-brain", onClick: back }, { label: doc?.title ?? "Document" }];
+    const toClient = (event: React.MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault();
+      setOpenPath("");
+      setView("client");
+    };
+    const root = { label: "QC Brain", href: "/qc-brain", onClick: back };
+    if (view === "client" && detail) return [root, { label: detail.label }];
+    // Three deep, because a document now sits under the client it belongs to rather than under the
+    // repository — and getting back to the client rather than all the way home is the common move.
+    if (view === "doc" && detail) {
+      return [root, { label: detail.label, href: "/qc-brain", onClick: toClient }, { label: doc?.title ?? "Document" }];
+    }
+    if (view === "area" && area) return [root, { label: area.label }];
+    if (view === "skills") return [root, { label: "Skills" }];
+    if (view === "solo") return [root, { label: doc?.title ?? "Document" }];
     return [{ label: "QC Brain" }];
   }, [view, detail, area, doc?.title, home]);
 
@@ -215,6 +227,21 @@ export default function QcBrainPage() {
         <header className="topbar">
           <Crumb trail={trail} />
           <div className="top-actions">
+            {/*
+              In the bar rather than on the page. The index is meant to read as a wall of clients, and
+              a full-width search box above it made the first thing on the screen a thing to type in
+              rather than the thing people came for. It still has to exist somewhere — four hundred
+              documents are not navigable by clicking — so it lives where every other tool's search
+              lives, and stays reachable from every screen instead of only the first one.
+            */}
+            <input
+              className="brain-search-input"
+              type="search"
+              placeholder="Search the brain"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label="Search the QC Brain"
+            />
             <a className="brain-repo-link" href={repoUrl} target="_blank" rel="noreferrer">
               Open in GitHub
             </a>
@@ -223,22 +250,6 @@ export default function QcBrainPage() {
         </header>
 
         <main className="brain-page">
-          <div className="brain-search">
-            <input
-              className="brain-search-input"
-              type="search"
-              placeholder="Search everything — a client, a campaign code, a phrase someone wrote"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              aria-label="Search the QC Brain"
-            />
-            {searchOpen && (
-              <span className="brain-search-state">
-                {searching ? "Searching…" : `${hits.length} result${hits.length === 1 ? "" : "s"}`}
-              </span>
-            )}
-          </div>
-
           {error && <p className="brain-error">{error}</p>}
 
           {/*
@@ -257,17 +268,18 @@ export default function QcBrainPage() {
               }}
             />
           ) : view === "index" ? (
-            <Index
-              loading={loading}
-              clients={clients}
-              areas={areas}
-              total={total}
-              onClient={openClient}
-              onArea={openArea}
-              onSkills={openSkills}
-            />
+            <Index loading={loading} clients={clients} areas={areas} onClient={openClient} onArea={openArea} onSkills={openSkills} />
           ) : view === "client" ? (
-            <ClientView
+            <ClientHome
+              detail={detail}
+              campaigns={campaigns}
+              onOpen={(path) => {
+                setOpenPath(path);
+                setView("doc");
+              }}
+            />
+          ) : view === "doc" ? (
+            <ClientDoc
               detail={detail}
               campaigns={campaigns}
               openPath={openPath}
@@ -291,17 +303,19 @@ export default function QcBrainPage() {
 /* ── The index ───────────────────────────────────────────────────────────────────────────────── */
 
 /**
- * Every client as a card, ordered by how much context is missing.
+ * Every client, as a logo and a name and nothing else.
  *
- * Alphabetical would be the obvious ordering and it would waste the page. This list exists to show
- * where the gaps are, so the gaps go at the top — somebody opening the tab to do a tidy sees the work
- * without scrolling, and somebody looking for a particular client uses the search box anyway.
+ * It carried coverage bars, file counts and a chip per document, and that was a worse page: eighteen
+ * cards each making five claims is a lot to look at when the only thing anyone does here is pick a
+ * client. The completeness figures were not wrong, they were early — they belong on the client's own
+ * page, where "4 of 6 core documents" sits next to the six documents and means something.
+ *
+ * Alphabetical, because that is how you find a name you already have in mind.
  */
 function Index({
   loading,
   clients,
   areas,
-  total,
   onClient,
   onArea,
   onSkills,
@@ -309,57 +323,20 @@ function Index({
   loading: boolean;
   clients: IndexClient[];
   areas: Area[];
-  total: number;
   onClient: (slug: string) => void;
   onArea: (prefix: string) => void;
   onSkills: () => void;
 }) {
-  const ordered = useMemo(
-    () => [...clients].sort((a, b) => a.coverage.fraction - b.coverage.fraction || a.label.localeCompare(b.label)),
-    [clients],
-  );
-
   if (loading) return <p className="brain-quiet">Reading the brain…</p>;
   if (!clients.length) return <p className="brain-quiet">No clients found in the repository.</p>;
 
-  const complete = clients.filter((client) => client.coverage.fraction === 1).length;
-  const average = Math.round((clients.reduce((sum, client) => sum + client.coverage.fraction, 0) / clients.length) * 100);
-
   return (
     <>
-      <div className="brain-summary">
-        <Stat label="Clients" value={String(clients.length)} note={`${complete} fully written up`} />
-        <Stat label="Documents" value={String(total)} note="across the whole repository" />
-        <Stat label="Core context" value={`${average}%`} note="average completeness" />
-      </div>
-
-      <h2 className="brain-heading">Clients</h2>
-      <p className="brain-sub">Least complete first, because the gaps are the reason to look.</p>
       <div className="brain-grid">
-        {ordered.map((client) => (
+        {clients.map((client) => (
           <button key={client.client} className="brain-card" onClick={() => onClient(client.client)}>
-            <span className="brain-card-head">
-              <span className="brain-card-name">{client.label}</span>
-              <span className="brain-card-count">{client.files} files</span>
-            </span>
-            <span className="brain-meter" aria-hidden="true">
-              <span
-                className={`brain-meter-fill${client.coverage.fraction === 1 ? " is-full" : client.coverage.fraction < 0.5 ? " is-thin" : ""}`}
-                style={{ width: `${Math.round(client.coverage.fraction * 100)}%` }}
-              />
-            </span>
-            <span className="brain-card-cover">
-              {client.coverage.have} of {client.coverage.total} core documents
-            </span>
-            <span className="brain-chips">
-              {client.docs
-                .filter((entry) => entry.key !== "dnc")
-                .map((entry) => (
-                  <span key={entry.key} className={`brain-chip${entry.present ? " is-present" : ""}`}>
-                    {entry.label}
-                  </span>
-                ))}
-            </span>
+            <ClientMark label={client.label} logo={client.logo} slug={client.client} />
+            <span className="brain-card-name">{client.label}</span>
           </button>
         ))}
       </div>
@@ -382,19 +359,166 @@ function Index({
   );
 }
 
-function Stat({ label, value, note }: { label: string; value: string; note: string }) {
+/**
+ * A client's logo, or their initials on a colour of their own.
+ *
+ * No client in the repo has a logo file today, so in practice this is the monogram — but the way to
+ * change that is to commit `logo.png` into the client's folder, which is a thing this team does forty
+ * times a day, rather than an upload screen and a second place for client data to live.
+ *
+ * The image is swapped for the monogram if it fails to load, because a broken-image icon in a grid of
+ * eighteen tiles looks like the page is broken rather than like one file is missing.
+ */
+function ClientMark({ label, logo, slug, size }: { label: string; logo: string; slug: string; size?: "lg" }) {
+  const [broken, setBroken] = useState(false);
+  const className = `brain-mark${size === "lg" ? " is-lg" : ""}`;
+  if (logo && !broken) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img className={className} src={logo} alt="" onError={() => setBroken(true)} />;
+  }
   return (
-    <div className="brain-stat">
-      <span className="brain-stat-value">{value}</span>
-      <span className="brain-stat-label">{label}</span>
-      <span className="brain-stat-note">{note}</span>
-    </div>
+    <span className={className} style={{ ["--mark-hue" as string]: String(hue(slug || label)) }} aria-hidden="true">
+      {initials(label)}
+    </span>
   );
 }
 
 /* ── One client ──────────────────────────────────────────────────────────────────────────────── */
 
-function ClientView({
+/**
+ * A client's home page: who they are, what we hold on them, and how their campaigns are doing.
+ *
+ * This is what the index used to try to say in a card. Given a whole page it can say it properly —
+ * every core document as something you can click, with when it last changed, and a plain sentence
+ * where a document has never been written. The campaign figures sit here rather than only inside a
+ * document that happens to mention a code, because "how is this client actually doing" is a question
+ * about the client and not about one file.
+ */
+function ClientHome({
+  detail,
+  campaigns,
+  onOpen,
+}: {
+  detail: ClientDetail | null;
+  campaigns: Campaign[];
+  onOpen: (path: string) => void;
+}) {
+  if (!detail) return <p className="brain-quiet">Opening…</p>;
+
+  const missing = detail.docs.filter((entry) => !entry.present && entry.key !== "dnc");
+  const extras = detail.groups.reduce((sum, group) => sum + group.files.length, 0);
+  const percent = Math.round(detail.coverage.fraction * 100);
+
+  return (
+    <div className="brain-home">
+      <header className="brain-home-head">
+        <ClientMark label={detail.label} logo={detail.logo} slug={detail.client} size="lg" />
+        <div className="brain-home-title">
+          <h1>{detail.label}</h1>
+          <p className="brain-home-facts">
+            {detail.coverage.have} of {detail.coverage.total} core documents · {detail.files} files in the brain
+          </p>
+          <span className="brain-meter" aria-hidden="true">
+            <span
+              className={`brain-meter-fill${percent === 100 ? " is-full" : percent < 50 ? " is-thin" : ""}`}
+              style={{ width: `${percent}%` }}
+            />
+          </span>
+        </div>
+      </header>
+
+      {/* Named in a sentence, not left as an absence to be inferred from a grid. Somebody who came
+          here to write the missing one should not have to audit seven cards to find out which. */}
+      {missing.length > 0 && (
+        <p className="brain-home-missing">
+          Nobody has written {list(missing.map((entry) => entry.label.toLowerCase()))} for {detail.label}.
+        </p>
+      )}
+
+      <h2 className="brain-heading">Core context</h2>
+      <div className="brain-docgrid">
+        {detail.docs.map((entry) => {
+          const age = stale(entry.updated);
+          return (
+            <button
+              key={entry.key}
+              className={`brain-doccard${entry.present ? "" : " is-missing"}`}
+              onClick={() => entry.present && onOpen(entry.path)}
+              disabled={!entry.present}
+            >
+              <span className="brain-doccard-label">{entry.label}</span>
+              <span className="brain-doccard-blurb">{entry.blurb}</span>
+              <span className={`brain-doccard-age${age.stale ? " is-stale" : ""}`}>
+                {entry.present ? (entry.updated ? `Changed ${ago(entry.updated)}` : "In the repo") : "Not written"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <CampaignStrip campaigns={campaigns} heading="Campaigns running for them now" />
+
+      {extras > 0 && (
+        <>
+          <h2 className="brain-heading">Everything else ({extras})</h2>
+          <div className="brain-more">
+            {detail.groups.map((group) => (
+              <div key={group.folder} className="brain-more-group">
+                {group.folder && <h3 className="brain-more-folder">{group.folder}</h3>}
+                <ul className="brain-more-list">
+                  {group.files.map((file) => (
+                    <li key={file.path}>
+                      <button className="brain-more-file" onClick={() => onOpen(file.path)}>
+                        <span className="brain-more-title">{file.title}</span>
+                        <span className="brain-more-kind">{kindOf(file.path)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** "icp, personas and voice" — an English list, because this goes inside a sentence. */
+const list = (words: string[]) =>
+  words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+
+/**
+ * Every campaign QC is running for this client, against the same axis.
+ *
+ * The join, and the reason this tab is in Reply Radar. Shown whole on the client's page and filtered
+ * to the codes a document mentions when reading one, so the same figures answer both "how are they
+ * doing" and "did the thing this note describes work".
+ */
+function CampaignStrip({ campaigns, heading }: { campaigns: Campaign[]; heading: string }) {
+  if (!campaigns.length) return null;
+  return (
+    <div className="brain-campaigns">
+      <h3 className="brain-campaigns-head">{heading}</h3>
+      <ul className="brain-campaign-list">
+        {campaigns.map((campaign) => (
+          <li key={campaign.id} className="brain-campaign">
+            <span className="brain-campaign-name">{campaign.name}</span>
+            <span className="brain-campaign-bar" aria-hidden="true">
+              <span className="brain-campaign-fill" style={{ width: `${Math.min(100, Math.round(campaign.replyRate))}%` }} />
+            </span>
+            <span className="brain-campaign-figures">
+              {campaign.replyRate.toFixed(1)}% replied · {campaign.replies} of {campaign.conversationsStarted} conversations
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Reading one of a client's documents, with the rest of them still one click away. */
+function ClientDoc({
   detail,
   campaigns,
   openPath,
@@ -413,7 +537,6 @@ function ClientView({
   if (!detail) return <p className="brain-quiet">Opening…</p>;
 
   const extras = detail.groups.reduce((sum, group) => sum + group.files.length, 0);
-  const written = detail.docs.some((entry) => entry.present);
 
   return (
     <div className="brain-client">
@@ -473,11 +596,7 @@ function ClientView({
         </div>
       )}
 
-      {written ? (
-        <Reader doc={doc} error={docError} campaigns={campaigns} />
-      ) : (
-        <p className="brain-quiet">Nothing has been written for {detail.label} yet.</p>
-      )}
+      <Reader doc={doc} error={docError} campaigns={campaigns} />
     </div>
   );
 }
@@ -578,24 +697,7 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
         </p>
       )}
 
-      {mentioned.length > 0 && !editing && (
-        <div className="brain-campaigns">
-          <h3 className="brain-campaigns-head">Campaigns this mentions, as they are actually doing</h3>
-          <ul className="brain-campaign-list">
-            {mentioned.map((campaign) => (
-              <li key={campaign.id} className="brain-campaign">
-                <span className="brain-campaign-name">{campaign.name}</span>
-                <span className="brain-campaign-bar" aria-hidden="true">
-                  <span className="brain-campaign-fill" style={{ width: `${Math.min(100, Math.round(campaign.replyRate))}%` }} />
-                </span>
-                <span className="brain-campaign-figures">
-                  {campaign.replyRate.toFixed(1)}% replied · {campaign.replies} of {campaign.conversationsStarted} conversations
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {!editing && <CampaignStrip campaigns={mentioned} heading="Campaigns this mentions, as they are actually doing" />}
 
       {editing ? (
         <div className="brain-editor">

@@ -19,7 +19,13 @@
  */
 import { NextResponse } from "next/server";
 import { BRAIN_URL, brainConfigured, brainLastTouched, brainTree } from "../../../lib/brain";
-import { BRAIN_AREAS, clientSkeleton, clientsIn, coverage, fileTitle, groupByFolder } from "../../../../shared/brain-structure.mjs";
+import { BRAIN_AREAS, clientLabel, clientLogoIn, clientSkeleton, clientsIn, coverage, fileTitle, groupByFolder } from "../../../../shared/brain-structure.mjs";
+
+/** A logo the browser can actually load, or nothing. The repo is private, so it cannot be a raw URL. */
+const logoFor = (client: string, paths: string[]) => {
+  const found = String(clientLogoIn(paths, client));
+  return found ? `/api/brain/logo?path=${encodeURIComponent(found)}` : "";
+};
 
 type Skeleton = {
   client: string;
@@ -82,6 +88,8 @@ export async function GET(request: Request) {
         client: {
           client: skeleton.client,
           label: skeleton.label,
+          logo: logoFor(skeleton.client, paths),
+          files: skeleton.extras.length + skeleton.docs.filter((doc) => doc.present).length,
           docs: skeleton.docs.map((doc) => ({
             key: doc.key,
             label: doc.label,
@@ -99,23 +107,21 @@ export async function GET(request: Request) {
       });
     }
 
-    const clients = clientsIn(paths).map((client: string) => {
-      const skeleton = clientSkeleton(client, paths) as Skeleton;
-      return {
-        client: skeleton.client,
-        label: skeleton.label,
-        docs: skeleton.docs.map((doc) => ({ key: doc.key, label: doc.label, blurb: doc.blurb, path: doc.found, present: doc.present })),
-        files: skeleton.extras.length + skeleton.docs.filter((doc) => doc.present).length,
-        coverage: coverage(skeleton),
-      };
-    });
+    // The index is a wall of names, so it carries names. Coverage and file counts belong on the
+    // client's own page, where there is room to say what they mean — a bare "4 of 6" on a tile is a
+    // number without a question attached to it.
+    const clients = clientsIn(paths).map((client: string) => ({
+      client,
+      label: String(clientLabel(client)),
+      logo: logoFor(client, paths),
+    }));
 
     const areas = BRAIN_AREAS.map((area: { key: string; label: string; prefix: string; blurb: string }) => ({
       ...area,
       files: paths.filter((path) => path.startsWith(area.prefix)).length,
     }));
 
-    return NextResponse.json({ ok: true, repoUrl: BRAIN_URL, clients, areas, total: paths.length });
+    return NextResponse.json({ ok: true, repoUrl: BRAIN_URL, clients, areas });
   } catch (error) {
     return NextResponse.json(
       { ok: false, repoUrl: BRAIN_URL, error: error instanceof Error ? error.message : "The QC Brain could not be read." },

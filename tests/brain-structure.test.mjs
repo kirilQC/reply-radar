@@ -17,7 +17,10 @@ import {
   CLIENT_DOCS,
   agoLabel,
   campaignCodesIn,
+  clientHue,
+  clientInitials,
   clientLabel,
+  clientLogoIn,
   clientOf,
   clientSkeleton,
   clientsIn,
@@ -205,4 +208,44 @@ test("the non-client areas cover the folders the repo actually has", () => {
   for (const path of ["company/positioning.md", "wiki/sales-motion.md", ".claude/commands/willow-weekly.md"]) {
     assert.ok(prefixes.some((prefix) => path.startsWith(prefix)), `${path} belongs to no area`);
   }
+});
+
+/**
+ * The client mark. Most clients have no logo committed, so the fallback is what people will
+ * actually see — and a fallback that changed colour between renders would be worse than no colour
+ * at all, because the whole job of a monogram tile is to be recognisable without being read.
+ */
+test("initials come from the words a person would shorten", () => {
+  assert.equal(clientInitials("Willow"), "WI");
+  assert.equal(clientInitials("Cardinal Trust"), "CT");
+  assert.equal(clientInitials("steady-well"), "SW");
+  assert.equal(clientInitials("open_ocean labs"), "OO");
+  assert.equal(clientInitials(""), "?");
+  assert.equal(clientInitials(undefined), "?");
+});
+
+test("a client's colour is the same every time it is asked for", () => {
+  assert.equal(clientHue("willow"), clientHue("willow"));
+  assert.notEqual(clientHue("willow"), clientHue("webrix"));
+  for (const name of ["willow", "webrix", "cardinal-trust", ""]) {
+    const hue = clientHue(name);
+    assert.ok(Number.isInteger(hue) && hue >= 0 && hue < 360, `${name} gave ${hue}`);
+  }
+});
+
+test("a logo is found only inside the client's own folder", () => {
+  const paths = [
+    "clients/willow/logo.png",
+    "clients/willow/icp.md",
+    "clients/webrix/assets/screenshot.png",
+    "clients/steadywell/LOGO.SVG",
+    "company/logo.png",
+  ];
+  assert.equal(clientLogoIn(paths, "willow"), "clients/willow/logo.png");
+  // Case is a person's typing, not a meaningful difference.
+  assert.equal(clientLogoIn(paths, "steadywell"), "clients/steadywell/LOGO.SVG");
+  // A screenshot buried in an assets folder is not a logo, and neither is the company's own.
+  assert.equal(clientLogoIn(paths, "webrix"), "");
+  assert.equal(clientLogoIn(paths, "nobody"), "");
+  assert.equal(clientLogoIn([], "willow"), "");
 });

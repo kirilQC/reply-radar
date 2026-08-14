@@ -166,6 +166,22 @@ export async function brainFile(path: string): Promise<BrainDoc> {
 }
 
 /**
+ * A file's raw bytes, for the things that are not text.
+ *
+ * The `raw` media type rather than base64 JSON, because an image has no SHA to carry back and
+ * decoding a megabyte of base64 to re-encode it as bytes is work done for nothing.
+ */
+export async function brainRaw(path: string): Promise<ArrayBuffer> {
+  if (!brainConfigured()) throw new Error("The QC Brain is not connected.");
+  const response = await fetch(`${API}/repos/${BRAIN_REPO}/contents/${encodePath(path)}`, {
+    headers: headers({ Accept: "application/vnd.github.raw" }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`GitHub returned ${response.status}.`);
+  return response.arrayBuffer();
+}
+
+/**
  * Several files at once, for search and for anything that reads a whole client.
  *
  * Capped concurrency rather than a bare `Promise.all` over an unbounded list: forty simultaneous

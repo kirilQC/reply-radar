@@ -82,6 +82,57 @@ export function clientLabel(slug) {
     .join(" ");
 }
 
+/**
+ * A client's monogram, for when there is no logo file.
+ *
+ * Two letters from two words, one from one — "Bluevia Health" is BH and "Willow" is W. Initials of a
+ * name people already know are recognisable at a glance in a way that a generic placeholder is not,
+ * and the grid is a wall of eighteen tiles that has to be scannable without reading.
+ */
+export function clientInitials(label) {
+  const words = String(label ?? "")
+    .split(/[\s\-_]+/)
+    .filter(Boolean);
+  if (!words.length) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+/**
+ * A colour for that monogram, derived from the name.
+ *
+ * Derived rather than stored, because a colour nobody chose still has to be the *same* colour every
+ * time — a tile that changes hue between page loads reads as a bug, and asking someone to pick
+ * eighteen colours to look at a repository is not a reasonable trade. The name is hashed to a hue and
+ * the saturation and lightness are fixed, so every tile is a different colour and none of them fight
+ * the page.
+ */
+export function clientHue(name) {
+  const text = String(name ?? "");
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) % 360000;
+  }
+  return hash % 360;
+}
+
+const LOGO_NAMES = /^logo\.(png|jpg|jpeg|svg|webp|gif)$/i;
+
+/**
+ * A real logo, if somebody has put one in the client's folder.
+ *
+ * Nothing in the repo has one today. This exists so that the way to get a real logo onto the page is
+ * to drop `logo.png` into `clients/<name>/` and commit it — which is how this team already works,
+ * and which needs no upload screen, no storage and no second source of truth. Until then the monogram
+ * stands in.
+ */
+export function clientLogoIn(paths, client) {
+  const prefix = `clients/${client}/`;
+  return (
+    (Array.isArray(paths) ? paths : []).find((path) => path.startsWith(prefix) && LOGO_NAMES.test(path.slice(prefix.length))) ?? ""
+  );
+}
+
 /** Every client in the repo, from the paths alone, in alphabetical order. */
 export const clientsIn = (paths) =>
   [...new Set((Array.isArray(paths) ? paths : []).map(clientOf).filter(Boolean))].sort((a, b) =>
