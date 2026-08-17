@@ -13,11 +13,17 @@ const items = [
   ["/inbox", "Inbox", "inbox"],
   ["/database", "Database", "database"],
   ["/profiles", "Profiles", "profiles"],
+  // In the order the work happens: a reply becomes a booked call, a call becomes pipeline, and a won
+  // deal becomes a client to get live. Analytics and reporting sit after all of it because they are
+  // what you read once it has happened.
   ["/meetings", "Meetings", "calendar"],
+  ["/deals", "Deals", "deals"],
+  ["/onboarding", "Onboarding", "onboarding"],
   ["/analytics", "Analytics", "analytics"],
   ["/reports", "Reports", "reports"],
   ["/mcp", "MCP", "mcp"],
   ["/qc-brain", "QC Brain", "brain"],
+  ["/slack", "Slack", "slack"],
   ["/health", "System health", "health"],
   ["/admin", "Configuration", "settings"],
 ] as const;
@@ -37,6 +43,17 @@ const iconPaths: Record<string, string> = {
   // Inbox tab says "messages" rather than "ask this anything". The sparkle is the one glyph everyone
   // already reads as an assistant, and nothing else in the rail is round-and-pointed.
   mcp: "M11 4c0 3.9 3.1 7 7 7-3.9 0-7 3.1-7 7 0-3.9-3.1-7-7-7 3.9 0 7-3.1 7-7z M19 15c0 1.7 1.3 3 3 3-1.7 0-3 1.3-3 3 0-1.7-1.3-3-3-3 1.7 0 3-1.3 3-3z",
+  // A funnel, because a deal is a stage in one. Not a currency symbol: the tab is about where each
+  // conversation has got to, and the amount is one column of that rather than the point of it.
+  deals: "M4 5h16l-6 7v6l-4-2v-4z",
+  // Ascending steps — a sequence to walk a client through. Three 6-unit steps rather than four 4-unit
+  // ones: at the 16px this renders at, 4 units is under 3px and the whole thing collapsed into what
+  // looked like a plain diagonal line. Still distinct from the analytics bars beside it because it is
+  // one connected polyline rather than four separate uprights.
+  onboarding: "M4 20h6v-6h6v-6h4",
+  // A channel hash. Slack's own mark is four rounded bars in a pinwheel, which is theirs and needs
+  // fills this rail does not use; `#` is how everyone writes a Slack channel anyway.
+  slack: "M9 4v16M15 4v16M4 9h16M4 15h16",
 };
 function SidebarIcon({ name }: { name: string }) {
   return (
