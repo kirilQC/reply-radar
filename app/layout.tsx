@@ -8,6 +8,7 @@ import "./dashboard.css";
 import "./inbox-analytics.css";
 import "./reply-radar-overrides.css";
 import "./integrity-refinements.css";
+import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import PreferenceBootstrap from "./components/PreferenceBootstrap";
 
@@ -48,7 +49,13 @@ export default function RootLayout({
         virtue of serving the page. Adding a filter would mean wrapping this in a client component to
         pass a function, which is real complexity for no change in who can see what.
       */}
-      <body><PreferenceBootstrap />{children}<SpeedInsights /></body>
+      {/*
+        Page views, which here are a usage signal rather than a marketing one: with no login, this is
+        the only way to know whether the team actually opened the inbox this week or went back to
+        HeyReach. The `?client=` query on those URLs is the useful part — it says which clients get
+        worked and which get forgotten — and it goes to a dashboard only we can see.
+      */}
+      <body><PreferenceBootstrap />{children}<SpeedInsights /><Analytics /></body>
     </html>
   );
 }
