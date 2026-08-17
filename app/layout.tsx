@@ -1,7 +1,7 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./feature-overrides.css";
 import "./dashboard.css";
@@ -11,6 +11,24 @@ import "./integrity-refinements.css";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import PreferenceBootstrap from "./components/PreferenceBootstrap";
+
+/**
+ * Without this, iOS Safari assumes a 980px-wide desktop page and scales the whole thing down to
+ * fit the phone — which also means every `max-width` breakpoint in the stylesheets measures 980
+ * and never fires. The app had a full off-canvas sidebar and a dozen narrow-screen layouts
+ * written for it that were unreachable purely for want of this tag.
+ *
+ * `maximumScale` and `userScalable` are deliberately left alone. Locking zoom is the usual way to
+ * stop iOS magnifying the page when a text field is focused, but it takes pinch-zoom away from
+ * everyone to do it. The focus jump is caused by fields under 16px, and that is fixed in CSS
+ * where the cause actually is.
+ *
+ * Desktop is unaffected: browsers there already lay out at the real window width.
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
 
 export const metadata: Metadata = {
   title: "Reply Radar — Follow-up intelligence",

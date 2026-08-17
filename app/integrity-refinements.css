@@ -4609,3 +4609,352 @@ span.brain-mark.is-lg {
   color: var(--muted, #8b8b96);
   text-align: right;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+   Phone and small-tablet layout
+   ══════════════════════════════════════════════════════════════════════════════════════════════
+
+   Everything below this line is inside a `max-width` query, so none of it can reach a desktop
+   window. That is deliberate and worth preserving: the desktop layout is the product and this
+   section is only allowed to describe what happens when there is not enough room for it.
+
+   760px is the existing breakpoint the app already uses for the off-canvas sidebar, so the phone
+   layout starts at exactly the width the navigation already changes at rather than introducing a
+   second, competing idea of "narrow".
+   ══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 760px) {
+  /* iOS magnifies the page when a focused field is under 16px and does not zoom back out when the
+     field is blurred, which strands you at 1.3× with the layout hanging off both edges. 13px is
+     inherited from `body` through `button,input,textarea{font:inherit}`, so every field in the app
+     has the problem and every field is fixed here rather than one at a time.
+
+     16px is a floor, not a change of type scale: labels, table cells and headings keep their
+     desktop sizes, so the only thing that grows is text you can type into. */
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+  /* Safari also inflates text in landscape unless told not to, which undoes the sizing above. */
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
+/* ── The phone navigation drawer ──────────────────────────────────────────────────────────────
+   The slide-in itself already exists in globals.css. What was missing was anything to open it, and
+   the two controls below are that. They live outside the <aside> because the aside is translated
+   off the left edge when closed.
+
+   `display:none` above 760px is load-bearing rather than cosmetic: AppSidebar renders these as
+   siblings of the rail inside `.app-shell{display:flex}`, and a visible-but-empty flex item would
+   consume a gap and shift the desktop layout. None means they are not flex items at all. */
+.rr-nav-toggle,
+.rr-nav-scrim,
+.rr-nav-dismiss {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .rr-nav-toggle {
+    display: grid;
+    place-items: center;
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    /* Above the drawer's own z-index of 5 would put it over the open panel, so it sits below and is
+       covered while the drawer is out — the ✕ inside takes over at that point. */
+    z-index: 4;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--panel) 88%, transparent);
+    backdrop-filter: blur(7px);
+    color: var(--text);
+  }
+  .rr-nav-toggle svg {
+    width: 21px;
+    height: 21px;
+  }
+  /* Every page puts its breadcrumb at the very left of the topbar, which is exactly where the
+     button now floats. This is the only reason the topbar needs to know the drawer exists. */
+  /* Configuration is the one page that builds its own header bar instead of reusing `.topbar`, so
+     it needs naming separately — without it the hamburger sat straight on top of the breadcrumb. */
+  .topbar,
+  .admin-topbar {
+    padding-left: 58px !important;
+  }
+  /* "QC Growth" is absolutely centred in the topbar and `white-space:nowrap`, so it does not
+     participate in the layout and cannot be pushed aside — at 25px it simply drew over the
+     breadcrumb on its left and the theme toggle on its right. 390px minus the 58px the hamburger
+     now takes and the ~40px control on the right leaves about 292px of centre; at 17px the words
+     measure ~95px and span x≈147–242, clear of a crumb that ends near 123px. */
+  .dashboard-brand {
+    font-size: 17px !important;
+  }
+
+  .rr-nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 4;
+    border: 0;
+    background: #000a;
+    /* Kept in the tree but inert when closed, so the fade has something to animate from and a
+       stray tap cannot land on an invisible full-screen button. */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .rr-nav-scrim-shown {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .rr-nav-dismiss {
+    display: block;
+    margin-left: auto;
+    padding: 4px 6px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 19px;
+    line-height: 1;
+  }
+  /* Collapsing a drawer to a 72px icon strip is a desktop idea that means nothing here — the phone
+     drawer is either out or away. The collapsed state is dropped in AppSidebar rather than undone
+     here, because `sidebar-collapsed` drives a dozen rules including a `font-size:0` label trick,
+     and reversing those one at a time in a media query would break the next time one changed. */
+  .sidebar-collapse {
+    display: none !important;
+  }
+  /* Room for a fingertip, and the drawer scrolls when the client list is long. */
+  .sidebar {
+    width: 268px;
+    flex-basis: 268px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .sidebar .nav-item,
+  .sidebar .client-directory-item {
+    min-height: 44px;
+  }
+}
+
+/* ── Inbox filters ────────────────────────────────────────────────────────────────────────────
+   The submenu is a flyout at `left:100%` hanging off a dropdown already anchored to the right edge,
+   so on a phone it opened past the right side of the screen and could not be read or reached. Here
+   it stops being a flyout and becomes part of the dropdown's own flow, directly under the row that
+   opened it, which is both on-screen and easier to follow with a thumb. */
+@media (max-width: 760px) {
+  .unified-filter-dropdown {
+    width: min(286px, calc(100vw - 26px)) !important;
+  }
+  .unified-filter-sub {
+    position: static !important;
+    width: auto !important;
+    margin: 3px 7px 5px !important;
+    max-height: 232px !important;
+    box-shadow: none !important;
+    background: var(--panel-2) !important;
+  }
+  /* 10px submenu labels are for a mouse pointer at arm's length. */
+  .uf-sub-item {
+    padding: 10px 13px !important;
+    font-size: 12px !important;
+  }
+  .uf-item {
+    min-height: 40px;
+    padding-top: 9px;
+    padding-bottom: 9px;
+    font-size: 12px;
+  }
+}
+
+/* ── The inbox on a phone: one pane at a time ─────────────────────────────────────────────────
+   On a desktop the conversation list and the open thread sit side by side behind a drag handle. At
+   1100px they already stack, which is right for a laptop but wrong for a phone: the list is a full
+   screen of its own, so a stacked thread sits below the fold and tapping a row appears to do
+   nothing at all. Here the two swap places instead — list until something is picked, thread after. */
+.rr-thread-back {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .operational-grid .pane-divider {
+    /* Dragging a divider between two panes only one of which is on screen. */
+    display: none !important;
+  }
+  /* Nothing picked yet: the list has the screen. */
+  .operational-grid:not(.rr-thread-open) > .detail-card {
+    display: none !important;
+  }
+  /* A conversation is open: it gets the screen, and the button below leads back. */
+  .operational-grid.rr-thread-open > .queue-card {
+    display: none !important;
+  }
+
+  .rr-thread-back {
+    display: block;
+    width: 100%;
+    margin: 0 0 13px;
+    padding: 11px 2px;
+    border: 0;
+    border-bottom: 1px solid var(--border-soft);
+    border-radius: 0;
+    background: transparent;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+  }
+
+  /* The row is an eight-column desktop table. Four of those columns are 40px of number or a name
+     nobody scans on a phone, so they go and the two that identify the conversation stay: who it is,
+     and when they last wrote. The header row goes with them — two columns need no labels. */
+  .inbox-operational-table .table-head,
+  .table-head-followups {
+    display: none !important;
+  }
+  .inbox-operational-table .lead-row,
+  .table-head-followups ~ .lead-row {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 4px 10px !important;
+    padding: 12px 13px !important;
+    min-height: 62px;
+  }
+  .inbox-operational-table .lead-row > .campaign-cell,
+  .inbox-operational-table .lead-row > .sender-cell,
+  .inbox-operational-table .lead-row > .turn-cell,
+  .inbox-operational-table .lead-row > .client-cell {
+    display: none !important;
+  }
+  /* Date and score share the right-hand column, stacked, so the row stays two columns wide. */
+  .inbox-operational-table .lead-row > .date-cell,
+  .inbox-operational-table .lead-row > .lead-score-cell,
+  .inbox-operational-table .lead-row > .follow-up-score-cell {
+    grid-column: 2 !important;
+    align-items: flex-end !important;
+    text-align: right !important;
+  }
+  .inbox-operational-table .lead-main {
+    min-width: 0;
+  }
+  .inbox-operational-table .lead-name-text {
+    font-size: 13px;
+  }
+  /* A tapped row should be a comfortable target rather than a 9px line of text. */
+  .inbox-operational-table .lead-row .inbox-meta-cell {
+    font-size: 10.5px;
+  }
+}
+
+/* ── The wide pages ───────────────────────────────────────────────────────────────────────────
+   Card grids, tables and fixed-width document sheets, none of which were ever asked to fit in
+   390px. Everything here is `max-width` scoped, and the two `screen and` blocks further below are
+   scoped that way so a printed page — which is 8.5in, wider than 760px, but still worth being
+   explicit about — cannot pick them up. */
+
+@media (max-width: 760px) {
+  /* Two across rather than one: these are small stat and client cards, and a single column turns
+     the dashboard into a very long scroll for no gain in legibility. */
+  .metrics,
+  .dashboard-stats-grid,
+  .dashboard-client-grid,
+  .dashboard-profile-grid,
+  .profile-card-grid,
+  .workspace-cards,
+  .workspace-directory-list,
+  .tracked-clients,
+  .theme-presets {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  /* Label-and-value pairs, on the other hand, are unreadable side by side at this width. */
+  .database-field-grid,
+  .heartbeat-service-grid,
+  .heartbeat-kid-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  /* A seven-day calendar stays seven days wide — collapsing it would stop it being a calendar — so
+     it pans instead. */
+  .calendar-grid {
+    min-width: 560px;
+  }
+  .calendar-grid-scroll,
+  .calendar-month {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  /* The range picker over the inbox graphs sits to the right of its heading in a `nowrap` row, and
+     five pills plus the heading measure 434px. Nothing above it scrolls horizontally, so "This
+     quarter" and "All time" were simply cut off past the right edge — reachable by no gesture at
+     all. Wrapping is the fix rather than a scroller: these are five short pills that tile happily
+     onto a second line, and a scroller you cannot see the end of hides options just as well. */
+  .inbox-analytics-heading,
+  .inbox-analytics-heading > div,
+  .inbox-analytics-range {
+    flex-wrap: wrap !important;
+    min-width: 0;
+  }
+
+  /* Markdown tables come from the MCP answers and the brain sheets, where the column count is
+     whatever the model wrote. `md-table-wrap` existed in the markup with no rule behind it. */
+  .md-table-wrap {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  /* Long single tokens with no space to break at — profile URLs, share links, company links and the
+     brain path note. Left alone these push their container wider than the screen and take the whole
+     layout with them, because a grid track cannot be narrower than an unbreakable word inside it. */
+  .client-share-url,
+  .database-company-link,
+  .detail-profile-links a,
+  .lead-database-link,
+  .linkedin,
+  .brain-link-note,
+  .database-field-value {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* iOS reports `vh` against the taller layout viewport — the one with the toolbar hidden — so a
+     `100vh` box is roughly a toolbar taller than the screen and leaves a dead band you can scroll
+     into. `dvh` is the height actually on show. `.app-shell` already does this correctly; these are
+     the ones that were missed. */
+  .database-main,
+  .admin-layout {
+    min-height: 100dvh;
+  }
+  .mcp-page {
+    height: calc(100dvh - 64px);
+  }
+  .ai-client-sidebar,
+  .ai-client-content {
+    max-height: none;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Below this a two-column stat card is mostly padding. */
+  .metrics,
+  .dashboard-stats-grid,
+  .dashboard-client-grid,
+  .dashboard-profile-grid,
+  .profile-card-grid,
+  .workspace-cards,
+  .workspace-directory-list,
+  .tracked-clients {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* Reports needs nothing here. `reports.css` already carries `@media (max-width:900px){.report-page
+   {width:100%}}`, so the letter sheet reflows to the screen on its own and the print rule that
+   restores `8.5in` is scoped to `@media print`. An earlier draft of this file turned
+   `.report-document` into a horizontal scroller on the assumption the sheet stayed 816px wide; it
+   was removed once that turned out to be false, because `align-items:flex-start` on a flex column
+   changes how every child sizes itself and it was buying nothing. */

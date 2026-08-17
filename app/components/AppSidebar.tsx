@@ -58,6 +58,37 @@ function SidebarIcon({ name }: { name: string }) {
 export default function AppSidebar() {
   const pathname = usePathname();
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  /**
+   * Whether the navigation is showing on a phone.
+   *
+   * Under 760px the rail becomes a fixed drawer parked off the left edge, and until now nothing
+   * rendered the control that brings it back — the stylesheet had the whole slide-in written for a
+   * `sidebar-open` class that no component ever set, so on a phone the navigation was simply gone.
+   *
+   * Only the drawer reads this. Above 760px the toggle and the scrim are `display:none`, which
+   * keeps them out of `.app-shell`'s flex layout entirely rather than merely invisible.
+   */
+  const [navOpen, setNavOpen] = useState(false);
+  /**
+   * Whether the rail is currently a drawer rather than a docked column.
+   *
+   * This exists so the collapsed state can be ignored on a phone. Collapsing is a desktop
+   * affordance — it trades labels for width in a column you can always see — and `sidebar-collapsed`
+   * drives a dozen rules including a `font-size:0` trick for the client names. Undoing those inside
+   * a media query would mean re-listing every one and re-listing it again whenever one changed, so
+   * the class is simply not applied down here.
+   *
+   * Starts false so the server render and the first client render agree; the media query is only
+   * consulted after mount. Desktop never matches, so the class logic there is exactly what it was.
+   */
+  const [drawerLayout, setDrawerLayout] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 760px)");
+    const sync = () => setDrawerLayout(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
   const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string; logoUrl?: string }>>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -127,14 +158,37 @@ export default function AppSidebar() {
     );
   };
   return (
-    <aside
-      className={`sidebar app-sidebar ${collapsed ? "sidebar-collapsed" : ""}`}
-    >
+    <>
+      {/*
+        The phone navigation control, and the tap-anywhere-else layer behind the open drawer.
+        Both sit outside the <aside> on purpose: the aside is translated off-screen when closed, so
+        anything inside it goes with it and could never be used to reopen it.
+      */}
+      <button
+        className="rr-nav-toggle"
+        onClick={() => setNavOpen(true)}
+        aria-label="Open navigation"
+        aria-expanded={navOpen}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+      </button>
+      <button
+        className={`rr-nav-scrim ${navOpen ? "rr-nav-scrim-shown" : ""}`}
+        onClick={() => setNavOpen(false)}
+        aria-label="Close navigation"
+        tabIndex={navOpen ? 0 : -1}
+      />
+      <aside
+        className={`sidebar app-sidebar ${collapsed && !drawerLayout ? "sidebar-collapsed" : ""} ${navOpen ? "sidebar-open" : ""}`}
+      >
       <div className="brand-row">
         <Link
           href="/"
           className="brand-name"
           style={{ textDecoration: "none", color: "inherit" }}
+          onClick={() => setNavOpen(false)}
         >
           <span className="brand-mark">
             <span />
@@ -145,12 +199,24 @@ export default function AppSidebar() {
             reply<span>radar</span>
           </span>
         </Link>
+        {/*
+          Collapse belongs to the desktop rail — on a phone the drawer is either open or gone, and a
+          72px collapsed drawer is not a state anyone wants. Hidden under 760px, where the button
+          beside it closes the drawer instead.
+        */}
         <button
           className="sidebar-collapse"
           onClick={toggle}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? "→" : "←"}
+        </button>
+        <button
+          className="rr-nav-dismiss"
+          onClick={() => setNavOpen(false)}
+          aria-label="Close navigation"
+        >
+          ✕
         </button>
       </div>
       <div className="nav-label">Operate</div>
@@ -177,6 +243,7 @@ export default function AppSidebar() {
           </a>
         ))}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

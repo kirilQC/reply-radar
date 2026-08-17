@@ -299,13 +299,6 @@ const metricCatalog = [
     sub: "Awaiting synced data",
   },
 ];
-const nav = [
-  ["inbox", "General inbox", "⌘1"],
-  ["profiles", "Profiles", "⌘2"],
-  ["calendar", "Follow-up calendar", "⌘3"],
-  ["analytics", "Analytics", "⌘4"],
-  ["health", "System health", ""],
-];
 const DEFAULT_FOLLOW_UP_THRESHOLD = 50;
 /**
  * How long a synced conversation counts as fresh.
@@ -396,8 +389,7 @@ export function InboxPage() {
     [sort, setSort] = useState("score-desc"),
     [search, setSearch] = useState(""),
     [searchOpen, setSearchOpen] = useState(false),
-    [theme, setTheme] = useState("midnight"),
-    [sidebarOpen, setSidebarOpen] = useState(false);
+    [theme, setTheme] = useState("midnight");
   const [layoutPrefs, setLayoutPrefs] = useState(defaultLayout);
   const [appearance, setAppearance] = useState(defaultAppearance);
   const [layoutOpen, setLayoutOpen] = useState(false);
@@ -1476,89 +1468,16 @@ export function InboxPage() {
         } as React.CSSProperties
       }
     >
+      {/*
+        A second, older sidebar used to be rendered here alongside AppSidebar, kept alive only by
+        `.legacy-sidebar{display:none!important}`. It carried hardcoded demo values — a "12" unread
+        badge and "All client workspaces" — and its ☰ button toggled a drawer that could never be
+        seen. It also would have become a second, non-functioning hamburger the moment the viewport
+        tag started letting the 760px breakpoint fire, so it is gone rather than hidden.
+      */}
       <AppSidebar />
-      <aside
-        className={`sidebar legacy-sidebar ${sidebarOpen ? "sidebar-open" : ""}`}
-      >
-        <div className="brand-row">
-          <div className="brand-mark">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div className="brand-name">
-            reply<span>radar</span>
-          </div>
-          <button
-            className="mobile-close"
-            onClick={() => setSidebarOpen(false)}
-          >
-            ×
-          </button>
-        </div>
-        <button className="workspace-select">
-          <span className="workspace-dot" />
-          <span>
-            <small>WORKSPACE</small>
-            <strong>All client workspaces</strong>
-          </span>
-          <Icon name="chevron" />
-        </button>
-        <div className="nav-label">Operate</div>
-        <nav>
-          {nav.map(([id, label, shortcut]) => (
-            <button
-              key={id}
-              className={`nav-item ${activeNav === id ? "active" : ""}`}
-              onClick={() => {
-                setActiveNav(id);
-                setSidebarOpen(false);
-              }}
-            >
-              <Icon name={id} />
-              <span>{label}</span>
-              {id === "inbox" && <b className="nav-count">12</b>}
-              {shortcut && <kbd>{shortcut}</kbd>}
-            </button>
-          ))}
-        </nav>
-        <div className="nav-label clients-label">
-          Clients <button>+</button>
-        </div>
-        <div className="client-list">
-          {workspaceDirectory.map((workspace) => (
-            <a
-              href={`/inbox?client=${workspace.slug}`}
-              className={`client-directory-item ${clientParam === workspace.slug ? "selected" : ""}`}
-              key={workspace.slug}
-            >
-              <i style={{ background: workspace.tone ?? "var(--accent)" }}>
-                {workspace.name?.[0] ?? "?"}
-              </i>
-              {workspace.name || "Unnamed client"}
-            </a>
-          ))}
-        </div>
-        <div className="sidebar-bottom">
-          <button className="nav-item">
-            <Icon name="settings" />
-            <span>Admin console</span>
-          </button>
-          <div className="user-chip">
-            <div className="user-avatar">?</div>
-            <div>
-              <strong>Profile not selected</strong>
-              <small>Select a profile to personalize this view</small>
-            </div>
-            <Icon name="more" />
-          </div>
-        </div>
-      </aside>
       <section className="main-area">
         <header className="topbar">
-          <button className="mobile-menu" onClick={() => setSidebarOpen(true)}>
-            ☰
-          </button>
           <Crumb
             trail={[
               { label: "Inbox", href: "/inbox" },
@@ -1925,11 +1844,21 @@ export function InboxPage() {
                       {filterDropdownOpen && (
                         <div className="unified-filter-dropdown">
                           <button className={`uf-item ${filter === "Starred" ? "uf-active" : ""}`} onMouseEnter={() => setFilterSub(null)} onClick={() => { setFilter(filter === "Starred" ? "All follow-ups" : "Starred"); setSelectedId(""); }}>Starred {filter === "Starred" ? "✓" : ""}</button>
-                          <button className="uf-item" onMouseEnter={() => setFilterSub("campaign")}>Campaign {campaignFilter ? `· ${campaignFilter.slice(0, 20)}` : ""}<b>›</b></button>
-                          <button className="uf-item" onMouseEnter={() => setFilterSub("sender")}>Sender {senderFilter ? `· ${senderFilter.slice(0, 20)}` : ""}<b>›</b></button>
-                          <button className="uf-item" onMouseEnter={() => setFilterSub("sentiment")}>Sentiment {sentimentFilter ? `· ${sentimentFilter}` : ""}<b>›</b></button>
-                          <button className="uf-item" onMouseEnter={() => setFilterSub("tier")}>Tier {["Hot", "Warm", "Nurture"].includes(filter) ? `· ${filter}` : ""}<b>›</b></button>
-                          <button className="uf-item" onMouseEnter={() => setFilterSub("sort")}>Sort {sort !== "score-desc" ? `· ${sort}` : ""}<b>›</b></button>
+                          {/*
+                            Each of these opens its submenu on hover and on click. The click handlers
+                            are what make the filters reachable at all on a touchscreen, where there
+                            is no hover to give — every one of these rows was a dead end on a phone.
+
+                            They set the same value the hover sets rather than toggling, which is the
+                            reason a mouse notices no difference: by the time you can click a row you
+                            are already hovering it, so the click asks for the state it is already in.
+                            A toggle would have closed the submenu under the cursor instead.
+                          */}
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("campaign")} onClick={() => setFilterSub("campaign")}>Campaign {campaignFilter ? `· ${campaignFilter.slice(0, 20)}` : ""}<b>›</b></button>
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("sender")} onClick={() => setFilterSub("sender")}>Sender {senderFilter ? `· ${senderFilter.slice(0, 20)}` : ""}<b>›</b></button>
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("sentiment")} onClick={() => setFilterSub("sentiment")}>Sentiment {sentimentFilter ? `· ${sentimentFilter}` : ""}<b>›</b></button>
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("tier")} onClick={() => setFilterSub("tier")}>Tier {["Hot", "Warm", "Nurture"].includes(filter) ? `· ${filter}` : ""}<b>›</b></button>
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("sort")} onClick={() => setFilterSub("sort")}>Sort {sort !== "score-desc" ? `· ${sort}` : ""}<b>›</b></button>
                           <div className="uf-divider" />
                           <button className="uf-item uf-clear" onClick={() => { setCampaignFilter(""); setSenderFilter(""); setSentimentFilter(""); setSort("score-desc"); setFilter("All follow-ups"); setFilterDropdownOpen(false); setSelectedId(""); }}>Clear all filters</button>
                           {filterSub === "campaign" && (
@@ -1981,9 +1910,21 @@ export function InboxPage() {
                   </div>
                 </div>
               </div>
+              {/*
+                `rr-thread-open` says a conversation has been picked. Only the phone stylesheet reads
+                it, where the two panes stop being side by side and become one screen at a time — a
+                stacked list above a thread means scrolling past every other conversation to reach the
+                one you just tapped.
+
+                It keys off `selectedId` rather than `current`, because `current` falls back to the
+                first row in the list so the desktop preview is never empty. On a phone that fallback
+                would mean arriving on a thread nobody asked for.
+
+                No desktop rule mentions this class, so the layout above 760px is untouched.
+              */}
               <div
                 ref={paneGridRef}
-                className={`dashboard-grid operational-grid ${layoutPrefs.paneSplit < 58 ? "pane-density-no-followup" : ""} ${layoutPrefs.paneSplit < 50 ? "pane-density-no-replies" : ""}`}
+                className={`dashboard-grid operational-grid ${selectedId ? "rr-thread-open" : ""} ${layoutPrefs.paneSplit < 58 ? "pane-density-no-followup" : ""} ${layoutPrefs.paneSplit < 50 ? "pane-density-no-replies" : ""}`}
                 style={
                   {
                     "--inbox-pane": `${layoutPrefs.paneSplit}fr`,
@@ -2162,6 +2103,17 @@ export function InboxPage() {
                 <aside
                   className={`detail-card ${layoutPrefs.showDetail ? "" : "layout-hidden"}`}
                 >
+                  {/*
+                    The way back to the list on a phone, where the list is not on screen beside this.
+                    `display:none` above 760px, so the desktop card is unchanged — there the list is
+                    already visible to the left and this would be a button that undid nothing.
+                  */}
+                  <button
+                    className="rr-thread-back"
+                    onClick={() => setSelectedId("")}
+                  >
+                    ‹ All conversations
+                  </button>
                   <div className="detail-top">
                     <div className="detail-person">
                       <div
