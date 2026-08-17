@@ -929,17 +929,24 @@ async function pruneSyncRuns() {
  * answer, and a per-client page needs a call per sender on top of that. None of it can be cached for
  * long and all of it is on the critical path of a page load, so the analytics tab opened as an empty
  * shell and filled in two or three seconds later. Collected here instead, the page is one Supabase
- * read: the numbers are up to half an hour old and the page says so, which is a better trade than a
- * blank screen every visit.
+ * read: the numbers are a day old at worst, the page says exactly when they were taken, and there is a
+ * button to take them again — which is a better trade than a blank screen on every visit.
  *
  * ── One client per cycle ─────────────────────────────────────────────────────────────────────────
  * A pass is roughly sixteen HeyReach calls, so doing every client in one cycle would be a couple of
  * hundred and would stretch a cycle past the point where the health page calls the worker stale. The
- * client whose stored figures are oldest is picked instead, which at a two-minute cycle covers fifteen
- * clients every half hour and needs no state of its own. `refreshed_at` in the table is the timer, so
- * a deploy resumes the rotation rather than restarting it.
+ * client whose stored figures are oldest is picked instead, one per cycle, and needs no state of its
+ * own: `refreshed_at` in the table is the timer, so a deploy resumes the rotation rather than
+ * restarting it.
+ *
+ * ── Once a day, or when somebody asks ────────────────────────────────────────────────────────────
+ * A day is the cadence because these figures move on the scale of a day's sending — a campaign's
+ * lifetime acceptance rate does not meaningfully change between breakfast and lunch — and because
+ * HeyReach's rate limit is a shared budget with the inbox sync, which is the part that has to be
+ * timely. Anyone who wants figures sooner than that presses the button on the client's page, which
+ * queues an `rr_sync_runs` row that `queuedAnalyticsRequest` claims ahead of the rotation.
  */
-const ANALYTICS_STALENESS_MS = 30 * 60 * 1000;
+const ANALYTICS_STALENESS_MS = 24 * 60 * 60 * 1000;
 /**
  * Days of daily history rewritten each pass.
  *
@@ -1164,8 +1171,46 @@ async function staleAnalyticsWorkspace() {
   return oldest.workspace;
 }
 
+/** PATCHes one `rr_sync_runs` row. Used to move a requested refresh through its states. */
+function patchSyncRun(id, patch) {
+  return supabase(`rr_sync_runs?id=eq.${encodeURIComponent(String(id))}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify(patch),
+  });
+}
+
+/**
+ * A refresh somebody pressed the button for, claimed so it is never worked twice.
+ *
+ * `/api/analytics/client/refresh` writes a `queued` analytics run rather than collecting anything
+ * itself: a pass is a couple of hundred HeyReach calls against a rate limit this process already owns,
+ * and a serverless function has ten seconds. There is no channel from the app to this worker, so the
+ * table is the channel.
+ *
+ * The row is flipped to `running` before a single HeyReach call is made, which is what stops a pass
+ * that throws from being retried on every cycle for the next two days.
+ */
+async function queuedAnalyticsRequest() {
+  const queued = await supabase("rr_sync_runs?select=id,workspace_id&run_type=eq.analytics&status=eq.queued&workspace_id=not.is.null&order=started_at.asc&limit=1");
+  const request = queued?.[0];
+  if (!request) return null;
+  const workspaces = await supabase(`rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&id=eq.${encodeURIComponent(String(request.workspace_id))}&limit=1`);
+  const workspace = workspaces?.[0];
+  if (!workspace?.heyreach_api_key_ciphertext) {
+    // Closed rather than left queued: a client with no key will never be collectable, and a request
+    // that stays `queued` leaves the page showing a progress bar that can never finish.
+    await patchSyncRun(request.id, { status: "failed", finished_at: new Date().toISOString(), error_text: "No HeyReach key on this client" });
+    return null;
+  }
+  await patchSyncRun(request.id, { status: "running" });
+  return { workspace, requestId: String(request.id) };
+}
+
 async function collectAnalytics() {
-  const workspace = await staleAnalyticsWorkspace();
+  // Asked-for refreshes go ahead of the daily rotation — somebody is watching a progress bar.
+  const request = await queuedAnalyticsRequest();
+  const workspace = request?.workspace ?? (await staleAnalyticsWorkspace());
   if (!workspace) return;
   const startedAt = new Date().toISOString();
   let campaigns = 0;
@@ -1175,17 +1220,22 @@ async function collectAnalytics() {
     campaigns = await collectCampaignStats(workspace);
     await touchHeartbeat();
     days = await collectDailyStats(workspace);
-    console.info("reply_radar_analytics_collected", { workspace: workspace.slug, campaigns, dailyRows: days });
+    console.info("reply_radar_analytics_collected", { workspace: workspace.slug, campaigns, dailyRows: days, requested: Boolean(request) });
   } catch (error) {
     errorText = error instanceof Error ? error.message : "Analytics collection failed";
     console.warn("reply_radar_analytics_failed", { workspace: workspace.slug, error: errorText });
   }
-  await writeSyncRun({
-    workspace_id: workspace.id, run_type: "analytics", source: "render-worker",
+  const finished = {
     status: errorText ? "failed" : "success",
-    started_at: startedAt, finished_at: new Date().toISOString(),
-    records_seen: campaigns, records_written: campaigns + days, error_text: errorText,
-  });
+    finished_at: new Date().toISOString(),
+    records_seen: campaigns,
+    records_written: campaigns + days,
+    error_text: errorText,
+  };
+  // A requested pass finishes the row it was asked through instead of writing a second one beside it,
+  // so the log stays one row per pass and the page watches that row go queued → running → success.
+  if (request) await patchSyncRun(request.requestId, finished);
+  else await writeSyncRun({ workspace_id: workspace.id, run_type: "analytics", source: "render-worker", started_at: startedAt, ...finished });
 }
 
 // ── Main loop ───────────────────────────────────────────────────────
@@ -1228,7 +1278,8 @@ async function runOnce() {
   try { await reconcileDueWorkspace(); } catch (error) { console.error("reply_radar_reconcile_cycle_failed", error); }
 
   /*
-   * One client's analytics per cycle, and only the client whose figures are oldest.
+   * One client's analytics per cycle: whoever asked for a refresh first, else the client whose stored
+   * figures are oldest, and only once they are over a day old.
    *
    * No loop timer here on purpose: the staleness check is inside `staleAnalyticsWorkspace`, reading
    * `refreshed_at` out of the table rather than a variable that a deploy would reset. Fifteen clients

@@ -411,20 +411,74 @@
 .client-hero-identity h1 {
   margin: 4px 0 0;
 }
-.client-share-url {
-  margin-top: 8px;
-  padding: 4px 10px;
+/*
+ * The freshness stamp and the button that acts on it, as one block on the right of the client hero.
+ *
+ * They belong together: the stamp is the only reason to press the button, and the button is the only
+ * answer to a stamp that reads older than you wanted.
+ */
+.client-hero-sync {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.client-resync {
+  padding: 7px 14px;
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: 8px;
   background: var(--panel);
-  color: var(--muted);
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
 }
-.client-share-url:hover {
+.client-resync:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
+}
+.client-resync:disabled {
+  color: var(--muted-2);
+  cursor: default;
+}
+/*
+ * The collection bar. A track and a fill, both divs, sized from the run's own state rather than from a
+ * clock — so it stops at whatever step the worker has reached and does not pretend to know the rest.
+ */
+.collect-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin: -6px 0 22px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--panel);
+}
+/* The track: full width of its column, so the fill inside it reads as a fraction of the whole job. */
+.collect-progress > span {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.collect-progress i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--green));
+  /* Long enough to read as movement between two states minutes apart, rather than as a jump. */
+  transition: width 900ms ease;
+}
+.collect-progress small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .campaign-list-header {
@@ -663,6 +717,23 @@
     width: 56px;
     height: 56px;
     font-size: 24px;
+  }
+  /* The hero stacks on a phone, so the stamp and its button read left-aligned under the name rather
+     than pushed to an edge that is no longer there. */
+  .client-hero-sync {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+  /* The stage caption goes under the bar: side by side it either wraps or squeezes the track to
+     nothing, and the track is the part carrying the information. */
+  .collect-progress {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
+  .collect-progress small {
+    white-space: normal;
   }
 }
 
@@ -4910,7 +4981,6 @@ span.brain-mark.is-lg {
   /* Long single tokens with no space to break at — profile URLs, share links, company links and the
      brain path note. Left alone these push their container wider than the screen and take the whole
      layout with them, because a grid track cannot be narrower than an unbreakable word inside it. */
-  .client-share-url,
   .database-company-link,
   .detail-profile-links a,
   .lead-database-link,

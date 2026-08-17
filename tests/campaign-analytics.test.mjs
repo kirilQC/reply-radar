@@ -20,6 +20,8 @@ import { sequenceCopy } from "../shared/campaign-sequence.mjs";
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const page = readFileSync(new URL("../app/analytics/page.tsx", import.meta.url), "utf8");
 const route = readFileSync(new URL("../app/api/analytics/client/route.ts", import.meta.url), "utf8");
+const refreshRoute = readFileSync(new URL("../app/api/analytics/client/refresh/route.ts", import.meta.url), "utf8");
+const worker = readFileSync(new URL("../worker/render-worker.mjs", import.meta.url), "utf8");
 
 /** A real shape: connection request → (accepted) message → follow-up, with an END on the other branch. */
 const tree = {
@@ -135,6 +137,85 @@ test("every sort the campaign table offers is a sort the comparator implements",
     if (id === options[0]) continue;
     assert.ok(comparator.includes(`"${id}"`), `sort "${id}" is offered in the menu but never handled`);
   }
+});
+
+/*
+ * ── The manual refresh ───────────────────────────────────────────────────────────────────────────
+ * Three processes have to agree on four strings for the button to work: the route writes a run, the
+ * worker claims and closes it, and the page reads its state to decide whether to show a progress bar.
+ * Every disagreement is silent. Spell `running` differently in the worker than in the reading route and
+ * the bar sits at "queued" through the whole pass; forget to close the row and the bar never comes down
+ * and the worker re-collects that client on every cycle for two days.
+ */
+test("the refresh route queues a run the worker's claim query will actually find", () => {
+  // The claim is `run_type=eq.analytics&status=eq.queued`, so the row has to carry both.
+  assert.match(refreshRoute, /run_type: "analytics"/);
+  assert.match(refreshRoute, /status: "queued"/);
+  assert.match(refreshRoute, /workspace_id: workspace\.id/);
+  assert.match(worker, /run_type=eq\.analytics&status=eq\.queued/);
+  // And it must not collect anything itself — a serverless function has ten seconds, and the rate
+  // budget against HeyReach belongs to the worker. Asserted on where it can fetch from rather than on
+  // whether it says "HeyReach", which it does, correctly, in explaining exactly that.
+  const targets = [...refreshRoute.matchAll(/fetch\(\s*`([^`]+)`/g)].map(([, target]) => target);
+  assert.deepEqual(targets, ["${url}/rest/v1/${path}"], `the refresh route fetches from ${targets.join(", ")}`);
+});
+
+test("a claimed request is always closed, whether the pass works or not", () => {
+  const collect = worker.slice(worker.indexOf("async function queuedAnalyticsRequest"), worker.indexOf("// ── Main loop"));
+  // Claimed before the first HeyReach call: a pass that throws must leave a failed run, not a request
+  // that is picked up again every cycle until the retention sweep deletes it.
+  assert.ok(collect.includes('patchSyncRun(request.id, { status: "running" })'), "the queued row is not flipped to running before work starts");
+  assert.match(collect, /if \(request\) await patchSyncRun\(request\.requestId, finished\)/);
+  // `finished` is assigned outside the try/catch that swallows the error, so both outcomes reach it.
+  assert.match(collect, /status: errorText \? "failed" : "success"/);
+  // A client with no key can never be collected, so its request is closed rather than left queued.
+  assert.match(collect, /No HeyReach key on this client/);
+});
+
+test("the states the worker writes are the states the page reads", () => {
+  // The reading route maps rows to queued/running/idle; the page decides on that word alone.
+  for (const state of ["queued", "running"]) {
+    assert.ok(route.includes(`"${state}"`), `the client route does not recognise a ${state} run`);
+  }
+  assert.match(route, /state: pending \?/);
+  assert.match(page, /const syncState = clientPayload\?\.sync\?\.state \?\? "idle"/);
+  // The bar has to be reachable from every state that is not idle, and unreachable once one is.
+  assert.match(page, /const inFlight = syncState !== "idle"/);
+  assert.match(page, /const collecting = inFlight \|\| !everRan/);
+  // A successful pass over a client with no campaigns still counts as collected, or the bar never ends.
+  assert.match(page, /lastStatus === "success"/);
+  // And the button stays pressable for a client that has never been collected — the case it exists for.
+  assert.match(page, /disabled=\{inFlight\}/);
+});
+
+/** `24 * 60 * 60 * 1000` or `86_400_000` as a number, so these checks read a duration not a spelling. */
+const msValue = (expression) => expression.split("*").reduce((total, part) => total * Number(part.trim().replace(/_/g, "")), 1);
+
+test("analytics are collected once a day, and the button is the way to ask sooner", () => {
+  const window = worker.match(/const ANALYTICS_STALENESS_MS = ([^;]+);/);
+  assert.ok(window, "ANALYTICS_STALENESS_MS is gone — nothing is pacing collection");
+  assert.equal(msValue(window[1]), 24 * 60 * 60 * 1000, `the collection window is ${window[1]}, not a day`);
+  // A requested pass has to be able to jump the daily rotation, or the button waits up to a day.
+  assert.match(worker, /const request = await queuedAnalyticsRequest\(\);\n\s*const workspace = request\?\.workspace \?\? \(await staleAnalyticsWorkspace\(\)\)/);
+});
+
+test("the page polls faster while it is waiting on a refresh, and gives up eventually", () => {
+  const active = Number(page.match(/const CLIENT_POLL_ACTIVE_MS = ([\d_]+)/)?.[1].replace(/_/g, ""));
+  const idle = Number(page.match(/const CLIENT_POLL_IDLE_MS = ([\d_]+)/)?.[1].replace(/_/g, ""));
+  const tick = Number(page.match(/const CLIENT_POLL_TICK_MS = ([\d_]+)/)?.[1].replace(/_/g, ""));
+  assert.ok(active > 0 && active < idle, `active poll ${active}ms is not faster than idle ${idle}ms`);
+  // The tick has to be at least as fine as the fastest cadence or it becomes the cadence.
+  assert.ok(tick <= active, `a ${tick}ms tick cannot deliver an ${active}ms poll`);
+  // The worker claims on its own cycle — two minutes by default — so patience has to outlast that by
+  // enough to cover a pass, otherwise the bar is abandoned while the pass is still running.
+  const patience = page.match(/const REFRESH_PATIENCE_MS = ([^;]+);/);
+  assert.ok(msValue(patience[1]) >= 5 * 60_000, "a refresh is abandoned before the worker could plausibly finish");
+});
+
+test("the share URL is gone from the client page", () => {
+  // Removed on request: it showed the deployment's own hostname, which is not a fact about the client.
+  assert.ok(!page.includes("client-share-url"), "the share URL button is still rendered");
+  assert.ok(!/rootHost|shareUrl/.test(page), "the share URL is gone but the host arithmetic behind it is not");
 });
 
 test("the client route reads Supabase and nothing else", () => {

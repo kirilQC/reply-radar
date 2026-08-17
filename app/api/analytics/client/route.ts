@@ -61,10 +61,16 @@ export async function GET(request: Request) {
     if (!workspace) return NextResponse.json({ ok: false, status: "not_found" }, { status: 404 });
     const workspaceId = String(workspace.id);
 
-    const [campaignRows, dailyRows, conversations] = await Promise.all([
+    const [campaignRows, dailyRows, conversations, runs] = await Promise.all([
       get(`rr_campaign_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=launched_at.desc.nullslast&limit=2000`),
       get(`rr_daily_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=day.asc&limit=2000`),
       get(`rr_conversations?select=id&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=2000`),
+      /*
+       * The last few collection passes for this client, which is what the page's progress bar is made
+       * of. `/api/analytics/client/refresh` queues a row here and the worker moves it queued → running
+       * → success, so every step the bar shows is a state somebody wrote rather than a timer running.
+       */
+      get(`rr_sync_runs?select=status,started_at,finished_at,error_text&workspace_id=eq.${encodeURIComponent(workspaceId)}&run_type=eq.analytics&order=started_at.desc&limit=4`),
     ]);
 
     /*
@@ -205,6 +211,15 @@ export async function GET(request: Request) {
       .map((row) => Date.parse(String(row.refreshed_at ?? "")))
       .filter((value) => Number.isFinite(value));
 
+    const pending = runs.find((run) => {
+      const state = String(run.status ?? "").toLowerCase();
+      return state === "queued" || state === "running";
+    });
+    const settled = runs.find((run) => {
+      const state = String(run.status ?? "").toLowerCase();
+      return state !== "queued" && state !== "running";
+    });
+
     return NextResponse.json({
       ok: true,
       status: campaigns.length ? "live" : "no_data",
@@ -226,6 +241,15 @@ export async function GET(request: Request) {
       replies7d,
       conversations: conversationIds.length,
       collectedAt: refreshed.length ? new Date(Math.max(...refreshed)).toISOString() : null,
+      sync: {
+        // `queued` means the worker has not picked it up yet, `running` means it is mid-pass, and
+        // `idle` means the stored figures are the whole story until the next daily turn.
+        state: pending ? (String(pending.status).toLowerCase() === "running" ? "running" : "queued") : "idle",
+        requestedAt: pending?.started_at ? String(pending.started_at) : null,
+        lastStatus: settled?.status ? String(settled.status) : null,
+        lastFinishedAt: settled?.finished_at ? String(settled.finished_at) : null,
+        lastError: settled?.error_text ? String(settled.error_text) : null,
+      },
     });
   } catch (error) {
     return NextResponse.json({ ok: false, status: "error", error: error instanceof Error ? error.message : "Client analytics unavailable" }, { status: 502 });

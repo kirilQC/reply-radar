@@ -296,6 +296,10 @@ create index if not exists rr_sync_runs_started_idx on rr_sync_runs(started_at d
 -- The heartbeat reads are all `source=eq.X&run_type=eq.Y order by started_at desc limit N`, which
 -- the started_at-only index above cannot serve without scanning tens of thousands of rows.
 create index if not exists rr_sync_runs_source_type_started_idx on rr_sync_runs(source, run_type, started_at desc);
+-- The client analytics page reads this table on every poll to decide whether a collection is in flight,
+-- and it asks by workspace rather than by source. Without this it is a scan of two days of worker log
+-- every two minutes per open tab.
+create index if not exists rr_sync_runs_workspace_type_started_idx on rr_sync_runs(workspace_id, run_type, started_at desc);
 create index if not exists rr_audit_log_created_idx on rr_audit_log(created_at desc);
 create index if not exists rr_reports_workspace_generated_idx on rr_reports(workspace_id, generated_at desc);
 create index if not exists rr_reports_generated_idx on rr_reports(generated_at desc);

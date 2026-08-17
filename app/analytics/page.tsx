@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
@@ -33,10 +33,21 @@ type ClientCampaign = {
 };
 type DailyPoint = { day: string; label: string; connectionsSent: number; connectionsAccepted: number; messagesSent: number; replies: number };
 type SenderSeries = { id: string; name: string; dailyLimit: number | null; connectionsSent: number; connectionsAccepted: number; byDay: number[] };
+/**
+ * Where the worker is with this client, straight off `rr_sync_runs`.
+ *
+ * `queued` is a refresh that has been asked for and not started, `running` is a pass mid-flight, and
+ * `idle` is neither. Every step the progress bar shows comes from here, which is the difference between
+ * a bar that reports collection and a bar that is a stopwatch pretending to.
+ */
+type SyncState = {
+  state?: "queued" | "running" | "idle";
+  requestedAt?: string | null; lastStatus?: string | null; lastFinishedAt?: string | null; lastError?: string | null;
+};
 type ClientAnalytics = {
   status?: string; workspace?: WorkspaceDetail; campaigns?: ClientCampaign[]; daily?: DailyPoint[];
   senders?: SenderSeries[]; senderCap?: number; repliesSynced?: number; replies7d?: number;
-  conversations?: number; collectedAt?: string | null;
+  conversations?: number; collectedAt?: string | null; sync?: SyncState;
 };
 
 /**
@@ -151,6 +162,44 @@ const excerpt = (value: string | null, length = 130) => {
 const RANKABLE_MINIMUM = 50;
 const rankable = (campaigns: ClientCampaign[]) => campaigns.filter((row) => row.connectionsSent >= RANKABLE_MINIMUM);
 
+/**
+ * How the client page polls: rarely, unless a refresh is outstanding.
+ *
+ * The worker collects a client once a day, so the idle cadence exists only to catch that pass and to
+ * notice a page left open overnight. `TICK` is the granularity at which the choice between the two is
+ * made — cheap, because a tick with nothing due does no work at all.
+ */
+const CLIENT_POLL_IDLE_MS = 120_000;
+const CLIENT_POLL_ACTIVE_MS = 8_000;
+const CLIENT_POLL_TICK_MS = 4_000;
+/**
+ * How long a requested refresh is waited on before the page stops claiming one is happening.
+ *
+ * The worker claims requests on its own cycle, which is two minutes by default, and a pass over a large
+ * account is a couple of hundred HeyReach calls after that. Six minutes covers both with room to spare;
+ * past it the honest thing is to go back to showing when the figures were last collected.
+ */
+const REFRESH_PATIENCE_MS = 6 * 60_000;
+/**
+ * What the progress bar shows, given only what the tables say.
+ *
+ * There is no byte count to report — collection is HeyReach paging inside another process — so the bar
+ * is the run's own state machine rather than a percentage of anything. Each stop is a row somebody
+ * wrote: `queued` is a request the worker has not claimed, `running` is one it has, and a client with
+ * no stored figures at all is waiting for its turn in the daily rotation.
+ */
+const collectionStage = (state: string, hasFigures: boolean) => {
+  if (state === "running") return { percent: 72, label: "Reading HeyReach" };
+  if (state === "queued") return { percent: 28, label: "Queued" };
+  return hasFigures ? { percent: 90, label: "Refreshing" } : { percent: 12, label: "Waiting for the collector" };
+};
+
+/** Time alone for figures taken today; date as well once they are older, so a day-old stamp reads as one. */
+const syncedLabel = (at: Date) =>
+  at.toDateString() === new Date().toDateString()
+    ? at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : at.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
 export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsData>({});
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -158,7 +207,23 @@ export default function AnalyticsPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<ClientCampaign | null>(null);
   const [sort, setSort] = useState("launch-desc");
   const [leaderMetric, setLeaderMetric] = useState<string>("accepted");
-  const [copied, setCopied] = useState(false);
+  /**
+   * A refresh this tab asked for, kept so the bar appears on the press rather than on the next poll.
+   *
+   * The worker is what actually collects, and it picks the request up on its next cycle — up to two
+   * minutes away — so without this the button would look like it had done nothing. Cleared once the
+   * run this press queued has settled, or abandoned after `REFRESH_PATIENCE_MS` so a worker that is
+   * down leaves a stale stamp rather than a bar that never fills.
+   */
+  const [refresh, setRefresh] = useState<{ slug: string; at: number } | null>(null);
+  /**
+   * The same press, as a ref, read by the poll timer.
+   *
+   * A ref rather than the state above because the timer lives in an effect that must not be torn down
+   * and rebuilt every time the press is recorded — doing that would restart the poll and, worse, make
+   * the effect depend on state it also sets.
+   */
+  const askedAt = useRef(0);
   // The campaign name from the URL, resolved against the metrics once they load.
   const [urlCampaign, setUrlCampaign] = useState<string | null>(null);
   /**
@@ -194,29 +259,45 @@ export default function AnalyticsPage() {
   }, []);
 
   /**
-   * One client's figures, from Supabase alone.
+   * The stored copy of this client's figures, painted before anything is fetched.
    *
-   * Polled more slowly than the index page because the worker only refreshes a client every half hour,
-   * so a ten-second poll would return the same rows nine times out of ten. The snapshot is per client
-   * and restored first, which is what makes a second visit paint immediately.
+   * Split out of the polling effect below so that a manual refresh, which re-runs that effect, cannot
+   * momentarily put yesterday's snapshot back over figures already on screen.
    */
   useEffect(() => {
     if (!routeReady || !selectedSlug) return;
     const slug = selectedSlug;
-    const cacheKey = `${clientSnapshotKey}:${slug}`;
     try {
-      const cached = window.localStorage.getItem(cacheKey);
+      const cached = window.localStorage.getItem(`${clientSnapshotKey}:${slug}`);
       if (cached) {
         const parsed = JSON.parse(cached) as { at?: number; payload?: ClientAnalytics };
         if (parsed?.payload && Array.isArray(parsed.payload.campaigns)) {
           // Same argument as the index snapshot below: one extra render is the whole point of it.
           // eslint-disable-next-line react-hooks/set-state-in-effect
-          setClientData({ slug, payload: parsed.payload, at: parsed.at ?? 0 });
+          setClientData((current) => (current?.slug === slug ? current : { slug, payload: parsed.payload!, at: parsed.at ?? 0 }));
         }
       }
     } catch { /* a corrupt or evicted snapshot just means waiting for the fetch */ }
+  }, [routeReady, selectedSlug]);
+
+  /**
+   * One client's figures, from Supabase alone.
+   *
+   * Polled slowly by default — the worker collects a client once a day, so a ten-second poll would
+   * return the same rows every time — and quickly while a refresh is in flight, which is the only
+   * window in which the answer is expected to change while somebody is looking at it. Self-scheduling
+   * rather than on an interval so the cadence can switch without tearing the effect down.
+   */
+  useEffect(() => {
+    if (!routeReady || !selectedSlug) return;
+    const slug = selectedSlug;
+    const cacheKey = `${clientSnapshotKey}:${slug}`;
     let live = true;
-    const load = () => fetch(`/api/analytics/client?client=${encodeURIComponent(slug)}`, { cache: "no-store" })
+    let pending = false;
+    let lastFetch = 0;
+    const load = () => {
+      lastFetch = Date.now();
+      return fetch(`/api/analytics/client?client=${encodeURIComponent(slug)}`, { cache: "no-store" })
       .then((response) => response.json())
       .then((payload: ClientAnalytics) => {
         if (!live) return;
@@ -244,10 +325,35 @@ export default function AnalyticsPage() {
         if (figures) {
           try { window.localStorage.setItem(cacheKey, JSON.stringify({ at, payload })); } catch { /* quota or private mode */ }
         }
+        pending = (payload?.sync?.state ?? "idle") !== "idle";
+        /*
+         * Retire the bar once the pass it was asked for has landed.
+         *
+         * `lastFinishedAt` is the newest settled run, so comparing it against the press proves the
+         * figures on screen are the ones that were asked for rather than the ones already there. The
+         * patience clause is for the case the worker never picks the request up at all: better a stamp
+         * that says the figures are a day old than a bar that fills forever.
+         */
+        setRefresh((current) => {
+          if (!current || current.slug !== slug || pending) return current;
+          const settledAt = Date.parse(String(payload?.sync?.lastFinishedAt ?? "")) || 0;
+          const done = settledAt > current.at || at - current.at > REFRESH_PATIENCE_MS;
+          if (done) askedAt.current = 0;
+          return done ? null : current;
+        });
       })
       .catch(() => undefined);
+    };
     void load();
-    const timer = window.setInterval(load, 120_000);
+    /*
+     * One slow poll, one fast one, chosen per tick rather than by tearing this effect down and building
+     * it again every time the answer changes. Idle is the steady state — the worker collects a client
+     * once a day — and the fast cadence applies only while a refresh this tab asked for is outstanding.
+     */
+    const timer = window.setInterval(() => {
+      const watching = pending || Date.now() - askedAt.current < REFRESH_PATIENCE_MS;
+      if (Date.now() - lastFetch >= (watching ? CLIENT_POLL_ACTIVE_MS : CLIENT_POLL_IDLE_MS)) void load();
+    }, CLIENT_POLL_TICK_MS);
     return () => { live = false; window.clearInterval(timer); };
   }, [routeReady, selectedSlug]);
 
@@ -353,9 +459,29 @@ export default function AnalyticsPage() {
     setSelectedSlug(slug);
     setSelectedCampaign(null);
     setUrlCampaign(null);
-    setCopied(false);
     const url = slug ? `/analytics?client=${encodeURIComponent(slug)}` : "/analytics";
     window.history.pushState({}, "", url);
+  };
+
+  /**
+   * Asks the worker for a pass over this client now, instead of at its next daily turn.
+   *
+   * The bar goes up on the press rather than on the answer, because the answer is only ever "queued":
+   * collection happens in the Render worker, which claims the request on its next cycle. Setting
+   * `askedAt` is what switches the poll above to its fast cadence, so the queued → running → collected
+   * transitions are seen as they happen rather than two minutes after the fact.
+   *
+   * A rejected request — no HeyReach key on the client, Supabase unreachable — takes the bar back down
+   * immediately instead of leaving it to time out.
+   */
+  const requestRefresh = (slug: string) => {
+    const at = Date.now();
+    askedAt.current = at;
+    setRefresh({ slug, at });
+    const abandon = () => { askedAt.current = 0; setRefresh((current) => (current?.at === at ? null : current)); };
+    void fetch(`/api/analytics/client/refresh?client=${encodeURIComponent(slug)}`, { method: "POST" })
+      .then((response) => { if (!response.ok) abandon(); })
+      .catch(abandon);
   };
 
   if (selectedSlug) {
@@ -398,10 +524,24 @@ export default function AnalyticsPage() {
       .sort((left, right) => right.acceptanceRate - left.acceptanceRate)
       .slice(0, 5);
     const collectedAt = clientPayload?.collectedAt ? new Date(clientPayload.collectedAt) : null;
-    // Strip an existing client label so the shown host stays `<slug>.<root domain>`.
-    const host = typeof window === "undefined" ? "" : window.location.host;
-    const rootHost = host.startsWith(`${detail.slug}.`) ? host.slice(detail.slug.length + 1) : host;
-    const shareUrl = `${detail.slug}.${rootHost}`;
+    /*
+     * Whether a collection is happening, and how far along.
+     *
+     * `everRan` is the test for "this client has been collected at least once" rather than "there are
+     * campaigns on screen", because a client with genuinely no campaigns would otherwise sit behind a
+     * progress bar forever — a successful pass that found nothing is still a finished pass.
+     */
+    const syncState = clientPayload?.sync?.state ?? "idle";
+    const everRan = Boolean(clientPayload?.collectedAt) || clientPayload?.sync?.lastStatus === "success";
+    // A pass this page is waiting on, as against a client that is merely waiting its turn. The button
+    // is disabled by the first and not the second: a client that has never been collected is the case
+    // most worth pressing it for.
+    const inFlight = syncState !== "idle" || refresh?.slug === detail.slug;
+    const collecting = inFlight || !everRan;
+    // A press that has not shown up in the table yet is still a queued request — the row is written, this
+    // tab simply has not polled since. Waiting for the poll to say so would leave the bar reporting the
+    // state the client was in before the button was pressed.
+    const stage = collectionStage(syncState === "idle" && inFlight ? "queued" : syncState, clientCampaigns.length > 0);
     return <div className="app-shell"><AppSidebar/><section className="main-area">
       <header className="topbar"><Crumb trail={[{ label: "Analytics", href: "/analytics", onClick: (event) => { event.preventDefault(); openClient(null); } }, { label: detail.name }]} /><div className="top-actions"><GlobalAppearanceControl /></div></header>
       <main className="analytics-dashboard">
@@ -413,23 +553,26 @@ export default function AnalyticsPage() {
             <div>
               <button className="analytics-back" onClick={() => openClient(null)}>← All clients</button>
               <h1>{detail.name}</h1>
-              <button
-                className="client-share-url"
-                title="Copy this client's analytics URL"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(`${window.location.origin}/analytics?client=${encodeURIComponent(detail.slug)}`);
-                  setCopied(true);
-                }}
-              >
-                {copied ? "Copied link" : shareUrl}
-              </button>
             </div>
           </div>
-          {/* Stamped with when the worker last read HeyReach, not with when this page was opened. The
-              figures are up to half an hour old and saying so is the difference between a stale number
-              and a wrong one. */}
-          <div className="analytics-live"><i /> HeyReach{collectedAt ? ` · collected ${collectedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : " · collecting"}</div>
+          <div className="client-hero-sync">
+            {/* Stamped with when the worker last read HeyReach, not with when this page was opened. The
+                figures are up to a day old, and saying so is the difference between a stale number and a
+                wrong one — which is also what the button beside it is for. */}
+            <div className="analytics-live"><i /> {collectedAt ? `Last synced @ ${syncedLabel(collectedAt)}` : "Not synced yet"}</div>
+            <button className="client-resync" onClick={() => requestRefresh(detail.slug)} disabled={inFlight}>
+              {inFlight ? "Syncing…" : "Sync now"}
+            </button>
+          </div>
         </header>
+        {collecting && (
+          /* Divs, like every other bar on the site. Each width is a state read out of `rr_sync_runs`
+             rather than a clock, so it stops where collection has actually got to. */
+          <div className="collect-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={stage.percent} aria-label="Collecting analytics">
+            <span><i style={{ width: `${stage.percent}%` }}/></span>
+            <small>{stage.label}</small>
+          </div>
+        )}
         <section className="analytics-kpis">
           <Kpi label="All-time replies" value={allTimeReplies.toLocaleString()} sub={`${(clientPayload?.repliesSynced ?? 0).toLocaleString()} synced to the inbox`}/>
           <Kpi label="Average reply rate" value={average("replyRate") == null ? "—" : `${average("replyRate")!.toFixed(1)}%`}/>
