@@ -212,6 +212,73 @@ create table if not exists rr_feedback_events (
   created_at timestamptz not null default now()
 );
 
+-- ── Analytics, collected by the worker rather than asked for on page load ────────────────────────
+--
+-- Everything the per-client analytics page shows used to be fetched from HeyReach inside the request
+-- that rendered it: a campaign list, a stats rollup, and one call per sender, per client, every time
+-- anybody opened the page. That is two to three seconds of somebody else's API before the first
+-- number can be painted, which is why the page arrived as an empty shell and filled in later.
+--
+-- These two tables are the worker's copy of the same answers. The page reads Supabase and nothing
+-- else, so it paints in one round trip, and the freshness is stated on screen from `refreshed_at`
+-- rather than implied.
+
+-- One row per campaign, overwritten in place each pass. The rollup HeyReach returns per campaign is
+-- lifetime, so this is a current picture rather than a history — `rr_daily_stats` is the history.
+create table if not exists rr_campaign_stats (
+  workspace_id uuid not null references rr_workspaces(id) on delete cascade,
+  campaign_id text not null,
+  name text not null default '',
+  status text,
+  launched_at timestamptz,
+  -- The sender accounts assigned to the campaign. Its length times the per-sender daily cap is how
+  -- many connection requests the campaign can send in a day, which is what "days left" divides by.
+  sender_ids text[] not null default '{}',
+  total_leads integer not null default 0,
+  -- Leads that have not been contacted yet. This, not `total_leads`, is the work remaining.
+  leads_pending integer not null default 0,
+  leads_in_progress integer not null default 0,
+  leads_finished integer not null default 0,
+  connections_sent integer not null default 0,
+  connections_accepted integer not null default 0,
+  replies integer not null default 0,
+  messages_started integer not null default 0,
+  -- The campaign's own copy: the note on the connection request, and the first message after it is
+  -- accepted. Held here so "which messaging performed best" can put the words next to the rates
+  -- instead of next to a campaign name that only means something to whoever wrote it.
+  first_touch text,
+  follow_up text,
+  sequence_steps integer,
+  -- Null until the sequence has been read. The worker fills a handful of these per pass, so a client
+  -- with sixty campaigns backfills over an hour or so rather than in one burst of sixty API calls.
+  sequence_fetched_at timestamptz,
+  refreshed_at timestamptz not null default now(),
+  primary key (workspace_id, campaign_id)
+);
+
+-- One row per client per day per sender, plus one row per client per day for the client as a whole.
+--
+-- The all-senders row is what `sender_id = ''` means, and it is not redundant with the sum of the
+-- others. Per-sender rows can only be written for senders HeyReach still lists; a LinkedIn account
+-- disconnected next month would silently subtract itself from every day it ever sent on. The total
+-- is asked for separately and stored separately so the headline chart cannot drift from HeyReach's
+-- own dashboard, which is the number anyone would check it against.
+create table if not exists rr_daily_stats (
+  workspace_id uuid not null references rr_workspaces(id) on delete cascade,
+  day date not null,
+  sender_id text not null default '',
+  sender_name text not null default '',
+  connections_sent integer not null default 0,
+  connections_accepted integer not null default 0,
+  messages_sent integer not null default 0,
+  replies integer not null default 0,
+  -- The sender's own connection-request cap, as HeyReach reports it — 25 on every account measured.
+  -- Stored per row so a chart can draw the ceiling a sender was actually working to on that day.
+  daily_limit integer,
+  refreshed_at timestamptz not null default now(),
+  primary key (workspace_id, day, sender_id)
+);
+
 create index if not exists rr_workspaces_created_idx on rr_workspaces(created_at);
 create index if not exists rr_profile_workspaces_workspace_idx on rr_profile_workspaces(workspace_id);
 -- rr_leads is filtered by workspace and by profile URL on every ingestion pass.
@@ -234,6 +301,12 @@ create index if not exists rr_reports_workspace_generated_idx on rr_reports(work
 create index if not exists rr_reports_generated_idx on rr_reports(generated_at desc);
 create index if not exists rr_feedback_status_created_idx on rr_feedback(status, created_at desc);
 create index if not exists rr_feedback_events_feedback_idx on rr_feedback_events(feedback_id, created_at);
+-- Both analytics tables are read one client at a time and written by the worker as a whole client at
+-- a time, so the workspace is the leading column on each.
+create index if not exists rr_campaign_stats_workspace_idx on rr_campaign_stats(workspace_id, launched_at desc);
+-- The worker picks the client whose analytics are stalest by this column.
+create index if not exists rr_campaign_stats_refreshed_idx on rr_campaign_stats(refreshed_at asc);
+create index if not exists rr_daily_stats_workspace_day_idx on rr_daily_stats(workspace_id, day desc);
 
 create or replace function rr_set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at = now(); return new; end; $$;
 drop trigger if exists rr_workspaces_updated_at on rr_workspaces;
@@ -267,6 +340,8 @@ alter table rr_audit_log enable row level security;
 alter table rr_reports enable row level security;
 alter table rr_feedback enable row level security;
 alter table rr_feedback_events enable row level security;
+alter table rr_campaign_stats enable row level security;
+alter table rr_daily_stats enable row level security;
 
 -- A readable flattening of rr_leads for exports and ad-hoc queries: the client resolved to a name
 -- rather than a UUID, and the timestamps that generated columns cannot hold.

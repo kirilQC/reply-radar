@@ -3,6 +3,8 @@
 
 import { classifyConversationOrigin } from "../shared/conversation-origin.mjs";
 import { directionFor, extractMessageRows, messageKey, syntheticMessageId } from "../shared/message-identity.mjs";
+import { ourCampaigns } from "../shared/campaign-code.mjs";
+import { sequenceCopy } from "../shared/campaign-sequence.mjs";
 
 /**
  * Render Background Worker entrypoint.
@@ -918,6 +920,274 @@ async function pruneSyncRuns() {
   if (worker || aiArk) console.info("reply_radar_sync_runs_pruned", { worker, aiArk, retentionHours: RETENTION_HOURS });
 }
 
+// ── Analytics collection ────────────────────────────────────────────
+/**
+ * Fills `rr_campaign_stats` and `rr_daily_stats` so the analytics pages never talk to HeyReach.
+ *
+ * ── Why this moved here ──────────────────────────────────────────────────────────────────────────
+ * `/api/analytics` asks HeyReach for a campaign list and a stats rollup for every client before it can
+ * answer, and a per-client page needs a call per sender on top of that. None of it can be cached for
+ * long and all of it is on the critical path of a page load, so the analytics tab opened as an empty
+ * shell and filled in two or three seconds later. Collected here instead, the page is one Supabase
+ * read: the numbers are up to half an hour old and the page says so, which is a better trade than a
+ * blank screen every visit.
+ *
+ * ── One client per cycle ─────────────────────────────────────────────────────────────────────────
+ * A pass is roughly sixteen HeyReach calls, so doing every client in one cycle would be a couple of
+ * hundred and would stretch a cycle past the point where the health page calls the worker stale. The
+ * client whose stored figures are oldest is picked instead, which at a two-minute cycle covers fifteen
+ * clients every half hour and needs no state of its own. `refreshed_at` in the table is the timer, so
+ * a deploy resumes the rotation rather than restarting it.
+ */
+const ANALYTICS_STALENESS_MS = 30 * 60 * 1000;
+/**
+ * Days of daily history rewritten each pass.
+ *
+ * The charts show a fortnight. Three weeks is written so that the fortnight is still complete after a
+ * week in which the worker was down, and because HeyReach can revise a recent day — an acceptance
+ * lands against the day the request went out, not the day it was accepted.
+ */
+const ANALYTICS_WINDOW_DAYS = 21;
+const ANALYTICS_PAGE_SIZE = 100;
+/** 2,000 campaigns per client: far past the largest account seen, and a stop for a bad `totalCount`. */
+const ANALYTICS_MAX_PAGES = 20;
+/**
+ * Sequences read per pass. The copy inside a campaign never changes once it is running, so this is a
+ * backfill rather than a refresh: a client with sixty campaigns is complete after ten passes and then
+ * costs nothing, instead of sixty calls every half hour forever.
+ */
+const ANALYTICS_SEQUENCE_BUDGET = 6;
+
+/** Every campaign on the account, ours and the client's own, so the filter can be applied once. */
+async function heyReachCampaignPages(apiKey) {
+  const items = [];
+  for (let page = 0; page < ANALYTICS_MAX_PAGES; page += 1) {
+    const response = await heyReachFetch(apiKey, "campaign/GetAll", {
+      method: "POST",
+      body: JSON.stringify({ offset: page * ANALYTICS_PAGE_SIZE, limit: ANALYTICS_PAGE_SIZE }),
+    });
+    const batch = Array.isArray(response?.items) ? response.items : [];
+    items.push(...batch);
+    const total = Number(response?.totalCount || 0);
+    if (batch.length < ANALYTICS_PAGE_SIZE || (total && items.length >= total)) break;
+  }
+  return items;
+}
+
+/** `rr_campaign_stats` for one client: the campaign list joined to the lifetime rollup. */
+async function collectCampaignStats(workspace) {
+  const apiKey = workspace.heyreach_api_key_ciphertext;
+  const [campaigns, rollup, stored] = await Promise.all([
+    heyReachCampaignPages(apiKey),
+    heyReachFetch(apiKey, "stats/GetOverallStatsByCampaign", {
+      method: "POST",
+      // Pinned to 2020 for the same reason the API route pins it: these are lifetime totals, and a
+      // rollup with no date range comes back empty rather than all-time.
+      body: JSON.stringify({ accountIds: [], campaignIds: [], startDate: "2020-01-01T00:00:00.000Z", endDate: new Date().toISOString() }),
+    }).catch(() => null),
+    supabase(`rr_campaign_stats?select=campaign_id,first_touch,follow_up,sequence_steps,sequence_fetched_at&workspace_id=eq.${encodeURIComponent(workspace.id)}&limit=2000`),
+  ]);
+  // A client's own pre-engagement campaigns share this API key. Dropped at the edge, as everywhere
+  // else, so nothing downstream can count them as our work.
+  const ours = ourCampaigns(campaigns, (row) => row.name);
+  if (!ours.length) return 0;
+
+  const statsById = new Map();
+  for (const row of Array.isArray(rollup?.overallStats) ? rollup.overallStats : []) {
+    statsById.set(String(row.campaignId ?? ""), row);
+  }
+  const storedById = new Map((stored || []).map((row) => [String(row.campaign_id), row]));
+
+  /*
+   * Which campaigns get their copy read this pass.
+   *
+   * Newest first, because a campaign launched this week is the one somebody is asking about. Campaigns
+   * whose copy is already stored are skipped entirely — that is what makes this a backfill that finishes
+   * rather than a cost that recurs.
+   */
+  const needsCopy = ours
+    .filter((row) => !storedById.get(String(row.id))?.sequence_fetched_at)
+    .sort((left, right) => String(right.startedAt || right.creationTime || "").localeCompare(String(left.startedAt || left.creationTime || "")))
+    .slice(0, ANALYTICS_SEQUENCE_BUDGET);
+  const copyById = new Map();
+  for (const campaign of needsCopy) {
+    try {
+      // A query parameter, not a path segment — see the same call in app/lib/heyreach-api.ts.
+      const sequence = await heyReachFetch(apiKey, `campaign/GetCampaignSequence?campaignId=${encodeURIComponent(String(campaign.id))}`, { method: "GET" });
+      copyById.set(String(campaign.id), sequenceCopy(sequence));
+    } catch (error) {
+      console.warn("reply_radar_analytics_sequence_failed", { workspace: workspace.slug, campaign: String(campaign.id), error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  const now = new Date().toISOString();
+  const rows = ours.map((campaign) => {
+    const id = String(campaign.id);
+    const stats = statsById.get(id) || {};
+    const progress = campaign.progressStats && typeof campaign.progressStats === "object" ? campaign.progressStats : {};
+    const previous = storedById.get(id) || {};
+    const fetched = copyById.get(id);
+    return {
+      workspace_id: workspace.id,
+      campaign_id: id,
+      name: String(campaign.name || ""),
+      status: String(campaign.status || "") || null,
+      launched_at: String(campaign.startedAt || campaign.creationTime || "") || null,
+      sender_ids: (Array.isArray(campaign.campaignAccountIds) ? campaign.campaignAccountIds : []).map((value) => String(value)),
+      total_leads: Number(progress.totalUsers || 0),
+      leads_pending: Number(progress.totalUsersPending || 0),
+      leads_in_progress: Number(progress.totalUsersInProgress || 0),
+      leads_finished: Number(progress.totalUsersFinished || 0),
+      connections_sent: Number(stats.connectionsSent || 0),
+      connections_accepted: Number(stats.connectionsAccepted || 0),
+      replies: Number(stats.totalMessageReplies || 0) + Number(stats.totalInmailReplies || 0),
+      messages_started: Number(stats.totalMessageStarted || 0) + Number(stats.totalInmailStarted || 0),
+      // Carried forward rather than omitted. An upsert has to send the same keys for every row, so a
+      // row without these would write nulls over copy a previous pass had already read.
+      first_touch: fetched ? fetched.firstTouch || null : previous.first_touch ?? null,
+      follow_up: fetched ? fetched.followUp || null : previous.follow_up ?? null,
+      sequence_steps: fetched ? fetched.steps : previous.sequence_steps ?? null,
+      sequence_fetched_at: fetched ? now : previous.sequence_fetched_at ?? null,
+      refreshed_at: now,
+    };
+  });
+
+  await supabase("rr_campaign_stats?on_conflict=workspace_id,campaign_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(rows),
+  });
+  /*
+   * Campaigns HeyReach no longer lists are deleted rather than left behind.
+   *
+   * A campaign can be removed on their side, and a stale row would keep counting toward "campaigns
+   * launched" and could win a "best performing" ranking with figures nobody can check. Scoped to this
+   * client and to ids we did not just write.
+   */
+  const keep = rows.map((row) => `"${row.campaign_id}"`).join(",");
+  await supabase(`rr_campaign_stats?workspace_id=eq.${encodeURIComponent(workspace.id)}&campaign_id=not.in.(${keep})`, {
+    method: "DELETE", headers: { Prefer: "return=minimal" },
+  }).catch((error) => console.warn("reply_radar_analytics_prune_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) }));
+  return rows.length;
+}
+
+/**
+ * `rr_daily_stats` for one client: a day-by-day series for the client as a whole, and one per sender.
+ *
+ * Both are asked for, rather than deriving the total by adding the senders up. They do agree today —
+ * checked against HeyReach's dashboard on three consecutive days, where four campaign-assigned senders
+ * summed to 100 against a client total of 108 until the two accounts HeyReach reports as `isActive:
+ * false` were included as well, at which point it matched exactly. `isActive` turns out to mean "on a
+ * running campaign", not "has ever sent". They would stop agreeing the moment a LinkedIn account is
+ * disconnected, though: it drops out of the account list and would take its history out of the sum with
+ * it, quietly lowering every past day. The total is the number somebody would check against HeyReach,
+ * so it is stored as HeyReach reports it.
+ */
+async function collectDailyStats(workspace) {
+  const apiKey = workspace.heyreach_api_key_ciphertext;
+  const start = new Date(Date.now() - (ANALYTICS_WINDOW_DAYS - 1) * 86_400_000);
+  const startDate = `${start.toISOString().slice(0, 10)}T00:00:00.000Z`;
+  const endDate = new Date().toISOString();
+  const series = (accountIds) => heyReachFetch(apiKey, "stats/GetOverallStats", {
+    method: "POST",
+    body: JSON.stringify({ accountIds, campaignIds: [], startDate, endDate }),
+  });
+
+  const accountsResponse = await heyReachFetch(apiKey, "linkedinAccount/GetAll", {
+    method: "POST",
+    body: JSON.stringify({ offset: 0, limit: ANALYTICS_PAGE_SIZE }),
+  }).catch(() => null);
+  const accounts = Array.isArray(accountsResponse?.items) ? accountsResponse.items : [];
+
+  const rows = [];
+  const now = new Date().toISOString();
+  const push = (senderId, senderName, dailyLimit, response) => {
+    const byDay = response?.byDayStats && typeof response.byDayStats === "object" ? response.byDayStats : {};
+    for (const [stamp, day] of Object.entries(byDay)) {
+      if (!day || typeof day !== "object") continue;
+      rows.push({
+        workspace_id: workspace.id,
+        day: String(stamp).slice(0, 10),
+        sender_id: senderId,
+        sender_name: senderName,
+        connections_sent: Number(day.connectionsSent || 0),
+        connections_accepted: Number(day.connectionsAccepted || 0),
+        messages_sent: Number(day.messagesSent || 0) + Number(day.inmailMessagesSent || 0),
+        replies: Number(day.totalMessageReplies || 0) + Number(day.totalInmailReplies || 0),
+        daily_limit: dailyLimit,
+        refreshed_at: now,
+      });
+    }
+  };
+
+  // The all-senders total. `sender_id = ''` is what marks it, and the primary key keeps it from
+  // colliding with any real sender.
+  push("", "", null, await series([]).catch(() => null));
+  for (const account of accounts) {
+    const id = String(account.id ?? "");
+    if (!id) continue;
+    const limits = account.accountLimits && typeof account.accountLimits === "object" ? account.accountLimits : {};
+    // `connectioRequestLimit` is spelled that way by the API. Both spellings are read so a fix on
+    // their side does not turn the cap into a null.
+    const cap = Number(limits.connectioRequestLimit ?? limits.connectionRequestLimit ?? 0) || null;
+    const name = [String(account.firstName || ""), String(account.lastName || "")].filter(Boolean).join(" ") || `Sender ${id}`;
+    push(id, name, cap, await series([Number(id) || id]).catch(() => null));
+  }
+  if (!rows.length) return 0;
+  await supabase("rr_daily_stats?on_conflict=workspace_id,day,sender_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(rows),
+  });
+  return rows.length;
+}
+
+/** The client whose stored analytics are oldest, or one that has none at all. */
+async function staleAnalyticsWorkspace() {
+  const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&heyreach_api_key_ciphertext=not.is.null&order=created_at.asc");
+  if (!workspaces || !workspaces.length) return null;
+  // Grouping has to happen here: PostgREST has no `max(...) group by`, and two columns over a thousand
+  // campaign rows is a smaller read than the aggregate would save.
+  const freshest = new Map();
+  const stamps = await supabase("rr_campaign_stats?select=workspace_id,refreshed_at&order=refreshed_at.desc&limit=5000");
+  for (const row of stamps || []) {
+    const id = String(row.workspace_id);
+    // Descending, so the first stamp seen for a workspace is its newest.
+    if (!freshest.has(id)) freshest.set(id, Date.parse(String(row.refreshed_at || "")) || 0);
+  }
+  const ranked = workspaces
+    .map((workspace) => ({ workspace, at: freshest.get(String(workspace.id)) ?? 0 }))
+    .sort((left, right) => left.at - right.at);
+  const oldest = ranked[0];
+  // Nothing is due. With two clients on the roster this is what stops the pass running every cycle.
+  if (!oldest || Date.now() - oldest.at < ANALYTICS_STALENESS_MS) return null;
+  return oldest.workspace;
+}
+
+async function collectAnalytics() {
+  const workspace = await staleAnalyticsWorkspace();
+  if (!workspace) return;
+  const startedAt = new Date().toISOString();
+  let campaigns = 0;
+  let days = 0;
+  let errorText = null;
+  try {
+    campaigns = await collectCampaignStats(workspace);
+    await touchHeartbeat();
+    days = await collectDailyStats(workspace);
+    console.info("reply_radar_analytics_collected", { workspace: workspace.slug, campaigns, dailyRows: days });
+  } catch (error) {
+    errorText = error instanceof Error ? error.message : "Analytics collection failed";
+    console.warn("reply_radar_analytics_failed", { workspace: workspace.slug, error: errorText });
+  }
+  await writeSyncRun({
+    workspace_id: workspace.id, run_type: "analytics", source: "render-worker",
+    status: errorText ? "failed" : "success",
+    started_at: startedAt, finished_at: new Date().toISOString(),
+    records_seen: campaigns, records_written: campaigns + days, error_text: errorText,
+  });
+}
+
 // ── Main loop ───────────────────────────────────────────────────────
 
 async function runOnce() {
@@ -956,6 +1226,16 @@ async function runOnce() {
    * of them together from stretching a cycle indefinitely.
    */
   try { await reconcileDueWorkspace(); } catch (error) { console.error("reply_radar_reconcile_cycle_failed", error); }
+
+  /*
+   * One client's analytics per cycle, and only the client whose figures are oldest.
+   *
+   * No loop timer here on purpose: the staleness check is inside `staleAnalyticsWorkspace`, reading
+   * `refreshed_at` out of the table rather than a variable that a deploy would reset. Fifteen clients
+   * all falling due at once are then worked off one per cycle over the following half hour, which is
+   * the cadence rather than a queue.
+   */
+  try { await collectAnalytics(); } catch (error) { console.error("reply_radar_analytics_cycle_failed", error); }
 
   // Every cycle, so a reply that arrives while nobody is on the site is already analysed,
   // ICP-scored and follow-up-scored by the time it is opened.

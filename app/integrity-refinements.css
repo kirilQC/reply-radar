@@ -4967,3 +4967,363 @@ span.brain-mark.is-lg {
    The four entries reached most — the reply and added-date orders — are the first four, above the
    fold. `data-dropdown` stays on the trigger in `DatabaseDropdown`; it costs nothing and is the hook
    any future per-menu rule would need. */
+
+/* ── Per-client analytics ────────────────────────────────────────────────────────────────────────
+   The client page grew from five boxes and a table into the eleven answers the HeyReach dashboard
+   gives, so these are the pieces that had no equivalent before: a second KPI row, a stacked
+   by-sender chart, the ranking cards' toggle and runway rows, and the copy blocks.
+
+   Nothing here touches a selector the index page uses. `.analytics-bars`, `.analytics-rank`, the
+   seven-column campaign grid and `.campaign-modal` are reused exactly as they are, which is why the
+   desktop layout of everything that already existed is untouched by this block. */
+
+/* The five headline figures keep their 34px numerals; the five underneath them are supporting, so
+   they are shorter and quieter rather than a second row competing with the first. */
+.analytics-kpis-secondary .analytics-kpi {
+  min-height: 96px;
+  padding: 18px;
+}
+.analytics-kpis-secondary .analytics-kpi strong {
+  margin-top: 12px;
+  font-size: 26px;
+}
+
+/* Requests per day, split by who sent them.
+
+   One column per day, `stackMax` tall. Each sender's segment is a percentage of that same maximum,
+   so the segments of a column add up to the column and columns are comparable across the fortnight.
+   `column-reverse` grows the stack up from the axis, which puts the first sender — the busiest, the
+   list is sorted — at the bottom where the eye starts. */
+.sender-stack {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  align-items: end;
+  height: 240px;
+  gap: 10px;
+  padding-top: 34px;
+}
+.sender-stack > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 7px;
+  min-width: 0;
+}
+.sender-stack strong {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.sender-stack > div > span {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  width: min(42px, 90%);
+  height: 100%;
+  border-radius: 7px 7px 2px 2px;
+  overflow: hidden;
+}
+.sender-stack i {
+  display: block;
+  flex: 0 0 auto;
+  min-height: 3px;
+  width: 100%;
+}
+.sender-stack small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+/* Six tones, cycled. Four are the palette's own; the last two are added here because six senders on
+   one chart is normal and repeating a colour would make two people look like one. */
+.sender-stack i[data-tone="0"],
+.sender-legend i[data-tone="0"] { background: var(--accent); }
+.sender-stack i[data-tone="1"],
+.sender-legend i[data-tone="1"] { background: var(--green); }
+.sender-stack i[data-tone="2"],
+.sender-legend i[data-tone="2"] { background: var(--amber); }
+.sender-stack i[data-tone="3"],
+.sender-legend i[data-tone="3"] { background: var(--coral); }
+.sender-stack i[data-tone="4"],
+.sender-legend i[data-tone="4"] { background: #6ba8e5; }
+.sender-stack i[data-tone="5"],
+.sender-legend i[data-tone="5"] { background: #c58ae0; }
+
+.sender-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 26px;
+}
+.sender-legend > span {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.sender-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+}
+.sender-legend em {
+  font-style: normal;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sender-legend b {
+  font-size: 14px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+/* The per-day average sits under the total, in the third column, so the names above it stay aligned
+   however long the number is. */
+.sender-legend small {
+  grid-column: 3;
+  color: var(--muted-2);
+  font-size: 9px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Which figure the "best performing" list is ranked by. Three buttons rather than a select, because
+   the whole point is switching between them repeatedly to compare. */
+.metric-toggle {
+  display: flex;
+  gap: 4px;
+  margin: 16px 0 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-2);
+}
+.metric-toggle button {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-2);
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.metric-toggle button:hover {
+  color: var(--text);
+}
+.metric-toggle button.is-active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 4px #0004;
+}
+
+/* An active campaign and how many sending days its remaining list represents. Same rhythm as
+   `.analytics-rank`, minus the bar: a runway is a single number, not a share of anything. */
+.campaign-runway {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 0;
+  border: none;
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  text-align: left;
+}
+.campaign-runway:hover strong {
+  color: var(--accent);
+}
+.campaign-runway strong {
+  display: block;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.campaign-runway small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.campaign-runway data {
+  font-size: 16px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* `.analytics-rank` rows on this page open a campaign, so they are buttons. A button carries its own
+   background, alignment, width and font, all of which have to be handed back before the shared grid
+   rules apply as they do to the divs on the index page. */
+.analytics-rank.is-button {
+  width: 100%;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+}
+.analytics-rank.is-button:hover span > strong {
+  color: var(--accent);
+}
+/* Without a rank number — the underperforming list is not a leaderboard and numbering it 1–6 would
+   read as a ranking of the wrong direction. The `.has-mark.no-index` rule above is more specific and
+   keeps its own three-column shape on the index page. */
+.analytics-rank.no-index {
+  grid-template-columns: minmax(0, 1fr) 42px;
+}
+/* Warning tone for a bar that is bad news rather than progress. */
+.analytics-rank span > i > em.is-warning {
+  background: var(--coral);
+}
+
+/* Copy alongside the rates it earned. */
+.messaging-card {
+  margin-bottom: 14px;
+}
+.messaging-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+  width: 100%;
+  padding: 18px 0;
+  border: none;
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  text-align: left;
+}
+.messaging-row:last-child {
+  border-bottom: none;
+}
+.messaging-rates {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+}
+.messaging-rates data {
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.messaging-rates data:first-child {
+  color: var(--accent);
+}
+.messaging-rates small {
+  margin-bottom: 8px;
+  color: var(--muted-2);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.messaging-copy strong {
+  display: block;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.messaging-copy q {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  quotes: "\201C" "\201D";
+}
+.messaging-row:hover .messaging-copy q {
+  color: var(--text);
+}
+
+/* The campaign's own words, in full, under its figures in the modal. */
+.campaign-modal-copy {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+.campaign-modal-copy > div {
+  padding: 15px;
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.campaign-modal-copy span {
+  display: block;
+  color: var(--muted-2);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.campaign-modal-copy p {
+  margin: 9px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1200px) {
+  /* The rates column loses the room the copy needs before the copy does. */
+  .messaging-row {
+    grid-template-columns: 84px minmax(0, 1fr);
+    gap: 14px;
+  }
+}
+@media (max-width: 900px) {
+  .sender-stack {
+    gap: 5px;
+  }
+  .sender-stack small {
+    font-size: 8px;
+  }
+  /* A stacked column narrower than about five pixels stops being readable as bands, and the legend
+     under it already carries every sender's total. */
+  .sender-stack strong {
+    font-size: 10px;
+  }
+}
+@media (max-width: 760px) {
+  .analytics-kpis-secondary .analytics-kpi {
+    min-height: 78px;
+  }
+  .sender-stack {
+    height: 190px;
+  }
+  .sender-legend {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .metric-toggle {
+    flex-wrap: wrap;
+  }
+  .metric-toggle button {
+    flex: 1 0 30%;
+    font-size: 9px;
+  }
+  .messaging-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .messaging-rates {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .messaging-rates small {
+    margin-bottom: 0;
+    margin-right: 8px;
+  }
+}
