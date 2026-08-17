@@ -221,10 +221,27 @@ export default function AnalyticsPage() {
       .then((payload: ClientAnalytics) => {
         if (!live) return;
         const at = Date.now();
-        setClientData({ slug, payload, at });
-        // Kept only when there are campaigns in it, for the same reason the index snapshot is: one
-        // failed poll must not leave a blank page on every later visit.
-        if (Array.isArray(payload?.campaigns) && payload.campaigns.length) {
+        const figures = Array.isArray(payload?.campaigns) && payload.campaigns.length > 0;
+        /*
+         * An answer with nothing in it does not get to replace an answer that had something.
+         *
+         * This route replies `not_configured`, `no_data`, or a 502 with `error` on anything thrown, and
+         * every one of those is a 200-shaped JSON body as far as `then` is concerned. Setting state
+         * from it unconditionally meant a single failed poll blanked a page that was, a moment earlier,
+         * showing the figures still sitting in localStorage — and then did it again every two minutes.
+         *
+         * A client that genuinely has no campaigns still has to reach its empty state rather than
+         * spinning, so an empty payload is accepted when there is nothing better on screen: the guard
+         * is only against losing figures already shown for this same client.
+         */
+        setClientData((current) => {
+          if (figures) return { slug, payload, at };
+          const holding = current && current.slug === slug && current.payload.campaigns?.length;
+          return holding ? current : { slug, payload, at };
+        });
+        // Kept only when there are campaigns in it, for the same reason: one failed poll must not
+        // leave a blank page on every later visit either.
+        if (figures) {
           try { window.localStorage.setItem(cacheKey, JSON.stringify({ at, payload })); } catch { /* quota or private mode */ }
         }
       })
