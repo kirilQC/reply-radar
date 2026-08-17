@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { isAiArkEnrichmentEnabled } from "../../../lib/lead-identity";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { isOurWebhookUrl, publicBaseUrl, webhookUrlFor } from "../../../lib/public-url";
+import { normalizeChannelId } from "../../../lib/slack-channel";
 
 function supabaseConfig() {
   return { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
   const { url, key } = supabaseConfig();
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  let response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,brain_folder,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&order=name.asc`, { headers, cache: "no-store" });
+  let response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,brain_folder,slack_internal_channel_id,slack_external_channel_id,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&order=name.asc`, { headers, cache: "no-store" });
   // Permit the UI to keep working while the additive migration is being run.
   if (!response.ok) response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,logo_url,accent_color,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&order=name.asc`, { headers, cache: "no-store" });
   const rows = await response.json();
@@ -32,6 +33,12 @@ export async function POST(request: Request) {
   const payload = await request.json();
   const existingGuardrails = payload.guardrails && typeof payload.guardrails === "object" && !Array.isArray(payload.guardrails) ? payload.guardrails : {};
   const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, brain_folder: payload.brainFolder || null, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ?? null, custom_system_prompt: payload.systemPrompt ?? null, logo_url: payload.logoUrl ?? null, accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null, webhook_url: webhookUrlFor(payload.slug, request), guardrails: existingGuardrails };
+  // Absent means "leave alone", not "clear". Every other field here is sent by the one form that owns
+  // it, but the theme panel auto-saves a partial payload of its own, and a channel id silently emptied
+  // by a logo upload would not be noticed until a Monday brief went nowhere. Normalised on the way in
+  // rather than on the way out, because pasting the URL out of the address bar is the common case.
+  if ("slackInternalChannelId" in payload) record.slack_internal_channel_id = normalizeChannelId(payload.slackInternalChannelId) || null;
+  if ("slackExternalChannelId" in payload) record.slack_external_channel_id = normalizeChannelId(payload.slackExternalChannelId) || null;
   if (typeof payload.heyreachApiKey === "string" && payload.heyreachApiKey.trim()) record.heyreach_api_key_ciphertext = payload.heyreachApiKey.trim();
   const previousSlug = typeof payload.previousSlug === "string" ? payload.previousSlug.trim() : "";
   const id = typeof payload.id === "string" ? payload.id.trim() : "";
@@ -44,6 +51,8 @@ export async function POST(request: Request) {
       delete legacyRecord.timezone;
       delete legacyRecord.website_url;
       delete legacyRecord.brain_folder;
+      delete legacyRecord.slack_internal_channel_id;
+      delete legacyRecord.slack_external_channel_id;
       patched = await fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(legacyRecord) });
     }
     const patchText = await patched.text();
@@ -61,6 +70,8 @@ export async function POST(request: Request) {
     delete legacyRecord.timezone;
     delete legacyRecord.website_url;
     delete legacyRecord.brain_folder;
+    delete legacyRecord.slack_internal_channel_id;
+    delete legacyRecord.slack_external_channel_id;
     response = await fetch(`${url}/rest/v1/rr_workspaces?on_conflict=slug`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(legacyRecord) });
   }
   const body = await response.text();

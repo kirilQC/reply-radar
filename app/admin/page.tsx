@@ -10,6 +10,7 @@ import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import { defaultFollowUpPrompt, defaultIcpPrompt, FOLLOW_UP_TEMPLATES, ICP_TEMPLATES, MIN_CLIENT_BRIEF_LENGTH, type ScoringTemplate, templateLabel } from "../lib/scoring-templates";
 import { brainFolderFor } from "../../shared/brain-link.mjs";
+import { looksLikeChannelId, normalizeChannelId } from "../lib/slack-channel";
 
 /** What the breadcrumb calls each configuration section. */
 const adminSectionLabels: Record<string, string> = {
@@ -40,6 +41,8 @@ type ClientWorkspace = {
   logoUrl?: string;
   website?: string;
   brainFolder?: string;
+  slackInternalChannelId?: string;
+  slackExternalChannelId?: string;
   anthropicModel?: string;
   systemPrompt?: string;
   webhookUrl?: string;
@@ -86,7 +89,7 @@ export default function AdminPage() {
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))] ?? { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced" };
-  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "" });
+  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "" });
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -109,6 +112,7 @@ export default function AdminPage() {
             lastSync: String(item.last_successful_poll_at ?? "not synced"), createdAt: String(item.created_at ?? ""),
             brief: String(item.client_brief ?? ""), apiKey: "", apiKeyMasked: String(item.heyreach_api_key_masked ?? ""), timezone: String(item.timezone ?? "America/New_York"), website: String(item.website_url ?? ""), anthropicModel: String(item.anthropic_model ?? ""), systemPrompt: String(item.custom_system_prompt ?? ""), webhookUrl: String(item.webhook_url ?? ""), keyConfigured: Boolean(item.key_configured),
             logoUrl: String(item.logo_url ?? ""), brainFolder: String(item.brain_folder ?? ""),
+            slackInternalChannelId: String(item.slack_internal_channel_id ?? ""), slackExternalChannelId: String(item.slack_external_channel_id ?? ""),
             guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {},
           }));
           setWorkspaceClients(hydratedClients);
@@ -133,7 +137,7 @@ export default function AdminPage() {
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "" });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -152,7 +156,7 @@ export default function AdminPage() {
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
     const mutationIdentity = isNewWorkspace ? { create: true } : { id: client.id, previousSlug: client.slug };
     const nextGuardrails = { ...(client.guardrails ?? {}), messaging_doc_url: workspaceDraft.messagingDocUrl.trim() };
-    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
+    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
     if (!response?.ok) {
       const detail = await response?.json().catch(() => ({}));
       setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
@@ -163,7 +167,7 @@ export default function AdminPage() {
     const payload = await response.json().catch(() => ({}));
     const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] : null;
     const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
     setWorkspaceClients(next);
     setWorkspaceDraft((draft) => ({ ...draft, apiKey: "" }));
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
@@ -220,6 +224,16 @@ export default function AdminPage() {
       .catch(() => setBrainFolders([]));
   }, [active]);
   const guessedFolder = brainFolderFor({ slug: workspaceDraft.slug, name: workspaceDraft.name, brainFolder: "" }, brainFolders) as { folder: string; how: string };
+  const slackChannelNote = (() => {
+    const internal = normalizeChannelId(workspaceDraft.slackInternal);
+    const external = normalizeChannelId(workspaceDraft.slackExternal);
+    const wrong = [internal && !looksLikeChannelId(internal) ? "internal" : "", external && !looksLikeChannelId(external) ? "external" : ""].filter(Boolean);
+    if (wrong.length) return `That does not look like a channel id (${wrong.join(" and ")}). Open the channel in Slack, choose View channel details, and copy the id from the bottom — or paste the channel URL here and the id will be read out of it.`;
+    if (internal && internal === external) return "Both fields hold the same channel. The internal channel is where the team talks and the external one is shared with the client — briefs written for one are not safe to post in the other.";
+    if (internal && external) return "The internal channel is read for what the team committed to. The external channel is read for anything the client asked that nobody answered. The Reply Radar bot has to be invited to both.";
+    if (internal || external) return `Only the ${internal ? "internal" : "external"} channel is set. A brief will still be written, but it will be missing whatever the other channel would have told it.`;
+    return "Briefs need at least one channel. Paste the channel id, or the channel URL, and the id will be read out of it.";
+  })();
   const accentColor = accentOverrides[client.slug] ?? client.tone;
   const workspaceLogo = logos[client.slug] ?? client.logoUrl ?? "";
   const setAccentColor = (value: string) =>
@@ -507,6 +521,23 @@ export default function AdminPage() {
                     </section>
                   </div>}
                     {workspaceOpen && <div className="client-config-sections">
+                    <section className="admin-panel client-config-section" id="client-slack">
+                      <div className="panel-heading"><div><h2>Slack channels</h2><p>Where this client&apos;s briefs are read and posted.</p></div><span className="saved-dot">● Auto-saved</span></div>
+                      <div className="field-row">
+                        <label className="field-label">
+                          INTERNAL CHANNEL ID
+                          <input value={workspaceDraft.slackInternal} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slackInternal: event.target.value }))} placeholder="C09ABCDEF" />
+                        </label>
+                        <label className="field-label">
+                          EXTERNAL CHANNEL ID
+                          <input value={workspaceDraft.slackExternal} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slackExternal: event.target.value }))} placeholder="C09XYZ123" />
+                        </label>
+                      </div>
+                      {/* Named plainly because both mistakes here are silent. A channel name instead of an
+                          id saves without complaint and resolves to nothing; the two ids the wrong way
+                          round sends the team's own notes to the client. */}
+                      <p className="slack-channel-note">{slackChannelNote}</p>
+                    </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
                       <div className="logo-drop">{workspaceLogo ? <img className="logo-sample" src={workspaceLogo} alt={`${client.name} logo`} /> : <div className="logo-sample" style={{ background: accentColor }}>{client.name[0] || "?"}</div>}<div><strong>Upload client logo</strong><small>SVG, PNG, JPG · max 2MB</small></div><button className="secondary-button" type="button" onClick={chooseLogo}>Choose file</button><input ref={logoInput} type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={handleLogo} /></div>
@@ -1297,7 +1328,9 @@ type AiConfig = {
   defaultSentimentPrompt: string;
   icpDocPrompt: string;
   defaultIcpDocPrompt: string;
-  workspaceAi: { name: string; slug: string; brief: string; model: string; icpPrompt: string; followUpPrompt: string; replyPrompt: string; sentimentPrompt: string; followUpThreshold?: number } | null;
+  morningBriefPrompt: string;
+  defaultMorningBriefPrompt: string;
+  workspaceAi: { name: string; slug: string; brief: string; model: string; icpPrompt: string; followUpPrompt: string; replyPrompt: string; sentimentPrompt: string; morningBriefPrompt?: string; followUpThreshold?: number } | null;
   workspaces: Array<{ id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; hasBrief: boolean }>;
 };
 type PastReplyRef = { body: string; senderName: string; leadName: string; campaignName: string };
@@ -1511,6 +1544,9 @@ function AiHubView() {
   const [icpDoc, setIcpDoc] = useState("");
   const [icpDocSaved, setIcpDocSaved] = useState(false);
   const [icpDocError, setIcpDocError] = useState("");
+  const [briefPrompt, setBriefPrompt] = useState("");
+  const [briefSaved, setBriefSaved] = useState(false);
+  const [briefError, setBriefError] = useState("");
   const [clientBrief, setClientBrief] = useState("");
   const [icpPrompt, setIcpPrompt] = useState("");
   const [followUpPrompt, setFollowUpPrompt] = useState("");
@@ -1556,6 +1592,7 @@ function AiHubView() {
         setConfig(payload);
         setGlobalPrompt(String(payload.globalSentimentPrompt ?? ""));
         setIcpDoc(String(payload.icpDocPrompt ?? ""));
+        setBriefPrompt(String(payload.morningBriefPrompt ?? ""));
         if (payload.workspaceAi) {
           setClientBrief(payload.workspaceAi.brief);
           // A client with nothing stored is shown the same defaults the scoring routes fall back to,
@@ -1639,6 +1676,23 @@ function AiHubView() {
     }
     setIcpDocSaved(true);
     setTimeout(() => setIcpDocSaved(false), 2500);
+  };
+
+  /** The instructions every morning brief is written on, unless a client overrides them. */
+  const saveBriefPrompt = async () => {
+    setBriefError("");
+    const response = await fetch("/api/ai/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "save_morning_brief_prompt", value: briefPrompt }),
+    }).catch(() => null);
+    const payload = (await response?.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!payload?.ok) {
+      setBriefError(payload?.error || "Could not save the prompt.");
+      return;
+    }
+    setBriefSaved(true);
+    setTimeout(() => setBriefSaved(false), 2500);
   };
 
   const saveClientAi = async () => {
@@ -1751,6 +1805,19 @@ function AiHubView() {
         </label>
         {icpDocError && <p className="form-error" role="alert">{icpDocError}</p>}
         <button className="text-button" onClick={() => setIcpDoc(config?.defaultIcpDocPrompt ?? "")}>Reset to default prompt</button>
+      </section>
+
+      {/* The figures a brief quotes are computed before the model is called, so this prompt decides
+          what gets raised first and what goes unsaid — not what the numbers are. */}
+      <section className="admin-panel">
+        <div className="panel-heading"><div><h2>Morning brief prompt</h2><p>Run by the morning brief on the Slack tab. The client’s campaign figures and both Slack channels are handed over with it.</p></div>
+          <button className="primary-button" onClick={saveBriefPrompt}>{briefSaved ? "Saved ✓" : "Save prompt"}</button>
+        </div>
+        <label className="field-label">MORNING BRIEF PROMPT
+          <textarea value={briefPrompt} onChange={(event) => setBriefPrompt(event.target.value)} rows={16} style={{ minHeight: 360 }} />
+        </label>
+        {briefError && <p className="form-error" role="alert">{briefError}</p>}
+        <button className="text-button" onClick={() => setBriefPrompt(config?.defaultMorningBriefPrompt ?? "")}>Reset to default prompt</button>
       </section>
     </>}
 

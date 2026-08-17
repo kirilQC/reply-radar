@@ -4986,6 +4986,7 @@ span.brain-mark.is-lg {
   .lead-database-link,
   .linkedin,
   .brain-link-note,
+  .slack-channel-note,
   .database-field-value {
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -5395,5 +5396,119 @@ span.brain-mark.is-lg {
   .messaging-rates small {
     margin-bottom: 0;
     margin-right: 8px;
+  }
+}
+
+/* ── Slack ───────────────────────────────────────────────────────────────────────────────────────
+ *
+ * Two unrelated screens: the channel-id note on a client's configuration page, and the morning brief
+ * hub. The hub borrows `reports.css` wholesale for its cards and grids, so only the parts the reports
+ * hub has no equivalent of are here.
+ */
+
+/* Same shape as `.brain-link-note` beside it, for the same reason: a consequence that is invisible
+   until it bites has to be stated in words next to the field that causes it. */
+.slack-channel-note {
+  margin: -2px 0 4px;
+  color: var(--muted-2);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+/* Three mutually exclusive answers to "where does this go", each carrying the channel it would use.
+   Not a <select>: the destination that would post the team's own notes to a client is worth reading
+   in full before it is picked, and a collapsed select shows one line. */
+.slack-destinations {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.slack-destination {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 13px 14px;
+  border-radius: 11px;
+  border: 1px solid var(--report-line);
+  background: var(--report-surface);
+  color: var(--report-ink);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.slack-destination:hover:not(:disabled) {
+  border-color: var(--report-brand);
+}
+
+.slack-destination.is-active {
+  border-color: var(--report-brand);
+  /* A tint rather than a filled button: the three sit side by side and a solid one would read as the
+     only control on the row rather than as the chosen one of three. */
+  background: color-mix(in srgb, var(--report-brand) 12%, var(--report-surface));
+}
+
+.slack-destination:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.slack-destination strong {
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.slack-destination span {
+  font-size: 10.5px;
+  color: var(--report-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.slack-run-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.slack-run-note {
+  font-size: 11px;
+  color: var(--report-ink-soft);
+  max-width: 52ch;
+  line-height: 1.5;
+}
+
+/* The brief as Slack will receive it, wrapped rather than scrolled sideways: the asterisks and the
+   line breaks are the thing being checked, and a horizontal scrollbar hides exactly those. */
+.slack-brief-body {
+  margin: 0;
+  padding: 18px 20px;
+  border-radius: 12px;
+  border: 1px solid var(--report-line);
+  background: var(--report-inset);
+  color: var(--report-ink);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.68;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .slack-destinations {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .slack-run-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .slack-run-row .config-generate {
+    width: 100%;
   }
 }

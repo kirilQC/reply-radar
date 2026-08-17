@@ -23,6 +23,11 @@ create table if not exists rr_workspaces (
   timezone text not null default 'America/New_York', website_url text,
   -- Which QC Brain folder this client is, when the name-based guess is wrong. See shared/brain-link.mjs.
   brain_folder text,
+  -- The two Slack channels this client has: the one the team talks in, and the one the client is in.
+  -- Plain columns rather than `guardrails` entries because the brief scheduler filters on them, and a
+  -- channel id is configuration a teammate pastes in, not an AI guardrail. Slack ids, not names — a
+  -- channel renamed in Slack keeps its id, and a name would silently stop resolving.
+  slack_internal_channel_id text, slack_external_channel_id text,
   last_webhook_received_at timestamptz, last_successful_poll_at timestamptz, last_reconciled_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
@@ -279,6 +284,34 @@ create table if not exists rr_daily_stats (
   primary key (workspace_id, day, sender_id)
 );
 
+-- One row per brief that was written, whether it reached Slack or not.
+--
+-- Not `rr_sync_runs`, which is swept at 48 hours: the whole value of a project-management brief is
+-- that it can say "this has slipped three weeks running", and a two-day memory cannot. The rendered
+-- text is kept as well as the outcome, so the Slack tab can show what was actually said rather than
+-- only that something was, and so a brief can be re-read without spending a model call to rebuild it.
+create table if not exists rr_slack_briefs (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references rr_workspaces(id) on delete cascade,
+  -- Which automation wrote it. One column now, because "morning brief" is the only card on the tab,
+  -- but the table is the log for all of them and a second automation should not need a second table.
+  automation text not null default 'morning_brief',
+  -- 'preview' when nobody but the operator saw it, 'test' for the nominated test channel, 'internal'
+  -- or 'external' once it is going to the client's own channels. The distinction is the audit trail
+  -- for the one mistake that matters here, which is a half-tuned brief reaching a client.
+  destination text not null default 'preview',
+  slack_channel_id text,
+  -- Slack's own message timestamp, which is also its id. Null when nothing was posted.
+  slack_message_ts text,
+  body text not null default '',
+  -- The deterministic figures the model was given, kept so a wrong brief can be told apart from
+  -- wrong inputs without re-running anything.
+  signals jsonb not null default '{}'::jsonb,
+  status text not null default 'success',
+  error_text text,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists rr_workspaces_created_idx on rr_workspaces(created_at);
 create index if not exists rr_profile_workspaces_workspace_idx on rr_profile_workspaces(workspace_id);
 -- rr_leads is filtered by workspace and by profile URL on every ingestion pass.
@@ -311,6 +344,8 @@ create index if not exists rr_campaign_stats_workspace_idx on rr_campaign_stats(
 -- The worker picks the client whose analytics are stalest by this column.
 create index if not exists rr_campaign_stats_refreshed_idx on rr_campaign_stats(refreshed_at asc);
 create index if not exists rr_daily_stats_workspace_day_idx on rr_daily_stats(workspace_id, day desc);
+-- The Slack tab asks "when did this client last get a brief" once per client per open page.
+create index if not exists rr_slack_briefs_workspace_created_idx on rr_slack_briefs(workspace_id, automation, created_at desc);
 
 create or replace function rr_set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at = now(); return new; end; $$;
 drop trigger if exists rr_workspaces_updated_at on rr_workspaces;

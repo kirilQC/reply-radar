@@ -1,0 +1,233 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
+/**
+ * The morning brief: what a project manager would say about one client on a Monday.
+ *
+ * ── What makes this trustworthy, and what would kill it ─────────────────────────────────────────
+ * A brief that nags about work already finished, or invents a deadline nobody set, gets muted inside a
+ * fortnight — and a muted brief is worse than no brief, because the numbers in it stop being checked
+ * while everyone assumes they still are. Two things guard against that, and they are both structural
+ * rather than a matter of prompt wording:
+ *
+ * 1. Every number the brief states is computed here, in `gatherSignals`, and handed to the model as
+ *    fact. The model is never asked to count anything, work out a percentage, or judge whether sending
+ *    is down. It is asked to explain and prioritise figures that are already true. A model that cannot
+ *    invent a number cannot be wrong about one.
+ * 2. Every claim about a person has to point at something they said. The transcript is supplied with
+ *    names and days attached, and the prompt requires an attribution for each commitment raised. A
+ *    commitment the model cannot attribute is one it made up, and the prompt says to drop it.
+ *
+ * ── Why the figures are not the interesting part ────────────────────────────────────────────────
+ * The analytics page already shows the figures, better than a Slack message could. The reason to write
+ * this at all is the join: "Willow's sends stopped on Tuesday and nobody in the channel has mentioned
+ * Willow since Monday" is a sentence neither the dashboard nor the channel can produce alone, and it is
+ * the one worth waking up to.
+ */
+
+/**
+ * ── Nothing is imported here, on purpose ────────────────────────────────────────────────────────
+ * Everything that touches Slack, Supabase or Anthropic lives in `morning-brief-run.ts`. This file is
+ * arithmetic and wording, which means the tests can run it directly — and the arithmetic is the part
+ * that has to be right, because a figure in a brief is read by the people least likely to check it.
+ */
+
+/** The global prompt, and one variant per client that overrides it. Mirrors the sentiment prompt. */
+export const MORNING_BRIEF_PROMPT_PREFIX = "morning_brief_prompt";
+export const morningBriefPromptKey = (slug?: string | null) =>
+  slug ? `${MORNING_BRIEF_PROMPT_PREFIX}_${slug}` : MORNING_BRIEF_PROMPT_PREFIX;
+
+/** How far back the brief looks. A week, so a Monday brief covers the week that just ended. */
+export const BRIEF_WINDOW_DAYS = 7;
+
+export const DEFAULT_MORNING_BRIEF_PROMPT = `You are the project manager for one client of a B2B outbound growth agency. You are writing the short brief that lands in the team's Slack channel first thing in the morning. The people reading it ran this account last week and will run it today: they do not need to be told what outbound is, what the client sells, or what a connection request is.
+
+You will be given, for one client:
+- **Figures**, computed from the agency's own records. These are facts. Never restate a figure differently from how it is given, never compute a new one, and never estimate.
+- **The internal channel**, where the team talks about this client.
+- **The external channel**, shared with the client, if there is one.
+- **The client brief**, which may state what this account is supposed to be doing.
+
+## What to write
+
+Write between 120 and 300 words as Slack mrkdwn. Lead with the thing that would change what somebody does today. If nothing needs doing, say that in one line and stop — a short honest brief is the point, and padding one out is how it stops being read.
+
+Use these sections, and drop any that has nothing real in it:
+
+*Needs a decision today* — anything blocked, waiting on us, or about to slip. One line each, naming who it is on.
+*Slipped* — commitments from the internal channel that had a date and did not land. Name the person and quote enough of what they said to be recognisable. If a message says it was finished, it is finished — do not raise it.
+*The numbers* — only figures that changed meaningfully or that contradict what the channel says. Not a recap of the dashboard.
+*The client is waiting* — anything asked in the external channel that nobody answered.
+
+## Rules
+
+- Every commitment you raise must be attributable to a message you were given. Say who said it and roughly when. If you cannot point at the message, leave it out.
+- Do not invent deadlines. A deadline exists only if somebody stated one, or the client brief states one. "Should probably be done soon" is not a deadline and must not be written as one.
+- Where the figures and the channel disagree, that disagreement is the most valuable line in the brief. Say both sides plainly: what the records show, and what the channel said.
+- Never guess at why something happened. "Sends stopped on Wednesday" is useful. "Sends stopped on Wednesday, probably because of the LinkedIn limits" is not, unless somebody said so.
+- Silence is a finding, not an absence. A client nobody has mentioned in a week is worth one line.
+- Do not thank anyone, do not encourage anyone, do not close with a summary or a question. End on the last finding.
+- Slack mrkdwn only: *bold* with single asterisks, _italic_ with underscores, • or - for bullets. No markdown headings, no tables, no code fences, and no @-mentions — the brief must not ping anybody.`;
+
+export type BriefWorkspace = {
+  id: string;
+  name: string;
+  slug: string;
+  timezone?: string | null;
+  client_brief?: string | null;
+  slack_internal_channel_id?: string | null;
+  slack_external_channel_id?: string | null;
+};
+
+type Row = Record<string, unknown>;
+type Reader = (path: string) => Promise<unknown>;
+
+export type BriefSignals = {
+  campaigns: { total: number; active: number; paused: number; names: { name: string; status: string; sent: number; accepted: number; replies: number; pending: number }[] };
+  sending: { thisWeek: number; lastWeek: number; changePercent: number | null; lastDayWithSends: string | null; quietDays: number };
+  replies: { thisWeek: number; lastWeek: number };
+  acceptance: { thisWeek: number | null; lastWeek: number | null };
+  // `dayCount` is how many days were on record at all, which is the only honest way to tell "nothing
+  // was sent" apart from "nothing has been collected". `statsAgeHours` comes from the campaign rows and
+  // is advisory: it can be unknown while the daily figures are perfectly good.
+  staleness: { statsAgeHours: number | null; dayCount: number };
+};
+
+const int = (value: unknown) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+const rate = (accepted: number, sent: number) => (sent > 0 ? Math.round((accepted / sent) * 1000) / 10 : null);
+
+/**
+ * Everything the brief is allowed to state as fact, computed rather than asked for.
+ *
+ * The two windows are seven days each, back to back, because a figure with nothing to compare it
+ * against cannot say whether anything changed — and "has anything changed" is the only question a
+ * recurring brief is really asking. `quietDays` is counted from the last day with any sends at all
+ * rather than from today, so a client that stopped a fortnight ago reads as a fortnight, not as zero.
+ */
+export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Promise<BriefSignals> {
+  const filter = `workspace_id=eq.${encodeURIComponent(workspace.id)}`;
+  const [campaignRows, dailyRows] = await Promise.all([
+    read(`rr_campaign_stats?select=name,status,connections_sent,connections_accepted,replies,leads_pending,refreshed_at&${filter}&order=connections_sent.desc&limit=60`),
+    read(`rr_daily_stats?select=day,connections_sent,connections_accepted,replies&${filter}&sender_id=eq.&order=day.desc&limit=21`),
+  ]);
+  const campaigns = Array.isArray(campaignRows) ? (campaignRows as Row[]) : [];
+  const days = Array.isArray(dailyRows) ? (dailyRows as Row[]) : [];
+
+  const isActive = (status: unknown) => /active|running|in ?progress/i.test(String(status ?? ""));
+  const isPaused = (status: unknown) => /pause|stopped|hold/i.test(String(status ?? ""));
+
+  // `days` is newest first, so the first seven rows are the recent window and the next seven the one
+  // before it. Rows are only written for days HeyReach reported, so a gap is a day with no sending.
+  const window = (from: number, to: number) => days.slice(from, to);
+  const sum = (rows: Row[], column: string) => rows.reduce((total, row) => total + int(row[column]), 0);
+  const recent = window(0, 7);
+  const previous = window(7, 14);
+  const thisWeek = sum(recent, "connections_sent");
+  const lastWeek = sum(previous, "connections_sent");
+
+  const withSends = days.find((row) => int(row.connections_sent) > 0);
+  const lastDayWithSends = withSends ? String(withSends.day ?? "") : null;
+  const quietDays = lastDayWithSends
+    ? Math.max(0, Math.round((Date.now() - Date.parse(`${lastDayWithSends}T12:00:00Z`)) / 86_400_000))
+    : days.length;
+
+  const freshest = campaigns.reduce((newest, row) => Math.max(newest, Date.parse(String(row.refreshed_at ?? "")) || 0), 0);
+
+  return {
+    campaigns: {
+      total: campaigns.length,
+      active: campaigns.filter((row) => isActive(row.status)).length,
+      paused: campaigns.filter((row) => isPaused(row.status)).length,
+      // The ten biggest by volume. A client with sixty campaigns has a long tail of finished ones that
+      // would fill the prompt without changing a single line of the brief.
+      names: campaigns.slice(0, 10).map((row) => ({
+        name: String(row.name ?? ""),
+        status: String(row.status ?? "unknown"),
+        sent: int(row.connections_sent),
+        accepted: int(row.connections_accepted),
+        replies: int(row.replies),
+        pending: int(row.leads_pending),
+      })),
+    },
+    sending: {
+      thisWeek,
+      lastWeek,
+      changePercent: lastWeek > 0 ? Math.round(((thisWeek - lastWeek) / lastWeek) * 100) : null,
+      lastDayWithSends,
+      quietDays,
+    },
+    replies: { thisWeek: sum(recent, "replies"), lastWeek: sum(previous, "replies") },
+    acceptance: {
+      thisWeek: rate(sum(recent, "connections_accepted"), thisWeek),
+      lastWeek: rate(sum(previous, "connections_accepted"), lastWeek),
+    },
+    staleness: { statsAgeHours: freshest ? Math.round((Date.now() - freshest) / 3_600_000) : null, dayCount: days.length },
+  };
+}
+
+/**
+ * The figures as prose, because a model reading JSON writes about JSON.
+ *
+ * Every line is stated in the form the brief should repeat it in, and the ones that are unknown say so
+ * rather than being dropped — a missing line reads as a zero, and "no figures have been collected yet"
+ * is a completely different brief from "nothing was sent".
+ */
+export function signalsAsText(signals: BriefSignals): string {
+  const lines: string[] = [];
+  const { campaigns, sending, replies, acceptance, staleness } = signals;
+
+  // "Nothing has been collected" is the only case where the figures must be withheld, and it is not the
+  // same as "no campaign row carried a timestamp": the daily figures are written by their own sync and
+  // are perfectly good on their own. Gating on the timestamp suppressed a real week of sending.
+  if (!campaigns.total && !staleness.dayCount) {
+    lines.push("No figures have ever been collected for this client, so nothing below is known. Say so rather than reporting zeros.");
+    return lines.join("\n");
+  }
+  if (staleness.statsAgeHours !== null && staleness.statsAgeHours > 36) lines.push(`These figures were last collected ${staleness.statsAgeHours} hours ago, so they may be behind.`);
+
+  if (!campaigns.total) lines.push("No campaign records have been collected for this client, so which campaigns these figures came from is not known.");
+  else lines.push(`Campaigns: ${campaigns.total} total, ${campaigns.active} active, ${campaigns.paused} paused or stopped.`);
+  for (const campaign of campaigns.names) {
+    const accepted = rate(campaign.accepted, campaign.sent);
+    lines.push(`- "${campaign.name}" (${campaign.status}): ${campaign.sent} sent, ${campaign.accepted} accepted${accepted === null ? "" : ` (${accepted}%)`}, ${campaign.replies} replies, ${campaign.pending} leads not yet contacted.`);
+  }
+
+  lines.push(`Connection requests sent in the last 7 days: ${sending.thisWeek}. In the 7 days before that: ${sending.lastWeek}.`);
+  if (sending.changePercent !== null) lines.push(`That is a change of ${sending.changePercent > 0 ? "+" : ""}${sending.changePercent}% week on week.`);
+  if (!sending.lastDayWithSends) lines.push("There is no record of any sending at all in the last three weeks.");
+  else if (sending.quietDays >= 2) lines.push(`Nothing has been sent since ${sending.lastDayWithSends} — that is ${sending.quietDays} days quiet.`);
+
+  lines.push(`Replies in the last 7 days: ${replies.thisWeek}. In the 7 days before that: ${replies.lastWeek}.`);
+  if (acceptance.thisWeek !== null) lines.push(`Acceptance rate over the last 7 days: ${acceptance.thisWeek}%${acceptance.lastWeek === null ? "" : `, against ${acceptance.lastWeek}% the week before`}.`);
+
+  return lines.join("\n");
+}
+
+export type BriefInputs = {
+  signals: BriefSignals;
+  internal: { channelId: string; messages: number; text: string; error?: string };
+  external: { channelId: string; messages: number; text: string; error?: string };
+};
+
+/** What the model is shown, in the order it should read it. */
+export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs): string {
+  const timezone = workspace.timezone || "America/New_York";
+  const today = new Date().toLocaleDateString("en-US", { timeZone: timezone, weekday: "long", month: "long", day: "numeric" });
+  const brief = String(workspace.client_brief ?? "").trim();
+  const section = (channel: BriefInputs["internal"], label: string) => {
+    if (!channel.channelId) return `# The ${label} channel\n\nNo ${label} channel is configured for this client.`;
+    if (channel.error) return `# The ${label} channel\n\nThis channel could not be read: ${channel.error}\nSay so in one line at the end of the brief.`;
+    if (!channel.messages) return `# The ${label} channel\n\nNothing has been said in this channel in the last ${BRIEF_WINDOW_DAYS} days.`;
+    return `# The ${label} channel (last ${BRIEF_WINDOW_DAYS} days, ${channel.messages} messages)\n\n${channel.text}`;
+  };
+  return [
+    `# Client\n\n${workspace.name}. Today is ${today} in ${timezone}.`,
+    `# Figures\n\nThese are facts. Do not restate them differently and do not compute new ones.\n\n${signalsAsText(inputs.signals)}`,
+    section(inputs.internal, "internal"),
+    section(inputs.external, "external"),
+    // Last, and trimmed: the brief is thousands of words of standing context, and it is the least
+    // time-sensitive thing here. It is included because it is the only place an expectation like
+    // "should be running three campaigns" is written down.
+    brief ? `# Client brief\n\nStanding context. Anything in here that states what this account is supposed to be doing counts as an expectation the figures above can be measured against.\n\n${brief.slice(0, 8_000)}` : "",
+  ].filter(Boolean).join("\n\n---\n\n");
+}

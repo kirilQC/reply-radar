@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import { DEFAULT_SENTIMENT_PROMPT } from "../../../lib/reply-sentiment";
 import { DEFAULT_ICP_DOC_PROMPT, ICP_DOC_PROMPT_KEY } from "../../../lib/brain-icp";
+import { DEFAULT_MORNING_BRIEF_PROMPT, MORNING_BRIEF_PROMPT_PREFIX, morningBriefPromptKey } from "../../../lib/morning-brief";
 import { explainConfigError, readConfig, readConfigPrefix, writeConfig } from "../../../lib/app-config";
 
 type Row = Record<string, unknown>;
@@ -38,6 +39,9 @@ export async function GET(request: Request) {
     // from its own endpoint because this is the screen that edits it, and a second round trip to fill
     // one textarea is a second thing that can fail.
     const icpDoc = asPrompt(await readConfig(ICP_DOC_PROMPT_KEY).catch(() => "")) || DEFAULT_ICP_DOC_PROMPT;
+    // Same shape as the sentiment prompt: one global set of instructions, and a per-client override for
+    // the client whose briefs need to read differently. Read as a prefix so both arrive in one round trip.
+    const briefPrompts = await readConfigPrefix(MORNING_BRIEF_PROMPT_PREFIX).catch(() => new Map<string, unknown>());
 
     const globalPrompt = asPrompt(prompts.get(SENTIMENT_PREFIX)) || DEFAULT_SENTIMENT_PROMPT;
     const workspacePrompt = workspace ? asPrompt(prompts.get(sentimentKey(workspace))) || null : null;
@@ -65,6 +69,7 @@ export async function GET(request: Request) {
           replyPrompt: guardrails.reply_prompt ?? "",
           followUpThreshold: Number(guardrails.follow_up_threshold ?? 50),
           sentimentPrompt: workspacePrompt ?? "",
+          morningBriefPrompt: asPrompt(briefPrompts.get(morningBriefPromptKey(workspace))),
         };
       }
     }
@@ -82,6 +87,8 @@ export async function GET(request: Request) {
       defaultSentimentPrompt: DEFAULT_SENTIMENT_PROMPT,
       icpDocPrompt: icpDoc,
       defaultIcpDocPrompt: DEFAULT_ICP_DOC_PROMPT,
+      morningBriefPrompt: asPrompt(briefPrompts.get(morningBriefPromptKey())) || DEFAULT_MORNING_BRIEF_PROMPT,
+      defaultMorningBriefPrompt: DEFAULT_MORNING_BRIEF_PROMPT,
       workspaceAi,
       workspaces: allWorkspaces,
     });
@@ -106,6 +113,21 @@ export async function POST(request: Request) {
       try {
         const scope = typeof workspace === "string" && workspace.trim() ? workspace.trim() : null;
         await writeConfig(sentimentKey(scope), typeof value === "string" ? value : "");
+      } catch (error) {
+        return NextResponse.json(
+          { ok: false, error: explainConfigError(error, "Could not save the prompt.") },
+          { status: 502 },
+        );
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "save_morning_brief_prompt") {
+      // A blank value is a deletion, not an empty prompt: clearing a client's override should fall back
+      // to the global instructions, and saving "" as the override would instead send the model nothing.
+      try {
+        const scope = typeof workspace === "string" && workspace.trim() ? workspace.trim() : null;
+        await writeConfig(morningBriefPromptKey(scope), typeof value === "string" ? value.trim() : "");
       } catch (error) {
         return NextResponse.json(
           { ok: false, error: explainConfigError(error, "Could not save the prompt.") },
