@@ -157,6 +157,9 @@ Server-side only. The Supabase service-role key must never reach a browser bundl
 | `AI_BATCH_SIZE` | `10` | Conversations through the AI pipeline per client per cycle. |
 | `AI_CONCURRENCY` | `4` | Conversations analysed at once. |
 | `AI_CYCLE_BUDGET_SECONDS` | `600` | When the budget runs out the worker remembers which client it stopped at and resumes there, so a backlog at one client cannot starve the others. |
+| `RECONCILE_MAX_INGEST` | `25` | Missing conversations recovered per client per nightly reconciliation pass. Each one costs a HeyReach history fetch, a campaign-membership lookup and an enrichment attempt, so a real backlog drains over a few nights rather than arriving as one bill. Raise it to clear a backlog faster. |
+| `RECONCILE_BUDGET_SECONDS` | `420` | How long one client's reconciliation may take before it stops and stamps what it managed. |
+| `SYNC_RUN_RETENTION_HOURS` | `48` | Shelf life of the worker's own log in `rr_sync_runs`, swept hourly. AI Ark enrichment rows are kept 14 days regardless, because the health page charts them. |
 | `HEYREACH_API_BASE` | `https://api.heyreach.io/api/public` | Rarely changed. |
 | `WORKER_SERVICE_URL` | — | Optional, for health visibility. |
 

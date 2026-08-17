@@ -93,11 +93,31 @@ const MAX_TOKENS = 16_384;
  */
 const THINKING_BUDGET = 3_072;
 /**
- * Long-running by design. Vercel's limit depends on the plan; if a deployment is ever rejected for
- * this value, lower it rather than trimming MAX_TURNS — the stream degrades gracefully at the cut,
- * and the tool budget is what makes the answers right.
+ * The real ceiling, not the one we would like.
+ *
+ * This said 300, which was wishful: Vercel's limit is a property of the plan and a larger number is
+ * **silently clamped**, not rejected. On Hobby the function is killed at sixty seconds — and because
+ * the answer is a stream, that kill arrives as a stream that simply stops. No error, no `done` frame;
+ * the UI sits there with a half-written table looking like a rendering bug. Thirty tool rounds and a
+ * "take two minutes to be right" instruction made that the likely outcome for exactly the ambitious
+ * questions this feature exists for.
+ *
+ * So the ceiling is stated honestly and the route now works to it: `TOOL_DEADLINE_MS` below stops it
+ * starting new tool rounds in time to write an answer from what it already has. Raise both together
+ * if this ever moves to a plan with a longer limit — the number here buys nothing on its own.
  */
-export const maxDuration = 300;
+export const maxDuration = 60;
+/**
+ * When to stop researching and start answering.
+ *
+ * A final turn of `FINAL_MAX_TOKENS` measures at roughly fifteen to twenty seconds, so this leaves
+ * that plus the round trip inside the sixty. Past this point the model is told it may not use tools,
+ * which forces it to answer from what it has gathered — a short answer that names its own gaps,
+ * instead of a long one that gets cut mid-sentence.
+ */
+const TOOL_DEADLINE_MS = 34_000;
+/** Enough for a summary and a table of what was found. Not enough to start a new investigation. */
+const FINAL_MAX_TOKENS = 4_096;
 
 type Row = Record<string, unknown>;
 type Block = Row;
@@ -333,15 +353,21 @@ async function streamTurn(
   apiKey: string,
   messages: Turn[],
   onEvent: (event: Row) => void,
+  options: { allowTools?: boolean } = {},
 ): Promise<{ content: Block[]; stopReason: string; usage: { input: number; output: number } }> {
+  // The tools stay declared even on the final turn — the conversation already contains tool_use and
+  // tool_result blocks, and a request that omits the definitions those blocks refer to is rejected.
+  // `tool_choice: none` is how the API says "answer in words", and it is compatible with thinking.
+  const finalTurn = options.allowTools === false;
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: MAX_TOKENS,
+      max_tokens: finalTurn ? FINAL_MAX_TOKENS : MAX_TOKENS,
       system: SYSTEM,
       tools: TOOLS,
+      ...(finalTurn ? { tool_choice: { type: "none" } } : {}),
       messages,
       // Temperature is deliberately unset: extended thinking requires the default.
       thinking: { type: "enabled", budget_tokens: THINKING_BUDGET },
@@ -408,12 +434,16 @@ export async function POST(request: Request) {
       };
 
       const steps: Array<{ tool: string; input: Row; ok: boolean; detail: string }> = [];
+      const startedAt = Date.now();
       let inputTokens = 0;
       let outputTokens = 0;
 
       try {
         for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-          const { content, usage, stopReason } = await streamTurn(apiKey, messages, send);
+          // Checked before the turn rather than after it: the point is to spend the remaining seconds
+          // writing instead of looking one more thing up and being killed with the answer unwritten.
+          const outOfTime = Date.now() - startedAt >= TOOL_DEADLINE_MS;
+          const { content, usage, stopReason } = await streamTurn(apiKey, messages, send, { allowTools: !outOfTime });
           inputTokens += usage.input;
           outputTokens += usage.output;
 
@@ -431,7 +461,9 @@ export async function POST(request: Request) {
             const cut =
               stopReason === "max_tokens"
                 ? "\n\n---\n\n*This answer was cut off at the length limit. Ask for a narrower slice — one client, or a shorter period — to see the rest.*"
-                : "";
+                : outOfTime
+                  ? `\n\n---\n\n*Answered from ${steps.length} lookup${steps.length === 1 ? "" : "s"} — the time limit for one question was reached, so it stopped researching to write this. Ask for a narrower slice to let it look further.*`
+                  : "";
             send({
               type: "done",
               reply: said ? `${said}${cut}` : "I could not find an answer to that.",

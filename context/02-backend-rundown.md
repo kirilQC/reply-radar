@@ -150,7 +150,7 @@ client brief is threaded into the ICP prompt *above* the criteria.
 
 ## The Render worker
 
-`worker/render-worker.mjs`, ~560 lines of plain ESM. One infinite loop:
+`worker/render-worker.mjs`, ~970 lines of plain ESM. One infinite loop:
 
 ```
 main()
@@ -165,11 +165,66 @@ main()
 2. For each client in `rr_workspaces` ordered by `created_at`: `syncWorkspace` — check the HeyReach
    key works, record the result.
 3. Write the `success` heartbeat row.
-4. **Every 24 hours** (`REFRESH_INTERVAL_MS`): `refreshAllConversations`, in batches of 20.
-5. **Every cycle**: `runAiPipeline`.
+4. **Every ~2.4 hours** (`REFRESH_LOOP_MS`): `refreshAllConversations`, 5 conversations per client.
+5. **Every hour** (`PURGE_LOOP_MS`): `purgeInboundLeads`.
+6. **Every hour** (`RETENTION_LOOP_MS`): `pruneSyncRuns` — see below.
+7. **One client per cycle**: `reconcileDueWorkspace` — see below.
+8. **Every cycle**: `runAiPipeline`.
 
 Each step is individually wrapped in try/catch and logged with a `reply_radar_*` event name, so one
 client's broken key cannot stop the cycle.
+
+### Reconciliation, and why the webhook is not enough
+
+Every conversation in the database arrived through the HeyReach webhook, and until this existed nothing
+else could discover one — the refresh pass only updates conversations already stored, and the sync only
+checks that the API key works. A webhook that is misconfigured, deleted in HeyReach, or that fails
+while the function is down therefore produces no error at all. It produces an inbox quietly missing
+replies.
+
+```
+reconcileDueWorkspace()
+  pick 1 client where last_reconciled_at is null or older than 24h, oldest first
+  reconcileWorkspace()
+    storedConversationIds()   // every heyreach_conversation_id we hold, `::` suffixes unpicked
+    declinedConversations()   // reconcile:<id> events ingestion previously turned away, with when
+    heyReachInbox()           // inbox/GetConversationsV2, up to 20 pages of 100
+    filter → newest first → up to RECONCILE_MAX_INGEST (25)
+    POST each to /api/webhooks/heyreach/<slug> with reply_radar_source: "reconciliation"
+    stamp rr_workspaces.last_reconciled_at, always
+```
+
+- **The schedule lives in `last_reconciled_at`, not in a variable.** Render restarts the worker on every
+  deploy, which would reset a module-level timer and re-run the whole roster each time.
+- **It is stamped even when the pass fails or runs out of budget.** The column is the queue as well as
+  the record; leaving it unstamped would pin one client at the front of it forever and the other
+  fourteen would never be reconciled at all. A backlog drains at 25 a night per client instead.
+- **Ingestion is reused, not reimplemented.** The block list, the outbound-only rule, campaign
+  attribution, enrichment and the identity rollup all live in `ingestHeyReachWebhook`, so the worker
+  posts to the webhook route rather than keeping a second copy of rules that decide who is in the inbox.
+- **A reconciled ingest does not stamp `last_webhook_received_at`.** It is us asking HeyReach, not
+  HeyReach telling us — stamping it would make a client whose webhook has been dead for a month report
+  healthy every night, which is the exact failure this pass exists to catch.
+- **Cold inbound and reply-less threads are filtered out before HeyReach is asked**, from the messages
+  already embedded in the list response — but only when that thread is complete (`messages.length >=
+  totalMessages`). On a truncated page the order cannot be trusted, so the judgement goes to ingestion,
+  which reads the real history. Skipping on incomplete evidence is how a real reply gets lost.
+- **A conversation ingestion declines is remembered** by its own `reconcile:<id>` event row, and only
+  put forward again if HeyReach shows a message newer than the refusal. Without that, every stranger who
+  ever cold-messaged a client would be fetched and rejected again nightly, at three API calls each.
+
+### Log retention
+
+`rr_sync_runs` takes 17 writes a cycle — two heartbeats plus one per client — which is about 12,000 rows
+a day for a table whose every reader asks for the newest 25. It had reached 90,000 rows. `pruneSyncRuns`
+deletes anything older than `SYNC_RUN_RETENTION_HOURS` (48) hourly, using `Prefer: count=exact` so the
+log says how much went.
+
+`source = 'ai_ark'` rows are held for 14 days instead: they are one per lead enrichment rather than per
+cycle, so they are not the volume, and the health page draws a fourteen-day enrichment usage chart from
+them. `supabase/schema.sql` carries the same policy as `rr_prune_sync_runs()`, but the pg_cron line to
+schedule it was only ever a comment — which is how the table got to 90,000 rows. The worker is what
+actually runs.
 
 ### The AI sweep
 

@@ -288,12 +288,16 @@ from rr_leads l
 left join rr_workspaces w on w.id = l.workspace_id;
 revoke all on rr_leads_export from anon, authenticated;
 
--- Retention for the worker's log. Heartbeat rows land once a minute and only the newest is ever
--- read, so they go after a day; the poll and sync rows feed the admin audit page's date filter, so
--- they get a fortnight. Without this the table reaches tens of thousands of rows and dwarfs the
--- actual data. Scheduled hourly via pg_cron:
+-- Retention for the worker's log: 48 hours, matching what the Render worker enforces hourly in
+-- `pruneSyncRuns`. The worker is what actually runs — this function is kept so the policy is stated
+-- in the schema and can be run by hand, and because the pg_cron line below was only ever a comment,
+-- which is how the table reached ninety thousand rows.
 --   select cron.schedule('rr-prune-sync-runs', '17 * * * *', 'select public.rr_prune_sync_runs()');
+--
+-- AI Ark rows are held for a fortnight rather than two days. They are one per lead enrichment instead
+-- of seventeen per poll cycle, so they are not the volume problem, and the health page draws a
+-- fourteen-day enrichment usage chart from them.
 create or replace function rr_prune_sync_runs() returns void language sql as $$
-  delete from public.rr_sync_runs where run_type = 'heartbeat'  and started_at < now() - interval '24 hours';
-  delete from public.rr_sync_runs where run_type <> 'heartbeat' and started_at < now() - interval '14 days';
+  delete from public.rr_sync_runs where coalesce(source, '') <> 'ai_ark' and started_at < now() - interval '48 hours';
+  delete from public.rr_sync_runs where source = 'ai_ark' and started_at < now() - interval '14 days';
 $$;

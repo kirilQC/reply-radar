@@ -42,12 +42,22 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
       console.info("heyreach_webhook_validated", { workspaceId, workspace: workspace.id });
       return NextResponse.json({ ok: true, validation: true, workspace: workspaceId, history: "skipped_for_synthetic_test" }, { status: 200 });
     }
-    const result = await ingestHeyReachWebhook({ url, key }, workspace, payload as Record<string, unknown>);
+    /*
+     * The worker's nightly reconciliation pass posts here too, marked so it can be told apart.
+     *
+     * It goes through this route rather than reimplementing ingestion because ingestion is where the
+     * block list, the outbound-only rule, campaign attribution, enrichment and the identity rollup all
+     * live — a second copy of that in the worker would drift, and the rules it would drift away from
+     * are the ones deciding who ends up in the inbox. The marker only suppresses the webhook clock;
+     * everything else about a reconciled conversation is stored identically.
+     */
+    const origin = String((payload as Record<string, unknown>).reply_radar_source ?? "") === "reconciliation" ? "reconciliation" : "webhook";
+    const result = await ingestHeyReachWebhook({ url, key }, workspace, payload as Record<string, unknown>, origin);
     // Discarded ingests never wrote a conversation row, so there is nothing to classify.
     if (!("discarded" in result) && result.conversationId) {
       after(() => classifyLatestReply({ url, key }, result.conversationId, workspace.slug ?? workspaceId, { workspaceName: workspace.name ?? undefined }).catch(() => undefined));
     }
-    console.info("heyreach_webhook_processed", { workspaceId, ...result });
+    console.info("heyreach_webhook_processed", { workspaceId, origin, ...result });
     return NextResponse.json({ ok: true, ...result }, { status: 200 });
   } catch (error) { return NextResponse.json({ ok: false, stage: "unexpected", error: error instanceof Error ? error.message : "Webhook processing failed" }, { status: 502 }); }
 }

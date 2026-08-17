@@ -101,11 +101,11 @@ const REFRESH_BATCH_SIZE = 5;
 const REFRESH_DORMANT_DAYS = 30;
 let lastRefreshRun = 0;
 
-async function heyReachFetch(apiKey, path, init = {}) {
+async function heyReachFetch(apiKey, path, init = {}, timeoutMs = 15_000) {
   const response = await fetch(`${heyreachBase}/${path.replace(/^\//, "")}`, {
     ...init,
     headers: { "X-API-KEY": apiKey, accept: "application/json", "content-type": "application/json", ...(init.headers || {}) },
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) throw new Error(`HeyReach ${path.split("?")[0]} ${response.status}`);
   return response.json().catch(() => null);
@@ -602,6 +602,322 @@ async function runAiPipeline() {
   }
 }
 
+// ── Reconciliation ──────────────────────────────────────────────────
+/**
+ * Once a day, per client, asks HeyReach what conversations it has and stores the ones we do not.
+ *
+ * ── Why this has to exist ────────────────────────────────────────────────────────────────────────
+ * Every conversation in Reply Radar arrived through the webhook, and nothing else in the system can
+ * discover one. The refresh pass above updates conversations that are already stored; the sync above
+ * that only checks the API key still works. So a webhook that is misconfigured, deleted from HeyReach,
+ * or that fails while our function is down does not produce an error anywhere — it produces an inbox
+ * that is quietly missing replies, which is the one failure nobody notices until a client asks why
+ * their prospect was ignored for a fortnight. This pass is the second path in, and it is the reason
+ * `rr_workspaces.last_reconciled_at` was in the schema before anything wrote to it.
+ *
+ * ── Why the cadence is stored in the database, not in a variable ─────────────────────────────────
+ * `last_reconciled_at` is the timer. A module-level timestamp would restart at zero on every deploy,
+ * and Render restarts the worker on each one — so a busy afternoon of deploys would mean a full
+ * fifteen-client reconciliation pass every few minutes. Reading the column means a restart resumes
+ * rather than repeats, and one client is done per cycle so the pass never holds the loop for long.
+ *
+ * ── Why so much is filtered out before HeyReach is asked ─────────────────────────────────────────
+ * A HeyReach inbox holds every conversation the sending accounts have ever had, most of which are not
+ * ours to store: strangers who messaged the client first are out of scope by rule, and threads with no
+ * reply are not what this product is for. Those are skipped here, from the messages HeyReach already
+ * embedded in the list response, because a candidate handed to ingestion costs three HeyReach calls
+ * and an enrichment attempt to reach the same conclusion — and would be re-examined tomorrow, and the
+ * day after, forever, since a discarded conversation leaves no row to recognise it by.
+ */
+const RECONCILE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** HeyReach caps a page at 100 on every endpoint tested. */
+const RECONCILE_PAGE_SIZE = 100;
+/** 2,000 conversations per client: more than the largest inbox measured, and a stop for a runaway. */
+const RECONCILE_MAX_PAGES = 20;
+/**
+ * How far back a missing conversation is still worth recovering. Long enough to cover a webhook that
+ * was broken for a season, short enough that the pass is not re-reading years of inbox every night.
+ */
+const RECONCILE_LOOKBACK_DAYS = 90;
+/**
+ * Conversations actually ingested per client per pass. This is the cost ceiling — each one is a
+ * HeyReach history fetch, a campaign-membership lookup and an enrichment attempt. A real backlog
+ * drains over a few nights rather than arriving as one bill, and the number is an env var because
+ * the right value on the first night is not the right value on the hundredth.
+ */
+const RECONCILE_MAX_INGEST = Math.max(1, Number(process.env.RECONCILE_MAX_INGEST || 25));
+/** Wall clock one pass may take before it stops and stamps what it managed. */
+const RECONCILE_BUDGET_MS = Math.max(60, Number(process.env.RECONCILE_BUDGET_SECONDS || 420)) * 1000;
+
+/** The HeyReach conversation ids we already hold for a client, including re-keyed duplicates. */
+async function storedConversationIds(workspaceId) {
+  const known = new Set();
+  for (let offset = 0; ; offset += 1000) {
+    const rows = await supabase(`rr_conversations?select=heyreach_conversation_id&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=heyreach_conversation_id.asc&offset=${offset}&limit=1000`);
+    for (const row of rows || []) {
+      const stored = String(row.heyreach_conversation_id || "");
+      if (!stored) continue;
+      known.add(stored);
+      // A lead who replied to two campaigns from two senders is stored a second time under
+      // `<id>::<campaign>::<sender>`, so the HeyReach id has to be recovered from the prefix or the
+      // conversation looks missing and gets ingested again every night.
+      if (stored.includes("::")) known.add(stored.split("::")[0]);
+    }
+    if (!rows || rows.length < 1000) break;
+  }
+  return known;
+}
+
+/**
+ * Conversations a previous pass already offered to ingestion and had turned away, with when.
+ *
+ * Ingestion is the authority on who belongs in the inbox, and when it declines a conversation it
+ * leaves no `rr_conversations` row — so without this the same stranger who cold-messaged the client in
+ * March would be fetched, judged and rejected again every single night, at three HeyReach calls a
+ * time, forever. The verdict is remembered by the event row reconciliation itself wrote.
+ *
+ * The timestamp is kept rather than just the id, because the verdict was about the thread as it stood.
+ * Somebody we declined can later be added to a campaign and reply, and a conversation with messages
+ * newer than the refusal is worth putting to ingestion again.
+ */
+async function declinedConversations(workspaceId) {
+  const declined = new Map();
+  const prefix = `${encodeURIComponent("reconcile:")}*`;
+  for (let offset = 0; ; offset += 1000) {
+    const rows = await supabase(`rr_webhook_events?select=event_key,processed_at&workspace_id=eq.${encodeURIComponent(workspaceId)}&status=eq.discarded&event_key=like.${prefix}&order=event_key.asc&offset=${offset}&limit=1000`);
+    for (const row of rows || []) {
+      const id = String(row.event_key || "").slice("reconcile:".length);
+      if (id) declined.set(id, String(row.processed_at || ""));
+    }
+    if (!rows || rows.length < 1000) break;
+  }
+  return declined;
+}
+
+/** The conversations HeyReach holds for a client, newest first, bounded by the page ceiling. */
+async function heyReachInbox(apiKey) {
+  const items = [];
+  for (let page = 0; page < RECONCILE_MAX_PAGES; page += 1) {
+    // The filters must be nested under `filters`. Passed flat they are silently dropped and the whole
+    // inbox comes back at HTTP 200 — see app/lib/heyreach-api.ts. Nothing is filtered here, so the
+    // nesting is moot, but the shape is kept so a future filter cannot be added in the wrong place.
+    const response = await heyReachFetch(apiKey, "inbox/GetConversationsV2", {
+      method: "POST",
+      body: JSON.stringify({ offset: page * RECONCILE_PAGE_SIZE, limit: RECONCILE_PAGE_SIZE, filters: {} }),
+      // A hundred conversations arrive with their messages inside them, and HeyReach's first call after
+      // a quiet period has been measured at 26 seconds. The default 15 would turn its cold start into
+      // a failed reconciliation, and then wait a day before finding out whether that was the reason.
+    }, 45_000);
+    const batch = Array.isArray(response) ? response : (response && Array.isArray(response.items) ? response.items : []);
+    items.push(...batch);
+    const total = Number((response && response.totalCount) || 0);
+    if (batch.length < RECONCILE_PAGE_SIZE || (total && items.length >= total)) break;
+  }
+  return items;
+}
+
+/**
+ * Whether a conversation HeyReach knows about is one Reply Radar should hold.
+ *
+ * Deliberately conservative in one direction only: when the embedded thread is truncated the message
+ * order cannot be trusted, so the judgement is deferred to ingestion, which reads the real history.
+ * Skipping on incomplete evidence is how a genuine reply would be lost, and that is the whole point.
+ */
+function reconciliationCandidate(item, cutoffMs) {
+  const conversationId = String(item.id || item.conversationId || item.conversation_id || item.linkedInConversationId || "");
+  const accountId = String(item.linkedInAccountId || item.linkedInAccount?.id || "");
+  const correspondent = (item.correspondentProfile && typeof item.correspondentProfile === "object" ? item.correspondentProfile : {}) || {};
+  const profileUrl = String(correspondent.profileUrl || correspondent.profile_url || "");
+  // Without a sender account and a profile URL, ingestion cannot read the thread at all.
+  if (!conversationId || !accountId || !profileUrl) return null;
+
+  const lastMessageAt = String(item.lastMessageAt || item.last_message_at || "");
+  const lastMessageMs = Date.parse(lastMessageAt);
+  if (Number.isFinite(lastMessageMs) && lastMessageMs < cutoffMs) return null;
+
+  const rows = extractMessageRows(item);
+  const directions = rows.map((row) => directionFor(row, accountId));
+  const complete = rows.length >= Math.max(1, Number(item.totalMessages || 0));
+  // Nothing to work: this product is about replies, and a thread the lead has not answered is not one.
+  // Only trustworthy when the thread is whole — a truncated page could be hiding the reply.
+  if (complete && !directions.includes("inbound")) return null;
+  // The lead spoke first and HeyReach embedded the whole thread to prove it. Ingestion would reach the
+  // same verdict at the cost of three API calls, and would reach it again every night.
+  if (complete && directions[0] === "inbound") return null;
+
+  const account = (item.linkedInAccount && typeof item.linkedInAccount === "object" ? item.linkedInAccount : {}) || {};
+  return {
+    conversationId,
+    lastMessageAt,
+    payload: {
+      event_type: "RECONCILED_CONVERSATION",
+      // Read by the webhook route, and the only thing that distinguishes this from a real webhook.
+      reply_radar_source: "reconciliation",
+      // Stable per conversation, so a conversation that fails to ingest reuses its event row rather
+      // than writing a fresh one every night.
+      correlation_id: `reconcile:${conversationId}`,
+      conversation_id: conversationId,
+      timestamp: lastMessageAt || new Date().toISOString(),
+      sender: {
+        id: accountId,
+        full_name: [String(account.firstName || ""), String(account.lastName || "")].filter(Boolean).join(" "),
+      },
+      lead: {
+        id: String(correspondent.linkedin_id || correspondent.linkedinId || ""),
+        profile_url: profileUrl,
+        first_name: String(correspondent.firstName || ""),
+        last_name: String(correspondent.lastName || ""),
+        company_name: String(correspondent.companyName || correspondent.company || ""),
+        position: String(correspondent.position || correspondent.headline || ""),
+      },
+      // No campaign is supplied on purpose. Ingestion asks HeyReach which campaigns the lead is
+      // actually enrolled in, and that answer is what decides whether we ever contacted them — a
+      // campaign name invented here would defeat the guard rather than satisfy it.
+    },
+  };
+}
+
+async function reconcileWorkspace(workspace, deadline) {
+  const startedAt = new Date().toISOString();
+  const cutoffMs = Date.now() - RECONCILE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+  let seen = 0;
+  let ingested = 0;
+  let discarded = 0;
+  let skipped = 0;
+  let failed = 0;
+  let lastHeartbeat = Date.now();
+  let errorText = null;
+
+  try {
+    const [known, declined, inbox] = await Promise.all([
+      storedConversationIds(workspace.id),
+      declinedConversations(workspace.id),
+      heyReachInbox(workspace.heyreach_api_key_ciphertext),
+    ]);
+    seen = inbox.length;
+    const missing = [];
+    for (const item of inbox) {
+      const id = String(item.id || item.conversationId || item.conversation_id || item.linkedInConversationId || "");
+      if (!id || known.has(id)) continue;
+      const candidate = reconciliationCandidate(item, cutoffMs);
+      if (!candidate) continue;
+      // Parsed rather than string-compared: HeyReach writes `…T10:00:00.000Z` and Postgres writes
+      // `…T10:00:00.123456+00:00`, and those two orderings only agree by luck.
+      const refusedAt = Date.parse(declined.get(id) || "");
+      const spokeAt = Date.parse(candidate.lastMessageAt || "");
+      // Nothing has been said since we were told this one does not belong here.
+      if (Number.isFinite(refusedAt) && !(spokeAt > refusedAt)) {
+        skipped += 1;
+        continue;
+      }
+      missing.push(candidate);
+    }
+    // Newest first: a reply from this morning matters more than one from March.
+    missing.sort((left, right) => String(right.lastMessageAt).localeCompare(String(left.lastMessageAt)));
+
+    for (const candidate of missing.slice(0, RECONCILE_MAX_INGEST)) {
+      if (Date.now() >= deadline) break;
+      try {
+        const result = await appPost(`/api/webhooks/heyreach/${encodeURIComponent(workspace.slug)}`, candidate.payload);
+        if (result && result.discarded) discarded += 1;
+        else ingested += 1;
+      } catch (error) {
+        failed += 1;
+        console.warn("reply_radar_reconcile_ingest_failed", { workspace: workspace.slug, conversation: candidate.conversationId, error: error instanceof Error ? error.message : String(error) });
+      }
+      // The health page calls the worker stale after five minutes, so a long pass says it is alive.
+      if (Date.now() - lastHeartbeat >= 60_000) {
+        lastHeartbeat = Date.now();
+        await touchHeartbeat();
+      }
+      // HeyReach is doing three calls behind each of these; give it room.
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    console.info("reply_radar_reconciled", { workspace: workspace.slug, heyreachConversations: seen, missing: missing.length, ingested, discarded, ...(skipped ? { previouslyDeclined: skipped } : {}), ...(failed ? { failed } : {}) });
+  } catch (error) {
+    errorText = error instanceof Error ? error.message : "Reconciliation failed";
+    console.warn("reply_radar_reconcile_failed", { workspace: workspace.slug, error: errorText });
+  }
+
+  /*
+   * Stamped even when the pass was partial or failed outright.
+   *
+   * This column is the schedule as well as the record. Leaving it unstamped after a client that ran
+   * out of budget would put that same client at the front of the queue on the next cycle and every
+   * cycle after it, and the fourteen clients behind it would never be reconciled at all. A backlog
+   * drains at `RECONCILE_MAX_INGEST` a night instead, which is slower and fair.
+   */
+  await supabase(`rr_workspaces?id=eq.${encodeURIComponent(workspace.id)}`, {
+    method: "PATCH", headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ last_reconciled_at: new Date().toISOString() }),
+  }).catch((error) => console.warn("reply_radar_reconcile_stamp_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) }));
+
+  await writeSyncRun({
+    workspace_id: workspace.id,
+    run_type: "reconciliation",
+    source: "render-worker",
+    status: errorText ? "failed" : failed > 0 ? "partial" : "success",
+    started_at: startedAt,
+    finished_at: new Date().toISOString(),
+    records_seen: seen,
+    records_written: ingested,
+    error_text: errorText || (failed > 0 ? `${failed} conversations failed to ingest` : null),
+  });
+}
+
+async function reconcileDueWorkspace() {
+  if (!appBaseUrl) return;
+  const due = new Date(Date.now() - RECONCILE_INTERVAL_MS).toISOString();
+  // One client per cycle. Fifteen clients at a cycle every two minutes means the whole roster is
+  // covered within half an hour of falling due, without any single cycle carrying all of it.
+  const workspaces = await supabase(`rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&heyreach_api_key_ciphertext=not.is.null&or=(last_reconciled_at.is.null,last_reconciled_at.lt.${encodeURIComponent(due)})&order=last_reconciled_at.asc.nullsfirst&limit=1`);
+  const workspace = (workspaces || [])[0];
+  if (!workspace || !workspace.slug) return;
+  await reconcileWorkspace(workspace, Date.now() + RECONCILE_BUDGET_MS);
+}
+
+// ── Log retention ───────────────────────────────────────────────────
+/**
+ * Deletes the worker's own log after 48 hours.
+ *
+ * `rr_sync_runs` is written seventeen times a cycle — two heartbeats and one row per client — which is
+ * about twelve thousand rows a day and, left alone, four and a half million a year for a table whose
+ * every reader asks for the newest twenty-five. The database had reached ninety thousand rows before
+ * this existed. `supabase/schema.sql` has always carried an `rr_prune_sync_runs()` function for this
+ * and the pg_cron line to schedule it was only ever a comment, so it never ran; doing it from the
+ * worker needs nothing enabled in Supabase and cannot silently stop being scheduled.
+ *
+ * AI Ark rows are the one exception. They are one per lead enrichment rather than per cycle, so they
+ * are not the volume problem, and the health page draws a fourteen-day enrichment usage chart from
+ * them — a 48-hour sweep would leave that chart with two bars and no way to tell that it used to have
+ * fourteen.
+ */
+const RETENTION_LOOP_MS = 60 * 60 * 1000;
+const RETENTION_HOURS = Math.max(2, Number(process.env.SYNC_RUN_RETENTION_HOURS || 48));
+const AI_ARK_RETENTION_DAYS = 14;
+let lastRetentionRun = 0;
+
+async function pruneSyncRuns() {
+  const workerCutoff = new Date(Date.now() - RETENTION_HOURS * 60 * 60 * 1000).toISOString();
+  const aiArkCutoff = new Date(Date.now() - AI_ARK_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  // `count=exact` so the log says how much was removed; the rows themselves are not returned.
+  const deleteRows = async (query) => {
+    const response = await fetch(`${supabaseUrl}/rest/v1/rr_sync_runs?${query}`, {
+      method: "DELETE",
+      headers: { ...headers, Prefer: "return=minimal,count=exact" },
+    });
+    if (!response.ok) throw new Error(`Supabase ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    // PostgREST reports the affected count in the Content-Range header as `*/N`.
+    return Number(String(response.headers.get("content-range") || "").split("/")[1] || 0);
+  };
+
+  // `source.is.null` is spelled out because a null never satisfies `neq` in PostgREST, and rows from
+  // the original schema have no source — those are exactly the oldest rows in the table.
+  const worker = await deleteRows(`or=(source.is.null,source.neq.ai_ark)&started_at=lt.${encodeURIComponent(workerCutoff)}`);
+  const aiArk = await deleteRows(`source=eq.ai_ark&started_at=lt.${encodeURIComponent(aiArkCutoff)}`);
+  if (worker || aiArk) console.info("reply_radar_sync_runs_pruned", { worker, aiArk, retentionHours: RETENTION_HOURS });
+}
+
 // ── Main loop ───────────────────────────────────────────────────────
 
 async function runOnce() {
@@ -624,6 +940,22 @@ async function runOnce() {
     try { await purgeInboundLeads(); } catch (error) { console.error("reply_radar_inbound_purge_failed", error); }
     lastPurgeRun = Date.now();
   }
+
+  // Trim the worker's own log every hour, so the table stays at about two days of rows instead of
+  // growing by twelve thousand a day forever.
+  if (Date.now() - lastRetentionRun >= RETENTION_LOOP_MS) {
+    try { await pruneSyncRuns(); } catch (error) { console.error("reply_radar_sync_run_prune_failed", error); }
+    lastRetentionRun = Date.now();
+  }
+
+  /*
+   * One client per cycle, and only if its last reconciliation was over a day ago.
+   *
+   * Placed before the AI pipeline so a conversation recovered here is analysed on the same cycle it
+   * was found rather than waiting for the next one — the pipeline's own budget is what stops the two
+   * of them together from stretching a cycle indefinitely.
+   */
+  try { await reconcileDueWorkspace(); } catch (error) { console.error("reply_radar_reconcile_cycle_failed", error); }
 
   // Every cycle, so a reply that arrives while nobody is on the site is already analysed,
   // ICP-scored and follow-up-scored by the time it is opened.
