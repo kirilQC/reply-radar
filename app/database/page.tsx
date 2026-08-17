@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
+import { DEFAULT_LEAD_SORT, LEAD_SORTS } from "../lib/lead-sort";
 
 type Workspace = {
   id: string;
@@ -193,12 +194,26 @@ const campaignNameFrom = (...values: unknown[]) => {
   return "No campaign name";
 };
 
+/**
+ * The sorts offered as dropdown entries.
+ *
+ * The default is dropped, because every one of these dropdowns already renders its placeholder as a
+ * first "back to normal" entry — listing "Newest first" as well would put it in the menu twice.
+ */
+const sortChoices = LEAD_SORTS.filter((option) => option.id !== DEFAULT_LEAD_SORT.id).map((option) => ({
+  value: option.id,
+  label: option.label,
+}));
+
 export default function DatabasePage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspace, setWorkspace] = useState("");
   const [sender, setSender] = useState("");
   const [campaign, setCampaign] = useState("");
   const [timeRange, setTimeRange] = useState("all");
+  // Empty means the API's own default, newest first, which is also what the control shows as its
+  // placeholder — so the "clear" entry every dropdown renders first lands back on it for free.
+  const [sort, setSort] = useState("");
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({ senders: [], campaigns: [] });
   const [exporting, setExporting] = useState(false);
   const [blockedError, setBlockedError] = useState("");
@@ -260,6 +275,7 @@ export default function DatabasePage() {
         if (campaign) params.set("campaign", campaign);
         if (timeRange !== "all") params.set("timeRange", timeRange);
         if (debouncedSearch) params.set("search", debouncedSearch);
+        if (sort) params.set("sort", sort);
         if (requestedCursor) params.set("cursor", requestedCursor);
         const response = await fetch(`/api/database/leads?${params}`, {
           cache: "no-store",
@@ -293,7 +309,10 @@ export default function DatabasePage() {
         setLoadingMore(false);
       }
     },
-    [workspace, sender, campaign, timeRange, debouncedSearch],
+    // `sort` belongs here with the filters: the effect below re-runs whenever this callback changes,
+    // and re-running it is exactly what reordering needs — a fresh first page, with the cursor from
+    // the old order dropped rather than carried into a sequence it no longer describes.
+    [workspace, sender, campaign, timeRange, debouncedSearch, sort],
   );
 
   const chooseWorkspace = (value: string) => {
@@ -317,6 +336,9 @@ export default function DatabasePage() {
         if (campaign) params.set("campaign", campaign);
         if (timeRange !== "all") params.set("timeRange", timeRange);
         if (debouncedSearch) params.set("search", debouncedSearch);
+        // The export comes out in the order on screen. A CSV that silently reordered itself would
+        // be a different document from the one somebody thought they were downloading.
+        if (sort) params.set("sort", sort);
         if (nextCursor) params.set("cursor", nextCursor);
         const response = await fetch(`/api/database/leads?${params}`, { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
@@ -559,6 +581,16 @@ export default function DatabasePage() {
               />
             </label>
             <DatabaseDropdown label="Client" value={workspace} placeholder="All clients" options={workspaces.map((item) => ({ value: item.slug, label: item.name }))} onChange={chooseWorkspace} />
+            {/*
+              Sorting happens in Postgres over the whole table, not in the browser over the fifty
+              rows that happen to be loaded — so "A–Z" means the first lead alphabetically out of
+              forty thousand, which is the only reading of it that is any use.
+
+              Replies and last reply are missing on purpose: they live on `rr_conversations`, and
+              until there is a view joining them to the lead they cannot be ordered from here. A
+              per-page sort would have looked like the others and meant something quite different.
+            */}
+            <DatabaseDropdown label="Sort" value={sort} placeholder={DEFAULT_LEAD_SORT.label} options={sortChoices} onChange={setSort} />
             {workspace && <DatabaseDropdown label="Sender" value={sender} placeholder="All senders" options={filterOptions.senders.map((name) => ({ value: name, label: name }))} onChange={setSender} />}
             {workspace && <DatabaseDropdown label="Campaign" value={campaign} placeholder="All campaigns" options={filterOptions.campaigns.map((name) => ({ value: name, label: name }))} onChange={setCampaign} />}
             {workspace && <DatabaseDropdown label="Time range" value={timeRange} placeholder="All time" options={[{ value: "7d", label: "Last 7 days" }, { value: "14d", label: "Last 14 days" }, { value: "1m", label: "Last month" }, { value: "3m", label: "Last 3 months" }]} onChange={setTimeRange} />}

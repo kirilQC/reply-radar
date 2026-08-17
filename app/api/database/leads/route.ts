@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../../lib/person-name";
 import { countRows } from "../../../lib/rest-count";
+import { leadSortOrder } from "../../../lib/lead-sort";
 type Row = Record<string, unknown>;
 const field = (value: unknown, key: string) =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -36,13 +37,34 @@ async function get(url: string, key: string, path: string) {
     throw new Error(`Supabase ${response.status}: ${JSON.stringify(data)}`);
   return Array.isArray(data) ? (data as Row[]) : [];
 }
-const encodeCursor = (createdAt: unknown) =>
-  Buffer.from(String(createdAt)).toString("base64url");
+/**
+ * The cursor is a row offset, not a timestamp.
+ *
+ * It used to carry the last row's `created_at` and page with `created_at=lt.<cursor>`, which is the
+ * better technique — but it only works while `created_at` is also the sort key. Ordering by name and
+ * then asking for "created before the last row" returns nonsense. Keyset paging on an arbitrary
+ * column means a composite `or=(col.gt.x,and(col.eq.x,created_at.lt.y))` filter, and there is already
+ * an `or=` on this query for search, which PostgREST will not let us have twice.
+ *
+ * An offset is uniform across every sort and correct for what this page is: someone browsing a table
+ * fifty rows at a time. Its known weakness — a row inserted mid-paging shifts the window — is a
+ * cosmetic duplicate on page two of a table that grows by webhook, and the timestamp cursor it
+ * replaces had a comparable hole anyway, since `lt` drops rows sharing the boundary timestamp.
+ *
+ * Base64 is kept so the shape of the value is unchanged for any client holding an old one; a stale
+ * timestamp cursor decodes to NaN and lands harmlessly on the first page.
+ */
+const encodeCursor = (offset: unknown) =>
+  Buffer.from(String(offset)).toString("base64url");
 const decodeCursor = (cursor: string | null) => {
   try {
-    return cursor ? Buffer.from(cursor, "base64url").toString("utf8") : "";
+    const decoded = cursor ? Buffer.from(cursor, "base64url").toString("utf8") : "";
+    const offset = Math.floor(Number(decoded));
+    // The ceiling is the same order of magnitude as the 10,000-row filter reads below, and stops a
+    // hand-edited cursor from asking Postgres to count past a million rows before answering.
+    return Number.isFinite(offset) && offset > 0 ? Math.min(offset, 100_000) : 0;
   } catch {
-    return "";
+    return 0;
   }
 };
 const senderNameFrom = (...values: unknown[]) => {
@@ -148,7 +170,8 @@ export async function GET(request: Request) {
       100,
       Math.max(10, Number(params.get("limit") || 50)),
     );
-    const cursor = decodeCursor(params.get("cursor"));
+    const offset = decodeCursor(params.get("cursor"));
+    const order = leadSortOrder(params.get("sort"));
     const workspaces = await get(
       url,
       key,
@@ -169,7 +192,6 @@ export async function GET(request: Request) {
       selectedWorkspace
         ? `workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}`
         : "",
-      cursor ? `created_at=lt.${encodeURIComponent(cursor)}` : "",
       search
         ? `or=(name.ilike.*${encodeURIComponent(search)}*,company.ilike.*${encodeURIComponent(search)}*,role.ilike.*${encodeURIComponent(search)}*,linkedin_id.ilike.*${encodeURIComponent(search)}*)`
         : "",
@@ -177,10 +199,13 @@ export async function GET(request: Request) {
       .filter(Boolean)
       .join("&");
     const metadataFiltering = Boolean(selectedWorkspace && (senderFilter || campaignFilter || timeRangeDays[timeRange]));
+    // Sender, campaign and time-range filters are decided in memory below, so that path has to read
+    // the whole filtered set from row one and take its page afterwards — an offset in the query would
+    // skip rows before the filter ever saw them. Everything else pages in the database.
     let rows = await get(
       url,
       key,
-      `rr_leads?select=*&${filters ? `${filters}&` : ""}order=created_at.desc&limit=${metadataFiltering ? 10000 : limit + 1}`,
+      `rr_leads?select=*&${filters ? `${filters}&` : ""}order=${order}&limit=${metadataFiltering ? 10000 : limit + 1}${metadataFiltering || !offset ? "" : `&offset=${offset}`}`,
     );
     const optionRows = selectedWorkspace
       ? await get(url, key, `rr_leads?select=raw_data&workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}&limit=10000`)
@@ -199,8 +224,8 @@ export async function GET(request: Request) {
     }
     // Sender, campaign and time-range filters are applied in memory, so in that case the filtered set
     // in hand already is the answer. Otherwise ask the database, since paging only ever sees one page.
-    // The cursor is left out either way: it narrows to "older than this page", which is a paging
-    // detail, not something the reader is filtering by.
+    // The cursor is left out either way: it narrows to "everything after this page", which is a
+    // paging detail, not something the reader is filtering by.
     const countFilters = [
       selectedWorkspace ? `workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}` : "",
       search ? `or=(name.ilike.*${encodeURIComponent(search)}*,company.ilike.*${encodeURIComponent(search)}*,role.ilike.*${encodeURIComponent(search)}*,linkedin_id.ilike.*${encodeURIComponent(search)}*)` : "",
@@ -208,7 +233,10 @@ export async function GET(request: Request) {
     const totalLeads = metadataFiltering
       ? rows.length
       : await countRows(url, key, `rr_leads?select=id${countFilters ? `&${countFilters}` : ""}`);
-    const page = rows.slice(0, limit);
+    // The in-memory path holds the whole filtered set, so its page is cut out of the middle; the
+    // database path was already handed the offset and returns the page plus one probe row.
+    const page = metadataFiltering ? rows.slice(offset, offset + limit) : rows.slice(0, limit);
+    const hasMore = metadataFiltering ? rows.length > offset + limit : rows.length > limit;
     const leadIds = page.map((lead) => String(lead.id));
     const conversations = leadIds.length
       ? await get(
@@ -337,11 +365,8 @@ export async function GET(request: Request) {
       filterOptions,
       totalLeads,
       filtered: Boolean(selectedWorkspace || search || metadataFiltering),
-      hasMore: rows.length > limit,
-      nextCursor:
-        rows.length > limit && page.length
-          ? encodeCursor(page.at(-1)?.created_at)
-          : null,
+      hasMore,
+      nextCursor: hasMore && page.length ? encodeCursor(offset + page.length) : null,
       pageSize: limit,
     });
   } catch (error) {
