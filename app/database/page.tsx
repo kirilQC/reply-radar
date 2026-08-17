@@ -821,7 +821,9 @@ export default function DatabasePage() {
 function DatabaseDropdown({ label, value, placeholder, options, onChange, disabled = false }: { label: string; value: string; placeholder: string; options: Array<{ value: string; label: string }>; onChange: (value: string) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const selected = options.find((option) => option.value === value)?.label;
-  return <div className={`database-dropdown ${disabled ? "disabled" : ""}`} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
+  // Named so a single dropdown can be styled without reaching every one of them. Sort is the only
+  // one with a list of known length, which is what makes fitting it worth asking for.
+  return <div className={`database-dropdown ${disabled ? "disabled" : ""}`} data-dropdown={label} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
     <span>{label}</span>
     <button type="button" disabled={disabled} aria-expanded={open} onClick={() => setOpen((current) => !current)}>{selected || placeholder}<b>⌄</b></button>
     {open && !disabled && <div className="database-dropdown-menu">

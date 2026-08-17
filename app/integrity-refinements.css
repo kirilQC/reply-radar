@@ -4958,3 +4958,13 @@ span.brain-mark.is-lg {
    `.report-document` into a horizontal scroller on the assumption the sheet stayed 816px wide; it
    was removed once that turned out to be false, because `align-items:flex-start` on a flex column
    changes how every child sizes itself and it was buying nothing. */
+
+/* The Sort menu on the lead database, at its own height.
+   The shared 300px cap left the last two of its ten entries below the fold. That cap is right for
+   the Client, Sender and Campaign menus — those list whatever the workspace happens to hold, and a
+   fourteen-client menu should scroll rather than run off the screen — but Sort's list is fixed and
+   forty pixels too tall, so the two options nobody could see were hidden by an accident of length
+   rather than by any decision. Scoped to this one menu by name; every other dropdown keeps the cap. */
+[data-dropdown="Sort"] .database-dropdown-menu {
+  max-height: 344px;
+}
