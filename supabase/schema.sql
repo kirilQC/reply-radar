@@ -219,6 +219,8 @@ create index if not exists rr_leads_workspace_idx on rr_leads(workspace_id);
 create index if not exists rr_leads_profile_url_idx on rr_leads(linkedin_profile_url);
 create index if not exists rr_leads_icp_score_idx on rr_leads(icp_score desc);
 create index if not exists rr_conversations_workspace_tier_idx on rr_conversations(workspace_id, tier);
+-- Both the rr_lead_index rollup and the lead database's `lead_id=in.(...)` read group by this column.
+create index if not exists rr_conversations_lead_idx on rr_conversations(lead_id);
 create index if not exists rr_conversations_last_message_idx on rr_conversations(last_message_at desc);
 create index if not exists rr_messages_sent_at_idx on rr_messages(sent_at desc);
 create index if not exists rr_blocked_leads_blocked_at_idx on rr_blocked_leads(blocked_at desc);
@@ -287,6 +289,32 @@ select
 from rr_leads l
 left join rr_workspaces w on w.id = l.workspace_id;
 revoke all on rr_leads_export from anon, authenticated;
+
+-- rr_leads plus the two facts the lead database displays but rr_leads cannot hold.
+--
+-- The table's "Date and time" column has always shown the last reply, and its "Replies" column the
+-- count of inbound messages. Both live on rr_conversations/rr_messages, so ordering rr_leads by
+-- created_at produced a column of dates in no visible order — the sort was real, it just was not the
+-- sort the reader could see. Joining them here makes them ordinary columns to `order=`, which is what
+-- lets the sort agree with the screen.
+--
+-- Cheap because it is per lead, not per message: one grouped pass keyed by lead_id, served by
+-- rr_conversations_lead_idx and the (conversation_id, heyreach_message_id) unique index below.
+create or replace view rr_lead_index with (security_invoker = true) as
+select
+  l.*,
+  activity.last_reply_at,
+  coalesce(activity.reply_count, 0) as reply_count
+from rr_leads l
+left join (
+  select c.lead_id,
+         max(c.last_message_at)                                  as last_reply_at,
+         count(m.id) filter (where m.direction = 'inbound')       as reply_count
+  from rr_conversations c
+  left join rr_messages m on m.conversation_id = c.id
+  group by c.lead_id
+) activity on activity.lead_id = l.id;
+revoke all on rr_lead_index from anon, authenticated;
 
 -- Retention for the worker's log: 48 hours, matching what the Render worker enforces hourly in
 -- `pruneSyncRuns`. The worker is what actually runs — this function is kept so the policy is stated

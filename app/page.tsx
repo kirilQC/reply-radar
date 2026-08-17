@@ -45,7 +45,6 @@ type Lead = {
   avatar: string;
   profileUrl?: string | null;
   photoUrl?: string | null;
-  clientLogoUrl?: string | null;
   senderName: string;
   campaignName?: string | null;
   headline?: string | null;
@@ -1473,13 +1472,19 @@ export function InboxPage() {
     if (!selectedWorkspaceSlug) return;
     await fetch("/api/client-resources", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace: selectedWorkspaceSlug, quickTemplates: next }) }).catch(() => null);
   };
+  /**
+   * The lead's client logo, looked up rather than carried on the lead.
+   *
+   * This used to prefer a `clientLogoUrl` the inbox API sent with every row. Logos are base64 data
+   * URIs and there are only three of them, so that field alone was 10.3MB of a 12.8MB response.
+   * The directory holds the same three values once, so the lookup is the cheap half of what was
+   * already a fallback.
+   */
   const clientLogoFor = (lead: Lead) =>
-    lead.clientLogoUrl ||
     workspaceDirectory.find(
       (workspace) =>
         workspace.slug === lead.clientSlug || workspace.name === lead.client,
-    )?.logoUrl ||
-    null;
+    )?.logoUrl || null;
   const beginPaneResize = (event: React.PointerEvent<HTMLDivElement>) => {
     const grid = paneGridRef.current;
     if (!grid) return;

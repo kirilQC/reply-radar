@@ -6,28 +6,37 @@
  *
  * One list, because the two sides of this feature fail differently when they drift. The page offers
  * the labels; the API turns an id into a Postgres `order` clause. If the page offered an id the API
- * did not know, the request would quietly fall back to newest-first and the dropdown would sit there
+ * did not know, the request would quietly fall back to the default and the dropdown would sit there
  * claiming a sort that never happened — the kind of bug nobody reports because it looks like the
  * data just happens to be in that order.
  *
- * Every column named below is a real column on `rr_leads`. `client_names`, `campaign_names` and
- * `sender_names` are generated-stored columns over the rollup inside `raw_data`, which is what makes
- * them sortable in the database rather than only across whatever page is loaded. Replies and last
- * reply are absent on purpose: they live on `rr_conversations`, and until a view joins them to the
- * lead they cannot be ordered from here. Offering them as a per-page sort would have looked identical
- * to these and meant something entirely different.
+ * Every column named below is a real column on `rr_lead_index`. `client_names`, `campaign_names` and
+ * `sender_names` are generated-stored columns over the rollup inside `raw_data`; `last_reply_at` and
+ * `reply_count` are the view's join onto `rr_conversations`/`rr_messages`. All of them are sortable in
+ * the database rather than only across whatever page is loaded.
+ *
+ * The rule the list obeys: a sort must order by the column the reader can see. The table's date
+ * column shows the last reply, not when the row was inserted, so "Newest first" has to mean
+ * `last_reply_at`. Ordering by `created_at` under that label is what made the first version look
+ * broken — the dates on screen came back in no visible order. `created_at` is still offered, under
+ * labels that say what it is.
  */
 export type LeadSort = { id: string; label: string; order: string };
 
 /**
- * `created_at.desc` trails every text sort as a tiebreaker.
+ * `created_at.desc` trails every sort that is not itself unique, as a tiebreaker.
  *
- * Thousands of leads share a client name, and with no second key Postgres may return ties in a
- * different order on each request. Paging then shows rows twice, or never.
+ * Leads share a client name, a reply count, and — for everything never replied to — a null last
+ * reply. With no second key Postgres may return ties in a different order on each request, and
+ * paging then shows rows twice, or never.
  */
 export const LEAD_SORTS: readonly LeadSort[] = [
-  { id: "recent", label: "Newest first", order: "created_at.desc" },
-  { id: "oldest", label: "Oldest first", order: "created_at.asc" },
+  { id: "recent", label: "Newest reply first", order: "last_reply_at.desc.nullslast,created_at.desc" },
+  { id: "oldest", label: "Oldest reply first", order: "last_reply_at.asc.nullslast,created_at.desc" },
+  { id: "added-desc", label: "Recently added", order: "created_at.desc" },
+  { id: "added-asc", label: "First added", order: "created_at.asc" },
+  { id: "replies-desc", label: "Most replies", order: "reply_count.desc.nullslast,created_at.desc" },
+  { id: "replies-asc", label: "Fewest replies", order: "reply_count.asc.nullslast,created_at.desc" },
   { id: "name-asc", label: "Lead A–Z", order: "name.asc.nullslast,created_at.desc" },
   { id: "name-desc", label: "Lead Z–A", order: "name.desc.nullslast,created_at.desc" },
   { id: "client-asc", label: "Client A–Z", order: "client_names.asc.nullslast,created_at.desc" },

@@ -202,10 +202,13 @@ export async function GET(request: Request) {
     // Sender, campaign and time-range filters are decided in memory below, so that path has to read
     // the whole filtered set from row one and take its page afterwards — an offset in the query would
     // skip rows before the filter ever saw them. Everything else pages in the database.
+    // rr_lead_index rather than rr_leads: every rr_leads column plus `last_reply_at` and
+    // `reply_count`, which are the two things this table displays and sorts by. Reading the base table
+    // meant "Newest first" ordered by insertion time while the date column showed the last reply.
     let rows = await get(
       url,
       key,
-      `rr_leads?select=*&${filters ? `${filters}&` : ""}order=${order}&limit=${metadataFiltering ? 10000 : limit + 1}${metadataFiltering || !offset ? "" : `&offset=${offset}`}`,
+      `rr_lead_index?select=*&${filters ? `${filters}&` : ""}order=${order}&limit=${metadataFiltering ? 10000 : limit + 1}${metadataFiltering || !offset ? "" : `&offset=${offset}`}`,
     );
     const optionRows = selectedWorkspace
       ? await get(url, key, `rr_leads?select=raw_data&workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}&limit=10000`)
@@ -336,21 +339,26 @@ export async function GET(request: Request) {
           raw,
         ),
         senderNames,
+        // No `logoUrl` on the row's workspace: it is a base64 data URI, there are three of them, and
+        // repeating one per lead was a fifth of a three-megabyte response. The `workspaces` array
+        // below carries each logo once and the table looks it up from there by slug.
         workspace: {
           id: workspace.id,
           name: workspace.name,
           slug: workspace.slug,
-          logoUrl: workspace.logo_url,
           accentColor: workspace.accent_color,
         },
         createdAt: lead.created_at,
         conversationCount: leadConversations.length,
-        replyCount: leadMessages.filter(
-          (message) => message.direction === "inbound",
-        ).length,
-        lastReplyAt: leadConversations[0]?.last_message_at ?? null,
+        // Straight off the view, which is also what the sort ordered by. Counting the messages loaded
+        // for this page would drift from it: that read is capped at a thousand rows, so a busy page
+        // could show a reply count lower than the one the rows were sorted on.
+        replyCount: Number(lead.reply_count ?? 0),
+        lastReplyAt: lead.last_reply_at ?? null,
         lastMessage: latestMessage?.body ?? "",
-        rawData: raw,
+        // `rawData` used to be here — the entire stored HeyReach payload, per row, three quarters of
+        // the response by weight and read by nothing. The table renders none of it, and the drawer
+        // that does fetches the lead on its own from /api/database/lead/[id].
       };
     });
     return NextResponse.json({

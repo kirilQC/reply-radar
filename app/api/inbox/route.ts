@@ -295,7 +295,12 @@ export async function GET(request: Request) {
         client: String(workspace.name || workspace.slug || "Unknown client"),
         clientSlug: workspace.slug,
         clientTone: String(workspace.accent_color || "#8b7cff"),
-        clientLogoUrl: workspace.logo_url ?? null,
+        // No `clientLogoUrl` here on purpose. Logos are stored as base64 data URIs, and there are only
+        // three distinct ones, so shipping the workspace's logo on every conversation row put the same
+        // few hundred kilobytes into the response several hundred times over — 10.3MB of a 12.8MB
+        // payload, which is the whole reason the inbox sat blank for seconds after the page appeared.
+        // The client resolves the logo from `workspaceDirectory` by slug, which it already loads once
+        // from /api/admin/workspaces and caches in localStorage.
         senderName,
         leadScore: metadata.icp_score !== undefined && metadata.icp_score !== null ? Number(metadata.icp_score) || 0 : null,
         icpReason: String(metadata.icp_reason ?? "") || null,

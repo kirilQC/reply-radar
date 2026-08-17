@@ -43,7 +43,6 @@ type Lead = {
   replyCount: number;
   lastReplyAt?: string | null;
   lastMessage: string;
-  rawData: Record<string, unknown>;
 };
 type Detail = {
   lead: Record<string, unknown>;
@@ -544,6 +543,17 @@ export default function DatabasePage() {
     () => leads.find((lead) => lead.id === selectedId),
     [leads, selectedId],
   );
+  /**
+   * Client logos once each, keyed by slug.
+   *
+   * The rows used to carry their own copy. A logo is a base64 data URI and there are three distinct
+   * ones, so a logo per lead was a fifth of a three-megabyte response for the same few hundred
+   * kilobytes repeated fifty times. `workspaces` arrives in the same payload holding each one once.
+   */
+  const logoBySlug = useMemo(
+    () => new Map(workspaces.map((item) => [item.slug, item.logoUrl || ""])),
+    [workspaces],
+  );
 
   return (
     <div className="app-shell">
@@ -586,9 +596,10 @@ export default function DatabasePage() {
               rows that happen to be loaded — so "A–Z" means the first lead alphabetically out of
               forty thousand, which is the only reading of it that is any use.
 
-              Replies and last reply are missing on purpose: they live on `rr_conversations`, and
-              until there is a view joining them to the lead they cannot be ordered from here. A
-              per-page sort would have looked like the others and meant something quite different.
+              Every order here is by a column this table shows. The first version defaulted to
+              `created_at` while the date column rendered the last reply, so "Newest first" produced
+              dates in no visible order and read as a control that did nothing. Replies and last reply
+              come from the `rr_lead_index` view, which joins them onto the lead.
             */}
             <DatabaseDropdown label="Sort" value={sort} placeholder={DEFAULT_LEAD_SORT.label} options={sortChoices} onChange={setSort} />
             {workspace && <DatabaseDropdown label="Sender" value={sender} placeholder="All senders" options={filterOptions.senders.map((name) => ({ value: name, label: name }))} onChange={setSender} />}
@@ -649,9 +660,9 @@ export default function DatabasePage() {
                     </span>
                   </span>
                   <span className="database-client">
-                    {lead.workspace?.logoUrl ? (
+                    {logoBySlug.get(String(lead.workspace?.slug ?? "")) ? (
                       <i>
-                        <img src={lead.workspace.logoUrl} alt="" />
+                        <img src={logoBySlug.get(String(lead.workspace?.slug ?? ""))} alt="" />
                       </i>
                     ) : (
                       <i
