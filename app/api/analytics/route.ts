@@ -95,10 +95,8 @@ async function heyReachCampaignList(workspace: Row) {
   if (cached && cached.expires > Date.now()) return cached.rows;
   const apiKey = String(workspace.heyreach_api_key_ciphertext ?? "").trim();
   if (!apiKey) return [];
-  const rows: Row[] = [];
   const pageSize = 100;
-  // HeyReach caps a page at 100 records, so walk pages until the reported total is covered.
-  for (let offset = 0; offset < 2_000; offset += pageSize) {
+  const page = async (offset: number) => {
     const response = await fetch("https://api.heyreach.io/api/public/campaign/GetAll", {
       method: "POST",
       headers: { "X-API-KEY": apiKey, "content-type": "application/json", Accept: "application/json" },
@@ -106,14 +104,34 @@ async function heyReachCampaignList(workspace: Row) {
       signal: AbortSignal.timeout(15_000),
       cache: "no-store",
     }).catch(() => null);
-    if (!response?.ok) break;
-    const payload = await response.json().catch(() => ({}));
-    const items = Array.isArray(payload?.items) ? (payload.items as Row[]) : [];
-    rows.push(...ourCampaigns(items, (row) => row.name));
-    // Paging is judged on what HeyReach returned, not on what survived the filter: comparing a
-    // filtered length against `totalCount` would stop early and lose later pages.
-    const total = Number(payload?.totalCount ?? 0);
-    if (items.length < pageSize || offset + items.length >= total) break;
+    if (!response?.ok) return null;
+    return await response.json().catch(() => null) as { items?: Row[]; totalCount?: number } | null;
+  };
+  /**
+   * HeyReach caps a page at 100 records. This used to walk the pages in a `for` loop, one awaited
+   * request after another, up to twenty of them per client — and with a client on every row of the
+   * sidebar that serialised into the bulk of the wait before the analytics page could paint.
+   *
+   * The first page reports `totalCount`, so after it there is nothing left to discover: the
+   * remaining offsets are arithmetic and can all go at once. One round-trip plus one parallel batch
+   * instead of up to twenty in single file.
+   */
+  const first = await page(0);
+  if (!first) return [];
+  const items = Array.isArray(first.items) ? first.items : [];
+  const total = Number(first.totalCount ?? 0);
+  const rows: Row[] = [...ourCampaigns(items, (row) => row.name)];
+  if (items.length >= pageSize && total > pageSize) {
+    const offsets: number[] = [];
+    // The 2,000 ceiling is kept from the loop it replaces — a guard against a bad `totalCount`
+    // turning into an unbounded fan-out.
+    for (let offset = pageSize; offset < Math.min(total, 2_000); offset += pageSize) offsets.push(offset);
+    const pages = await Promise.all(offsets.map((offset) => page(offset)));
+    for (const result of pages) {
+      // Paging is judged on what HeyReach returned, not on what survived the filter: comparing a
+      // filtered length against `totalCount` would lose later pages.
+      if (result?.items?.length) rows.push(...ourCampaigns(result.items, (row) => row.name));
+    }
   }
   campaignListCache.set(workspaceId, { expires: Date.now() + 10 * 60_000, rows });
   return rows;

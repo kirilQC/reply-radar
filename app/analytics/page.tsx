@@ -13,6 +13,15 @@ type CampaignMetric = { workspaceId: string; client: string; campaignId: string;
 type WorkspaceDetail = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type AnalyticsData = { status?: string; totalReplies?: number; messagesSent?: number; activeConversations?: number; replies7d?: number; trend?: number[]; trendLabels?: string[]; averageDailyReplies?: number; campaignMetrics?: CampaignMetric[]; campaignAverages?: { replyRate: number; acceptanceRate: number; positiveReplyRate: number }; clientPerformance?: Performance[]; campaigns?: Performance[]; senders?: Performance[]; workspaceDetails?: WorkspaceDetail[] };
 
+/**
+ * Where the last good `/api/analytics` answer is parked between visits.
+ *
+ * Versioned in the name so a change to `AnalyticsData` cannot be handed a snapshot shaped for the
+ * previous version — bumping the `:v1` retires every stored copy at once, which is cheaper and
+ * safer than migrating them.
+ */
+const snapshotKey = "reply-radar-analytics-snapshot:v1";
+
 const launchDate = (value: string | null) => {
   if (!value) return "—";
   const date = new Date(value);
@@ -83,7 +92,50 @@ export default function AnalyticsPage() {
   const [urlCampaign, setUrlCampaign] = useState<string | null>(null);
 
   useEffect(() => {
-    const load = () => fetch("/api/analytics", { cache: "no-store" }).then((response) => response.json()).then((payload) => { setData(payload); setUpdatedAt(new Date()); }).catch(() => setData({ status: "error" }));
+    /**
+     * Last run's figures, painted while this run's are still in flight.
+     *
+     * `/api/analytics` talks to HeyReach for every client before it can answer, so there is a
+     * multi-second window on every visit where this page had nothing to draw and showed an empty
+     * shell — and because tab switches are now client-side, that emptiness is the *only* thing you
+     * see. The numbers from the previous visit are the same numbers this fetch is about to return,
+     * give or take a few replies, so showing them is strictly better than showing nothing.
+     *
+     * Read here rather than in `useState`'s initialiser on purpose: an initialiser runs during
+     * render, where the server rendered `{}` and the client would render a full payload, and React
+     * discards the whole tree on that mismatch. An effect runs after hydration, so the restore is
+     * a normal state update — one frame later, which is imperceptible.
+     *
+     * The stamp is stored with it and put straight into the "updated HH:MM" label already in the
+     * hero, so a restored snapshot says how old it is instead of pretending to be live.
+     */
+    try {
+      const cached = window.localStorage.getItem(snapshotKey);
+      if (cached) {
+        const parsed = JSON.parse(cached) as { at?: number; data?: AnalyticsData };
+        if (parsed?.data && typeof parsed.data === "object") {
+          // The one extra render this costs is the entire point of the snapshot — it is what turns
+          // an empty shell into last visit's figures. `set-state-in-effect` exists to catch render
+          // loops, and this runs once on mount from a value that cannot change.
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setData(parsed.data);
+          if (parsed.at) setUpdatedAt(new Date(parsed.at));
+        }
+      }
+    } catch { /* a corrupt or evicted snapshot just means the old empty-shell wait */ }
+    const load = () => fetch("/api/analytics", { cache: "no-store" }).then((response) => response.json()).then((payload) => {
+      setData(payload);
+      const at = Date.now();
+      setUpdatedAt(new Date(at));
+      // Only an answer with figures in it is kept, judged on content rather than on a status
+      // string: the route can reply `error`, `not_configured`, or a 200 with nothing in it, and any
+      // of those overwriting a working snapshot would mean one bad poll leaves the page blank on
+      // every later visit. Campaign metrics are the spine of everything below, so their presence is
+      // the honest test of whether this payload is worth keeping.
+      if (Array.isArray(payload?.campaignMetrics) && payload.campaignMetrics.length) {
+        try { window.localStorage.setItem(snapshotKey, JSON.stringify({ at, data: payload })); } catch { /* quota or private mode */ }
+      }
+    }).catch(() => setData((current) => (current.campaignMetrics?.length ? current : { status: "error" })));
     void load();
     const timer = window.setInterval(load, 30_000);
     return () => window.clearInterval(timer);

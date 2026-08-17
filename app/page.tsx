@@ -347,6 +347,44 @@ const mergeInboxLeads = (previous: Lead[], incoming: Lead[]): Lead[] => {
     return merged;
   });
 };
+/**
+ * The last inbox payload, parked for the next visit.
+ *
+ * One key, not one per client. A lead carries its whole message history, so a snapshot per scope
+ * would put fourteen copies of the queue into a 5MB budget and start throwing quota errors; storing
+ * the scope *inside* the single record instead means the newest one always wins and a mismatch just
+ * falls back to the blank wait we had before. Switching clients therefore gets no snapshot, which is
+ * the right trade: the complaint was about returning to the inbox tab, not about client hopping.
+ */
+const inboxSnapshotKey = "reply-radar-inbox-snapshot:v1";
+/**
+ * How many rows are kept. Bodies are unbounded, so the whole queue is not something to hand to
+ * localStorage; the payload arrives already ordered by the API, so the first sixty are the ones
+ * anybody is about to look at. Counts read a little low for the second before the real answer
+ * lands and `mergeInboxLeads` replaces the lot.
+ */
+const inboxSnapshotRows = 60;
+const readInboxSnapshot = (scope: string): Lead[] | null => {
+  try {
+    const raw = window.localStorage.getItem(inboxSnapshotKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { scope?: string; leads?: Lead[] };
+    if (parsed?.scope !== scope || !Array.isArray(parsed.leads) || !parsed.leads.length) return null;
+    return parsed.leads;
+  } catch {
+    return null;
+  }
+};
+const writeInboxSnapshot = (scope: string, leads: Lead[]) => {
+  // An empty answer is not worth keeping, and worse, storing it would throw away a good snapshot —
+  // a route that briefly returns nothing would leave every later visit staring at a blank queue.
+  if (!leads.length) return;
+  try {
+    window.localStorage.setItem(inboxSnapshotKey, JSON.stringify({ scope, leads: leads.slice(0, inboxSnapshotRows) }));
+  } catch {
+    /* quota, or private browsing — the snapshot is an optimisation, never a requirement */
+  }
+};
 function Icon({ name }: { name: string }) {
   const paths: Record<string, string> = {
     inbox: "M4 5h16v14H4z M4 9h5l1.5 2h3L15 9h5",
@@ -629,6 +667,9 @@ export function InboxPage() {
       workspaceDirectory.find((item) => item.name === client)?.slug ||
       client.toLowerCase(),
   );
+  // What the snapshot is a snapshot *of*. The fetch below is scoped to these slugs, so a stored
+  // queue is only reusable when the scope matches exactly.
+  const inboxSnapshotScope = trackedWorkspaceSlugs.join(",");
   const greeting =
     new Date().getHours() < 12
       ? "Good morning"
@@ -769,6 +810,19 @@ export function InboxPage() {
     let cancelled = false;
     setInboxLoading(true);
     setInboxError("");
+    /**
+     * Paint the previous visit's queue while this one loads.
+     *
+     * The inbox needs the workspace directory before it may even ask for conversations, and the
+     * answer then covers every client, so there is a stretch of seconds on arrival with nothing on
+     * screen. Now that tab switches happen on the client rather than as a document load, that empty
+     * stretch is the whole of what a returning user sees.
+     *
+     * `mergeInboxLeads` already exists to fold a fresh payload over rows that are on screen, so a
+     * restored snapshot needs no special handling downstream — it is simply what `previous` is.
+     */
+    const restored = readInboxSnapshot(inboxSnapshotScope);
+    if (restored) setLeads((current) => (current.length ? current : restored));
     fetch(
       `/api/inbox?workspaces=${encodeURIComponent(trackedWorkspaceSlugs.join(","))}`,
       { cache: "no-store" },
@@ -787,6 +841,7 @@ export function InboxPage() {
           ? payload.conversations
           : [];
         setLeads((previous) => mergeInboxLeads(previous, incoming));
+        writeInboxSnapshot(inboxSnapshotScope, incoming);
       })
       .catch((error) => {
         if (!cancelled) {

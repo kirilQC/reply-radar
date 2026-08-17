@@ -220,18 +220,32 @@ export default function AppSidebar() {
         </button>
       </div>
       <div className="nav-label">Operate</div>
+      {/*
+        `Link`, not `<a href>`. These were plain anchors, which meant every tab switch was a full
+        document navigation: the entire bundle re-downloaded and re-parsed, React remounted from
+        nothing, and every page's fetches restarted cold — several seconds of blank screen to move
+        between two pages that were both already loaded once. Link transitions on the client and
+        prefetches the target, so the switch is immediate.
+
+        Each of these goes to a different pathname, which is what makes it safe: the destination
+        component still mounts fresh, so the pages that read `window.location.search` in a
+        mount-only effect (this file, page.tsx, analytics) read the new URL exactly as before.
+        The client links below are deliberately *not* converted — they only change `?client=`, and
+        on a same-pathname transition those effects would not re-run.
+      */}
       <nav>
         {items.map(([href, label, icon]) => (
-          <a
+          <Link
             key={href}
             href={href}
             className={`nav-item ${pathname === href ? "active" : ""}`}
+            onClick={() => setNavOpen(false)}
           >
             <span className="sidebar-icon">
               <SidebarIcon name={icon} />
             </span>
             <span>{label}</span>
-          </a>
+          </Link>
         ))}
       </nav>
       <div className="nav-label clients-label">Clients</div>
