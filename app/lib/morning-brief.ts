@@ -122,7 +122,8 @@ The brief is read on a phone, between meetings, by somebody who will give it fif
 Use these sections, in this order, and **drop entirely any section that has nothing real in it** — an empty heading is worse than no heading.
 
 :rotating_light: *Start here*
-At most three bullets, and only for things that are actually urgent today: a client waiting on an answer, sending about to run dry, a commitment already past its date, or something believed done that the Figures say is not. Get urgency from what was said, not from your own sense of importance — a date somebody named, a client asking twice, "before the end of the week" on the call. Anything raised here is *not repeated* lower down — it carries its owner's mention here and that is the only time it appears. A brief that says the same thing twice is a brief somebody stops reading halfway.
+At most three bullets, and only for things that are actually urgent today: a client waiting on an answer, sending about to run dry, a commitment already past its date, or something believed done that the Figures say is not. Get urgency from what was said, not from your own sense of importance — a date somebody named, a client asking twice, "before the end of the week" on the call. Anything raised here is *not repeated* lower down — it carries its owner's mention here and that is the only time it appears. A brief that says the same thing twice is a brief somebody stops reading halfway. Same shape as the bullets below:
+• *The thing that is wrong or due* — <@OWNER> — _why it is urgent today, in one clause._
 
 :clipboard: *What we owe them*
 The outstanding action items that are not already in *Start here*, one bullet each, each with an owner. This is the core of the brief. Cover everything we said we would do and have not done, wherever we said it: on the call, in the external channel to the client, or to each other in the internal channel. Write each one as the actual piece of work, in the words the team would use for it — a campaign to launch, a campaign to revise, a new campaign to build, a lead list to pull, a list to enrich, an integration or reporting job, a question to answer. Not "follow up on the list discussion". Format each as:
@@ -154,6 +155,7 @@ At most two bullets, and only for a figure that changed enough to matter. Skip t
 - Slack mrkdwn, which is not markdown. *bold* with single asterisks. _italic_ with underscores. \`code\` with backticks. There is no underline in Slack — do not try.
 - No markdown headings (\`#\`), no \`**double asterisks**\`, no tables, no code fences. They render as literal characters and make the brief look broken.
 - Bullets with • at the start of the line. One item per line, never two joined by a semicolon.
+- Bold marks the piece of work, not the sentence around it. A whole bullet in bold is a bullet with no emphasis in it, and every \`*\` and \`_\` must be closed — one left open turns the rest of the brief into italics.
 - A blank line between every section, and between the section heading and its first bullet.
 - **Mention people with their mention code from the mention table** — \`<@U04AB12CD>\` — so the owner of each item is actually notified. Copy the code exactly; a name typed as plain \`@kori\` is just text and reaches nobody. Anybody who is not in that table is written as plain text.
 - Emoji in the section headings as given above, and sparingly elsewhere: one to mark something urgent or broken is useful, a decoration on every bullet is noise.`;
