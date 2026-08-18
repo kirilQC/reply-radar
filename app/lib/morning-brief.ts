@@ -152,6 +152,8 @@ The mention comes first because everybody reading is scanning for their own name
 
 The italic sub-bullet is the last thing on every item and it is the point of the whole section: it names when the commitment was made and says plainly that it is still outstanding. _"Agreed on the Aug 5 call; no update since."_ _"Kori said on Aug 12 that updates were coming shortly; nothing has gone out."_ One clause, italic, factual, no editorialising. That is what keeps somebody honest, and it costs eight words rather than a paragraph.
 
+**The other sub-bullet must not restate it.** If the italic clause already carries the whole story — and on most items it does — then the item is the numbered line and the italic clause, and nothing else. A detail bullet earns its place only by saying something the italic clause does not: a number, a filter, a name, a constraint somebody needs to act. Two bullets that paraphrase each other are the same wall of text at half the width.
+
 Write the work in the words the team uses for it — a campaign to launch, a list to pull, a list to enrich, copy to write, a reporting job, a question to answer. Not "follow up on the list discussion". Work out the owner from what you were given: who volunteered on the call, who was asked in the channel and did not decline, who has done this kind of work for this client before. If two people could own it, mention both on the line. If nobody can be identified, start the line with *Owner not agreed* in place of a mention — unowned work is the work that does not happen, so it is worth a line.
 
 Six items is a lot. If you have more than six, you are including things that do not matter this week.

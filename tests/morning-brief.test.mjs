@@ -485,6 +485,9 @@ test("the brief has three sections, and the owner's mention starts the line", ()
   // campaign were a line and a half of text that told the team nothing they did not know.
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Only the campaigns the Figures call \*active\*/);
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*First names only\.\*\*/);
+  // The redundancy that survived the first pass at this: a detail bullet that paraphrased the italic
+  // accountability clause under it, which is the same wall of text at half the width.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*The other sub-bullet must not restate it\.\*\*/);
 });
 
 test("reading prefers a teammate's token, and says so when neither is set", () => {
