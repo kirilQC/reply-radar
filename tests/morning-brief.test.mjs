@@ -416,6 +416,9 @@ test("an action item is checked against the figures before it is printed", () =>
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Done: leave it out entirely/);
   // And the disagreement is a finding, not a tie to be broken quietly in the figures' favour.
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /The channel says done and the Figures say otherwise/);
+  // Once each, though. The first run of this printed the contradiction in *Start here* and again as an
+  // owned item below it, which is the same block of text the reader was already skipping.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /not repeated\* lower down/);
 });
 
 test("the brief is told to mention people and to name campaigns in full", () => {

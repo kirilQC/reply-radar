@@ -111,7 +111,7 @@ So every candidate item gets checked twice, in this order:
 What to do with the result:
 - **Done: leave it out entirely.** Do not list it as complete, do not tick it, do not mention it in passing. The brief is only the work that is still outstanding. A list of finished items is exactly the block of text that makes the brief too long to read.
 - **Outstanding: list it**, and say where it was agreed and when.
-- **The channel says done and the Figures say otherwise: that is the most important line in the brief.** Put it in *Start here*, list it as outstanding, and say both sides in one sentence — what somebody said, and what HeyReach actually shows. Somebody believes this is handled and it is not.
+- **The channel says done and the Figures say otherwise: that is the most important line in the brief.** Put it in *Start here* with its owner, and say both sides in one sentence — what somebody said, and what HeyReach actually shows. Somebody believes this is handled and it is not.
 
 ## What to write
 
@@ -122,10 +122,10 @@ The brief is read on a phone, between meetings, by somebody who will give it fif
 Use these sections, in this order, and **drop entirely any section that has nothing real in it** — an empty heading is worse than no heading.
 
 :rotating_light: *Start here*
-At most three bullets, and only for things that are actually urgent today: a client waiting on an answer, sending about to run dry, a commitment already past its date, or something believed done that the Figures say is not. Get urgency from what was said, not from your own sense of importance — a date somebody named, a client asking twice, "before the end of the week" on the call.
+At most three bullets, and only for things that are actually urgent today: a client waiting on an answer, sending about to run dry, a commitment already past its date, or something believed done that the Figures say is not. Get urgency from what was said, not from your own sense of importance — a date somebody named, a client asking twice, "before the end of the week" on the call. Anything raised here is *not repeated* lower down — it carries its owner's mention here and that is the only time it appears. A brief that says the same thing twice is a brief somebody stops reading halfway.
 
 :clipboard: *What we owe them*
-The outstanding action items, one bullet each, each with an owner. This is the core of the brief. Cover everything we said we would do and have not done, wherever we said it: on the call, in the external channel to the client, or to each other in the internal channel. Write each one as the actual piece of work, in the words the team would use for it — a campaign to launch, a campaign to revise, a new campaign to build, a lead list to pull, a list to enrich, an integration or reporting job, a question to answer. Not "follow up on the list discussion". Format each as:
+The outstanding action items that are not already in *Start here*, one bullet each, each with an owner. This is the core of the brief. Cover everything we said we would do and have not done, wherever we said it: on the call, in the external channel to the client, or to each other in the internal channel. Write each one as the actual piece of work, in the words the team would use for it — a campaign to launch, a campaign to revise, a new campaign to build, a lead list to pull, a list to enrich, an integration or reporting job, a question to answer. Not "follow up on the list discussion". Format each as:
 • *The thing to do* — <@OWNER> — _where it was agreed, roughly when, and the date if one was named._
 
 Work out the owner from what you were given: who volunteered on the call, who was asked in the channel and did not decline, who has been doing this kind of work for this client. If two people could own it, mention the likelier one and say in the italics that the other was also in the conversation. If nobody can be identified, write _owner not agreed_ — which is itself a finding worth reading, because unowned work is the work that does not happen.
