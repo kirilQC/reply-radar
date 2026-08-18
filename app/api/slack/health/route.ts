@@ -17,11 +17,17 @@
  */
 
 import { NextResponse } from "next/server";
+import { inspectNotes, type NoteSighting } from "../../../lib/granola";
+import { parseDomains } from "../../../lib/granola-match";
+import { granolaKeys } from "../../../lib/morning-brief-run";
 import { probeChannel, tokenReports, type ChannelProbe } from "../../../lib/slack";
 
 export const maxDuration = 60;
 
 const TEST_CHANNEL_ENV = "SLACK_TEST_CHANNEL_ID";
+
+/** The same window the brief searches, so this cannot report a call the brief would not have used. */
+const CALL_WINDOW_DAYS = 14;
 
 function credentials() {
   const url = process.env.SUPABASE_URL;
@@ -41,19 +47,25 @@ export async function GET(request: Request) {
   if (testChannel) targets.push(["Test channel", testChannel]);
 
   let client = "";
-  if (slug) {
-    const store = credentials();
-    if (store) {
-      const query = `${store.url}/rest/v1/rr_workspaces?slug=eq.${encodeURIComponent(slug)}&select=name,slack_internal_channel_id,slack_external_channel_id&limit=1`;
-      const response = await fetch(query, { headers: { apikey: store.key, Authorization: `Bearer ${store.key}` }, cache: "no-store" }).catch(() => null);
-      const rows = response?.ok ? ((await response.json().catch(() => [])) as Record<string, unknown>[]) : [];
-      const row = rows[0];
-      if (row) {
-        client = String(row.name ?? slug);
-        const internal = String(row.slack_internal_channel_id ?? "").trim();
-        const external = String(row.slack_external_channel_id ?? "").trim();
-        targets.push(["Internal channel", internal], ["External channel", external]);
-      }
+  let domains: string[] = [];
+  let granola: NoteSighting[] = [];
+  const store = credentials();
+  if (slug && store) {
+    const read = async (path: string): Promise<unknown> => {
+      const response = await fetch(`${store.url}/rest/v1/${path}`, { headers: { apikey: store.key, Authorization: `Bearer ${store.key}` }, cache: "no-store" });
+      return response.ok ? response.json() : [];
+    };
+    const rows = (await read(`rr_workspaces?slug=eq.${encodeURIComponent(slug)}&select=name,slack_internal_channel_id,slack_external_channel_id,granola_domains&limit=1`).catch(() => [])) as Record<string, unknown>[];
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    if (row) {
+      client = String(row.name ?? slug);
+      domains = parseDomains(row.granola_domains);
+      targets.push(
+        ["Internal channel", String(row.slack_internal_channel_id ?? "").trim()],
+        ["External channel", String(row.slack_external_channel_id ?? "").trim()],
+      );
+      // The same window the brief uses, so "found nothing" here means the brief found nothing too.
+      granola = await inspectNotes(await granolaKeys(read), CALL_WINDOW_DAYS).catch(() => []);
     }
   }
 
@@ -62,5 +74,27 @@ export async function GET(request: Request) {
   const channels: ChannelProbe[] = [];
   for (const [label, id] of targets) channels.push(await probeChannel(label, id));
 
-  return NextResponse.json({ ok: true, client, tokens, channels });
+  // Every note each key can see, with the domains found in it beside the title. A call that is in the
+  // list but has no matching domain is a parser problem; a call that is not in any list at all is in
+  // somebody else's Granola and needs their key.
+  return NextResponse.json({
+    ok: true,
+    client,
+    tokens,
+    channels,
+    granola: {
+      windowDays: CALL_WINDOW_DAYS,
+      domains,
+      keys: granola.map((sighting) => ({
+        key: sighting.keyLabel,
+        error: sighting.error,
+        matched: sighting.notes.filter((note) => note.domains.some((domain) => domains.includes(domain))).length,
+        notes: sighting.notes.map((note) => ({
+          title: note.title,
+          when: note.startedAt ? new Date(note.startedAt).toISOString().slice(0, 10) : "no date",
+          domains: note.domains,
+        })),
+      })),
+    },
+  });
 }

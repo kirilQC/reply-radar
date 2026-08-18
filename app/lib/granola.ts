@@ -19,7 +19,7 @@
  * brief then says which source it was missing, which is what gets it fixed.
  */
 
-import { callAgeDays, parseDomains, pickLatestCall, transcriptText, type GranolaNote } from "./granola-match";
+import { callAgeDays, normalizeNote, parseDomains, pickLatestCall, transcriptText, type GranolaNote } from "./granola-match";
 
 const BASE = "https://public-api.granola.ai/v1";
 /** Granola's list endpoint caps at 30, and one page is several weeks of one person's meetings. */
@@ -156,4 +156,43 @@ export async function findClientCall(
     },
     errors,
   };
+}
+
+/**
+ * What each key can actually see, for when a call that definitely happened was definitely not found.
+ *
+ * There are exactly two reasons for that, and they need opposite fixes: either the note is not in this
+ * person's Granola at all — Granola holds notes for the meetings *you* recorded, so a call somebody else
+ * took notes on is in their account and needs their key — or the note is there and the attendee emails
+ * are not where `noteDomains` looks. Listing the titles with the domains found beside them separates the
+ * two in one request, which is the difference between adding a teammate's key and fixing a parser.
+ *
+ * Titles and dates only. The transcript is the sensitive part and no diagnostic needs it.
+ */
+export type NoteSighting = {
+  keyLabel: string;
+  error: string;
+  notes: Array<{ id: string; title: string; startedAt: number; domains: string[] }>;
+};
+
+export async function inspectNotes(keys: GranolaKey[], windowDays: number): Promise<NoteSighting[]> {
+  const createdAfter = new Date(Date.now() - windowDays * 86_400_000).toISOString();
+  const query = `/notes?created_after=${encodeURIComponent(createdAfter)}&page_size=${PAGE_SIZE}`;
+  return Promise.all(keys.map(async (key) => {
+    try {
+      const notes = notesOf(await granola(key.apiKey, query));
+      return {
+        keyLabel: key.label || "A Granola key",
+        error: "",
+        // A note `normalizeNote` refused could never have been chosen as a client's call either, so
+        // leaving it out keeps this list honest about what was actually in play.
+        notes: notes
+          .map((raw) => normalizeNote(raw))
+          .filter((note): note is GranolaNote => Boolean(note))
+          .map((note) => ({ id: note.id, title: note.title, startedAt: note.startedAt, domains: note.domains })),
+      };
+    } catch (error) {
+      return { keyLabel: key.label || "A Granola key", error: error instanceof Error ? error.message : "could not be read.", notes: [] };
+    }
+  }));
 }
