@@ -481,12 +481,13 @@ test("the standing reminder is appended under the brief, indented, fenced by div
 
   const posted = briefWithFooter(body, zone, friday);
   assert.ok(posted.includes("1. *Cold calling update*"), "the model's own findings must come through untouched");
-  assert.match(posted, /\n\n\n={41}\n\n {8}:page_facing_up: Remember to send out the EOW report! :page_facing_up:\n\n={41}$/);
+  assert.match(posted, /\n\n\n={37}\n\n {3}:page_facing_up: Remember to send out the EOW report! :page_facing_up:\n\n={37}$/);
   // Under the findings, never above them: it is a closing ritual, not the headline.
   assert.ok(posted.indexOf("Cold calling") < posted.indexOf("EOW report"));
 
-  // Monday's is the same shape with its own emoji, so the two cannot drift apart.
-  assert.match(briefWithFooter(body, zone, new Date("2026-08-17T14:00:00Z")), / {8}:speech_balloon: Make sure to sync about game plan for this week! :speech_balloon:/);
+  // Monday's is the same shape with its own emoji, so the two cannot drift apart. Its own indent, though:
+  // the line is wider than the rule, so any indent at all would wrap it, and a wrapped line is not centred.
+  assert.match(briefWithFooter(body, zone, new Date("2026-08-17T14:00:00Z")), /\n:speech_balloon: Make sure to sync about game plan for this week! :speech_balloon:\n/);
 
   // Midweek the brief ends on the last finding, with no empty fence hanging off the end of it.
   const midweek = briefWithFooter(body, zone, new Date("2026-08-19T14:00:00Z"));
@@ -506,7 +507,7 @@ test("every section heading is fenced above and below and centred, and the model
    * Asked for it, runs came back with the rule above the heading but not below, or centred by a different
    * number of spaces each time, and leading whitespace is the first thing a model tidies away.
    */
-  const divider = "=".repeat(41);
+  const divider = "=".repeat(37);
   const body = [
     "*:signal_strength: _Active Campaigns_ :signal_strength:*",
     "",
@@ -525,16 +526,63 @@ test("every section heading is fenced above and below and centred, and the model
   const framed = briefFraming(body);
 
   // It opens on a rule, not on the heading and not on a title.
-  assert.ok(framed.startsWith(`${divider}\n\n        *:signal_strength:`), framed.slice(0, 140));
+  assert.ok(framed.startsWith(`${divider}\n\n${" ".repeat(20)}*:signal_strength:`), framed.slice(0, 140));
   for (const heading of ["*:signal_strength: _Active Campaigns_ :signal_strength:*", "*:male-technologist: _Things to work on_ :male-technologist:*"]) {
-    assert.ok(framed.includes(`${divider}\n\n        ${heading}\n\n${divider}`), `${heading} was not fenced and centred`);
+    assert.ok(framed.includes(`${divider}\n\n${" ".repeat(20)}${heading}\n\n${divider}`), `${heading} was not fenced and centred`);
   }
   // Four rules for two sections. The model's own leftover divider was dropped rather than left in a gap.
   assert.equal(framed.split(divider).length - 1, 4);
   // Two blank lines between the end of one section and the rule that opens the next.
-  assert.match(framed, /pending leads \(~2 days of sending left\)\n\n\n={41}/);
+  assert.match(framed, /pending leads \(~2 days of sending left\)\n\n\n={37}/);
   // The sub-bullet's own indent is the model's and means something, so it survives untouched.
   assert.ok(framed.includes("    • 106 pending leads"));
+});
+
+test("the indent is worked out per line, so a short heading and a long reminder both land centred", () => {
+  /*
+   * Emoji render about five spaces wide, so a heading cannot be centred by counting characters, and one
+   * fixed indent cannot serve both a two word heading and a reminder that nearly fills the rule. The first
+   * attempt used a single constant and came out looking left aligned, which is what Kiril reported.
+   *
+   * The numbers are approximate by nature, since Slack's font is proportional. What is asserted is that they
+   * are derived: the shorter line is pushed further in, and nothing is pushed past the end of the rule.
+   */
+  const indentOf = (heading) => briefFraming(`${heading}\n\n1. x`).split("\n")[2].match(/^ */)[0].length;
+
+  // The two long headings agree, so the three sections do not each sit somewhere different.
+  assert.equal(indentOf("*:signal_strength: _Active Campaigns_ :signal_strength:*"), 20);
+  assert.equal(indentOf("*:male-technologist: _Things to work on_ :male-technologist:*"), 20);
+  // A shorter heading is pushed further in rather than lining up with the others on the left.
+  assert.ok(indentOf("*:hourglass: _Client Bottlenecks_ :hourglass:*") < 20);
+  // A line wider than the rule gets no indent at all, because indenting it would wrap it.
+  assert.equal(indentOf("*:hourglass: _A heading far too long to be centred under any rule this width_ :hourglass:*"), 0);
+});
+
+test("each sub-bullet under an item is stepped in further than the one above it", () => {
+  /*
+   * Kiril's rule, and it earns its place: the second bullet is almost always the accountability clause,
+   * which is a comment on the first bullet rather than a sibling of it. Two bullets at the same indent read
+   * as one block of text.
+   *
+   * Normalised in code because the model has to get this right several times per brief rather than once, and
+   * because leading whitespace is the first thing it tidies away.
+   */
+  const framed = briefFraming([
+    "*:male-technologist: _Things to work on_ :male-technologist:*",
+    "",
+    "1. <@U01> to *finish the Doximity list*",
+    "• scoring and filtering to the top ~2,000 contacts",
+    "    • _agreed on the Aug 5 call, no update since._",
+    "",
+    "2. <@U02> to *send campaign updates*",
+    "        • _said on Aug 12 that updates were coming, nothing has gone out._",
+  ].join("\n"));
+
+  assert.ok(framed.includes("\n    • scoring and filtering to the top ~2,000 contacts\n"), framed);
+  assert.ok(framed.includes("\n        • _agreed on the Aug 5 call, no update since._\n"), framed);
+  // The counter resets on the next item, so the second item's only bullet starts at four again however the
+  // model indented it. Otherwise the steps accumulate down the section and the last item sits off the screen.
+  assert.ok(framed.includes("\n    • _said on Aug 12 that updates were coming, nothing has gone out._"), framed);
 });
 
 test("the old status title is dropped even when something still writes one", () => {
@@ -543,14 +591,14 @@ test("the old status title is dropped even when something still writes one", () 
   // back on one client only.
   const framed = briefFraming("*Midweek Status:*\n\n\n*:hourglass: _Client Bottlenecks_ :hourglass:*\n\n1. *Cold calling*");
   assert.ok(!framed.includes("Midweek Status"), framed);
-  assert.ok(framed.startsWith("=".repeat(41)));
+  assert.ok(framed.startsWith("=".repeat(37)));
   assert.ok(framed.includes("1. *Cold calling*"));
 });
 
 test("a heading written without its asterisks is still fenced, and normalised on the way", () => {
   // Three headings formatted three ways is the kind of thing nobody reports and everybody notices.
   const framed = briefFraming(":hourglass: _Client Bottlenecks_ :hourglass:\n\n1. *Cold calling*");
-  assert.ok(framed.includes(`${"=".repeat(41)}\n\n        *:hourglass: _Client Bottlenecks_ :hourglass:*\n\n${"=".repeat(41)}`), framed);
+  assert.ok(framed.includes(`${"=".repeat(37)}\n\n${" ".repeat(18)}*:hourglass: _Client Bottlenecks_ :hourglass:*\n\n${"=".repeat(37)}`), framed);
 });
 
 test("the runway warning is not mistaken for a section heading", () => {
@@ -569,7 +617,7 @@ test("the runway warning is not mistaken for a section heading", () => {
   ].join("\n"));
 
   // One section, so exactly two rules, and the warning is inside it rather than fenced off on its own.
-  assert.equal(framed.split("=".repeat(41)).length - 1, 2);
+  assert.equal(framed.split("=".repeat(37)).length - 1, 2);
   assert.ok(framed.trimEnd().endsWith(warning), framed);
 });
 
@@ -673,7 +721,7 @@ test("the brief has three sections, and the owner's mention starts the line", ()
   // Numbered with a blank line between, and indented sub-bullets: the things that turn a wall of text into
   // something readable standing up. The rules that fence each heading are no longer among them, because
   // they are added to the model's output afterwards rather than asked for.
-  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /indented four spaces and start with/);
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*each one is indented further than the one above it\*\*/);
 
   // Length is the whole complaint, so it is stated as a number rather than as "be concise".
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /150 to 250 words/);

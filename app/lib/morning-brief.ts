@@ -148,7 +148,7 @@ Numbered, one campaign each, and never more than two sub-bullets under a campaig
 
 1. *FULL CAMPAIGN NAME*
     • N pending leads (~N days of sending left)
-    • N senders: first names only
+        • N senders: first names only
 
 **First names only.** *3 senders: Ali, Abhyuday, Vijay*, never *Ali Mahomed, Abhyuday Roychowdhury, Vijay Prasad MD, MPH*. The team knows who they are, and the surnames and credentials are a line and a half of text that tells them nothing, repeated on every campaign. The one exception: if two senders on the same campaign share a first name, add the last initial to both (*Kiril I., Kiril P.*). Never print the same first name twice in one list, because that reads as a bug rather than as two people.
 
@@ -165,7 +165,7 @@ The outstanding action items. Numbered, and **the owner's mention is the first t
 
 1. <@OWNER> to *do the specific thing*
     • the one detail that makes it actionable, only if it is not obvious
-    • _where it was agreed, when, and that it still has not happened._
+        • _where it was agreed, when, and that it still has not happened._
 
 The mention comes first because everybody reading is scanning for their own name and nothing else. A mention buried in the middle of a sentence is a mention that gets missed, and the item with it.
 
@@ -207,7 +207,7 @@ The layout, exactly:
 - **Section headings** are the emoji, the name in bold italics, and the same emoji again, on their own line and hard against the left margin: \`*:signal_strength: _Active Campaigns_ :signal_strength:*\`. Use the three given above, spelled exactly that way. Nothing else goes on that line.
 - **No divider lines anywhere.** Never write \`===\`. The rules that fence each heading are added after you are done, and one of yours in the middle of a section cannot be told from one of those.
 - **Items are numbered.** \`1.\`, \`2.\`, \`3.\` at the start of the line.
-- **Sub-bullets** are indented four spaces and start with \`•\`. They belong to the item above them, so there is no blank line between an item and its own sub-bullets. Two at most per item, and never a third.
+- **Sub-bullets** start with \`•\` and **each one is indented further than the one above it**: the first four spaces in, the second eight. They belong to the item above them, so there is no blank line between an item and its own sub-bullets. Two at most per item, and never a third.
 - **Two blank lines between one numbered item and the next**, and two after a section heading before its first item. That air is the whole difference between a list somebody can scan and a block they skip past. Err on the side of more space, never less.
 - **Mention people with their mention code from the mention table**, \`<@U04AB12CD>\`, so the owner is actually notified. Copy it exactly. A name typed as plain \`@kori\` is text and reaches nobody, and anybody not in that table is written as plain text.
 - **Bold marks the piece of work itself**, not the sentence around it, because a whole line in bold is a line with no emphasis in it. That means the campaign name, the thing to be done, and the thing we are waiting on the client for. Never a sub-bullet. Italics are for the accountability clause and nothing else. Every \`*\` and \`_\` must be closed, since one left open turns the rest of the brief into italics.
@@ -220,12 +220,12 @@ A worked example of the shape and the spacing, with the content stripped out. Ma
 
 1. *BV007: ASCs v2*
     • 106 pending leads (~2 days of sending left)
-    • 3 senders: Ali, Abhyuday, Vijay
+        • 3 senders: Ali, Abhyuday, Vijay
 
 
 2. *BV009: Ortho Offices*
     • 340 pending leads (~5 days of sending left)
-    • 3 senders
+        • 3 senders
 
 
 :warning: New leads or a new campaign must be in motion today! Less than 2 days of sending remaining! :warning:
@@ -236,7 +236,7 @@ A worked example of the shape and the spacing, with the content stripped out. Ma
 
 1. <@U01> to *finish the Doximity list*
     • scoring and filtering down to the top ~2,000 contacts
-    • _agreed on the Aug 5 call, no update since._
+        • _agreed on the Aug 5 call, no update since._
 
 
 2. <@U02> to *send campaign updates to the client*
@@ -647,17 +647,38 @@ export function briefWeekdayNote(timezone: string, at: Date = new Date()): strin
 }
 
 /** The divider, shared so the prompt, the headings and the footer cannot drift to different widths. */
-const BRIEF_DIVIDER = "=".repeat(41);
+const BRIEF_DIVIDER = "=".repeat(37);
+
 /**
- * Slack has no centre alignment, so the indent is the only way to get a line off the left margin, which is
- * how Kiril centred it by hand. Chosen against the divider's width rather than measured: emoji render
- * about twice as wide as a character and the font is proportional, so exact centring is not available at
- * any indent. This one sits the line under the middle of the divider closely enough to read as centred.
+ * How wide things render in Slack, measured in spaces, because a space is the only unit of indent we have.
  *
- * One constant for the headings and the footer both, because they are the same gesture and two numbers
- * would eventually centre them to two different places on the same message.
+ * Slack's message font is proportional, so these are averages taken off a real posted brief rather than
+ * anything exact: a space is about 6.5px, an `=` about 13.9, a letter about 12, and an emoji about 30. An
+ * emoji is nearly five spaces wide, which is why a heading with two of them cannot be centred by counting
+ * characters. Being a few pixels out is fine. Being half a heading out, which counting characters is, is
+ * what made the last attempt look left aligned.
  */
-const CENTRE_INDENT = " ".repeat(8);
+const WIDTH_EQUALS = 2.14;
+const WIDTH_CHAR = 1.85;
+const WIDTH_EMOJI = 4.6;
+
+/**
+ * The indent that sits a line under the middle of the divider.
+ *
+ * Slack has no centre alignment, so leading spaces are the whole mechanism, which means the number has to
+ * be worked out per line rather than fixed. A fixed one cannot serve both: the headings are short and need
+ * about twenty spaces, while `Remember to send out the EOW report!` nearly fills the divider on its own and
+ * would wrap onto a second line at the same indent. Long lines fall out at zero, which is correct, since a
+ * line as wide as the rule is already centred.
+ */
+const centreIndent = (line: string): string => {
+  const text = line.replace(/[*_]/g, "").trim();
+  let width = 0;
+  for (const token of text.match(/:[a-z0-9_+-]+:|./gi) ?? []) {
+    width += token.length > 1 ? WIDTH_EMOJI : token === " " ? 1 : WIDTH_CHAR;
+  }
+  return " ".repeat(Math.max(0, Math.round((BRIEF_DIVIDER.length * WIDTH_EQUALS - width) / 2)));
+};
 
 /**
  * A section heading, as the model writes it: an emoji, the name in bold italics, the same emoji again.
@@ -691,6 +712,31 @@ const isBriefDivider = (line: string) => /^\s*={3,}\s*$/.test(line);
 const isStatusTitle = (line: string) => /^\*?[^*]{0,40}status\s*:?\s*\*?$/i.test(line.trim());
 
 /**
+ * Sub-bullets stepped one indent further for each one under the same item.
+ *
+ * Kiril's rule: the first bullet sits four spaces in, the second eight, a third twelve. Two bullets at the
+ * same indent read as one block of text, and the second bullet is almost always the accountability clause,
+ * which is a comment on the first rather than a sibling of it. Stepping it in says so at a glance.
+ *
+ * The counter resets on anything that is not a bullet, which is what makes the indent per item rather than
+ * per section: a numbered line, a standalone warning, or a blank gap all start the next item's bullets over.
+ * Done in code for the same reason the fencing is. Leading whitespace is the first thing a model tidies
+ * away, and this one it would have to get right several times per brief instead of once.
+ */
+const briefBullets = (lines: string[]): string[] => {
+  let depth = 0;
+  return lines.map((line) => {
+    const bullet = /^\s*•\s*(.*)$/.exec(line);
+    if (!bullet) {
+      depth = 0;
+      return line;
+    }
+    depth += 1;
+    return `${" ".repeat(4 * depth)}• ${bullet[1].trim()}`;
+  });
+};
+
+/**
  * The framing round the brief: each heading fenced by a divider and pushed off the left margin.
  *
  * Done here rather than asked of the model, for the reason the footer already is. It is fixed padding
@@ -717,8 +763,8 @@ export function briefFraming(body: string): string {
   // it would be worse than leaving it alone. Posting something imperfect beats posting something cut up.
   if (!sections.length) return body.trim();
   const blocks = sections.map(({ heading, lines }) => {
-    const text = lines.join("\n").replace(/\n{4,}/g, "\n\n\n").trim();
-    const head = `${BRIEF_DIVIDER}\n\n${CENTRE_INDENT}${heading}\n\n${BRIEF_DIVIDER}`;
+    const text = briefBullets(lines).join("\n").replace(/\n{4,}/g, "\n\n\n").trim();
+    const head = `${BRIEF_DIVIDER}\n\n${centreIndent(heading)}${heading}\n\n${BRIEF_DIVIDER}`;
     // A heading with nothing under it still gets posted: the model was told to drop empty sections, so if
     // one arrives empty anyway that is worth seeing rather than hiding behind a tidy-looking brief.
     return text ? `${head}\n\n${text}` : head;
@@ -740,7 +786,7 @@ export function briefWeekdayFooter(timezone: string, at: Date = new Date()): str
   if (!note) return "";
   // Fenced by a divider above and below, so it reads as a closing ritual rather than as one more finding,
   // and identically to a section heading, since by now that is what a fenced centred line means here.
-  return `${BRIEF_DIVIDER}\n\n${CENTRE_INDENT}${note}\n\n${BRIEF_DIVIDER}`;
+  return `${BRIEF_DIVIDER}\n\n${centreIndent(note)}${note}\n\n${BRIEF_DIVIDER}`;
 }
 
 /** The brief as it is posted: the model's findings framed, then the day's standing reminder under it. */
