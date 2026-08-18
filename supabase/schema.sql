@@ -32,11 +32,11 @@ create table if not exists rr_workspaces (
   -- client added on a Tuesday must not post into a channel on Wednesday morning before anybody has read
   -- one of its briefs. Opting in is a decision somebody makes on the Slack tab, once.
   morning_brief_enabled boolean not null default false,
-  -- The client's own email domains, comma separated, used to find their weekly call in Granola. Matched
-  -- against the attendee list rather than the meeting title because our titles do not contain the client
-  -- name anyway — "QC - Willow Weekly Team Sync" is the Webrix account — and titles get renamed, while
-  -- who was in the room does not change.
-  granola_domains text,
+  -- What has to appear in a Granola meeting title for it to be this client's call. Null is the normal
+  -- case and means the client's own `name` is used; this is only for when the calendar names them
+  -- differently. Matched on the title rather than the attendee list because Granola's list endpoint
+  -- returns six fields and attendees are not among them — see app/lib/granola-match.ts.
+  granola_title_match text,
   last_webhook_received_at timestamptz, last_successful_poll_at timestamptz, last_reconciled_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );

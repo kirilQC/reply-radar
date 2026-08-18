@@ -92,7 +92,7 @@ export async function gatherCall(
 ): Promise<{ call: BriefCall | null; callReason?: string; errors: string[] }> {
   try {
     const keys = await granolaKeys(read);
-    const found = await findClientCall(keys, workspace.granola_domains, CALL_WINDOW_DAYS);
+    const found = await findClientCall(keys, workspace.granola_title_match, workspace.name, CALL_WINDOW_DAYS);
     return { call: found.call, callReason: found.reason, errors: found.errors };
   } catch (error) {
     return { call: null, callReason: error instanceof Error ? error.message : "The call transcript could not be read.", errors: [] };

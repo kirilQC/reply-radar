@@ -40,7 +40,7 @@ type BriefClient = {
   accentColor: string | null;
   internalChannelId: string;
   externalChannelId: string;
-  granolaDomains: string;
+  granolaTitleMatch: string;
   morningBriefEnabled: boolean;
   hasBrief: boolean;
   readiness: Readiness;

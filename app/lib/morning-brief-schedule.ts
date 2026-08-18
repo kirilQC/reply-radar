@@ -101,7 +101,7 @@ export type ReadinessInput = {
   lastSuccessfulPollAt: string | null;
   internalChannelId: string;
   externalChannelId: string;
-  granolaDomains: string;
+  granolaTitleMatch: string;
   granolaKeyCount: number;
 };
 
@@ -135,9 +135,9 @@ export function readinessOf(input: ReadinessInput, now = Date.now()): Readiness 
 
   const granola: Check = !input.granolaKeyCount
     ? { ok: false, detail: "No Granola keys added" }
-    : !input.granolaDomains.trim()
-      ? { ok: false, detail: "No client domains set" }
-      : { ok: true, detail: `${input.granolaKeyCount === 1 ? "1 key" : `${input.granolaKeyCount} keys`} · domains set` };
+    : !input.granolaTitleMatch.trim()
+      ? { ok: false, detail: "No name to match titles on" }
+      : { ok: true, detail: `${input.granolaKeyCount === 1 ? "1 key" : `${input.granolaKeyCount} keys`} · matching “${input.granolaTitleMatch.trim()}”` };
 
   // Slack alone decides whether a brief can be *sent*, because without a channel there is nowhere to put
   // it. The other two decide how good it will be. `ready` means all three, which is what the grid shows.

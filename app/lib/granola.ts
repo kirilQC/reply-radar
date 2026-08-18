@@ -14,12 +14,17 @@
  * so the parallelism is what keeps this inside the route's budget rather than something to apologise for.
  *
  * ── A missing transcript must never fail a brief ─────────────────────────────────────────────────
- * The call is the third of three sources. A revoked key, a client with no domains configured, or a week
- * with no call at all are all ordinary states, and each one returns a reason rather than throwing. The
- * brief then says which source it was missing, which is what gets it fixed.
+ * The call is the third of three sources. A revoked key, a renamed invite, or a week with no call at all
+ * are all ordinary states, and each one returns a reason rather than throwing. The brief then says which
+ * source it was missing, which is what gets it fixed.
+ *
+ * ── One list request per key, and one detail request in total ─────────────────────────────────────
+ * Which meeting belongs to which client is decided entirely from the list response, because the title is
+ * in it. Only the winning note is opened, and that one request also carries the transcript. Anything that
+ * needs a field per note — attendees, most obviously — does not fit in the budget; see `granola-match.ts`.
  */
 
-import { callAgeDays, emailBearingFields, normalizeNote, parseDomains, pickLatestCall, transcriptText, type GranolaNote } from "./granola-match";
+import { callAgeDays, describeNeedles, normalizeNote, parseTitleNeedles, pickLatestCall, titleMatches, transcriptText, type GranolaNote } from "./granola-match";
 
 const BASE = "https://public-api.granola.ai/v1";
 /** Granola's list endpoint caps at 30, and one page is several weeks of one person's meetings. */
@@ -100,11 +105,12 @@ export async function verifyKey(apiKey: string): Promise<{ ok: boolean; notes: n
  */
 export async function findClientCall(
   keys: GranolaKey[],
-  rawDomains: unknown,
+  titleMatch: unknown,
+  clientName: unknown,
   windowDays: number,
 ): Promise<{ call: ClientCall | null; errors: string[]; reason?: string }> {
-  const domains = parseDomains(rawDomains);
-  if (!domains.length) return { call: null, errors: [], reason: "No client email domains are configured, so their call cannot be identified." };
+  const needles = parseTitleNeedles(titleMatch, clientName);
+  if (!needles.length) return { call: null, errors: [], reason: "This client has no name to look for in meeting titles, so their call cannot be identified." };
   if (!keys.length) return { call: null, errors: [], reason: "No Granola API keys have been added, so no call transcripts can be read." };
 
   const createdAfter = new Date(Date.now() - windowDays * 86_400_000).toISOString();
@@ -127,30 +133,43 @@ export async function findClientCall(
   // winners lands on one of the duplicates arbitrarily, which is correct — they are the same meeting.
   let winner: { note: GranolaNote; key: GranolaKey } | null = null;
   for (const { key, notes } of perKey) {
-    const note = pickLatestCall(notes, domains);
+    const note = pickLatestCall(notes, needles);
     if (note && (!winner || note.startedAt > winner.note.startedAt)) winner = { note, key };
   }
   if (!winner) {
-    return { call: null, errors, reason: `No meeting with anyone from ${domains.join(" or ")} was found in the last ${windowDays} days.` };
+    return { call: null, errors, reason: `No meeting with "${describeNeedles(needles)}" in the title was found in the last ${windowDays} days.` };
   }
 
+  // The winner is opened once, with the transcript asked for in the same request. The list response has
+  // no summary and no meeting time — only `created_at` — so without this the brief would be working from
+  // a transcript alone and dating the call from when Granola happened to write the note.
   const { note, key } = winner;
+  let detail: Row = {};
   let transcript = "";
   try {
-    transcript = transcriptText(await granola(key.apiKey, `/notes/${encodeURIComponent(note.id)}/transcript`));
-  } catch (error) {
-    errors.push(`The transcript for "${note.title}" could not be read: ${error instanceof Error ? error.message : "unknown reason"}.`);
+    detail = ((await granola(key.apiKey, `/notes/${encodeURIComponent(note.id)}?include=transcript`)) ?? {}) as Row;
+    transcript = transcriptText(detail.transcript ?? detail);
+  } catch {
+    // `include=transcript` is refused with 413 when the transcript is very large, and a long call is
+    // exactly the one worth reading. Fall back to the paged endpoint, which is where it always was.
+    try {
+      transcript = transcriptText(await granola(key.apiKey, `/notes/${encodeURIComponent(note.id)}/transcript`));
+    } catch (error) {
+      errors.push(`The transcript for "${note.title}" could not be read: ${error instanceof Error ? error.message : "unknown reason"}.`);
+    }
   }
 
+  const full = normalizeNote({ ...detail, id: note.id, title: detail.title ?? note.title });
+  const startedAt = full?.startedAt || note.startedAt;
   const truncated = transcript.length > MAX_TRANSCRIPT_CHARS;
   return {
     call: {
       noteId: note.id,
-      title: note.title,
-      startedAt: note.startedAt,
-      ageDays: callAgeDays(note.startedAt),
+      title: full?.title || note.title,
+      startedAt,
+      ageDays: callAgeDays(startedAt),
       owner: key.label || "a teammate",
-      summary: note.summary.slice(0, 6_000),
+      summary: (full?.summary || "").slice(0, 6_000),
       transcript: truncated ? transcript.slice(-MAX_TRANSCRIPT_CHARS) : transcript,
       truncated,
     },
@@ -161,34 +180,21 @@ export async function findClientCall(
 /**
  * What each key can actually see, for when a call that definitely happened was definitely not found.
  *
- * There are exactly two reasons for that, and they need opposite fixes: either the note is not in this
- * person's Granola at all — Granola holds notes for the meetings *you* recorded, so a call somebody else
- * took notes on is in their account and needs their key — or the note is there and the attendee emails
- * are not where `noteDomains` looks. Listing the titles with the domains found beside them separates the
- * two in one request, which is the difference between adding a teammate's key and fixing a parser.
+ * There are two reasons for that and they need opposite fixes: either the note is not in this person's
+ * Granola at all — Granola holds notes for the meetings *you* recorded, so a call somebody else took notes
+ * on is in their account and needs their key — or it is there under a title that does not name the client.
+ * Listing every title with a tick beside the ones that match separates the two in one request, which is
+ * the difference between adding a teammate's key and typing a name into the config page.
  *
  * Titles and dates only. The transcript is the sensitive part and no diagnostic needs it.
  */
 export type NoteSighting = {
   keyLabel: string;
   error: string;
-  /**
-   * The field names the API actually returned, from the first note. When every note matches no domain,
-   * this says whether an attendee field was even in the response — which is the difference between a
-   * one-line parser fix and a second request per note.
-   */
-  fields: string[];
-  notes: Array<{
-    id: string;
-    title: string;
-    startedAt: number;
-    domains: string[];
-    /** Where addresses actually are in this note, when `domains` says the matcher found none. */
-    emailFields: Array<{ field: string; domains: string[] }>;
-  }>;
+  notes: Array<{ id: string; title: string; startedAt: number; matches: boolean }>;
 };
 
-export async function inspectNotes(keys: GranolaKey[], windowDays: number): Promise<NoteSighting[]> {
+export async function inspectNotes(keys: GranolaKey[], needles: string[][], windowDays: number): Promise<NoteSighting[]> {
   const createdAfter = new Date(Date.now() - windowDays * 86_400_000).toISOString();
   const query = `/notes?created_after=${encodeURIComponent(createdAfter)}&page_size=${PAGE_SIZE}`;
   return Promise.all(keys.map(async (key) => {
@@ -197,22 +203,15 @@ export async function inspectNotes(keys: GranolaKey[], windowDays: number): Prom
       return {
         keyLabel: key.label || "A Granola key",
         error: "",
-        fields: Object.keys((notes[0] ?? {}) as Row).sort(),
         // A note `normalizeNote` refused could never have been chosen as a client's call either, so
         // leaving it out keeps this list honest about what was actually in play.
         notes: notes
-          .map((raw) => ({ raw, note: normalizeNote(raw) }))
-          .filter((pair): pair is { raw: unknown; note: GranolaNote } => Boolean(pair.note))
-          .map(({ raw, note }) => ({
-            id: note.id,
-            title: note.title,
-            startedAt: note.startedAt,
-            domains: note.domains,
-            emailFields: emailBearingFields(raw),
-          })),
+          .map((raw) => normalizeNote(raw))
+          .filter((note): note is GranolaNote => Boolean(note))
+          .map((note) => ({ id: note.id, title: note.title, startedAt: note.startedAt, matches: titleMatches(note.title, needles) })),
       };
     } catch (error) {
-      return { keyLabel: key.label || "A Granola key", error: error instanceof Error ? error.message : "could not be read.", fields: [], notes: [] };
+      return { keyLabel: key.label || "A Granola key", error: error instanceof Error ? error.message : "could not be read.", notes: [] };
     }
   }));
 }

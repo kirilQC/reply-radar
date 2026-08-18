@@ -62,7 +62,7 @@ function reader(url: string, key: string) {
     });
     if (!response.ok) {
       // PostgREST's own message is the whole answer when a column is missing — "column
-      // rr_workspaces.granola_domains does not exist" tells a teammate to run the migration, where
+      // rr_workspaces.granola_title_match does not exist" tells a teammate to run the migration, where
       // "HTTP 400" tells them nothing and sends them here to read this file.
       const detail = (await response.json().catch(() => null)) as { message?: string; hint?: string } | null;
       throw new Error(detail?.message ? `Supabase refused the read: ${detail.message}` : `Supabase refused the read: HTTP ${response.status}`);
@@ -116,7 +116,7 @@ export async function GET() {
 
   try {
     const [workspaceRows, keyedRows, briefRows, granolaRows, automationRows] = await Promise.all([
-      read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_domains,morning_brief_enabled,last_successful_poll_at&order=name.asc"),
+      read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match,morning_brief_enabled,last_successful_poll_at&order=name.asc"),
       read("rr_workspaces?select=id&heyreach_api_key_ciphertext=not.is.null"),
       // Every client's brief history in one read rather than one read per client. 200 rows is roughly a
       // year of three-a-week briefs for a dozen clients, and only the newest per client is used.
@@ -150,14 +150,16 @@ export async function GET() {
       const sent = latestSent.get(id);
       const internalChannelId = String(workspace.slack_internal_channel_id ?? "");
       const externalChannelId = String(workspace.slack_external_channel_id ?? "");
-      const granolaDomains = String(workspace.granola_domains ?? "");
+      // Blank means "use the client's own name", which is what the matcher does, so the page and the
+      // readiness check have to show the same effective value rather than an empty field.
+      const granolaTitleMatch = String(workspace.granola_title_match ?? "").trim() || String(workspace.name ?? "");
       const enabled = Boolean(workspace.morning_brief_enabled);
       const readiness = readinessOf({
         heyreachKeyConfigured: withHeyreachKey.has(id),
         lastSuccessfulPollAt: workspace.last_successful_poll_at ? String(workspace.last_successful_poll_at) : null,
         internalChannelId,
         externalChannelId,
-        granolaDomains,
+        granolaTitleMatch,
         granolaKeyCount,
       }, now.getTime());
       const sentToday = alreadySentToday(sent ? String(sent.created_at ?? "") : null, schedule, now);
@@ -169,7 +171,7 @@ export async function GET() {
         accentColor: workspace.accent_color ?? null,
         internalChannelId,
         externalChannelId,
-        granolaDomains,
+        granolaTitleMatch,
         morningBriefEnabled: enabled,
         hasBrief: Boolean(String(workspace.client_brief ?? "").trim()),
         readiness,
@@ -280,7 +282,7 @@ export async function POST(request: Request) {
     destination = body.destination === "test" || body.destination === "internal" || body.destination === "external" ? body.destination : "preview";
     if (!slug) return NextResponse.json({ error: "No client was named." }, { status: 400 });
 
-    const rows = await read(`rr_workspaces?select=id,name,slug,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_domains&slug=eq.${encodeURIComponent(slug)}&limit=1`);
+    const rows = await read(`rr_workspaces?select=id,name,slug,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match&slug=eq.${encodeURIComponent(slug)}&limit=1`);
     const found = (Array.isArray(rows) ? (rows as Row[]) : [])[0];
     if (!found) return NextResponse.json({ error: "That client does not exist." }, { status: 404 });
     workspace = found as BriefWorkspace;

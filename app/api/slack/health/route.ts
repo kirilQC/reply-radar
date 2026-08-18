@@ -18,7 +18,7 @@
 
 import { NextResponse } from "next/server";
 import { inspectNotes, type NoteSighting } from "../../../lib/granola";
-import { parseDomains } from "../../../lib/granola-match";
+import { describeNeedles, parseTitleNeedles } from "../../../lib/granola-match";
 import { granolaKeys } from "../../../lib/morning-brief-run";
 import { probeChannel, tokenReports, type ChannelProbe } from "../../../lib/slack";
 
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
   if (testChannel) targets.push(["Test channel", testChannel]);
 
   let client = "";
-  let domains: string[] = [];
+  let needles: string[][] = [];
   let granola: NoteSighting[] = [];
   const store = credentials();
   if (slug && store) {
@@ -55,17 +55,17 @@ export async function GET(request: Request) {
       const response = await fetch(`${store.url}/rest/v1/${path}`, { headers: { apikey: store.key, Authorization: `Bearer ${store.key}` }, cache: "no-store" });
       return response.ok ? response.json() : [];
     };
-    const rows = (await read(`rr_workspaces?slug=eq.${encodeURIComponent(slug)}&select=name,slack_internal_channel_id,slack_external_channel_id,granola_domains&limit=1`).catch(() => [])) as Record<string, unknown>[];
+    const rows = (await read(`rr_workspaces?slug=eq.${encodeURIComponent(slug)}&select=name,slack_internal_channel_id,slack_external_channel_id,granola_title_match&limit=1`).catch(() => [])) as Record<string, unknown>[];
     const row = Array.isArray(rows) ? rows[0] : undefined;
     if (row) {
       client = String(row.name ?? slug);
-      domains = parseDomains(row.granola_domains);
+      needles = parseTitleNeedles(row.granola_title_match, client);
       targets.push(
         ["Internal channel", String(row.slack_internal_channel_id ?? "").trim()],
         ["External channel", String(row.slack_external_channel_id ?? "").trim()],
       );
       // The same window the brief uses, so "found nothing" here means the brief found nothing too.
-      granola = await inspectNotes(await granolaKeys(read), CALL_WINDOW_DAYS).catch(() => []);
+      granola = await inspectNotes(await granolaKeys(read), needles, CALL_WINDOW_DAYS).catch(() => []);
     }
   }
 
@@ -74,9 +74,9 @@ export async function GET(request: Request) {
   const channels: ChannelProbe[] = [];
   for (const [label, id] of targets) channels.push(await probeChannel(label, id));
 
-  // Every note each key can see, with the domains found in it beside the title. A call that is in the
-  // list but has no matching domain is a parser problem; a call that is not in any list at all is in
-  // somebody else's Granola and needs their key.
+  // Every note each key can see, ticked if its title names this client. A call that is in the list but
+  // not ticked needs a name typing into the config page; a call that is in no list at all is in somebody
+  // else's Granola and needs their key.
   return NextResponse.json({
     ok: true,
     client,
@@ -84,19 +84,15 @@ export async function GET(request: Request) {
     channels,
     granola: {
       windowDays: CALL_WINDOW_DAYS,
-      domains,
+      matchingOn: describeNeedles(needles),
       keys: granola.map((sighting) => ({
         key: sighting.keyLabel,
         error: sighting.error,
-        matched: sighting.notes.filter((note) => note.domains.some((domain) => domains.includes(domain))).length,
-        // The field names the API returned, so "no attendees anywhere" is distinguishable from
-        // "attendees under a name the matcher does not sweep".
-        fields: sighting.fields,
+        matched: sighting.notes.filter((note) => note.matches).length,
         notes: sighting.notes.map((note) => ({
           title: note.title,
           when: note.startedAt ? new Date(note.startedAt).toISOString().slice(0, 10) : "no date",
-          domains: note.domains,
-          emailFields: note.emailFields,
+          matches: note.matches,
         })),
       })),
     },

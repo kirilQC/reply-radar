@@ -88,7 +88,7 @@ export type BriefWorkspace = {
   client_brief?: string | null;
   slack_internal_channel_id?: string | null;
   slack_external_channel_id?: string | null;
-  granola_domains?: string | null;
+  granola_title_match?: string | null;
 };
 
 type Row = Record<string, unknown>;

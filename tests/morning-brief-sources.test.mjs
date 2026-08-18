@@ -6,8 +6,8 @@
  *
  * A wrong figure at least looks wrong to somebody who knows the account. These three do not:
  *
- *  · The wrong client's call. Matching is on attendee email domains, and a domain rule that is one
- *    character too loose puts Bluevia's call in Cotool's brief — and the brief will read perfectly.
+ *  · The wrong client's call. Matching is on words in the meeting title, and a rule one character too
+ *    loose puts Bluevia's call in Cotool's brief — and the brief will read perfectly.
  *  · The wrong morning. "Eight Eastern" is a different number of hours from UTC in July than in
  *    January, so anything that stores an offset sends Monday's brief on Sunday night for half the
  *    year, and nobody files that as a bug — they just stop trusting the timing.
@@ -20,7 +20,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { callAgeDays, noteDomains, normalizeNote, parseDomains, pickLatestCall, transcriptText } from "../app/lib/granola-match.ts";
+import { callAgeDays, describeNeedles, normalizeNote, parseTitleNeedles, pickLatestCall, titleMatches, transcriptText } from "../app/lib/granola-match.ts";
 import {
   alreadySentToday,
   DEFAULT_SCHEDULE,
@@ -34,58 +34,96 @@ import {
 
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../supabase/migrations/20260817_morning_brief_sources.sql", import.meta.url), "utf8");
+const titleMigration = readFileSync(new URL("../supabase/migrations/20260817_granola_title_match.sql", import.meta.url), "utf8");
 const worker = readFileSync(new URL("../worker/render-worker.mjs", import.meta.url), "utf8");
 
 // ── Which call belongs to which client ───────────────────────────────
 
-test("a domain list is read out of whatever was typed", () => {
-  assert.deepEqual(parseDomains("webrix.ai"), ["webrix.ai"]);
-  assert.deepEqual(parseDomains("emaapp.co, emahealth.ai"), ["emaapp.co", "emahealth.ai"]);
-  assert.deepEqual(parseDomains("Dana@Webrix.AI"), ["webrix.ai"]);
-  assert.deepEqual(parseDomains("blueviahealth.com; cotool.ai getsteadywell.com"), ["blueviahealth.com", "cotool.ai", "getsteadywell.com"]);
+test("a client's own name is what gets looked for, with no configuration", () => {
+  // The point of the fallback: twelve clients, and nobody should have to fill in a field to get this.
+  assert.deepEqual(parseTitleNeedles("", "Bluevia"), [["bluevia"]]);
+  assert.deepEqual(parseTitleNeedles(null, "Cotool"), [["cotool"]]);
+  // "Vitalic Health" is invited as "Vitalic", so the phrase and its distinctive word both count.
+  assert.deepEqual(parseTitleNeedles("", "Vitalic Health"), [["vitalic", "health"], ["vitalic"]]);
+  assert.deepEqual(parseTitleNeedles("Willow, Webrix", "Willow"), [["willow"], ["webrix"]]);
 });
 
-test("a single label is refused, because it would match every meeting", () => {
-  // "qc" or "weekly" typed into the domains field is the mistake that silently matches everything.
-  assert.deepEqual(parseDomains("qc"), []);
-  assert.deepEqual(parseDomains("weekly"), []);
-  assert.deepEqual(parseDomains("Webrix"), []);
-  assert.deepEqual(parseDomains(""), []);
-  assert.deepEqual(parseDomains(null), []);
+test("a name too short or too generic to identify anybody is refused", () => {
+  // A needle of "qc" matches every meeting we have, and a needle of "health" matches four clients.
+  assert.deepEqual(parseTitleNeedles("QC", ""), []);
+  assert.deepEqual(parseTitleNeedles("Health", ""), []);
+  assert.deepEqual(parseTitleNeedles("", ""), []);
+  assert.deepEqual(parseTitleNeedles(null, null), []);
 });
 
-test("a domain is never taken from the body of a call", () => {
-  // "I'll email fred@othercompany.com" is not evidence that anyone from othercompany.com attended,
-  // and treating it as evidence is how one client's transcript lands in another client's brief.
-  const found = noteDomains({
-    attendees: [{ email: "dana@webrix.ai" }],
-    summary_markdown: "Dana will loop in fred@blueviahealth.com after the call.",
-    transcript: "kori@qcgrowth.com: sounds good",
-  });
-  assert.deepEqual(found, ["webrix.ai"]);
+test("titles match on whole words, so a short name cannot be a substring of another", () => {
+  const ema = parseTitleNeedles("", "Ema");
+  assert.equal(titleMatches("QC Onboarding <> Ema", ema), true);
+  // The failure this exists to prevent: "Ema" claiming every meeting with "Email" in the name, and
+  // Emma's one-to-one along with it.
+  assert.equal(titleMatches("Email deliverability review", ema), false);
+  assert.equal(titleMatches("Client kickoff — Kudo, Emma, and Vitalik", ema), false);
 });
 
-test("attendees are read out of the calendar event too", () => {
-  const found = noteDomains({ google_calendar_event: { attendees: [{ email: "Ari@Cotool.ai" }, { email: "kiril@qcgrowth.com" }] } });
-  assert.deepEqual(found.sort(), ["cotool.ai", "qcgrowth.com"]);
+test("the real titles from the account match the real client names", () => {
+  const cases = [
+    ["QC <> Bluevia Weekly", "Bluevia"],
+    ["Cotool <> QC Weekly", "Cotool"],
+    ["Steadywell <> QC Weekly", "Steadywell"],
+    ["QC - Willow Weekly Team Sync ", "Willow"],
+    ["Kuddo: QC Onboarding ", "Kuddo"],
+    ["QC Growth <> Vitalic Kickoff Pt. 2", "Vitalic Health"],
+  ];
+  for (const [title, name] of cases) {
+    assert.equal(titleMatches(title, parseTitleNeedles("", name)), true, `${name} should match ${title}`);
+  }
+  // Our internal meetings name no client and must claim none of them.
+  for (const title of ["Weekly Eng/Ops Sync", "QC Sales Leadership Brainstorm", "[QC Monthly] GTM Engineering Show & Tell"]) {
+    for (const [, name] of cases) {
+      assert.equal(titleMatches(title, parseTitleNeedles("", name)), false, `${name} should not match ${title}`);
+    }
+  }
+});
+
+test("one client's call never lands in another client's brief", () => {
+  assert.equal(titleMatches("QC <> Bluevia Weekly", parseTitleNeedles("", "Cotool")), false);
+  assert.equal(titleMatches("Cotool <> QC Weekly", parseTitleNeedles("", "Bluevia")), false);
 });
 
 test("the newest matching call wins, and a non-matching one never does", () => {
   const notes = [
-    { id: "a", title: "QC <> Bluevia Weekly", created_at: "2026-08-10T14:00:00Z", attendees: [{ email: "sam@blueviahealth.com" }] },
-    { id: "b", title: "QC - Willow Weekly Team Sync", created_at: "2026-08-14T14:00:00Z", attendees: [{ email: "dana@webrix.ai" }] },
-    { id: "c", title: "Internal standup", created_at: "2026-08-16T14:00:00Z", attendees: [{ email: "kiril@qcgrowth.com" }] },
+    { id: "a", title: "QC <> Bluevia Weekly", created_at: "2026-08-10T14:00:00Z" },
+    { id: "b", title: "QC - Willow Weekly Team Sync", created_at: "2026-08-14T14:00:00Z" },
+    { id: "c", title: "Internal standup", created_at: "2026-08-16T14:00:00Z" },
   ];
-  // The title says Willow and the attendees say Webrix. The attendees are what decides.
-  assert.equal(pickLatestCall(notes, ["webrix.ai"])?.id, "b");
-  assert.equal(pickLatestCall(notes, ["blueviahealth.com"])?.id, "a");
-  assert.equal(pickLatestCall(notes, ["cotool.ai"]), null);
-  assert.equal(pickLatestCall([], ["webrix.ai"]), null);
+  assert.equal(pickLatestCall(notes, parseTitleNeedles("", "Willow"))?.id, "b");
+  assert.equal(pickLatestCall(notes, parseTitleNeedles("", "Bluevia"))?.id, "a");
+  assert.equal(pickLatestCall(notes, parseTitleNeedles("", "Cotool")), null);
+  // No needles must never mean "match anything" — that would put a random meeting in every brief.
+  assert.equal(pickLatestCall(notes, []), null);
+  assert.equal(pickLatestCall([], parseTitleNeedles("", "Willow")), null);
 });
 
-test("a note with no start time and no attendees is not a call", () => {
+test("the meeting's own time beats the time the note was written", () => {
+  // A note written up the next morning would otherwise date the call to the wrong day, and "we said we
+  // would" in a brief is an argument about dates.
+  const note = normalizeNote({
+    id: "a",
+    title: "QC <> Bluevia Weekly",
+    created_at: "2026-08-13T09:00:00Z",
+    calendar_event: { scheduled_start_time: "2026-08-12T19:00:00Z" },
+  });
+  assert.equal(new Date(note.startedAt).toISOString(), "2026-08-12T19:00:00.000Z");
+});
+
+test("a note with no id is not a call", () => {
   assert.equal(normalizeNote({}), null);
   assert.equal(normalizeNote(null), null);
+});
+
+test("needles read back the way somebody would say them", () => {
+  assert.equal(describeNeedles(parseTitleNeedles("", "Vitalic Health")), "vitalic health or vitalic");
+  assert.equal(describeNeedles([]), "");
 });
 
 test("a call's age is whole days, and the future is not negative days ago", () => {
@@ -169,7 +207,7 @@ const READY = {
   lastSuccessfulPollAt: "2026-08-17T11:00:00Z",
   internalChannelId: "C09INTERNAL",
   externalChannelId: "C09EXTERNAL",
-  granolaDomains: "webrix.ai",
+  granolaTitleMatch: "Willow",
   granolaKeyCount: 3,
 };
 const NOW = Date.parse("2026-08-17T12:00:00Z");
@@ -178,7 +216,7 @@ test("all three present is ready", () => {
   const readiness = readinessOf(READY, NOW);
   assert.equal(readiness.ready, true);
   assert.equal(readiness.heyreach.ok, true);
-  assert.equal(readiness.granola.detail, "3 keys · domains set");
+  assert.equal(readiness.granola.detail, "3 keys · matching \u201CWillow\u201D");
 });
 
 test("a HeyReach key that stopped reporting is not a working source", () => {
@@ -199,8 +237,8 @@ test("no internal channel is a failure, one missing external channel is not", ()
   assert.equal(externalMissing.ready, true);
 });
 
-test("a key with no domains, and domains with no key, are both not ready", () => {
-  assert.equal(readinessOf({ ...READY, granolaDomains: "  " }, NOW).granola.ok, false);
+test("a key with no name to match on, and a name with no key, are both not ready", () => {
+  assert.equal(readinessOf({ ...READY, granolaTitleMatch: "  " }, NOW).granola.ok, false);
   assert.equal(readinessOf({ ...READY, granolaKeyCount: 0 }, NOW).granola.detail, "No Granola keys added");
   assert.equal(readinessOf({ ...READY, granolaKeyCount: 0 }, NOW).ready, false);
 });
@@ -208,10 +246,14 @@ test("a key with no domains, and domains with no key, are both not ready", () =>
 // ── What has to exist for any of the above to run ────────────────────
 
 test("the schema and the migration agree on the new columns and tables", () => {
-  for (const needed of ["granola_domains", "morning_brief_enabled", "rr_granola_keys", "rr_slack_automations"]) {
+  for (const needed of ["morning_brief_enabled", "rr_granola_keys", "rr_slack_automations"]) {
     assert.ok(schema.includes(needed), `schema.sql is missing ${needed}`);
     assert.ok(migration.includes(needed), `the migration is missing ${needed}`);
   }
+  // The column the matcher actually reads, and the dead one it replaced.
+  assert.ok(schema.includes("granola_title_match"), "schema.sql is missing granola_title_match");
+  assert.ok(titleMigration.includes("add column if not exists granola_title_match"));
+  assert.ok(!schema.includes("granola_domains"), "schema.sql still declares granola_domains");
   // Everything additive, so the migration can be run against a live database twice.
   assert.ok(migration.includes("add column if not exists"));
   assert.ok(migration.includes("create table if not exists"));

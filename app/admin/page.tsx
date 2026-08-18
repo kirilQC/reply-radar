@@ -11,7 +11,7 @@ import Crumb from "../components/Crumb";
 import { defaultFollowUpPrompt, defaultIcpPrompt, FOLLOW_UP_TEMPLATES, ICP_TEMPLATES, MIN_CLIENT_BRIEF_LENGTH, type ScoringTemplate, templateLabel } from "../lib/scoring-templates";
 import { brainFolderFor } from "../../shared/brain-link.mjs";
 import { looksLikeChannelId, normalizeChannelId } from "../lib/slack-channel";
-import { parseDomains } from "../lib/granola-match";
+import { parseTitleNeedles, describeNeedles } from "../lib/granola-match";
 
 /** What the breadcrumb calls each configuration section. */
 const adminSectionLabels: Record<string, string> = {
@@ -45,7 +45,7 @@ type ClientWorkspace = {
   brainFolder?: string;
   slackInternalChannelId?: string;
   slackExternalChannelId?: string;
-  granolaDomains?: string;
+  granolaTitleMatch?: string;
   anthropicModel?: string;
   systemPrompt?: string;
   webhookUrl?: string;
@@ -98,7 +98,7 @@ export default function AdminPage() {
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))] ?? { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced" };
-  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", granolaDomains: "" });
+  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", granolaTitleMatch: "" });
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -121,7 +121,7 @@ export default function AdminPage() {
             lastSync: String(item.last_successful_poll_at ?? "not synced"), createdAt: String(item.created_at ?? ""),
             brief: String(item.client_brief ?? ""), apiKey: "", apiKeyMasked: String(item.heyreach_api_key_masked ?? ""), timezone: String(item.timezone ?? "America/New_York"), website: String(item.website_url ?? ""), anthropicModel: String(item.anthropic_model ?? ""), systemPrompt: String(item.custom_system_prompt ?? ""), webhookUrl: String(item.webhook_url ?? ""), keyConfigured: Boolean(item.key_configured),
             logoUrl: String(item.logo_url ?? ""), brainFolder: String(item.brain_folder ?? ""),
-            slackInternalChannelId: String(item.slack_internal_channel_id ?? ""), slackExternalChannelId: String(item.slack_external_channel_id ?? ""), granolaDomains: String(item.granola_domains ?? ""),
+            slackInternalChannelId: String(item.slack_internal_channel_id ?? ""), slackExternalChannelId: String(item.slack_external_channel_id ?? ""), granolaTitleMatch: String(item.granola_title_match ?? ""),
             guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {},
           }));
           setWorkspaceClients(hydratedClients);
@@ -146,7 +146,7 @@ export default function AdminPage() {
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", granolaDomains: client.granolaDomains ?? "" });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", granolaTitleMatch: client.granolaTitleMatch ?? "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -165,7 +165,7 @@ export default function AdminPage() {
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
     const mutationIdentity = isNewWorkspace ? { create: true } : { id: client.id, previousSlug: client.slug };
     const nextGuardrails = { ...(client.guardrails ?? {}), messaging_doc_url: workspaceDraft.messagingDocUrl.trim() };
-    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, granolaDomains: workspaceDraft.granolaDomains, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
+    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, granolaTitleMatch: workspaceDraft.granolaTitleMatch, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
     if (!response?.ok) {
       const detail = await response?.json().catch(() => ({}));
       setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
@@ -176,7 +176,7 @@ export default function AdminPage() {
     const payload = await response.json().catch(() => ({}));
     const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] : null;
     const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaDomains: String(savedRow?.granola_domains ?? workspaceDraft.granolaDomains), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaTitleMatch: String(savedRow?.granola_title_match ?? workspaceDraft.granolaTitleMatch), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
     setWorkspaceClients(next);
     setWorkspaceDraft((draft) => ({ ...draft, apiKey: "" }));
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
@@ -243,14 +243,12 @@ export default function AdminPage() {
     if (internal || external) return `Only the ${internal ? "internal" : "external"} channel is set. A brief will still be written, but it will be missing whatever the other channel would have told it.`;
     return "Briefs need at least one channel. Paste the channel id, or the channel URL, and the id will be read out of it.";
   })();
-  // Echoed back parsed rather than as typed, because the failure this catches is a plausible-looking
-  // entry that matches nothing — a bare company name, or the client's own person rather than their domain.
-  const granolaDomainNote = (() => {
-    const raw = workspaceDraft.granolaDomains.trim();
-    if (!raw) return "Without a domain this client's call cannot be found, and their brief goes out without it.";
-    const domains = parseDomains(raw);
-    if (!domains.length) return "None of that is an email domain. Use the part after the @ — webrix.ai, not Webrix.";
-    return `Any meeting with somebody at ${domains.join(" or ")} counts as this client's call.`;
+  // Echoed back as the matcher will read it, not as typed. The failure this catches is a name that looks
+  // fine and matches nothing: two letters, or a word this drops as generic.
+  const granolaTitleNote = (() => {
+    const needles = parseTitleNeedles(workspaceDraft.granolaTitleMatch, workspaceDraft.name);
+    if (!needles.length) return "Nothing here is specific enough to find a meeting by.";
+    return `Meetings with “${describeNeedles(needles)}” in the title.`;
   })();
   const accentColor = accentOverrides[client.slug] ?? client.tone;
   const workspaceLogo = logos[client.slug] ?? client.logoUrl ?? "";
@@ -565,13 +563,13 @@ export default function AdminPage() {
                     <section className="admin-panel client-config-section" id="client-granola">
                       <div className="panel-heading"><div><h2>Call transcripts</h2><p>Which Granola meeting belongs to this client.</p></div><span className="saved-dot">● Auto-saved</span></div>
                       <label className="field-label">
-                        CLIENT EMAIL DOMAINS
-                        <input value={workspaceDraft.granolaDomains} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, granolaDomains: event.target.value }))} placeholder="webrix.ai, emahealth.ai" />
+                        MEETING TITLE CONTAINS
+                        <input value={workspaceDraft.granolaTitleMatch} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, granolaTitleMatch: event.target.value }))} placeholder={workspaceDraft.name || "Bluevia"} />
                       </label>
-                      {/* Matched on who was in the room, not on the meeting name: our own titles do not
-                          contain the client's company — "QC - Willow Weekly Team Sync" is the Webrix
-                          account — and a renamed calendar entry would silently stop matching. */}
-                      <p className="slack-channel-note">{granolaDomainNote}</p>
+                      {/* Blank is the normal case: the client's own name is used. This is for when the
+                          calendar calls them something else — the account is "Vitalic Health" and the
+                          invite says "Vitalic" — and takes a comma-separated list. */}
+                      <p className="slack-channel-note">{granolaTitleNote}</p>
                     </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
