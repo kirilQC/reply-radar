@@ -27,7 +27,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { briefTrace, briefUserContent, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
+import { briefHeaderText, briefTrace, briefUserContent, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
 import { BRIEF_MODEL, gatherCall, gatherChannels, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
 import {
   alreadySentToday,
@@ -325,17 +325,31 @@ export async function POST(request: Request) {
     const content = briefUserContent(workspace, inputs);
     const body_ = await writeBrief(systemPrompt, content);
 
+    /*
+     * Two messages, not one: a one-line header in the channel, and the brief itself as a reply in its
+     * thread. Three page-long briefs a week posted flat is the internal channel turning into a brief
+     * archive with the team's actual conversations wedged between them.
+     *
+     * The header goes first because the reply needs its `ts`. If the header posts and the reply does not,
+     * the header is left standing rather than deleted: a header with nothing under it is a visible failure
+     * somebody will ask about, and `sendError` names it. Silently tidying it away would hide the fact that
+     * a brief was written and never delivered.
+     */
     let messageTs = "";
+    let briefTs = "";
     let sendError = "";
     if (channelId) {
       try {
-        messageTs = await postMessage(channelId, body_);
+        messageTs = await postMessage(channelId, briefHeaderText(workspace));
+        briefTs = await postMessage(channelId, body_, messageTs);
       } catch (error) {
         // The brief itself succeeded, so it is returned and stored either way — the send is what failed,
         // and saying which of the two went wrong is the difference between a fixable error and a mystery.
-        sendError = error instanceof Error ? error.message : "Slack refused the message.";
+        const detail = error instanceof Error ? error.message : "Slack refused the message.";
+        sendError = messageTs ? `The header posted but the brief did not: ${detail}` : detail;
       }
     }
+    const posted = Boolean(briefTs);
 
     // `sources` rides along in the same column as the figures because it is the same kind of fact: what
     // the model was given. A brief that reads thinly is then explainable a week later without guessing.
@@ -356,7 +370,7 @@ export async function POST(request: Request) {
       briefChars: body_.length,
       destination,
       channelId,
-      posted: Boolean(messageTs),
+      posted,
       sendError,
     });
 
@@ -365,7 +379,9 @@ export async function POST(request: Request) {
       automation: AUTOMATION,
       destination,
       slack_channel_id: channelId || null,
-      slack_message_ts: messageTs || null,
+      // The brief's own message, not the header above it — this column is how a stored brief is matched
+      // back to the thing people actually read.
+      slack_message_ts: briefTs || null,
       body: body_,
       signals: { ...signals, sources },
       status: sendError ? "error" : "success",
@@ -378,9 +394,12 @@ export async function POST(request: Request) {
       signals,
       sources,
       steps,
-      posted: Boolean(messageTs),
+      posted,
       channelId: channelId || null,
-      messageTs: messageTs || null,
+      messageTs: briefTs || null,
+      // The header the brief was threaded under, so a caller can tell "nothing posted" apart from "the
+      // header went out and the brief did not".
+      threadTs: messageTs || null,
       channelNotes: [channels.internal.error, channels.external.error, ...call.errors].filter(Boolean),
       error: sendError || undefined,
     });

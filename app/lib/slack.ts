@@ -286,14 +286,27 @@ export function transcript(messages: SlackMessage[], names: Map<string, string>,
  * Always the bot token, never the user token, even when only a user token is set. A brief that arrives
  * in a client-facing channel under a person's own name reads as that person having written it, and the
  * first thing anyone does is reply to them about it. It has to be visibly from QC Bot or not sent.
+ *
+ * `threadTs` is the `ts` of the message to reply under. A morning brief is a page long and the internal
+ * channel is where the team actually talks, so the brief goes in a thread hanging off a one-line header
+ * rather than into the channel itself — three of those a week, unthreaded, and the channel is the brief.
+ * Deliberately not `reply_broadcast`: a broadcast reply puts the whole thing back in the channel and
+ * undoes the point of threading it.
  */
-export async function postMessage(channelId: string, text: string): Promise<string> {
+export async function postMessage(channelId: string, text: string, threadTs = ""): Promise<string> {
   const body = await call("chat.postMessage", {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },
     // `unfurl_links: false` because a brief that quotes a campaign URL should not paste a preview card
     // under itself, and `mrkdwn` because the brief is written in Slack's own flavour of markdown.
-    body: JSON.stringify({ channel: channelId, text, mrkdwn: true, unfurl_links: false, unfurl_media: false }),
+    body: JSON.stringify({
+      channel: channelId,
+      text,
+      mrkdwn: true,
+      unfurl_links: false,
+      unfurl_media: false,
+      ...(threadTs ? { thread_ts: threadTs } : {}),
+    }),
   }, "write");
   return String(body.ts ?? "");
 }

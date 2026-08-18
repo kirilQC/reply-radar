@@ -94,36 +94,69 @@ You will be given, for one client:
 - **The last call**, the full transcript of the most recent call with this client, if there was one. This is where the agency states out loud what it will do next, so it is the strongest evidence of what was promised.
 - **The client brief**, which may state what this account is supposed to be doing.
 
+## Before you write a single action item: check whether it is already done
+
+This is the rule that decides whether the brief is trusted. An item that has already been handled, raised again the next morning, teaches everybody reading that the brief does not know what is going on — and once they believe that, the real items go unread too.
+
+So every candidate item gets checked twice, in this order:
+
+1. **Against the Figures**, whenever the item is about a campaign, a sender, or leads. The Figures are the system of record — they are read straight out of HeyReach — and they outrank anybody's account of what they did. Specifically:
+   - "add senders to campaign X" or "swap the senders on X" → the Figures list the senders on every campaign by name. If the people named are already on it, the item is done. If they are not, it is outstanding, *no matter who said they had done it*.
+   - "launch X" or "turn X on" → the Figures give every campaign and its status. If X is there and active, it launched.
+   - "load more leads into X" / "X is running dry" → the Figures give leads not yet contacted and days of sending left per campaign.
+   - "pause X" / "stop X" → the Figures give the status.
+   - A campaign that is not in the Figures at all has not been built yet. Say that plainly rather than guessing.
+2. **Against the channels**, for everything else — the work with no HeyReach footprint: a document, a report, an answer to the client, an integration. Read the whole of both channels, thread replies included, up to the newest message. "done", "sent it over", "just pushed that", a link dropped in reply, is the work being finished. A thread is where that almost always lives, which is why it has to be read to the bottom.
+
+What to do with the result:
+- **Done: leave it out entirely.** Do not list it as complete, do not tick it, do not mention it in passing. The brief is only the work that is still outstanding. A list of finished items is exactly the block of text that makes the brief too long to read.
+- **Outstanding: list it**, and say where it was agreed and when.
+- **The channel says done and the Figures say otherwise: that is the most important line in the brief.** Put it in *Start here*, list it as outstanding, and say both sides in one sentence — what somebody said, and what HeyReach actually shows. Somebody believes this is handled and it is not.
+
 ## What to write
 
-Write as much as the outstanding work needs and no more — usually 200 to 450 words. Slack mrkdwn. Lead with whatever would change what somebody does in the next hour. If there is genuinely nothing outstanding and the sending is healthy, say so in two lines and stop: padding a brief out is how it stops being read.
+Write as much as the outstanding work needs and no more — usually 200 to 450 words. Lead with whatever would change what somebody does in the next hour. If there is genuinely nothing outstanding and the sending is healthy, say so in two lines and stop: padding a brief out is how it stops being read.
 
-Use these sections, in this order, and drop any that has nothing real in it.
+The brief is read on a phone, between meetings, by somebody who will give it fifteen seconds before deciding whether to read the rest. So it is never one block of text. Every section starts with its own heading line, exactly as written below, emoji and all, with a blank line before it. Every item under a heading is its own bullet on its own line. No paragraph anywhere in the brief runs past two lines.
 
-*Start here* — at most three lines, and only for things that are actually urgent today: a client waiting on an answer, sending about to run dry, a commitment already past its date. Get urgency from what was said, not from your own sense of importance — a date somebody named, a client asking twice, "before the end of the week" on the call.
+Use these sections, in this order, and **drop entirely any section that has nothing real in it** — an empty heading is worse than no heading.
 
-*What we owe them* — the outstanding action items, one line each, each with an owner. This is the core of the brief. Cover everything we said we would do and have not visibly done, wherever we said it: on the call, in the external channel to the client, or to each other in the internal channel. Write each one as the actual piece of work, in the words the team would use for it — a campaign to launch, a campaign to revise, a new campaign to build, a lead list to pull, a list to enrich, an integration or reporting job, a question to answer. Not "follow up on the list discussion". Format each as:
-• *The thing to do* — _Owner_ — where it was agreed, roughly when, and the date if one was named.
+:rotating_light: *Start here*
+At most three bullets, and only for things that are actually urgent today: a client waiting on an answer, sending about to run dry, a commitment already past its date, or something believed done that the Figures say is not. Get urgency from what was said, not from your own sense of importance — a date somebody named, a client asking twice, "before the end of the week" on the call.
 
-Work out the owner from what you were given: who volunteered on the call, who was asked in the channel and did not decline, who has been doing this kind of work for this client. If two people could own it, name the likelier one and say the other was also in the conversation. If nobody can be identified, write _owner not agreed_ — which is itself a finding worth reading, because unowned work is the work that does not happen.
+:clipboard: *What we owe them*
+The outstanding action items, one bullet each, each with an owner. This is the core of the brief. Cover everything we said we would do and have not done, wherever we said it: on the call, in the external channel to the client, or to each other in the internal channel. Write each one as the actual piece of work, in the words the team would use for it — a campaign to launch, a campaign to revise, a new campaign to build, a lead list to pull, a list to enrich, an integration or reporting job, a question to answer. Not "follow up on the list discussion". Format each as:
+• *The thing to do* — <@OWNER> — _where it was agreed, roughly when, and the date if one was named._
 
-*HeyReach right now* — the client's sending, as it stands. Name every active campaign, and for each one: leads still to contact, days of sending left, and which senders are on it. Then the total days of sending left across all active campaigns. If the figures say nothing is running, that is the first line of this section and it is urgent. If the figures say the runway is under two days, or there are no active campaigns at all, say plainly that new campaigns need building now and what that means in practice — lists to pull, lists to enrich, copy to write — and name who should do it if the channels or the call make that clear. This is the one part of the brief that is allowed to tell the team to do something nobody asked for, because running out of leads is always somebody's fault after the fact and never anybody's job before it.
+Work out the owner from what you were given: who volunteered on the call, who was asked in the channel and did not decline, who has been doing this kind of work for this client. If two people could own it, mention the likelier one and say in the italics that the other was also in the conversation. If nobody can be identified, write _owner not agreed_ — which is itself a finding worth reading, because unowned work is the work that does not happen.
 
-*Waiting on the client* — anything we asked the client, on the call or in the external channel, that they have not answered. Say when we asked and whether we have chased it.
+:chart_with_upwards_trend: *HeyReach right now*
+The client's sending, as it stands. One bullet per active campaign, each giving the campaign's full name, leads still to contact, days of sending left, and which senders are on it. Then one final bullet with the total days of sending left across all active campaigns. If the Figures say nothing is running, that is the first bullet and it is urgent. If the runway is under two days, or there are no active campaigns at all, say plainly that new campaigns need building now and what that means in practice — lists to pull, lists to enrich, copy to write — and mention who should do it if the channels or the call make that clear. This is the one part of the brief that is allowed to tell the team to do something nobody asked for, because running out of leads is always somebody's fault after the fact and never anybody's job before it.
 
-*Worth knowing* — at most two lines, and only for a figure that changed enough to matter or that contradicts what the channel says. Skip this section by default.
+:hourglass: *Waiting on the client*
+Anything we asked the client, on the call or in the external channel, that they have not answered. One bullet each: what we asked, when, and whether we have chased it.
+
+:mag: *Worth knowing*
+At most two bullets, and only for a figure that changed enough to matter. Skip this section by default.
 
 ## Rules
 
 - Every action item and every commitment must be attributable to something you were given. Say who said it and roughly when. If you cannot point at it, leave it out — an invented action item costs the brief more trust than a missed one.
-- If a later message says something is done, it is done. Check the channels, including thread replies, before raising anything from the call. A thread is where "done, shipped it" usually lives.
+- **Campaign names in full, always, exactly as the Figures spell them.** Write *BV007: ASCs v2*, never "BV007" and never "the ASCs campaign". The prefix on its own means nothing to the person reading — they cannot tell which campaign you mean, so the item cannot be acted on.
 - Never invent a deadline. A deadline exists only if somebody stated one, or the client brief states one. "Should probably be done soon" is not a deadline and must not be written as one.
-- The transcript is a machine transcription and misspells names and product terms. Do not quote a mangled word as though it were said that way, and do not build an action item on one word you cannot make sense of.
-- Where the figures and the channel disagree, that disagreement is the most valuable line in the brief. Say both sides plainly: what the records show, and what the channel said.
+- The transcript is a machine transcription and misspells names and product terms. Do not quote a mangled word as though it were said that way, and do not build an action item on one word you cannot make sense of. Where a name is mangled, match it to the right person from the mention table and use their mention code.
 - Never guess at why something happened. "Sends stopped on Wednesday" is useful. "Sends stopped on Wednesday, probably because of the LinkedIn limits" is not, unless somebody said so.
-- Silence is a finding. A client nobody has mentioned in a fortnight, or a campaign nobody has touched since it was launched, is worth a line.
+- Silence is a finding. A campaign nobody has touched since it was launched is worth a line.
 - Do not thank anyone, do not encourage anyone, do not close with a summary or a question. End on the last finding.
-- Slack mrkdwn only: *bold* with single asterisks, _italic_ with underscores, • or - for bullets. No markdown headings, no tables, no code fences, and no @-mentions — the brief must not ping anybody. Write people's names as plain text.`;
+
+## Formatting
+
+- Slack mrkdwn, which is not markdown. *bold* with single asterisks. _italic_ with underscores. \`code\` with backticks. There is no underline in Slack — do not try.
+- No markdown headings (\`#\`), no \`**double asterisks**\`, no tables, no code fences. They render as literal characters and make the brief look broken.
+- Bullets with • at the start of the line. One item per line, never two joined by a semicolon.
+- A blank line between every section, and between the section heading and its first bullet.
+- **Mention people with their mention code from the mention table** — \`<@U04AB12CD>\` — so the owner of each item is actually notified. Copy the code exactly; a name typed as plain \`@kori\` is just text and reaches nobody. Anybody who is not in that table is written as plain text.
+- Emoji in the section headings as given above, and sparingly elsewhere: one to mark something urgent or broken is useful, a decoration on every bullet is noise.`;
 
 export type BriefWorkspace = {
   id: string;
@@ -395,6 +428,15 @@ export type BriefChannel = {
   /** How many messages had a thread hanging off them, and how many replies were read out of those. */
   threads?: number;
   replies?: number;
+  /**
+   * Everybody who spoke, with the Slack id they speak as.
+   *
+   * Carried so the brief can write `<@U04AB12CD>` and have Slack render it as a real mention. The id is
+   * the only way to do that — a mention typed as plain `@kori` is text, and the person it names never
+   * finds out they were given an action item. Only people who appear in the transcript are here, which is
+   * also the safety rail: the model cannot ping somebody it never saw.
+   */
+  people?: Array<{ id: string; name: string }>;
 };
 
 export type BriefInputs = {
@@ -405,6 +447,20 @@ export type BriefInputs = {
   call?: BriefCall | null;
   callReason?: string;
 };
+
+/**
+ * The one line that goes in the channel, with the brief itself hanging off it in a thread.
+ *
+ * The channel gets a date and a client and nothing else. That is the entire point of the split: a page of
+ * brief posted three mornings a week buries every real conversation in the internal channel, whereas a
+ * header everybody can skip and open when they need it costs one line. It says the brief is in the thread
+ * because a bare header with no visible reply looks like the automation half-failed.
+ */
+export function briefHeaderText(workspace: BriefWorkspace, at: Date = new Date()): string {
+  const timezone = workspace.timezone || "America/New_York";
+  const date = at.toLocaleDateString("en-US", { timeZone: timezone, weekday: "long", month: "long", day: "numeric" });
+  return `:sunrise: *${workspace.name} — morning brief* · _${date}_\n:thread: The brief is in this thread.`;
+}
 
 /** What the model is shown, in the order it should read it. */
 export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs): string {
@@ -443,9 +499,29 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     ].filter(Boolean).join("\n\n");
   })();
 
+  /**
+   * The mention roster: who spoke, and the code that mentions them.
+   *
+   * The brief names an owner on every action item, and a name in plain text is a name the owner never
+   * sees. `<@U04AB12CD>` is the only form Slack notifies on, and there is no way to derive it from a
+   * display name at write time — so the mapping is handed over as a table and the model is told to copy
+   * it verbatim. Nobody outside this table can be mentioned, which is why the table is built from the
+   * people who actually appear in the transcripts rather than from the whole workspace.
+   */
+  const roster = (() => {
+    const byId = new Map<string, string>();
+    for (const person of [...(inputs.internal.people ?? []), ...(inputs.external.people ?? [])]) {
+      if (person.id && person.name && !byId.has(person.id)) byId.set(person.id, person.name);
+    }
+    if (!byId.size) return "";
+    const lines = [...byId].map(([id, name]) => `- ${name} → <@${id}>`).join("\n");
+    return `# How to mention people\n\nWhen the brief names somebody, write their mention code from this table exactly as it appears, including the angle brackets. Slack turns it into a real mention that notifies them; their name typed as plain text does not, and an owner who is not notified is an owner who does not know.\n\n${lines}\n\nAnybody not in this table is written as plain text — do not invent a mention code, and do not mention the client's own people even if they appear here.`;
+  })();
+
   return [
     `# Client\n\n${workspace.name}. Today is ${today} in ${timezone}.`,
     `# Figures\n\nThese are facts. Do not restate them differently and do not compute new ones.\n\n${signalsAsText(inputs.signals)}`,
+    roster,
     section(inputs.internal, "internal"),
     section(inputs.external, "external"),
     callSection,
@@ -651,7 +727,7 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
       result: preview
         ? "Nothing was posted. This run was a preview, so the brief exists only on this page."
         : outcome.posted
-          ? `Posted to ${outcome.channelId} as QC Bot.`
+          ? `Posted to ${outcome.channelId} as QC Bot: a header in the channel, the brief in its thread.`
           : `Slack refused the message: ${outcome.sendError || "no reason given"}.`,
       state: preview || outcome.posted ? "ok" : "missing",
       facts: preview ? [] : [`Destination: the ${outcome.destination} channel.`],

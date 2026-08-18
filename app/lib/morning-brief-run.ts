@@ -59,12 +59,16 @@ export async function morningBriefPrompt(slug?: string | null): Promise<string> 
 export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<BriefInputs, "internal" | "external">> {
   const timezone = workspace.timezone || "America/New_York";
   const readChannel = async (channelId: string) => {
-    if (!channelId) return { channelId: "", messages: 0, raw: 0, threads: 0, replies: 0, capped: false, text: "" };
+    if (!channelId) return { channelId: "", messages: 0, raw: 0, threads: 0, replies: 0, capped: false, text: "", people: [] };
     try {
       const history = await channelHistory(channelId, BRIEF_WINDOW_DAYS, BRIEF_MAX_MESSAGES);
       const names = await resolveUserNames(history.messages.map((message) => message.author));
       return {
         channelId,
+        // Name and id together, so the brief can turn "Kori should do this" into a mention Kori is
+        // actually notified by. Only the people who spoke, which is both all the model needs and the
+        // reason it cannot ping somebody who was never in the conversation.
+        people: [...names].map(([id, name]) => ({ id, name })),
         // Parents and replies together, because that is what the model is given. The two are reported
         // separately below so the trace can still say how much of it came out of threads.
         messages: history.messages.length,
@@ -76,7 +80,7 @@ export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<Br
         text: transcript(history.messages, names, timezone),
       };
     } catch (error) {
-      return { channelId, messages: 0, raw: 0, threads: 0, replies: 0, capped: false, text: "", error: error instanceof Error ? error.message : "This channel could not be read." };
+      return { channelId, messages: 0, raw: 0, threads: 0, replies: 0, capped: false, text: "", people: [], error: error instanceof Error ? error.message : "This channel could not be read." };
     }
   };
   const [internal, external] = await Promise.all([

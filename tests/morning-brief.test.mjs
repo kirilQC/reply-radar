@@ -14,7 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { looksLikeChannelId, normalizeChannelId } from "../app/lib/slack-channel.ts";
-import { briefTrace, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
+import { briefHeaderText, briefTrace, DEFAULT_MORNING_BRIEF_PROMPT, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
 import { transcript } from "../app/lib/slack.ts";
 
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
@@ -345,6 +345,91 @@ test("a brief posts as the bot even when only a user token is set", () => {
   // Exactly one `call()` asks for the write credential, and it is the one that posts.
   assert.equal(slackLib.match(/\}, "write"\);/g)?.length, 1);
   assert.match(slackLib, /chat\.postMessage[\s\S]{0,700}\}, "write"\);/);
+});
+
+test("the brief goes in a thread under a header, not flat into the channel", () => {
+  /*
+   * Three page-long briefs a week posted flat turn the internal channel into a brief archive with the
+   * team's real conversations wedged between them. So: a one-line header in the channel, and the brief as
+   * a reply in its thread. Order matters — the reply needs the header's `ts`, which only exists once the
+   * header has posted, so these two calls can never become a `Promise.all`.
+   */
+  assert.match(slackLib, /threadTs \? \{ thread_ts: threadTs \} : \{\}/);
+  assert.match(route, /messageTs = await postMessage\(channelId, briefHeaderText\(workspace\)\);\s*\n\s*briefTs = await postMessage\(channelId, body_, messageTs\);/);
+  // A half-send has to be legible as one. The header standing alone with nothing under it is the visible
+  // symptom, and this is the sentence that explains it.
+  assert.match(route, /The header posted but the brief did not/);
+  // `posted` is the brief arriving, not the header arriving — otherwise a failed reply reports success.
+  assert.match(route, /const posted = Boolean\(briefTs\);/);
+});
+
+test("the header is a date and a client and nothing else", () => {
+  const header = briefHeaderText({ ...WORKSPACE, timezone: "America/New_York" }, new Date("2026-08-17T14:00:00Z"));
+  assert.match(header, /Willow — morning brief/);
+  assert.match(header, /Monday, August 17/);
+  assert.match(header, /in this thread/);
+  // Two lines. The whole reason for the split is that the channel gets one glanceable line, so a header
+  // that grew into a summary of the brief would have defeated it.
+  assert.equal(header.split("\n").length, 2);
+});
+
+test("the model is handed the mention code for everybody who spoke", async () => {
+  /*
+   * An owner named in plain text is an owner who never finds out. `<@U04AB12CD>` is the only form Slack
+   * notifies on and it cannot be derived from a display name, so the mapping is handed over as a table.
+   * Built from the people in the transcripts, which is also the rail: the brief cannot ping a stranger.
+   */
+  const signals = await gatherSignals(readerFor([], dayRows(0, 7, 100)), WORKSPACE);
+  const content = briefUserContent(WORKSPACE, {
+    signals,
+    internal: { channelId: "C1", messages: 2, text: "10:00 Kori: list?", people: [{ id: "U01", name: "Kori" }] },
+    external: { channelId: "C2", messages: 1, text: "11:00 Jake: ok", people: [{ id: "U02", name: "Jake" }, { id: "U01", name: "Kori" }] },
+  });
+  assert.match(content, /Kori → <@U01>/);
+  assert.match(content, /Jake → <@U02>/);
+  // Once, not twice: Kori spoke in both channels and a duplicated row invites the model to pick one at random.
+  assert.equal(content.match(/<@U01>/g)?.length, 1);
+});
+
+test("no mention table is offered when nobody could be identified", async () => {
+  // An empty table is an invitation to invent a mention code, and a made-up id renders as dead text.
+  const signals = await gatherSignals(readerFor([], dayRows(0, 7, 100)), WORKSPACE);
+  const content = briefUserContent(WORKSPACE, {
+    signals,
+    internal: { channelId: "C1", messages: 1, text: "10:00 U01: hi", people: [] },
+    external: { channelId: "", messages: 0, text: "" },
+  });
+  assert.doesNotMatch(content, /How to mention people/);
+});
+
+test("an action item is checked against the figures before it is printed", () => {
+  /*
+   * The failure this exists for: Kori asked for two senders to be added to a campaign, it was done the
+   * same morning, and the next brief asked whether it had been done. Re-raising handled work is how a
+   * brief loses the reader — and once they stop reading, the real items go with it.
+   *
+   * The check has to be against HeyReach rather than against the channel, because the channel is where
+   * somebody says they did something. The figures are where it either happened or did not.
+   */
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /check whether it is already done/i);
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /the system of record/);
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Done: leave it out entirely/);
+  // And the disagreement is a finding, not a tie to be broken quietly in the figures' favour.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /The channel says done and the Figures say otherwise/);
+});
+
+test("the brief is told to mention people and to name campaigns in full", () => {
+  // Two reversals of the old prompt, which forbade mentions outright and let a campaign be called by its
+  // prefix. "BV007" does not tell the reader which campaign it is, so the item cannot be acted on.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Mention people with their mention code/);
+  assert.doesNotMatch(DEFAULT_MORNING_BRIEF_PROMPT, /the brief must not ping anybody/);
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Campaign names in full/);
+  // Slack has no underline. Asked for one, the model reaches for markdown that renders as literal characters.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /There is no underline in Slack/);
+  // Sections, each with its own heading line, because the complaint was that it arrived as one block.
+  for (const heading of [":rotating_light: \\*Start here\\*", ":clipboard: \\*What we owe them\\*", ":chart_with_upwards_trend: \\*HeyReach right now\\*", ":hourglass: \\*Waiting on the client\\*"]) {
+    assert.match(DEFAULT_MORNING_BRIEF_PROMPT, new RegExp(heading));
+  }
 });
 
 test("reading prefers a teammate's token, and says so when neither is set", () => {
