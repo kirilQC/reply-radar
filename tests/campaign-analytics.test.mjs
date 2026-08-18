@@ -121,6 +121,22 @@ test("rr_daily_stats is keyed per sender per day, which is what the stacked char
   assert.match(body, /primary key \(workspace_id, day, sender_id\)/);
 });
 
+test("the worker asks HeyReach for senders on the path that exists", () => {
+  /*
+   * `linkedinaccount/GetAll` is the name every other route's shape implies, and it returns 404. The
+   * worker was on it for its whole life and the failure is swallowed so the totals still get stored, so
+   * the only symptom was two absences nobody could trace to a call: the per-sender chart on the
+   * analytics page was always empty, and the morning brief named a campaign's senders `203189, 205419`.
+   * Asserted on the worker's source rather than on a mocked response, because the defect is the string.
+   */
+  const collect = worker.slice(worker.indexOf("async function collectDailyStats"), worker.indexOf("/** The client whose stored analytics are oldest"));
+  assert.match(collect, /"li_account\/GetAll"/, "the senders call is not on the path that answers");
+  // Quoted, so the comment naming the dead path as dead does not read as a call to it.
+  assert.doesNotMatch(worker, /"linkedinaccount\/GetAll"/i, "this path 404s — see app/lib/heyreach-campaigns.ts");
+  // And an empty account list has to say so, or the same absence hides the next time the path moves.
+  assert.match(collect, /reply_radar_analytics_no_senders/);
+});
+
 test("both analytics tables have row level security on, like every other table here", () => {
   for (const table of ["rr_campaign_stats", "rr_daily_stats"]) {
     assert.ok(schema.includes(`alter table ${table} enable row level security`), `${table} is not locked down`);

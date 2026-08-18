@@ -1100,11 +1100,23 @@ async function collectDailyStats(workspace) {
     body: JSON.stringify({ accountIds, campaignIds: [], startDate, endDate }),
   });
 
-  const accountsResponse = await heyReachFetch(apiKey, "linkedinAccount/GetAll", {
+  /*
+   * `li_account/GetAll`, not `linkedinaccount/GetAll` — the latter is what the shape of every other
+   * route suggests and it returns 404. This call was on the wrong path for its whole life, and because
+   * the failure is swallowed the only symptom was an absence: the total row below was written, no
+   * per-sender row ever was, and so the analytics page's per-sender chart was permanently empty and the
+   * morning brief named a campaign's senders by their numeric ids. Hence the warning — the totals must
+   * still be stored if this call fails, but it must not be able to fail quietly again.
+   */
+  const accountsResponse = await heyReachFetch(apiKey, "li_account/GetAll", {
     method: "POST",
     body: JSON.stringify({ offset: 0, limit: ANALYTICS_PAGE_SIZE }),
-  }).catch(() => null);
+  }).catch((error) => {
+    console.warn("reply_radar_analytics_accounts_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
+    return null;
+  });
   const accounts = Array.isArray(accountsResponse?.items) ? accountsResponse.items : [];
+  if (!accounts.length) console.warn("reply_radar_analytics_no_senders", { workspace: workspace.slug });
 
   const rows = [];
   const now = new Date().toISOString();
