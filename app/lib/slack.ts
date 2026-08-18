@@ -123,41 +123,109 @@ export type SlackMessage = {
   text: string;
   /** How many replies hang off this message, when it is the head of a thread. */
   replies: number;
+  /** Whether this is a reply inside a thread rather than a message in the channel itself. */
+  isReply?: boolean;
 };
 
+/** One message as Slack sends it, before it is reduced to the fields a brief needs. */
+type RawMessage = Record<string, unknown>;
+
+/** Text a brief must never read as activity: a quiet channel somebody joined is still a quiet channel. */
+const isRealMessage = (message: RawMessage) =>
+  typeof message.text === "string"
+  && String(message.text).trim().length > 0
+  && !String(message.subtype ?? "").startsWith("channel_");
+
+const asMessage = (message: RawMessage, isReply = false): SlackMessage => ({
+  ts: String(message.ts ?? ""),
+  at: new Date(Number(message.ts ?? 0) * 1000),
+  author: String(message.user ?? message.bot_id ?? "unknown"),
+  text: String(message.text ?? ""),
+  replies: Number(message.reply_count ?? 0),
+  isReply,
+});
+
 /**
- * The last `days` of a channel, oldest first.
+ * How many `conversations.replies` calls may be in flight at once.
  *
- * Oldest first because the model is being asked what happened over a week and in what order, and
+ * The method is rate limited per minute, and a fortnight of a busy channel can hold fifty threads. Eight
+ * at a time reads them all in about a second without arriving as one burst, which matters because the
+ * whole brief has a sixty-second ceiling and a 429 here would cost more time than the throttle does.
+ */
+const THREAD_CONCURRENCY = 8;
+
+/** Runs `work` over `items` a few at a time, in order, keeping results aligned with the input. */
+async function pooled<In, Out>(items: In[], size: number, work: (item: In) => Promise<Out>): Promise<Out[]> {
+  const results: Out[] = new Array(items.length);
+  let next = 0;
+  const runner = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await work(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, runner));
+  return results;
+}
+
+/**
+ * The last `days` of a channel, oldest first, threads and all.
+ *
+ * Oldest first because the model is being asked what happened over a fortnight and in what order, and
  * Slack returns newest first. Reversing here means no prompt has to explain the ordering.
  *
- * Threads are counted but not walked. A brief cares that a question got eleven replies; reading all
- * eleven costs a `conversations.replies` call per thread and buys detail the brief would not use.
+ * Threads are walked, not just counted. This channel is where the agency agrees what it will do, and in
+ * Slack that agreement almost always happens *in the thread* — the parent message is "here's the list,
+ * what do you think" and the commitment is the fourth reply down. A brief built from parents alone reads
+ * a channel full of decisions as a channel full of links.
  *
  * `raw` is how many messages Slack handed over before any were dropped. A channel that reads as quiet
  * because it is full of joins and empty messages is indistinguishable from a channel nobody posted in,
  * and the two need opposite responses, so the count before filtering is reported rather than discarded.
  */
-export async function channelHistory(channelId: string, days: number, limit = 200): Promise<{ messages: SlackMessage[]; raw: number }> {
+export async function channelHistory(
+  channelId: string,
+  days: number,
+  limit = 200,
+): Promise<{ messages: SlackMessage[]; raw: number; threads: number; replies: number }> {
   const oldest = (Date.now() - days * 24 * 60 * 60 * 1000) / 1000;
   const params = new URLSearchParams({ channel: channelId, oldest: oldest.toFixed(6), limit: String(Math.min(1000, Math.max(1, limit))) });
   const body = await call(`conversations.history?${params.toString()}`, { method: "GET" });
-  const messages = Array.isArray(body.messages) ? (body.messages as Record<string, unknown>[]) : [];
+  const raw = Array.isArray(body.messages) ? (body.messages as RawMessage[]) : [];
+  const parents = raw.filter(isRealMessage).reverse();
+
+  // Only threads whose parent survived filtering, because a thread hanging off a join notice is not a
+  // conversation. `reply_count` is Slack's own count, so nothing is fetched speculatively.
+  const heads = parents.filter((message) => Number(message.reply_count ?? 0) > 0);
+  const fetched = await pooled(heads, THREAD_CONCURRENCY, async (head) => {
+    const query = new URLSearchParams({ channel: channelId, ts: String(head.ts ?? ""), limit: "200" });
+    try {
+      const thread = await call(`conversations.replies?${query.toString()}`, { method: "GET" });
+      const all = Array.isArray(thread.messages) ? (thread.messages as RawMessage[]) : [];
+      // Slack returns the parent as the first element of its own thread; keeping it would print every
+      // threaded message twice.
+      return all.filter((message) => String(message.ts ?? "") !== String(head.ts ?? "")).filter(isRealMessage);
+    } catch {
+      // One unreadable thread must not cost the channel. The parent still carries its reply count, so
+      // the transcript says a conversation happened even where its contents could not be read.
+      return [] as RawMessage[];
+    }
+  });
+
+  const repliesFor = new Map<string, RawMessage[]>();
+  heads.forEach((head, index) => repliesFor.set(String(head.ts ?? ""), fetched[index] ?? []));
+
+  const messages: SlackMessage[] = [];
+  for (const parent of parents) {
+    messages.push(asMessage(parent));
+    for (const reply of repliesFor.get(String(parent.ts ?? "")) ?? []) messages.push(asMessage(reply, true));
+  }
+
   return {
-    raw: messages.length,
-    messages: messages
-      .filter((message) => typeof message.text === "string" && String(message.text).trim())
-      // Channel joins and leaves are noise a brief must never read as activity: a quiet channel that
-      // somebody joined is still a quiet channel.
-      .filter((message) => !String(message.subtype ?? "").startsWith("channel_"))
-      .map((message) => ({
-        ts: String(message.ts ?? ""),
-        at: new Date(Number(message.ts ?? 0) * 1000),
-        author: String(message.user ?? message.bot_id ?? "unknown"),
-        text: String(message.text ?? ""),
-        replies: Number(message.reply_count ?? 0),
-      }))
-      .reverse(),
+    raw: raw.length,
+    threads: heads.length,
+    replies: messages.filter((message) => message.isReply).length,
+    messages,
   };
 }
 
@@ -186,7 +254,13 @@ export async function resolveUserNames(ids: string[]): Promise<Map<string, strin
   return names;
 }
 
-/** A transcript a model can read, with ids replaced by names and days marked. */
+/**
+ * A transcript a model can read, with ids replaced by names and days marked.
+ *
+ * Replies are indented under the message they answer rather than flattened into the day. Who replied to
+ * what is the whole difference between "Kori asked whether the list was ready" and "Kori asked, and Dan
+ * said he would have it by Friday" — flattened, the second reads as two unrelated remarks.
+ */
 export function transcript(messages: SlackMessage[], names: Map<string, string>, timezone: string): string {
   const dayOf = (at: Date) => at.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" });
   const timeOf = (at: Date) => at.toLocaleTimeString("en-US", { timeZone: timezone, hour: "numeric", minute: "2-digit" });
@@ -194,10 +268,14 @@ export function transcript(messages: SlackMessage[], names: Map<string, string>,
   const lines: string[] = [];
   for (const message of messages) {
     const day = dayOf(message.at);
-    if (day !== lastDay) { lines.push(`\n## ${day}`); lastDay = day; }
+    // Only the channel's own messages open a day. A reply carries the date of the thread it is in, and a
+    // "## Thu" appearing halfway down a thread would date the parent wrongly.
+    if (!message.isReply && day !== lastDay) { lines.push(`\n## ${day}`); lastDay = day; }
     const who = names.get(message.author) ?? message.author;
-    const thread = message.replies ? ` [${message.replies} ${message.replies === 1 ? "reply" : "replies"} in thread]` : "";
-    lines.push(`${timeOf(message.at)} ${who}: ${message.text.replace(/\s+/g, " ").trim()}${thread}`);
+    const said = message.text.replace(/\s+/g, " ").trim();
+    if (message.isReply) { lines.push(`    ↳ ${timeOf(message.at)} ${who}: ${said}`); continue; }
+    const thread = message.replies ? ` [thread, ${message.replies} ${message.replies === 1 ? "reply" : "replies"}]` : "";
+    lines.push(`${timeOf(message.at)} ${who}: ${said}${thread}`);
   }
   return lines.join("\n").trim();
 }

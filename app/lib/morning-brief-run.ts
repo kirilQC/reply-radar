@@ -26,8 +26,12 @@ import { readConfig } from "./app-config";
 
 /** Exported so the trace can name the model that was actually asked, rather than a second copy of it. */
 export const BRIEF_MODEL = "claude-sonnet-4-6";
-/** A brief is 120–300 words by design, so this is headroom rather than a target. */
-const MAX_OUTPUT_TOKENS = 1_400;
+/**
+ * A brief is 200–450 words by design, so this is headroom rather than a target. It has to be headroom:
+ * a brief cut off mid-sentence loses the last action item, and the last one is the one nobody else knew
+ * about. Raised from 1,400 when the brief grew a per-campaign HeyReach section and owned action items.
+ */
+const MAX_OUTPUT_TOKENS = 2_000;
 /**
  * Inside Hobby's 60s function ceiling, with room for the two Granola calls that now run first and for
  * writing the row afterwards. Was 45s, which left nothing for the transcript fetch.
@@ -55,20 +59,24 @@ export async function morningBriefPrompt(slug?: string | null): Promise<string> 
 export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<BriefInputs, "internal" | "external">> {
   const timezone = workspace.timezone || "America/New_York";
   const readChannel = async (channelId: string) => {
-    if (!channelId) return { channelId: "", messages: 0, raw: 0, capped: false, text: "" };
+    if (!channelId) return { channelId: "", messages: 0, raw: 0, threads: 0, replies: 0, capped: false, text: "" };
     try {
       const history = await channelHistory(channelId, BRIEF_WINDOW_DAYS, BRIEF_MAX_MESSAGES);
       const names = await resolveUserNames(history.messages.map((message) => message.author));
       return {
         channelId,
+        // Parents and replies together, because that is what the model is given. The two are reported
+        // separately below so the trace can still say how much of it came out of threads.
         messages: history.messages.length,
         raw: history.raw,
+        threads: history.threads,
+        replies: history.replies,
         // Slack returned exactly as many as were asked for, which means there were probably more.
         capped: history.raw >= BRIEF_MAX_MESSAGES,
         text: transcript(history.messages, names, timezone),
       };
     } catch (error) {
-      return { channelId, messages: 0, raw: 0, capped: false, text: "", error: error instanceof Error ? error.message : "This channel could not be read." };
+      return { channelId, messages: 0, raw: 0, threads: 0, replies: 0, capped: false, text: "", error: error instanceof Error ? error.message : "This channel could not be read." };
     }
   };
   const [internal, external] = await Promise.all([

@@ -26,27 +26,46 @@
  */
 
 /**
- * ── Nothing is imported here, on purpose ────────────────────────────────────────────────────────
+ * ── Almost nothing is imported here, on purpose ──────────────────────────────────────────────────
  * Everything that touches Slack, Supabase or Anthropic lives in `morning-brief-run.ts`. This file is
  * arithmetic and wording, which means the tests can run it directly — and the arithmetic is the part
  * that has to be right, because a figure in a brief is read by the people least likely to check it.
+ *
+ * The one exception is `shared/sending-runway.mjs`, imported with its extension because Node's
+ * TypeScript loader will not resolve an extensionless relative path. The alternative was writing the
+ * per-sender send cap out a second time, and a brief that says "two days of sending left" while the
+ * campaign report says four is how the team learns to ignore both.
  */
+
+import { DAILY_CONNECTIONS_PER_SENDER, sendingDaysLeft } from "../../shared/sending-runway.mjs";
 
 /** The global prompt, and one variant per client that overrides it. Mirrors the sentiment prompt. */
 export const MORNING_BRIEF_PROMPT_PREFIX = "morning_brief_prompt";
 export const morningBriefPromptKey = (slug?: string | null) =>
   slug ? `${MORNING_BRIEF_PROMPT_PREFIX}_${slug}` : MORNING_BRIEF_PROMPT_PREFIX;
 
-/** How far back the brief looks at Slack. A week, so a Monday brief covers the week that just ended. */
-export const BRIEF_WINDOW_DAYS = 7;
+/**
+ * How far back the brief looks at Slack.
+ *
+ * A fortnight, not a week. A week was chosen so a Monday brief covered the week that just ended, and it
+ * was wrong for the thing the brief is actually for: an item somebody agreed to nine days ago and has
+ * not done is the most overdue thing on the account, and a seven-day window is precisely the window in
+ * which it disappears. The same length as the call window, so a commitment made on the last call and the
+ * conversation that followed it are both in view.
+ */
+export const BRIEF_WINDOW_DAYS = 14;
 
 /**
- * How many messages of one channel to read. Two hundred is a busy week; past that the oldest are noise.
+ * How many of a channel's own messages to read. Slack's own per-request ceiling, so nothing in the
+ * window is dropped by us — a channel busy enough to exceed this in a fortnight does not exist here.
+ *
+ * Thread replies are fetched separately and are not counted against this, which is the point: the
+ * commitment is usually the fourth reply down, not the message that started it.
  *
  * Here rather than beside the fetch because the trace has to be able to say the cap was reached, and a
  * cap stated in one file and reported from another is a cap that eventually stops matching.
  */
-export const BRIEF_MAX_MESSAGES = 200;
+export const BRIEF_MAX_MESSAGES = 1_000;
 
 /**
  * How far back to look for a call. Longer than the Slack window on purpose: weeklies get moved, skipped
@@ -55,38 +74,56 @@ export const BRIEF_MAX_MESSAGES = 200;
  */
 export const CALL_WINDOW_DAYS = 14;
 
-export const DEFAULT_MORNING_BRIEF_PROMPT = `You are the project manager for one client of a B2B outbound growth agency. You are writing the short brief that lands in the team's Slack channel first thing in the morning. The people reading it ran this account last week and will run it today: they do not need to be told what outbound is, what the client sells, or what a connection request is.
+/**
+ * Days of sending left below which the brief stops reporting and starts asking for new campaigns.
+ *
+ * Two, because building a campaign is not a same-day job: a list has to be pulled, enriched, and the
+ * copy written and approved. By the time the runway is at zero the gap is already unavoidable, so the
+ * alarm has to sound while there is still a day of sending to build against.
+ */
+export const RUNWAY_ALARM_DAYS = 2;
+
+export const DEFAULT_MORNING_BRIEF_PROMPT = `You are the delivery lead for one client of a B2B outbound growth agency. You are writing the brief that lands in the team's internal Slack channel first thing in the morning, three mornings a week. The people reading it ran this account last week and will run it today: they do not need to be told what outbound is, what the client sells, or what a connection request is.
+
+The brief has one job: **make sure everybody knows what we owe this client, who owes it, and whether the client's outbound is going to keep running.** It is not a status report and it is not a recap of the dashboard. It is a list of the work that is outstanding, in the order it should be done.
 
 You will be given, for one client:
 - **Figures**, computed from the agency's own records. These are facts. Never restate a figure differently from how it is given, never compute a new one, and never estimate.
-- **The internal channel**, where the team talks about this client.
-- **The external channel**, shared with the client, if there is one.
-- **The last call**, a transcript of the most recent call with this client, if there was one. This is where the agency states out loud what it will do next, so it is the strongest evidence of what was promised.
+- **The internal channel**, where the team talks about this client. Every message of the last fortnight, with thread replies indented under the message they answer.
+- **The external channel**, shared with the client, if there is one. Anything we said here we said to the client's face.
+- **The last call**, the full transcript of the most recent call with this client, if there was one. This is where the agency states out loud what it will do next, so it is the strongest evidence of what was promised.
 - **The client brief**, which may state what this account is supposed to be doing.
 
 ## What to write
 
-Write between 120 and 300 words as Slack mrkdwn. Lead with the thing that would change what somebody does today. If nothing needs doing, say that in one line and stop — a short honest brief is the point, and padding one out is how it stops being read.
+Write as much as the outstanding work needs and no more — usually 200 to 450 words. Slack mrkdwn. Lead with whatever would change what somebody does in the next hour. If there is genuinely nothing outstanding and the sending is healthy, say so in two lines and stop: padding a brief out is how it stops being read.
 
-Use these sections, and drop any that has nothing real in it:
+Use these sections, in this order, and drop any that has nothing real in it.
 
-*Needs a decision today* — anything blocked, waiting on us, or about to slip. One line each, naming who it is on.
-*We said we would* — what the agency committed to on the last call, where nothing since suggests it has happened. Quote the commitment. This is the most valuable section in the brief when there was a recent call, because a promise made out loud to a client and then forgotten is the failure this brief exists to prevent.
-*Slipped* — commitments from the internal channel that had a date and did not land. Name the person and quote enough of what they said to be recognisable. If a message says it was finished, it is finished — do not raise it.
-*The numbers* — only figures that changed meaningfully or that contradict what the channel says. Not a recap of the dashboard.
-*The client is waiting* — anything asked in the external channel that nobody answered.
+*Start here* — at most three lines, and only for things that are actually urgent today: a client waiting on an answer, sending about to run dry, a commitment already past its date. Get urgency from what was said, not from your own sense of importance — a date somebody named, a client asking twice, "before the end of the week" on the call.
+
+*What we owe them* — the outstanding action items, one line each, each with an owner. This is the core of the brief. Cover everything we said we would do and have not visibly done, wherever we said it: on the call, in the external channel to the client, or to each other in the internal channel. Write each one as the actual piece of work, in the words the team would use for it — a campaign to launch, a campaign to revise, a new campaign to build, a lead list to pull, a list to enrich, an integration or reporting job, a question to answer. Not "follow up on the list discussion". Format each as:
+• *The thing to do* — _Owner_ — where it was agreed, roughly when, and the date if one was named.
+
+Work out the owner from what you were given: who volunteered on the call, who was asked in the channel and did not decline, who has been doing this kind of work for this client. If two people could own it, name the likelier one and say the other was also in the conversation. If nobody can be identified, write _owner not agreed_ — which is itself a finding worth reading, because unowned work is the work that does not happen.
+
+*HeyReach right now* — the client's sending, as it stands. Name every active campaign, and for each one: leads still to contact, days of sending left, and which senders are on it. Then the total days of sending left across all active campaigns. If the figures say nothing is running, that is the first line of this section and it is urgent. If the figures say the runway is under two days, or there are no active campaigns at all, say plainly that new campaigns need building now and what that means in practice — lists to pull, lists to enrich, copy to write — and name who should do it if the channels or the call make that clear. This is the one part of the brief that is allowed to tell the team to do something nobody asked for, because running out of leads is always somebody's fault after the fact and never anybody's job before it.
+
+*Waiting on the client* — anything we asked the client, on the call or in the external channel, that they have not answered. Say when we asked and whether we have chased it.
+
+*Worth knowing* — at most two lines, and only for a figure that changed enough to matter or that contradicts what the channel says. Skip this section by default.
 
 ## Rules
 
-- Every commitment you raise must be attributable to a message or a line of the transcript you were given. Say who said it and roughly when. If you cannot point at it, leave it out.
-- A commitment on a call that a later Slack message says is done is done. Check the channels before raising anything from the transcript.
-- The transcript is a machine transcription and misspells names and product terms. Do not quote a mangled word as though it were said that way, and do not build a finding on one word you cannot make sense of.
-- Do not invent deadlines. A deadline exists only if somebody stated one, or the client brief states one. "Should probably be done soon" is not a deadline and must not be written as one.
+- Every action item and every commitment must be attributable to something you were given. Say who said it and roughly when. If you cannot point at it, leave it out — an invented action item costs the brief more trust than a missed one.
+- If a later message says something is done, it is done. Check the channels, including thread replies, before raising anything from the call. A thread is where "done, shipped it" usually lives.
+- Never invent a deadline. A deadline exists only if somebody stated one, or the client brief states one. "Should probably be done soon" is not a deadline and must not be written as one.
+- The transcript is a machine transcription and misspells names and product terms. Do not quote a mangled word as though it were said that way, and do not build an action item on one word you cannot make sense of.
 - Where the figures and the channel disagree, that disagreement is the most valuable line in the brief. Say both sides plainly: what the records show, and what the channel said.
 - Never guess at why something happened. "Sends stopped on Wednesday" is useful. "Sends stopped on Wednesday, probably because of the LinkedIn limits" is not, unless somebody said so.
-- Silence is a finding, not an absence. A client nobody has mentioned in a week is worth one line.
+- Silence is a finding. A client nobody has mentioned in a fortnight, or a campaign nobody has touched since it was launched, is worth a line.
 - Do not thank anyone, do not encourage anyone, do not close with a summary or a question. End on the last finding.
-- Slack mrkdwn only: *bold* with single asterisks, _italic_ with underscores, • or - for bullets. No markdown headings, no tables, no code fences, and no @-mentions — the brief must not ping anybody.`;
+- Slack mrkdwn only: *bold* with single asterisks, _italic_ with underscores, • or - for bullets. No markdown headings, no tables, no code fences, and no @-mentions — the brief must not ping anybody. Write people's names as plain text.`;
 
 export type BriefWorkspace = {
   id: string;
@@ -102,10 +139,36 @@ export type BriefWorkspace = {
 type Row = Record<string, unknown>;
 type Reader = (path: string) => Promise<unknown>;
 
+/** One campaign as the brief states it. `senders` are names where known, ids where not. */
+export type BriefCampaign = {
+  name: string;
+  status: string;
+  /** Whether this one is running, decided here so the prompt never has to read a status string. */
+  isActive: boolean;
+  sent: number;
+  accepted: number;
+  replies: number;
+  pending: number;
+  senders: string[];
+  /** Days of sending left at this campaign's own sender count, or null when it has no senders. */
+  daysLeft: number | null;
+};
+
 export type BriefSignals = {
   // `finished` is counted so that the three buckets add up to `total`. Without it a client whose work is
   // mostly done reads as "13 campaigns, 0 active, 2 paused", and the eleven unaccounted for look like a bug.
-  campaigns: { total: number; active: number; paused: number; finished: number; names: { name: string; status: string; sent: number; accepted: number; replies: number; pending: number }[] };
+  campaigns: { total: number; active: number; paused: number; finished: number; names: BriefCampaign[] };
+  /**
+   * How long the client keeps sending if nothing new is built.
+   *
+   * Computed across every active campaign rather than summed per campaign, because senders are shared:
+   * two campaigns on the same four accounts do not have four accounts each. Total pending divided by the
+   * whole distinct sender capacity is the only figure that answers "when do we run dry?"
+   *
+   * This is the one number in the brief that is supposed to make somebody do something today, so it is
+   * computed here and handed over as fact like every other figure.
+   */
+  runway: { daysLeft: number | null; pending: number; senders: number; needsCampaigns: boolean };
   sending: { thisWeek: number; lastWeek: number; changePercent: number | null; lastDayWithSends: string | null; quietDays: number };
   replies: { thisWeek: number; lastWeek: number };
   acceptance: { thisWeek: number | null; lastWeek: number | null };
@@ -128,12 +191,28 @@ const rate = (accepted: number, sent: number) => (sent > 0 ? Math.round((accepte
  */
 export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Promise<BriefSignals> {
   const filter = `workspace_id=eq.${encodeURIComponent(workspace.id)}`;
-  const [campaignRows, dailyRows] = await Promise.all([
-    read(`rr_campaign_stats?select=name,status,connections_sent,connections_accepted,replies,leads_pending,refreshed_at&${filter}&order=connections_sent.desc&limit=60`),
+  const [campaignRows, dailyRows, senderRows] = await Promise.all([
+    read(`rr_campaign_stats?select=name,status,connections_sent,connections_accepted,replies,leads_pending,sender_ids,refreshed_at&${filter}&order=connections_sent.desc&limit=60`),
     read(`rr_daily_stats?select=day,connections_sent,connections_accepted,replies&${filter}&sender_id=eq.&order=day.desc&limit=21`),
+    // Per-sender rows exist only to put a name on the ids the campaign rows carry. A brief that says
+    // "4 senders" is a statistic; one that says "Kori, Dan, Alina and Sam" is something a person can act
+    // on, because knowing which account is oversubscribed is the whole reason to ask.
+    read(`rr_daily_stats?select=sender_id,sender_name&${filter}&sender_id=neq.&order=day.desc&limit=400`),
   ]);
   const campaigns = Array.isArray(campaignRows) ? (campaignRows as Row[]) : [];
   const days = Array.isArray(dailyRows) ? (dailyRows as Row[]) : [];
+
+  const senderNames = new Map<string, string>();
+  for (const row of Array.isArray(senderRows) ? (senderRows as Row[]) : []) {
+    const id = String(row.sender_id ?? "").trim();
+    const name = String(row.sender_name ?? "").trim();
+    if (id && name && !senderNames.has(id)) senderNames.set(id, name);
+  }
+  /** A campaign's assigned accounts, named where the daily figures have seen them. */
+  const sendersOf = (row: Row) =>
+    (Array.isArray(row.sender_ids) ? row.sender_ids : [])
+      .map((id) => String(id ?? "").trim())
+      .filter(Boolean);
 
   // HeyReach sends these as `IN_PROGRESS`, `PAUSED`, `FINISHED`, so the separator has to allow an
   // underscore — matching only "in progress" quietly filed every running campaign under none of these.
@@ -158,22 +237,45 @@ export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Pr
 
   const freshest = campaigns.reduce((newest, row) => Math.max(newest, Date.parse(String(row.refreshed_at ?? "")) || 0), 0);
 
+  // The runway is computed over every active campaign, not the ten reported below, and over the distinct
+  // senders across all of them — two campaigns sharing four accounts have four between them, not eight.
+  const running = campaigns.filter((row) => isActive(row.status));
+  const runwayPending = running.reduce((total, row) => total + int(row.leads_pending), 0);
+  const runwaySenders = new Set(running.flatMap(sendersOf)).size;
+  const runwayDaysLeft = sendingDaysLeft(runwayPending, runwaySenders);
+
   return {
     campaigns: {
       total: campaigns.length,
       active: campaigns.filter((row) => isActive(row.status)).length,
       paused: campaigns.filter((row) => isPaused(row.status)).length,
       finished: campaigns.filter((row) => isFinished(row.status)).length,
-      // The ten biggest by volume. A client with sixty campaigns has a long tail of finished ones that
-      // would fill the prompt without changing a single line of the brief.
-      names: campaigns.slice(0, 10).map((row) => ({
-        name: String(row.name ?? ""),
-        status: String(row.status ?? "unknown"),
-        sent: int(row.connections_sent),
-        accepted: int(row.connections_accepted),
-        replies: int(row.replies),
-        pending: int(row.leads_pending),
-      })),
+      // Every active campaign, then the biggest of the rest up to ten. Volume alone was the wrong order:
+      // a campaign switched on yesterday has sent almost nothing and is the one the team needs to hear
+      // about, while the finished campaign at the top of the list changes nothing anybody does today.
+      names: [...running, ...campaigns.filter((row) => !isActive(row.status))].slice(0, 10).map((row) => {
+        const senders = sendersOf(row);
+        return {
+          name: String(row.name ?? ""),
+          status: String(row.status ?? "unknown"),
+          isActive: isActive(row.status),
+          sent: int(row.connections_sent),
+          accepted: int(row.connections_accepted),
+          replies: int(row.replies),
+          pending: int(row.leads_pending),
+          senders: senders.map((id) => senderNames.get(id) || id),
+          daysLeft: sendingDaysLeft(int(row.leads_pending), senders.length),
+        };
+      }),
+    },
+    runway: {
+      daysLeft: runwayDaysLeft,
+      pending: runwayPending,
+      senders: runwaySenders,
+      // Only claimed when there are campaign records to judge: a client whose HeyReach has never synced
+      // has an unknown runway, and "start building campaigns" on the strength of no data is the kind of
+      // wrong instruction that gets the whole brief ignored.
+      needsCampaigns: campaigns.length > 0 && (runwayDaysLeft === null || runwayDaysLeft < RUNWAY_ALARM_DAYS),
     },
     sending: {
       thisWeek,
@@ -200,7 +302,7 @@ export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Pr
  */
 export function signalsAsText(signals: BriefSignals): string {
   const lines: string[] = [];
-  const { campaigns, sending, replies, acceptance, staleness } = signals;
+  const { campaigns, runway, sending, replies, acceptance, staleness } = signals;
 
   // "Nothing has been collected" is the only case where the figures must be withheld, and it is not the
   // same as "no campaign row carried a timestamp": the daily figures are written by their own sync and
@@ -213,9 +315,31 @@ export function signalsAsText(signals: BriefSignals): string {
 
   if (!campaigns.total) lines.push("No campaign records have been collected for this client, so which campaigns these figures came from is not known.");
   else lines.push(`Campaigns: ${campaigns.total} total, ${campaigns.active} active, ${campaigns.paused} paused, ${campaigns.finished} finished.`);
+  if (campaigns.total && !campaigns.active) lines.push("No campaign is running for this client right now. Nothing new is going out until one is started.");
   for (const campaign of campaigns.names) {
     const accepted = rate(campaign.accepted, campaign.sent);
-    lines.push(`- "${campaign.name}" (${campaign.status}): ${campaign.sent} sent, ${campaign.accepted} accepted${accepted === null ? "" : ` (${accepted}%)`}, ${campaign.replies} replies, ${campaign.pending} leads not yet contacted.`);
+    const senders = campaign.senders.length
+      ? `Senders on it: ${campaign.senders.join(", ")}.`
+      : "No senders are recorded on it, so it may not be sending at all.";
+    // Days left is stated only for the campaigns it means anything for. A paused or finished campaign has
+    // a runway on paper and no runway in fact, and printing one invites the brief to count it.
+    const left = !campaign.isActive
+      ? ""
+      : campaign.daysLeft === null
+        ? " Days of sending left: unknown, because it has no senders."
+        : campaign.daysLeft === 0
+          ? " It has no leads left to contact, so it is done sending and needs new leads or replacing."
+          : ` Days of sending left: ${campaign.daysLeft}, at ${DAILY_CONNECTIONS_PER_SENDER} connection requests per sender per day.`;
+    lines.push(`- "${campaign.name}" (${campaign.status}${campaign.isActive ? ", active" : ""}): ${campaign.sent} sent, ${campaign.accepted} accepted${accepted === null ? "" : ` (${accepted}%)`}, ${campaign.replies} replies, ${campaign.pending} leads not yet contacted. ${senders}${left}`);
+  }
+
+  if (campaigns.active) {
+    lines.push(`Across all ${campaigns.active} active campaigns: ${runway.pending} leads still to contact, ${runway.senders} distinct sender${runway.senders === 1 ? "" : "s"} between them.`);
+    if (runway.daysLeft === null) lines.push("Total days of sending left cannot be worked out, because no senders are recorded on the active campaigns.");
+    else lines.push(`Total days of sending left across all active campaigns: ${runway.daysLeft}.`);
+  }
+  if (runway.needsCampaigns) {
+    lines.push(`This is under the ${RUNWAY_ALARM_DAYS}-day line. Tell the team, at the top of the brief, that new campaigns need building now: lists pulled, enriched, and copy written. Say who should do it if the channels or the call make that clear.`);
   }
 
   lines.push(`Connection requests sent in the last 7 days: ${sending.thisWeek}. In the 7 days before that: ${sending.lastWeek}.`);
@@ -233,11 +357,18 @@ export function signalsAsText(signals: BriefSignals): string {
  * The client's most recent call. Shaped here rather than imported from `granola.ts`, because this file
  * is not allowed a relative import — see the note at the top.
  */
+/**
+ * ── Why Granola's own summary is not here ───────────────────────────────────────────────────────────
+ * It used to be, and it made the brief worse. Granola's summary is already a model's reading of the call,
+ * with its own idea of what mattered and its own omissions, and a summary sitting above a transcript gets
+ * treated as the answer — the brief ended up paraphrasing Granola's conclusions rather than finding the
+ * sentence where somebody said they would do something. The transcript alone is the only unmediated
+ * record of what was actually said, so it is the only thing sent.
+ */
 export type BriefCall = {
   title: string;
   ageDays: number | null;
   owner: string;
-  summary: string;
   transcript: string;
   truncated: boolean;
   /**
@@ -253,6 +384,7 @@ export type BriefCall = {
 /** One channel as it was read: what was configured, what came back, and what survived filtering. */
 export type BriefChannel = {
   channelId: string;
+  /** Everything sent to the model: the channel's own messages and every reply inside them. */
   messages: number;
   text: string;
   error?: string;
@@ -260,6 +392,9 @@ export type BriefChannel = {
   raw?: number;
   /** Whether `BRIEF_MAX_MESSAGES` was reached, which means the oldest of the window is missing. */
   capped?: boolean;
+  /** How many messages had a thread hanging off them, and how many replies were read out of those. */
+  threads?: number;
+  replies?: number;
 };
 
 export type BriefInputs = {
@@ -280,7 +415,10 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     if (!channel.channelId) return `# The ${label} channel\n\nNo ${label} channel is configured for this client.`;
     if (channel.error) return `# The ${label} channel\n\nThis channel could not be read: ${channel.error}\nSay so in one line at the end of the brief.`;
     if (!channel.messages) return `# The ${label} channel\n\nNothing has been said in this channel in the last ${BRIEF_WINDOW_DAYS} days.`;
-    return `# The ${label} channel (last ${BRIEF_WINDOW_DAYS} days, ${channel.messages} messages)\n\n${channel.text}`;
+    // The thread count is stated because the shape of the transcript has to be explained once: replies are
+    // indented under the message they answer, and a model told nothing about that reads them as new remarks.
+    const threads = channel.threads ? `, including ${channel.replies ?? 0} replies across ${channel.threads} threads` : "";
+    return `# The ${label} channel (last ${BRIEF_WINDOW_DAYS} days, every message${threads})\n\nIndented lines beginning ↳ are replies inside the thread on the message above them, in order. A reply is where the real answer usually is: the message that starts a thread asks, and the fourth reply down is where somebody agrees to do something.\n\n${channel.text}`;
   };
   /**
    * The call, with its age stated in words rather than left for the model to work out from a date.
@@ -299,8 +437,9 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     const cut = call.truncated ? "\n\nOnly the last part of the transcript is included; the earlier portion was too long to pass on." : "";
     return [
       `# The last call: "${call.title}", ${when}${stale}`,
-      call.summary ? `## Granola's own summary\n\n${call.summary}` : "",
-      call.transcript ? `## Transcript\n\nA machine transcription, so names and product terms are unreliable. Commitments the agency made here are the highest-value thing in this brief.${cut}\n\n${call.transcript}` : "The transcript itself could not be read, so only the summary above is available.",
+      call.transcript
+        ? `## Transcript, in full\n\nA machine transcription, so names and product terms are unreliable. This is the whole call and the only record of it you have — there is no summary, deliberately, because what you are looking for is the sentence in which somebody said they would do something, and who said it. Read it for that.${cut}\n\n${call.transcript}`
+        : "The transcript could not be read, so nothing about what was said on this call is known. Do not speculate about it.",
     ].filter(Boolean).join("\n\n");
   })();
 
@@ -384,19 +523,25 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
       }
       read += 1;
       raw += channel.raw ?? channel.messages;
-      const skipped = (channel.raw ?? channel.messages) - channel.messages;
-      facts.push(`${label} ${channel.channelId}: ${plural(channel.messages, "message")} over ${BRIEF_WINDOW_DAYS} days${skipped > 0 ? `, ${count(skipped)} dropped as joins or empty` : ""}.`);
+      // `raw` counts only what `conversations.history` returned, so replies fetched from threads are not
+      // part of it — which is why the arithmetic here is stated rather than left to be inferred from two
+      // numbers that deliberately do not reconcile.
+      const replies = channel.replies ?? 0;
+      const skipped = (channel.raw ?? 0) - (channel.messages - replies);
+      facts.push(`${label} ${channel.channelId}: ${plural(channel.messages - replies, "message")} over ${BRIEF_WINDOW_DAYS} days${skipped > 0 ? `, ${count(skipped)} dropped as joins or empty` : ""}.`);
+      if (channel.threads) facts.push(`${label}: opened ${plural(channel.threads, "thread")} and read ${plural(replies, "reply", "replies")} out of them.`);
       if (channel.capped) facts.push(`${label} hit the ${count(BRIEF_MAX_MESSAGES)}-message ceiling, so the oldest of the window was not read.`);
     }
     const used = inputs.internal.messages + inputs.external.messages;
+    const threads = (inputs.internal.threads ?? 0) + (inputs.external.threads ?? 0);
     const excerpts: TraceStep["excerpts"] = [];
     if (inputs.internal.text) excerpts.push(excerptOf("Internal channel, as the model read it", inputs.internal.text));
     if (inputs.external.text) excerpts.push(excerptOf("External channel, as the model read it", inputs.external.text));
     steps.push({
       source: "Slack channels",
       result: read
-        ? `Pulled ${read === 2 ? "both channels" : "one channel"} and got ${plural(raw, "message")}. ${count(used)} carried text and went to the model.`
-        : "No channel could be read, so nothing anyone said this week is in this brief.",
+        ? `Pulled ${read === 2 ? "both channels" : "one channel"} and got ${plural(raw, "message")}, then opened ${plural(threads, "thread")}. ${count(used)} messages and replies went to the model.`
+        : "No channel could be read, so nothing anyone said in the last fortnight is in this brief.",
       state: read === 2 ? "ok" : read ? "partial" : "missing",
       facts,
       excerpts,
@@ -425,9 +570,9 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
       if (call.durationMinutes) facts.push(`Scheduled for ${plural(call.durationMinutes, "minute")}.`);
       facts.push(call.transcript
         ? `Transcript: ${plural(call.transcript.length, "character")}${call.truncated ? ", of which only the last part was sent — the end of a call is where next steps get agreed" : ", sent whole"}.`
-        : "The transcript could not be read, so only Granola's own summary was sent.");
+        : "The transcript could not be read, so nothing from this call reached the brief.");
+      facts.push("Granola's own summary was not sent. The transcript is the only account of the call the brief was given.");
       const excerpts: TraceStep["excerpts"] = [];
-      if (call.summary) excerpts.push(excerptOf("Granola's own summary", call.summary));
       if (call.transcript) excerpts.push(excerptOf("Transcript, as the model read it", call.transcript));
       steps.push({
         source: "Granola",
@@ -442,14 +587,22 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
   // 3 — HeyReach. Every campaign the model was given, in full, because the figures are the part of a
   // brief nobody checks and the only way to check them is to see the same numbers the model saw.
   {
-    const { campaigns, sending, replies, acceptance, staleness } = inputs.signals;
+    const { campaigns, runway, sending, replies, acceptance, staleness } = inputs.signals;
     const facts: string[] = [];
     for (const campaign of campaigns.names) {
       const accepted = rate(campaign.accepted, campaign.sent);
-      facts.push(`“${campaign.name}” (${campaign.status}): ${count(campaign.sent)} sent, ${count(campaign.accepted)} accepted${accepted === null ? "" : ` (${accepted}%)`}, ${count(campaign.replies)} replies, ${count(campaign.pending)} not yet contacted.`);
+      const senders = campaign.senders.length ? ` Senders: ${campaign.senders.join(", ")}.` : " No senders recorded.";
+      const left = campaign.isActive && campaign.daysLeft !== null ? ` ${plural(campaign.daysLeft, "day")} of sending left.` : "";
+      facts.push(`“${campaign.name}” (${campaign.status}): ${count(campaign.sent)} sent, ${count(campaign.accepted)} accepted${accepted === null ? "" : ` (${accepted}%)`}, ${count(campaign.replies)} replies, ${count(campaign.pending)} not yet contacted.${senders}${left}`);
     }
     const untold = campaigns.total - campaigns.names.length;
-    if (untold > 0) facts.push(`${plural(untold, "smaller campaign")} were left out, to keep the prompt to the ones with volume in them.`);
+    if (untold > 0) facts.push(`${plural(untold, "smaller campaign")} were left out, to keep the prompt to the active ones and the ones with volume in them.`);
+    if (campaigns.active) {
+      facts.push(`Runway: ${count(runway.pending)} leads pending across ${plural(campaigns.active, "active campaign")} on ${plural(runway.senders, "sender")} — ${runway.daysLeft === null ? "days left unknown, because no senders are recorded" : `${plural(runway.daysLeft, "day")} of sending left`}.`);
+    }
+    // The one figure in the brief that is meant to start work today, so the trace has to show whether it
+    // fired and on what basis. A brief that failed to raise it is a brief nobody can tell was wrong.
+    if (runway.needsCampaigns) facts.push(`Under the ${RUNWAY_ALARM_DAYS}-day line, so the brief was told to ask for new campaigns to be built.`);
     facts.push(`Connection requests: ${count(sending.thisWeek)} this week against ${count(sending.lastWeek)} the week before${sending.changePercent === null ? "" : ` (${sending.changePercent > 0 ? "+" : ""}${sending.changePercent}%)`}.`);
     facts.push(`Replies: ${count(replies.thisWeek)} this week against ${count(replies.lastWeek)} the week before.`);
     if (acceptance.thisWeek !== null) facts.push(`Acceptance: ${acceptance.thisWeek}%${acceptance.lastWeek === null ? "" : ` against ${acceptance.lastWeek}% the week before`}.`);

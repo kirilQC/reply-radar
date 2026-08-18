@@ -36,10 +36,15 @@ const PAGE_SIZE = 30;
  */
 const TIMEOUT_MS = 6_000;
 /**
- * About six thousand words. Longer calls are cut from the front rather than the back, because the last
- * ten minutes of a client call is where next steps get agreed and that is the part a brief is for.
+ * About sixty thousand words — a four-hour call, where a weekly client sync is forty minutes. This is
+ * high enough that in practice nothing is cut, which is the point: the transcript is now the brief's only
+ * account of what was said on the call, so a truncated one is a brief that confidently misses a commitment.
+ *
+ * There is still a ceiling, because a prompt has to fit in the model's context and the route has sixty
+ * seconds. If one is ever hit, the cut takes the front rather than the back — the last ten minutes of a
+ * client call is where next steps get agreed, and the reader is told the transcript was shortened.
  */
-const MAX_TRANSCRIPT_CHARS = 24_000;
+const MAX_TRANSCRIPT_CHARS = 320_000;
 
 type Row = Record<string, unknown>;
 
@@ -56,7 +61,6 @@ export type ClientCall = {
   attendees: string[];
   /** Scheduled length in whole minutes, or null. Shown to a reader; not sent to the model. */
   durationMinutes: number | null;
-  summary: string;
   transcript: string;
   truncated: boolean;
 };
@@ -144,9 +148,9 @@ export async function findClientCall(
     return { call: null, errors, reason: `No meeting with "${describeNeedles(needles)}" in the title was found in the last ${windowDays} days.` };
   }
 
-  // The winner is opened once, with the transcript asked for in the same request. The list response has
-  // no summary and no meeting time — only `created_at` — so without this the brief would be working from
-  // a transcript alone and dating the call from when Granola happened to write the note.
+  // The winner is opened once, with the transcript asked for in the same request. This is the only place
+  // the transcript exists, and it is also the only place the meeting's own start time does — the list
+  // response carries `created_at`, which is when Granola wrote the note, not when the call happened.
   const { note, key } = winner;
   let detail: Row = {};
   let transcript = "";
@@ -177,7 +181,6 @@ export async function findClientCall(
       // same case where `title` falls back to the list's copy.
       attendees: full?.attendees ?? [],
       durationMinutes: full?.durationMinutes ?? null,
-      summary: (full?.summary || "").slice(0, 6_000),
       transcript: truncated ? transcript.slice(-MAX_TRANSCRIPT_CHARS) : transcript,
       truncated,
     },

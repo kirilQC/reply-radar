@@ -224,6 +224,33 @@ export function callAgeDays(startedAt: number, now = Date.now()): number | null 
 }
 
 /**
+ * Who said one line of a transcript.
+ *
+ * Granola sends the speaker as an object on at least some notes, and the previous version of this stringified
+ * it — so every line of every transcript arrived at the model reading `[object Object]: …`. That is worse
+ * than having no speaker at all: a brief whose job is to say *who* committed to something was being handed a
+ * conversation in which nobody was distinguishable from anybody, and it filled the gap by guessing.
+ *
+ * `source` is last and is mapped, because it is not a name — Granola uses it to mean which audio channel the
+ * line came from, where `microphone` is whoever recorded the note and `system` is everyone else on the call.
+ * Coarse, but "the recorder" against "the other side" is a real distinction and better than silence.
+ */
+function speakerName(segment: Row): string {
+  const named = [segment.speaker, segment.speaker_name, segment.speakerName, segment.name, segment.person, segment.user]
+    .map((raw) => {
+      if (typeof raw === "string" || typeof raw === "number") return String(raw).trim();
+      const person = (raw ?? {}) as Row;
+      return (text(person.name) || text(person.display_name) || text(person.displayName) || text(person.label) || text(person.email)).trim();
+    })
+    .find(Boolean);
+  if (named) return named;
+  const source = text(segment.source).toLowerCase();
+  if (source === "microphone" || source === "mic" || source === "me") return "The person recording";
+  if (source === "system" || source === "speaker" || source === "them") return "Someone else on the call";
+  return "";
+}
+
+/**
  * The transcript as one block of text.
  *
  * Read defensively for the same reason the note fields are: the shape has moved between API versions,
@@ -242,7 +269,7 @@ export function transcriptText(payload: unknown): string {
     .map((raw) => {
       if (typeof raw === "string") return raw;
       const segment = (raw ?? {}) as Row;
-      const speaker = String(segment.speaker ?? segment.source ?? segment.name ?? "").trim();
+      const speaker = speakerName(segment);
       const said = String(segment.text ?? segment.content ?? segment.value ?? "").trim();
       if (!said) return "";
       return speaker ? `${speaker}: ${said}` : said;

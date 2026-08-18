@@ -75,8 +75,12 @@ type RunResult = {
   steps?: TraceStep[];
 };
 
-/** Where a brief goes. Not sent with the request until the button is pressed, so a misclick costs nothing. */
-type Destination = "preview" | "test" | "internal" | "external";
+/**
+ * Where a manually run brief goes. Not sent with the request until the button is pressed, so a misclick
+ * costs nothing — and neither of the two can reach a client, so the worst a right click can do is post to
+ * the test channel. The scheduled run posts to the client's internal channel and is not chosen here.
+ */
+type Destination = "preview" | "test";
 
 /** The zones the team actually works in. A free-text field here would be a typo away from a silent no-op. */
 const TIMEZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Asia/Jerusalem", "UTC"];
@@ -282,14 +286,8 @@ export default function SlackPage() {
                     {TIMEZONES.map((zone) => <option key={zone} value={zone}>{zone.split("/").pop()?.replace(/_/g, " ")}</option>)}
                   </select>
                 </label>
-                <label className="brief-field">
-                  POSTS TO
-                  <select value={draft.destination} onChange={(event) => setDraft((current) => ({ ...current, destination: event.target.value }))}>
-                    <option value="test">Test channel</option>
-                    <option value="internal">Internal channel</option>
-                    <option value="external">External channel</option>
-                  </select>
-                </label>
+                {/* No destination picker. A scheduled brief goes to the client's internal channel, which
+                    is the only place it was ever for — the field only existed to be got wrong. */}
                 <button className="config-generate" type="button" onClick={saveSchedule} disabled={savingSchedule}>{savingSchedule ? "Saving…" : "Save schedule"}</button>
               </div>
               {/* The one thing a schedule cannot show about itself: whether it would fire right now. */}
@@ -366,14 +364,15 @@ export default function SlackPage() {
                 </div>
 
                 <div className="hub-group-label"><span>Where it goes</span></div>
+                {/* Two, not four. Clicking Generate by hand is checking the prompt, and the scheduled run
+                    is what posts to the team — so a manual run either shows the brief here or drops it in
+                    the test channel. Neither can reach a client. */}
                 <div className="slack-destinations">
                   {([
                     ["preview", "Show it here", "Nothing is posted"],
                     ["test", "Test channel", testChannel || "SLACK_TEST_CHANNEL_ID not set"],
-                    ["internal", "Internal channel", active.internalChannelId || "No channel set"],
-                    ["external", "External channel", active.externalChannelId || "No channel set"],
                   ] as Array<[Destination, string, string]>).map(([id, label, detail]) => {
-                    const unavailable = (id === "test" && !testChannel) || (id === "internal" && !active.internalChannelId) || (id === "external" && !active.externalChannelId);
+                    const unavailable = id === "test" && !testChannel;
                     return (
                       <button
                         key={id}

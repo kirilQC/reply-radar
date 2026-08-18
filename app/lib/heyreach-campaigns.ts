@@ -35,6 +35,11 @@
  */
 
 import { isOurCampaign } from "../../shared/campaign-code.mjs";
+// Re-exported below, because the morning brief needs the same runway arithmetic and cannot import from
+// this file — see the note at the top of `shared/sending-runway.mjs`.
+import { DAILY_CONNECTIONS_PER_SENDER, sendingDaysLeft } from "../../shared/sending-runway.mjs";
+
+export { DAILY_CONNECTIONS_PER_SENDER, sendingDaysLeft };
 
 type Row = Record<string, unknown>;
 
@@ -64,15 +69,6 @@ const REQUEST_TIMEOUT_MS = 30_000;
  * someone else's rate limit, not a cache of the report.
  */
 const CACHE_TTL_MS = 60_000;
-/**
- * Connection requests one LinkedIn account sends in a day.
- *
- * QC's own sending cap, not LinkedIn's limit — it is the number the pulse check and the campaign
- * schedules are both built around, so a runway calculated from anything else would contradict what the
- * team already tells clients.
- */
-export const DAILY_CONNECTIONS_PER_SENDER = 25;
-
 /**
  * Fields HeyReach has been seen to carry the assigned LinkedIn accounts under.
  *
@@ -143,22 +139,6 @@ export type CampaignStatusRow = {
   /** Days of sending left at the current sender count. Null when the sender count is unknown. */
   daysLeftInSending: number | null;
 };
-
-/**
- * How much longer a campaign has to run before its list is exhausted.
- *
- * Pending leads divided by the daily send capacity, which is the sender count times the per-sender cap:
- * 500 pending across 4 senders is 100 a day, so five days left. It is the answer to the question a
- * client actually asks about a campaign — not "how big is the list" but "when do you need more leads?"
- *
- * Null rather than zero when there are no senders. A campaign with nobody assigned is not finishing
- * today; it is not sending at all, and the honest answer is that we cannot say.
- */
-export function sendingDaysLeft(pending: number, senders: number): number | null {
-  if (!Number.isFinite(pending) || !Number.isFinite(senders) || senders <= 0) return null;
-  if (pending <= 0) return 0;
-  return Math.ceil(pending / (senders * DAILY_CONNECTIONS_PER_SENDER));
-}
 
 /**
  * The distinct accounts assigned to a campaign, whichever shape HeyReach used to list them.

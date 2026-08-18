@@ -5415,9 +5415,10 @@ span.brain-mark.is-lg {
   line-height: 1.55;
 }
 
-/* Three mutually exclusive answers to "where does this go", each carrying the channel it would use.
-   Not a <select>: the destination that would post the team's own notes to a client is worth reading
-   in full before it is picked, and a collapsed select shows one line. */
+/* Two mutually exclusive answers to "where does this go", each carrying the channel it would use.
+   Not a <select>: a collapsed select shows one line, and the line worth reading is the channel id
+   underneath. `auto-fit` means dropping the two client-facing options widened the remaining pair
+   rather than leaving a gap where they were. */
 .slack-destinations {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

@@ -30,6 +30,11 @@ export type BriefSchedule = {
   sendHour: number;
   sendMinute: number;
   timezone: string;
+  /**
+   * Where a scheduled brief goes. Always the client's internal channel, and no longer a choice — the
+   * brief is written for the team about the client, so the only other place it could go is a channel the
+   * client can read, and posting our own outstanding-work list there was never a thing anyone wanted.
+   */
   destination: string;
 };
 
@@ -39,9 +44,7 @@ export const DEFAULT_SCHEDULE: BriefSchedule = {
   sendHour: 8,
   sendMinute: 0,
   timezone: "America/New_York",
-  // Not 'internal'. A freshly enabled automation posts where only the team is looking until somebody
-  // moves it, so the first scheduled run of a misjudged prompt cannot reach a client-facing channel.
-  destination: "test",
+  destination: "internal",
 };
 
 /** The calendar date in a given zone, as `YYYY-MM-DD`. `en-CA` formats in that order by definition. */

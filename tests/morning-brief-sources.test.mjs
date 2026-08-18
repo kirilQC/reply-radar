@@ -146,6 +146,34 @@ test("a transcript is flattened whichever shape it arrives in", () => {
   assert.equal(transcriptText({}), "");
 });
 
+test("a speaker sent as an object is named, not stringified", () => {
+  // The bug this exists for, found by reading the trace's own excerpt of a real Bluevia call: every line
+  // of every transcript reached the model as `[object Object]: …`, because the speaker arrives as an object
+  // on some notes and was being coerced with String(). That is worse than no speaker at all — a brief whose
+  // job is to say who committed to something was reading a call in which nobody was distinguishable, and it
+  // filled the gap by guessing.
+  assert.equal(
+    transcriptText({ segments: [{ speaker: { name: "Kori Katz" }, text: "I'll pull the list" }] }),
+    "Kori Katz: I'll pull the list",
+  );
+  assert.equal(
+    transcriptText({ segments: [{ speaker: { display_name: "Dan Shapiro" }, text: "Friday works" }] }),
+    "Dan Shapiro: Friday works",
+  );
+  // An object with nothing name-shaped in it must not produce a speaker at all.
+  assert.equal(transcriptText({ segments: [{ speaker: { id: 42 }, text: "hello" }] }), "hello");
+});
+
+test("an unnamed speaker is at least told apart from the other side of the call", () => {
+  // `source` is Granola's audio channel, not a name: `microphone` is whoever recorded the note and
+  // `system` is everyone else in the room. Coarse, but "the recorder" against "the other side" is a real
+  // distinction and a brief can use it, where a transcript with no speakers at all is a monologue.
+  assert.equal(
+    transcriptText({ segments: [{ source: "microphone", text: "we will send it Thursday" }, { source: "system", text: "great" }] }),
+    "The person recording: we will send it Thursday\nSomeone else on the call: great",
+  );
+});
+
 // ── Which morning, in which zone ─────────────────────────────────────
 
 test("the local day and clock come from the zone, not from an offset", () => {
@@ -177,12 +205,14 @@ test("a brief is due on its own days, at or after its own time", () => {
   assert.equal(isDueNow({ ...MWF, enabled: false }, new Date("2026-08-17T12:00:00Z")), false);
 });
 
-test("the automation is off until somebody turns it on", () => {
-  // Nobody should be able to add a client on Tuesday and have it post on Wednesday morning, and a
-  // newly enabled schedule must not reach a client-facing channel before a human has read one brief.
+test("the automation is off until somebody turns it on, and posts where the team is", () => {
+  // Nobody should be able to add a client on Tuesday and have it post on Wednesday morning.
   assert.equal(DEFAULT_SCHEDULE.enabled, false);
-  assert.equal(DEFAULT_SCHEDULE.destination, "test");
   assert.equal(isDueNow(DEFAULT_SCHEDULE, new Date("2026-08-17T12:00:00Z")), false);
+  // The internal channel, and it is no longer a choice. The guard used to be that a new schedule pointed
+  // at the test channel so it could not reach a client-facing one; the client-facing option is gone
+  // instead, which is the stronger version of the same guarantee.
+  assert.equal(DEFAULT_SCHEDULE.destination, "internal");
 });
 
 test("already sent today is judged in the schedule's zone", () => {

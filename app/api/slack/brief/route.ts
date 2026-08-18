@@ -8,8 +8,10 @@
  * A brief that was written but not sent is not half-done work, it is a preview — and a preview that
  * had to be stored and then referred to by id in a second request would mean a brief could be edited
  * between the two, which is precisely the thing nobody should be able to do to a figure. So the model
- * call and the Slack post happen together, and `destination` decides at the outset which of the four
- * it is: shown on the page, posted to the test channel, or posted to one of the client's own channels.
+ * call and the Slack post happen together, and `destination` decides at the outset which of the three
+ * it is: shown on the page, posted to the test channel, or posted to the client's internal channel. There
+ * is no fourth. The brief is the team's own outstanding-work list, so a client-facing channel was never a
+ * destination worth offering — it was only ever a way to send the wrong people the wrong document.
  *
  * ── Every attempt is recorded, including the failures ────────────────────────────────────────────
  * A row goes into `rr_slack_briefs` whether or not Slack accepted the message, because the question
@@ -97,7 +99,10 @@ function scheduleFrom(rows: unknown): BriefSchedule {
     sendHour: Number.isFinite(Number(row.send_hour)) ? Number(row.send_hour) : DEFAULT_SCHEDULE.sendHour,
     sendMinute: Number.isFinite(Number(row.send_minute)) ? Number(row.send_minute) : DEFAULT_SCHEDULE.sendMinute,
     timezone: String(row.timezone ?? DEFAULT_SCHEDULE.timezone),
-    destination: String(row.destination ?? DEFAULT_SCHEDULE.destination),
+    // Not read from the row. Rows written before the destination stopped being a choice still say `test`
+    // or `external`, and honouring one of those would mean the schedule kept posting somewhere nobody can
+    // now see on the page — or, worse, into a channel the client reads.
+    destination: DEFAULT_SCHEDULE.destination,
   };
 }
 
@@ -224,7 +229,10 @@ export async function PATCH(request: Request) {
       const days = asNumberList(input.sendDays);
       const hour = Math.min(23, Math.max(0, Math.round(Number(input.sendHour) || 0)));
       const minute = Math.min(59, Math.max(0, Math.round(Number(input.sendMinute) || 0)));
-      const destination = input.destination === "internal" || input.destination === "external" ? String(input.destination) : "test";
+      // Not read from the request. A scheduled brief goes to the client's internal channel and nowhere
+      // else; the column stays because every stored brief records where it went, but it is no longer a
+      // choice anybody has to make on the page.
+      const destination = "internal";
       // An enabled automation with no days would look on and never fire, which is the worst of both.
       if (input.enabled && !days.length) return NextResponse.json({ error: "Pick at least one day, or switch the automation off." }, { status: 400 });
       const response = await write(url, key, "rr_slack_automations", {
@@ -279,7 +287,10 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as Row;
     const slug = typeof body.workspace === "string" ? body.workspace.trim() : "";
-    destination = body.destination === "test" || body.destination === "internal" || body.destination === "external" ? body.destination : "preview";
+    // `internal` is here for the scheduler, which is the only caller that asks for it — the page offers a
+    // preview and the test channel, because a person clicking Generate is checking the prompt, not sending
+    // the team their Monday brief by hand.
+    destination = body.destination === "test" || body.destination === "internal" ? body.destination : "preview";
     if (!slug) return NextResponse.json({ error: "No client was named." }, { status: 400 });
 
     const rows = await read(`rr_workspaces?select=id,name,slug,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match&slug=eq.${encodeURIComponent(slug)}&limit=1`);
@@ -296,10 +307,6 @@ export async function POST(request: Request) {
     if (destination === "internal") {
       channelId = String(workspace.slack_internal_channel_id ?? "").trim();
       if (!channelId) return NextResponse.json({ error: `${workspace.name} has no internal channel id. Add one on their configuration page.` }, { status: 400 });
-    }
-    if (destination === "external") {
-      channelId = String(workspace.slack_external_channel_id ?? "").trim();
-      if (!channelId) return NextResponse.json({ error: `${workspace.name} has no external channel id. Add one on their configuration page.` }, { status: 400 });
     }
     if (channelId && !slackConfigured()) {
       return NextResponse.json({ error: `${SLACK_TOKEN_ENV} is not set, so nothing can be posted to Slack.` }, { status: 400 });
