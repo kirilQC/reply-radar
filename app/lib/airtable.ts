@@ -34,36 +34,76 @@
  */
 
 const BASE = "https://api.airtable.com/v0";
-/** Airtable is normally fast; this exists so a hung meta call cannot hold an admin screen open. */
-const TIMEOUT_MS = 8_000;
+/**
+ * Long enough for the biggest base we have, short enough that a genuinely hung call still gives up.
+ *
+ * This was 8s and it was wrong. `meta/bases/{id}/tables` returns the full schema of *every* table in
+ * the base in one response and cannot be narrowed to one table — Bluevia has a Master Outreach Table,
+ * a Reply Tracker, call trackers and a per-campaign table for each campaign, which is about 70KB of
+ * JSON, and it does not reliably arrive inside eight seconds. The admin screen showed "Airtable did
+ * not respond in time" for a base that was fine; the check was just too impatient to see it.
+ *
+ * The number is a client-base ceiling, not a guess: bases grow a table per campaign, so the response
+ * grows over the life of a client and the limit has to have room in it.
+ */
+const TIMEOUT_MS = 25_000;
+/** One retry, for timeouts only — see `airtableGet`. */
+const TIMEOUT_RETRIES = 1;
 
 /**
- * The tracker's table id, shared by every base duplicated from the client template.
+ * The old single tracker, kept only to recognise a base that has not been split yet.
  *
- * Tried first because it survives the table being renamed, which has already happened once: the
- * template calls it `Campaigns & Projects` and every live client base calls it
- * `Campaigns & Projects Tracker`. A base built from scratch rather than duplicated will not have this
- * id, so the name is tried second.
+ * Every client base was duplicated from one template, so this id is genuinely shared: it is the
+ * `Campaigns & Projects Tracker` in the template, in Willow, in Bluevia and in Cotool. Nothing is
+ * written to it any more — it is the "this base still needs splitting" signal.
  */
-export const TRACKER_TABLE_ID = "tblb3uziiRyZD2AMi";
-/** Matched loosely, lowercased: the suffix differs between the template and the client bases. */
-const TRACKER_NAME_NEEDLE = "campaigns & projects";
+export const LEGACY_TRACKER_TABLE_ID = "tblb3uziiRyZD2AMi";
+const LEGACY_TRACKER_NAME_NEEDLE = "campaigns & projects";
 
 /**
- * The fields the brief needs in order to write an action item, and the type each has to be.
+ * ── Why the two new tables are matched by name and not by id ──────────────────────────────────────
+ * The legacy tracker could be found by id because every base was duplicated from one template that
+ * already contained it. These two tables did not exist when that duplication happened, so each base
+ * gets its own ids when they are added — Bluevia's `Campaigns` is `tblrq38rkLIPujZUs` and no other
+ * base will ever share that. An id is only a shared handle when a shared ancestor handed it out.
  *
- * Deliberately the small set that is identical across all four bases inspected. `Responsibility` and
- * `Priority` are *not* here despite existing in most client bases: their field ids differ per base,
- * Cotool's `Responsibility` means something else entirely, and `Priority` is absent from the template.
- * A field we cannot interpret the same way everywhere is not a field the brief can fill.
+ * So the name is the contract, and the name is therefore load-bearing: renaming `Campaigns` in a
+ * client base disconnects the brief from it. That is deliberately visible — the audit says the table
+ * is missing rather than writing somewhere unexpected.
  */
-export const REQUIRED_TRACKER_FIELDS: { name: string; type: string; why: string }[] = [
+export const CAMPAIGNS_TABLE_NAME = "Campaigns";
+export const ACTION_ITEMS_TABLE_NAME = "Projects & Action Items";
+
+/**
+ * The fields the brief needs in order to write an action item.
+ *
+ * Every one of these traces to something the brief already produces. `Owner` is text rather than a
+ * collaborator because the brief's owners are Slack mentions and not all of them are people — "QC
+ * Campaign Approval and Launch" is a group, and guessing a collaborator from a name would put a task
+ * on whoever shares a first name. `Assignee` stays a collaborator for humans to set by hand.
+ *
+ * `Brief Key` and `Raised by Brief` are what make a re-run safe: the key finds the row this item
+ * already has, and the checkbox marks the rows the brief is allowed to touch. Without both, three
+ * briefs about one unfinished task make three rows.
+ */
+export const REQUIRED_ACTION_ITEM_FIELDS: { name: string; type: string; why: string }[] = [
   { name: "Title", type: "singleLineText", why: "the action item itself" },
+  { name: "Type", type: "singleSelect", why: "action item, project or bottleneck" },
   { name: "Status", type: "singleSelect", why: "so a finished item can be closed" },
-  { name: "Type", type: "singleSelect", why: "so brief items are separable from campaigns" },
-  { name: "Assignee", type: "singleCollaborator", why: "who owes it" },
-  { name: "Comments", type: "multilineText", why: "why the brief raised it" },
-  { name: "Due Date", type: "date", why: "when it is owed" },
+  { name: "Owner", type: "singleLineText", why: "who owes it, as the brief named them" },
+  { name: "Detail", type: "multilineText", why: "the evidence for raising it" },
+  { name: "Source", type: "singleSelect", why: "internal channel, client channel or call" },
+  { name: "First Raised", type: "date", why: "what ages an item" },
+  { name: "Brief Key", type: "singleLineText", why: "so a re-run updates instead of duplicating" },
+  { name: "Last Seen", type: "date", why: "the last brief that still considered it open" },
+  { name: "Raised by Brief", type: "checkbox", why: "so the brief never edits a row you typed" },
+];
+
+/** Campaigns are mostly read, so this is the smaller set the brief needs to recognise and link one. */
+export const REQUIRED_CAMPAIGN_FIELDS: { name: string; type: string; why: string }[] = [
+  { name: "Title", type: "singleLineText", why: "the campaign name" },
+  { name: "Campaign Code", type: "singleLineText", why: "joins the row to its lead table" },
+  { name: "Status", type: "singleSelect", why: "whether it is live" },
 ];
 
 export type AirtableBase = { id: string; name: string; permissionLevel?: string };
@@ -78,7 +118,16 @@ export function isAirtableConfigured() {
   return Boolean(process.env.AIRTABLE_API_KEY);
 }
 
-async function airtableGet<T>(path: string): Promise<AirtableResult<T>> {
+/**
+ * One GET, with a single retry when — and only when — it timed out.
+ *
+ * The retry is narrow on purpose. A 429 must never be retried: Airtable's rate limit locks the token
+ * out of the base for a full thirty seconds, so a second attempt is guaranteed to fail and to spend
+ * somebody's request budget doing it. A 401 or 403 is a token setting and will fail identically
+ * forever. A timeout is the one failure here that is plausibly luck, and a large schema arriving
+ * slowly once is exactly the case that made this necessary.
+ */
+async function airtableGet<T>(path: string, attempt = 0): Promise<AirtableResult<T>> {
   const token = process.env.AIRTABLE_API_KEY;
   if (!token) return { ok: false, error: "No Airtable token is set. Add AIRTABLE_API_KEY.", status: 503 };
   const controller = new AbortController();
@@ -102,6 +151,10 @@ async function airtableGet<T>(path: string): Promise<AirtableResult<T>> {
     return { ok: true, data: body as T };
   } catch (error) {
     const aborted = (error as Error)?.name === "AbortError";
+    if (aborted && attempt < TIMEOUT_RETRIES) {
+      clearTimeout(timer);
+      return airtableGet<T>(path, attempt + 1);
+    }
     return { ok: false, error: aborted ? "Airtable did not respond in time." : "Airtable could not be reached.", status: 504 };
   } finally {
     clearTimeout(timer);
@@ -134,35 +187,53 @@ export async function getBaseTables(baseId: string): Promise<AirtableResult<Airt
   return { ok: true, data: Array.isArray(result.data?.tables) ? result.data.tables : [] };
 }
 
-/** The tracker table in a base: by the shared id first, then by name for a base built from scratch. */
-export function findTrackerTable(tables: AirtableTable[]): AirtableTable | null {
-  const byId = tables.find((table) => table.id === TRACKER_TABLE_ID);
-  if (byId) return byId;
-  return tables.find((table) => String(table.name ?? "").toLowerCase().includes(TRACKER_NAME_NEEDLE)) ?? null;
+/** Names are compared flattened, so a stray double space or a capital does not read as a missing table. */
+const flatten = (value: unknown) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
+/** A table by its exact name. See `CAMPAIGNS_TABLE_NAME` for why these two are not found by id. */
+export function findTableByName(tables: AirtableTable[], name: string): AirtableTable | null {
+  return tables.find((table) => flatten(table.name) === flatten(name)) ?? null;
 }
+
+/** The pre-split tracker, if this base still has one. Nothing is written to it. */
+export function findLegacyTracker(tables: AirtableTable[]): AirtableTable | null {
+  const byId = tables.find((table) => table.id === LEGACY_TRACKER_TABLE_ID);
+  if (byId) return byId;
+  return tables.find((table) => flatten(table.name).includes(LEGACY_TRACKER_NAME_NEEDLE)) ?? null;
+}
+
+export type TableAudit = {
+  name: string;
+  table: { id: string; name: string } | null;
+  present: { name: string; id: string; type: string }[];
+  missing: { name: string; type: string; why: string }[];
+  mistyped: { name: string; id: string; expected: string; actual: string }[];
+  choices: Record<string, string[]>;
+};
 
 export type TrackerAudit = {
   baseId: string;
   ready: boolean;
-  table: { id: string; name: string; matchedBy: "id" | "name" } | null;
-  present: { name: string; id: string; type: string }[];
-  missing: { name: string; type: string; why: string }[];
-  mistyped: { name: string; id: string; expected: string; actual: string }[];
-  statusChoices: string[];
-  typeChoices: string[];
+  campaigns: TableAudit;
+  actionItems: TableAudit;
+  /** True when the base still has the old combined tracker and has not been split. */
+  needsSplit: boolean;
+  legacyTable: { id: string; name: string } | null;
 };
 
 /**
- * Whether one base's tracker can be written into, and precisely what is wrong when it cannot.
+ * Whether one base's two tracker tables can be written into, and precisely what is wrong when they
+ * cannot.
  *
- * Three outcomes, not two, and the middle one is the common one: no tracker table at all, a tracker
- * missing some fields, or a tracker ready to use. A base that is simply not a client base — the lead
- * databases, the automations base — lands in the first, which is also how a mis-mapped base announces
- * itself before anything is written into it.
+ * The interesting outcome is the third one. A base can fail this three ways: it is not a client base
+ * at all (neither table, no legacy tracker), it is a client base that has not been split yet (legacy
+ * tracker present, new tables absent — `needsSplit`), or it has the tables but somebody has changed a
+ * field. Collapsing those into "not ready" would send you looking for a missing column in a base whose
+ * real problem is that it was never set up.
  *
- * The choice sets are returned rather than checked against an expected list, because they have already
- * drifted per client and there is no correct set to check against. What the writer will need to do is
- * pick from what is actually there, so what is actually there is what this reports.
+ * Choice sets are reported, not validated. They have already drifted per client — Cotool has no
+ * `Completed`, Bluevia had both `Completed` and `Done` plus an option with an empty name — so there is
+ * no correct set to check against, and the writer's job is to pick from whatever is actually there.
  */
 export async function auditTracker(baseId: string): Promise<AirtableResult<TrackerAudit>> {
   const tables = await getBaseTables(baseId);
@@ -170,33 +241,42 @@ export async function auditTracker(baseId: string): Promise<AirtableResult<Track
   return { ok: true, data: auditTrackerTables(baseId, tables.data) };
 }
 
+function auditOneTable(tables: AirtableTable[], name: string, required: { name: string; type: string; why: string }[]): TableAudit {
+  const table = findTableByName(tables, name);
+  if (!table) return { name, table: null, present: [], missing: required, mistyped: [], choices: {} };
+  const fields = Array.isArray(table.fields) ? table.fields : [];
+  const byName = new Map(fields.map((field) => [flatten(field.name), field]));
+  const present: TableAudit["present"] = [];
+  const missing: TableAudit["missing"] = [];
+  const mistyped: TableAudit["mistyped"] = [];
+  for (const want of required) {
+    const field = byName.get(flatten(want.name));
+    if (!field) { missing.push(want); continue; }
+    if (field.type !== want.type) { mistyped.push({ name: want.name, id: field.id, expected: want.type, actual: field.type }); continue; }
+    present.push({ name: want.name, id: field.id, type: field.type });
+  }
+  const choices: Record<string, string[]> = {};
+  for (const field of fields) {
+    const list = (field.options?.choices ?? []).map((choice) => String(choice?.name ?? "")).filter(Boolean);
+    if (list.length) choices[String(field.name ?? "")] = list;
+  }
+  return { name, table: { id: table.id, name: String(table.name ?? "") }, present, missing, mistyped, choices };
+}
+
 /** The judgement half of `auditTracker`, kept apart from the fetch so it can be tested against a schema. */
 export function auditTrackerTables(baseId: string, tables: AirtableTable[]): TrackerAudit {
-  const table = findTrackerTable(tables);
-  if (!table) {
-    return { baseId, ready: false, table: null, present: [], missing: REQUIRED_TRACKER_FIELDS, mistyped: [], statusChoices: [], typeChoices: [] };
-  }
-  const fields = Array.isArray(table.fields) ? table.fields : [];
-  const byName = new Map(fields.map((field) => [String(field.name ?? "").trim().toLowerCase(), field]));
-  const present: TrackerAudit["present"] = [];
-  const missing: TrackerAudit["missing"] = [];
-  const mistyped: TrackerAudit["mistyped"] = [];
-  for (const required of REQUIRED_TRACKER_FIELDS) {
-    const field = byName.get(required.name.toLowerCase());
-    if (!field) { missing.push(required); continue; }
-    if (field.type !== required.type) { mistyped.push({ name: required.name, id: field.id, expected: required.type, actual: field.type }); continue; }
-    present.push({ name: required.name, id: field.id, type: field.type });
-  }
-  const choicesOf = (name: string) =>
-    (byName.get(name)?.options?.choices ?? []).map((choice) => String(choice?.name ?? "")).filter(Boolean);
+  const campaigns = auditOneTable(tables, CAMPAIGNS_TABLE_NAME, REQUIRED_CAMPAIGN_FIELDS);
+  const actionItems = auditOneTable(tables, ACTION_ITEMS_TABLE_NAME, REQUIRED_ACTION_ITEM_FIELDS);
+  const legacy = findLegacyTracker(tables);
+  const clean = (audit: TableAudit) => Boolean(audit.table) && !audit.missing.length && !audit.mistyped.length;
   return {
     baseId,
-    ready: missing.length === 0 && mistyped.length === 0,
-    table: { id: table.id, name: String(table.name ?? ""), matchedBy: table.id === TRACKER_TABLE_ID ? "id" : "name" },
-    present,
-    missing,
-    mistyped,
-    statusChoices: choicesOf("status"),
-    typeChoices: choicesOf("type"),
+    ready: clean(campaigns) && clean(actionItems),
+    campaigns,
+    actionItems,
+    // Only worth saying when the new tables are genuinely absent. A base mid-migration, with both the
+    // old tracker and the new tables, is not asking to be split again.
+    needsSplit: Boolean(legacy) && !campaigns.table && !actionItems.table,
+    legacyTable: legacy ? { id: legacy.id, name: String(legacy.name ?? "") } : null,
   };
 }

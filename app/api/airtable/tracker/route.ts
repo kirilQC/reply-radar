@@ -20,6 +20,13 @@
 import { NextResponse } from "next/server";
 import { auditTracker, isAirtableConfigured } from "../../../lib/airtable";
 
+/**
+ * Above the 25s the fetch itself allows, so a slow schema is reported by us rather than cut off by the
+ * platform. Vercel's default would end the function first and the client would see a bare 504 with no
+ * explanation of which of the two things went wrong.
+ */
+export const maxDuration = 60;
+
 export async function GET(request: Request) {
   if (!isAirtableConfigured()) {
     return NextResponse.json({ ok: false, error: "Airtable is not connected yet. Add AIRTABLE_API_KEY in Vercel and redeploy." }, { status: 503 });

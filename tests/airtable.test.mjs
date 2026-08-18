@@ -15,7 +15,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { airtableBaseFor, isConfidentMatch } from "../shared/airtable-link.mjs";
-import { auditTrackerTables, findTrackerTable, REQUIRED_TRACKER_FIELDS, TRACKER_TABLE_ID } from "../app/lib/airtable.ts";
+import {
+  ACTION_ITEMS_TABLE_NAME,
+  auditTrackerTables,
+  CAMPAIGNS_TABLE_NAME,
+  findLegacyTracker,
+  findTableByName,
+  LEGACY_TRACKER_TABLE_ID,
+  REQUIRED_ACTION_ITEM_FIELDS,
+  REQUIRED_CAMPAIGN_FIELDS,
+} from "../app/lib/airtable.ts";
 
 const BASES = [
   { id: "appKH5X6AO2uXTsI1", name: "KI test" },
@@ -122,77 +131,158 @@ test("a nameless workspace does not match every short base name", () => {
 
 const field = (id, name, type, choices) => ({ id, name, type, ...(choices ? { options: { choices: choices.map((choice, index) => ({ id: `sel${index}`, name: choice })) } } : {}) });
 
-/** The tracker as it really is in a client base, with the fields the brief needs. */
-const readyTracker = () => ({
-  id: TRACKER_TABLE_ID,
-  name: "Campaigns & Projects Tracker",
+/** The two tables as they really are in Bluevia, the base they were first built in. */
+const campaignsTable = () => ({
+  id: "tblrq38rkLIPujZUs",
+  name: CAMPAIGNS_TABLE_NAME,
   fields: [
-    field("fld8fhitNz1pb8gFb", "Title", "singleLineText"),
-    field("fld6x01xAKokE1w4F", "Status", "singleSelect", ["Not Started", "In Progress", "Done"]),
-    field("fld8qDqEdu6PDONPA", "Type", "singleSelect", ["Campaign", "Project", "To Do"]),
-    field("fldYXz69102YCuZii", "Assignee", "singleCollaborator"),
-    field("fldVIbKtOuLim0zTW", "Comments", "multilineText"),
-    field("fldgtxOE2vK7vZQHp", "Due Date", "date"),
+    field("fld4XBrL37ozk5UAh", "Title", "singleLineText"),
+    field("fldJtNrjq9YViFP6X", "Campaign Code", "singleLineText"),
+    field("fld2Vskb3wVQGww1z", "Status", "singleSelect", ["Not Started", "In Progress", "Launched"]),
+    field("fldbbmIyGS6dGuGvx", "Owner", "singleLineText"),
+    field("fldC1XtLoCXUrOce5", "Launch Date", "date"),
   ],
 });
 
-test("the tracker is found by its shared table id even when renamed", () => {
-  const table = findTrackerTable([{ id: "tblOther", name: "Master Table" }, { ...readyTracker(), name: "Renamed Entirely" }]);
-  assert.equal(table.id, TRACKER_TABLE_ID);
+const actionItemsTable = () => ({
+  id: "tbljRlffgDz7B6BBZ",
+  name: ACTION_ITEMS_TABLE_NAME,
+  fields: [
+    field("flde7oPbCgZfWAF7t", "Title", "singleLineText"),
+    field("fldoyzvBiyygkjahq", "Type", "singleSelect", ["Action Item", "Project", "Bottleneck"]),
+    field("fld7vg2EDjZHOka34", "Status", "singleSelect", ["Not Started", "In Progress", "Blocked", "Done"]),
+    field("fldXRUE0POnMUF2Yo", "Owner", "singleLineText"),
+    field("fldngQSQMHrpv4PsE", "Detail", "multilineText"),
+    field("fld1YYonDeAH697jV", "Source", "singleSelect", ["Internal channel", "Client channel", "Call", "Manual"]),
+    field("fldWPDI21CvxSAdAW", "First Raised", "date"),
+    field("fldXlqo7fupibMCmI", "Brief Key", "singleLineText"),
+    field("fldoXtRAc5ahFZbPY", "Last Seen", "date"),
+    field("fldmhUxFPmmZdHDtf", "Raised by Brief", "checkbox"),
+  ],
 });
 
-test("the tracker is found by name in a base that was built rather than duplicated", () => {
-  const table = findTrackerTable([{ id: "tblFresh0000000001", name: "Campaigns & Projects", fields: [] }]);
-  assert.equal(table.id, "tblFresh0000000001");
-});
+const splitBase = () => [campaignsTable(), actionItemsTable()];
 
-test("a ready tracker reports ready, with the real choice sets", () => {
-  const audit = auditTrackerTables("appHDmwRZZGqJ0pSN", [readyTracker()]);
+test("a split base with both tables reports ready", () => {
+  const audit = auditTrackerTables("appoVGkvrA146CmzF", splitBase());
   assert.equal(audit.ready, true);
-  assert.equal(audit.table.matchedBy, "id");
-  assert.equal(audit.missing.length, 0);
-  assert.equal(audit.mistyped.length, 0);
-  assert.deepEqual(audit.typeChoices, ["Campaign", "Project", "To Do"]);
+  assert.equal(audit.needsSplit, false);
+  assert.equal(audit.campaigns.table.id, "tblrq38rkLIPujZUs");
+  assert.equal(audit.actionItems.table.id, "tbljRlffgDz7B6BBZ");
 });
 
-test("a base with no tracker at all is reported as such, not as a tracker missing every field", () => {
-  const audit = auditTrackerTables("appoPRY555McadjfR", [{ id: "tblLeads0000000001", name: "Master Lead Database", fields: [] }]);
+test("the choice sets are reported rather than judged", () => {
+  const audit = auditTrackerTables("appoVGkvrA146CmzF", splitBase());
+  assert.deepEqual(audit.actionItems.choices.Type, ["Action Item", "Project", "Bottleneck"]);
+  assert.deepEqual(audit.actionItems.choices.Source, ["Internal channel", "Client channel", "Call", "Manual"]);
+});
+
+test("a base still holding the old combined tracker is asking to be split, not missing fields", () => {
+  // The distinction that matters: this base is fine, it just has not been migrated. Reporting it as
+  // ten missing fields would send somebody looking for columns to add to a table that should not exist.
+  const legacy = { id: LEGACY_TRACKER_TABLE_ID, name: "Campaigns & Projects Tracker", fields: [] };
+  const audit = auditTrackerTables("appPwljHf8ozgVjMq", [legacy]);
   assert.equal(audit.ready, false);
-  assert.equal(audit.table, null);
-  assert.equal(audit.missing.length, REQUIRED_TRACKER_FIELDS.length);
+  assert.equal(audit.needsSplit, true);
+  assert.equal(audit.legacyTable.id, LEGACY_TRACKER_TABLE_ID);
+});
+
+test("a base mid-migration is not told to split again", () => {
+  const audit = auditTrackerTables("appoVGkvrA146CmzF", [{ id: LEGACY_TRACKER_TABLE_ID, name: "Campaigns & Projects Tracker", fields: [] }, ...splitBase()]);
+  assert.equal(audit.needsSplit, false);
+  assert.equal(audit.ready, true);
+});
+
+test("a base that is not a client base at all is neither ready nor asking to be split", () => {
+  const audit = auditTrackerTables("app4fQrF7XLSyXptG", [{ id: "tblLeads0000000001", name: "Master Lead Database", fields: [] }]);
+  assert.equal(audit.ready, false);
+  assert.equal(audit.needsSplit, false);
+  assert.equal(audit.campaigns.table, null);
+  assert.equal(audit.actionItems.missing.length, REQUIRED_ACTION_ITEM_FIELDS.length);
+});
+
+test("the two new tables are found by name, because their ids differ in every base", () => {
+  // Bluevia's Campaigns is tblrq38rkLIPujZUs and no other base will share it — these tables were
+  // created after the template was duplicated, so there is no inherited id to match on.
+  const renamedIds = splitBase().map((table, index) => ({ ...table, id: `tblOtherBase00000${index}` }));
+  const audit = auditTrackerTables("appHDmwRZZGqJ0pSN", renamedIds);
+  assert.equal(audit.ready, true);
+  assert.equal(audit.campaigns.table.id, "tblOtherBase000000");
+});
+
+test("renaming a table in a client base is reported, not silently worked around", () => {
+  const tables = splitBase();
+  tables[1].name = "Action Items";
+  const audit = auditTrackerTables("appHDmwRZZGqJ0pSN", tables);
+  assert.equal(audit.ready, false);
+  assert.equal(audit.actionItems.table, null);
+});
+
+test("a table name differing only by case or spacing still matches", () => {
+  const tables = splitBase();
+  tables[0].name = "  campaigns  ";
+  tables[1].name = "Projects  &  Action Items";
+  const audit = auditTrackerTables("appHDmwRZZGqJ0pSN", tables);
+  assert.equal(audit.ready, true);
+});
+
+test("findTableByName does not match a table that merely contains the name", () => {
+  // `Campaigns & Projects Tracker` contains "Campaigns". Matching loosely here would point the writer
+  // at the legacy table and undo the whole split.
+  const found = findTableByName([{ id: LEGACY_TRACKER_TABLE_ID, name: "Campaigns & Projects Tracker" }], CAMPAIGNS_TABLE_NAME);
+  assert.equal(found, null);
+});
+
+test("the legacy tracker is still found by id when it has been renamed", () => {
+  const found = findLegacyTracker([{ id: LEGACY_TRACKER_TABLE_ID, name: "Old Tracker (archive)" }]);
+  assert.equal(found.id, LEGACY_TRACKER_TABLE_ID);
 });
 
 test("a missing field is named so somebody can add it", () => {
-  const table = readyTracker();
-  table.fields = table.fields.filter((entry) => entry.name !== "Due Date");
-  const audit = auditTrackerTables("appHDmwRZZGqJ0pSN", [table]);
+  const tables = splitBase();
+  tables[1].fields = tables[1].fields.filter((entry) => entry.name !== "Brief Key");
+  const audit = auditTrackerTables("appoVGkvrA146CmzF", tables);
   assert.equal(audit.ready, false);
-  assert.deepEqual(audit.missing.map((entry) => entry.name), ["Due Date"]);
+  assert.deepEqual(audit.actionItems.missing.map((entry) => entry.name), ["Brief Key"]);
 });
 
 test("a field of the wrong type is a fault, not a pass", () => {
-  // The failure this catches: Assignee left as text reads as present, and every write of a
-  // collaborator object into it would be rejected one morning at a time.
-  const table = readyTracker();
-  table.fields = table.fields.map((entry) => (entry.name === "Assignee" ? field(entry.id, "Assignee", "singleLineText") : entry));
-  const audit = auditTrackerTables("appHDmwRZZGqJ0pSN", [table]);
+  // The failure this catches: `Raised by Brief` left as text reads as present, and the brief would
+  // then be unable to tell its own rows from yours — which is the one thing protecting your edits.
+  const tables = splitBase();
+  tables[1].fields = tables[1].fields.map((entry) => (entry.name === "Raised by Brief" ? field(entry.id, "Raised by Brief", "singleLineText") : entry));
+  const audit = auditTrackerTables("appoVGkvrA146CmzF", tables);
   assert.equal(audit.ready, false);
-  assert.deepEqual(audit.mistyped, [{ name: "Assignee", id: "fldYXz69102YCuZii", expected: "singleCollaborator", actual: "singleLineText" }]);
+  assert.deepEqual(audit.actionItems.mistyped, [{ name: "Raised by Brief", id: "fldmhUxFPmmZdHDtf", expected: "checkbox", actual: "singleLineText" }]);
 });
 
 test("field names are matched case and space insensitively", () => {
-  const table = readyTracker();
-  table.fields = table.fields.map((entry) => (entry.name === "Due Date" ? field(entry.id, " due date ", "date") : entry));
-  const audit = auditTrackerTables("appHDmwRZZGqJ0pSN", [table]);
+  const tables = splitBase();
+  tables[1].fields = tables[1].fields.map((entry) => (entry.name === "First Raised" ? field(entry.id, " first raised ", "date") : entry));
+  const audit = auditTrackerTables("appoVGkvrA146CmzF", tables);
   assert.equal(audit.ready, true);
 });
 
-test("the required set holds no field whose id drifts between client bases", () => {
+test("the required set holds no field whose id or meaning drifts between client bases", () => {
   // Responsibility has three different ids across four bases and Cotool's means something else
-  // entirely; Priority is absent from the template. Neither may become a required field by accident.
-  const names = REQUIRED_TRACKER_FIELDS.map((entry) => entry.name);
+  // entirely; Priority is absent from the template. Neither may become required by accident.
+  const names = [...REQUIRED_ACTION_ITEM_FIELDS, ...REQUIRED_CAMPAIGN_FIELDS].map((entry) => entry.name);
   assert.ok(!names.includes("Responsibility"));
   assert.ok(!names.includes("Priority"));
+});
+
+test("Assignee is never required, because the brief is not allowed to guess a person", () => {
+  // The brief writes Owner as text. Requiring the collaborator field would imply we can resolve
+  // "@QC Campaign Approval and Launch" to one human, which is not a thing.
+  const names = REQUIRED_ACTION_ITEM_FIELDS.map((entry) => entry.name);
+  assert.ok(!names.includes("Assignee"));
+  assert.ok(names.includes("Owner"));
+});
+
+test("the fields that make a re-run safe are all required", () => {
+  // Without every one of these, a second brief about the same unfinished task writes a second row.
+  const names = REQUIRED_ACTION_ITEM_FIELDS.map((entry) => entry.name);
+  for (const needed of ["Brief Key", "Last Seen", "Raised by Brief"]) assert.ok(names.includes(needed), `${needed} must stay required`);
 });
 
 test("the writer never sets typecast, so it cannot invent options in a client's base", () => {

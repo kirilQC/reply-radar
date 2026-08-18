@@ -315,7 +315,8 @@ export default function AdminPage() {
    * dropdown would be fifty schema requests against a five-per-second limit to answer a question about
    * one client, and the answer for the other forty-nine would be thrown away.
    */
-  const [tracker, setTracker] = useState<{ ready: boolean; table: { name: string; matchedBy: string } | null; missing: { name: string }[]; mistyped: { name: string; expected: string; actual: string }[]; statusChoices: string[]; typeChoices: string[] } | null>(null);
+  type TableAudit = { name: string; table: { id: string; name: string } | null; missing: { name: string }[]; mistyped: { name: string; expected: string; actual: string }[] };
+  const [tracker, setTracker] = useState<{ ready: boolean; campaigns: TableAudit; actionItems: TableAudit; needsSplit: boolean; legacyTable: { name: string } | null } | null>(null);
   const [trackerState, setTrackerState] = useState<"idle" | "checking" | "error">("idle");
   const [trackerError, setTrackerError] = useState("");
   useEffect(() => {
@@ -342,16 +343,20 @@ export default function AdminPage() {
       if (guessedBase.baseId) return `${guessedBase.name} looks like this client's base. Pick it above to confirm — nothing is written to Airtable until a base is chosen here.`;
       return airtableBases.length ? "No base matches this name. Pick this client's base above, or leave it unset to write nothing to Airtable." : "No Airtable bases have been listed yet.";
     }
-    if (trackerState === "checking") return "Checking the tracker in that base.";
+    if (trackerState === "checking") return "Checking the tables in that base.";
     if (trackerState === "error") return trackerError;
     if (!tracker) return "";
-    if (!tracker.table) return "That base has no Campaigns & Projects tracker. Either it is not this client's base, or the table has been renamed.";
-    const faults = [
-      ...tracker.missing.map((field) => `${field.name} is missing`),
-      ...tracker.mistyped.map((field) => `${field.name} is a ${field.actual}, not a ${field.expected}`),
-    ];
-    if (faults.length) return `${tracker.table.name} is missing what the brief needs: ${faults.join(", ")}.`;
-    return `${tracker.table.name} is ready. Status: ${tracker.statusChoices.join(", ") || "no options"}. Type: ${tracker.typeChoices.join(", ") || "no options"}.`;
+    if (tracker.ready) return "Campaigns and Projects & Action Items are both ready.";
+    // Said as the thing to go and do. "Not ready" is three different jobs depending on why, and the
+    // one that reads as a missing column is usually a base nobody has split yet.
+    if (tracker.needsSplit) return `That base still has the old ${tracker.legacyTable?.name ?? "combined tracker"}. It needs splitting into Campaigns and Projects & Action Items before the brief can write to it.`;
+    const faults: string[] = [];
+    for (const audit of [tracker.campaigns, tracker.actionItems]) {
+      if (!audit.table) { faults.push(`${audit.name} is missing`); continue; }
+      for (const field of audit.missing) faults.push(`${audit.name}: ${field.name} is missing`);
+      for (const field of audit.mistyped) faults.push(`${audit.name}: ${field.name} is a ${field.actual}, not a ${field.expected}`);
+    }
+    return faults.length ? faults.join(". ") + "." : "";
   })();
   const slackChannelNote = (() => {
     const internal = normalizeChannelId(workspaceDraft.slackInternal);
@@ -742,8 +747,8 @@ export default function AdminPage() {
                         </select>
                       </label>
                       <p className="slack-channel-note">{airtableNote}</p>
-                      {tracker?.table && !tracker.ready && (
-                        <p className="slack-channel-note">Add the missing fields in Airtable, then reopen this tab to re-check.</p>
+                      {tracker && !tracker.ready && !tracker.needsSplit && (
+                        <p className="slack-channel-note">Fix it in Airtable, then reopen this tab to re-check.</p>
                       )}
                     </section>
                     <section className="admin-panel client-config-section" id="client-theme">
