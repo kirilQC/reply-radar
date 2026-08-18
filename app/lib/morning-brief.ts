@@ -961,6 +961,23 @@ export type BriefOutcome = {
   channelId: string;
   posted: boolean;
   sendError?: string;
+  /**
+   * What the tracker step did. Optional because the trace is built in tests and from stored runs that
+   * predate the step, and a trace that throws over a missing key hides the five steps above it.
+   */
+  tracker?: BriefTrackerOutcome;
+};
+
+export type BriefTrackerOutcome = {
+  attempted?: boolean;
+  reason?: string;
+  items?: number;
+  result?: {
+    ran?: boolean;
+    campaigns?: { created?: number; updated?: number; finished?: string[] };
+    projects?: { created?: number; updated?: number; removed?: number };
+    notes?: string[];
+  } | null;
 };
 
 /** Long enough to recognise what was read, short enough to scroll past. */
@@ -1198,6 +1215,48 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
       facts: preview ? [] : [`Destination: the ${outcome.destination} channel.`],
       excerpts: [],
     });
+  }
+
+  /*
+   * 6 — The trackers. The only step that writes into somebody else's system rather than reading from
+   * one, which is exactly why it is spelled out row by row instead of reported as "synced".
+   *
+   * Deletions are named as deletions. The brief removes its own rows from the project tracker once
+   * they stop appearing in it, and a person who opens Airtable to find four fewer cards than yesterday
+   * needs the line here that says so, otherwise the honest answer to "where did my item go" is a
+   * shrug.
+   *
+   * Absent on runs stored before this step existed, and those get no step rather than a step reading
+   * "not touched" — a red mark against a run that could not have done it is a report of a failure that
+   * never happened. Every run from here on sets it, including the ones that skipped the work.
+   */
+  if (outcome.tracker) {
+    const tracker = outcome.tracker;
+    const sync = tracker?.result ?? null;
+    const facts: string[] = [];
+    if (tracker?.reason) facts.push(tracker.reason);
+    for (const note of sync?.notes ?? []) facts.push(note);
+    let result: string;
+    let state: TraceStep["state"];
+    if (!tracker?.attempted) {
+      result = tracker?.reason || "The trackers were not touched on this run.";
+      state = "missing";
+    } else if (!sync?.ran) {
+      result = "Nothing was written. The reason is below.";
+      state = "missing";
+    } else {
+      const campaigns = sync.campaigns ?? {};
+      const projects = sync.projects ?? {};
+      const wrote = (campaigns.created ?? 0) + (campaigns.updated ?? 0) + (projects.created ?? 0) + (projects.updated ?? 0) + (projects.removed ?? 0);
+      result = wrote
+        ? `Campaign Tracker: ${plural(campaigns.created ?? 0, "row")} added, ${count(campaigns.updated ?? 0)} refreshed. Project Tracker: ${plural(projects.created ?? 0, "item")} added, ${count(projects.updated ?? 0)} updated, ${count(projects.removed ?? 0)} removed.`
+        : "Both trackers were already saying what this brief says, so nothing changed.";
+      state = tracker.reason || (sync.notes ?? []).length ? "partial" : "ok";
+      facts.push(`${plural(tracker.items ?? 0, "item")} read out of the brief.`);
+      for (const name of campaigns.finished ?? []) facts.push(`${name} has no leads left, so it was marked finished with its closing figures.`);
+      if (projects.removed) facts.push("Removed items are ones the brief raised and has now stopped raising. Rows nobody's brief created are never touched.");
+    }
+    steps.push({ source: "Airtable trackers", result, state, facts, excerpts: [] });
   }
 
   return steps;

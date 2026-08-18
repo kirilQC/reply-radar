@@ -876,6 +876,70 @@ test("a run that used every source says four of four", () => {
   assert.match(stepFor(steps, "Anthropic").result, /Fed 4 of 4 sources to claude-sonnet-4-6/);
 });
 
+test("a run stored before the trackers existed gets no tracker step, rather than a failing one", () => {
+  // The step is only absent for history. Marking those runs "missing" would report a failure that could
+  // not have happened, and a trace full of red for things nobody did is a trace people stop reading.
+  const steps = briefTrace(WORKSPACE, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "", messages: 0, text: "" },
+    external: { channelId: "", messages: 0, text: "" },
+  }, OUTCOME);
+  assert.equal(stepFor(steps, "Airtable trackers"), undefined);
+});
+
+test("a tracker step that wrote rows names the campaigns it closed and explains the deletions", () => {
+  const steps = briefTrace(WORKSPACE, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "", messages: 0, text: "" },
+    external: { channelId: "", messages: 0, text: "" },
+  }, {
+    ...OUTCOME,
+    tracker: {
+      attempted: true,
+      items: 4,
+      result: {
+        ran: true,
+        campaigns: { created: 1, updated: 3, finished: ["BV007: ASC owners"] },
+        projects: { created: 2, updated: 1, removed: 2 },
+        notes: [],
+      },
+    },
+  });
+
+  const step = stepFor(steps, "Airtable trackers");
+  assert.equal(step.state, "ok");
+  assert.match(step.result, /Campaign Tracker: 1 row added, 3 refreshed/);
+  assert.match(step.result, /Project Tracker: 2 items added, 1 updated, 2 removed/);
+  assert.match(step.facts.join(" "), /BV007: ASC owners has no leads left/);
+  // Somebody who opens Airtable to fewer cards than yesterday has to be able to find out why here.
+  assert.match(step.facts.join(" "), /Rows nobody's brief created are never touched/);
+});
+
+test("a tracker step that was skipped says why, and one that half-worked is a partial", () => {
+  const skipped = stepFor(briefTrace(WORKSPACE, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "", messages: 0, text: "" },
+    external: { channelId: "", messages: 0, text: "" },
+  }, { ...OUTCOME, tracker: { attempted: false, reason: "Willow has no Airtable base mapped, so there is no tracker to update." } }), "Airtable trackers");
+  assert.equal(skipped.state, "missing");
+  assert.match(skipped.result, /no Airtable base mapped/);
+
+  const partial = stepFor(briefTrace(WORKSPACE, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "", messages: 0, text: "" },
+    external: { channelId: "", messages: 0, text: "" },
+  }, {
+    ...OUTCOME,
+    tracker: {
+      attempted: true,
+      items: 3,
+      result: { ran: true, campaigns: { created: 0, updated: 2, finished: [] }, projects: { created: 3, updated: 0, removed: 0 }, notes: ['This base has no Status option meaning "finished".'] },
+    },
+  }), "Airtable trackers");
+  assert.equal(partial.state, "partial");
+  assert.match(partial.facts.join(" "), /no Status option meaning "finished"/);
+});
+
 test("the standing context is its own step, so a client nobody has written up is visible", () => {
   /*
    * The failure this is here for: a brief that reports figures and never calls one of them off-plan reads

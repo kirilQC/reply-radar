@@ -346,10 +346,10 @@ export default function AdminPage() {
     if (trackerState === "checking") return "Checking the tables in that base.";
     if (trackerState === "error") return trackerError;
     if (!tracker) return "";
-    if (tracker.ready) return "Campaigns and Projects & Action Items are both ready.";
+    if (tracker.ready) return "Campaign Tracker and Project Tracker are both ready.";
     // Said as the thing to go and do. "Not ready" is three different jobs depending on why, and the
     // one that reads as a missing column is usually a base nobody has split yet.
-    if (tracker.needsSplit) return `That base still has the old ${tracker.legacyTable?.name ?? "combined tracker"}. It needs splitting into Campaigns and Projects & Action Items before the brief can write to it.`;
+    if (tracker.needsSplit) return `That base still has the old ${tracker.legacyTable?.name ?? "combined tracker"}. It needs splitting into Campaign Tracker and Project Tracker before the brief can write to it.`;
     const faults: string[] = [];
     for (const audit of [tracker.campaigns, tracker.actionItems]) {
       if (!audit.table) { faults.push(`${audit.name} is missing`); continue; }

@@ -138,9 +138,17 @@ const campaignsTable = () => ({
   fields: [
     field("fld4XBrL37ozk5UAh", "Title", "singleLineText"),
     field("fldJtNrjq9YViFP6X", "Campaign Code", "singleLineText"),
-    field("fld2Vskb3wVQGww1z", "Status", "singleSelect", ["Not Started", "In Progress", "Launched"]),
+    field("fld2Vskb3wVQGww1z", "Status", "singleSelect", ["Not Started", "In Progress", "Launched", "On Hold", "Completed"]),
     field("fldbbmIyGS6dGuGvx", "Owner", "singleLineText"),
     field("fldC1XtLoCXUrOce5", "Launch Date", "date"),
+    field("fld1zppGcnad7hGMk", "Leads Sent", "number"),
+    field("fldb4WN69DZ87T9XK", "Accepted", "number"),
+    field("fld9qdE99hiT2EHPg", "Replies", "number"),
+    field("fldOY3MZLhaI94pqz", "Pending Leads", "number"),
+    field("fldYhGxe3dQ6UkuEM", "Days Left", "number"),
+    field("fld9NLUICgbVfzo9c", "Senders", "singleLineText"),
+    field("fldkJGyIrBTmWQfEW", "Finished On", "date"),
+    field("fldoBsAinDMweSvIZ", "Last Synced", "date"),
   ],
 });
 
@@ -220,8 +228,8 @@ test("renaming a table in a client base is reported, not silently worked around"
 
 test("a table name differing only by case or spacing still matches", () => {
   const tables = splitBase();
-  tables[0].name = "  campaigns  ";
-  tables[1].name = "Projects  &  Action Items";
+  tables[0].name = "  campaign   tracker  ";
+  tables[1].name = "PROJECT TRACKER";
   const audit = auditTrackerTables("appHDmwRZZGqJ0pSN", tables);
   assert.equal(audit.ready, true);
 });

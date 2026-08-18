@@ -34,15 +34,35 @@ import {
   alreadySentToday,
   DEFAULT_SCHEDULE,
   isDueNow,
+  localDayKey,
   readinessOf,
   type BriefSchedule,
 } from "../../../lib/morning-brief-schedule";
+import { isAirtableConfigured } from "../../../lib/airtable";
+import { extractTrackerItems } from "../../../lib/tracker-extract";
+import { syncTrackers } from "../../../lib/tracker-sync-run";
 import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
 
-// One model call at a 40s timeout plus two short Granola calls, inside Hobby's 60s ceiling. No chunking:
-// a brief is ~1,400 output tokens by design, and the whole point of it is that it is short enough to read
-// before standup.
+/*
+ * Sixty seconds is the ceiling and asking for more does not buy it — see the note in `brain-icp.ts`.
+ * That is the whole reason the tracker step below runs on a budget rather than unconditionally: the
+ * brief is one model call plus the source reads, and the tracker step is a second model call plus two
+ * Airtable round trips, and the two together do not always fit. So the brief is written and posted
+ * first, and the tracker step gets whatever is left. Running out of time skips it with a note rather
+ * than killing the function, because a brief that was delivered must not come back as a failed run.
+ */
 export const maxDuration = 60;
+
+/**
+ * How much of the sixty seconds has to be left before the tracker step is worth starting.
+ *
+ * A second model call and two Airtable round trips: `TRACKER_MODEL_MS` for the extraction, then the
+ * schema read, two record reads and up to six writes. Starting it with less than this is starting
+ * something that will be cut off mid-write, which is the one outcome worth avoiding — a half-applied
+ * plan is a tracker nobody can reason about.
+ */
+const TRACKER_BUDGET_MS = 30_000;
+const TRACKER_MODEL_MS = 20_000;
 
 type Row = Record<string, unknown>;
 
@@ -284,6 +304,9 @@ export async function POST(request: Request) {
 
   let workspace: BriefWorkspace | null = null;
   let destination = "preview";
+  // Taken before anything is read, because what the tracker step needs to know is how much of the
+  // function's sixty seconds is gone, not how long the model took.
+  const startedAt = Date.now();
 
   try {
     const body = (await request.json().catch(() => ({}))) as Row;
@@ -298,7 +321,7 @@ export async function POST(request: Request) {
     // whole read over one unknown column. A database without the migration still writes briefs; it just
     // writes them from the two channels and the one call, which is what it had before.
     const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match";
-    const rows = await read(`rr_workspaces?select=${columns},slack_extra_channel_ids,granola_extra_title_matches&slug=eq.${encodeURIComponent(slug)}&limit=1`)
+    const rows = await read(`rr_workspaces?select=${columns},slack_extra_channel_ids,granola_extra_title_matches,airtable_base_id&slug=eq.${encodeURIComponent(slug)}&limit=1`)
       .catch(() => read(`rr_workspaces?select=${columns}&slug=eq.${encodeURIComponent(slug)}&limit=1`));
     const found = (Array.isArray(rows) ? (rows as Row[]) : [])[0];
     if (!found) return NextResponse.json({ error: "That client does not exist." }, { status: 404 });
@@ -366,6 +389,43 @@ export async function POST(request: Request) {
     }
     const posted = Boolean(briefTs);
 
+    /*
+     * The tracker step. Deliberately here, after the send, and deliberately in this order.
+     *
+     * After the send, because the brief is the thing people read and nothing about keeping Airtable
+     * tidy is worth delaying or risking it. Everything below is allowed to fail; none of it can make
+     * `posted` false or change what went to Slack.
+     *
+     * Reading the brief that was just written rather than the sources it came from, because a second
+     * independent reading of the same fortnight would disagree with the first, and then Slack and
+     * Airtable would say different numbers of outstanding things about the same morning. See the note
+     * at the top of `tracker-extract.ts`.
+     *
+     * Runs on a preview too, and that is intentional: a preview is how somebody checks the brief, and
+     * checking a step that never runs in the check is not checking it. The tracker is the client's own
+     * base either way, so there is no test copy of it to write to instead.
+     */
+    const tracker: Row = { attempted: false, reason: "", items: 0, result: null };
+    const baseId = String((workspace as Row).airtable_base_id ?? "").trim();
+    const remaining = startedAt + maxDuration * 1_000 - Date.now();
+    if (!baseId) tracker.reason = `${workspace.name} has no Airtable base mapped, so there is no tracker to update.`;
+    else if (!isAirtableConfigured()) tracker.reason = "AIRTABLE_API_KEY is not set, so nothing could be written to Airtable.";
+    else if (remaining < TRACKER_BUDGET_MS) tracker.reason = "The brief took most of the time budget, so the trackers were left for the next run.";
+    else {
+      tracker.attempted = true;
+      const today = localDayKey(new Date(), workspace.timezone || "America/New_York");
+      const extracted = await extractTrackerItems(body_, signals, { timeoutMs: Math.min(TRACKER_MODEL_MS, remaining - 10_000) });
+      tracker.items = extracted.items.length;
+      if (extracted.error) tracker.reason = extracted.error;
+      /*
+       * `null`, not `[]`, when the extraction failed. An empty list is a claim that the brief raised
+       * nothing, which starts the clock on removing every row in the tracker; a failure is a claim
+       * about nothing at all. Three failed extractions in a row would otherwise quietly empty a
+       * client's project tracker, and the campaign half — which needs no model — still runs either way.
+       */
+      tracker.result = await syncTrackers(baseId, signals.campaigns.names, extracted.error ? null : extracted.items, today);
+    }
+
     // `sources` rides along in the same column as the figures because it is the same kind of fact: what
     // the model was given. A brief that reads thinly is then explainable a week later without guessing.
     const sources = {
@@ -378,6 +438,9 @@ export async function POST(request: Request) {
       // Which folder was read and which documents, not their text: the brain is a repo anybody can open,
       // and a copy of six of its files in a log table is six stale copies.
       brain: { folder: brain.folder, documents: brain.documents, chars: brain.block.length, reason: brain.reason || null },
+      // Stored, not just returned: "why did BV003 get marked finished on the 18th" is a question about
+      // a write we made into somebody else's base, and it has to be answerable later.
+      tracker,
     };
 
     // Returned, not stored. The trace quotes the transcript and both channels verbatim, and a row that
@@ -392,6 +455,7 @@ export async function POST(request: Request) {
       channelId,
       posted,
       sendError,
+      tracker,
     });
 
     await insertBrief(url, key, {
@@ -420,6 +484,7 @@ export async function POST(request: Request) {
       // The header the brief was threaded under, so a caller can tell "nothing posted" apart from "the
       // header went out and the brief did not".
       threadTs: messageTs || null,
+      tracker,
       channelNotes: [channels.internal.error, channels.external.error, ...call.errors].filter(Boolean),
       error: sendError || undefined,
     });

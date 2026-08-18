@@ -71,8 +71,8 @@ const LEGACY_TRACKER_NAME_NEEDLE = "campaigns & projects";
  * client base disconnects the brief from it. That is deliberately visible — the audit says the table
  * is missing rather than writing somewhere unexpected.
  */
-export const CAMPAIGNS_TABLE_NAME = "Campaigns";
-export const ACTION_ITEMS_TABLE_NAME = "Projects & Action Items";
+export const CAMPAIGNS_TABLE_NAME = "Campaign Tracker";
+export const ACTION_ITEMS_TABLE_NAME = "Project Tracker";
 
 /**
  * The fields the brief needs in order to write an action item.
@@ -99,11 +99,29 @@ export const REQUIRED_ACTION_ITEM_FIELDS: { name: string; type: string; why: str
   { name: "Raised by Brief", type: "checkbox", why: "so the brief never edits a row you typed" },
 ];
 
-/** Campaigns are mostly read, so this is the smaller set the brief needs to recognise and link one. */
+/**
+ * What the brief needs in order to move a campaign through its life and leave the final figures behind.
+ *
+ * The row is not the brief's to begin with — the approval process creates it and marks it sent for
+ * approval — so the brief writes only these: the status, the figures, and the two dates that say when
+ * it last looked and when the campaign ran out. `Title`, `Owner` and `Notes` are somebody's writing and
+ * are never overwritten.
+ *
+ * The rates are formulas in Airtable rather than fields here, because a stored rate is a figure that
+ * can disagree with the two numbers above it.
+ */
 export const REQUIRED_CAMPAIGN_FIELDS: { name: string; type: string; why: string }[] = [
   { name: "Title", type: "singleLineText", why: "the campaign name" },
   { name: "Campaign Code", type: "singleLineText", why: "joins the row to its lead table" },
-  { name: "Status", type: "singleSelect", why: "whether it is live" },
+  { name: "Status", type: "singleSelect", why: "where it is in its life" },
+  { name: "Leads Sent", type: "number", why: "the headline figure when it finishes" },
+  { name: "Accepted", type: "number", why: "the other half of the acceptance rate" },
+  { name: "Replies", type: "number", why: "what the campaign was for" },
+  { name: "Pending Leads", type: "number", why: "zero on a live campaign is what finishes it" },
+  { name: "Days Left", type: "number", why: "the runway warning, in the tracker as well as the brief" },
+  { name: "Senders", type: "singleLineText", why: "sender names, never ids" },
+  { name: "Finished On", type: "date", why: "the day the figures became final" },
+  { name: "Last Synced", type: "date", why: "a date that stopped moving means the brief lost the campaign" },
 ];
 
 export type AirtableBase = { id: string; name: string; permissionLevel?: string };
@@ -185,6 +203,117 @@ export async function getBaseTables(baseId: string): Promise<AirtableResult<Airt
   const result = await airtableGet<{ tables?: AirtableTable[] }>(`/meta/bases/${encodeURIComponent(baseId)}/tables`);
   if (!result.ok) return result;
   return { ok: true, data: Array.isArray(result.data?.tables) ? result.data.tables : [] };
+}
+
+/**
+ * One write, with no retry at all.
+ *
+ * Deliberately unlike `airtableGet`. A GET that times out can be repeated because nothing happened; a
+ * POST that times out may well have landed, and repeating it is how one action item becomes two rows
+ * in somebody's tracker. So a write that does not come back is reported as a write whose outcome is
+ * unknown, and the next brief reconciles it — that is what `Brief Key` is for.
+ */
+async function airtableSend<T>(method: "POST" | "PATCH" | "DELETE", path: string, payload?: unknown): Promise<AirtableResult<T>> {
+  const token = process.env.AIRTABLE_API_KEY;
+  if (!token) return { ok: false, error: "No Airtable token is set. Add AIRTABLE_API_KEY.", status: 503 };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const response = await fetch(`${BASE}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${token}`, ...(payload === undefined ? {} : { "content-type": "application/json" }) },
+      body: payload === undefined ? undefined : JSON.stringify(payload),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let body: unknown = null;
+    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+    if (!response.ok) {
+      const detail = (body as { error?: { message?: string; type?: string } })?.error;
+      const message =
+        response.status === 401 ? "Airtable rejected the token. Check AIRTABLE_API_KEY."
+          : response.status === 403 ? "The token cannot write to this base. It needs data.records:write."
+            : response.status === 429 ? "Airtable rate limit hit. It clears after 30 seconds."
+              : String(detail?.message || detail?.type || `Airtable returned ${response.status}.`);
+      return { ok: false, error: message, status: response.status };
+    }
+    return { ok: true, data: body as T };
+  } catch (error) {
+    const aborted = (error as Error)?.name === "AbortError";
+    return { ok: false, error: aborted ? "Airtable did not answer the write in time, so it is not known whether it landed." : "Airtable could not be reached.", status: 504 };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export type AirtableRecord = { id: string; createdTime?: string; fields: Record<string, unknown> };
+
+/** Airtable's own ceiling: ten records per create, update or delete request. Not a tuning knob. */
+const WRITE_BATCH = 10;
+
+/**
+ * Every record in one table.
+ *
+ * Paged to the end, because a tracker the brief only half read is a tracker it will duplicate rows
+ * into. The loop is bounded at 5,000 rows: a tracker that large is not a tracker, and spinning through
+ * it inside a request nobody is watching is worse than stopping.
+ */
+export async function listRecords(baseId: string, tableId: string): Promise<AirtableResult<AirtableRecord[]>> {
+  const records: AirtableRecord[] = [];
+  let offset = "";
+  for (let page = 0; page < 50; page += 1) {
+    const query = `pageSize=100${offset ? `&offset=${encodeURIComponent(offset)}` : ""}`;
+    const result = await airtableGet<{ records?: AirtableRecord[]; offset?: string }>(`/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}?${query}`);
+    if (!result.ok) return result;
+    for (const record of result.data?.records ?? []) records.push({ id: String(record.id ?? ""), createdTime: record.createdTime, fields: record.fields ?? {} });
+    offset = String(result.data?.offset ?? "");
+    if (!offset) break;
+  }
+  return { ok: true, data: records.filter((record) => record.id) };
+}
+
+export async function createRecords(baseId: string, tableId: string, rows: Record<string, unknown>[]): Promise<AirtableResult<AirtableRecord[]>> {
+  return writeInBatches(rows, WRITE_BATCH, async (batch) => {
+    const result = await airtableSend<{ records?: AirtableRecord[] }>("POST", `/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}`, { records: batch.map((fields) => ({ fields })) });
+    return result.ok ? { ok: true, data: result.data?.records ?? [] } : result;
+  });
+}
+
+export async function updateRecords(baseId: string, tableId: string, rows: { id: string; fields: Record<string, unknown> }[]): Promise<AirtableResult<AirtableRecord[]>> {
+  return writeInBatches(rows, WRITE_BATCH, async (batch) => {
+    const result = await airtableSend<{ records?: AirtableRecord[] }>("PATCH", `/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}`, { records: batch });
+    return result.ok ? { ok: true, data: result.data?.records ?? [] } : result;
+  });
+}
+
+export async function deleteRecords(baseId: string, tableId: string, ids: string[]): Promise<AirtableResult<string[]>> {
+  return writeInBatches(ids, WRITE_BATCH, async (batch) => {
+    const query = batch.map((id) => `records[]=${encodeURIComponent(id)}`).join("&");
+    const result = await airtableSend<{ records?: { id: string }[] }>("DELETE", `/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}?${query}`);
+    return result.ok ? { ok: true, data: (result.data?.records ?? []).map((record) => String(record.id ?? "")) } : result;
+  });
+}
+
+/**
+ * Batches run one after another, never in parallel.
+ *
+ * Airtable allows five requests a second per base and answers the sixth with a thirty second lockout,
+ * which would take the rest of the sync down with it. Sequential is not slow here: a tracker is tens of
+ * rows, so this is two or three requests.
+ *
+ * A failed batch stops the run and returns what landed before it. Carrying on would mean the caller
+ * cannot tell a partial write from a whole one, and half a tracker updated silently is exactly the
+ * quiet wrongness this file exists to avoid.
+ */
+async function writeInBatches<In, Out>(items: In[], size: number, send: (batch: In[]) => Promise<AirtableResult<Out[]>>): Promise<AirtableResult<Out[]>> {
+  const done: Out[] = [];
+  for (let index = 0; index < items.length; index += size) {
+    const result = await send(items.slice(index, index + size));
+    if (!result.ok) return result;
+    done.push(...result.data);
+  }
+  return { ok: true, data: done };
 }
 
 /** Names are compared flattened, so a stray double space or a capital does not read as a missing table. */
@@ -279,4 +408,10 @@ export function auditTrackerTables(baseId: string, tables: AirtableTable[]): Tra
     needsSplit: Boolean(legacy) && !campaigns.table && !actionItems.table,
     legacyTable: legacy ? { id: legacy.id, name: String(legacy.name ?? "") } : null,
   };
+}
+
+/** Every option on one single select, as the base spells them. */
+export function choicesFor(table: AirtableTable | null, fieldName: string): string[] {
+  const field = (table?.fields ?? []).find((candidate) => flatten(candidate.name) === flatten(fieldName));
+  return (field?.options?.choices ?? []).map((choice) => String(choice?.name ?? "")).filter(Boolean);
 }
