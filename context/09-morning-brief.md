@@ -36,8 +36,12 @@ That sentence is the design brief. Everything below serves it.
 | `app/slack/page.tsx` | The Slack hub: per-client cards, Generate, the schedule editor. |
 | `app/health/page.tsx` | The automation log panel, so a brief that stopped posting is visible. |
 | `worker/render-worker.mjs` (`sendDueBrief`, ~line 1253) | The scheduler. **At most one client per cycle.** |
+| `app/lib/tracker-extract.ts` | Reads the posted brief back for its action items, as JSON. |
+| `app/lib/tracker-sync.ts` | The tracker rules: campaign lifecycle, project upsert, the stale sweep. Pure. |
+| `app/lib/tracker-sync-run.ts` | The same rules against a real base. The only half that opens a socket. |
 | `tests/morning-brief.test.mjs` | 341 tests as of `8e8f90a`. Most of them are about wording. |
 | `tests/morning-brief-sources.test.mjs` | The source gathering half. |
+| `tests/tracker-sync.test.mjs` | The tracker rules, including every case that deletes somebody's row. |
 
 ### Where the model's input comes from
 
@@ -95,6 +99,50 @@ buried mid-sentence is a mention that gets missed, and the item with it.
 `:page_facing_up:` (Friday), `:speech_balloon:` (Monday), `:warning:` (runway), `:coffee:` (header).
 An earlier round guessed `:bar_chart:` and `:construction_worker:` and both were wrong. A test asserts
 the guessed ones never come back. **Ask rather than guess** on anything he can see.
+
+## The brief runs the client's Airtable trackers
+
+The last step of a run, after the brief has been posted. Two tables per client base, matched by name
+because tables created after the client bases were duplicated have a unique id per base:
+
+- **Campaign Tracker** — one row per campaign, permanent. Nothing here ever deletes one, because
+  "what did BV003 actually do" is a question somebody asks six months later.
+- **Project Tracker** — everything else, and only while it is outstanding. Rows are deleted, because
+  the tables are read in gallery view as a live answer to "what is open today" and a table that only
+  gains rows stops answering that within a fortnight.
+
+**The action items are read out of the brief, not out of the sources.** A second model call
+(`tracker-extract.ts`, temperature 0) is handed the brief that was just posted and returns JSON. The
+alternative — reading Slack and Granola again — would produce a second opinion, and a tracker that
+disagrees with the message the team read that morning is worse than no tracker. This way Airtable is a
+projection of the brief and the two cannot drift.
+
+**Deleting is only safe because ownership is provable.** `Raised by Brief` is ticked on creation and
+checked before every update and every delete. A row somebody typed by hand is never touched, however
+stale it looks, and unticking the box takes a row out of the brief's reach permanently.
+
+**A missing item waits five days.** Briefs run three mornings a week, so `STALE_DAYS = 5` is at least
+two runs that did not mention it — one thin model run is not destructive. An item somebody explicitly
+marks Done goes immediately, because that is a person deciding rather than an absence being read.
+
+**Statuses are resolved, not written.** `CAMPAIGN_STATE_SYNONYMS` maps each lifecycle state to every
+word a client base might already use for it, and `resolveChoice` picks whichever the base actually
+has. The choice sets have drifted per client and cannot be corrected from the API: Airtable will not
+remove a select option, and `typecast: true` would quietly invent one, leaving a client with two words
+for the same thing. No match means the figures are still written and the reason lands in the trace.
+
+**A campaign is finished when it runs out of leads, whatever HeyReach says.** A campaign that has sent
+to everybody on its list sits at `IN_PROGRESS` in HeyReach forever — nothing switches it off — so
+waiting for HeyReach's word would mean no campaign is ever closed. `pending === 0 && sent > 0` is the
+end. `pending === 0 && sent === 0` is *not started* and must stay off the board.
+
+**Titles are short on purpose.** `TITLE_MAX = 64`, cut at a word boundary. The gallery view shows the
+title and little else; the fine print goes in `Detail`.
+
+**The step gets whatever is left of the sixty seconds.** It runs after the post, needs
+`TRACKER_BUDGET_MS` to start, and skips with a legible note otherwise. A delivered brief must never
+come back as a failed run. Trace step 6 reports it either way, and is absent entirely on runs stored
+before the step existed rather than showing them a failure they could not have had.
 
 ## Layout is done in code, not asked of the model
 
