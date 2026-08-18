@@ -6044,3 +6044,218 @@ span.brain-mark.is-lg {
     flex-basis: 100%;
   }
 }
+
+/* ── Extra sources beside a main field ───────────────────────────────────────────────────────────
+   Deliberately quieter than the field above it: smaller label, no uppercase weight, indented under a
+   left rule. The two named channels and the client's own call are the account, and a row here that
+   looked like an equal field would be typed into as though it were one. */
+.extra-rows {
+  margin-top: 14px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.extra-rows-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.extra-rows-label {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.extra-rows-add {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.extra-rows-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.extra-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.extra-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Square rather than the width of its one character, so three rows of remove buttons line up. */
+.extra-row-remove {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.extra-row-remove:hover {
+  border-color: var(--danger, #e5484d);
+  color: var(--danger, #e5484d);
+}
+
+/* ── What one Granola key can see ────────────────────────────────────────────────────────────────
+   Under the row it belongs to and spanning it, because a key only holds its owner's meetings and the
+   whole question this answers is which client's calls are on which person's key. Titles and dates
+   only: the transcript is the sensitive half and no diagnostic needs it. */
+.granola-key-meetings {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+}
+
+.granola-key-meetings ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.granola-key-meetings li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.granola-key-meetings li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.granola-key-meetings li small {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.granola-key-meetings-empty {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ── The Slack hub's cards ───────────────────────────────────────────────────────────────────────
+   Scoped to `.slack-hub` because `reports.css` is shared with the reports hub, where a dozen template
+   cards are supposed to be compact. Here there is one automation card on the whole screen, and at the
+   shared size the title and its three facts sat on top of each other. */
+.slack-hub .hub-card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.slack-hub .hub-card-open {
+  gap: 13px;
+  padding: 24px 24px 22px;
+}
+
+.slack-hub .hub-card h3 {
+  font-size: 21px;
+}
+
+/* Still uppercase and still letter-spaced, so one point of size is as far as this goes before the three
+   facts wrap. The room came from the card, not from the type. */
+.slack-hub .hub-card-meta {
+  gap: 8px;
+  padding-top: 13px;
+  font-size: 11px;
+}
+
+/* Slack automation log on System health.
+   One row per attempt with the exact time first, because the question this list answers is "when did
+   it last run", and a scan down a left-aligned column of timestamps answers it without reading a word.
+   Failures are tinted rather than moved, so the sequence stays chronological: a failure followed by a
+   success means it recovered, and reordering by severity would hide that. */
+.slack-run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 14px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--rr-border, rgba(148, 163, 184, 0.18));
+}
+.slack-run {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1.1fr) minmax(0, 1.4fr) 72px;
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 13px;
+  background: var(--rr-surface, #fff);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.slack-run-when {
+  font-variant-numeric: tabular-nums;
+  color: var(--rr-muted, #64748b);
+}
+.slack-run-client {
+  font-weight: 600;
+}
+.slack-run-where,
+.slack-run-status {
+  color: var(--rr-muted, #64748b);
+}
+.slack-run-status {
+  text-align: right;
+  font-weight: 600;
+}
+/* The error takes the whole next line: truncating the one field that says what broke would leave a
+   row that reports a failure and withholds the reason. */
+.slack-run-error {
+  grid-column: 1 / -1;
+  color: var(--rr-danger, #b91c1c);
+  font-size: 11.5px;
+}
+.slack-run.run-ok .slack-run-status {
+  color: var(--rr-success, #15803d);
+}
+.slack-run.run-bad {
+  background: var(--rr-danger-soft, rgba(185, 28, 28, 0.06));
+}
+.slack-run.run-bad .slack-run-status {
+  color: var(--rr-danger, #b91c1c);
+}
+/* A preview is somebody checking a prompt, not the automation working. It is logged, so it is shown,
+   but it is dimmed so it cannot be miscounted as a delivery. */
+.slack-run.run-quiet {
+  opacity: 0.62;
+}
+@media (max-width: 720px) {
+  .slack-run {
+    grid-template-columns: 1fr auto;
+  }
+  .slack-run-where {
+    grid-column: 1 / -1;
+  }
+}

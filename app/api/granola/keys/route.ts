@@ -17,7 +17,10 @@
  */
 
 import { NextResponse } from "next/server";
-import { verifyKey } from "../../../lib/granola";
+import { inspectNotes, verifyKey } from "../../../lib/granola";
+// The same window a brief searches, imported rather than repeated: a Test button that listed three weeks
+// of meetings would show a call the brief can no longer find, which is the exact confusion it exists to end.
+import { CALL_WINDOW_DAYS } from "../../../lib/morning-brief";
 
 type Row = Record<string, unknown>;
 
@@ -82,16 +85,40 @@ export async function POST(request: Request) {
     if (action === "check") {
       const id = String(body.id ?? "");
       if (!id) return NextResponse.json({ error: "No key was named." }, { status: 400 });
-      const rows = (await (await rest(url, key, `${TABLE}?select=id,api_key&id=eq.${encodeURIComponent(id)}&limit=1`)).json().catch(() => [])) as Row[];
+      const rows = (await (await rest(url, key, `${TABLE}?select=id,label,api_key&id=eq.${encodeURIComponent(id)}&limit=1`)).json().catch(() => [])) as Row[];
       const stored = rows[0];
       if (!stored) return NextResponse.json({ error: "That key no longer exists." }, { status: 404 });
-      const result = await verifyKey(String(stored.api_key ?? ""));
+      const apiKey = String(stored.api_key ?? "");
+      const result = await verifyKey(apiKey);
       await rest(url, key, `${TABLE}?id=eq.${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { Prefer: "return=minimal" },
         body: JSON.stringify({ last_checked_at: new Date().toISOString(), last_status: result.ok ? "ok" : "error", last_error: result.error ?? null }),
       });
-      return NextResponse.json({ ok: result.ok, error: result.error });
+      /*
+       * What this key can see, not merely whether it works.
+       *
+       * A Granola key only holds the meetings its owner recorded, so "which clients' calls are on which
+       * key" is a question with no answer anywhere else — and it is the question somebody actually has
+       * when a brief says no call was found. Titles and dates only: the transcript is the sensitive half
+       * and no diagnostic needs it. Never fatal, because a working key that could not be listed is still
+       * a working key and the check above already said so.
+       */
+      const meetings = result.ok
+        ? await inspectNotes([{ id, label: String(stored.label ?? ""), apiKey }], [], CALL_WINDOW_DAYS)
+          .then((sightings) => sightings[0]?.notes ?? [])
+          .catch(() => [])
+        : [];
+      return NextResponse.json({
+        ok: result.ok,
+        error: result.error,
+        windowDays: CALL_WINDOW_DAYS,
+        // Newest first, which is the order somebody reads a list of meetings in.
+        meetings: meetings
+          .slice()
+          .sort((left, right) => right.startedAt - left.startedAt)
+          .map((note) => ({ title: note.title, startedAt: new Date(note.startedAt).toISOString() })),
+      });
     }
 
     const label = String(body.label ?? "").trim();

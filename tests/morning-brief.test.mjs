@@ -734,18 +734,71 @@ const OUTCOME = { model: "claude-sonnet-4-6", promptChars: 6_000, contentChars: 
 /** The step for one system, so a test can assert on it without depending on the order. */
 const stepFor = (steps, source) => steps.find((step) => step.source === source);
 
-test("a run that used all three sources says three of three", () => {
-  const steps = briefTrace(WORKSPACE, {
+test("a run that used every source says four of four", () => {
+  const steps = briefTrace({ ...WORKSPACE, client_brief: "Willow sells to RevOps leads." }, {
     signals: { ...NO_SIGNALS, campaigns: { total: 2, active: 2, paused: 0, finished: 0, names: [] }, staleness: { statsAgeHours: 2, dayCount: 14 } },
     internal: { channelId: "C1", messages: 18, raw: 23, capped: false, text: "10:00 Kiril: shipping today" },
     external: { channelId: "C2", messages: 5, raw: 5, capped: false, text: "09:00 Client: any update?" },
     call: { title: "QC <> Bluevia Weekly", ageDays: 5, owner: "Kiril", startedAt: Date.parse("2026-08-12T19:00:00Z"), attendees: ["Kiril Ivlev", "Dan Shapiro"], durationMinutes: 33, transcript: "Kiril: we will send the list Thursday.", truncated: false },
+    brain: "# What the QC Brain says about Willow\n\nThree campaigns, RevOps persona.",
   }, OUTCOME);
 
-  assert.equal(steps.length, 5);
-  assert.deepEqual(steps.map((step) => step.source), ["Slack channels", "Granola", "HeyReach", "Anthropic", "Slack post"]);
+  assert.equal(steps.length, 6);
+  assert.deepEqual(steps.map((step) => step.source), ["Slack channels", "Granola", "HeyReach", "Standing context", "Anthropic", "Slack post"]);
   assert.ok(steps.every((step) => step.state === "ok"), `every source was live: ${steps.filter((step) => step.state !== "ok").map((step) => step.source)}`);
-  assert.match(stepFor(steps, "Anthropic").result, /Fed 3 of 3 sources to claude-sonnet-4-6/);
+  assert.match(stepFor(steps, "Anthropic").result, /Fed 4 of 4 sources to claude-sonnet-4-6/);
+});
+
+test("the standing context is its own step, so a client nobody has written up is visible", () => {
+  /*
+   * The failure this is here for: a brief that reports figures and never calls one of them off-plan reads
+   * as a thin brief, when what actually happened is that this client has no brief and no brain folder. That
+   * is a fixable thing, and it is only fixable if somebody can see it.
+   */
+  const bare = briefTrace(WORKSPACE, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "", messages: 0, text: "" },
+    external: { channelId: "", messages: 0, text: "" },
+  }, OUTCOME);
+  assert.equal(stepFor(bare, "Standing context").state, "missing");
+  assert.match(stepFor(bare, "Standing context").facts.join(" "), /No client brief has been written/);
+  assert.match(stepFor(bare, "Standing context").facts.join(" "), /Nothing was read out of the QC Brain/);
+
+  // One of the two is a partial, not a pass: half the standing context missing changes what a brief can say.
+  const half = briefTrace({ ...WORKSPACE, client_brief: "Willow sells to RevOps leads." }, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "", messages: 0, text: "" },
+    external: { channelId: "", messages: 0, text: "" },
+  }, OUTCOME);
+  assert.equal(stepFor(half, "Standing context").state, "partial");
+  assert.equal(stepFor(half, "Standing context").excerpts.length, 1);
+});
+
+test("the extra channels and extra calls are traced as extras, on the steps they came from", () => {
+  // Extras share a step with the source they were fetched from, because they were the same act. What must
+  // not be shared is the wording: an extra reading as one of the two named channels is the whole risk.
+  const steps = briefTrace(WORKSPACE, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "C1", messages: 4, raw: 4, text: "10:00 Kiril: shipping today" },
+    external: { channelId: "C2", messages: 2, raw: 2, text: "09:00 Client: any update?" },
+    extraChannels: [{ channelId: "C9", messages: 11, raw: 11, text: "11:00 Dan: leads are loaded" }],
+    call: null,
+    callReason: 'No meeting with "Willow" in the title was found in the last 14 days.',
+    extraCalls: [{ title: "QC internal, Willow", ageDays: 2, owner: "Kiril", transcript: "Kiril: we will rebuild the list.", truncated: false }],
+  }, OUTCOME);
+
+  const slack = stepFor(steps, "Slack channels");
+  assert.match(slack.facts.join(" "), /Extra C9: 11 messages and replies, ranked below the two above/);
+  assert.equal(slack.excerpts.length, 3);
+  /*
+   * The client's own call was missing and an internal one was read instead. That is a different brief from
+   * one built on the client's own words, and this is the step that has to say so rather than reading as
+   * though nothing was found at all.
+   */
+  const granola = stepFor(steps, "Granola");
+  assert.equal(granola.state, "missing");
+  assert.match(granola.facts.join(" "), /Also read 1 extra meeting, ranked below the client's own call/);
+  assert.equal(granola.excerpts.length, 1);
 });
 
 test("a source that came back empty is not allowed to read as working", () => {
@@ -766,7 +819,7 @@ test("a source that came back empty is not allowed to read as working", () => {
   // key or type a name into the config page.
   assert.match(stepFor(steps, "Granola").result, /No meeting with "Bluevia" in the title/);
   assert.equal(stepFor(steps, "HeyReach").state, "missing");
-  assert.match(stepFor(steps, "Anthropic").result, /Fed 0 of 3 sources/);
+  assert.match(stepFor(steps, "Anthropic").result, /Fed 0 of 4 sources/);
 });
 
 test("figures too old to trust do not read as a working source", () => {
@@ -853,7 +906,7 @@ test("replies read out of threads are counted apart from the channel's own messa
 test("the trace is built from what the model was given, not from a second set of notes", () => {
   // The guarantee that makes it worth reading: one object goes to `briefUserContent` and to `briefTrace`,
   // so the trace cannot drift into describing a run that did not happen.
-  assert.match(route, /const inputs = \{ signals, \.\.\.channels, call: call\.call, callReason: call\.callReason \};/);
+  assert.match(route, /const inputs = \{ signals, \.\.\.channels, call: call\.call, callReason: call\.callReason, extraCalls: call\.extras, brain: brain\.block \};/);
   assert.match(route, /const content = briefUserContent\(workspace, inputs\);/);
   assert.match(route, /briefTrace\(workspace, inputs, \{/);
   // Not stored. The excerpts quote every client call verbatim, and the row is kept for a year.

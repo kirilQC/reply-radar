@@ -45,6 +45,24 @@ const TIMEOUT_MS = 6_000;
  * client call is where next steps get agreed, and the reader is told the transcript was shortened.
  */
 const MAX_TRANSCRIPT_CHARS = 320_000;
+/**
+ * The ceiling for an *extra* call, which is a fifth of the main one's.
+ *
+ * An extra call is background — the internal weekly where we decide what we are working on — and the main
+ * call is the thing the brief is accountable to. Given equal room in the prompt they would be weighed
+ * equally, and three hours of internal chat would drown forty minutes with the client. Sixty thousand
+ * characters is a long meeting; the cut takes the front, same as the main transcript, because next steps
+ * are agreed at the end.
+ */
+const EXTRA_TRANSCRIPT_CHARS = 60_000;
+/**
+ * How many extra calls one brief will read.
+ *
+ * Not a storage limit — the column holds as many as anybody types. It is a budget limit: each extra call
+ * is one more detail request and one more transcript inside a 60s ceiling that already contains a 40s
+ * model call. Three is more context than any brief has needed and still fits.
+ */
+export const MAX_EXTRA_CALLS = 3;
 
 type Row = Record<string, unknown>;
 
@@ -105,27 +123,11 @@ export async function verifyKey(apiKey: string): Promise<{ ok: boolean; notes: n
   }
 }
 
-/**
- * The client's most recent call, from whichever teammate's key has it.
- *
- * `errors` is returned alongside rather than thrown because a broken key is worth reporting on the page
- * while the brief still goes out with the other two sources. One dead key must not cost the team a brief.
- */
-export async function findClientCall(
-  keys: GranolaKey[],
-  titleMatch: unknown,
-  clientName: unknown,
-  windowDays: number,
-): Promise<{ call: ClientCall | null; errors: string[]; reason?: string }> {
-  const needles = parseTitleNeedles(titleMatch, clientName);
-  if (!needles.length) return { call: null, errors: [], reason: "This client has no name to look for in meeting titles, so their call cannot be identified." };
-  if (!keys.length) return { call: null, errors: [], reason: "No Granola API keys have been added, so no call transcripts can be read." };
-
+/** Every key's recent notes, in one burst. A key that refuses contributes an error and no notes. */
+async function listNotes(keys: GranolaKey[], windowDays: number, errors: string[]) {
   const createdAfter = new Date(Date.now() - windowDays * 86_400_000).toISOString();
   const query = `/notes?created_after=${encodeURIComponent(createdAfter)}&page_size=${PAGE_SIZE}`;
-  const errors: string[] = [];
-
-  const perKey = await Promise.all(
+  return Promise.all(
     keys.map(async (key) => {
       try {
         return { key, notes: notesOf(await granola(key.apiKey, query)) };
@@ -135,22 +137,43 @@ export async function findClientCall(
       }
     }),
   );
+}
 
-  // Matched per key so the winner carries the label of whoever's key found it, then compared across
-  // keys. The same meeting often appears under two people's keys; taking the newest of the per-key
-  // winners lands on one of the duplicates arbitrarily, which is correct — they are the same meeting.
+type Listed = Awaited<ReturnType<typeof listNotes>>;
+
+/**
+ * The newest note matching these needles, across every key, ignoring any note already taken.
+ *
+ * Matched per key so the winner carries the label of whoever's key found it, then compared across keys.
+ * The same meeting often appears under two people's keys; taking the newest of the per-key winners lands
+ * on one of the duplicates arbitrarily, which is correct — they are the same meeting.
+ *
+ * `taken` is what stops an extra call from being the main call a second time. Two configured matches will
+ * often both hit the same meeting, and a brief that read one call twice would present its own duplicate as
+ * corroboration.
+ */
+function pickWinner(listed: Listed, needles: string[][], taken: Set<string>) {
   let winner: { note: GranolaNote; key: GranolaKey } | null = null;
-  for (const { key, notes } of perKey) {
+  for (const { key, notes } of listed) {
     const note = pickLatestCall(notes, needles);
-    if (note && (!winner || note.startedAt > winner.note.startedAt)) winner = { note, key };
+    if (!note || taken.has(note.id)) continue;
+    if (!winner || note.startedAt > winner.note.startedAt) winner = { note, key };
   }
-  if (!winner) {
-    return { call: null, errors, reason: `No meeting with "${describeNeedles(needles)}" in the title was found in the last ${windowDays} days.` };
-  }
+  return winner;
+}
 
-  // The winner is opened once, with the transcript asked for in the same request. This is the only place
-  // the transcript exists, and it is also the only place the meeting's own start time does — the list
-  // response carries `created_at`, which is when Granola wrote the note, not when the call happened.
+/**
+ * One note opened, with its transcript.
+ *
+ * The detail request is the only place the transcript exists, and it is also the only place the meeting's
+ * own start time does — the list response carries `created_at`, which is when Granola wrote the note, not
+ * when the call happened.
+ */
+async function openCall(
+  winner: { note: GranolaNote; key: GranolaKey },
+  limit: number,
+  errors: string[],
+): Promise<ClientCall> {
   const { note, key } = winner;
   let detail: Row = {};
   let transcript = "";
@@ -169,22 +192,84 @@ export async function findClientCall(
 
   const full = normalizeNote({ ...detail, id: note.id, title: detail.title ?? note.title });
   const startedAt = full?.startedAt || note.startedAt;
-  const truncated = transcript.length > MAX_TRANSCRIPT_CHARS;
+  const truncated = transcript.length > limit;
   return {
-    call: {
-      noteId: note.id,
-      title: full?.title || note.title,
-      startedAt,
-      ageDays: callAgeDays(startedAt),
-      owner: key.label || "a teammate",
-      // Both come from the detail response and are empty when it could not be read at all, which is the
-      // same case where `title` falls back to the list's copy.
-      attendees: full?.attendees ?? [],
-      durationMinutes: full?.durationMinutes ?? null,
-      transcript: truncated ? transcript.slice(-MAX_TRANSCRIPT_CHARS) : transcript,
-      truncated,
-    },
+    noteId: note.id,
+    title: full?.title || note.title,
+    startedAt,
+    ageDays: callAgeDays(startedAt),
+    owner: key.label || "a teammate",
+    // Both come from the detail response and are empty when it could not be read at all, which is the
+    // same case where `title` falls back to the list's copy.
+    attendees: full?.attendees ?? [],
+    durationMinutes: full?.durationMinutes ?? null,
+    transcript: truncated ? transcript.slice(-limit) : transcript,
+    truncated,
+  };
+}
+
+/**
+ * The client's call, and any extra calls that were asked for.
+ *
+ * ── One list pass, several winners ───────────────────────────────────────────────────────────────
+ * The expensive half of this is asking every key what it can see, and that answer is the same whichever
+ * meeting is being looked for. So the notes are listed once and each configured match picks its own winner
+ * out of the same pile. Adding a second call to a client therefore costs one detail request, not a second
+ * round of ten list requests.
+ *
+ * ── Why the extras are a separate list and not a longer one ──────────────────────────────────────
+ * `titleMatch` names the client's own call: the weekly with them, or a kickoff, or an escalation. That is
+ * the meeting the brief is accountable to, and the reason it is singular. `extraMatches` are other
+ * meetings that happen to contain useful context — most often our own internal weekly about the account —
+ * and they are returned apart so that everything downstream, up to and including the prompt, can keep
+ * saying which is which. Returning six calls in one array would have thrown that distinction away here,
+ * where it is known, in exchange for the model guessing at it later.
+ *
+ * `errors` is returned alongside rather than thrown because a broken key is worth reporting on the page
+ * while the brief still goes out with the other two sources. One dead key must not cost the team a brief.
+ */
+export async function findClientCalls(
+  keys: GranolaKey[],
+  titleMatch: unknown,
+  extraMatches: string[],
+  clientName: unknown,
+  windowDays: number,
+): Promise<{ call: ClientCall | null; extras: ClientCall[]; errors: string[]; reason?: string }> {
+  const needles = parseTitleNeedles(titleMatch, clientName);
+  if (!needles.length) return { call: null, extras: [], errors: [], reason: "This client has no name to look for in meeting titles, so their call cannot be identified." };
+  if (!keys.length) return { call: null, extras: [], errors: [], reason: "No Granola API keys have been added, so no call transcripts can be read." };
+
+  const errors: string[] = [];
+  const listed = await listNotes(keys, windowDays, errors);
+  const taken = new Set<string>();
+
+  const winner = pickWinner(listed, needles, taken);
+  if (winner) taken.add(winner.note.id);
+
+  // The extras are chosen before anything is opened, so the primary always gets first refusal on a
+  // meeting both matches want, whichever order they are configured in.
+  const extraWinners = extraMatches
+    .slice(0, MAX_EXTRA_CALLS)
+    .map((match) => {
+      const extraNeedles = parseTitleNeedles(match, "");
+      if (!extraNeedles.length) return null;
+      const found = pickWinner(listed, extraNeedles, taken);
+      if (found) taken.add(found.note.id);
+      return found;
+    })
+    .filter((found): found is { note: GranolaNote; key: GranolaKey } => Boolean(found));
+
+  // Together, because they are independent requests and the budget is the reason the extras are capped.
+  const [call, ...extras] = await Promise.all([
+    winner ? openCall(winner, MAX_TRANSCRIPT_CHARS, errors) : Promise.resolve(null),
+    ...extraWinners.map((found) => openCall(found, EXTRA_TRANSCRIPT_CHARS, errors)),
+  ]);
+
+  return {
+    call,
+    extras: extras.filter((extra): extra is ClientCall => Boolean(extra)),
     errors,
+    reason: call ? undefined : `No meeting with "${describeNeedles(needles)}" in the title was found in the last ${windowDays} days.`,
   };
 }
 

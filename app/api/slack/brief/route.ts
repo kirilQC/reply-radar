@@ -28,7 +28,8 @@
 
 import { NextResponse } from "next/server";
 import { briefHeaderText, briefTrace, briefUserContent, briefWithFooter, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
-import { BRIEF_MODEL, gatherCall, gatherChannels, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
+import { BRIEF_MODEL, gatherCalls, gatherChannels, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
+import { brainContext } from "../../../lib/brain-context";
 import {
   alreadySentToday,
   DEFAULT_SCHEDULE,
@@ -293,7 +294,12 @@ export async function POST(request: Request) {
     destination = body.destination === "test" || body.destination === "internal" ? body.destination : "preview";
     if (!slug) return NextResponse.json({ error: "No client was named." }, { status: 400 });
 
-    const rows = await read(`rr_workspaces?select=id,name,slug,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match&slug=eq.${encodeURIComponent(slug)}&limit=1`);
+    // Two selects, because the extra-source columns are an additive migration and PostgREST fails the
+    // whole read over one unknown column. A database without the migration still writes briefs; it just
+    // writes them from the two channels and the one call, which is what it had before.
+    const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match";
+    const rows = await read(`rr_workspaces?select=${columns},slack_extra_channel_ids,granola_extra_title_matches&slug=eq.${encodeURIComponent(slug)}&limit=1`)
+      .catch(() => read(`rr_workspaces?select=${columns}&slug=eq.${encodeURIComponent(slug)}&limit=1`));
     const found = (Array.isArray(rows) ? (rows as Row[]) : [])[0];
     if (!found) return NextResponse.json({ error: "That client does not exist." }, { status: 404 });
     workspace = found as BriefWorkspace;
@@ -312,16 +318,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `${SLACK_TOKEN_ENV} is not set, so nothing can be posted to Slack.` }, { status: 400 });
     }
 
-    // All four sources at once. The call is the slowest and the most likely to be missing, and it is the
-    // one that must not hold up or fail the other three — `gatherCall` never throws.
-    const [signals, channels, call, systemPrompt] = await Promise.all([
+    // Every source at once. The calls are the slowest and the most likely to be missing, and they must not
+    // hold up or fail the others — neither `gatherCalls` nor `brainContext` ever throws. The QC Brain is a
+    // GitHub read rather than a database one, which is why it is a fifth request and not part of the row
+    // above: it is the agency's own written record of this client, and it is what turns a figure that
+    // dropped into a figure that dropped against a plan.
+    const [signals, channels, call, systemPrompt, brain] = await Promise.all([
       gatherSignals(read, workspace),
       gatherChannels(workspace),
-      gatherCall(read, workspace),
+      gatherCalls(read, workspace),
       morningBriefPrompt(workspace.slug),
+      brainContext(workspace),
     ]);
 
-    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason };
+    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason, extraCalls: call.extras, brain: brain.block };
     const content = briefUserContent(workspace, inputs);
     // Monday's sync reminder and Friday's report reminder are appended here rather than written by the
     // model, so they land in the same place, worded the same way, with the same indent, every week. They
@@ -361,8 +371,13 @@ export async function POST(request: Request) {
     const sources = {
       internalMessages: channels.internal.messages,
       externalMessages: channels.external.messages,
+      extraChannels: (channels.extraChannels ?? []).map((channel) => ({ channelId: channel.channelId, messages: channel.messages })),
       call: call.call ? { title: call.call.title, ageDays: call.call.ageDays, owner: call.call.owner, transcriptChars: call.call.transcript.length } : null,
+      extraCalls: call.extras.map((extra) => ({ title: extra.title, ageDays: extra.ageDays, owner: extra.owner, transcriptChars: extra.transcript.length })),
       callReason: call.callReason ?? null,
+      // Which folder was read and which documents, not their text: the brain is a repo anybody can open,
+      // and a copy of six of its files in a log table is six stale copies.
+      brain: { folder: brain.folder, documents: brain.documents, chars: brain.block.length, reason: brain.reason || null },
     };
 
     // Returned, not stored. The trace quotes the transcript and both channels verbatim, and a row that

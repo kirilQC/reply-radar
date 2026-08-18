@@ -21,7 +21,7 @@ import {
   type BriefWorkspace,
 } from "./morning-brief";
 import { channelHistory, resolveUserNames, transcript } from "./slack";
-import { findClientCall, type ClientCall, type GranolaKey } from "./granola";
+import { findClientCalls, type ClientCall, type GranolaKey } from "./granola";
 import { readConfig } from "./app-config";
 
 /** Exported so the trace can name the model that was actually asked, rather than a second copy of it. */
@@ -50,13 +50,36 @@ export async function morningBriefPrompt(slug?: string | null): Promise<string> 
 }
 
 /**
+ * Every string in a Postgres text array, deduplicated, blank entries dropped.
+ *
+ * Written defensively because the column is additive: a database that has not had the migration run
+ * returns nothing at all for it, and PostgREST hands back `null` rather than an empty array.
+ */
+const asList = (value: unknown): string[] =>
+  [...new Set((Array.isArray(value) ? value : []).map((entry) => String(entry ?? "").trim()).filter(Boolean))];
+
+/**
+ * How many extra channels one brief will read.
+ *
+ * Each one is a `conversations.history` call plus a `conversations.replies` call per thread, and Slack rate
+ * limits per method per workspace. Three is more than any client has needed and leaves the two channels
+ * that matter with room to be read in full.
+ */
+const MAX_EXTRA_CHANNELS = 3;
+
+/**
  * Reads both channels, or reports why it could not.
  *
  * A channel that cannot be read must not fail the brief. The commonest reason by far is that nobody
  * invited the bot, and a brief that says "the internal channel could not be read: the bot is not in
  * that channel" is what gets that fixed. A brief that fails silently, or fails entirely, does not.
+ *
+ * The internal and external channels are read as named things, and anything else the client has been given
+ * is read afterwards into `extraChannels`. That split is kept all the way from the column names to the
+ * prompt: the two named channels are where our team and the client respectively commit to things, and an
+ * extra channel is somewhere a useful thing was mentioned once.
  */
-export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<BriefInputs, "internal" | "external">> {
+export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<BriefInputs, "internal" | "external" | "extraChannels">> {
   const timezone = workspace.timezone || "America/New_York";
   const readChannel = async (channelId: string) => {
     if (!channelId) return { channelId: "", messages: 0, raw: 0, threads: 0, replies: 0, capped: false, text: "", people: [] };
@@ -83,11 +106,16 @@ export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<Br
       return { channelId, messages: 0, raw: 0, threads: 0, replies: 0, capped: false, text: "", people: [], error: error instanceof Error ? error.message : "This channel could not be read." };
     }
   };
-  const [internal, external] = await Promise.all([
-    readChannel(String(workspace.slack_internal_channel_id ?? "")),
-    readChannel(String(workspace.slack_external_channel_id ?? "")),
+  const named = [String(workspace.slack_internal_channel_id ?? "").trim(), String(workspace.slack_external_channel_id ?? "").trim()];
+  // An extra channel that is already one of the two named ones is dropped rather than read twice. The
+  // same conversation appearing under two headings would read to the model as two sources agreeing.
+  const extraIds = asList(workspace.slack_extra_channel_ids).filter((id) => !named.includes(id)).slice(0, MAX_EXTRA_CHANNELS);
+  const [internal, external, ...extraChannels] = await Promise.all([
+    readChannel(named[0]),
+    readChannel(named[1]),
+    ...extraIds.map((id) => readChannel(id)),
   ]);
-  return { internal, external };
+  return { internal, external, extraChannels };
 }
 
 /** Every stored Granola key. Read on each run so a key added minutes ago is used by the next brief. */
@@ -99,21 +127,27 @@ export async function granolaKeys(read: (path: string) => Promise<unknown>): Pro
 }
 
 /**
- * The client's last call, or the reason there isn't one.
+ * The client's last call and any extra calls, or the reason there isn't one.
  *
  * Never throws. A missing transcript is one of three sources going quiet, and the brief is more useful
  * with two sources and a line saying what it is missing than not written at all.
  */
-export async function gatherCall(
+export async function gatherCalls(
   read: (path: string) => Promise<unknown>,
   workspace: BriefWorkspace,
-): Promise<{ call: ClientCall | null; callReason?: string; errors: string[] }> {
+): Promise<{ call: ClientCall | null; extras: ClientCall[]; callReason?: string; errors: string[] }> {
   try {
     const keys = await granolaKeys(read);
-    const found = await findClientCall(keys, workspace.granola_title_match, workspace.name, CALL_WINDOW_DAYS);
-    return { call: found.call, callReason: found.reason, errors: found.errors };
+    const found = await findClientCalls(
+      keys,
+      workspace.granola_title_match,
+      asList(workspace.granola_extra_title_matches),
+      workspace.name,
+      CALL_WINDOW_DAYS,
+    );
+    return { call: found.call, extras: found.extras, callReason: found.reason, errors: found.errors };
   } catch (error) {
-    return { call: null, callReason: error instanceof Error ? error.message : "The call transcript could not be read.", errors: [] };
+    return { call: null, extras: [], callReason: error instanceof Error ? error.message : "The call transcript could not be read.", errors: [] };
   }
 }
 

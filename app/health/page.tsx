@@ -75,6 +75,36 @@ type Heartbeat = {
       }>;
     };
   };
+  /**
+   * Every Slack automation attempt, successes and failures alike, newest first.
+   *
+   * A brief that silently stopped posting looks identical to a quiet week from the outside, which is
+   * why this is a log of attempts rather than a status: the absence of a run is the failure worth
+   * seeing, and only a list with times in it makes an absence visible.
+   */
+  slack?: {
+    configured: boolean;
+    testChannelConfigured: boolean;
+    readable: boolean;
+    attempts: number;
+    failures: number;
+    lastRunAt: string | null;
+    lastRunAgeSeconds: number | null;
+    lastFailureAt: string | null;
+    error: string | null;
+    runs?: Array<{
+      id: string;
+      automation: string;
+      client: string;
+      slug: string;
+      status: string;
+      destination: string;
+      channelId: string;
+      error: string;
+      at: string | null;
+      ageSeconds: number | null;
+    }>;
+  };
 };
 
 const formatAge = (seconds: number | null | undefined) => {
@@ -87,6 +117,27 @@ const formatAge = (seconds: number | null | undefined) => {
 
 const formatTime = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleString() : "Not recorded";
+
+/** Where a run went, in the words the Slack tab uses, so the two pages cannot disagree. */
+const destinationLabel = (destination: string) =>
+  destination === "internal"
+    ? "Internal channel"
+    : destination === "test"
+      ? "Test channel"
+      : destination === "preview"
+        ? "Preview only"
+        : destination || "Unknown";
+
+/** The exact moment, short enough to sit on one row of a list of thirty. */
+const formatStamp = (value: string | null | undefined) =>
+  value
+    ? new Date(value).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : "No time recorded";
 
 const formatElapsed = (seconds: number | null) => {
   if (seconds == null) return "Waiting for the first check";
@@ -137,6 +188,18 @@ export default function HealthPage() {
   const aiArkRunsFailing =
     (heartbeat.aiArk?.failures24h ?? 0) > 5 &&
     (heartbeat.aiArk?.failures24h ?? 0) > (heartbeat.aiArk?.successes24h ?? 0);
+  // A Slack automation is only unhealthy when it tried and failed. Never having run is a separate
+  // state, because "the schedule has not fired yet" and "the schedule fired and broke" are two
+  // different jobs for whoever is reading this.
+  const slackRuns = heartbeat.slack?.runs ?? [];
+  const slackFailing = Boolean(heartbeat.slack && heartbeat.slack.failures > 0);
+  const slackState = !heartbeat.slack?.configured
+    ? "missing"
+    : !heartbeat.slack.readable || slackFailing
+      ? "missing"
+      : heartbeat.slack.attempts === 0
+        ? "neutral"
+        : "ready";
   const clients = heartbeat.clients ?? [];
   const clientCount = clients.length;
   const attentionCount = clients.filter(
@@ -433,6 +496,97 @@ export default function HealthPage() {
                     records
                   </summary>
                   <pre>{JSON.stringify(heartbeat.aiArk ?? null, null, 2)}</pre>
+                </details>
+              )}
+            </section>
+
+            <section
+              className={`admin-panel slack-automation-health ${slackState === "missing" ? "has-alert" : ""}`}
+            >
+              <div className="panel-heading">
+                <div>
+                  <h2>Slack automations</h2>
+                </div>
+                <span className={`health-state ${slackState}`}>
+                  {slackState === "ready"
+                    ? "RUNNING"
+                    : slackState === "neutral"
+                      ? "NEVER RUN"
+                      : "NEEDS ATTENTION"}
+                </span>
+              </div>
+              <div className="heartbeat-kid-grid">
+                <div className={heartbeat.slack?.configured ? "ok" : "bad"}>
+                  <b>{heartbeat.slack?.configured ? "✓" : "!"}</b>
+                  <span>
+                    <strong>Slack token</strong>
+                    <small>
+                      {heartbeat.slack?.configured
+                        ? "Configured."
+                        : "No Slack token is set, so nothing can post."}
+                    </small>
+                  </span>
+                </div>
+                <div className={heartbeat.slack?.lastRunAt ? "ok" : "bad"}>
+                  <b>{heartbeat.slack?.lastRunAt ? "✓" : "!"}</b>
+                  <span>
+                    <strong>Last delivery</strong>
+                    <small>
+                      {heartbeat.slack?.lastRunAt
+                        ? `${formatStamp(heartbeat.slack.lastRunAt)} · ${formatAge(heartbeat.slack.lastRunAgeSeconds)}`
+                        : "No brief has been delivered yet."}
+                    </small>
+                  </span>
+                </div>
+                <div className={slackFailing ? "bad" : "ok"}>
+                  <b>{slackFailing ? "!" : "✓"}</b>
+                  <span>
+                    <strong>Deliveries</strong>
+                    <small>
+                      {heartbeat.slack?.attempts ?? 0} attempted ·{" "}
+                      {heartbeat.slack?.failures ?? 0} failed
+                      {heartbeat.slack?.lastFailureAt
+                        ? ` · last failed ${formatStamp(heartbeat.slack.lastFailureAt)}`
+                        : ""}
+                    </small>
+                  </span>
+                </div>
+              </div>
+              {heartbeat.slack?.error ? (
+                <p className="error-text">{heartbeat.slack.error}</p>
+              ) : slackRuns.length ? (
+                <div className="slack-run-list">
+                  {slackRuns.map((run) => (
+                    <div
+                      className={`slack-run ${run.status === "sent" ? "run-ok" : run.destination === "preview" ? "run-quiet" : "run-bad"}`}
+                      key={run.id}
+                    >
+                      <span className="slack-run-when">
+                        {formatStamp(run.at)}
+                      </span>
+                      <span className="slack-run-client">{run.client}</span>
+                      <span className="slack-run-where">
+                        {destinationLabel(run.destination)}
+                        {run.channelId ? ` · ${run.channelId}` : ""}
+                      </span>
+                      <span className="slack-run-status">
+                        {run.status === "sent" ? "Sent" : run.status || "Failed"}
+                      </span>
+                      {run.error && (
+                        <span className="slack-run-error">{run.error}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-state">
+                  No Slack automation has run yet.
+                </p>
+              )}
+              {mode === "advanced" && (
+                <details className="diagnostic-details" open>
+                  <summary>Raw Slack automation log</summary>
+                  <pre>{JSON.stringify(heartbeat.slack ?? null, null, 2)}</pre>
                 </details>
               )}
             </section>

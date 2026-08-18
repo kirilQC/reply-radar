@@ -37,6 +37,13 @@ create table if not exists rr_workspaces (
   -- differently. Matched on the title rather than the attendee list because Granola's list endpoint
   -- returns six fields and attendees are not among them — see app/lib/granola-match.ts.
   granola_title_match text,
+  -- Extra sources somebody added for context, deliberately separate columns from the two above rather
+  -- than more entries in them. `granola_title_match`'s comma-separated entries are alternate spellings
+  -- of one call, so appending to it would make a second meeting read as another name for the first.
+  -- Kept plainly secondary in the brief too: most extra calls are our own internal meetings, where what
+  -- is said is what we intend rather than anything the client agreed to.
+  granola_extra_title_matches text[] not null default '{}',
+  slack_extra_channel_ids text[] not null default '{}',
   last_webhook_received_at timestamptz, last_successful_poll_at timestamptz, last_reconciled_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );

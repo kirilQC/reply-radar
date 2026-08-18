@@ -46,6 +46,9 @@ type ClientWorkspace = {
   slackInternalChannelId?: string;
   slackExternalChannelId?: string;
   granolaTitleMatch?: string;
+  /** The extras, always lists. A database without the migration run reads them as empty, not as absent. */
+  slackExtraChannelIds?: string[];
+  granolaExtraTitleMatches?: string[];
   anthropicModel?: string;
   systemPrompt?: string;
   webhookUrl?: string;
@@ -54,6 +57,47 @@ type ClientWorkspace = {
 };
 
 const initialClients: ClientWorkspace[] = [];
+
+/** A Postgres text array as a list of non-blank strings. Absent columns and `null` both read as empty. */
+const asTextList = (value: unknown): string[] =>
+  (Array.isArray(value) ? value : []).map((entry) => String(entry ?? "").trim()).filter(Boolean);
+
+/**
+ * How many extras one client may add, matching what the brief will actually read.
+ *
+ * Stated here as well as on the server because a form that lets somebody add a fifth channel, saves it, and
+ * then silently reads three is worse than a form that stops at three: the missing one looks like a bug in
+ * the brief rather than a limit. The server still enforces its own cap; this is only so nobody meets it.
+ */
+const MAX_EXTRAS = 3;
+
+/**
+ * A list of one-line values with a plus to add and a minus to remove, for the extras beside a main field.
+ *
+ * A list of inputs rather than one comma-separated field, because these are separate things: one channel per
+ * row and one meeting per row is what the brief does with them, and a comma inside a meeting title would
+ * otherwise split it in two.
+ */
+function ExtraRows({ label, values, placeholder, onChange }: { label: string; values: string[]; placeholder: string; onChange: (next: string[]) => void }) {
+  return (
+    <div className="extra-rows">
+      <div className="extra-rows-head">
+        <span className="extra-rows-label">{label}</span>
+        {values.length < MAX_EXTRAS && <button className="extra-rows-add" type="button" onClick={() => onChange([...values, ""])}>+ Add</button>}
+      </div>
+      {values.map((value, index) => (
+        <div className="extra-row" key={index}>
+          <input
+            value={value}
+            placeholder={placeholder}
+            onChange={(event) => onChange(values.map((entry, position) => (position === index ? event.target.value : entry)))}
+          />
+          <button className="extra-row-remove" type="button" aria-label={`Remove ${label} ${index + 1}`} onClick={() => onChange(values.filter((_, position) => position !== index))}>×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
 type HeartbeatPayload = {
   status: string;
   checkedAt?: string;
@@ -98,7 +142,12 @@ export default function AdminPage() {
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))] ?? { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced" };
-  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", granolaTitleMatch: "" });
+  const [workspaceDraft, setWorkspaceDraft] = useState<{
+    name: string; slug: string; brief: string; timezone: string; website: string; messagingDocUrl: string;
+    anthropicModel: string; systemPrompt: string; apiKey: string; brainFolder: string;
+    slackInternal: string; slackExternal: string; granolaTitleMatch: string;
+    slackExtra: string[]; granolaExtra: string[];
+  }>({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", granolaTitleMatch: "", slackExtra: [], granolaExtra: [] });
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -122,6 +171,7 @@ export default function AdminPage() {
             brief: String(item.client_brief ?? ""), apiKey: "", apiKeyMasked: String(item.heyreach_api_key_masked ?? ""), timezone: String(item.timezone ?? "America/New_York"), website: String(item.website_url ?? ""), anthropicModel: String(item.anthropic_model ?? ""), systemPrompt: String(item.custom_system_prompt ?? ""), webhookUrl: String(item.webhook_url ?? ""), keyConfigured: Boolean(item.key_configured),
             logoUrl: String(item.logo_url ?? ""), brainFolder: String(item.brain_folder ?? ""),
             slackInternalChannelId: String(item.slack_internal_channel_id ?? ""), slackExternalChannelId: String(item.slack_external_channel_id ?? ""), granolaTitleMatch: String(item.granola_title_match ?? ""),
+            slackExtraChannelIds: asTextList(item.slack_extra_channel_ids), granolaExtraTitleMatches: asTextList(item.granola_extra_title_matches),
             guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {},
           }));
           setWorkspaceClients(hydratedClients);
@@ -146,7 +196,7 @@ export default function AdminPage() {
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", granolaTitleMatch: client.granolaTitleMatch ?? "" });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", granolaTitleMatch: client.granolaTitleMatch ?? "", slackExtra: client.slackExtraChannelIds ?? [], granolaExtra: client.granolaExtraTitleMatches ?? [] });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -165,7 +215,7 @@ export default function AdminPage() {
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
     const mutationIdentity = isNewWorkspace ? { create: true } : { id: client.id, previousSlug: client.slug };
     const nextGuardrails = { ...(client.guardrails ?? {}), messaging_doc_url: workspaceDraft.messagingDocUrl.trim() };
-    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, granolaTitleMatch: workspaceDraft.granolaTitleMatch, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
+    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, granolaTitleMatch: workspaceDraft.granolaTitleMatch, slackExtraChannelIds: workspaceDraft.slackExtra, granolaExtraTitleMatches: workspaceDraft.granolaExtra, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
     if (!response?.ok) {
       const detail = await response?.json().catch(() => ({}));
       setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
@@ -176,7 +226,7 @@ export default function AdminPage() {
     const payload = await response.json().catch(() => ({}));
     const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] : null;
     const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaTitleMatch: String(savedRow?.granola_title_match ?? workspaceDraft.granolaTitleMatch), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaTitleMatch: String(savedRow?.granola_title_match ?? workspaceDraft.granolaTitleMatch), slackExtraChannelIds: asTextList(savedRow?.slack_extra_channel_ids ?? workspaceDraft.slackExtra), granolaExtraTitleMatches: asTextList(savedRow?.granola_extra_title_matches ?? workspaceDraft.granolaExtra), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
     setWorkspaceClients(next);
     setWorkspaceDraft((draft) => ({ ...draft, apiKey: "" }));
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
@@ -249,6 +299,19 @@ export default function AdminPage() {
     const needles = parseTitleNeedles(workspaceDraft.granolaTitleMatch, workspaceDraft.name);
     if (!needles.length) return "Nothing here is specific enough to find a meeting by.";
     return `Meetings with “${describeNeedles(needles)}” in the title.`;
+  })();
+  // Echoed the same way, and only when there is something to echo. The one thing worth saying is which
+  // of these will actually find a meeting: a row typed and left too vague matches nothing and looks fine.
+  const extraCallNote = (() => {
+    const rows = workspaceDraft.granolaExtra.map((entry) => entry.trim()).filter(Boolean);
+    if (!rows.length) return "";
+    const described = rows.map((entry) => {
+      const needles = parseTitleNeedles(entry, "");
+      return needles.length ? `“${describeNeedles(needles)}”` : "";
+    });
+    const vague = described.filter((entry) => !entry).length;
+    const found = described.filter(Boolean);
+    return `${found.length ? `Also the latest meeting with ${found.join(" or ")} in the title. ` : ""}${vague ? `${vague} of these is not specific enough to find a meeting by.` : "Ranked below the main call."}`;
   })();
   const accentColor = accentOverrides[client.slug] ?? client.tone;
   const workspaceLogo = logos[client.slug] ?? client.logoUrl ?? "";
@@ -547,11 +610,11 @@ export default function AdminPage() {
                       <div className="panel-heading"><div><h2>Slack channels</h2><p>Where this client&apos;s briefs are read and posted.</p></div><span className="saved-dot">● Auto-saved</span></div>
                       <div className="field-row">
                         <label className="field-label">
-                          INTERNAL CHANNEL ID
+                          MAIN · INTERNAL CHANNEL ID
                           <input value={workspaceDraft.slackInternal} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slackInternal: event.target.value }))} placeholder="C09ABCDEF" />
                         </label>
                         <label className="field-label">
-                          EXTERNAL CHANNEL ID
+                          MAIN · EXTERNAL CHANNEL ID
                           <input value={workspaceDraft.slackExternal} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slackExternal: event.target.value }))} placeholder="C09XYZ123" />
                         </label>
                       </div>
@@ -559,17 +622,36 @@ export default function AdminPage() {
                           id saves without complaint and resolves to nothing; the two ids the wrong way
                           round sends the team's own notes to the client. */}
                       <p className="slack-channel-note">{slackChannelNote}</p>
+                      {/* Marked as extras in the label as well as by position, because the prompt ranks
+                          them below the two above and somebody who thought this was a third equal channel
+                          would read the brief as having ignored it. */}
+                      <ExtraRows
+                        label="EXTRA CHANNELS"
+                        values={workspaceDraft.slackExtra}
+                        placeholder="C09MOREID"
+                        onChange={(next) => setWorkspaceDraft((draft) => ({ ...draft, slackExtra: next }))}
+                      />
                     </section>
                     <section className="admin-panel client-config-section" id="client-granola">
                       <div className="panel-heading"><div><h2>Call transcripts</h2><p>Which Granola meeting belongs to this client.</p></div><span className="saved-dot">● Auto-saved</span></div>
                       <label className="field-label">
-                        MEETING TITLE CONTAINS
+                        MAIN CALL · MEETING TITLE CONTAINS
                         <input value={workspaceDraft.granolaTitleMatch} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, granolaTitleMatch: event.target.value }))} placeholder={workspaceDraft.name || "Bluevia"} />
                       </label>
                       {/* Blank is the normal case: the client's own name is used. This is for when the
                           calendar calls them something else — the account is "Vitalic Health" and the
                           invite says "Vitalic" — and takes a comma-separated list. */}
                       <p className="slack-channel-note">{granolaTitleNote}</p>
+                      {/* One meeting per row, not more entries in the field above: everything in that
+                          field is an alternate spelling of the *same* call, so a weekly internal meeting
+                          typed there would become this client's "last call" whenever it ran latest. */}
+                      <ExtraRows
+                        label="EXTRA MEETINGS"
+                        values={workspaceDraft.granolaExtra}
+                        placeholder="QC internal weekly"
+                        onChange={(next) => setWorkspaceDraft((draft) => ({ ...draft, granolaExtra: next }))}
+                      />
+                      {extraCallNote && <p className="slack-channel-note">{extraCallNote}</p>}
                     </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
@@ -925,6 +1007,8 @@ const readScreenshot = (file: File) =>
   });
 
 type GranolaKeyRow = { id: string; label: string; masked: string; lastCheckedAt: string | null; lastStatus: string; lastError: string };
+/** What one Test found: the meetings this key can see, and the window they were looked for in. */
+type GranolaSighting = { windowDays: number; meetings: Array<{ title: string; startedAt: string }> };
 
 /**
  * One Granola key per teammate.
@@ -945,6 +1029,7 @@ function GranolaKeysView() {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState("");
+  const [sightings, setSightings] = useState<Record<string, GranolaSighting>>({});
 
   const load = async () => {
     const response = await fetch("/api/granola/keys", { cache: "no-store" }).catch(() => null);
@@ -975,9 +1060,23 @@ function GranolaKeysView() {
     await load();
   };
 
+  /*
+   * Test says what the key can see, not only that it works.
+   *
+   * The meetings are held per key on the page rather than stored, because they are a live answer to "which
+   * client's calls are on this key" and a stored one would be read weeks later as though it were current.
+   */
   const checkKey = async (id: string) => {
     setBusyId(id);
-    await fetch("/api/granola/keys", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "check", id }) }).catch(() => null);
+    const response = await fetch("/api/granola/keys", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "check", id }) }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    setSightings((current) => ({
+      ...current,
+      [id]: {
+        windowDays: Number(payload?.windowDays ?? 0),
+        meetings: Array.isArray(payload?.meetings) ? (payload.meetings as GranolaSighting["meetings"]) : [],
+      },
+    }));
     setBusyId("");
     await load();
   };
@@ -1024,6 +1123,22 @@ function GranolaKeysView() {
                 <button className="secondary-button" type="button" onClick={() => checkKey(key.id)} disabled={busyId === key.id}>{busyId === key.id ? "…" : "Test"}</button>
                 <button className="text-button" type="button" onClick={() => removeKey(key.id)} disabled={busyId === key.id}>Remove</button>
               </div>
+              {sightings[key.id] && (
+                <div className="granola-key-meetings">
+                  {sightings[key.id].meetings.length === 0 ? (
+                    <p className="granola-key-meetings-empty">No meetings in the last {sightings[key.id].windowDays || 14} days.</p>
+                  ) : (
+                    <ul>
+                      {sightings[key.id].meetings.map((meeting, index) => (
+                        <li key={`${meeting.startedAt}-${index}`}>
+                          <span>{meeting.title}</span>
+                          <small>{new Date(meeting.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>

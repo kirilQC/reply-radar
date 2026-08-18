@@ -76,19 +76,29 @@ type RunResult = {
 };
 
 /**
- * Where a manually run brief goes. Not sent with the request until the button is pressed, so a misclick
- * costs nothing — and neither of the two can reach a client, so the worst a right click can do is post to
- * the test channel. The scheduled run posts to the client's internal channel and is not chosen here.
+ * Where a manually run brief goes.
+ *
+ * Three, not four. The internal channel is the one a brief is actually for, so running one by hand and
+ * having nowhere to put it meant copying text out of the preview and pasting it into Slack as a person,
+ * which loses the header and the thread. The client's external channel is still not offered: the brief is
+ * the team's own outstanding-work list, and there is no version of sending it to the client that is right.
  */
-type Destination = "preview" | "test";
+type Destination = "preview" | "test" | "internal";
 
 /** The zones the team actually works in. A free-text field here would be a typo away from a silent no-op. */
 const TIMEZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Asia/Jerusalem", "UTC"];
 
+/**
+ * When the last brief went, to the minute.
+ *
+ * The time matters as much as the day: three briefs a week go out at a set minute, so "Aug 18" cannot
+ * distinguish one that arrived on schedule at 08:30 from one the worker got to at noon, and the second is a
+ * thing to look into. Read in whoever is looking's own zone, which is the zone the clock on their wall is in.
+ */
 const formatWhen = (iso: string) => {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 };
 
 export default function SlackPage() {
@@ -101,6 +111,8 @@ export default function SlackPage() {
   const [result, setResult] = useState<RunResult | null>(null);
   const [draft, setDraft] = useState<BriefSchedule>(DEFAULT_SCHEDULE);
   const [savingSchedule, setSavingSchedule] = useState(false);
+  /** Closed until asked for. The schedule is set once; the switch is the only part touched after that. */
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleError, setScheduleError] = useState("");
   const [togglingSlug, setTogglingSlug] = useState("");
 
@@ -140,10 +152,10 @@ export default function SlackPage() {
     setView("brief");
   };
 
-  const saveSchedule = async () => {
+  const saveSchedule = async (schedule: BriefSchedule = draft) => {
     setSavingSchedule(true);
     setScheduleError("");
-    const response = await fetch("/api/slack/brief", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ schedule: draft }) }).catch(() => null);
+    const response = await fetch("/api/slack/brief", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ schedule }) }).catch(() => null);
     const payload = await response?.json().catch(() => ({}));
     setSavingSchedule(false);
     if (!response?.ok || !payload?.ok) {
@@ -151,6 +163,20 @@ export default function SlackPage() {
       return;
     }
     await load();
+  };
+
+  /*
+   * The switch saves on its own, unlike the fields behind the button.
+   *
+   * It has to: it is the only control still on the page when the editor is closed, and a switch that
+   * looked on until the tab was reloaded would be read as "the brief is scheduled" when nothing had been
+   * written down. The days and the time are edited in a batch and saved in one go, which is a different
+   * act and keeps its own button.
+   */
+  const toggleSchedule = async () => {
+    const next = { ...draft, enabled: !draft.enabled };
+    setDraft(next);
+    await saveSchedule(next);
   };
 
   const toggleClient = async (client: BriefClient) => {
@@ -212,7 +238,9 @@ export default function SlackPage() {
         </header>
 
         {view === "automations" ? (
-          <main className="reports-hub">
+          // `slack-hub` only scopes the card size below. `reports.css` is shared with the reports hub on
+          // purpose, so a change made for one automation card must not resize a hub of twelve templates.
+          <main className="reports-hub slack-hub">
             <div className="hub-lede"><h1>Slack</h1></div>
 
             <div className="hub-group-label">
@@ -258,10 +286,18 @@ export default function SlackPage() {
               <span>{describeSchedule(draft)}</span>
             </div>
             <div className="brief-schedule">
+              {/* The switch and one button. The days, the time and the zone are set once and then not
+                  touched for months, and open on the page they were four controls standing between the
+                  schedule and the client list, which is what somebody actually came here for. */}
               <div className="brief-schedule-row">
-                <button type="button" className={draft.enabled ? "brief-switch is-on" : "brief-switch"} onClick={() => setDraft((current) => ({ ...current, enabled: !current.enabled }))}>
+                <button type="button" className={draft.enabled ? "brief-switch is-on" : "brief-switch"} onClick={toggleSchedule} disabled={savingSchedule}>
                   <span />{draft.enabled ? "On" : "Off"}
                 </button>
+                <button type="button" className="secondary-button" onClick={() => setScheduleOpen((open) => !open)}>
+                  {scheduleOpen ? "Done" : "Edit time and date"}
+                </button>
+              </div>
+              {scheduleOpen && <div className="brief-schedule-row">
                 <div className="brief-days">
                   {DAY_NAMES.map((name, day) => (
                     <button key={name} type="button" className={draft.sendDays.includes(day) ? "brief-day is-on" : "brief-day"} onClick={() => toggleDay(day)} title={name}>
@@ -288,8 +324,8 @@ export default function SlackPage() {
                 </label>
                 {/* No destination picker. A scheduled brief goes to the client's internal channel, which
                     is the only place it was ever for — the field only existed to be got wrong. */}
-                <button className="config-generate" type="button" onClick={saveSchedule} disabled={savingSchedule}>{savingSchedule ? "Saving…" : "Save schedule"}</button>
-              </div>
+                <button className="config-generate" type="button" onClick={() => saveSchedule()} disabled={savingSchedule}>{savingSchedule ? "Saving…" : "Save schedule"}</button>
+              </div>}
               {/* The one thing a schedule cannot show about itself: whether it would fire right now. */}
               {directory?.scheduleDueNow && directory.schedule.enabled && (
                 <p className="brief-schedule-note">Due now. {directory.due.length ? `${directory.due.length} client${directory.due.length === 1 ? "" : "s"} waiting on the worker.` : "Every enabled client has had one today."}</p>
@@ -364,15 +400,16 @@ export default function SlackPage() {
                 </div>
 
                 <div className="hub-group-label"><span>Where it goes</span></div>
-                {/* Two, not four. Clicking Generate by hand is checking the prompt, and the scheduled run
-                    is what posts to the team — so a manual run either shows the brief here or drops it in
-                    the test channel. Neither can reach a client. */}
+                {/* Preview first and selected by default, so the destination has to be chosen deliberately
+                    to post anywhere. The internal channel is the real one; the test channel is for checking
+                    a prompt change without putting it in front of the team. */}
                 <div className="slack-destinations">
                   {([
                     ["preview", "Show it here", "Nothing is posted"],
                     ["test", "Test channel", testChannel || "SLACK_TEST_CHANNEL_ID not set"],
+                    ["internal", "Internal channel", active.internalChannelId || "No internal channel is set"],
                   ] as Array<[Destination, string, string]>).map(([id, label, detail]) => {
-                    const unavailable = id === "test" && !testChannel;
+                    const unavailable = (id === "test" && !testChannel) || (id === "internal" && !active.internalChannelId);
                     return (
                       <button
                         key={id}

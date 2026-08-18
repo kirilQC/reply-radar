@@ -151,6 +151,7 @@ export async function GET() {
       aiArkResult,
       aiArkUsageResult,
       recentLeadResult,
+      slackBriefResult,
       anthropicResult,
     ] = await Promise.all([
       request("rr_workspaces?select=*&order=name.asc"),
@@ -165,6 +166,17 @@ export async function GET() {
       ),
       request(
         `rr_leads?select=id,workspace_id,linkedin_profile_url,raw_data,created_at&linkedin_profile_url=not.is.null&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=1000`,
+      ),
+      /*
+       * Every attempt at a Slack automation, successes and failures alike.
+       *
+       * `rr_slack_briefs` is the log rather than `rr_sync_runs` because that table is swept at 48 hours,
+       * and an automation that stopped running on Friday is a thing somebody finds out about on Monday. The
+       * body is not selected: the rows carry the full text of every brief, and this page only has to answer
+       * whether the automation ran and whether Slack took it.
+       */
+      request(
+        "rr_slack_briefs?select=id,workspace_id,automation,status,destination,slack_channel_id,error_text,created_at&order=created_at.desc&limit=60",
       ),
       anthropicCheck,
     ]);
@@ -274,6 +286,54 @@ export async function GET() {
         : aiArkStatus === "disabled"
           ? "Disabled globally."
           : "Recent enrichment runs are failing.";
+
+    /*
+     * The Slack automations, run by run.
+     *
+     * One line per attempt rather than a single "healthy" light, because the failure this exists to catch is
+     * an automation that stopped: no error anywhere, just nothing since Thursday. A count of runs cannot show
+     * that and a status cannot either. The list can, because the newest row carries its own date.
+     */
+    const slackBriefRows = Array.isArray(slackBriefResult.body)
+      ? (slackBriefResult.body as Row[])
+      : [];
+    const nameBySlug = new Map(
+      rows.map((row) => [String(row.id ?? ""), { name: String(row.name ?? ""), slug: String(row.slug ?? "") }]),
+    );
+    const slackRuns = slackBriefRows.map((row) => {
+      const client = nameBySlug.get(String(row.workspace_id ?? ""));
+      return {
+        id: String(row.id ?? ""),
+        automation: String(row.automation ?? "morning_brief"),
+        // The workspace may since have been deleted, which is worth showing as a run that happened rather
+        // than dropping: a brief posted for a client who is gone is itself the thing to look at.
+        client: client?.name || "Unknown client",
+        slug: client?.slug || "",
+        status: String(row.status ?? ""),
+        destination: String(row.destination ?? ""),
+        channelId: String(row.slack_channel_id ?? ""),
+        error: row.error_text ? String(row.error_text) : "",
+        at: row.created_at ? String(row.created_at) : null,
+        ageSeconds: ageSeconds(row.created_at),
+      };
+    });
+    // A preview is somebody checking a prompt, not the automation running, so it is not counted either way.
+    const delivered = slackRuns.filter((run) => run.destination !== "preview");
+    const lastDelivered = delivered[0] ?? null;
+    const slack = {
+      configured: Boolean(process.env.SLACK_BOT_TOKEN || process.env.SLACK_USER_TOKEN),
+      testChannelConfigured: Boolean(process.env.SLACK_TEST_CHANNEL_ID),
+      readable: slackBriefResult.response.ok,
+      attempts: delivered.length,
+      failures: delivered.filter((run) => run.status !== "sent").length,
+      lastRunAt: lastDelivered?.at ?? null,
+      lastRunAgeSeconds: lastDelivered?.ageSeconds ?? null,
+      lastFailureAt: delivered.find((run) => run.status !== "sent")?.at ?? null,
+      // The table may not exist yet on a database that has not had the migration run, which is a different
+      // thing from an automation that has never run, and only one of the two is somebody's job to fix.
+      error: slackBriefResult.response.ok ? null : `The Slack automation log could not be read (HTTP ${slackBriefResult.response.status}).`,
+      runs: slackRuns.slice(0, 30),
+    };
 
     const clients = rows.map((row) => {
       const webhookAgeSeconds = ageSeconds(row.last_webhook_received_at);
@@ -443,6 +503,7 @@ export async function GET() {
       clients,
       worker,
       aiArk,
+      slack,
       checkedAt,
       thresholds,
       diagnostics: {
