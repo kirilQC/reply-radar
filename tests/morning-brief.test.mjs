@@ -14,7 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { looksLikeChannelId, normalizeChannelId } from "../app/lib/slack-channel.ts";
-import { briefHeaderText, briefStatusTitle, briefTrace, briefWeekdayNote, briefWithFooter, DEFAULT_MORNING_BRIEF_PROMPT, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
+import { briefFraming, briefHeaderText, briefTrace, briefWeekdayNote, briefWithFooter, DEFAULT_MORNING_BRIEF_PROMPT, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
 import { transcript } from "../app/lib/slack.ts";
 
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
@@ -477,21 +477,21 @@ test("the standing reminder is appended under the brief, indented, fenced by div
    */
   const zone = "America/New_York";
   const friday = new Date("2026-08-21T14:00:00Z");
-  const body = "*End of Week Status:*\n\n1. *Cold calling update*";
+  const body = "*:hourglass: _Client Bottlenecks_ :hourglass:*\n\n1. *Cold calling update*";
 
   const posted = briefWithFooter(body, zone, friday);
-  assert.ok(posted.startsWith(body), "the model's own brief must come through untouched");
-  assert.match(posted, /\n\n={41}\n\n {8}:page_facing_up: Remember to send out the EOW report! :page_facing_up:\n\n={41}$/);
+  assert.ok(posted.includes("1. *Cold calling update*"), "the model's own findings must come through untouched");
+  assert.match(posted, /\n\n\n={41}\n\n {8}:page_facing_up: Remember to send out the EOW report! :page_facing_up:\n\n={41}$/);
   // Under the findings, never above them: it is a closing ritual, not the headline.
   assert.ok(posted.indexOf("Cold calling") < posted.indexOf("EOW report"));
 
   // Monday's is the same shape with its own emoji, so the two cannot drift apart.
   assert.match(briefWithFooter(body, zone, new Date("2026-08-17T14:00:00Z")), / {8}:speech_balloon: Make sure to sync about game plan for this week! :speech_balloon:/);
 
-  // Midweek the brief is returned as written, with no trailing divider left hanging off the end.
+  // Midweek the brief ends on the last finding, with no empty fence hanging off the end of it.
   const midweek = briefWithFooter(body, zone, new Date("2026-08-19T14:00:00Z"));
-  assert.equal(midweek, body);
-  assert.ok(!midweek.includes("="), "a day with no reminder must not get an empty fence");
+  assert.ok(midweek.endsWith("1. *Cold calling update*"), midweek);
+  assert.ok(!midweek.includes("EOW report") && !midweek.includes("game plan"), "a day with no reminder must not get one");
 });
 
 test("the brief the model writes is not asked to carry the reminder as well", () => {
@@ -500,15 +500,94 @@ test("the brief the model writes is not asked to carry the reminder as well", ()
   assert.ok(!DEFAULT_MORNING_BRIEF_PROMPT.includes("Make sure to sync about game plan"), "the worked example still models the reminder the model must not write");
 });
 
-test("where in the week today is, is a fact the model is given", () => {
-  // Monday's brief is a plan and Friday's is a reckoning. The model is told which, because it is a fact
-  // about the calendar and everything else it states as fact is computed here too.
-  const zone = "America/New_York";
-  assert.equal(briefStatusTitle(zone, new Date("2026-08-17T14:00:00Z")), "Beginning of Week Status");
-  assert.equal(briefStatusTitle(zone, new Date("2026-08-19T14:00:00Z")), "Midweek Status");
-  assert.equal(briefStatusTitle(zone, new Date("2026-08-21T14:00:00Z")), "End of Week Status");
-  // Late enough in UTC to be the previous day in New York, which is the client's day and the one that counts.
-  assert.equal(briefStatusTitle(zone, new Date("2026-08-18T02:00:00Z")), "Beginning of Week Status");
+test("every section heading is fenced above and below and centred, and the model draws none of it", () => {
+  /*
+   * The fencing is applied to the model's output rather than asked for, for the same reason the reminder is.
+   * Asked for it, runs came back with the rule above the heading but not below, or centred by a different
+   * number of spaces each time, and leading whitespace is the first thing a model tidies away.
+   */
+  const divider = "=".repeat(41);
+  const body = [
+    "*:signal_strength: _Active Campaigns_ :signal_strength:*",
+    "",
+    "",
+    "1. *BV007: ASCs v2*",
+    "    • 106 pending leads (~2 days of sending left)",
+    "",
+    divider,
+    "",
+    "*:male-technologist: _Things to work on_ :male-technologist:*",
+    "",
+    "",
+    "1. <@U01> to *finish the Doximity list*",
+  ].join("\n");
+
+  const framed = briefFraming(body);
+
+  // It opens on a rule, not on the heading and not on a title.
+  assert.ok(framed.startsWith(`${divider}\n\n        *:signal_strength:`), framed.slice(0, 140));
+  for (const heading of ["*:signal_strength: _Active Campaigns_ :signal_strength:*", "*:male-technologist: _Things to work on_ :male-technologist:*"]) {
+    assert.ok(framed.includes(`${divider}\n\n        ${heading}\n\n${divider}`), `${heading} was not fenced and centred`);
+  }
+  // Four rules for two sections. The model's own leftover divider was dropped rather than left in a gap.
+  assert.equal(framed.split(divider).length - 1, 4);
+  // Two blank lines between the end of one section and the rule that opens the next.
+  assert.match(framed, /pending leads \(~2 days of sending left\)\n\n\n={41}/);
+  // The sub-bullet's own indent is the model's and means something, so it survives untouched.
+  assert.ok(framed.includes("    • 106 pending leads"));
+});
+
+test("the old status title is dropped even when something still writes one", () => {
+  // Kiril took the line out: three sections that announce themselves do not need a label above them. A
+  // per-client prompt override still carries the old instruction, so it has to die here too or it comes
+  // back on one client only.
+  const framed = briefFraming("*Midweek Status:*\n\n\n*:hourglass: _Client Bottlenecks_ :hourglass:*\n\n1. *Cold calling*");
+  assert.ok(!framed.includes("Midweek Status"), framed);
+  assert.ok(framed.startsWith("=".repeat(41)));
+  assert.ok(framed.includes("1. *Cold calling*"));
+});
+
+test("a heading written without its asterisks is still fenced, and normalised on the way", () => {
+  // Three headings formatted three ways is the kind of thing nobody reports and everybody notices.
+  const framed = briefFraming(":hourglass: _Client Bottlenecks_ :hourglass:\n\n1. *Cold calling*");
+  assert.ok(framed.includes(`${"=".repeat(41)}\n\n        *:hourglass: _Client Bottlenecks_ :hourglass:*\n\n${"=".repeat(41)}`), framed);
+});
+
+test("the runway warning is not mistaken for a section heading", () => {
+  /*
+   * The warning is an emoji, some words, and the same emoji again, which is the shape of a heading. Matched
+   * loosely it was fenced into a section of its own with nothing under it, putting the most urgent line in
+   * the brief where it read as a decoration. The italics on a real heading are what separate the two.
+   */
+  const warning = ":warning: New leads or a new campaign must be in motion today! Less than 2 days of sending remaining! :warning:";
+  const framed = briefFraming([
+    "*:signal_strength: _Active Campaigns_ :signal_strength:*",
+    "",
+    "1. *BV007: ASCs v2*",
+    "",
+    warning,
+  ].join("\n"));
+
+  // One section, so exactly two rules, and the warning is inside it rather than fenced off on its own.
+  assert.equal(framed.split("=".repeat(41)).length - 1, 2);
+  assert.ok(framed.trimEnd().endsWith(warning), framed);
+});
+
+test("a brief with no headings at all is left alone rather than cut up", () => {
+  // Framing something that is not in this shape risks dropping findings. An unframed brief is a cosmetic
+  // failure; a truncated one is a lie about the week.
+  const plain = "The internal channel could not be read, so there is nothing to report.";
+  assert.equal(briefFraming(plain), plain);
+});
+
+test("the prompt hands the fencing to the code and asks for neither dividers nor a title", () => {
+  // Both halves have to agree. If the prompt still asked for either, the code would strip work the model
+  // spent words on, and the brief would come out a section short of what it wrote.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*Start with the first section heading\.\*\*/);
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*No divider lines anywhere\.\*\*/);
+  assert.ok(!DEFAULT_MORNING_BRIEF_PROMPT.includes("========"), "the prompt still draws a divider the model would copy");
+  const example = DEFAULT_MORNING_BRIEF_PROMPT.slice(DEFAULT_MORNING_BRIEF_PROMPT.indexOf("A worked example"));
+  assert.ok(!/Status:/.test(example), "the worked example still opens on a status title");
 });
 
 test("the model is handed the mention code for everybody who spoke", async () => {
@@ -591,9 +670,9 @@ test("the brief has three sections, and the owner's mention starts the line", ()
 
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /the owner's mention is the first thing on the line/i);
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /1\. <@OWNER> to \*do the specific thing\*/);
-  // Numbered with a blank line between, indented sub-bullets, and a divider between sections — the three
-  // things that turn a wall of text into something readable standing up.
-  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /=========================================/);
+  // Numbered with a blank line between, and indented sub-bullets: the things that turn a wall of text into
+  // something readable standing up. The rules that fence each heading are no longer among them, because
+  // they are added to the model's output afterwards rather than asked for.
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /indented four spaces and start with/);
 
   // Length is the whole complaint, so it is stated as a number rather than as "be concise".

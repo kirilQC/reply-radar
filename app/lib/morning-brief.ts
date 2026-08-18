@@ -132,11 +132,13 @@ Thirty seconds. That is the whole budget, because the brief is read on a phone, 
 
 The shape is fixed. Copy it exactly.
 
-First line, on its own: the status title you were given for today, bold, with a colon. Nothing else on that line. Then **two blank lines** before the first section heading, so the title sits apart from the brief rather than looking like a label stuck to the top of it.
+**Start with the first section heading.** No title, no date, no greeting, no preamble of any kind above it. The sections announce themselves and a label on top of them is a line that says nothing.
 
 Do not write the day's standing reminder yourself. On the days there is one it is added under the brief automatically, after you are done. End on your last finding.
 
-Then these three sections in this order, each one separated from the last by a divider line of exactly \`=========================================\` on its own line. Drop a section entirely if it has nothing real in it.
+Then these three sections in this order. Drop a section entirely if it has nothing real in it.
+
+**Do not draw divider lines and do not indent the headings.** Write each heading as a plain line on its own, exactly as given below. The equals-sign rules above and below it, and the spacing that centres it, are added for you afterwards. Every one you draw yourself has to be taken back out.
 
 ### :signal_strength: _Active Campaigns_ :signal_strength:
 
@@ -202,8 +204,8 @@ Slack mrkdwn, which is not markdown. *bold* with single asterisks, _italic_ with
 
 The layout, exactly:
 
-- **Section headings** are the emoji, the name in bold italics, and the same emoji again, on their own line: \`*:signal_strength: _Active Campaigns_ :signal_strength:*\`. Use the three given above, spelled exactly that way.
-- **A divider line** of \`=========================================\` on its own line between sections. Not before the first one, not after the last.
+- **Section headings** are the emoji, the name in bold italics, and the same emoji again, on their own line and hard against the left margin: \`*:signal_strength: _Active Campaigns_ :signal_strength:*\`. Use the three given above, spelled exactly that way. Nothing else goes on that line.
+- **No divider lines anywhere.** Never write \`===\`. The rules that fence each heading are added after you are done, and one of yours in the middle of a section cannot be told from one of those.
 - **Items are numbered.** \`1.\`, \`2.\`, \`3.\` at the start of the line.
 - **Sub-bullets** are indented four spaces and start with \`•\`. They belong to the item above them, so there is no blank line between an item and its own sub-bullets. Two at most per item, and never a third.
 - **Two blank lines between one numbered item and the next**, and two after a section heading before its first item. That air is the whole difference between a list somebody can scan and a block they skip past. Err on the side of more space, never less.
@@ -211,10 +213,7 @@ The layout, exactly:
 - **Bold marks the piece of work itself**, not the sentence around it, because a whole line in bold is a line with no emphasis in it. That means the campaign name, the thing to be done, and the thing we are waiting on the client for. Never a sub-bullet. Italics are for the accountability clause and nothing else. Every \`*\` and \`_\` must be closed, since one left open turns the rest of the brief into italics.
 - **Emoji** in the section headings as given, and the one \`:warning:\` line when the runway is short. Nowhere else. A decoration on every bullet is noise.
 
-A worked example of the shape and the spacing, with the content stripped out. Match this spacing exactly:
-
-*Beginning of Week Status:*
-
+A worked example of the shape and the spacing, with the content stripped out. Match this spacing exactly. This is what you write: it opens on the first heading, there is not an equals sign in it, and no line is indented except the sub-bullets.
 
 *:signal_strength: _Active Campaigns_ :signal_strength:*
 
@@ -231,7 +230,6 @@ A worked example of the shape and the spacing, with the content stripped out. Ma
 
 :warning: New leads or a new campaign must be in motion today! Less than 2 days of sending remaining! :warning:
 
-=========================================
 
 *:male-technologist: _Things to work on_ :male-technologist:*
 
@@ -244,7 +242,6 @@ A worked example of the shape and the spacing, with the content stripped out. Ma
 2. <@U02> to *send campaign updates to the client*
     • _said on Aug 12 that updates were coming shortly, nothing has gone out._
 
-=========================================
 
 *:hourglass: _Client Bottlenecks_ :hourglass:*
 
@@ -632,20 +629,6 @@ export function briefHeaderText(workspace: BriefWorkspace, at: Date = new Date()
 }
 
 /**
- * Where in the week today is, which is the brief's opening line.
- *
- * Three mornings a week means the same brief means different things on different days: Monday's is a plan,
- * Friday's is a reckoning. Computed here rather than left to the model, because it is a fact about the
- * calendar and the model has already been told every other fact rather than asked to work one out.
- */
-export function briefStatusTitle(timezone: string, at: Date = new Date()): string {
-  const weekday = at.toLocaleDateString("en-US", { timeZone: timezone, weekday: "long" });
-  if (weekday === "Monday" || weekday === "Sunday") return "Beginning of Week Status";
-  if (weekday === "Friday" || weekday === "Saturday") return "End of Week Status";
-  return "Midweek Status";
-}
-
-/**
  * The standing reminder for whichever day of the week it is, or nothing.
  *
  * Two rituals bracket the week: agreeing the plan on Monday and sending the client their report on Friday.
@@ -663,15 +646,86 @@ export function briefWeekdayNote(timezone: string, at: Date = new Date()): strin
   return "";
 }
 
-/** The divider between sections, shared so the prompt and the footer below cannot drift to different widths. */
+/** The divider, shared so the prompt, the headings and the footer cannot drift to different widths. */
 const BRIEF_DIVIDER = "=".repeat(41);
 /**
- * Slack has no centre alignment, so the indent is the only way to get it off the left margin, which is
+ * Slack has no centre alignment, so the indent is the only way to get a line off the left margin, which is
  * how Kiril centred it by hand. Chosen against the divider's width rather than measured: emoji render
  * about twice as wide as a character and the font is proportional, so exact centring is not available at
  * any indent. This one sits the line under the middle of the divider closely enough to read as centred.
+ *
+ * One constant for the headings and the footer both, because they are the same gesture and two numbers
+ * would eventually centre them to two different places on the same message.
  */
-const FOOTER_INDENT = " ".repeat(8);
+const CENTRE_INDENT = " ".repeat(8);
+
+/**
+ * A section heading, as the model writes it: an emoji, the name in bold italics, the same emoji again.
+ *
+ * Returned normalised rather than as found, so a run that forgot the surrounding asterisks still gets a
+ * heading identical to every other run's. The alternative is a brief whose three headings are formatted
+ * three different ways, which is the kind of thing nobody reports and everybody notices.
+ *
+ * The italics are required, not optional, and that is load bearing. The runway warning is also an emoji,
+ * some words, and the same emoji again: `:warning: New leads ... :warning:`. Matched loosely, it was read
+ * as a heading and fenced into a section of its own with nothing underneath, which put the single most
+ * urgent line in the brief where it looked like a decoration. Underscores are what tells them apart.
+ */
+const briefHeading = (line: string): string => {
+  const match = /^\s*\*?\s*:([a-z0-9_+-]+):\s+_([^_]+)_\s+:([a-z0-9_+-]+):\s*\*?\s*$/i.exec(line);
+  if (!match) return "";
+  const [, left, name, right] = match;
+  return `*:${left}: _${name.trim()}_ :${right}:*`;
+};
+
+/** A divider the model wrote itself. Any run of equals signs counts, since the width is ours to decide. */
+const isBriefDivider = (line: string) => /^\s*={3,}\s*$/.test(line);
+
+/**
+ * The old opening line, `*Midweek Status:*`.
+ *
+ * Kiril took it out: three sections that each announce themselves do not also need a label above them.
+ * It is dropped here as well as removed from the prompt, because a per-client prompt override still
+ * carries the old instruction and would put the line back on one client only.
+ */
+const isStatusTitle = (line: string) => /^\*?[^*]{0,40}status\s*:?\s*\*?$/i.test(line.trim());
+
+/**
+ * The framing round the brief: each heading fenced by a divider and pushed off the left margin.
+ *
+ * Done here rather than asked of the model, for the reason the footer already is. It is fixed padding
+ * around a fixed string, and leading whitespace is the first thing a model tidies away; asked for it,
+ * runs came back with the fence above but not below, or centred by a different number of spaces each
+ * time. Nothing is gained by generating a constant.
+ *
+ * The model's own dividers are dropped on the way through. It still writes them between sections, and
+ * once every heading carries its own fence a leftover one lands as a third line in the middle of a gap.
+ */
+export function briefFraming(body: string): string {
+  const sections: Array<{ heading: string; lines: string[] }> = [];
+  const preamble: string[] = [];
+  for (const line of body.replace(/\r\n/g, "\n").split("\n")) {
+    const heading = briefHeading(line);
+    if (heading) {
+      sections.push({ heading, lines: [] });
+      continue;
+    }
+    if (isBriefDivider(line)) continue;
+    (sections[sections.length - 1]?.lines ?? preamble).push(line);
+  }
+  // No heading found at all means the brief is not in the shape this function understands, and mangling
+  // it would be worse than leaving it alone. Posting something imperfect beats posting something cut up.
+  if (!sections.length) return body.trim();
+  const blocks = sections.map(({ heading, lines }) => {
+    const text = lines.join("\n").replace(/\n{4,}/g, "\n\n\n").trim();
+    const head = `${BRIEF_DIVIDER}\n\n${CENTRE_INDENT}${heading}\n\n${BRIEF_DIVIDER}`;
+    // A heading with nothing under it still gets posted: the model was told to drop empty sections, so if
+    // one arrives empty anyway that is worth seeing rather than hiding behind a tidy-looking brief.
+    return text ? `${head}\n\n${text}` : head;
+  });
+  const opening = preamble.filter((line) => line.trim() && !isStatusTitle(line)).join("\n").trim();
+  return [opening, ...blocks].filter(Boolean).join("\n\n\n");
+}
 
 /**
  * The standing reminder as its own block at the foot of the brief, or nothing.
@@ -684,15 +738,18 @@ const FOOTER_INDENT = " ".repeat(8);
 export function briefWeekdayFooter(timezone: string, at: Date = new Date()): string {
   const note = briefWeekdayNote(timezone, at);
   if (!note) return "";
-  // Fenced by a divider above and below, so it reads as a closing ritual rather than as one more finding.
-  return `${BRIEF_DIVIDER}\n\n${FOOTER_INDENT}${note}\n\n${BRIEF_DIVIDER}`;
+  // Fenced by a divider above and below, so it reads as a closing ritual rather than as one more finding,
+  // and identically to a section heading, since by now that is what a fenced centred line means here.
+  return `${BRIEF_DIVIDER}\n\n${CENTRE_INDENT}${note}\n\n${BRIEF_DIVIDER}`;
 }
 
-/** The brief as it is posted: what the model wrote, then the day's standing reminder under it. */
+/** The brief as it is posted: the model's findings framed, then the day's standing reminder under it. */
 export function briefWithFooter(body: string, timezone: string, at: Date = new Date()): string {
   const footer = briefWeekdayFooter(timezone, at);
-  const text = body.trim();
-  return footer ? `${text}\n\n${footer}` : text;
+  const text = briefFraming(body);
+  // The same two blank lines that separate one section from the next, because the footer is another
+  // fenced block and a smaller gap here would read as though it belonged to the last finding.
+  return footer ? `${text}\n\n\n${footer}` : text;
 }
 
 /** What the model is shown, in the order it should read it. */
@@ -794,12 +851,11 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
   })();
 
   return [
-    // The status title and the weekday note are handed over rather than worked out, like every other fact
-    // here. Monday's brief is a plan and Friday's is a reckoning, and which one today is depends on a
-    // calendar the model has no reason to reason about.
+    // The weekday note is handed over rather than worked out, like every other fact here: which day it is
+    // depends on a calendar the model has no reason to reason about.
     [
       `# Client\n\n${workspace.name}. Today is ${today} in ${timezone}.`,
-      `The brief's opening line is exactly this, bold, with a colon: *${briefStatusTitle(timezone)}:*`,
+      `Open on the first section heading. There is no title line above it.`,
       // The reminder is appended after the model returns, so the model is told it exists and told not to
       // write it. Without the first half it would have no idea why the posted brief has a line it did not
       // write; without the second, today's brief would carry that line twice.
