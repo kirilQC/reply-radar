@@ -57,26 +57,23 @@ Numbers that change should use `font-variant-numeric: tabular-nums` so they don'
 - A clickable card that contains its own buttons is `<div role="button">`, not `<button>`, so the
   nested button stays valid HTML.
 
-## Lint baseline: exactly 6 errors
+## Lint baseline: exactly 18 errors and 67 warnings
 
-Do not "fix" these as drive-by work; do not add a seventh.
+Run `npx eslint .` — **`npx next lint` is broken in this repo.** The number grew from 6 with the Slack
+and morning-brief work; the originals were in `app/api/inbox/route.ts` and `app/page.tsx`. Do not "fix"
+these as drive-by work and do not add a nineteenth. If your change moves either number, that is your
+change, not drift.
 
-| Location | Error |
-|---|---|
-| `app/api/inbox/route.ts:78` | `'latestBody' is assigned a value but never used` |
-| `app/page.tsx:900–902` | three × `react-hooks/use-memo` — dependency list is not simple expressions |
-| `app/page.tsx:1235` | `jsx-a11y/click-events-have-key-events` |
-| `app/page.tsx:1235` | `jsx-a11y/no-static-element-interactions` |
-
-Warnings (mostly `@next/next/no-img-element`) are expected and not tracked.
+Warnings (mostly `@next/next/no-img-element` and unused eslint-disable directives) are counted but not
+individually tracked.
 
 ## Commands
 
 ```bash
 npm run dev
 npm run typecheck     # tsc --noEmit
-npm run lint          # expect exactly 6 errors
-npm test              # node --test tests/*.test.mjs — expect 10 passing
+npm run lint          # expect exactly 18 errors, 67 warnings
+npm test              # node --test tests/*.test.mjs — 341 passing at 8e8f90a
 npm run build
 npm run worker:start
 ```
@@ -96,6 +93,17 @@ with `MODULE_NOT_FOUND`. The glob form is required.
 - **`AI_CANDIDATE_LIMIT` (200) and the 7-day enrichment backoff are constants**, not environment
   variables, despite older notes describing them as env vars.
 - **Explore/Agent subagents fail with "Prompt is too long"** here. Use `Grep` and `Read` directly.
+- **A shell's `cwd` resets to the launch directory after every command.** A scratch script in `/tmp`
+  needs **absolute** import paths, or it fails with `ERR_MODULE_NOT_FOUND` resolving against
+  `/private/tmp/app/…`.
+- **`/api/analytics/client` takes `?client=`**, not `?workspace=`.
+- **There is no `--rr-*` CSS namespace.** The real tokens are `--panel`, `--panel-2`, `--border`,
+  `--border-soft`, `--text`, `--muted`, `--muted-2`, `--accent`, `--green`, `--coral`, `--amber`,
+  `--admin-panel`, `--bg`, `--font`. Invent one and every fallback applies silently — white rows under
+  near-white text. Tint with `color-mix(in srgb, var(--x) N%, var(--panel-2))`.
+- **`.health-shell .admin-content` is `display: flex` with an explicit `order` on every child.** A
+  panel added without a number of its own defaults to `order: 0` and jumps to the top whatever the JSX
+  says.
 - **Kill the port before re-running a harness:** `lsof -ti tcp:<port> | xargs -r kill -9`. `SIGKILL`
   on `npm start` can leave the child listening.
 

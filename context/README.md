@@ -16,12 +16,17 @@ Written to be read in order, but each file stands alone. If you only read one th
 | [`06-product-decisions.md`](06-product-decisions.md) | Decisions the owner has already made, including ones that were reversed. Do not relitigate these. |
 | [`07-verification.md`](07-verification.md) | How to prove a change works when there are no local credentials. The harness pattern. |
 | [`08-session-handoff.md`](08-session-handoff.md) | Where the project stands right now: what shipped recently, what's verified, what's still open. |
+| [`09-morning-brief.md`](09-morning-brief.md) | The Slack morning brief: its sources, the rules that are load-bearing, and why its layout is applied in code rather than asked of the model. |
 
 ## The thirty-second version
 
 Reply Radar is QC Growth's internal LinkedIn reply manager. HeyReach conversations for every client
 land in one inbox; Claude classifies each reply's sentiment and follow-up urgency, scores the lead
 against the client's ICP, and drafts a response — all before anyone opens the thread.
+
+It also writes the **morning brief**: three mornings a week, a short intelligence report per client
+posted into the team's internal Slack channel, built from the figures, both Slack channels, the last
+client call and the QC Brain. See [`09-morning-brief.md`](09-morning-brief.md).
 
 Next.js 16 on Vercel. Supabase reached **only** over the PostgREST REST API. A separate always-on
 Render worker (`worker/render-worker.mjs`) polls HeyReach and drives the AI pipeline by calling the

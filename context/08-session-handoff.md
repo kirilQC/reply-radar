@@ -1,171 +1,181 @@
-# 8. Session handoff — state as of `59b4ba4`
+# 8. Session handoff — state as of `8e8f90a`
 
-Written at the end of the session that produced `ed9f9b2`, `17211f6` and `59b4ba4`. Read this for
-**where the project actually stands right now**; read `01`–`07` for how the system works.
+Read this for **where the project actually stands right now**; read `01`–`07` for how the system
+works, and `09-morning-brief.md` for the feature that has taken up most of the recent sessions.
 
-Everything in this file was true at `59b4ba4` on `main`. If `git log` shows commits after that, trust
+Everything here was true at `8e8f90a` on `main`. If `git log` shows commits after that, trust
 `git log`.
+
+The previous version of this file described the state at `59b4ba4` and is superseded; the parts of it
+worth keeping (the `17211f6` cleanup accounting, the two lessons from it) are summarised under
+*History worth keeping* at the bottom.
 
 ---
 
 ## Where things stand
 
-`main` is clean, pushed, and everything is green:
+`main` is clean and pushed. Green means:
 
 ```
-npm run typecheck   # clean
-npm run lint        # 59 problems, exactly 6 errors — the baseline, see 05
-npm test            # 10 passing
-npm run build       # compiles
+npm test          # 341 passing, 0 failing   (morning-brief.test.mjs alone is most of that)
+npm run typecheck  # clean
+npm run lint       # exactly 18 errors, 67 warnings — the baseline
 ```
 
-Pages that answer `200` on a production build: `/`, `/inbox`, `/admin`, `/database`, `/health`,
-`/analytics`, `/calendar`, `/profiles`, `/reports`.
+**The lint baseline is 18 errors and 67 warnings, not the 6 errors `05-conventions-and-gotchas.md`
+originally recorded.** It grew with the Slack and brief work. Do not "fix" them as drive-by work and
+do not add a nineteenth.
 
-**The heartbeat page is `/health`, not `/heartbeat`.** I lost a minute to that; the docs call the
-feature "heartbeat" throughout, but the route is `/health`.
+`npx next lint` is broken in this repo. Use `npx eslint .`. `npm test` prints a lot, so redirect it
+and grep for `ℹ (pass|fail)`.
 
-## What shipped, most recent first
+## The last several sessions, in one table
+
+Newest first. All pushed.
 
 | Commit | What it did |
 |---|---|
-| `59b4ba4` | Removed the home page's "Performance overview" section. |
-| `17211f6` | Deleted the starter-template remains; wrote `CLAUDE.md` and this `context/` folder. |
-| `ed9f9b2` | Exact totals on the home page and the lead-database heading. |
-| `6de4402` | Person-scoped lead deletion with read-back verification; the inbound-first purge. |
-| `8a308a1` | Vetted scoring defaults for unconfigured clients; the shared prompt library. |
-| `a16ed42` | Lead-initiated conversations dropped from the inbox rather than set aside. |
-| `0eb2dca` | The version of the above that set them aside — **reversed by `a16ed42`**, see `06`. |
-| `8085671` | Accept an `APP_BASE_URL` typed without its scheme. |
-| `f57b7c9` | Analyse every reply in the background, not only unanswered ones. |
+| `8e8f90a` | Rule narrowed to 37 `=`, per-line centring, cascading sub-bullet indents. |
+| `79161f6` | Heading fencing and centring moved into code; `Midweek Status:` title deleted. |
+| `4412e40` | Fixed the Slack health panel's colours, order and three false readings. |
+| `53da14a` | Extra Granola calls and extra Slack channels; the QC Brain as standing context; the automation log. |
+| `dabcc77` | Never name a sender we cannot name; weekday reminder moved to the foot of the brief. |
+| `3a4f476` | Real emojis, wider spacing, zero em dashes, spent campaigns dropped. |
+| `3a34ee6` | The brief's shape rewritten against a hand-written version of the same brief. |
+| `f7f5147` | The brief threaded under a header; each item checked against whether it is already done. |
+| `47fea8a` | The brief made a list of owned work rather than a status report. |
+| `33aa5ea` | Read Slack as a teammate, post as QC Bot. |
+| `3f1c241` | The brief scheduled, and given the client's call. |
 
-### `59b4ba4` in detail
+## The last round of requests, all shipped
 
-The five exact stat tiles made the charts redundant:
+Ten items, all in `53da14a` unless noted:
 
-> "can we get rid of the perfromance review from the dashboard since we now have those replies boxes
-> on the homepage."
+| Item | Where | Verified? |
+|---|---|---|
+| Extra Granola calls behind a plus button | `granola_extra_title_matches text[]` + `findClientCalls` + `ExtraRows` | needs the migration |
+| Extra Slack channels behind a plus button | `slack_extra_channel_ids text[]` + `gatherChannels` | needs the migration |
+| Main vs extra made explicit | prompt, user content, `MAIN ·` labels | tests |
+| Bigger Slack hub cards | `.slack-hub` scoped override | in browser |
+| Schedule behind an on/off switch and an "edit time and date" button | `app/slack/page.tsx` `scheduleOpen` | **not verified** |
+| Exact time and date on "last brief sent" | `formatWhen` | in browser |
+| Internal channel back as a destination inside Generate | `Destination` type + picker | tests |
+| Every Slack automation run visible in System health | `/api/heartbeat` + `app/health/page.tsx` | in browser |
+| The brief AI reading the client brief **and** the QC Brain | `brain-context.ts` + a trace step + prompt | tests |
+| The Granola Test button listing every call it detects | `inspectNotes` + `GranolaKeysView` | **not verified** |
 
-Gone: the `<section className="dashboard-insights">` markup (reply-volume line chart, queue-mix donut,
-workspace snapshot), plus its `analytics` state, its `DashboardAnalytics` type and its `/api/analytics`
-fetch — all dead once the section left. In `dashboard.css`, the `.dashboard-insights` rules went and
-the remaining orders were renumbered to stats → profiles → clients.
+Then two rounds of Slack formatting on top of that (`79161f6`, `8e8f90a`) — see
+`09-morning-brief.md`, which is where the reasoning lives.
 
-Two things worth knowing about this change:
+## Open, and roughly in priority order
 
-1. It took `/api/analytics` **off the home-page load path**, which is a real saving — that route pages
-   through HeyReach. The route still exists for other callers; only the home page stopped calling it.
-2. **The chart CSS was deliberately left in place.** `app/page.tsx` (the inbox) uses `donut-chart`,
-   `chart-area`, `chart-line` and `chart-axis`, and those live inside the *same one-line minified
-   blocks* as the removed section's classes. Editing minified CSS surgically is risk with no payoff.
-   If you are tempted to tidy it, grep the inbox first.
+**The migration has not been run.** Until it is, extra channels and extra calls silently fail to
+save. Paste it in the SQL editor:
 
-### `17211f6` in detail, because the diff looks alarming
+```sql
+alter table if exists rr_workspaces
+  add column if not exists granola_extra_title_matches text[] not null default '{}';
 
-The commit reports **9,387 deletions**, which prompted:
-
-> "woah it says you deleteded 9.3k rows of code. are you sure you didnt delete anything important or
-> anything that would break the front end or backend?"
-
-The honest accounting, which is the useful part:
-
-| | Lines |
-|---|---|
-| `package-lock.json` | 8,310 |
-| One unused starter CSS file | 326 |
-| Everything else, 22 files | 751 |
-| **Live source, untouched** | **11,437** |
-
-Nothing load-bearing went. The method that made that safe: inventory every candidate, grep the whole
-repo for references, and **delete only what is referenced solely by other dead files.** That method is
-also what stopped two mistakes:
-
-- **Tailwind looked like starter cruft but is live** — imported in `globals.css` and using utilities in
-  8 `.tsx` files. Kept.
-- **`worker/job-queue.ts` and `worker/watchdog.ts` had passing tests**, which argues for keeping them,
-  but the code is unwired stubs (`reconcileWorkspace` returns zeros) and `eventKey` was superseded by
-  `app/lib/heyreach-ingestion.ts:114`. Deleted with their tests.
-
-Deleted: `app/_sites-preview/*`, `app/chatgpt-auth.ts`, `build/sites-vite-plugin.ts`, `vite.config.ts`,
-`db/*`, `drizzle.config.ts`, `drizzle/meta/_journal.json`, `examples/d1/**`,
-`types/cloudflare-workers.d.ts`, `.openai/hosting.json`, `worker/{index,job-queue,reconciliation,watchdog,heyreach-client}.ts`,
-`tests/{rendered-html,reply-radar-core}.test.mjs`, and 3 unused starter SVGs from `public/`.
-`public/favicon.svg` and `public/qc-growth-logo.png` **are** referenced and were kept.
-
-Dependencies removed: `drizzle-orm`, `drizzle-kit`, `react-loading-skeleton`,
-`@cloudflare/vite-plugin`, `@vitejs/plugin-react`, `@vitejs/plugin-rsc`, `react-server-dom-webpack`,
-`vinext`, `vite`, `wrangler`. The `db:generate` script went with them.
-
-## Two discoveries from that cleanup that outlive it
-
-**`npm test` had never run the real suite.** The old script only ran a starter test. Fixing it to
-`node --test tests/*.test.mjs` immediately surfaced a failure in
-`tests/heyreach-conversation.test.mjs`: it expected `merged[0].raw.reply_radar.source === "webhook"`
-but got `"history"`.
-
-**The assertion was stale, not the code.** `mergeConversationMessages`
-(`app/lib/heyreach-conversation.ts:124-139`) intentionally keeps the API history row canonical because
-it carries the real message id, and attaches the webhook copy at `raw.webhook_message` so nothing is
-lost. The test now asserts both halves. The lesson: a test that has never executed is not a test.
-
-**Next 16 serves CSS from `/_next/static/chunks/*.css`, not `/_next/static/css/`.** My first
-verification grepped the old path, found zero stylesheets, and reported "tailwind utilities in bundle:
-0" — which looked like I had broken the front end. I hadn't; the check was wrong. Corrected, it found
-2 stylesheets, both `200`, 47,411b and 96,337b, containing `dashboard-stat-tile`, `tabular-nums`,
-`dashboard-stats-section` and Tailwind's `box-sizing:border-box` preflight. **If a verification result
-looks catastrophic, suspect the verification first.**
-
-## How this session verified things
-
-The pattern is in `07-verification.md`; what follows is what it looked like in practice.
-
-For `ed9f9b2` the assertions that carried the weight were about **the PostgREST query strings the
-route emitted**, not the JSON it returned — a stub returns whatever you tell it to, so response checks
-prove almost nothing. `summary-stats.mjs` ended at **17/17**, including the two added for the lead
-heading:
-
-```js
-["the lead heading reports the database total, not the page size",
-  dbUnfiltered.totalLeads === 91_500 && dbUnfiltered.filtered === false],
-["searching switches the heading to a filtered count",
-  dbSearched.filtered === true && typeof dbSearched.totalLeads === "number"],
+alter table if exists rr_workspaces
+  add column if not exists slack_extra_channel_ids text[] not null default '{}';
 ```
 
-For the cleanup, a passing build was **not** treated as sufficient, because "it compiles" does not
-answer "would this break the front end". Instead: zero dangling references across all remaining
-source, all 9 pages fetched and `200`, both CSS bundles loaded and inspected, all 4 harnesses re-run
-and passing, `node --check` on the worker, and both `shared/*.mjs` imported cleanly.
+`supabase/schema.sql` and `supabase/migrations/20260818_morning_brief_extra_sources.sql` both already
+carry them. The route reads with a two-select fallback, so a database without the migration still
+writes briefs — it just writes them from the two channels and the one call.
 
-Harnesses live in `/tmp/rr-harness/` and are **deliberately uncommitted** — they hardcode ports and an
-absolute `cwd`. `/tmp` does not survive a reboot; recreate them from the pattern in `07`. Always
-`lsof -ti tcp:<port> | xargs -r kill -9` first, because `SIGKILL` on `npm start` leaves the child
-listening and you will otherwise debug a stale server.
+**Willow has no per-sender rows in `rr_daily_stats`**, so its briefs say "3 senders" with no names.
+Not a brief bug; the ingestion never wrote them.
 
-## Pending and unresolved
+**The worker sends scheduled briefs to the test channel.** `worker/render-worker.mjs:1289` defaults
+`destination` to `"test"`, so an 8am scheduled brief lands in `#kiril-automation` rather than the
+client's internal channel. Deliberate while the format was being tuned; now worth changing.
 
-**Watch the first deploy after `17211f6`.** It changed `package.json` and `package-lock.json`, so
-Vercel and Render both do a fresh install. If either build fails, it is the dependency removal — revert
-only those two files; the file deletions are independent of them. This had not yet been confirmed when
-the session ended.
+**`/invite @QC Bot`** into each client's internal and external channels — `canPost: false` on some.
 
-**An unanswered request from much earlier, truncated mid-sentence:** "i also want to make it a little
-easier for my teammates trying to…". The shared prompt library in `8a308a1` may have been the intent,
-but it was never confirmed. Worth asking rather than guessing.
+**Other teammates' Granola keys** are not added, so their calls are invisible to the brief.
 
-**Open questions, both untouched:**
+**The 60-second Hobby function ceiling** has not been re-measured since the brain fetch and the extra
+transcripts were added to the brief route. There is a test asserting the route's own budget; the real
+wall clock is untested.
 
-- Should the worker's `APP_BASE_URL` point at `replyradar.app` rather than the `.vercel.app`
-  deployment? Never answered.
-- Subdomain analytics needs `ROOT_DOMAIN`, wildcard DNS, and the wildcard domain added in Vercel. None
-  of it is configured.
+**No UI for the per-client prompt override** (`morning_brief_prompt_<slug>`).
 
-## If you are picking this up cold
+Carried from earlier and still true: no auth on any page; the `AppSidebar.tsx:124` hydration bug; the
+Inbox Hot/Warm tier filters return zero rows; the theme panel nulls `custom_system_prompt`;
+`ROOT_DOMAIN`/`APP_BASE_URL` and wildcard DNS are unconfigured; `rr_sync_runs` has no retention SQL
+applied.
 
-Read `CLAUDE.md` first — it loads automatically and lists the eight things that catch everyone out.
-Then `04-issues-and-fixes.md`, which is where the expensive lessons are, and `06-product-decisions.md`
-before proposing any UI change, because several obvious-looking ideas have already been rejected.
+## How to verify things here
 
-The three that will bite you fastest: **`app/page.tsx` is the inbox, not the home page**;
-**`supabase/schema.sql` has drifted from production**, so check the real columns before writing a
-query; and **a lead is a person, not a row**, so anything lead-scoped must span every `rr_leads` row
-sharing a `linkedin_profile_url`.
+`07-verification.md` has the harness pattern. Three things this recent work added to it:
+
+**Browser verification catches what tests cannot.** The Slack health panel passed tests, types and
+lint, and then had five real bugs visible on screen: invented CSS variables painting white-on-white,
+a panel ordered above the client summary, a preview row tinted as a delivery, a raw column value
+printed as a status, and a diagnosis asserted from no data. Open the page.
+
+**Rendering output catches what tests cannot, either.** The runway-warning-as-heading bug
+(`09-morning-brief.md`) was invisible to the whole suite and obvious the moment a realistic brief was
+printed with spaces made visible:
+
+```js
+console.log(briefWithFooter(body, "America/New_York", new Date(day)).replace(/ /g, "\u00b7"));
+```
+
+**`destination: "preview"` is a safe production probe.** `POST /api/slack/brief` with it writes
+nothing to Slack, so the deployed behaviour can be measured rather than argued about from a
+screenshot. And check `git log -1 --format=%ci` against the clock before believing a change did not
+deploy.
+
+**The real CSS tokens are** `--panel`, `--panel-2`, `--border`, `--border-soft`, `--text`, `--muted`,
+`--muted-2`, `--accent`, `--green`, `--coral`, `--amber`, `--admin-panel`, `--bg`, `--font`. There is
+**no `--rr-*` namespace**; inventing one silently applies every fallback and the result is invisible
+text. `color-mix(in srgb, var(--x) N%, var(--panel-2))` is the established tint pattern.
+
+## Standing constraints worth restating
+
+Beyond `05-conventions-and-gotchas.md`:
+
+- **No new runtime dependencies.** `next`, `react`, `react-dom`, `@vercel/speed-insights`,
+  `@vercel/analytics`. Raw `fetch` only.
+- **Data visualisations are CSS divs, never SVG.**
+- **The stylesheet cascade ends at `app/integrity-refinements.css`.** Append there rather than editing
+  shared files, so a change made for one card cannot resize a hub of twelve.
+- **`shared/*.mjs` is plain ESM, imported with the `.mjs` extension.**
+- **Push without asking.** `main` is the release.
+- **Paste SQL inline in chat.** Never point at a migration file path.
+- **Keep explanatory prose out of the UI.** Titles, counts, clickable examples. No blurbs.
+- **Desktop must not change** when mobile is being worked on.
+- **PDF is `window.print()` only.**
+- **Every new source file carries the watermark banner** — `npm run watermark`.
+- **Brain writes are a branch and a PR**, never a direct commit.
+- The MCP tab stays labelled "MCP".
+
+## Traps that cost time recently
+
+- **Bash `cwd` resets** to the launch directory after every command, so a scratch script in `/tmp`
+  needs **absolute** import paths or it fails with `ERR_MODULE_NOT_FOUND` against `/private/tmp/app/…`.
+- **`/api/analytics/client` takes `?client=`**, not `?workspace=`.
+- **Explore/Agent subagents fail with "Prompt is too long"** in this repo. Use `Grep` and `Read`.
+- **PostgREST fails a whole read over one unknown column**, so an additive column needs a two-select
+  fallback and a `delete legacyRecord.<column>` in the write fallback.
+- **The heartbeat page is `/health`**, not `/heartbeat`, though the docs call the feature heartbeat.
+
+## History worth keeping
+
+From the `17211f6` cleanup, because the numbers still get questioned: of its 9,387 deletions, 8,310
+were `package-lock.json`, 326 an unused starter stylesheet, and 751 across 22 dead files. Live source
+was untouched. What made it safe: inventory every candidate, grep the whole repo, and **delete only
+what is referenced solely by other dead files.** That method caught two near-mistakes — Tailwind looks
+like starter cruft but is live in `globals.css` and 8 components, and `worker/job-queue.ts` had
+*passing tests* despite being an unwired stub.
+
+Two lessons from it that still apply:
+
+**A test that has never executed is not a test.** `npm test` had only ever run a starter file; fixing
+the script surfaced a real stale assertion immediately.
+
+**If a verification result looks catastrophic, suspect the verification first.** Next 16 serves CSS
+from `/_next/static/chunks/*.css`, not `/_next/static/css/`, and grepping the old path reported zero
+stylesheets, which looked like a broken front end and was a broken check.
