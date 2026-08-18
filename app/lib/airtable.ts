@@ -233,7 +233,10 @@ async function airtableSend<T>(method: "POST" | "PATCH" | "DELETE", path: string
       const detail = (body as { error?: { message?: string; type?: string } })?.error;
       const message =
         response.status === 401 ? "Airtable rejected the token. Check AIRTABLE_API_KEY."
-          : response.status === 403 ? "The token cannot write to this base. It needs data.records:write."
+          // Airtable's own wording, when it gave one. A 403 on a record write means the token is short
+          // of `data.records:write`; the same status on a schema write means `schema.bases:write`, and
+          // a fixed sentence naming one of them sends whoever reads it to the wrong token setting.
+          : response.status === 403 ? String(detail?.message || "The token cannot write to this base. It needs data.records:write, and schema.bases:write to create tables.")
             : response.status === 429 ? "Airtable rate limit hit. It clears after 30 seconds."
               : String(detail?.message || detail?.type || `Airtable returned ${response.status}.`);
       return { ok: false, error: message, status: response.status };
@@ -293,6 +296,25 @@ export async function deleteRecords(baseId: string, tableId: string, ids: string
     const result = await airtableSend<{ records?: { id: string }[] }>("DELETE", `/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}?${query}`);
     return result.ok ? { ok: true, data: (result.data?.records ?? []).map((record) => String(record.id ?? "")) } : result;
   });
+}
+
+/** One field as Airtable's schema API wants it written. `options` is field-type specific and untyped here. */
+export type AirtableFieldSpec = { name: string; type: string; description?: string; options?: Record<string, unknown> };
+
+/**
+ * A new table in a client's base.
+ *
+ * Only ever called for a table that is not there. Nothing in this file renames, retypes or deletes an
+ * existing one: a client base is somebody's working system, and the worst outcome available to a
+ * schema writer is changing a column other people already have views and formulas pointed at.
+ */
+export async function createTable(baseId: string, name: string, description: string, fields: AirtableFieldSpec[]): Promise<AirtableResult<AirtableTable>> {
+  return airtableSend<AirtableTable>("POST", `/meta/bases/${encodeURIComponent(baseId)}/tables`, { name, description, fields });
+}
+
+/** One new field on a table that already exists. Same rule: additive only. */
+export async function createField(baseId: string, tableId: string, field: AirtableFieldSpec): Promise<AirtableResult<AirtableField>> {
+  return airtableSend<AirtableField>("POST", `/meta/bases/${encodeURIComponent(baseId)}/tables/${encodeURIComponent(tableId)}/fields`, field);
 }
 
 /**

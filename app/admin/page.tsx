@@ -319,6 +319,7 @@ export default function AdminPage() {
   const [tracker, setTracker] = useState<{ ready: boolean; campaigns: TableAudit; actionItems: TableAudit; needsSplit: boolean; legacyTable: { name: string } | null } | null>(null);
   const [trackerState, setTrackerState] = useState<"idle" | "checking" | "error">("idle");
   const [trackerError, setTrackerError] = useState("");
+  const [trackerChecks, setTrackerChecks] = useState(0);
   useEffect(() => {
     const baseId = workspaceDraft.airtableBaseId;
     if (!baseId) { setTracker(null); setTrackerState("idle"); setTrackerError(""); return; }
@@ -333,7 +334,32 @@ export default function AdminPage() {
       })
       .catch(() => { if (!cancelled) { setTracker(null); setTrackerState("error"); setTrackerError("That base could not be read."); } });
     return () => { cancelled = true; };
-  }, [workspaceDraft.airtableBaseId]);
+  }, [workspaceDraft.airtableBaseId, trackerChecks]);
+
+  /*
+   * The one place in the app that changes the structure of a client's base, so it is a button and not
+   * a repair the audit does for you. It only ever adds, and it reports every table and column by name
+   * — somebody has to be able to tell their client exactly what appeared in their workspace.
+   */
+  const [buildState, setBuildState] = useState<"idle" | "building">("idle");
+  const [buildNote, setBuildNote] = useState("");
+  const buildTrackers = async () => {
+    const baseId = workspaceDraft.airtableBaseId;
+    if (!baseId || buildState === "building") return;
+    setBuildState("building");
+    setBuildNote("");
+    try {
+      const response = await fetch("/api/airtable/tracker", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ baseId }) });
+      const payload = await response.json();
+      const lines = [...(payload?.created ?? []), ...(payload?.added ?? []).map((line: string) => `Added ${line}.`), ...(payload?.skipped ?? []), ...(payload?.problems ?? [])];
+      setBuildNote(lines.length ? lines.join(" ") : String(payload?.error ?? "Nothing came back."));
+    } catch {
+      setBuildNote("That base could not be reached.");
+    } finally {
+      setBuildState("idle");
+      setTrackerChecks((count) => count + 1);
+    }
+  };
   // Echoed back as the writer will read it, same as the Slack and Granola notes: the failure worth
   // catching is a base that is mapped, saves cleanly, and has no tracker table to write into.
   const airtableNote = (() => {
@@ -747,9 +773,12 @@ export default function AdminPage() {
                         </select>
                       </label>
                       <p className="slack-channel-note">{airtableNote}</p>
-                      {tracker && !tracker.ready && !tracker.needsSplit && (
-                        <p className="slack-channel-note">Fix it in Airtable, then reopen this tab to re-check.</p>
+                      {tracker && !tracker.ready && (
+                        <button className="secondary-button" type="button" onClick={buildTrackers} disabled={buildState === "building"}>
+                          {buildState === "building" ? "Building" : "Build the tables"}
+                        </button>
                       )}
+                      {buildNote && <p className="slack-channel-note">{buildNote}</p>}
                     </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
