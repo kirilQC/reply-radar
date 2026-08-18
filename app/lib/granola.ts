@@ -19,7 +19,7 @@
  * brief then says which source it was missing, which is what gets it fixed.
  */
 
-import { callAgeDays, normalizeNote, parseDomains, pickLatestCall, transcriptText, type GranolaNote } from "./granola-match";
+import { callAgeDays, emailBearingFields, normalizeNote, parseDomains, pickLatestCall, transcriptText, type GranolaNote } from "./granola-match";
 
 const BASE = "https://public-api.granola.ai/v1";
 /** Granola's list endpoint caps at 30, and one page is several weeks of one person's meetings. */
@@ -172,7 +172,20 @@ export async function findClientCall(
 export type NoteSighting = {
   keyLabel: string;
   error: string;
-  notes: Array<{ id: string; title: string; startedAt: number; domains: string[] }>;
+  /**
+   * The field names the API actually returned, from the first note. When every note matches no domain,
+   * this says whether an attendee field was even in the response — which is the difference between a
+   * one-line parser fix and a second request per note.
+   */
+  fields: string[];
+  notes: Array<{
+    id: string;
+    title: string;
+    startedAt: number;
+    domains: string[];
+    /** Where addresses actually are in this note, when `domains` says the matcher found none. */
+    emailFields: Array<{ field: string; domains: string[] }>;
+  }>;
 };
 
 export async function inspectNotes(keys: GranolaKey[], windowDays: number): Promise<NoteSighting[]> {
@@ -184,15 +197,22 @@ export async function inspectNotes(keys: GranolaKey[], windowDays: number): Prom
       return {
         keyLabel: key.label || "A Granola key",
         error: "",
+        fields: Object.keys((notes[0] ?? {}) as Row).sort(),
         // A note `normalizeNote` refused could never have been chosen as a client's call either, so
         // leaving it out keeps this list honest about what was actually in play.
         notes: notes
-          .map((raw) => normalizeNote(raw))
-          .filter((note): note is GranolaNote => Boolean(note))
-          .map((note) => ({ id: note.id, title: note.title, startedAt: note.startedAt, domains: note.domains })),
+          .map((raw) => ({ raw, note: normalizeNote(raw) }))
+          .filter((pair): pair is { raw: unknown; note: GranolaNote } => Boolean(pair.note))
+          .map(({ raw, note }) => ({
+            id: note.id,
+            title: note.title,
+            startedAt: note.startedAt,
+            domains: note.domains,
+            emailFields: emailBearingFields(raw),
+          })),
       };
     } catch (error) {
-      return { keyLabel: key.label || "A Granola key", error: error instanceof Error ? error.message : "could not be read.", notes: [] };
+      return { keyLabel: key.label || "A Granola key", error: error instanceof Error ? error.message : "could not be read.", fields: [], notes: [] };
     }
   }));
 }

@@ -89,10 +89,14 @@ export async function GET(request: Request) {
         key: sighting.keyLabel,
         error: sighting.error,
         matched: sighting.notes.filter((note) => note.domains.some((domain) => domains.includes(domain))).length,
+        // The field names the API returned, so "no attendees anywhere" is distinguishable from
+        // "attendees under a name the matcher does not sweep".
+        fields: sighting.fields,
         notes: sighting.notes.map((note) => ({
           title: note.title,
           when: note.startedAt ? new Date(note.startedAt).toISOString().slice(0, 10) : "no date",
           domains: note.domains,
+          emailFields: note.emailFields,
         })),
       })),
     },

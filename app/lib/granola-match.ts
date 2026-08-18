@@ -71,6 +71,36 @@ export function noteDomains(raw: unknown): string[] {
   return [...found];
 }
 
+/**
+ * Which of a note's own fields contain something shaped like an email address.
+ *
+ * `noteDomains` sweeps a fixed list of field names, which is a guess about a payload shape that has moved
+ * between API versions. When it comes back empty for a call the client was definitely in, there are two
+ * possibilities needing opposite fixes: the addresses are under a field name not on that list, or they are
+ * not in this response at all and have to be fetched per note. This names every field that holds one, so
+ * the answer is a field name rather than another guess.
+ *
+ * Field names and domains only — never a local part, never a body. A diagnostic that leaks the attendee
+ * list of every meeting in the account is a worse problem than the one it solves.
+ */
+export function emailBearingFields(raw: unknown): Array<{ field: string; domains: string[] }> {
+  const note = (raw ?? {}) as Row;
+  const found: Array<{ field: string; domains: string[] }> = [];
+  for (const [field, value] of Object.entries(note)) {
+    if (value === null || value === undefined) continue;
+    let blob = "";
+    try {
+      blob = typeof value === "string" ? value : JSON.stringify(value);
+    } catch {
+      continue;
+    }
+    const domains = new Set<string>();
+    for (const match of blob.matchAll(EMAIL)) domains.add(match[1].toLowerCase());
+    if (domains.size) found.push({ field, domains: [...domains] });
+  }
+  return found;
+}
+
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 
 /** Epoch ms from whichever of the date fields the note actually carried. */
