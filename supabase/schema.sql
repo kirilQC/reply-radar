@@ -28,6 +28,15 @@ create table if not exists rr_workspaces (
   -- channel id is configuration a teammate pastes in, not an AI guardrail. Slack ids, not names — a
   -- channel renamed in Slack keeps its id, and a name would silently stop resolving.
   slack_internal_channel_id text, slack_external_channel_id text,
+  -- Whether the scheduled morning brief may send for this client. False by default, deliberately: a
+  -- client added on a Tuesday must not post into a channel on Wednesday morning before anybody has read
+  -- one of its briefs. Opting in is a decision somebody makes on the Slack tab, once.
+  morning_brief_enabled boolean not null default false,
+  -- The client's own email domains, comma separated, used to find their weekly call in Granola. Matched
+  -- against the attendee list rather than the meeting title because our titles do not contain the client
+  -- name anyway — "QC - Willow Weekly Team Sync" is the Webrix account — and titles get renamed, while
+  -- who was in the room does not change.
+  granola_domains text,
   last_webhook_received_at timestamptz, last_successful_poll_at timestamptz, last_reconciled_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
@@ -310,6 +319,49 @@ create table if not exists rr_slack_briefs (
   status text not null default 'success',
   error_text text,
   created_at timestamptz not null default now()
+);
+
+/*
+ * One Granola API key per teammate, because no single person is in every client call.
+ *
+ * Granola keys are scoped to the person who made them, so Kiril's key cannot see the transcript of a
+ * call he was not on. Ten keys between the team covers every account, and finding a client's call means
+ * asking each key in turn until one of them has it. That is why this is a table of keys rather than one
+ * env var: the set grows as the team does, and it changes without a deploy.
+ *
+ * The key is stored in full because the API needs it in full, and there is nothing to compare it
+ * against the way a password hash would be. Nothing reads it back out to a browser — the route masks
+ * every key to its last four characters — so the exposure is the database, same as the HeyReach keys.
+ */
+create table if not exists rr_granola_keys (
+  id uuid primary key default gen_random_uuid(),
+  -- Whose key it is, so a key that stops working can be handed back to the right person.
+  label text not null default '',
+  api_key text not null,
+  -- Written by the "Test" button and by every brief run, so a revoked key shows as broken on the page
+  -- instead of quietly contributing nothing to every brief.
+  last_checked_at timestamptz, last_status text, last_error text,
+  created_at timestamptz not null default now()
+);
+
+/*
+ * The schedule, and whether the automation is on at all. One row per automation, keyed by its name.
+ *
+ * A table rather than an app-config entry because the worker filters on these columns every couple of
+ * minutes and the whole row is read as a unit. `send_days` uses JavaScript's own day numbering (0 is
+ * Sunday) so the worker can compare it against `getDay()` in the configured timezone without a lookup
+ * table in between — the kind of off-by-one that would send Tuesday's brief on Monday.
+ */
+create table if not exists rr_slack_automations (
+  automation text primary key,
+  enabled boolean not null default false,
+  send_days smallint[] not null default '{1,3,5}',
+  send_hour smallint not null default 8,
+  send_minute smallint not null default 0,
+  timezone text not null default 'America/New_York',
+  -- Where a scheduled run posts. 'test' while it is being tuned, 'internal' once it is trusted.
+  destination text not null default 'test',
+  updated_at timestamptz not null default now()
 );
 
 create index if not exists rr_workspaces_created_idx on rr_workspaces(created_at);

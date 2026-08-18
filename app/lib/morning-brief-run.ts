@@ -13,12 +13,15 @@
 
 import {
   BRIEF_WINDOW_DAYS,
+  CALL_WINDOW_DAYS,
   DEFAULT_MORNING_BRIEF_PROMPT,
   morningBriefPromptKey,
+  type BriefCall,
   type BriefInputs,
   type BriefWorkspace,
 } from "./morning-brief";
 import { channelHistory, resolveUserNames, transcript } from "./slack";
+import { findClientCall, type GranolaKey } from "./granola";
 import { readConfig } from "./app-config";
 
 const MODEL = "claude-sonnet-4-6";
@@ -26,8 +29,11 @@ const MODEL = "claude-sonnet-4-6";
 const MAX_MESSAGES = 200;
 /** A brief is 120–300 words by design, so this is headroom rather than a target. */
 const MAX_OUTPUT_TOKENS = 1_400;
-/** Inside Hobby's 60s function ceiling, with room to write the row afterwards. */
-const REQUEST_TIMEOUT_MS = 45_000;
+/**
+ * Inside Hobby's 60s function ceiling, with room for the two Granola calls that now run first and for
+ * writing the row afterwards. Was 45s, which left nothing for the transcript fetch.
+ */
+const REQUEST_TIMEOUT_MS = 40_000;
 
 type Row = Record<string, unknown>;
 
@@ -64,6 +70,33 @@ export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<Br
     readChannel(String(workspace.slack_external_channel_id ?? "")),
   ]);
   return { internal, external };
+}
+
+/** Every stored Granola key. Read on each run so a key added minutes ago is used by the next brief. */
+export async function granolaKeys(read: (path: string) => Promise<unknown>): Promise<GranolaKey[]> {
+  const rows = await read("rr_granola_keys?select=id,label,api_key&order=created_at.asc").catch(() => []);
+  return (Array.isArray(rows) ? (rows as Row[]) : [])
+    .map((row) => ({ id: String(row.id ?? ""), label: String(row.label ?? ""), apiKey: String(row.api_key ?? "") }))
+    .filter((key) => key.apiKey);
+}
+
+/**
+ * The client's last call, or the reason there isn't one.
+ *
+ * Never throws. A missing transcript is one of three sources going quiet, and the brief is more useful
+ * with two sources and a line saying what it is missing than not written at all.
+ */
+export async function gatherCall(
+  read: (path: string) => Promise<unknown>,
+  workspace: BriefWorkspace,
+): Promise<{ call: BriefCall | null; callReason?: string; errors: string[] }> {
+  try {
+    const keys = await granolaKeys(read);
+    const found = await findClientCall(keys, workspace.granola_domains, CALL_WINDOW_DAYS);
+    return { call: found.call, callReason: found.reason, errors: found.errors };
+  } catch (error) {
+    return { call: null, callReason: error instanceof Error ? error.message : "The call transcript could not be read.", errors: [] };
+  }
 }
 
 /** Calls Anthropic once and returns the brief. One call, because a brief is short by design. */

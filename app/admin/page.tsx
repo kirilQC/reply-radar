@@ -11,11 +11,13 @@ import Crumb from "../components/Crumb";
 import { defaultFollowUpPrompt, defaultIcpPrompt, FOLLOW_UP_TEMPLATES, ICP_TEMPLATES, MIN_CLIENT_BRIEF_LENGTH, type ScoringTemplate, templateLabel } from "../lib/scoring-templates";
 import { brainFolderFor } from "../../shared/brain-link.mjs";
 import { looksLikeChannelId, normalizeChannelId } from "../lib/slack-channel";
+import { parseDomains } from "../lib/granola-match";
 
 /** What the breadcrumb calls each configuration section. */
 const adminSectionLabels: Record<string, string> = {
   workspaces: "Client directory",
   "ai-hub": "AI",
+  granola: "Granola keys",
   ai: "AI context",
   scoring: "Scoring engine",
   heartbeat: "Heartbeat",
@@ -43,6 +45,7 @@ type ClientWorkspace = {
   brainFolder?: string;
   slackInternalChannelId?: string;
   slackExternalChannelId?: string;
+  granolaDomains?: string;
   anthropicModel?: string;
   systemPrompt?: string;
   webhookUrl?: string;
@@ -64,7 +67,13 @@ type HeartbeatPayload = {
 };
 
 export default function AdminPage() {
-  const [active, setActive] = useState("workspaces");
+  // Read once from the URL so other pages can link to a section rather than to "the configuration page,
+  // now find it yourself". Anything unrecognised falls back to the directory.
+  const [active, setActive] = useState(() => {
+    if (typeof window === "undefined") return "workspaces";
+    const requested = new URLSearchParams(window.location.search).get("section") ?? "";
+    return requested in adminSectionLabels ? requested : "workspaces";
+  });
   const [workspaceClients, setWorkspaceClients] = useState(initialClients);
   const [workspaceStorageReady, setWorkspaceStorageReady] = useState(false);
   const [selected, setSelected] = useState(0);
@@ -89,7 +98,7 @@ export default function AdminPage() {
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))] ?? { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced" };
-  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "" });
+  const [workspaceDraft, setWorkspaceDraft] = useState({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", granolaDomains: "" });
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -112,7 +121,7 @@ export default function AdminPage() {
             lastSync: String(item.last_successful_poll_at ?? "not synced"), createdAt: String(item.created_at ?? ""),
             brief: String(item.client_brief ?? ""), apiKey: "", apiKeyMasked: String(item.heyreach_api_key_masked ?? ""), timezone: String(item.timezone ?? "America/New_York"), website: String(item.website_url ?? ""), anthropicModel: String(item.anthropic_model ?? ""), systemPrompt: String(item.custom_system_prompt ?? ""), webhookUrl: String(item.webhook_url ?? ""), keyConfigured: Boolean(item.key_configured),
             logoUrl: String(item.logo_url ?? ""), brainFolder: String(item.brain_folder ?? ""),
-            slackInternalChannelId: String(item.slack_internal_channel_id ?? ""), slackExternalChannelId: String(item.slack_external_channel_id ?? ""),
+            slackInternalChannelId: String(item.slack_internal_channel_id ?? ""), slackExternalChannelId: String(item.slack_external_channel_id ?? ""), granolaDomains: String(item.granola_domains ?? ""),
             guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {},
           }));
           setWorkspaceClients(hydratedClients);
@@ -137,7 +146,7 @@ export default function AdminPage() {
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "" });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", granolaDomains: client.granolaDomains ?? "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -156,7 +165,7 @@ export default function AdminPage() {
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
     const mutationIdentity = isNewWorkspace ? { create: true } : { id: client.id, previousSlug: client.slug };
     const nextGuardrails = { ...(client.guardrails ?? {}), messaging_doc_url: workspaceDraft.messagingDocUrl.trim() };
-    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
+    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, granolaDomains: workspaceDraft.granolaDomains, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
     if (!response?.ok) {
       const detail = await response?.json().catch(() => ({}));
       setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
@@ -167,7 +176,7 @@ export default function AdminPage() {
     const payload = await response.json().catch(() => ({}));
     const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] : null;
     const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaDomains: String(savedRow?.granola_domains ?? workspaceDraft.granolaDomains), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
     setWorkspaceClients(next);
     setWorkspaceDraft((draft) => ({ ...draft, apiKey: "" }));
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
@@ -233,6 +242,15 @@ export default function AdminPage() {
     if (internal && external) return "The internal channel is read for what the team committed to. The external channel is read for anything the client asked that nobody answered. The Reply Radar bot has to be invited to both.";
     if (internal || external) return `Only the ${internal ? "internal" : "external"} channel is set. A brief will still be written, but it will be missing whatever the other channel would have told it.`;
     return "Briefs need at least one channel. Paste the channel id, or the channel URL, and the id will be read out of it.";
+  })();
+  // Echoed back parsed rather than as typed, because the failure this catches is a plausible-looking
+  // entry that matches nothing — a bare company name, or the client's own person rather than their domain.
+  const granolaDomainNote = (() => {
+    const raw = workspaceDraft.granolaDomains.trim();
+    if (!raw) return "Without a domain this client's call cannot be found, and their brief goes out without it.";
+    const domains = parseDomains(raw);
+    if (!domains.length) return "None of that is an email domain. Use the part after the @ — webrix.ai, not Webrix.";
+    return `Any meeting with somebody at ${domains.join(" or ")} counts as this client's call.`;
   })();
   const accentColor = accentOverrides[client.slug] ?? client.tone;
   const workspaceLogo = logos[client.slug] ?? client.logoUrl ?? "";
@@ -300,6 +318,12 @@ export default function AdminPage() {
               >
                 <span>✦</span>AI
               </button>
+              <button
+                className={active === "granola" ? "active" : ""}
+                onClick={() => setActive("granola")}
+              >
+                <span>◉</span>Granola keys
+              </button>
               <div className="admin-nav-caption system-caption">SYSTEM</div>
               {[
                 ["feedback", "Feedback", "✎"],
@@ -316,7 +340,7 @@ export default function AdminPage() {
               ))}
             </aside>
             <section className={`admin-content ${active === "audit" ? "audit-content" : ""}`}>
-              {active !== "ai-hub" && <div className="admin-heading">
+              {active !== "ai-hub" && active !== "granola" && <div className="admin-heading">
                 <div>
                   <h1 className={active === "workspaces" ? (workspaceOpen ? "client-config-heading" : "workspace-directory-page-title") : undefined}>
                     {active === "workspaces" && workspaceOpen ? <>{workspaceLogo ? <img className="admin-client-heading-logo" src={workspaceLogo} alt="" /> : <span className="admin-client-heading-logo" style={{ background: accentColor }}>{client.name[0] || "?"}</span>}{client.name || "New workspace"}</> : active === "workspaces"
@@ -538,6 +562,17 @@ export default function AdminPage() {
                           round sends the team's own notes to the client. */}
                       <p className="slack-channel-note">{slackChannelNote}</p>
                     </section>
+                    <section className="admin-panel client-config-section" id="client-granola">
+                      <div className="panel-heading"><div><h2>Call transcripts</h2><p>Which Granola meeting belongs to this client.</p></div><span className="saved-dot">● Auto-saved</span></div>
+                      <label className="field-label">
+                        CLIENT EMAIL DOMAINS
+                        <input value={workspaceDraft.granolaDomains} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, granolaDomains: event.target.value }))} placeholder="webrix.ai, emahealth.ai" />
+                      </label>
+                      {/* Matched on who was in the room, not on the meeting name: our own titles do not
+                          contain the client's company — "QC - Willow Weekly Team Sync" is the Webrix
+                          account — and a renamed calendar entry would silently stop matching. */}
+                      <p className="slack-channel-note">{granolaDomainNote}</p>
+                    </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
                       <div className="logo-drop">{workspaceLogo ? <img className="logo-sample" src={workspaceLogo} alt={`${client.name} logo`} /> : <div className="logo-sample" style={{ background: accentColor }}>{client.name[0] || "?"}</div>}<div><strong>Upload client logo</strong><small>SVG, PNG, JPG · max 2MB</small></div><button className="secondary-button" type="button" onClick={chooseLogo}>Choose file</button><input ref={logoInput} type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={handleLogo} /></div>
@@ -548,6 +583,7 @@ export default function AdminPage() {
                 </>
               )}
               {active === "ai-hub" && <AiHubView />}
+              {active === "granola" && <GranolaKeysView />}
               {active === "ai" && (
                 <div className="admin-grid">
                   <section className="admin-panel">
@@ -889,6 +925,114 @@ const readScreenshot = (file: File) =>
     };
     reader.readAsDataURL(file);
   });
+
+type GranolaKeyRow = { id: string; label: string; masked: string; lastCheckedAt: string | null; lastStatus: string; lastError: string };
+
+/**
+ * One Granola key per teammate.
+ *
+ * A key sees only its owner's meetings, so no single key covers the roster — Kiril is not on the Bluevia
+ * weekly and Kori is not on the Cotool one. Ten keys between them do cover it, which is why this is a
+ * list anyone can add to rather than one field in an environment variable.
+ *
+ * Keys never come back from the server: what is listed is the last four characters. Editing a key is
+ * therefore removing it and adding the new one, which is deliberate — an amendable field would have to
+ * be pre-filled, and pre-filling means the key travels back to a browser.
+ */
+function GranolaKeysView() {
+  const [keys, setKeys] = useState<GranolaKeyRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [label, setLabel] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState("");
+
+  const load = async () => {
+    const response = await fetch("/api/granola/keys", { cache: "no-store" }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    if (!response?.ok) {
+      setError(String(payload?.error || "The Granola keys could not be read."));
+      setKeys([]);
+    } else {
+      setError("");
+      setKeys(Array.isArray(payload?.keys) ? payload.keys : []);
+    }
+    setLoading(false);
+  };
+  useEffect(() => { void load(); }, []);
+
+  const addKey = async () => {
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/granola/keys", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: label.trim(), apiKey: apiKey.trim() }) }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    setSaving(false);
+    if (!response?.ok || !payload?.ok) {
+      setError(String(payload?.error || "The key could not be saved."));
+      return;
+    }
+    setLabel("");
+    setApiKey("");
+    await load();
+  };
+
+  const checkKey = async (id: string) => {
+    setBusyId(id);
+    await fetch("/api/granola/keys", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "check", id }) }).catch(() => null);
+    setBusyId("");
+    await load();
+  };
+
+  const removeKey = async (id: string) => {
+    setBusyId(id);
+    await fetch(`/api/granola/keys?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => null);
+    setBusyId("");
+    await load();
+  };
+
+  const working = keys.filter((key) => key.lastStatus !== "error").length;
+  return (
+    <section className="admin-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>Granola keys</h2>
+          {/* Two counts, because the gap between them is the whole point: a key that stopped working
+              still looks like coverage on the morning brief grid until somebody checks it. */}
+          <p className="release-count"><b>{working}</b> of {keys.length} working</p>
+        </div>
+        <a className="filter-button" href="https://granola.ai" target="_blank" rel="noreferrer">Granola → Settings → API</a>
+      </div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="granola-key-form">
+        <label className="field-label">WHOSE KEY<input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Kiril" /></label>
+        <label className="field-label">API KEY<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="grn_…" autoComplete="off" spellCheck={false} /></label>
+        <button className="primary-button" type="button" onClick={addKey} disabled={saving || !label.trim() || !apiKey.trim()}>{saving ? "Checking…" : "Add key"}</button>
+      </div>
+      {loading ? <p className="feedback-empty">Loading…</p> : keys.length === 0 ? <p className="feedback-empty">No keys yet. Without one, briefs go out without the client&apos;s call.</p> : (
+        <ul className="granola-key-list">
+          {keys.map((key) => (
+            <li key={key.id} className={key.lastStatus === "error" ? "granola-key broken" : "granola-key"}>
+              <div className="granola-key-who">
+                <strong>{key.label || "Unnamed"}</strong>
+                <code>{key.masked}</code>
+              </div>
+              <div className="granola-key-state">
+                <span className={key.lastStatus === "error" ? "granola-key-badge broken" : "granola-key-badge"}>{key.lastStatus === "error" ? "Not working" : "Working"}</span>
+                {key.lastCheckedAt && <small>Checked {new Date(key.lastCheckedAt).toLocaleDateString()}</small>}
+              </div>
+              {key.lastError && <p className="granola-key-error">{key.lastError}</p>}
+              <div className="granola-key-actions">
+                <button className="secondary-button" type="button" onClick={() => checkKey(key.id)} disabled={busyId === key.id}>{busyId === key.id ? "…" : "Test"}</button>
+                <button className="text-button" type="button" onClick={() => removeKey(key.id)} disabled={busyId === key.id}>Remove</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 type Release = { sha: string; shortSha: string; date: string; author: string; summary: string; url: string };
 /** Five, then five more. Long enough to see the last few days, short enough not to bury the form below it. */
@@ -1554,7 +1698,9 @@ function AiHubView() {
   const [replyPrompt, setReplyPrompt] = useState("");
   const [clientSaving, setClientSaving] = useState(false);
   const [clientSaved, setClientSaved] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "clients">("overview");
+  // Opened straight on the prompt when the Slack hub linked here, because that link exists for one reason.
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "clients">(() =>
+    typeof window !== "undefined" && window.location.hash === "#ai-morning-brief" ? "prompts" : "overview");
   const [savedTemplates, setSavedTemplates] = useState<Array<{ id: string; kind: string; name: string; summary: string; prompt: string }>>([]);
 
   const loadSavedTemplates = () => fetch("/api/ai/templates", { cache: "no-store" })
@@ -1809,8 +1955,8 @@ function AiHubView() {
 
       {/* The figures a brief quotes are computed before the model is called, so this prompt decides
           what gets raised first and what goes unsaid — not what the numbers are. */}
-      <section className="admin-panel">
-        <div className="panel-heading"><div><h2>Morning brief prompt</h2><p>Run by the morning brief on the Slack tab. The client’s campaign figures and both Slack channels are handed over with it.</p></div>
+      <section className="admin-panel" id="ai-morning-brief">
+        <div className="panel-heading"><div><h2>Morning brief prompt</h2><p>Run by the morning brief on the Slack tab. The client’s campaign figures, both Slack channels and the transcript of their last call are handed over with it.</p></div>
           <button className="primary-button" onClick={saveBriefPrompt}>{briefSaved ? "Saved ✓" : "Save prompt"}</button>
         </div>
         <label className="field-label">MORNING BRIEF PROMPT

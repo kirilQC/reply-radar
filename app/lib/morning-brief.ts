@@ -37,8 +37,15 @@ export const MORNING_BRIEF_PROMPT_PREFIX = "morning_brief_prompt";
 export const morningBriefPromptKey = (slug?: string | null) =>
   slug ? `${MORNING_BRIEF_PROMPT_PREFIX}_${slug}` : MORNING_BRIEF_PROMPT_PREFIX;
 
-/** How far back the brief looks. A week, so a Monday brief covers the week that just ended. */
+/** How far back the brief looks at Slack. A week, so a Monday brief covers the week that just ended. */
 export const BRIEF_WINDOW_DAYS = 7;
+
+/**
+ * How far back to look for a call. Longer than the Slack window on purpose: weeklies get moved, skipped
+ * for a holiday, or held every other week, and the commitments made on the last one stand until the next
+ * one happens. A fortnight finds the call that is still in force rather than only this week's.
+ */
+export const CALL_WINDOW_DAYS = 14;
 
 export const DEFAULT_MORNING_BRIEF_PROMPT = `You are the project manager for one client of a B2B outbound growth agency. You are writing the short brief that lands in the team's Slack channel first thing in the morning. The people reading it ran this account last week and will run it today: they do not need to be told what outbound is, what the client sells, or what a connection request is.
 
@@ -46,6 +53,7 @@ You will be given, for one client:
 - **Figures**, computed from the agency's own records. These are facts. Never restate a figure differently from how it is given, never compute a new one, and never estimate.
 - **The internal channel**, where the team talks about this client.
 - **The external channel**, shared with the client, if there is one.
+- **The last call**, a transcript of the most recent call with this client, if there was one. This is where the agency states out loud what it will do next, so it is the strongest evidence of what was promised.
 - **The client brief**, which may state what this account is supposed to be doing.
 
 ## What to write
@@ -55,13 +63,16 @@ Write between 120 and 300 words as Slack mrkdwn. Lead with the thing that would 
 Use these sections, and drop any that has nothing real in it:
 
 *Needs a decision today* — anything blocked, waiting on us, or about to slip. One line each, naming who it is on.
+*We said we would* — what the agency committed to on the last call, where nothing since suggests it has happened. Quote the commitment. This is the most valuable section in the brief when there was a recent call, because a promise made out loud to a client and then forgotten is the failure this brief exists to prevent.
 *Slipped* — commitments from the internal channel that had a date and did not land. Name the person and quote enough of what they said to be recognisable. If a message says it was finished, it is finished — do not raise it.
 *The numbers* — only figures that changed meaningfully or that contradict what the channel says. Not a recap of the dashboard.
 *The client is waiting* — anything asked in the external channel that nobody answered.
 
 ## Rules
 
-- Every commitment you raise must be attributable to a message you were given. Say who said it and roughly when. If you cannot point at the message, leave it out.
+- Every commitment you raise must be attributable to a message or a line of the transcript you were given. Say who said it and roughly when. If you cannot point at it, leave it out.
+- A commitment on a call that a later Slack message says is done is done. Check the channels before raising anything from the transcript.
+- The transcript is a machine transcription and misspells names and product terms. Do not quote a mangled word as though it were said that way, and do not build a finding on one word you cannot make sense of.
 - Do not invent deadlines. A deadline exists only if somebody stated one, or the client brief states one. "Should probably be done soon" is not a deadline and must not be written as one.
 - Where the figures and the channel disagree, that disagreement is the most valuable line in the brief. Say both sides plainly: what the records show, and what the channel said.
 - Never guess at why something happened. "Sends stopped on Wednesday" is useful. "Sends stopped on Wednesday, probably because of the LinkedIn limits" is not, unless somebody said so.
@@ -77,6 +88,7 @@ export type BriefWorkspace = {
   client_brief?: string | null;
   slack_internal_channel_id?: string | null;
   slack_external_channel_id?: string | null;
+  granola_domains?: string | null;
 };
 
 type Row = Record<string, unknown>;
@@ -203,10 +215,26 @@ export function signalsAsText(signals: BriefSignals): string {
   return lines.join("\n");
 }
 
+/**
+ * The client's most recent call. Shaped here rather than imported from `granola.ts`, because this file
+ * is not allowed a relative import — see the note at the top.
+ */
+export type BriefCall = {
+  title: string;
+  ageDays: number | null;
+  owner: string;
+  summary: string;
+  transcript: string;
+  truncated: boolean;
+};
+
 export type BriefInputs = {
   signals: BriefSignals;
   internal: { channelId: string; messages: number; text: string; error?: string };
   external: { channelId: string; messages: number; text: string; error?: string };
+  /** Null when there was no call to find, or none could be read. `callReason` says which. */
+  call?: BriefCall | null;
+  callReason?: string;
 };
 
 /** What the model is shown, in the order it should read it. */
@@ -220,11 +248,34 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     if (!channel.messages) return `# The ${label} channel\n\nNothing has been said in this channel in the last ${BRIEF_WINDOW_DAYS} days.`;
     return `# The ${label} channel (last ${BRIEF_WINDOW_DAYS} days, ${channel.messages} messages)\n\n${channel.text}`;
   };
+  /**
+   * The call, with its age stated in words rather than left for the model to work out from a date.
+   *
+   * The age is the whole difference between "we agreed this on Friday and it is now Monday" and "we
+   * agreed this three weeks ago and it never happened". A brief that treats a stale call as current
+   * nags about work that has since been renegotiated, which is exactly how it gets muted.
+   */
+  const callSection = (() => {
+    const call = inputs.call;
+    if (!call) return `# The last call\n\n${inputs.callReason || "No transcript of a recent call with this client was available."}\nDo not speculate about what was discussed. If nothing else in the brief depends on it, do not mention it at all.`;
+    const when = call.ageDays === null ? "at an unknown date" : call.ageDays === 0 ? "today" : call.ageDays === 1 ? "yesterday" : `${call.ageDays} days ago`;
+    const stale = call.ageDays !== null && call.ageDays > 10
+      ? ` This is over a week old, so treat anything agreed on it as possibly superseded by the channels above.`
+      : "";
+    const cut = call.truncated ? "\n\nOnly the last part of the transcript is included; the earlier portion was too long to pass on." : "";
+    return [
+      `# The last call: "${call.title}", ${when}${stale}`,
+      call.summary ? `## Granola's own summary\n\n${call.summary}` : "",
+      call.transcript ? `## Transcript\n\nA machine transcription, so names and product terms are unreliable. Commitments the agency made here are the highest-value thing in this brief.${cut}\n\n${call.transcript}` : "The transcript itself could not be read, so only the summary above is available.",
+    ].filter(Boolean).join("\n\n");
+  })();
+
   return [
     `# Client\n\n${workspace.name}. Today is ${today} in ${timezone}.`,
     `# Figures\n\nThese are facts. Do not restate them differently and do not compute new ones.\n\n${signalsAsText(inputs.signals)}`,
     section(inputs.internal, "internal"),
     section(inputs.external, "external"),
+    callSection,
     // Last, and trimmed: the brief is thousands of words of standing context, and it is the least
     // time-sensitive thing here. It is included because it is the only place an expectation like
     // "should be running three campaigns" is written down.

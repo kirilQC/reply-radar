@@ -1238,6 +1238,81 @@ async function collectAnalytics() {
   else await writeSyncRun({ workspace_id: workspace.id, run_type: "analytics", source: "render-worker", started_at: startedAt, ...finished });
 }
 
+// ── Morning brief ───────────────────────────────────────────────────
+/**
+ * The scheduled morning brief: one client per cycle, never two at once.
+ *
+ * ── The app decides what is due, not this file ────────────────────────────────────────────────────
+ * "Eight in the morning Eastern on Monday, Wednesday and Friday, unless this client already had one
+ * today, unless one of its three sources is missing" is four rules and a time zone. A second copy of
+ * them here would drift from the one the page draws, and would drift silently — the visible symptom
+ * would be a brief arriving on the wrong morning, which nobody reports as a bug. So GET returns the
+ * list of slugs that are due and this only has to POST them.
+ *
+ * ── One per cycle, deliberately, even though the list is usually short ───────────────────────────
+ * A brief is a 40-second model call plus two Granola calls plus two Slack reads. Twelve of those at
+ * once is twelve concurrent Vercel functions and twelve bursts at Granola's 25-per-5-seconds limit,
+ * and the failure mode is rate-limited briefs that each look like a broken client. One per cycle
+ * spreads a full roster over about half an hour, which for an 8am brief is 8am to 8:30 — invisible.
+ * It also means a single hung client costs one cycle rather than the whole morning.
+ */
+const BRIEF_LOOP_MS = 60 * 1000;
+let lastBriefRun = 0;
+
+async function sendDueBrief() {
+  if (!appBaseUrl) return;
+  if (Date.now() - lastBriefRun < BRIEF_LOOP_MS) return;
+  lastBriefRun = Date.now();
+
+  const listed = await fetch(`${appBaseUrl}/api/slack/brief`, { cache: "no-store" }).catch(() => null);
+  if (!listed?.ok) return;
+  const payload = await listed.json().catch(() => null);
+  const due = Array.isArray(payload?.due) ? payload.due.filter((slug) => typeof slug === "string" && slug) : [];
+  if (!due.length) return;
+
+  // Only the first. The next cycle re-asks, and by then this one has a row in `rr_slack_briefs` and is
+  // no longer due — so the queue drains itself without this file holding any state about it.
+  const slug = due[0];
+  const startedAt = new Date().toISOString();
+  const destination = typeof payload?.schedule?.destination === "string" ? payload.schedule.destination : "test";
+  try {
+    const response = await fetch(`${appBaseUrl}/api/slack/brief`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspace: slug, destination }),
+    });
+    const result = await response.json().catch(() => ({}));
+    const failed = !response.ok || result?.ok === false;
+    console.info("reply_radar_morning_brief_sent", { slug, destination, posted: Boolean(result?.posted), remaining: due.length - 1 });
+    // Logged against the worker rather than the client, because the app already wrote the brief row.
+    // This row answers a different question: did the schedule fire, and did the call to it come back.
+    await writeSyncRun({
+      workspace_id: null,
+      run_type: "morning_brief",
+      source: "render-worker",
+      status: failed ? "error" : "success",
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      records_seen: due.length,
+      records_written: failed ? 0 : 1,
+      error_text: failed ? String(result?.error || `HTTP ${response.status}`).slice(0, 500) : null,
+    });
+  } catch (error) {
+    console.error("reply_radar_morning_brief_failed", { slug, error: String(error) });
+    await writeSyncRun({
+      workspace_id: null,
+      run_type: "morning_brief",
+      source: "render-worker",
+      status: "error",
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      records_seen: due.length,
+      records_written: 0,
+      error_text: String(error).slice(0, 500),
+    });
+  }
+}
+
 // ── Main loop ───────────────────────────────────────────────────────
 
 async function runOnce() {
@@ -1287,6 +1362,10 @@ async function runOnce() {
    * the cadence rather than a queue.
    */
   try { await collectAnalytics(); } catch (error) { console.error("reply_radar_analytics_cycle_failed", error); }
+
+  // At most one client's brief per cycle, and before the AI pipeline: a brief that is due at 8am is
+  // time-sensitive in a way the pipeline is not, and the pipeline's budget can hold a cycle open.
+  try { await sendDueBrief(); } catch (error) { console.error("reply_radar_morning_brief_cycle_failed", error); }
 
   // Every cycle, so a reply that arrives while nobody is on the site is already analysed,
   // ICP-scored and follow-up-scored by the time it is opened.

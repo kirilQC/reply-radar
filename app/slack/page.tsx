@@ -12,6 +12,13 @@
  * applies to every client, so the question is "which automation" and only then "for whom". Same three
  * screens, opposite order.
  *
+ * ── The middle screen exists to make a missing source visible ────────────────────────────────────
+ * A brief will be written with two of its three sources and read as though it had all three, so the
+ * client list is not a list of names — it is three marks per client saying whether their campaign
+ * figures are arriving, whether their channels are set, and whether their call can be found. A client
+ * cannot be switched on until all three are there, because switching one on is a promise that the brief
+ * posted into a client-facing channel on Monday morning is complete.
+ *
  * ── The stylesheet is the reports one, deliberately ──────────────────────────────────────────────
  * `reports.css` carries `.client-grid`, `.hub-card` and the rest, and this hub is supposed to be the
  * same object. Importing it is what makes the two identical rather than merely similar — a second copy
@@ -22,6 +29,7 @@ import { useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
+import { DAY_NAMES, DEFAULT_SCHEDULE, describeSchedule, type BriefSchedule, type Readiness } from "../lib/morning-brief-schedule";
 import "../reports/reports.css";
 
 type BriefClient = {
@@ -32,10 +40,15 @@ type BriefClient = {
   accentColor: string | null;
   internalChannelId: string;
   externalChannelId: string;
+  granolaDomains: string;
+  morningBriefEnabled: boolean;
   hasBrief: boolean;
+  readiness: Readiness;
+  sentToday: boolean;
   lastBriefAt: string | null;
   lastBriefStatus: string | null;
   lastBriefDestination: string | null;
+  dueNow: boolean;
 };
 
 type Directory = {
@@ -43,7 +56,11 @@ type Directory = {
   error?: string;
   slack: { configured: boolean; tokenEnv: string; testChannelId: string };
   anthropicConfigured: boolean;
+  granolaKeyCount: number;
+  schedule: BriefSchedule;
+  scheduleDueNow: boolean;
   workspaces: BriefClient[];
+  due: string[];
 };
 
 type RunResult = {
@@ -53,10 +70,14 @@ type RunResult = {
   posted?: boolean;
   channelId?: string | null;
   channelNotes?: string[];
+  sources?: { internalMessages?: number; externalMessages?: number; call?: { title: string; ageDays: number | null; owner: string } | null; callReason?: string | null };
 };
 
 /** Where a brief goes. Not sent with the request until the button is pressed, so a misclick costs nothing. */
-type Destination = "preview" | "test" | "internal";
+type Destination = "preview" | "test" | "internal" | "external";
+
+/** The zones the team actually works in. A free-text field here would be a typo away from a silent no-op. */
+const TIMEZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Asia/Jerusalem", "UTC"];
 
 const formatWhen = (iso: string) => {
   const date = new Date(iso);
@@ -72,36 +93,71 @@ export default function SlackPage() {
   const [destination, setDestination] = useState<Destination>("preview");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
+  const [draft, setDraft] = useState<BriefSchedule>(DEFAULT_SCHEDULE);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [scheduleError, setScheduleError] = useState("");
+  const [togglingSlug, setTogglingSlug] = useState("");
+
+  const load = async () => {
+    const payload = (await fetch("/api/slack/brief", { cache: "no-store" }).then((response) => response.json()).catch(() => null)) as Directory | null;
+    if (!payload || payload.ok === false || payload.error) {
+      setError(payload?.error || "The client list could not be loaded.");
+      return;
+    }
+    setError("");
+    setDirectory(payload);
+    return payload;
+  };
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/slack/brief", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((payload: Directory) => {
-        if (cancelled) return;
-        if (payload?.ok === false || payload?.error) { setError(payload.error || "The client list could not be loaded."); return; }
-        setDirectory(payload);
-      })
-      .catch(() => { if (!cancelled) setError("The client list could not be loaded."); });
+    void (async () => {
+      const payload = await load();
+      // The draft is seeded once from the server and then owned by the form. Re-seeding on every reload
+      // would throw away half-made edits the moment a brief finished writing in another part of the page.
+      if (!cancelled && payload?.schedule) setDraft(payload.schedule);
+    })();
     return () => { cancelled = true; };
   }, []);
 
   const clients = directory?.workspaces ?? [];
   const active = useMemo(() => clients.find((client) => client.slug === activeSlug) ?? null, [clients, activeSlug]);
 
-  /** How many clients could actually receive a brief today — the only number the card needs. */
-  const readyCount = clients.filter((client) => client.internalChannelId || client.externalChannelId).length;
-  const lastRunAt = clients
-    .map((client) => client.lastBriefAt)
-    .filter((value): value is string => Boolean(value))
-    .sort()
-    .at(-1);
+  /** How many clients could actually receive a brief — all three sources, not just a channel. */
+  const readyCount = clients.filter((client) => client.readiness?.ready).length;
+  const enabledCount = clients.filter((client) => client.morningBriefEnabled).length;
 
   const openClient = (slug: string) => {
     setActiveSlug(slug);
     setResult(null);
     setDestination("preview");
     setView("brief");
+  };
+
+  const saveSchedule = async () => {
+    setSavingSchedule(true);
+    setScheduleError("");
+    const response = await fetch("/api/slack/brief", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ schedule: draft }) }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    setSavingSchedule(false);
+    if (!response?.ok || !payload?.ok) {
+      setScheduleError(String(payload?.error || "The schedule could not be saved."));
+      return;
+    }
+    await load();
+  };
+
+  const toggleClient = async (client: BriefClient) => {
+    setTogglingSlug(client.slug);
+    setScheduleError("");
+    const response = await fetch("/api/slack/brief", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace: client.slug, enabled: !client.morningBriefEnabled }) }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    setTogglingSlug("");
+    if (!response?.ok || !payload?.ok) {
+      setScheduleError(String(payload?.error || "That client could not be updated."));
+      return;
+    }
+    await load();
   };
 
   const runBrief = async () => {
@@ -118,10 +174,7 @@ export default function SlackPage() {
       setResult(payload);
       // The list carries "last brief" per client, and it is now wrong for this one. Re-read rather than
       // patch it locally: the row that was just written is the authority on when and whether.
-      if (payload.brief) {
-        const refreshed = await fetch("/api/slack/brief", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
-        if (refreshed?.workspaces) setDirectory(refreshed as Directory);
-      }
+      if (payload.brief) await load();
     } catch {
       setResult({ ok: false, error: "The brief could not be written." });
     } finally {
@@ -137,6 +190,8 @@ export default function SlackPage() {
 
   const testChannel = directory?.slack.testChannelId ?? "";
   const tokenEnv = directory?.slack.tokenEnv ?? "SLACK_BOT_TOKEN";
+  const toggleDay = (day: number) =>
+    setDraft((current) => ({ ...current, sendDays: current.sendDays.includes(day) ? current.sendDays.filter((value) => value !== day) : [...current.sendDays, day].sort((a, b) => a - b) }));
 
   return (
     <div className="app-shell">
@@ -162,11 +217,10 @@ export default function SlackPage() {
                 <button type="button" className="hub-card-open" onClick={() => setView("clients")}>
                   <h3>Morning brief</h3>
                   <div className="hub-card-meta">
-                    {/* Two facts, not three: the card is 316px and a third wrapped the line. The window
-                        is fixed at a week and never changes, so it is the one to lose. */}
-                    <b>{lastRunAt ? `Last run ${formatWhen(lastRunAt)}` : "Never run"}</b>
+                    {/* Three facts fit only because the schedule is the shortest of them when it is off. */}
+                    <b>{directory?.schedule.enabled ? describeSchedule(directory.schedule) : "Off"}</b>
                     <span>·</span>
-                    <span>{readyCount === 1 ? "1 client ready" : `${readyCount} clients ready`}</span>
+                    <span>{enabledCount === 1 ? "1 client on" : `${enabledCount} clients on`}</span>
                   </div>
                 </button>
               </div>
@@ -184,28 +238,115 @@ export default function SlackPage() {
         ) : view === "clients" ? (
           <main className="reports-hub">
             <button type="button" className="config-back" onClick={() => setView("automations")}>← Slack automations</button>
-            <div className="hub-lede"><h1>Morning brief</h1></div>
+            <div className="hub-lede hub-lede-split">
+              <h1>Morning brief</h1>
+              <a className="text-button" href="/admin?section=ai-hub#ai-morning-brief">Edit the prompt →</a>
+            </div>
 
             <div className="hub-group-label">
-              <span>Client workspaces</span>
-              <span>{clients.length === 1 ? "1 client" : `${clients.length} clients`}</span>
+              <span>Schedule</span>
+              <span>{describeSchedule(draft)}</span>
             </div>
-            <div className="client-grid">
-              {clients.map((client) => {
-                const channels = [client.internalChannelId, client.externalChannelId].filter(Boolean);
-                return (
-                  <button key={client.slug} type="button" className="client-card" onClick={() => openClient(client.slug)}>
-                    {logoOf(client, "")}
-                    <h3>{client.name}</h3>
-                    {/* Whichever is the more useful of the two: when the last brief went out, or that
-                        one cannot go out at all yet. */}
-                    <small>{!channels.length ? "No channel set" : client.lastBriefAt ? `Last brief ${formatWhen(client.lastBriefAt)}` : "Never run"}</small>
-                  </button>
-                );
-              })}
+            <div className="brief-schedule">
+              <div className="brief-schedule-row">
+                <button type="button" className={draft.enabled ? "brief-switch is-on" : "brief-switch"} onClick={() => setDraft((current) => ({ ...current, enabled: !current.enabled }))}>
+                  <span />{draft.enabled ? "On" : "Off"}
+                </button>
+                <div className="brief-days">
+                  {DAY_NAMES.map((name, day) => (
+                    <button key={name} type="button" className={draft.sendDays.includes(day) ? "brief-day is-on" : "brief-day"} onClick={() => toggleDay(day)} title={name}>
+                      {name.slice(0, 1)}
+                    </button>
+                  ))}
+                </div>
+                <label className="brief-field">
+                  TIME
+                  <span className="brief-time">
+                    <select value={draft.sendHour} onChange={(event) => setDraft((current) => ({ ...current, sendHour: Number(event.target.value) }))}>
+                      {Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}</option>)}
+                    </select>
+                    <select value={draft.sendMinute} onChange={(event) => setDraft((current) => ({ ...current, sendMinute: Number(event.target.value) }))}>
+                      {[0, 15, 30, 45].map((minute) => <option key={minute} value={minute}>{String(minute).padStart(2, "0")}</option>)}
+                    </select>
+                  </span>
+                </label>
+                <label className="brief-field">
+                  ZONE
+                  <select value={draft.timezone} onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))}>
+                    {TIMEZONES.map((zone) => <option key={zone} value={zone}>{zone.split("/").pop()?.replace(/_/g, " ")}</option>)}
+                  </select>
+                </label>
+                <label className="brief-field">
+                  POSTS TO
+                  <select value={draft.destination} onChange={(event) => setDraft((current) => ({ ...current, destination: event.target.value }))}>
+                    <option value="test">Test channel</option>
+                    <option value="internal">Internal channel</option>
+                    <option value="external">External channel</option>
+                  </select>
+                </label>
+                <button className="config-generate" type="button" onClick={saveSchedule} disabled={savingSchedule}>{savingSchedule ? "Saving…" : "Save schedule"}</button>
+              </div>
+              {/* The one thing a schedule cannot show about itself: whether it would fire right now. */}
+              {directory?.scheduleDueNow && directory.schedule.enabled && (
+                <p className="brief-schedule-note">Due now. {directory.due.length ? `${directory.due.length} client${directory.due.length === 1 ? "" : "s"} waiting on the worker.` : "Every enabled client has had one today."}</p>
+              )}
+              {scheduleError && <div className="config-error">{scheduleError}</div>}
             </div>
 
+            <div className="hub-group-label">
+              <span>Clients</span>
+              <span>{readyCount} of {clients.length} ready</span>
+            </div>
+            <ul className="brief-client-list">
+              {clients.map((client) => {
+                const checks: Array<[string, { ok: boolean; detail: string }]> = [
+                  ["HeyReach", client.readiness.heyreach],
+                  ["Slack", client.readiness.slack],
+                  ["Granola", client.readiness.granola],
+                ];
+                return (
+                  <li key={client.slug} className={client.readiness.ready ? "brief-client" : "brief-client is-short"}>
+                    <div className="brief-client-who">
+                      {logoOf(client, "brief-client-logo")}
+                      <div>
+                        <strong>{client.name}</strong>
+                        <small>{client.lastBriefAt ? `Last brief ${formatWhen(client.lastBriefAt)}` : "Never run"}{client.sentToday ? " · sent today" : ""}</small>
+                      </div>
+                    </div>
+                    <div className="brief-client-checks">
+                      {checks.map(([label, check]) => (
+                        <span key={label} className={check.ok ? "brief-check is-ok" : "brief-check is-missing"} title={check.detail}>
+                          <b>{check.ok ? "✓" : "✕"}</b>{label}<small>{check.detail}</small>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="brief-client-channels">
+                      <span className={client.internalChannelId ? "brief-channel" : "brief-channel is-missing"}>INT <code>{client.internalChannelId || "not set"}</code></span>
+                      <span className={client.externalChannelId ? "brief-channel" : "brief-channel is-missing"}>EXT <code>{client.externalChannelId || "not set"}</code></span>
+                    </div>
+                    <div className="brief-client-actions">
+                      {/* Not switchable while a source is missing. The toggle is a promise that Monday's
+                          post is complete, and a half-sourced brief reads exactly like a whole one. */}
+                      <button
+                        type="button"
+                        className={client.morningBriefEnabled ? "brief-switch is-on" : "brief-switch"}
+                        onClick={() => toggleClient(client)}
+                        disabled={togglingSlug === client.slug || (!client.morningBriefEnabled && !client.readiness.ready)}
+                        title={client.readiness.ready ? "" : "All three sources have to be working first."}
+                      >
+                        <span />{client.morningBriefEnabled ? "On" : "Off"}
+                      </button>
+                      <button type="button" className="secondary-button" onClick={() => openClient(client.slug)}>Generate</button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
             {!clients.length && !error && <div className="hub-empty">No clients yet.</div>}
+            {directory && !directory.granolaKeyCount && (
+              <div className="hub-empty">No Granola keys are stored, so no client&apos;s call can be read. <a href="/admin">Add one in configuration</a>.</div>
+            )}
             {error && <div className="config-error">{error}</div>}
           </main>
         ) : (
@@ -224,8 +365,9 @@ export default function SlackPage() {
                     ["preview", "Show it here", "Nothing is posted"],
                     ["test", "Test channel", testChannel || "SLACK_TEST_CHANNEL_ID not set"],
                     ["internal", "Internal channel", active.internalChannelId || "No channel set"],
+                    ["external", "External channel", active.externalChannelId || "No channel set"],
                   ] as Array<[Destination, string, string]>).map(([id, label, detail]) => {
-                    const unavailable = (id === "test" && !testChannel) || (id === "internal" && !active.internalChannelId);
+                    const unavailable = (id === "test" && !testChannel) || (id === "internal" && !active.internalChannelId) || (id === "external" && !active.externalChannelId);
                     return (
                       <button
                         key={id}
@@ -246,9 +388,9 @@ export default function SlackPage() {
                     {running ? "Writing the brief…" : destination === "preview" ? "Write the brief" : "Write and post"}
                   </button>
                   <span className="slack-run-note">
-                    {active.internalChannelId || active.externalChannelId
-                      ? `Reads ${[active.internalChannelId ? "the internal channel" : "", active.externalChannelId ? "the external channel" : ""].filter(Boolean).join(" and ")}, plus this client's campaign figures.`
-                      : "No Slack channel is set for this client, so the brief will only have the campaign figures."}
+                    {[active.readiness.heyreach, active.readiness.slack, active.readiness.granola].filter((check) => !check.ok).length === 0
+                      ? "All three sources are working."
+                      : `Missing: ${[["campaign figures", active.readiness.heyreach], ["Slack channels", active.readiness.slack], ["the client's call", active.readiness.granola]].filter(([, check]) => !(check as { ok: boolean }).ok).map(([label]) => label).join(", ")}.`}
                   </span>
                 </div>
 
@@ -261,6 +403,14 @@ export default function SlackPage() {
                       <span>The brief</span>
                       <span>{result.posted ? `Posted to ${result.channelId}` : "Not posted"}</span>
                     </div>
+                    {/* What the model was actually given, above the text it produced, because a thin brief
+                        is nearly always a thin source and the numbers say which one. */}
+                    {result.sources && (
+                      <p className="brief-sources">
+                        {result.sources.internalMessages ?? 0} internal · {result.sources.externalMessages ?? 0} external ·{" "}
+                        {result.sources.call ? `call "${result.sources.call.title}" via ${result.sources.call.owner}` : result.sources.callReason || "no call"}
+                      </p>
+                    )}
                     {/* Shown exactly as Slack will render the text, which is to say not rendered at all:
                         a preview that prettified the mrkdwn would hide the one thing worth checking. */}
                     <pre className="slack-brief-body">{result.brief}</pre>
