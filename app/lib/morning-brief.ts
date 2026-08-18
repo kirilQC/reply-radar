@@ -96,51 +96,53 @@ You will be given, for one client:
 
 ## Before you write a single action item: check whether it is already done
 
-This is the rule that decides whether the brief is trusted. An item that has already been handled, raised again the next morning, teaches everybody reading that the brief does not know what is going on — and once they believe that, the real items go unread too.
+This is the rule that decides whether the brief is trusted. An item that has already been handled, raised again the next morning, teaches everybody reading that the brief does not know what is going on, and once they believe that, the real items go unread too.
 
 So every candidate item gets checked twice, in this order:
 
-1. **Against the Figures**, whenever the item is about a campaign, a sender, or leads. The Figures are the system of record — they are read straight out of HeyReach — and they outrank anybody's account of what they did. Specifically:
+1. **Against the Figures**, whenever the item is about a campaign, a sender, or leads. The Figures are the system of record, read straight out of HeyReach, and they outrank anybody's account of what they did. Specifically:
    - "add senders to campaign X" or "swap the senders on X" → the Figures list the senders on every campaign by name. If the people named are already on it, the item is done. If they are not, it is outstanding, *no matter who said they had done it*.
    - "launch X" or "turn X on" → the Figures give every campaign and its status. If X is there and active, it launched.
    - "load more leads into X" / "X is running dry" → the Figures give leads not yet contacted and days of sending left per campaign.
    - "pause X" / "stop X" → the Figures give the status.
    - A campaign that is not in the Figures at all has not been built yet. Say that plainly rather than guessing.
-2. **Against the channels**, for everything else — the work with no HeyReach footprint: a document, a report, an answer to the client, an integration. Read the whole of both channels, thread replies included, up to the newest message. "done", "sent it over", "just pushed that", a link dropped in reply, is the work being finished. A thread is where that almost always lives, which is why it has to be read to the bottom.
+2. **Against the channels**, for everything else, meaning the work with no HeyReach footprint: a document, a report, an answer to the client, an integration. Read the whole of both channels, thread replies included, up to the newest message. "done", "sent it over", "just pushed that", a link dropped in reply, is the work being finished. A thread is where that almost always lives, which is why it has to be read to the bottom.
 
 What to do with the result:
 - **Done: leave it out entirely.** Do not list it as complete, do not tick it, do not mention it in passing. The brief is only the work that is still outstanding. A list of finished items is exactly the block of text that makes the brief too long to read.
 - **Outstanding: list it**, and say where it was agreed and when.
-- **The channel says done and the Figures say otherwise: that is the most important item in the brief.** Make it the first item under *Things to work on*, owned by whoever said it was done, with the italic line giving both sides in one clause — what they said, and what HeyReach shows. Somebody believes this is handled and it is not. **Once, though.** It is one item, in one place. The previous version of this brief printed the same contradiction three times over and that is what made it unreadable.
+- **The channel says done and the Figures say otherwise: that is the most important item in the brief.** Make it the first item under *Things to work on*, owned by whoever said it was done, with the italic line giving both sides in one clause: what they said, and what HeyReach shows. Somebody believes this is handled and it is not. **Once, though.** It is one item, in one place. The previous version of this brief printed the same contradiction three times over and that is what made it unreadable.
 
 ## What to write
 
-Thirty seconds. That is the whole budget — the brief is read on a phone, standing up, by somebody deciding what to do first. **The entire brief is 150 to 250 words.** Not a word more. Everything below is about spending those words on the two things that cannot be got anywhere else: what is running, and who owes what.
+Thirty seconds. That is the whole budget, because the brief is read on a phone, standing up, by somebody deciding what to do first. **The entire brief is 150 to 250 words.** Not a word more. Everything below is about spending those words on the two things that cannot be got anywhere else: what is running, and who owes what.
 
 The shape is fixed. Copy it exactly.
 
 First line, on its own: the status title you were given for today, bold, with a colon. Nothing else on that line.
 
+If you were given a line for today's day of the week, it goes next, on its own line, word for word as it was given, before anything else in the brief. If you were not given one, go straight to the first section.
+
 Then these three sections in this order, each one separated from the last by a divider line of exactly \`=========================================\` on its own line. Drop a section entirely if it has nothing real in it.
 
-### :bar_chart: _Active Campaigns_ :bar_chart:
+### :signal_strength: _Active Campaigns_ :signal_strength:
 
-Only the campaigns the Figures call *active*. A paused campaign is not running and a finished one is not either, and listing them is four lines of text about work nobody is doing today. Numbered, one campaign each, and never more than two lines under a campaign:
+Only campaigns that are *both* active *and* still have leads to contact. A campaign with 0 pending leads is finished, whatever its status says, and everybody reading already knows that; listing it is two lines about work nobody can do. A paused campaign is not running either. Leave all of them out without comment.
+
+Numbered, one campaign each, and never more than two sub-bullets under a campaign:
 
 1. *FULL CAMPAIGN NAME*
     • N pending leads (~N days of sending left)
     • N senders: first names only
 
-**First names only.** *3 senders: Ali, Abhyuday, Vijay* — never *Ali Mahomed, Abhyuday Roychowdhury, Vijay Prasad MD, MPH*. The team knows who they are; the surnames and credentials are a line and a half of text that tells them nothing, and they repeat on every campaign.
+**First names only.** *3 senders: Ali, Abhyuday, Vijay*, never *Ali Mahomed, Abhyuday Roychowdhury, Vijay Prasad MD, MPH*. The team knows who they are, and the surnames and credentials are a line and a half of text that tells them nothing, repeated on every campaign. The one exception: if two senders on the same campaign share a first name, add the last initial to both (*Kiril I., Kiril P.*). Never print the same first name twice in one list, because that reads as a bug rather than as two people.
 
-An active campaign with 0 pending leads gets one sub-bullet and no more: \`• 0 pending leads — done sending, needs new leads or replacing\`.
-
-Then, and only if the total runway is under two days or nothing is active at all, one standalone line after the numbered list — not inside it:
+Then, and only if the total runway is under two days or nothing is active at all, one standalone line after the numbered list, not inside it:
 :warning: New leads or a new campaign must be in motion today! Less than N days of sending remaining! :warning:
 
-That line is the entire urgency mechanism of this brief. There is no separate urgent section, because a separate urgent section means writing the same finding twice — once at the top and once where it belongs.
+That line is the entire urgency mechanism of this brief. There is no separate urgent section, because a separate urgent section means writing the same finding twice, once at the top and once where it belongs.
 
-### :construction_worker: _Things to work on_ :construction_worker:
+### :male-technologist: _Things to work on_ :male-technologist:
 
 The outstanding action items. Numbered, and **the owner's mention is the first thing on the line**:
 
@@ -150,11 +152,11 @@ The outstanding action items. Numbered, and **the owner's mention is the first t
 
 The mention comes first because everybody reading is scanning for their own name and nothing else. A mention buried in the middle of a sentence is a mention that gets missed, and the item with it.
 
-The italic sub-bullet is the last thing on every item and it is the point of the whole section: it names when the commitment was made and says plainly that it is still outstanding. _"Agreed on the Aug 5 call; no update since."_ _"Kori said on Aug 12 that updates were coming shortly; nothing has gone out."_ One clause, italic, factual, no editorialising. That is what keeps somebody honest, and it costs eight words rather than a paragraph.
+The italic sub-bullet is the last thing on every item and it is the point of the whole section: it names when the commitment was made and says plainly that it is still outstanding. _"Agreed on the Aug 5 call, no update since."_ _"Kori said on Aug 12 that updates were coming shortly, nothing has gone out."_ One clause, italic, factual, no editorialising. That is what keeps somebody honest, and it costs eight words rather than a paragraph.
 
-**The other sub-bullet must not restate it.** If the italic clause already carries the whole story — and on most items it does — then the item is the numbered line and the italic clause, and nothing else. A detail bullet earns its place only by saying something the italic clause does not: a number, a filter, a name, a constraint somebody needs to act. Two bullets that paraphrase each other are the same wall of text at half the width.
+**The other sub-bullet must not restate it.** If the italic clause already carries the whole story, and on most items it does, then the item is the numbered line and the italic clause and nothing else. A detail bullet earns its place only by saying something the italic clause does not: a number, a filter, a name, a constraint somebody needs to act on. Two bullets that paraphrase each other are the same wall of text at half the width.
 
-Write the work in the words the team uses for it — a campaign to launch, a list to pull, a list to enrich, copy to write, a reporting job, a question to answer. Not "follow up on the list discussion". Work out the owner from what you were given: who volunteered on the call, who was asked in the channel and did not decline, who has done this kind of work for this client before. If two people could own it, mention both on the line. If nobody can be identified, start the line with *Owner not agreed* in place of a mention — unowned work is the work that does not happen, so it is worth a line.
+Write the work in the words the team uses for it: a campaign to launch, a list to pull, a list to enrich, copy to write, a reporting job, a question to answer. Not "follow up on the list discussion". Work out the owner from what you were given: who volunteered on the call, who was asked in the channel and did not decline, who has done this kind of work for this client before. If two people could own it, mention both on the line. If nobody can be identified, start the line with *Owner not agreed* in place of a mention, because unowned work is the work that does not happen.
 
 Six items is a lot. If you have more than six, you are including things that do not matter this week.
 
@@ -164,8 +166,9 @@ What we are waiting on the client for. Numbered, one short line each, with one i
 
 ## Rules
 
-- Every action item and every commitment must be attributable to something you were given. Say who said it and roughly when. If you cannot point at it, leave it out — an invented action item costs the brief more trust than a missed one.
-- **Campaign names in full, always, exactly as the Figures spell them.** Write *BV007: ASCs v2*, never "BV007" and never "the ASCs campaign". The prefix on its own means nothing to the person reading — they cannot tell which campaign you mean, so the item cannot be acted on.
+- **Never use an em dash or an en dash.** Not one, anywhere, for any reason. No \`—\`, no \`–\`. They are the single clearest tell that a machine wrote this, and the brief has to read like a colleague wrote it. Use a comma, a colon, a semicolon, brackets, or two sentences instead. Where you would reach for one, a full stop is almost always better.
+- Every action item and every commitment must be attributable to something you were given. Say who said it and roughly when. If you cannot point at it, leave it out, because an invented action item costs the brief more trust than a missed one.
+- **Campaign names in full, always, exactly as the Figures spell them.** Write *BV007: ASCs v2*, never "BV007" and never "the ASCs campaign". The prefix on its own means nothing to the person reading, so they cannot tell which campaign you mean and the item cannot be acted on.
 - Never invent a deadline. A deadline exists only if somebody stated one, or the client brief states one. "Should probably be done soon" is not a deadline and must not be written as one.
 - The transcript is a machine transcription and misspells names and product terms. Do not quote a mangled word as though it were said that way, and do not build an action item on one word you cannot make sense of. Where a name is mangled, match it to the right person from the mention table and use their mention code.
 - Never guess at why something happened. "Sends stopped on Wednesday" is useful. "Sends stopped on Wednesday, probably because of the LinkedIn limits" is not, unless somebody said so.
@@ -174,44 +177,57 @@ What we are waiting on the client for. Numbered, one short line each, with one i
 
 ## Formatting
 
-Slack mrkdwn, which is not markdown. *bold* with single asterisks, _italic_ with underscores, \`code\` with backticks. **There is no underline in Slack** — do not attempt one, and do not reach for HTML or markdown to fake it. No \`#\` headings, no \`**double asterisks**\`, no tables, no code fences: they render as literal characters and make the brief look broken.
+Slack mrkdwn, which is not markdown. *bold* with single asterisks, _italic_ with underscores, \`code\` with backticks. **There is no underline in Slack**, so do not attempt one and do not reach for HTML or markdown to fake it. No \`#\` headings, no \`**double asterisks**\`, no tables, no code fences: they render as literal characters and make the brief look broken.
 
 The layout, exactly:
 
-- **Section headings** are the emoji, the name in bold italics, and the same emoji again, on their own line: \`*:bar_chart: _Active Campaigns_ :bar_chart:*\`. Use the three given above, spelled that way.
+- **Section headings** are the emoji, the name in bold italics, and the same emoji again, on their own line: \`*:signal_strength: _Active Campaigns_ :signal_strength:*\`. Use the three given above, spelled exactly that way.
 - **A divider line** of \`=========================================\` on its own line between sections. Not before the first one, not after the last.
-- **Items are numbered** — \`1.\`, \`2.\`, \`3.\` at the start of the line — and there is a blank line between one numbered item and the next. That blank line is what makes the list scannable rather than a paragraph with numbers in it.
-- **Sub-bullets** are indented four spaces and start with \`•\`. They belong to the item above them. Two at most per item, and never a third.
-- **Mention people with their mention code from the mention table** — \`<@U04AB12CD>\` — so the owner is actually notified. Copy it exactly; a name typed as plain \`@kori\` is text and reaches nobody. Anybody not in that table is plain text.
-- **Bold marks the piece of work itself**, not the sentence around it — a whole line in bold is a line with no emphasis in it. Italics are for the accountability clause and nothing else. Every \`*\` and \`_\` must be closed; one left open turns the rest of the brief into italics.
+- **Items are numbered.** \`1.\`, \`2.\`, \`3.\` at the start of the line.
+- **Sub-bullets** are indented four spaces and start with \`•\`. They belong to the item above them, so there is no blank line between an item and its own sub-bullets. Two at most per item, and never a third.
+- **Two blank lines between one numbered item and the next**, and two after a section heading before its first item. That air is the whole difference between a list somebody can scan and a block they skip past. Err on the side of more space, never less.
+- **Mention people with their mention code from the mention table**, \`<@U04AB12CD>\`, so the owner is actually notified. Copy it exactly. A name typed as plain \`@kori\` is text and reaches nobody, and anybody not in that table is written as plain text.
+- **Bold marks the piece of work itself**, not the sentence around it, because a whole line in bold is a line with no emphasis in it. Italics are for the accountability clause and nothing else. Every \`*\` and \`_\` must be closed, since one left open turns the rest of the brief into italics.
 - **Emoji** in the section headings as given, and the one \`:warning:\` line when the runway is short. Nowhere else. A decoration on every bullet is noise.
 
-A worked example of the shape, with the content stripped out:
+A worked example of the shape and the spacing, with the content stripped out. Match this spacing exactly:
 
 *Beginning of Week Status:*
 
-*:bar_chart: _Active Campaigns_ :bar_chart:*
+Make sure to sync about game plan for this week!
+
+*:signal_strength: _Active Campaigns_ :signal_strength:*
+
 
 1. *BV007: ASCs v2*
     • 106 pending leads (~2 days of sending left)
     • 3 senders: Ali, Abhyuday, Vijay
 
+
+2. *BV009: Ortho Offices*
+    • 340 pending leads (~5 days of sending left)
+    • 2 senders: Kiril I., Kiril P.
+
+
 :warning: New leads or a new campaign must be in motion today! Less than 2 days of sending remaining! :warning:
 
 =========================================
 
-*:construction_worker: _Things to work on_ :construction_worker:*
+*:male-technologist: _Things to work on_ :male-technologist:*
+
 
 1. <@U01> to *finish the Doximity list*
     • scoring and filtering down to the top ~2,000 contacts
-    • _agreed on the Aug 5 call; no update since._
+    • _agreed on the Aug 5 call, no update since._
+
 
 2. <@U02> to *send campaign updates to the client*
-    • _said on Aug 12 that updates were coming shortly; nothing has gone out._
+    • _said on Aug 12 that updates were coming shortly, nothing has gone out._
 
 =========================================
 
 *:hourglass: _Client Bottlenecks_ :hourglass:*
+
 
 1. Cold calling update
     • _raised on the Aug 12 call, not answered, not chased since._`;
@@ -419,7 +435,10 @@ export function signalsAsText(signals: BriefSignals): string {
       : campaign.daysLeft === null
         ? " Days of sending left: unknown, because it has no senders."
         : campaign.daysLeft === 0
-          ? " It has no leads left to contact, so it is done sending and needs new leads or replacing."
+          // Counted in the runway and named here, but kept out of the brief's campaign list: a campaign
+          // with nothing left to send is finished whatever its status says, and everybody reading knows it.
+          // Stated as an instruction rather than left to the prompt so both layers cannot disagree.
+          ? " It has no leads left to contact, so it is finished in practice. Leave it out of the campaign list entirely."
           : ` Days of sending left: ${campaign.daysLeft}, at ${DAILY_CONNECTIONS_PER_SENDER} connection requests per sender per day.`;
     lines.push(`- "${campaign.name}" (${campaign.status}${campaign.isActive ? ", active" : ""}): ${campaign.sent} sent, ${campaign.accepted} accepted${accepted === null ? "" : ` (${accepted}%)`}, ${campaign.replies} replies, ${campaign.pending} leads not yet contacted. ${senders}${left}`);
   }
@@ -436,7 +455,9 @@ export function signalsAsText(signals: BriefSignals): string {
   lines.push(`Connection requests sent in the last 7 days: ${sending.thisWeek}. In the 7 days before that: ${sending.lastWeek}.`);
   if (sending.changePercent !== null) lines.push(`That is a change of ${sending.changePercent > 0 ? "+" : ""}${sending.changePercent}% week on week.`);
   if (!sending.lastDayWithSends) lines.push("There is no record of any sending at all in the last three weeks.");
-  else if (sending.quietDays >= 2) lines.push(`Nothing has been sent since ${sending.lastDayWithSends} — that is ${sending.quietDays} days quiet.`);
+  // No em dash, here or in any other line handed to the model. The brief is told never to write one, and a
+  // prompt that demands that while modelling the opposite loses to the example every time.
+  else if (sending.quietDays >= 2) lines.push(`Nothing has been sent since ${sending.lastDayWithSends}, which is ${sending.quietDays} days quiet.`);
 
   lines.push(`Replies in the last 7 days: ${replies.thisWeek}. In the 7 days before that: ${replies.lastWeek}.`);
   if (acceptance.thisWeek !== null) lines.push(`Acceptance rate over the last 7 days: ${acceptance.thisWeek}%${acceptance.lastWeek === null ? "" : `, against ${acceptance.lastWeek}% the week before`}.`);
@@ -543,10 +564,29 @@ export function briefStatusTitle(timezone: string, at: Date = new Date()): strin
   return "Midweek Status";
 }
 
+/**
+ * The standing reminder for whichever day of the week it is, or nothing.
+ *
+ * Two rituals bracket the week: agreeing the plan on Monday and sending the client their report on Friday.
+ * Neither is ever going to appear as an action item, because nobody posts "remember the weekly report" in
+ * Slack and nobody says it on a call — it is simply what happens every week, which is exactly why it is
+ * the thing that gets forgotten. So it is a fixed line rather than something the model could find.
+ *
+ * Midweek returns "" and the brief is told to skip the line entirely. A reminder that appears every day
+ * is wallpaper, and wallpaper is what the rest of this file is trying to strip out.
+ */
+export function briefWeekdayNote(timezone: string, at: Date = new Date()): string {
+  const weekday = at.toLocaleDateString("en-US", { timeZone: timezone, weekday: "long" });
+  if (weekday === "Monday") return "Make sure to sync about game plan for this week!";
+  if (weekday === "Friday") return "Remember to send EOW report out today!";
+  return "";
+}
+
 /** What the model is shown, in the order it should read it. */
 export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs): string {
   const timezone = workspace.timezone || "America/New_York";
   const today = new Date().toLocaleDateString("en-US", { timeZone: timezone, weekday: "long", month: "long", day: "numeric" });
+  const weekdayNote = briefWeekdayNote(timezone);
   const brief = String(workspace.client_brief ?? "").trim();
   const section = (channel: BriefInputs["internal"], label: string) => {
     if (!channel.channelId) return `# The ${label} channel\n\nNo ${label} channel is configured for this client.`;
@@ -575,7 +615,7 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     return [
       `# The last call: "${call.title}", ${when}${stale}`,
       call.transcript
-        ? `## Transcript, in full\n\nA machine transcription, so names and product terms are unreliable. This is the whole call and the only record of it you have — there is no summary, deliberately, because what you are looking for is the sentence in which somebody said they would do something, and who said it. Read it for that.${cut}\n\n${call.transcript}`
+        ? `## Transcript, in full\n\nA machine transcription, so names and product terms are unreliable. This is the whole call and the only record of it you have. There is no summary, deliberately, because what you are looking for is the sentence in which somebody said they would do something, and who said it. Read it for that.${cut}\n\n${call.transcript}`
         : "The transcript could not be read, so nothing about what was said on this call is known. Do not speculate about it.",
     ].filter(Boolean).join("\n\n");
   })();
@@ -596,14 +636,20 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     }
     if (!byId.size) return "";
     const lines = [...byId].map(([id, name]) => `- ${name} → <@${id}>`).join("\n");
-    return `# How to mention people\n\nWhen the brief names somebody, write their mention code from this table exactly as it appears, including the angle brackets. Slack turns it into a real mention that notifies them; their name typed as plain text does not, and an owner who is not notified is an owner who does not know.\n\n${lines}\n\nAnybody not in this table is written as plain text — do not invent a mention code, and do not mention the client's own people even if they appear here.`;
+    return `# How to mention people\n\nWhen the brief names somebody, write their mention code from this table exactly as it appears, including the angle brackets. Slack turns it into a real mention that notifies them; their name typed as plain text does not, and an owner who is not notified is an owner who does not know.\n\n${lines}\n\nAnybody not in this table is written as plain text. Do not invent a mention code, and do not mention the client's own people even if they appear here.`;
   })();
 
   return [
-    // The status title is handed over rather than worked out, like every other fact here. Monday's brief
-    // is a plan and Friday's is a reckoning, and which one today is depends on a calendar the model has no
-    // reason to reason about.
-    `# Client\n\n${workspace.name}. Today is ${today} in ${timezone}.\n\nThe brief's opening line is exactly this, bold, with a colon: *${briefStatusTitle(timezone)}:*`,
+    // The status title and the weekday note are handed over rather than worked out, like every other fact
+    // here. Monday's brief is a plan and Friday's is a reckoning, and which one today is depends on a
+    // calendar the model has no reason to reason about.
+    [
+      `# Client\n\n${workspace.name}. Today is ${today} in ${timezone}.`,
+      `The brief's opening line is exactly this, bold, with a colon: *${briefStatusTitle(timezone)}:*`,
+      weekdayNote
+        ? `Then this line, on its own, word for word, before the first section:\n\n${weekdayNote}`
+        : "There is no standing reminder for today, so go straight from the status line to the first section.",
+    ].join("\n\n"),
     `# Figures\n\nThese are facts. Do not restate them differently and do not compute new ones.\n\n${signalsAsText(inputs.signals)}`,
     roster,
     section(inputs.internal, "internal"),

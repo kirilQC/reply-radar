@@ -14,7 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { looksLikeChannelId, normalizeChannelId } from "../app/lib/slack-channel.ts";
-import { briefHeaderText, briefStatusTitle, briefTrace, DEFAULT_MORNING_BRIEF_PROMPT, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
+import { briefHeaderText, briefStatusTitle, briefTrace, briefWeekdayNote, DEFAULT_MORNING_BRIEF_PROMPT, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
 import { transcript } from "../app/lib/slack.ts";
 
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
@@ -246,7 +246,9 @@ test("an active campaign with no leads left says it is done sending", async () =
     WORKSPACE,
   );
   assert.equal(signals.campaigns.names[0].daysLeft, 0);
-  assert.match(signalsAsText(signals), /no leads left to contact, so it is done sending/);
+  assert.match(signalsAsText(signals), /no leads left to contact, so it is finished in practice/);
+  // Counted in the runway arithmetic, but kept off the brief: "its implied those campaigns are finished".
+  assert.match(signalsAsText(signals), /Leave it out of the campaign list entirely/);
 });
 
 test("a campaign with no senders reports an unknown runway rather than a finished one", async () => {
@@ -386,6 +388,26 @@ test("the day of the month is written the way it is said", () => {
   assert.match(on("2026-08-22T14:00:00Z"), /August 22nd/);
 });
 
+test("Monday and Friday carry a standing reminder, midweek carries none", async () => {
+  /*
+   * Two rituals bracket the week: agreeing the plan on Monday, sending the client their report on Friday.
+   * Neither will ever turn up as an action item, because nobody posts "remember the weekly report" in Slack
+   * and nobody says it on a call. It is just what happens every week, which is exactly why it gets
+   * forgotten, so it is a fixed line rather than something the model could be expected to find.
+   */
+  const zone = "America/New_York";
+  assert.equal(briefWeekdayNote(zone, new Date("2026-08-17T14:00:00Z")), "Make sure to sync about game plan for this week!");
+  assert.equal(briefWeekdayNote(zone, new Date("2026-08-21T14:00:00Z")), "Remember to send EOW report out today!");
+  // Midweek gets nothing. A reminder that appears every day is wallpaper.
+  assert.equal(briefWeekdayNote(zone, new Date("2026-08-19T14:00:00Z")), "");
+  assert.equal(briefWeekdayNote(zone, new Date("2026-08-20T14:00:00Z")), "");
+
+  // And the model is told when there is nothing, rather than left to infer it from an absent instruction.
+  const signals = await gatherSignals(readerFor([], dayRows(0, 7, 100)), WORKSPACE);
+  const content = briefUserContent(WORKSPACE, { signals, internal: { channelId: "", messages: 0, text: "" }, external: { channelId: "", messages: 0, text: "" } });
+  assert.match(content, /(word for word, before the first section|There is no standing reminder for today)/);
+});
+
 test("where in the week today is, is a fact the model is given", () => {
   // Monday's brief is a plan and Friday's is a reckoning. The model is told which, because it is a fact
   // about the calendar and everything else it states as fact is computed here too.
@@ -464,9 +486,12 @@ test("the brief has three sections, and the owner's mention starts the line", ()
    * as first names, and — the big one — put the owner's mention at the *start* of every action item, so a
    * person scanning for their own name finds it without reading a sentence first.
    */
-  for (const heading of ["_Active Campaigns_", "_Things to work on_", "_Client Bottlenecks_"]) {
+  for (const heading of [":signal_strength: _Active Campaigns_ :signal_strength:", ":male-technologist: _Things to work on_ :male-technologist:", ":hourglass: _Client Bottlenecks_ :hourglass:"]) {
     assert.match(DEFAULT_MORNING_BRIEF_PROMPT, new RegExp(heading));
   }
+  // The two the first version guessed at. Kiril picked these, and an emoji name Slack does not know renders
+  // as literal `:bar_chart:` text in the middle of the heading.
+  assert.doesNotMatch(DEFAULT_MORNING_BRIEF_PROMPT, /:bar_chart:|:construction_worker:/);
   // Sections the hand-written version did without. An urgent section is a second place to say the same
   // thing, and the runway warning already lives on the campaign it is about.
   assert.doesNotMatch(DEFAULT_MORNING_BRIEF_PROMPT, /Start here/);
@@ -482,12 +507,41 @@ test("the brief has three sections, and the owner's mention starts the line", ()
   // Length is the whole complaint, so it is stated as a number rather than as "be concise".
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /150 to 250 words/);
   // Only what is running, and senders by first name — full names with credentials repeated on every
-  // campaign were a line and a half of text that told the team nothing they did not know.
-  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Only the campaigns the Figures call \*active\*/);
+  // campaign were a line and a half of text that told the team nothing they did not know. "Active" alone
+  // is not enough: a campaign can be active and have nothing left to send, which is finished in practice.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Only campaigns that are \*both\* active \*and\* still have leads to contact/);
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /A campaign with 0 pending leads is finished/);
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*First names only\.\*\*/);
   // The redundancy that survived the first pass at this: a detail bullet that paraphrased the italic
   // accountability clause under it, which is the same wall of text at half the width.
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*The other sub-bullet must not restate it\.\*\*/);
+  // Two senders whose first names match printed as "Shane, Kiril, Kiril", which reads as a bug rather than
+  // as two people. First names are still right; a collision just takes a last initial.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Never print the same first name twice in one list/);
+});
+
+test("nothing the model is given contains an em dash", () => {
+  /*
+   * The brief is told never to write one, because an em dash is the clearest tell that a machine wrote the
+   * message. A prompt that demands that while modelling the opposite loses to the example every time, so
+   * the ban has to hold across everything the model actually reads: the prompt, the figures, the mention
+   * table, the call framing. Code comments are exempt, since the model never sees them.
+   */
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*Never use an em dash or an en dash\.\*\*/);
+
+  const dashes = /[—–]/;
+  // The one legitimate occurrence is the rule itself naming the characters it forbids.
+  const withoutTheRule = DEFAULT_MORNING_BRIEF_PROMPT.split("\n").filter((line) => !/Never use an em dash/.test(line));
+  for (const line of withoutTheRule) assert.doesNotMatch(line, dashes, `the prompt models an em dash: ${line.slice(0, 90)}`);
+});
+
+test("the figures the model is handed contain no em dash either", async () => {
+  const signals = await gatherSignals(readerFor(
+    [{ name: "W1", status: "IN_PROGRESS", connections_sent: 100, connections_accepted: 20, replies: 4, leads_pending: 0, sender_ids: ["1"] }],
+    // A fortnight of nothing, which is the branch that used to print "since Jan 10 — that is 14 days quiet".
+    dayRows(0, 3, 0).concat(dayRows(3, 11, 40)),
+  ), WORKSPACE);
+  assert.doesNotMatch(signalsAsText(signals), /[—–]/);
 });
 
 test("reading prefers a teammate's token, and says so when neither is set", () => {
