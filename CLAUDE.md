@@ -5,8 +5,15 @@ multiple clients through HeyReach. Replies from every client land in one inbox; 
 sentiment and follow-up urgency, scores the lead against the client's ICP, and drafts a response
 before anyone opens the thread.
 
-**Next.js 16 App Router + React 19 on Vercel · Supabase over the PostgREST REST API only · Anthropic
-`claude-haiku-4-5-20251001` · a separate always-on Render worker (`worker/render-worker.mjs`).**
+It also writes the **morning brief**: three mornings a week, a short intelligence report per client
+posted into the team's internal Slack channel. See
+[`context/09-morning-brief.md`](context/09-morning-brief.md) before touching it.
+
+**Next.js 16 App Router + React 19 on Vercel (Hobby, 60s function ceiling) · Supabase over the
+PostgREST REST API only · Anthropic `claude-haiku-4-5-20251001` for the inbox pipeline and
+`claude-sonnet-4-6` for the brief and the brain · a separate always-on Render worker
+(`worker/render-worker.mjs`) · `replyradar.dev`, whose bare domain 308-redirects, so `curl` needs
+`-L`.**
 
 ## Full context lives in `context/`
 
@@ -22,9 +29,10 @@ Read it rather than re-deriving things. `context/README.md` is the index.
 | [`context/06-product-decisions.md`](context/06-product-decisions.md) | Settled decisions, including reversed ones. Do not relitigate. |
 | [`context/07-verification.md`](context/07-verification.md) | How to prove a change works with no local credentials. |
 | [`context/08-session-handoff.md`](context/08-session-handoff.md) | **Current state: recent commits, what's verified, what's still open.** Start here if picking up cold. |
+| [`context/09-morning-brief.md`](context/09-morning-brief.md) | The Slack morning brief: sources, the load-bearing rules, and why its layout is applied in code rather than asked of the model. |
 | [`context/00-original-handoff.md`](context/00-original-handoff.md) | The original handoff, verbatim. Historical where it conflicts with the above. |
 
-## The eight things that catch everyone out
+## The ten things that catch everyone out
 
 1. **`app/page.tsx` is the inbox.** The home page is `app/components/DashboardHome.tsx`.
 2. **`supabase/schema.sql` has drifted from production.** Read the real columns in Supabase before
@@ -40,8 +48,13 @@ Read it rather than re-deriving things. `context/README.md` is the index.
    work goes through `/api/ai/*` routes the worker calls over HTTP. Never keep a second copy.
 7. **There is no local `.env`**, so no local production data. Anything needing live data must be a
    button the owner clicks. Verify changes with the harness pattern in `context/07-verification.md`.
-8. **Lint baseline is exactly 6 errors.** Any seventh is yours. Don't fix the existing 6 as drive-by
-   work.
+8. **Lint baseline is exactly 18 errors and 67 warnings**, via `npx eslint .` — **`npx next lint` is
+   broken here.** Any nineteenth is yours. Don't fix the existing ones as drive-by work.
+9. **The brief's layout is applied to the model's output, not asked of it** (`briefFraming`). It looks
+   like something to simplify and is not; `context/09-morning-brief.md` has the two failures that
+   argue for it.
+10. **No new runtime dependencies.** `next`, `react`, `react-dom`, `@vercel/speed-insights`,
+    `@vercel/analytics`. Raw `fetch` only. Charts are CSS divs, never SVG.
 
 ## Rules
 
@@ -64,9 +77,16 @@ Authentication of any kind. Webhook secret verification. Encryption of HeyReach 
 
 ```bash
 npm run typecheck     # clean
-npm run lint          # exactly 6 errors
-npm test              # 10 passing
+npx eslint .          # exactly 18 errors, 67 warnings
+npm test              # 341 passing, 0 failing
+npm run watermark     # every source file carries the banner
 npm run build         # confirm any new route appears in the route list
 ```
 
-`main` deploys to Vercel and Render automatically. **A push is a release.**
+`main` deploys to Vercel and Render automatically. **A push is a release** — and push without being
+asked, since that is the owner's standing instruction. Paste any SQL inline in chat rather than
+pointing at a migration file.
+
+**Green checks are not proof.** The Slack health panel passed all of the above and had five bugs
+visible the moment the page was opened, and the brief's worst formatting bug was invisible until the
+output was printed with its spaces made visible. Open the page; render the string.
