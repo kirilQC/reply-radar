@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   const { url, key } = supabaseConfig();
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  let response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,brain_folder,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids,granola_title_match,granola_extra_title_matches,morning_brief_enabled,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&order=name.asc`, { headers, cache: "no-store" });
+  let response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,brain_folder,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids,granola_title_match,granola_extra_title_matches,airtable_base_id,morning_brief_enabled,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&order=name.asc`, { headers, cache: "no-store" });
   // Permit the UI to keep working while the additive migration is being run.
   if (!response.ok) response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,logo_url,accent_color,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&order=name.asc`, { headers, cache: "no-store" });
   const rows = await response.json();
@@ -57,6 +57,18 @@ export async function POST(request: Request) {
     [...new Set((Array.isArray(value) ? value : []).map((entry) => clean(String(entry ?? ""))).filter(Boolean))];
   if ("slackExtraChannelIds" in payload) record.slack_extra_channel_ids = asStringList(payload.slackExtraChannelIds, (entry) => normalizeChannelId(entry));
   if ("granolaExtraTitleMatches" in payload) record.granola_extra_title_matches = asStringList(payload.granolaExtraTitleMatches, (entry) => entry.trim());
+  // Validated rather than trusted, and cleared to null rather than to "". This id is the address the
+  // brief will one day write client action items to, so the two failures worth stopping here are a
+  // half-pasted id that would 404 every morning, and a blank that reads as "no Airtable" but stores a
+  // value. Anything that is not the shape of a base id is refused outright instead of being saved and
+  // discovered later by a push that went nowhere.
+  if ("airtableBaseId" in payload) {
+    const baseId = String(payload.airtableBaseId ?? "").trim();
+    if (baseId && !/^app[A-Za-z0-9]{14}$/.test(baseId)) {
+      return NextResponse.json({ ok: false, error: "That is not an Airtable base id. It starts with app and is 17 characters." }, { status: 400 });
+    }
+    record.airtable_base_id = baseId || null;
+  }
   if (typeof payload.heyreachApiKey === "string" && payload.heyreachApiKey.trim()) record.heyreach_api_key_ciphertext = payload.heyreachApiKey.trim();
   const previousSlug = typeof payload.previousSlug === "string" ? payload.previousSlug.trim() : "";
   const id = typeof payload.id === "string" ? payload.id.trim() : "";
@@ -74,6 +86,7 @@ export async function POST(request: Request) {
       delete legacyRecord.granola_title_match;
       delete legacyRecord.slack_extra_channel_ids;
       delete legacyRecord.granola_extra_title_matches;
+      delete legacyRecord.airtable_base_id;
       patched = await fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(legacyRecord) });
     }
     const patchText = await patched.text();
@@ -96,6 +109,7 @@ export async function POST(request: Request) {
     delete legacyRecord.granola_title_match;
     delete legacyRecord.slack_extra_channel_ids;
     delete legacyRecord.granola_extra_title_matches;
+    delete legacyRecord.airtable_base_id;
     response = await fetch(`${url}/rest/v1/rr_workspaces?on_conflict=slug`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(legacyRecord) });
   }
   const body = await response.text();

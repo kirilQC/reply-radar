@@ -44,6 +44,14 @@ create table if not exists rr_workspaces (
   -- is said is what we intend rather than anything the client agreed to.
   granola_extra_title_matches text[] not null default '{}',
   slack_extra_channel_ids text[] not null default '{}',
+  -- Which Airtable base is this client's project tracker, when a person has said so. Null is the
+  -- normal case at first and means "nothing is written to Airtable for this client" — not "guess".
+  -- The guess in shared/airtable-link.mjs prefills the picker and never authorises a write: putting
+  -- our action items in the wrong company's tracker is not a mistake we can take back, and the base
+  -- list has two `Client Template 1`s, two `Untitled Base`s and a Hempmatics beside a Hemaptics.
+  -- Stored as the base id, not the name — bases get renamed, and a name would either stop resolving
+  -- or start resolving to a different base.
+  airtable_base_id text,
   last_webhook_received_at timestamptz, last_successful_poll_at timestamptz, last_reconciled_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
