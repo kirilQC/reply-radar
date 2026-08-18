@@ -103,7 +103,9 @@ type Row = Record<string, unknown>;
 type Reader = (path: string) => Promise<unknown>;
 
 export type BriefSignals = {
-  campaigns: { total: number; active: number; paused: number; names: { name: string; status: string; sent: number; accepted: number; replies: number; pending: number }[] };
+  // `finished` is counted so that the three buckets add up to `total`. Without it a client whose work is
+  // mostly done reads as "13 campaigns, 0 active, 2 paused", and the eleven unaccounted for look like a bug.
+  campaigns: { total: number; active: number; paused: number; finished: number; names: { name: string; status: string; sent: number; accepted: number; replies: number; pending: number }[] };
   sending: { thisWeek: number; lastWeek: number; changePercent: number | null; lastDayWithSends: string | null; quietDays: number };
   replies: { thisWeek: number; lastWeek: number };
   acceptance: { thisWeek: number | null; lastWeek: number | null };
@@ -133,8 +135,11 @@ export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Pr
   const campaigns = Array.isArray(campaignRows) ? (campaignRows as Row[]) : [];
   const days = Array.isArray(dailyRows) ? (dailyRows as Row[]) : [];
 
-  const isActive = (status: unknown) => /active|running|in ?progress/i.test(String(status ?? ""));
+  // HeyReach sends these as `IN_PROGRESS`, `PAUSED`, `FINISHED`, so the separator has to allow an
+  // underscore — matching only "in progress" quietly filed every running campaign under none of these.
+  const isActive = (status: unknown) => /active|running|in[ _-]?progress/i.test(String(status ?? ""));
   const isPaused = (status: unknown) => /pause|stopped|hold/i.test(String(status ?? ""));
+  const isFinished = (status: unknown) => /finish|complet|done|ended/i.test(String(status ?? ""));
 
   // `days` is newest first, so the first seven rows are the recent window and the next seven the one
   // before it. Rows are only written for days HeyReach reported, so a gap is a day with no sending.
@@ -158,6 +163,7 @@ export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Pr
       total: campaigns.length,
       active: campaigns.filter((row) => isActive(row.status)).length,
       paused: campaigns.filter((row) => isPaused(row.status)).length,
+      finished: campaigns.filter((row) => isFinished(row.status)).length,
       // The ten biggest by volume. A client with sixty campaigns has a long tail of finished ones that
       // would fill the prompt without changing a single line of the brief.
       names: campaigns.slice(0, 10).map((row) => ({
@@ -206,7 +212,7 @@ export function signalsAsText(signals: BriefSignals): string {
   if (staleness.statsAgeHours !== null && staleness.statsAgeHours > 36) lines.push(`These figures were last collected ${staleness.statsAgeHours} hours ago, so they may be behind.`);
 
   if (!campaigns.total) lines.push("No campaign records have been collected for this client, so which campaigns these figures came from is not known.");
-  else lines.push(`Campaigns: ${campaigns.total} total, ${campaigns.active} active, ${campaigns.paused} paused or stopped.`);
+  else lines.push(`Campaigns: ${campaigns.total} total, ${campaigns.active} active, ${campaigns.paused} paused, ${campaigns.finished} finished.`);
   for (const campaign of campaigns.names) {
     const accepted = rate(campaign.accepted, campaign.sent);
     lines.push(`- "${campaign.name}" (${campaign.status}): ${campaign.sent} sent, ${campaign.accepted} accepted${accepted === null ? "" : ` (${accepted}%)`}, ${campaign.replies} replies, ${campaign.pending} leads not yet contacted.`);
@@ -454,7 +460,7 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
     steps.push({
       source: "HeyReach",
       result: known
-        ? `Read ${plural(campaigns.total, "campaign")} and ${plural(staleness.dayCount, "day")} of daily figures — ${campaigns.active} active, ${campaigns.paused} paused or stopped.`
+        ? `Read ${plural(campaigns.total, "campaign")} and ${plural(staleness.dayCount, "day")} of daily figures — ${campaigns.active} active, ${campaigns.paused} paused, ${campaigns.finished} finished.`
         : "No figures have ever been collected for this client, so the brief was told to report none.",
       // Stale figures are the failure that looks like success, so they are not allowed to read as `ok`.
       state: !known ? "missing" : staleness.statsAgeHours !== null && staleness.statsAgeHours > 36 ? "partial" : "ok",

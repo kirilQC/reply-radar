@@ -112,7 +112,32 @@ test("campaign counts come from the statuses, not from the row count", async () 
   assert.equal(signals.campaigns.total, 3);
   assert.equal(signals.campaigns.active, 1);
   assert.equal(signals.campaigns.paused, 1);
+  assert.equal(signals.campaigns.finished, 1);
   assert.equal(signals.campaigns.names[0].name, "Founders — NY");
+});
+
+/**
+ * The status HeyReach actually sends for a running campaign, which is not the one the first version of
+ * this matched. A real Bluevia run read thirteen campaigns and reported "0 active, 2 paused" — the two
+ * `IN_PROGRESS` ones fell through every bucket, and nine finished ones were never counted at all.
+ */
+test("a running campaign is counted however HeyReach spells the status", async () => {
+  const sent = { connections_sent: 100, connections_accepted: 10, replies: 1, leads_pending: 50, refreshed_at: new Date().toISOString() };
+  const signals = await gatherSignals(
+    readerFor([
+      { name: "BV006", status: "IN_PROGRESS", ...sent },
+      { name: "BV007", status: "in progress", ...sent },
+      { name: "BV008", status: "IN-PROGRESS", ...sent },
+      { name: "BV009", status: "PAUSED", ...sent },
+      { name: "BV010", status: "FINISHED", ...sent },
+    ], dayRows(0, 7, 50)),
+    WORKSPACE,
+  );
+  assert.equal(signals.campaigns.active, 3);
+  // Every campaign lands in exactly one bucket, so the three add up to the total. A line that says
+  // "13 campaigns, 0 active, 2 paused" leaves eleven unexplained and reads as a bug in the report.
+  const { total, active, paused, finished } = signals.campaigns;
+  assert.equal(active + paused + finished, total);
 });
 
 test("the figures reach the model as prose, and are labelled as facts", async () => {
@@ -132,7 +157,7 @@ test("the figures reach the model as prose, and are labelled as facts", async ()
 
 test("a channel that could not be read becomes a line in the brief", () => {
   const content = briefUserContent(WORKSPACE, {
-    signals: { campaigns: { total: 0, active: 0, paused: 0, names: [] }, sending: { thisWeek: 0, lastWeek: 0, changePercent: null, lastDayWithSends: null, quietDays: 0 }, replies: { thisWeek: 0, lastWeek: 0 }, acceptance: { thisWeek: null, lastWeek: null }, staleness: { statsAgeHours: null, dayCount: 0 } },
+    signals: { campaigns: { total: 0, active: 0, paused: 0, finished: 0, names: [] }, sending: { thisWeek: 0, lastWeek: 0, changePercent: null, lastDayWithSends: null, quietDays: 0 }, replies: { thisWeek: 0, lastWeek: 0 }, acceptance: { thisWeek: null, lastWeek: null }, staleness: { statsAgeHours: null, dayCount: 0 } },
     internal: { channelId: "C1", messages: 0, text: "", error: "The Reply Radar bot is not in that channel. Invite it, then try again." },
     external: { channelId: "", messages: 0, text: "" },
   });
@@ -207,7 +232,7 @@ test("the brief route fits inside the Hobby function ceiling", () => {
 // separate set of notes taken as the run went.
 
 const NO_SIGNALS = {
-  campaigns: { total: 0, active: 0, paused: 0, names: [] },
+  campaigns: { total: 0, active: 0, paused: 0, finished: 0, names: [] },
   sending: { thisWeek: 0, lastWeek: 0, changePercent: null, lastDayWithSends: null, quietDays: 0 },
   replies: { thisWeek: 0, lastWeek: 0 },
   acceptance: { thisWeek: null, lastWeek: null },
@@ -221,7 +246,7 @@ const stepFor = (steps, source) => steps.find((step) => step.source === source);
 
 test("a run that used all three sources says three of three", () => {
   const steps = briefTrace(WORKSPACE, {
-    signals: { ...NO_SIGNALS, campaigns: { total: 2, active: 2, paused: 0, names: [] }, staleness: { statsAgeHours: 2, dayCount: 14 } },
+    signals: { ...NO_SIGNALS, campaigns: { total: 2, active: 2, paused: 0, finished: 0, names: [] }, staleness: { statsAgeHours: 2, dayCount: 14 } },
     internal: { channelId: "C1", messages: 18, raw: 23, capped: false, text: "10:00 Kiril: shipping today" },
     external: { channelId: "C2", messages: 5, raw: 5, capped: false, text: "09:00 Client: any update?" },
     call: { title: "QC <> Bluevia Weekly", ageDays: 5, owner: "Kiril", startedAt: Date.parse("2026-08-12T19:00:00Z"), attendees: ["Kiril Ivlev", "Dan Shapiro"], durationMinutes: 33, summary: "Agreed to send the new list.", transcript: "Kiril: we will send the list Thursday.", truncated: false },
@@ -257,7 +282,7 @@ test("a source that came back empty is not allowed to read as working", () => {
 test("figures too old to trust do not read as a working source", () => {
   // Stale figures are the failure that looks like success: every number is present and every one is from
   // Tuesday. A green tick against them is worse than no trace at all.
-  const stale = { ...NO_SIGNALS, campaigns: { total: 3, active: 1, paused: 2, names: [] }, staleness: { statsAgeHours: 70, dayCount: 14 } };
+  const stale = { ...NO_SIGNALS, campaigns: { total: 3, active: 1, paused: 2, finished: 0, names: [] }, staleness: { statsAgeHours: 70, dayCount: 14 } };
   const steps = briefTrace(WORKSPACE, { signals: stale, internal: { channelId: "", messages: 0, text: "" }, external: { channelId: "", messages: 0, text: "" } }, OUTCOME);
   assert.equal(stepFor(steps, "HeyReach").state, "partial");
   assert.match(stepFor(steps, "HeyReach").facts.join(" "), /last collected 70 hours ago/);
@@ -266,7 +291,7 @@ test("figures too old to trust do not read as a working source", () => {
 test("every campaign the model was given is listed, and the ones it was not are counted", () => {
   const names = Array.from({ length: 10 }, (_, index) => ({ name: `Campaign ${index + 1}`, status: "ACTIVE", sent: 100, accepted: 25, replies: 4, pending: 50 }));
   const steps = briefTrace(WORKSPACE, {
-    signals: { ...NO_SIGNALS, campaigns: { total: 23, active: 10, paused: 13, names }, staleness: { statsAgeHours: 3, dayCount: 21 } },
+    signals: { ...NO_SIGNALS, campaigns: { total: 23, active: 10, paused: 13, finished: 0, names }, staleness: { statsAgeHours: 3, dayCount: 21 } },
     internal: { channelId: "", messages: 0, text: "" },
     external: { channelId: "", messages: 0, text: "" },
   }, OUTCOME);
