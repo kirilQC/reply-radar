@@ -111,34 +111,54 @@ So every candidate item gets checked twice, in this order:
 What to do with the result:
 - **Done: leave it out entirely.** Do not list it as complete, do not tick it, do not mention it in passing. The brief is only the work that is still outstanding. A list of finished items is exactly the block of text that makes the brief too long to read.
 - **Outstanding: list it**, and say where it was agreed and when.
-- **The channel says done and the Figures say otherwise: that is the most important line in the brief.** Put it in *Start here* with its owner, and say both sides in one sentence — what somebody said, and what HeyReach actually shows. Somebody believes this is handled and it is not.
+- **The channel says done and the Figures say otherwise: that is the most important item in the brief.** Make it the first item under *Things to work on*, owned by whoever said it was done, with the italic line giving both sides in one clause — what they said, and what HeyReach shows. Somebody believes this is handled and it is not. **Once, though.** It is one item, in one place. The previous version of this brief printed the same contradiction three times over and that is what made it unreadable.
 
 ## What to write
 
-Write as much as the outstanding work needs and no more — usually 200 to 450 words. Lead with whatever would change what somebody does in the next hour. If there is genuinely nothing outstanding and the sending is healthy, say so in two lines and stop: padding a brief out is how it stops being read.
+Thirty seconds. That is the whole budget — the brief is read on a phone, standing up, by somebody deciding what to do first. **The entire brief is 150 to 250 words.** Not a word more. Everything below is about spending those words on the two things that cannot be got anywhere else: what is running, and who owes what.
 
-The brief is read on a phone, between meetings, by somebody who will give it fifteen seconds before deciding whether to read the rest. So it is never one block of text. Every section starts with its own heading line, exactly as written below, emoji and all, with a blank line before it. Every item under a heading is its own bullet on its own line. No paragraph anywhere in the brief runs past two lines.
+The shape is fixed. Copy it exactly.
 
-Use these sections, in this order, and **drop entirely any section that has nothing real in it** — an empty heading is worse than no heading.
+First line, on its own: the status title you were given for today, bold, with a colon. Nothing else on that line.
 
-:rotating_light: *Start here*
-At most three bullets, and only for things that are actually urgent today: a client waiting on an answer, sending about to run dry, a commitment already past its date, or something believed done that the Figures say is not. Get urgency from what was said, not from your own sense of importance — a date somebody named, a client asking twice, "before the end of the week" on the call. Anything raised here is *not repeated* lower down — it carries its owner's mention here and that is the only time it appears. A brief that says the same thing twice is a brief somebody stops reading halfway. Same shape as the bullets below:
-• *The thing that is wrong or due* — <@OWNER> — _why it is urgent today, in one clause._
+Then these three sections in this order, each one separated from the last by a divider line of exactly \`=========================================\` on its own line. Drop a section entirely if it has nothing real in it.
 
-:clipboard: *What we owe them*
-The outstanding action items that are not already in *Start here*, one bullet each, each with an owner. This is the core of the brief. Cover everything we said we would do and have not done, wherever we said it: on the call, in the external channel to the client, or to each other in the internal channel. Write each one as the actual piece of work, in the words the team would use for it — a campaign to launch, a campaign to revise, a new campaign to build, a lead list to pull, a list to enrich, an integration or reporting job, a question to answer. Not "follow up on the list discussion". Format each as:
-• *The thing to do* — <@OWNER> — _where it was agreed, roughly when, and the date if one was named._
+### :bar_chart: _Active Campaigns_ :bar_chart:
 
-Work out the owner from what you were given: who volunteered on the call, who was asked in the channel and did not decline, who has been doing this kind of work for this client. If two people could own it, mention the likelier one and say in the italics that the other was also in the conversation. If nobody can be identified, write _owner not agreed_ — which is itself a finding worth reading, because unowned work is the work that does not happen.
+Only the campaigns the Figures call *active*. A paused campaign is not running and a finished one is not either, and listing them is four lines of text about work nobody is doing today. Numbered, one campaign each, and never more than two lines under a campaign:
 
-:chart_with_upwards_trend: *HeyReach right now*
-The client's sending, as it stands. One bullet per active campaign, each giving the campaign's full name, leads still to contact, days of sending left, and which senders are on it. Then one final bullet with the total days of sending left across all active campaigns. If the Figures say nothing is running, that is the first bullet and it is urgent. If the runway is under two days, or there are no active campaigns at all, say plainly that new campaigns need building now and what that means in practice — lists to pull, lists to enrich, copy to write — and mention who should do it if the channels or the call make that clear. This is the one part of the brief that is allowed to tell the team to do something nobody asked for, because running out of leads is always somebody's fault after the fact and never anybody's job before it.
+1. *FULL CAMPAIGN NAME*
+    • N pending leads (~N days of sending left)
+    • N senders: first names only
 
-:hourglass: *Waiting on the client*
-Anything we asked the client, on the call or in the external channel, that they have not answered. One bullet each: what we asked, when, and whether we have chased it.
+**First names only.** *3 senders: Ali, Abhyuday, Vijay* — never *Ali Mahomed, Abhyuday Roychowdhury, Vijay Prasad MD, MPH*. The team knows who they are; the surnames and credentials are a line and a half of text that tells them nothing, and they repeat on every campaign.
 
-:mag: *Worth knowing*
-At most two bullets, and only for a figure that changed enough to matter. Skip this section by default.
+An active campaign with 0 pending leads gets one sub-bullet and no more: \`• 0 pending leads — done sending, needs new leads or replacing\`.
+
+Then, and only if the total runway is under two days or nothing is active at all, one standalone line after the numbered list — not inside it:
+:warning: New leads or a new campaign must be in motion today! Less than N days of sending remaining! :warning:
+
+That line is the entire urgency mechanism of this brief. There is no separate urgent section, because a separate urgent section means writing the same finding twice — once at the top and once where it belongs.
+
+### :construction_worker: _Things to work on_ :construction_worker:
+
+The outstanding action items. Numbered, and **the owner's mention is the first thing on the line**:
+
+1. <@OWNER> to *do the specific thing*
+    • the one detail that makes it actionable, only if it is not obvious
+    • _where it was agreed, when, and that it still has not happened._
+
+The mention comes first because everybody reading is scanning for their own name and nothing else. A mention buried in the middle of a sentence is a mention that gets missed, and the item with it.
+
+The italic sub-bullet is the last thing on every item and it is the point of the whole section: it names when the commitment was made and says plainly that it is still outstanding. _"Agreed on the Aug 5 call; no update since."_ _"Kori said on Aug 12 that updates were coming shortly; nothing has gone out."_ One clause, italic, factual, no editorialising. That is what keeps somebody honest, and it costs eight words rather than a paragraph.
+
+Write the work in the words the team uses for it — a campaign to launch, a list to pull, a list to enrich, copy to write, a reporting job, a question to answer. Not "follow up on the list discussion". Work out the owner from what you were given: who volunteered on the call, who was asked in the channel and did not decline, who has done this kind of work for this client before. If two people could own it, mention both on the line. If nobody can be identified, start the line with *Owner not agreed* in place of a mention — unowned work is the work that does not happen, so it is worth a line.
+
+Six items is a lot. If you have more than six, you are including things that do not matter this week.
+
+### :hourglass: _Client Bottlenecks_ :hourglass:
+
+What we are waiting on the client for. Numbered, one short line each, with one italic sub-bullet saying when we asked and whether we have chased it.
 
 ## Rules
 
@@ -152,13 +172,47 @@ At most two bullets, and only for a figure that changed enough to matter. Skip t
 
 ## Formatting
 
-- Slack mrkdwn, which is not markdown. *bold* with single asterisks. _italic_ with underscores. \`code\` with backticks. There is no underline in Slack — do not try.
-- No markdown headings (\`#\`), no \`**double asterisks**\`, no tables, no code fences. They render as literal characters and make the brief look broken.
-- Bullets with • at the start of the line. One item per line, never two joined by a semicolon.
-- Bold marks the piece of work, not the sentence around it. A whole bullet in bold is a bullet with no emphasis in it, and every \`*\` and \`_\` must be closed — one left open turns the rest of the brief into italics.
-- A blank line between every section, and between the section heading and its first bullet.
-- **Mention people with their mention code from the mention table** — \`<@U04AB12CD>\` — so the owner of each item is actually notified. Copy the code exactly; a name typed as plain \`@kori\` is just text and reaches nobody. Anybody who is not in that table is written as plain text.
-- Emoji in the section headings as given above, and sparingly elsewhere: one to mark something urgent or broken is useful, a decoration on every bullet is noise.`;
+Slack mrkdwn, which is not markdown. *bold* with single asterisks, _italic_ with underscores, \`code\` with backticks. **There is no underline in Slack** — do not attempt one, and do not reach for HTML or markdown to fake it. No \`#\` headings, no \`**double asterisks**\`, no tables, no code fences: they render as literal characters and make the brief look broken.
+
+The layout, exactly:
+
+- **Section headings** are the emoji, the name in bold italics, and the same emoji again, on their own line: \`*:bar_chart: _Active Campaigns_ :bar_chart:*\`. Use the three given above, spelled that way.
+- **A divider line** of \`=========================================\` on its own line between sections. Not before the first one, not after the last.
+- **Items are numbered** — \`1.\`, \`2.\`, \`3.\` at the start of the line — and there is a blank line between one numbered item and the next. That blank line is what makes the list scannable rather than a paragraph with numbers in it.
+- **Sub-bullets** are indented four spaces and start with \`•\`. They belong to the item above them. Two at most per item, and never a third.
+- **Mention people with their mention code from the mention table** — \`<@U04AB12CD>\` — so the owner is actually notified. Copy it exactly; a name typed as plain \`@kori\` is text and reaches nobody. Anybody not in that table is plain text.
+- **Bold marks the piece of work itself**, not the sentence around it — a whole line in bold is a line with no emphasis in it. Italics are for the accountability clause and nothing else. Every \`*\` and \`_\` must be closed; one left open turns the rest of the brief into italics.
+- **Emoji** in the section headings as given, and the one \`:warning:\` line when the runway is short. Nowhere else. A decoration on every bullet is noise.
+
+A worked example of the shape, with the content stripped out:
+
+*Beginning of Week Status:*
+
+*:bar_chart: _Active Campaigns_ :bar_chart:*
+
+1. *BV007: ASCs v2*
+    • 106 pending leads (~2 days of sending left)
+    • 3 senders: Ali, Abhyuday, Vijay
+
+:warning: New leads or a new campaign must be in motion today! Less than 2 days of sending remaining! :warning:
+
+=========================================
+
+*:construction_worker: _Things to work on_ :construction_worker:*
+
+1. <@U01> to *finish the Doximity list*
+    • scoring and filtering down to the top ~2,000 contacts
+    • _agreed on the Aug 5 call; no update since._
+
+2. <@U02> to *send campaign updates to the client*
+    • _said on Aug 12 that updates were coming shortly; nothing has gone out._
+
+=========================================
+
+*:hourglass: _Client Bottlenecks_ :hourglass:*
+
+1. Cold calling update
+    • _raised on the Aug 12 call, not answered, not chased since._`;
 
 export type BriefWorkspace = {
   id: string;
@@ -455,13 +509,36 @@ export type BriefInputs = {
  *
  * The channel gets a date and a client and nothing else. That is the entire point of the split: a page of
  * brief posted three mornings a week buries every real conversation in the internal channel, whereas a
- * header everybody can skip and open when they need it costs one line. It says the brief is in the thread
- * because a bare header with no visible reply looks like the automation half-failed.
+ * header everybody can skip and open when they need it costs one line.
+ *
+ * One line, and no "the brief is in this thread" under it. Slack already prints the reply count directly
+ * beneath a threaded parent, so saying it in words was the header explaining something the client was
+ * about to show anyway — which is exactly the habit this whole rewrite is trying to break.
  */
 export function briefHeaderText(workspace: BriefWorkspace, at: Date = new Date()): string {
   const timezone = workspace.timezone || "America/New_York";
-  const date = at.toLocaleDateString("en-US", { timeZone: timezone, weekday: "long", month: "long", day: "numeric" });
-  return `:sunrise: *${workspace.name} — morning brief* · _${date}_\n:thread: The brief is in this thread.`;
+  const weekday = at.toLocaleDateString("en-US", { timeZone: timezone, weekday: "long" });
+  const month = at.toLocaleDateString("en-US", { timeZone: timezone, month: "long" });
+  const day = Number(at.toLocaleDateString("en-US", { timeZone: timezone, day: "numeric" }));
+  // "August 17th", not "August 17". Written the way somebody would say it out loud, because the header is
+  // the one line of this that a person reads as a sentence rather than scans as data.
+  const tens = day % 100;
+  const suffix = tens >= 11 && tens <= 13 ? "th" : ["th", "st", "nd", "rd"][day % 10] ?? "th";
+  return `*${workspace.name} Morning Brief (${weekday}, ${month} ${day}${suffix})* :coffee:`;
+}
+
+/**
+ * Where in the week today is, which is the brief's opening line.
+ *
+ * Three mornings a week means the same brief means different things on different days: Monday's is a plan,
+ * Friday's is a reckoning. Computed here rather than left to the model, because it is a fact about the
+ * calendar and the model has already been told every other fact rather than asked to work one out.
+ */
+export function briefStatusTitle(timezone: string, at: Date = new Date()): string {
+  const weekday = at.toLocaleDateString("en-US", { timeZone: timezone, weekday: "long" });
+  if (weekday === "Monday" || weekday === "Sunday") return "Beginning of Week Status";
+  if (weekday === "Friday" || weekday === "Saturday") return "End of Week Status";
+  return "Midweek Status";
 }
 
 /** What the model is shown, in the order it should read it. */
@@ -521,7 +598,10 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
   })();
 
   return [
-    `# Client\n\n${workspace.name}. Today is ${today} in ${timezone}.`,
+    // The status title is handed over rather than worked out, like every other fact here. Monday's brief
+    // is a plan and Friday's is a reckoning, and which one today is depends on a calendar the model has no
+    // reason to reason about.
+    `# Client\n\n${workspace.name}. Today is ${today} in ${timezone}.\n\nThe brief's opening line is exactly this, bold, with a colon: *${briefStatusTitle(timezone)}:*`,
     `# Figures\n\nThese are facts. Do not restate them differently and do not compute new ones.\n\n${signalsAsText(inputs.signals)}`,
     roster,
     section(inputs.internal, "internal"),

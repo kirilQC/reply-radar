@@ -14,7 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { looksLikeChannelId, normalizeChannelId } from "../app/lib/slack-channel.ts";
-import { briefHeaderText, briefTrace, DEFAULT_MORNING_BRIEF_PROMPT, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
+import { briefHeaderText, briefStatusTitle, briefTrace, DEFAULT_MORNING_BRIEF_PROMPT, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
 import { transcript } from "../app/lib/slack.ts";
 
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
@@ -365,12 +365,36 @@ test("the brief goes in a thread under a header, not flat into the channel", () 
 
 test("the header is a date and a client and nothing else", () => {
   const header = briefHeaderText({ ...WORKSPACE, timezone: "America/New_York" }, new Date("2026-08-17T14:00:00Z"));
-  assert.match(header, /Willow — morning brief/);
-  assert.match(header, /Monday, August 17/);
-  assert.match(header, /in this thread/);
-  // Two lines. The whole reason for the split is that the channel gets one glanceable line, so a header
-  // that grew into a summary of the brief would have defeated it.
-  assert.equal(header.split("\n").length, 2);
+  assert.match(header, /Willow Morning Brief \(Monday, August 17th\)/);
+  // One line. The whole reason for the split is that the channel gets one glanceable line, so a header that
+  // grew a second line explaining itself would have defeated it — Slack already prints the reply count.
+  assert.equal(header.split("\n").length, 1);
+  assert.doesNotMatch(header, /in this thread/);
+});
+
+test("the day of the month is written the way it is said", () => {
+  const on = (iso) => briefHeaderText(WORKSPACE, new Date(iso));
+  assert.match(on("2026-08-01T14:00:00Z"), /August 1st/);
+  assert.match(on("2026-08-02T14:00:00Z"), /August 2nd/);
+  assert.match(on("2026-08-03T14:00:00Z"), /August 3rd/);
+  assert.match(on("2026-08-04T14:00:00Z"), /August 4th/);
+  // The teens are the whole reason this is not `day + suffix[day % 10]`: 11th, 12th and 13th, not 11st.
+  assert.match(on("2026-08-11T14:00:00Z"), /August 11th/);
+  assert.match(on("2026-08-12T14:00:00Z"), /August 12th/);
+  assert.match(on("2026-08-13T14:00:00Z"), /August 13th/);
+  assert.match(on("2026-08-21T14:00:00Z"), /August 21st/);
+  assert.match(on("2026-08-22T14:00:00Z"), /August 22nd/);
+});
+
+test("where in the week today is, is a fact the model is given", () => {
+  // Monday's brief is a plan and Friday's is a reckoning. The model is told which, because it is a fact
+  // about the calendar and everything else it states as fact is computed here too.
+  const zone = "America/New_York";
+  assert.equal(briefStatusTitle(zone, new Date("2026-08-17T14:00:00Z")), "Beginning of Week Status");
+  assert.equal(briefStatusTitle(zone, new Date("2026-08-19T14:00:00Z")), "Midweek Status");
+  assert.equal(briefStatusTitle(zone, new Date("2026-08-21T14:00:00Z")), "End of Week Status");
+  // Late enough in UTC to be the previous day in New York, which is the client's day and the one that counts.
+  assert.equal(briefStatusTitle(zone, new Date("2026-08-18T02:00:00Z")), "Beginning of Week Status");
 });
 
 test("the model is handed the mention code for everybody who spoke", async () => {
@@ -416,9 +440,10 @@ test("an action item is checked against the figures before it is printed", () =>
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Done: leave it out entirely/);
   // And the disagreement is a finding, not a tie to be broken quietly in the figures' favour.
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /The channel says done and the Figures say otherwise/);
-  // Once each, though. The first run of this printed the contradiction in *Start here* and again as an
-  // owned item below it, which is the same block of text the reader was already skipping.
-  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /not repeated\* lower down/);
+  // Once, though. The first live run of this printed the same contradiction three times over — at the top,
+  // as an owned item, and again as a parenthetical on the campaign — which is exactly the wall of text the
+  // brief exists to avoid.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*Once, though\.\*\*/);
 });
 
 test("the brief is told to mention people and to name campaigns in full", () => {
@@ -427,12 +452,39 @@ test("the brief is told to mention people and to name campaigns in full", () => 
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Mention people with their mention code/);
   assert.doesNotMatch(DEFAULT_MORNING_BRIEF_PROMPT, /the brief must not ping anybody/);
   assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Campaign names in full/);
-  // Slack has no underline. Asked for one, the model reaches for markdown that renders as literal characters.
-  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /There is no underline in Slack/);
-  // Sections, each with its own heading line, because the complaint was that it arrived as one block.
-  for (const heading of [":rotating_light: \\*Start here\\*", ":clipboard: \\*What we owe them\\*", ":chart_with_upwards_trend: \\*HeyReach right now\\*", ":hourglass: \\*Waiting on the client\\*"]) {
+  // Slack's API supports bold, italic, strike and code, and no underline. Asked for one anyway, the model
+  // reaches for markdown or HTML that renders as literal characters in the middle of the heading.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*There is no underline in Slack\*\*/);
+});
+
+test("the brief has three sections, and the owner's mention starts the line", () => {
+  /*
+   * The rewrite that came out of comparing a real run against a hand-written one. The differences were not
+   * cosmetic: the hand-written version was a third the length, listed only active campaigns, gave senders
+   * as first names, and — the big one — put the owner's mention at the *start* of every action item, so a
+   * person scanning for their own name finds it without reading a sentence first.
+   */
+  for (const heading of ["_Active Campaigns_", "_Things to work on_", "_Client Bottlenecks_"]) {
     assert.match(DEFAULT_MORNING_BRIEF_PROMPT, new RegExp(heading));
   }
+  // Sections the hand-written version did without. An urgent section is a second place to say the same
+  // thing, and the runway warning already lives on the campaign it is about.
+  assert.doesNotMatch(DEFAULT_MORNING_BRIEF_PROMPT, /Start here/);
+  assert.doesNotMatch(DEFAULT_MORNING_BRIEF_PROMPT, /Worth knowing/);
+
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /the owner's mention is the first thing on the line/i);
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /1\. <@OWNER> to \*do the specific thing\*/);
+  // Numbered with a blank line between, indented sub-bullets, and a divider between sections — the three
+  // things that turn a wall of text into something readable standing up.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /=========================================/);
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /indented four spaces and start with/);
+
+  // Length is the whole complaint, so it is stated as a number rather than as "be concise".
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /150 to 250 words/);
+  // Only what is running, and senders by first name — full names with credentials repeated on every
+  // campaign were a line and a half of text that told the team nothing they did not know.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Only the campaigns the Figures call \*active\*/);
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /\*\*First names only\.\*\*/);
 });
 
 test("reading prefers a teammate's token, and says so when neither is set", () => {
