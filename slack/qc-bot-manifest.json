@@ -1,0 +1,40 @@
+{
+  "display_information": {
+    "name": "QC Bot",
+    "description": "Reads the internal and external channel for each client and posts the morning brief.",
+    "long_description": "QC Bot is the Slack half of Reply Radar. On the mornings you choose it reads the recent history of each client's internal and external channel, combines it with that client's live HeyReach figures and the transcript of your last call with them, and posts a single brief saying what to focus on this week and what was promised on the call.\n\nIt reads channels only at the moment a brief is written and keeps no copy of them. It never reads direct messages.",
+    "background_color": "#7c5cff"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "QC Bot",
+      "always_online": true
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "user": [
+        "channels:history",
+        "groups:history",
+        "channels:read",
+        "groups:read",
+        "users:read"
+      ],
+      "bot": [
+        "chat:write",
+        "chat:write.public",
+        "channels:history",
+        "groups:history",
+        "channels:read",
+        "groups:read",
+        "users:read"
+      ]
+    }
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "is_hosted": false,
+    "token_rotation_enabled": false
+  }
+}

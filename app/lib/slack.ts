@@ -4,12 +4,15 @@
 /**
  * The Slack side of Reply Radar: reading a channel, and posting to one.
  *
- * ── One bot, one workspace ───────────────────────────────────────────────────────────────────────
- * Every channel Reply Radar touches lives in the same Slack workspace, so there is one bot token and
- * it is an environment variable rather than a per-client secret. If that ever stops being true — a
- * client's own Slack, joined as a guest — the change is a token column on `rr_workspaces` and a
- * `token` argument threaded through these functions, not a rewrite: nothing below assumes the token
- * came from the environment except `botToken()` itself.
+ * ── Two tokens, one workspace ────────────────────────────────────────────────────────────────────
+ * Every channel Reply Radar touches lives in the same Slack workspace, so the tokens are environment
+ * variables rather than per-client secrets. There are two of them because reading and posting are
+ * different problems: reads use a teammate's user token, which is already a member of every channel
+ * they are in, and posts use the bot token so the brief arrives from QC Bot. See `readToken`.
+ *
+ * If that ever stops being true — a client's own Slack, joined as a guest — the change is a token
+ * column on `rr_workspaces` and a `token` argument threaded through these functions, not a rewrite:
+ * nothing below assumes where a token came from except the two accessors at the top.
  *
  * ── Why there is no message table ────────────────────────────────────────────────────────────────
  * Channel history is read at the moment a brief is written and thrown away afterwards. Storing it
@@ -23,18 +26,50 @@
 type SlackReply = Record<string, unknown> & { ok?: boolean; error?: string };
 
 export const SLACK_TOKEN_ENV = "SLACK_BOT_TOKEN";
+export const SLACK_USER_TOKEN_ENV = "SLACK_USER_TOKEN";
+
+/** Which credential a call needs. Reading and posting are not the same permission here. */
+export type SlackActor = "read" | "write";
 
 export function botToken(): string {
   return (process.env[SLACK_TOKEN_ENV] ?? "").trim();
 }
 
+export function userToken(): string {
+  return (process.env[SLACK_USER_TOKEN_ENV] ?? "").trim();
+}
+
+/**
+ * Reading uses a teammate's own token when there is one, and the bot's otherwise.
+ *
+ * A bot can only read a channel it has been invited to, and the external channels are Slack Connect
+ * channels shared with the client — where adding an app is the client org's decision, not ours. A user
+ * token is already a member of every channel that person is in, which is all of them, so the read side
+ * needs no invitations and cannot be locked out by somebody else's app policy.
+ *
+ * Posting deliberately does not fall back the other way: see `postMessage`.
+ */
+export function readToken(): string {
+  return userToken() || botToken();
+}
+
+/** Whether channel history can be read at all. */
+export function slackReadable(): boolean {
+  return Boolean(readToken());
+}
+
+/** Whether a brief can actually be posted. Reading and posting fail separately, so they are asked separately. */
 export function slackConfigured(): boolean {
   return Boolean(botToken());
 }
 
-async function call(method: string, init: RequestInit): Promise<SlackReply> {
-  const token = botToken();
-  if (!token) throw new Error(`${SLACK_TOKEN_ENV} is not set, so Slack cannot be reached.`);
+async function call(method: string, init: RequestInit, actor: SlackActor = "read"): Promise<SlackReply> {
+  const token = actor === "write" ? botToken() : readToken();
+  if (!token) {
+    throw new Error(actor === "write"
+      ? `${SLACK_TOKEN_ENV} is not set, so nothing can be posted to Slack.`
+      : `Neither ${SLACK_USER_TOKEN_ENV} nor ${SLACK_TOKEN_ENV} is set, so no channel can be read.`);
+  }
   const response = await fetch(`https://slack.com/api/${method}`, {
     ...init,
     headers: { Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
@@ -42,18 +77,32 @@ async function call(method: string, init: RequestInit): Promise<SlackReply> {
   });
   const body = (await response.json().catch(() => ({}))) as SlackReply;
   // Slack's own errors are more useful than the status, and they are the ones a teammate can act on:
-  // `channel_not_found` means the id is wrong, `not_in_channel` means the bot was never invited.
-  if (!body.ok) throw new Error(slackErrorText(body.error, response.status));
+  // `channel_not_found` means the id is wrong, `not_in_channel` means whoever's token this is is not a member.
+  if (!body.ok) throw new Error(slackErrorText(body.error, response.status, actor));
   return body;
 }
 
-/** Slack's error slugs, in the words of somebody who has to fix them. */
-export function slackErrorText(error: unknown, status?: number): string {
+/**
+ * Slack's error slugs, in the words of somebody who has to fix them.
+ *
+ * The fix for the same slug differs by credential — `not_in_channel` on a read means add yourself or set
+ * a user token, on a write it means invite the bot — so the actor is part of the answer, not decoration.
+ */
+export function slackErrorText(error: unknown, status?: number, actor: SlackActor = "read"): string {
   const code = typeof error === "string" ? error : "";
+  const env = actor === "write" ? SLACK_TOKEN_ENV : (userToken() ? SLACK_USER_TOKEN_ENV : SLACK_TOKEN_ENV);
   if (code === "channel_not_found") return "Slack does not recognise that channel id. Check it on the client's configuration page.";
-  if (code === "not_in_channel") return "The Reply Radar bot is not in that channel. Invite it, then try again.";
-  if (code === "invalid_auth" || code === "not_authed" || code === "token_revoked") return `The ${SLACK_TOKEN_ENV} is not valid. Re-issue the bot token and set it again.`;
-  if (code === "missing_scope") return "The bot token is missing a scope. It needs channels:history, channels:read, users:read and chat:write.";
+  if (code === "not_in_channel") {
+    return actor === "write"
+      ? "The QC Bot is not in that channel. Invite it, then try again."
+      : `The account behind ${env} is not in that channel. Join it, or set ${SLACK_USER_TOKEN_ENV} to somebody who is.`;
+  }
+  if (code === "invalid_auth" || code === "not_authed" || code === "token_revoked") return `The ${env} is not valid. Re-issue it and set it again.`;
+  if (code === "missing_scope") {
+    return actor === "write"
+      ? `The ${SLACK_TOKEN_ENV} is missing a scope. It needs chat:write.`
+      : `The ${env} is missing a scope. It needs channels:history, groups:history, channels:read and users:read.`;
+  }
   if (code === "ratelimited") return "Slack is rate limiting us. Wait a minute and try again.";
   if (code) return `Slack refused the request: ${code}.`;
   return `Slack returned an unreadable reply${status ? ` (HTTP ${status})` : ""}.`;
@@ -140,7 +189,13 @@ export function transcript(messages: SlackMessage[], names: Map<string, string>,
   return lines.join("\n").trim();
 }
 
-/** Posts a message and returns Slack's timestamp for it, which is the id you would need to edit it. */
+/**
+ * Posts a message and returns Slack's timestamp for it, which is the id you would need to edit it.
+ *
+ * Always the bot token, never the user token, even when only a user token is set. A brief that arrives
+ * in a client-facing channel under a person's own name reads as that person having written it, and the
+ * first thing anyone does is reply to them about it. It has to be visibly from QC Bot or not sent.
+ */
 export async function postMessage(channelId: string, text: string): Promise<string> {
   const body = await call("chat.postMessage", {
     method: "POST",
@@ -148,6 +203,6 @@ export async function postMessage(channelId: string, text: string): Promise<stri
     // `unfurl_links: false` because a brief that quotes a campaign URL should not paste a preview card
     // under itself, and `mrkdwn` because the brief is written in Slack's own flavour of markdown.
     body: JSON.stringify({ channel: channelId, text, mrkdwn: true, unfurl_links: false, unfurl_media: false }),
-  });
+  }, "write");
   return String(body.ts ?? "");
 }

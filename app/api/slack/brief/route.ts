@@ -34,7 +34,7 @@ import {
   readinessOf,
   type BriefSchedule,
 } from "../../../lib/morning-brief-schedule";
-import { postMessage, slackConfigured, SLACK_TOKEN_ENV } from "../../../lib/slack";
+import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
 
 // One model call at a 40s timeout plus two short Granola calls, inside Hobby's 60s ceiling. No chunking:
 // a brief is ~1,400 output tokens by design, and the whole point of it is that it is short enough to read
@@ -186,7 +186,17 @@ export async function GET() {
 
     return NextResponse.json({
       ok: true,
-      slack: { configured: slackConfigured(), tokenEnv: SLACK_TOKEN_ENV, testChannelId: (process.env[TEST_CHANNEL_ENV] ?? "").trim() },
+      // Reading and posting are reported apart because they break apart: a user token with no bot token
+      // can read every channel and post to none, and a page that said "Slack: connected" would be lying
+      // about half of it.
+      slack: {
+        configured: slackConfigured(),
+        readable: slackReadable(),
+        readsAsUser: Boolean(userToken()),
+        tokenEnv: SLACK_TOKEN_ENV,
+        userTokenEnv: SLACK_USER_TOKEN_ENV,
+        testChannelId: (process.env[TEST_CHANNEL_ENV] ?? "").trim(),
+      },
       anthropicConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
       granolaKeyCount,
       schedule,

@@ -154,6 +154,23 @@ test("Slack's own error slug is what gets translated, not the HTTP status", () =
   assert.match(slackLib, /channel_not_found/);
 });
 
+test("a brief posts as the bot even when only a user token is set", () => {
+  // The user token exists so reads need no channel invitations. Letting a post fall back to it would put
+  // a brief into a client-facing channel under a person's name, and the client would reply to them.
+  assert.match(slackLib, /}, "write"\);/);
+  assert.match(slackLib, /const token = actor === "write" \? botToken\(\) : readToken\(\);/);
+  // One `"write"` call site, and it is the posting one.
+  assert.equal(slackLib.match(/, "write"\)/g)?.length, 1);
+  assert.match(slackLib, /chat\.postMessage[\s\S]{0,700}}, "write"\);/);
+});
+
+test("reading prefers a teammate's token, and says so when neither is set", () => {
+  // A bot can only read a channel it was invited to, and the external channels are shared with the
+  // client, where adding an app is not our decision to make.
+  assert.match(slackLib, /export function readToken\(\)[\s\S]{0,80}return userToken\(\) \|\| botToken\(\);/);
+  assert.match(slackLib, /Neither \$\{SLACK_USER_TOKEN_ENV\} nor \$\{SLACK_TOKEN_ENV\}/);
+});
+
 test("channel joins and leaves are not activity", () => {
   // A quiet channel that somebody joined is still a quiet channel, and a brief that counted the join
   // would report a week of movement on a dead account.

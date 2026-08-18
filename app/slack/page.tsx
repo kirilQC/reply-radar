@@ -54,7 +54,7 @@ type BriefClient = {
 type Directory = {
   ok?: boolean;
   error?: string;
-  slack: { configured: boolean; tokenEnv: string; testChannelId: string };
+  slack: { configured: boolean; readable: boolean; readsAsUser: boolean; tokenEnv: string; userTokenEnv: string; testChannelId: string };
   anthropicConfigured: boolean;
   granolaKeyCount: number;
   schedule: BriefSchedule;
@@ -190,6 +190,7 @@ export default function SlackPage() {
 
   const testChannel = directory?.slack.testChannelId ?? "";
   const tokenEnv = directory?.slack.tokenEnv ?? "SLACK_BOT_TOKEN";
+  const userTokenEnv = directory?.slack.userTokenEnv ?? "SLACK_USER_TOKEN";
   const toggleDay = (day: number) =>
     setDraft((current) => ({ ...current, sendDays: current.sendDays.includes(day) ? current.sendDays.filter((value) => value !== day) : [...current.sendDays, day].sort((a, b) => a - b) }));
 
@@ -227,8 +228,11 @@ export default function SlackPage() {
             </div>
 
             {/* Both of these are silent failures at run time, so they are said here instead. */}
+            {directory && !directory.slack.readable && (
+              <div className="hub-empty">No channel can be read. Set <code>{userTokenEnv}</code> to your own Slack user token, or <code>{tokenEnv}</code> and invite QC Bot to each channel.</div>
+            )}
             {directory && !directory.slack.configured && (
-              <div className="hub-empty">Slack is not connected. Set <code>{tokenEnv}</code> and invite the Reply Radar bot to each channel.</div>
+              <div className="hub-empty">Nothing can be posted. Set <code>{tokenEnv}</code> so the brief arrives from QC Bot rather than from a person.</div>
             )}
             {directory && !directory.anthropicConfigured && (
               <div className="hub-empty">No <code>ANTHROPIC_API_KEY</code> is set, so no brief can be written.</div>
