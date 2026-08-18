@@ -188,16 +188,23 @@ export default function HealthPage() {
   const aiArkRunsFailing =
     (heartbeat.aiArk?.failures24h ?? 0) > 5 &&
     (heartbeat.aiArk?.failures24h ?? 0) > (heartbeat.aiArk?.successes24h ?? 0);
-  // A Slack automation is only unhealthy when it tried and failed. Never having run is a separate
-  // state, because "the schedule has not fired yet" and "the schedule fired and broke" are two
-  // different jobs for whoever is reading this.
-  const slackRuns = heartbeat.slack?.runs ?? [];
-  const slackFailing = Boolean(heartbeat.slack && heartbeat.slack.failures > 0);
-  const slackState = !heartbeat.slack?.configured
-    ? "missing"
-    : !heartbeat.slack.readable || slackFailing
+  /*
+   * Three states, not two, and the third is the one that matters.
+   *
+   * A Slack automation is only unhealthy when it tried and failed. Never having run is separate —
+   * "the schedule has not fired yet" and "the schedule fired and broke" are different jobs. And when
+   * the heartbeat returns no Slack block at all, which is what happens before Supabase is configured,
+   * nothing is known either way: claiming the token is missing would be inventing a diagnosis, and a
+   * health page that guesses is worse than one that says it did not look.
+   */
+  const slack = heartbeat.slack;
+  const slackRuns = slack?.runs ?? [];
+  const slackFailing = Boolean(slack && slack.failures > 0);
+  const slackState = !slack
+    ? "neutral"
+    : !slack.configured || !slack.readable || slackFailing
       ? "missing"
-      : heartbeat.slack.attempts === 0
+      : slack.attempts === 0
         ? "neutral"
         : "ready";
   const clients = heartbeat.clients ?? [];
@@ -510,55 +517,64 @@ export default function HealthPage() {
                 <span className={`health-state ${slackState}`}>
                   {slackState === "ready"
                     ? "RUNNING"
-                    : slackState === "neutral"
-                      ? "NEVER RUN"
-                      : "NEEDS ATTENTION"}
+                    : !slack
+                      ? "NOT CHECKED"
+                      : slackState === "neutral"
+                        ? "NEVER RUN"
+                        : "NEEDS ATTENTION"}
                 </span>
               </div>
-              <div className="heartbeat-kid-grid">
-                <div className={heartbeat.slack?.configured ? "ok" : "bad"}>
-                  <b>{heartbeat.slack?.configured ? "✓" : "!"}</b>
-                  <span>
-                    <strong>Slack token</strong>
-                    <small>
-                      {heartbeat.slack?.configured
-                        ? "Configured."
-                        : "No Slack token is set, so nothing can post."}
-                    </small>
-                  </span>
+              {slack && (
+                <div className="heartbeat-kid-grid">
+                  <div className={slack.configured ? "ok" : "bad"}>
+                    <b>{slack.configured ? "✓" : "!"}</b>
+                    <span>
+                      <strong>Slack token</strong>
+                      <small>
+                        {slack.configured
+                          ? "Configured."
+                          : "No Slack token is set, so nothing can post."}
+                      </small>
+                    </span>
+                  </div>
+                  <div className={slack.lastRunAt ? "ok" : "bad"}>
+                    <b>{slack.lastRunAt ? "✓" : "!"}</b>
+                    <span>
+                      <strong>Last delivery</strong>
+                      <small>
+                        {slack.lastRunAt
+                          ? `${formatStamp(slack.lastRunAt)} · ${formatAge(slack.lastRunAgeSeconds)}`
+                          : "No brief has been delivered yet."}
+                      </small>
+                    </span>
+                  </div>
+                  <div className={slackFailing ? "bad" : "ok"}>
+                    <b>{slackFailing ? "!" : "✓"}</b>
+                    <span>
+                      <strong>Deliveries</strong>
+                      <small>
+                        {slack.attempts} attempted · {slack.failures} failed
+                        {slack.lastFailureAt
+                          ? ` · last failed ${formatStamp(slack.lastFailureAt)}`
+                          : ""}
+                      </small>
+                    </span>
+                  </div>
                 </div>
-                <div className={heartbeat.slack?.lastRunAt ? "ok" : "bad"}>
-                  <b>{heartbeat.slack?.lastRunAt ? "✓" : "!"}</b>
-                  <span>
-                    <strong>Last delivery</strong>
-                    <small>
-                      {heartbeat.slack?.lastRunAt
-                        ? `${formatStamp(heartbeat.slack.lastRunAt)} · ${formatAge(heartbeat.slack.lastRunAgeSeconds)}`
-                        : "No brief has been delivered yet."}
-                    </small>
-                  </span>
-                </div>
-                <div className={slackFailing ? "bad" : "ok"}>
-                  <b>{slackFailing ? "!" : "✓"}</b>
-                  <span>
-                    <strong>Deliveries</strong>
-                    <small>
-                      {heartbeat.slack?.attempts ?? 0} attempted ·{" "}
-                      {heartbeat.slack?.failures ?? 0} failed
-                      {heartbeat.slack?.lastFailureAt
-                        ? ` · last failed ${formatStamp(heartbeat.slack.lastFailureAt)}`
-                        : ""}
-                    </small>
-                  </span>
-                </div>
-              </div>
-              {heartbeat.slack?.error ? (
-                <p className="error-text">{heartbeat.slack.error}</p>
+              )}
+              {!slack ? (
+                <p className="empty-state">
+                  No Slack check was returned by the heartbeat.
+                </p>
+              ) : slack.error ? (
+                <p className="error-text">{slack.error}</p>
               ) : slackRuns.length ? (
                 <div className="slack-run-list">
                   {slackRuns.map((run) => (
                     <div
-                      className={`slack-run ${run.status === "sent" ? "run-ok" : run.destination === "preview" ? "run-quiet" : "run-bad"}`}
+                      // Preview is tested before status, because a preview that "succeeded" still did
+                      // not deliver anything and must not read as a green delivery.
+                      className={`slack-run ${run.destination === "preview" ? "run-quiet" : run.status === "sent" ? "run-ok" : "run-bad"}`}
                       key={run.id}
                     >
                       <span className="slack-run-when">
@@ -570,7 +586,11 @@ export default function HealthPage() {
                         {run.channelId ? ` · ${run.channelId}` : ""}
                       </span>
                       <span className="slack-run-status">
-                        {run.status === "sent" ? "Sent" : run.status || "Failed"}
+                        {run.destination === "preview"
+                          ? "Preview"
+                          : run.status === "sent"
+                            ? "Sent"
+                            : "Failed"}
                       </span>
                       {run.error && (
                         <span className="slack-run-error">{run.error}</span>
@@ -586,7 +606,7 @@ export default function HealthPage() {
               {mode === "advanced" && (
                 <details className="diagnostic-details" open>
                   <summary>Raw Slack automation log</summary>
-                  <pre>{JSON.stringify(heartbeat.slack ?? null, null, 2)}</pre>
+                  <pre>{JSON.stringify(slack ?? null, null, 2)}</pre>
                 </details>
               )}
             </section>
