@@ -63,6 +63,17 @@ export function slackConfigured(): boolean {
   return Boolean(botToken());
 }
 
+/** One request with one named token, returning Slack's answer rather than throwing. */
+async function raw(token: string, method: string, init: RequestInit): Promise<SlackReply & { status: number }> {
+  const response = await fetch(`https://slack.com/api/${method}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => ({}))) as SlackReply;
+  return { ...body, status: response.status };
+}
+
 async function call(method: string, init: RequestInit, actor: SlackActor = "read"): Promise<SlackReply> {
   const token = actor === "write" ? botToken() : readToken();
   if (!token) {
@@ -70,15 +81,10 @@ async function call(method: string, init: RequestInit, actor: SlackActor = "read
       ? `${SLACK_TOKEN_ENV} is not set, so nothing can be posted to Slack.`
       : `Neither ${SLACK_USER_TOKEN_ENV} nor ${SLACK_TOKEN_ENV} is set, so no channel can be read.`);
   }
-  const response = await fetch(`https://slack.com/api/${method}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
-    cache: "no-store",
-  });
-  const body = (await response.json().catch(() => ({}))) as SlackReply;
+  const body = await raw(token, method, init);
   // Slack's own errors are more useful than the status, and they are the ones a teammate can act on:
   // `channel_not_found` means the id is wrong, `not_in_channel` means whoever's token this is is not a member.
-  if (!body.ok) throw new Error(slackErrorText(body.error, response.status, actor));
+  if (!body.ok) throw new Error(slackErrorText(body.error, body.status, actor));
   return body;
 }
 
@@ -205,4 +211,121 @@ export async function postMessage(channelId: string, text: string): Promise<stri
     body: JSON.stringify({ channel: channelId, text, mrkdwn: true, unfurl_links: false, unfurl_media: false }),
   }, "write");
   return String(body.ts ?? "");
+}
+
+/* ── Diagnostics ─────────────────────────────────────────────────────────────────────────────────
+ *
+ * Three tokens look alike and behave nothing alike. `xoxb-` is a bot, `xoxp-` is a person, `xapp-` is
+ * an app-level token that almost no Web API method accepts — paste that one into either variable and
+ * every call comes back `not_allowed_token_type`, which reads like a scope problem and is not one.
+ *
+ * So rather than translate that error more sweetly, this asks Slack who each token is and reports the
+ * answer. `auth.test` is the one method every token type accepts, and its reply distinguishes them:
+ * a bot token comes back carrying `bot_id`, a user token does not.
+ */
+
+export type TokenReport = {
+  env: string;
+  role: SlackActor;
+  present: boolean;
+  /** The prefix as pasted, which is usually the whole diagnosis. */
+  prefix: string;
+  /** What Slack says it is: "bot", "user", or "" when the token was refused. */
+  kind: string;
+  /** The bot or person the token acts as. */
+  identity: string;
+  workspace: string;
+  ok: boolean;
+  error: string;
+};
+
+async function reportOn(env: string, token: string, role: SlackActor): Promise<TokenReport> {
+  const prefix = token ? `${token.slice(0, 5)}…` : "";
+  if (!token) return { env, role, present: false, prefix, kind: "", identity: "", workspace: "", ok: false, error: "Not set." };
+  const body: SlackReply & { status: number } = await raw(token, "auth.test", { method: "POST" })
+    .catch(() => ({ ok: false, error: "unreachable", status: 0 }));
+  if (!body.ok) {
+    const hint = String(body.error) === "not_allowed_token_type" && !token.startsWith("xoxb-") && !token.startsWith("xoxp-")
+      ? ` This is not a bot or user token — those start xoxb- or xoxp-.`
+      : "";
+    return { env, role, present: true, prefix, kind: "", identity: "", workspace: "", ok: false, error: `${slackErrorText(body.error, body.status, role)}${hint}` };
+  }
+  return {
+    env,
+    role,
+    present: true,
+    prefix,
+    // `bot_id` is present on a bot token and absent on a user token, which is the only reliable tell.
+    kind: body.bot_id ? "bot" : "user",
+    identity: String(body.user ?? body.bot_id ?? ""),
+    workspace: String(body.team ?? ""),
+    ok: true,
+    error: "",
+  };
+}
+
+/** Who each token is, asked of Slack rather than assumed. */
+export function tokenReports(): Promise<TokenReport[]> {
+  return Promise.all([
+    reportOn(SLACK_USER_TOKEN_ENV, userToken(), "read"),
+    reportOn(SLACK_TOKEN_ENV, botToken(), "write"),
+  ]);
+}
+
+export type ChannelProbe = {
+  label: string;
+  id: string;
+  name: string;
+  isPrivate: boolean;
+  /** A Slack Connect channel shared with the client, where adding an app is their decision. */
+  isExternal: boolean;
+  canRead: boolean;
+  readError: string;
+  canPost: boolean;
+  postError: string;
+};
+
+/**
+ * Whether a channel id can actually be read and posted to, tried rather than inferred.
+ *
+ * History is fetched with `limit: 1` because the question is only whether the call is permitted, and a
+ * probe that pulled a week of somebody's channel to answer it would be reading conversations for the
+ * sake of a green tick.
+ *
+ * Posting is probed with `conversations.info`, not a message. `chat:write.public` lets the bot post to
+ * a public channel it never joined, but nothing lets it post where it cannot see the channel — and a
+ * private channel the bot is not in reports `channel_not_found`, not `not_in_channel`, which is the
+ * single most misleading error in this whole feature.
+ */
+export async function probeChannel(label: string, id: string): Promise<ChannelProbe> {
+  const probe: ChannelProbe = { label, id, name: "", isPrivate: false, isExternal: false, canRead: false, readError: "", canPost: false, postError: "" };
+  if (!id) { probe.readError = "Not set."; probe.postError = "Not set."; return probe; }
+
+  const reader = readToken();
+  if (!reader) probe.readError = `Neither ${SLACK_USER_TOKEN_ENV} nor ${SLACK_TOKEN_ENV} is set.`;
+  else {
+    const info = await raw(reader, `conversations.info?channel=${encodeURIComponent(id)}`, { method: "GET" });
+    if (info.ok) {
+      const channel = (info.channel ?? {}) as Record<string, unknown>;
+      probe.name = String(channel.name ?? "");
+      probe.isPrivate = Boolean(channel.is_private);
+      probe.isExternal = Boolean(channel.is_ext_shared || channel.is_shared);
+    }
+    const history = await raw(reader, `conversations.history?channel=${encodeURIComponent(id)}&limit=1`, { method: "GET" });
+    probe.canRead = Boolean(history.ok);
+    if (!history.ok) probe.readError = slackErrorText(history.error, history.status, "read");
+  }
+
+  const bot = botToken();
+  if (!bot) probe.postError = `${SLACK_TOKEN_ENV} is not set.`;
+  else {
+    const seen = await raw(bot, `conversations.info?channel=${encodeURIComponent(id)}`, { method: "GET" });
+    probe.canPost = Boolean(seen.ok);
+    if (!seen.ok) {
+      probe.postError = String(seen.error) === "channel_not_found" && probe.isPrivate
+        ? "QC Bot cannot see this private channel. Invite it with /invite @QC Bot."
+        : slackErrorText(seen.error, seen.status, "write");
+    }
+  }
+  return probe;
 }

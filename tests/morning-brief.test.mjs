@@ -157,11 +157,10 @@ test("Slack's own error slug is what gets translated, not the HTTP status", () =
 test("a brief posts as the bot even when only a user token is set", () => {
   // The user token exists so reads need no channel invitations. Letting a post fall back to it would put
   // a brief into a client-facing channel under a person's name, and the client would reply to them.
-  assert.match(slackLib, /}, "write"\);/);
   assert.match(slackLib, /const token = actor === "write" \? botToken\(\) : readToken\(\);/);
-  // One `"write"` call site, and it is the posting one.
-  assert.equal(slackLib.match(/, "write"\)/g)?.length, 1);
-  assert.match(slackLib, /chat\.postMessage[\s\S]{0,700}}, "write"\);/);
+  // Exactly one `call()` asks for the write credential, and it is the one that posts.
+  assert.equal(slackLib.match(/\}, "write"\);/g)?.length, 1);
+  assert.match(slackLib, /chat\.postMessage[\s\S]{0,700}\}, "write"\);/);
 });
 
 test("reading prefers a teammate's token, and says so when neither is set", () => {
