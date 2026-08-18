@@ -119,9 +119,9 @@ Thirty seconds. That is the whole budget, because the brief is read on a phone, 
 
 The shape is fixed. Copy it exactly.
 
-First line, on its own: the status title you were given for today, bold, with a colon. Nothing else on that line.
+First line, on its own: the status title you were given for today, bold, with a colon. Nothing else on that line. Then **two blank lines** before the first section heading, so the title sits apart from the brief rather than looking like a label stuck to the top of it.
 
-If you were given a line for today's day of the week, it goes next, on its own line, word for word as it was given, before anything else in the brief. If you were not given one, go straight to the first section.
+Do not write the day's standing reminder yourself. On the days there is one it is added under the brief automatically, after you are done. End on your last finding.
 
 Then these three sections in this order, each one separated from the last by a divider line of exactly \`=========================================\` on its own line. Drop a section entirely if it has nothing real in it.
 
@@ -136,6 +136,8 @@ Numbered, one campaign each, and never more than two sub-bullets under a campaig
     • N senders: first names only
 
 **First names only.** *3 senders: Ali, Abhyuday, Vijay*, never *Ali Mahomed, Abhyuday Roychowdhury, Vijay Prasad MD, MPH*. The team knows who they are, and the surnames and credentials are a line and a half of text that tells them nothing, repeated on every campaign. The one exception: if two senders on the same campaign share a first name, add the last initial to both (*Kiril I., Kiril P.*). Never print the same first name twice in one list, because that reads as a bug rather than as two people.
+
+**The senders are whoever the Figures name, and nobody else.** Senders are the client's LinkedIn accounts. They are not our team, and the people talking in the two Slack channels are our team, so a name from a channel is never a sender's name. If the Figures give you names, use them. If the Figures say the names are not recorded, write the bare count and stop: *3 senders*, with nothing after it. Do not fill the gap from the channels, from the call, from the client brief, or from a previous brief. Naming the wrong person as a sender is the worst mistake this brief can make, because it is stated as fact about somebody's work and it is not true.
 
 Then, and only if the total runway is under two days or nothing is active at all, one standalone line after the numbered list, not inside it:
 :warning: New leads or a new campaign must be in motion today! Less than N days of sending remaining! :warning:
@@ -162,12 +164,18 @@ Six items is a lot. If you have more than six, you are including things that do 
 
 ### :hourglass: _Client Bottlenecks_ :hourglass:
 
-What we are waiting on the client for. Numbered, one short line each, with one italic sub-bullet saying when we asked and whether we have chased it.
+What we are waiting on the client for. Numbered, one short line each, with one italic sub-bullet saying when we asked and whether we have chased it:
+
+1. *What we are waiting on*
+    • _when we asked, and whether it has been chased since._
+
+**The thing we are waiting on is bold**, the same way the piece of work is bold under *Things to work on*, so the two sections scan alike. The sub-bullet under it is italic and never bold.
 
 ## Rules
 
 - **Never use an em dash or an en dash.** Not one, anywhere, for any reason. No \`—\`, no \`–\`. They are the single clearest tell that a machine wrote this, and the brief has to read like a colleague wrote it. Use a comma, a colon, a semicolon, brackets, or two sentences instead. Where you would reach for one, a full stop is almost always better.
 - Every action item and every commitment must be attributable to something you were given. Say who said it and roughly when. If you cannot point at it, leave it out, because an invented action item costs the brief more trust than a missed one.
+- **Never write a name you were not given for the thing you are naming.** A sender's name comes only from the Figures, an owner's only from the mention table. Names are not interchangeable between the two: our team owns action items, the client's accounts do the sending. Where you have no name, say the count or say the role. A plausible name is not a name.
 - **Campaign names in full, always, exactly as the Figures spell them.** Write *BV007: ASCs v2*, never "BV007" and never "the ASCs campaign". The prefix on its own means nothing to the person reading, so they cannot tell which campaign you mean and the item cannot be acted on.
 - Never invent a deadline. A deadline exists only if somebody stated one, or the client brief states one. "Should probably be done soon" is not a deadline and must not be written as one.
 - The transcript is a machine transcription and misspells names and product terms. Do not quote a mangled word as though it were said that way, and do not build an action item on one word you cannot make sense of. Where a name is mangled, match it to the right person from the mention table and use their mention code.
@@ -187,14 +195,13 @@ The layout, exactly:
 - **Sub-bullets** are indented four spaces and start with \`•\`. They belong to the item above them, so there is no blank line between an item and its own sub-bullets. Two at most per item, and never a third.
 - **Two blank lines between one numbered item and the next**, and two after a section heading before its first item. That air is the whole difference between a list somebody can scan and a block they skip past. Err on the side of more space, never less.
 - **Mention people with their mention code from the mention table**, \`<@U04AB12CD>\`, so the owner is actually notified. Copy it exactly. A name typed as plain \`@kori\` is text and reaches nobody, and anybody not in that table is written as plain text.
-- **Bold marks the piece of work itself**, not the sentence around it, because a whole line in bold is a line with no emphasis in it. Italics are for the accountability clause and nothing else. Every \`*\` and \`_\` must be closed, since one left open turns the rest of the brief into italics.
+- **Bold marks the piece of work itself**, not the sentence around it, because a whole line in bold is a line with no emphasis in it. That means the campaign name, the thing to be done, and the thing we are waiting on the client for. Never a sub-bullet. Italics are for the accountability clause and nothing else. Every \`*\` and \`_\` must be closed, since one left open turns the rest of the brief into italics.
 - **Emoji** in the section headings as given, and the one \`:warning:\` line when the runway is short. Nowhere else. A decoration on every bullet is noise.
 
 A worked example of the shape and the spacing, with the content stripped out. Match this spacing exactly:
 
 *Beginning of Week Status:*
 
-Make sure to sync about game plan for this week!
 
 *:signal_strength: _Active Campaigns_ :signal_strength:*
 
@@ -206,7 +213,7 @@ Make sure to sync about game plan for this week!
 
 2. *BV009: Ortho Offices*
     • 340 pending leads (~5 days of sending left)
-    • 2 senders: Kiril I., Kiril P.
+    • 3 senders
 
 
 :warning: New leads or a new campaign must be in motion today! Less than 2 days of sending remaining! :warning:
@@ -229,7 +236,7 @@ Make sure to sync about game plan for this week!
 *:hourglass: _Client Bottlenecks_ :hourglass:*
 
 
-1. Cold calling update
+1. *Cold calling update*
     • _raised on the Aug 12 call, not answered, not chased since._`;
 
 export type BriefWorkspace = {
@@ -246,7 +253,7 @@ export type BriefWorkspace = {
 type Row = Record<string, unknown>;
 type Reader = (path: string) => Promise<unknown>;
 
-/** One campaign as the brief states it. `senders` are names where known, ids where not. */
+/** One campaign as the brief states it. */
 export type BriefCampaign = {
   name: string;
   status: string;
@@ -256,7 +263,23 @@ export type BriefCampaign = {
   accepted: number;
   replies: number;
   pending: number;
+  /**
+   * The senders whose names are actually known. **Never ids.**
+   *
+   * It used to fall back to the numeric id when a name could not be found, and that produced the worst
+   * failure this brief has had: handed "Senders on it: 187697, 117558, 117559" and told to write first
+   * names only, the model supplied three names from the Slack channel instead, and the brief told the team
+   * that two colleagues were sending on a client campaign they have no account on. A number the model
+   * cannot use is worse than an absence, because an absence cannot be mistaken for data.
+   */
   senders: string[];
+  /**
+   * How many accounts are assigned, named or not, which is what the runway is computed from.
+   *
+   * Held separately from `senders.length` precisely so that "3 senders, none of them named" stays sayable.
+   * Collapsing the two would either lose the count or bring the ids back.
+   */
+  senderCount: number;
   /** Days of sending left at this campaign's own sender count, or null when it has no senders. */
   daysLeft: number | null;
 };
@@ -370,7 +393,10 @@ export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Pr
           accepted: int(row.connections_accepted),
           replies: int(row.replies),
           pending: int(row.leads_pending),
-          senders: senders.map((id) => senderNames.get(id) || id),
+          // Names only, and an id that resolves to nothing is dropped rather than printed. The count below
+          // is still the full one, so a campaign with three unnamed accounts reads as three senders.
+          senders: senders.map((id) => senderNames.get(id) || "").filter(Boolean),
+          senderCount: senders.length,
           daysLeft: sendingDaysLeft(int(row.leads_pending), senders.length),
         };
       }),
@@ -425,9 +451,21 @@ export function signalsAsText(signals: BriefSignals): string {
   if (campaigns.total && !campaigns.active) lines.push("No campaign is running for this client right now. Nothing new is going out until one is started.");
   for (const campaign of campaigns.names) {
     const accepted = rate(campaign.accepted, campaign.sent);
-    const senders = campaign.senders.length
-      ? `Senders on it: ${campaign.senders.join(", ")}.`
-      : "No senders are recorded on it, so it may not be sending at all.";
+    /*
+     * Three cases, and the middle one is the one that matters.
+     *
+     * Assigned but unnamed is not the same as unassigned, and it is not the same as named. When HeyReach has
+     * not told us who the accounts belong to, the only honest thing the brief can say is how many there are,
+     * so the count is given and the absence of names is stated as an instruction. Saying merely "no senders
+     * are recorded" here would be a lie about a campaign that is sending perfectly well.
+     */
+    const senders = campaign.senderCount === 0
+      ? "No senders are assigned to it, so it may not be sending at all."
+      : campaign.senders.length === 0
+        ? `It has ${campaign.senderCount} sender${campaign.senderCount === 1 ? "" : "s"} assigned, but their names are not recorded. Write the count and no names. Do not guess a name, and never take one from the Slack channels: the people in those channels are our team, not this client's sending accounts.`
+        : campaign.senders.length < campaign.senderCount
+          ? `It has ${campaign.senderCount} senders assigned. Names are recorded for only ${campaign.senders.length} of them: ${campaign.senders.join(", ")}. Write the count, and name only those. Do not invent names for the rest.`
+          : `Senders on it: ${campaign.senders.join(", ")}.`;
     // Days left is stated only for the campaigns it means anything for. A paused or finished campaign has
     // a runway on paper and no runway in fact, and printing one invites the brief to count it.
     const left = !campaign.isActive
@@ -547,7 +585,9 @@ export function briefHeaderText(workspace: BriefWorkspace, at: Date = new Date()
   // the one line of this that a person reads as a sentence rather than scans as data.
   const tens = day % 100;
   const suffix = tens >= 11 && tens <= 13 ? "th" : ["th", "st", "nd", "rd"][day % 10] ?? "th";
-  return `*${workspace.name} Morning Brief (${weekday}, ${month} ${day}${suffix})* :coffee:`;
+  // Two spaces before the emoji, not one. Slack sets an emoji at cap height and hard against the closing
+  // bracket it looked cramped, so the gap is deliberate and has to survive anybody tidying it away.
+  return `*${workspace.name} Morning Brief (${weekday}, ${month} ${day}${suffix})*  :coffee:`;
 }
 
 /**
@@ -577,9 +617,41 @@ export function briefStatusTitle(timezone: string, at: Date = new Date()): strin
  */
 export function briefWeekdayNote(timezone: string, at: Date = new Date()): string {
   const weekday = at.toLocaleDateString("en-US", { timeZone: timezone, weekday: "long" });
-  if (weekday === "Monday") return "Make sure to sync about game plan for this week!";
-  if (weekday === "Friday") return "Remember to send EOW report out today!";
+  if (weekday === "Monday") return ":speech_balloon: Make sure to sync about game plan for this week! :speech_balloon:";
+  if (weekday === "Friday") return ":page_facing_up: Remember to send out the EOW report! :page_facing_up:";
   return "";
+}
+
+/** The divider between sections, shared so the prompt and the footer below cannot drift to different widths. */
+const BRIEF_DIVIDER = "=".repeat(41);
+/**
+ * Slack has no centre alignment, so the indent is the only way to get it off the left margin, which is
+ * how Kiril centred it by hand. Chosen against the divider's width rather than measured: emoji render
+ * about twice as wide as a character and the font is proportional, so exact centring is not available at
+ * any indent. This one sits the line under the middle of the divider closely enough to read as centred.
+ */
+const FOOTER_INDENT = " ".repeat(8);
+
+/**
+ * The standing reminder as its own block at the foot of the brief, or nothing.
+ *
+ * Appended in code rather than asked of the model, and that is the point. It is a fixed string in a fixed
+ * place with fixed padding, and every one of those three is something the model has got wrong at least
+ * once across the rounds of tuning this brief. Nothing is gained by generating a constant, and leading
+ * whitespace in particular is exactly what a model tidies away.
+ */
+export function briefWeekdayFooter(timezone: string, at: Date = new Date()): string {
+  const note = briefWeekdayNote(timezone, at);
+  if (!note) return "";
+  // Fenced by a divider above and below, so it reads as a closing ritual rather than as one more finding.
+  return `${BRIEF_DIVIDER}\n\n${FOOTER_INDENT}${note}\n\n${BRIEF_DIVIDER}`;
+}
+
+/** The brief as it is posted: what the model wrote, then the day's standing reminder under it. */
+export function briefWithFooter(body: string, timezone: string, at: Date = new Date()): string {
+  const footer = briefWeekdayFooter(timezone, at);
+  const text = body.trim();
+  return footer ? `${text}\n\n${footer}` : text;
 }
 
 /** What the model is shown, in the order it should read it. */
@@ -646,9 +718,12 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     [
       `# Client\n\n${workspace.name}. Today is ${today} in ${timezone}.`,
       `The brief's opening line is exactly this, bold, with a colon: *${briefStatusTitle(timezone)}:*`,
+      // The reminder is appended after the model returns, so the model is told it exists and told not to
+      // write it. Without the first half it would have no idea why the posted brief has a line it did not
+      // write; without the second, today's brief would carry that line twice.
       weekdayNote
-        ? `Then this line, on its own, word for word, before the first section:\n\n${weekdayNote}`
-        : "There is no standing reminder for today, so go straight from the status line to the first section.",
+        ? `Today carries a standing reminder, which is added to the foot of the brief automatically once you are done. Do not write it yourself and do not write anything like it. End on your last finding.`
+        : "There is no standing reminder for today. End on your last finding.",
     ].join("\n\n"),
     `# Figures\n\nThese are facts. Do not restate them differently and do not compute new ones.\n\n${signalsAsText(inputs.signals)}`,
     roster,
@@ -797,7 +872,12 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
     const facts: string[] = [];
     for (const campaign of campaigns.names) {
       const accepted = rate(campaign.accepted, campaign.sent);
-      const senders = campaign.senders.length ? ` Senders: ${campaign.senders.join(", ")}.` : " No senders recorded.";
+      // The trace is where somebody goes to find out why a brief said what it said, so an unnamed sender is
+      // reported as unnamed rather than silently omitted. That distinction is the whole diagnosis when the
+      // per-sender rows are missing for a client, which is what put invented names in a brief once already.
+      const senders = campaign.senders.length === campaign.senderCount
+        ? (campaign.senderCount ? ` Senders: ${campaign.senders.join(", ")}.` : " No senders assigned.")
+        : ` ${plural(campaign.senderCount, "sender")} assigned, ${campaign.senders.length ? `named: ${campaign.senders.join(", ")}` : "none named"}.`;
       const left = campaign.isActive && campaign.daysLeft !== null ? ` ${plural(campaign.daysLeft, "day")} of sending left.` : "";
       facts.push(`“${campaign.name}” (${campaign.status}): ${count(campaign.sent)} sent, ${count(campaign.accepted)} accepted${accepted === null ? "" : ` (${accepted}%)`}, ${count(campaign.replies)} replies, ${count(campaign.pending)} not yet contacted.${senders}${left}`);
     }

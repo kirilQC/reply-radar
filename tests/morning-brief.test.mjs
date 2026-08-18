@@ -14,7 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { looksLikeChannelId, normalizeChannelId } from "../app/lib/slack-channel.ts";
-import { briefHeaderText, briefStatusTitle, briefTrace, briefWeekdayNote, DEFAULT_MORNING_BRIEF_PROMPT, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
+import { briefHeaderText, briefStatusTitle, briefTrace, briefWeekdayNote, briefWithFooter, DEFAULT_MORNING_BRIEF_PROMPT, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
 import { transcript } from "../app/lib/slack.ts";
 
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
@@ -177,9 +177,11 @@ test("days of sending left divide the pending leads by the whole sender bench", 
   assert.equal(signals.runway.needsCampaigns, false);
 
   const text = signalsAsText(signals);
-  // Named where the daily figures have seen the account, and left as the id where they have not — an id is
-  // still enough to go and look, and inventing a name would be worse.
-  assert.match(text, /Senders on it: Kori Katz, Dan Shapiro, s3, s4\./);
+  // Named where the daily figures have seen the account, counted where they have not. This used to print the
+  // bare id, on the reasoning that an id is still enough to go and look it up — but the model does not look
+  // anything up, it writes a brief, and what it actually did with a number it could not read was substitute a
+  // name from Slack. The count is the honest version and the arithmetic below is unaffected by it.
+  assert.match(text, /It has 4 senders assigned\. Names are recorded for only 2 of them: Kori Katz, Dan Shapiro\./);
   assert.match(text, /Total days of sending left across all active campaigns: 6\./);
   // Days left is not stated for a campaign that is not running, or the brief counts a paused list as work.
   assert.doesNotMatch(text, /"BV009".*Days of sending left/);
@@ -263,8 +265,58 @@ test("a campaign with no senders reports an unknown runway rather than a finishe
   assert.equal(signals.runway.daysLeft, null);
   assert.equal(signals.runway.needsCampaigns, true);
   const text = signalsAsText(signals);
-  assert.match(text, /No senders are recorded on it/);
+  assert.match(text, /No senders are assigned to it/);
   assert.match(text, /Total days of sending left cannot be worked out/);
+});
+
+test("an assigned sender whose name we do not know is a count, never an id and never a guess", async () => {
+  /*
+   * The worst thing this brief has done. Willow's per-sender rows were missing, so the campaign's three
+   * account ids resolved to nothing and the figures read "Senders on it: 187697, 117558, 117559". Told to
+   * write first names only, the model took three names out of the Slack channel instead, and the brief
+   * announced that two colleagues were sending on a client campaign they have no account on. The ids
+   * belonged to Roi, Eyal and Shalev.
+   *
+   * So a name that is not known must arrive as an absence rather than as a number. A number looks like data
+   * and invites translation; an absence can be stated.
+   */
+  const signals = await gatherSignals(
+    readerFor([
+      { name: "W038: BH 2026 Attendees (Post event)", status: "IN_PROGRESS", connections_sent: 129, connections_accepted: 8, replies: 0, leads_pending: 175, sender_ids: ["187697", "117558", "117559"], refreshed_at: new Date().toISOString() },
+    ], dayRows(0, 7, 50)),
+    WORKSPACE,
+  );
+  const campaign = signals.campaigns.names[0];
+  assert.deepEqual(campaign.senders, []);
+  // The count survives even though no name did, because the runway is computed from it.
+  assert.equal(campaign.senderCount, 3);
+  assert.equal(campaign.daysLeft, 3);
+
+  const text = signalsAsText(signals);
+  assert.match(text, /3 senders assigned, but their names are not recorded/);
+  assert.match(text, /Write the count and no names/);
+  // The instruction has to name where the wrong names came from, or it is just "do not guess", which lost.
+  assert.match(text, /never take one from the Slack channels/);
+  for (const id of ["187697", "117558", "117559"]) assert.ok(!text.includes(id), `the figures still leak the id ${id}`);
+});
+
+test("a partly named roster names the ones it knows and counts the rest", async () => {
+  // The half case is real: one account is new and has not appeared in a daily row yet. Naming two of three
+  // is honest, and silently reporting "2 senders" would understate the runway the campaign actually has.
+  const signals = await gatherSignals(
+    readerFor(
+      [{ name: "BV007: ASCs v2", status: "IN_PROGRESS", connections_sent: 100, connections_accepted: 10, replies: 1, leads_pending: 150, sender_ids: ["203189", "218130", "999999"], refreshed_at: new Date().toISOString() }],
+      dayRows(0, 7, 50),
+      [{ sender_id: "203189", sender_name: "Ali Mahomed" }, { sender_id: "218130", sender_name: "Vijay Prasad MD, MPH" }],
+    ),
+    WORKSPACE,
+  );
+  const campaign = signals.campaigns.names[0];
+  assert.deepEqual(campaign.senders, ["Ali Mahomed", "Vijay Prasad MD, MPH"]);
+  assert.equal(campaign.senderCount, 3);
+  const text = signalsAsText(signals);
+  assert.match(text, /It has 3 senders assigned\. Names are recorded for only 2 of them: Ali Mahomed, Vijay Prasad MD, MPH\./);
+  assert.ok(!text.includes("999999"), "the unresolved id leaked into the figures");
 });
 
 test("the figures reach the model as prose, and are labelled as facts", async () => {
@@ -372,6 +424,9 @@ test("the header is a date and a client and nothing else", () => {
   // grew a second line explaining itself would have defeated it — Slack already prints the reply count.
   assert.equal(header.split("\n").length, 1);
   assert.doesNotMatch(header, /in this thread/);
+  // Two spaces before the emoji. Slack sets an emoji at cap height, so hard against the closing bracket it
+  // looked cramped, and a single space is what anybody tidying this would leave behind.
+  assert.match(header, /\)\* {2}:coffee:$/);
 });
 
 test("the day of the month is written the way it is said", () => {
@@ -396,16 +451,53 @@ test("Monday and Friday carry a standing reminder, midweek carries none", async 
    * forgotten, so it is a fixed line rather than something the model could be expected to find.
    */
   const zone = "America/New_York";
-  assert.equal(briefWeekdayNote(zone, new Date("2026-08-17T14:00:00Z")), "Make sure to sync about game plan for this week!");
-  assert.equal(briefWeekdayNote(zone, new Date("2026-08-21T14:00:00Z")), "Remember to send EOW report out today!");
+  const monday = new Date("2026-08-17T14:00:00Z");
+  const friday = new Date("2026-08-21T14:00:00Z");
+  assert.equal(briefWeekdayNote(zone, monday), ":speech_balloon: Make sure to sync about game plan for this week! :speech_balloon:");
+  assert.equal(briefWeekdayNote(zone, friday), ":page_facing_up: Remember to send out the EOW report! :page_facing_up:");
   // Midweek gets nothing. A reminder that appears every day is wallpaper.
   assert.equal(briefWeekdayNote(zone, new Date("2026-08-19T14:00:00Z")), "");
   assert.equal(briefWeekdayNote(zone, new Date("2026-08-20T14:00:00Z")), "");
 
-  // And the model is told when there is nothing, rather than left to infer it from an absent instruction.
+  // The model is told the reminder exists and told not to write it, because it is appended afterwards. Told
+  // only the second half, it would have no idea why the posted brief carries a line it did not write.
   const signals = await gatherSignals(readerFor([], dayRows(0, 7, 100)), WORKSPACE);
   const content = briefUserContent(WORKSPACE, { signals, internal: { channelId: "", messages: 0, text: "" }, external: { channelId: "", messages: 0, text: "" } });
-  assert.match(content, /(word for word, before the first section|There is no standing reminder for today)/);
+  assert.match(content, /(added to the foot of the brief automatically|There is no standing reminder for today)/);
+});
+
+test("the standing reminder is appended under the brief, indented, fenced by dividers", () => {
+  /*
+   * Position, wording and indent are all fixed, and the model got each of them wrong at least once while
+   * this brief was being tuned. So it is concatenated rather than generated: there is nothing for a model to
+   * add to a constant except variation, and a standing reminder is the one line that must not vary.
+   *
+   * The indent is how it reads as centred. Slack has no centre alignment, so leading spaces are the only
+   * lever, and leading spaces are exactly what a model tidies away.
+   */
+  const zone = "America/New_York";
+  const friday = new Date("2026-08-21T14:00:00Z");
+  const body = "*End of Week Status:*\n\n1. *Cold calling update*";
+
+  const posted = briefWithFooter(body, zone, friday);
+  assert.ok(posted.startsWith(body), "the model's own brief must come through untouched");
+  assert.match(posted, /\n\n={41}\n\n {8}:page_facing_up: Remember to send out the EOW report! :page_facing_up:\n\n={41}$/);
+  // Under the findings, never above them: it is a closing ritual, not the headline.
+  assert.ok(posted.indexOf("Cold calling") < posted.indexOf("EOW report"));
+
+  // Monday's is the same shape with its own emoji, so the two cannot drift apart.
+  assert.match(briefWithFooter(body, zone, new Date("2026-08-17T14:00:00Z")), / {8}:speech_balloon: Make sure to sync about game plan for this week! :speech_balloon:/);
+
+  // Midweek the brief is returned as written, with no trailing divider left hanging off the end.
+  const midweek = briefWithFooter(body, zone, new Date("2026-08-19T14:00:00Z"));
+  assert.equal(midweek, body);
+  assert.ok(!midweek.includes("="), "a day with no reminder must not get an empty fence");
+});
+
+test("the brief the model writes is not asked to carry the reminder as well", () => {
+  // Both halves have to agree or today's brief says it twice: the prompt forbids writing it, the code adds it.
+  assert.match(DEFAULT_MORNING_BRIEF_PROMPT, /Do not write the day's standing reminder yourself/);
+  assert.ok(!DEFAULT_MORNING_BRIEF_PROMPT.includes("Make sure to sync about game plan"), "the worked example still models the reminder the model must not write");
 });
 
 test("where in the week today is, is a fact the model is given", () => {
@@ -687,7 +779,7 @@ test("figures too old to trust do not read as a working source", () => {
 });
 
 test("every campaign the model was given is listed, and the ones it was not are counted", () => {
-  const names = Array.from({ length: 10 }, (_, index) => ({ name: `Campaign ${index + 1}`, status: "ACTIVE", isActive: true, sent: 100, accepted: 25, replies: 4, pending: 50, senders: ["Kori Katz"], daysLeft: 2 }));
+  const names = Array.from({ length: 10 }, (_, index) => ({ name: `Campaign ${index + 1}`, status: "ACTIVE", isActive: true, sent: 100, accepted: 25, replies: 4, pending: 50, senders: ["Kori Katz"], senderCount: 1, daysLeft: 2 }));
   const steps = briefTrace(WORKSPACE, {
     signals: { ...NO_SIGNALS, campaigns: { total: 23, active: 10, paused: 13, finished: 0, names }, staleness: { statsAgeHours: 3, dayCount: 21 } },
     internal: { channelId: "", messages: 0, text: "" },

@@ -27,7 +27,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { briefHeaderText, briefTrace, briefUserContent, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
+import { briefHeaderText, briefTrace, briefUserContent, briefWithFooter, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
 import { BRIEF_MODEL, gatherCall, gatherChannels, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
 import {
   alreadySentToday,
@@ -323,7 +323,12 @@ export async function POST(request: Request) {
 
     const inputs = { signals, ...channels, call: call.call, callReason: call.callReason };
     const content = briefUserContent(workspace, inputs);
-    const body_ = await writeBrief(systemPrompt, content);
+    // Monday's sync reminder and Friday's report reminder are appended here rather than written by the
+    // model, so they land in the same place, worded the same way, with the same indent, every week. They
+    // are constants; the only thing generating them could add is variation, which is the one thing a
+    // standing reminder must not have. Stored and returned with the footer on, because this is the brief
+    // people actually read.
+    const body_ = briefWithFooter(await writeBrief(systemPrompt, content), workspace.timezone || "America/New_York");
 
     /*
      * Two messages, not one: a one-line header in the channel, and the brief itself as a reply in its
