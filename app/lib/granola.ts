@@ -52,6 +52,10 @@ export type ClientCall = {
   ageDays: number | null;
   /** Whose key found it, so a brief can say where the context came from. */
   owner: string;
+  /** Who was on it, by name. Empty when the note carried no attendee list. */
+  attendees: string[];
+  /** Scheduled length in whole minutes, or null. Shown to a reader; not sent to the model. */
+  durationMinutes: number | null;
   summary: string;
   transcript: string;
   truncated: boolean;
@@ -169,6 +173,10 @@ export async function findClientCall(
       startedAt,
       ageDays: callAgeDays(startedAt),
       owner: key.label || "a teammate",
+      // Both come from the detail response and are empty when it could not be read at all, which is the
+      // same case where `title` falls back to the list's copy.
+      attendees: full?.attendees ?? [],
+      durationMinutes: full?.durationMinutes ?? null,
       summary: (full?.summary || "").slice(0, 6_000),
       transcript: truncated ? transcript.slice(-MAX_TRANSCRIPT_CHARS) : transcript,
       truncated,

@@ -14,7 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { looksLikeChannelId, normalizeChannelId } from "../app/lib/slack-channel.ts";
-import { gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
+import { briefTrace, gatherSignals, signalsAsText, briefUserContent, morningBriefPromptKey } from "../app/lib/morning-brief.ts";
 
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const route = readFileSync(new URL("../app/api/slack/brief/route.ts", import.meta.url), "utf8");
@@ -197,4 +197,136 @@ test("a brief with nowhere to go is refused before the model is called", () => {
 
 test("the brief route fits inside the Hobby function ceiling", () => {
   assert.match(route, /export const maxDuration = 60;/);
+});
+
+// ── The trace ────────────────────────────────────────────────────────
+//
+// The trace is what somebody reads when a brief came back thin, so the one thing it must never do is
+// report a source as working when the brief did not get it. Every test here is about that: the states,
+// the counts, and the fact that it is built from the same inputs the model was given rather than from a
+// separate set of notes taken as the run went.
+
+const NO_SIGNALS = {
+  campaigns: { total: 0, active: 0, paused: 0, names: [] },
+  sending: { thisWeek: 0, lastWeek: 0, changePercent: null, lastDayWithSends: null, quietDays: 0 },
+  replies: { thisWeek: 0, lastWeek: 0 },
+  acceptance: { thisWeek: null, lastWeek: null },
+  staleness: { statsAgeHours: null, dayCount: 0 },
+};
+
+const OUTCOME = { model: "claude-sonnet-4-6", promptChars: 6_000, contentChars: 48_000, briefChars: 1_400, destination: "preview", channelId: "", posted: false };
+
+/** The step for one system, so a test can assert on it without depending on the order. */
+const stepFor = (steps, source) => steps.find((step) => step.source === source);
+
+test("a run that used all three sources says three of three", () => {
+  const steps = briefTrace(WORKSPACE, {
+    signals: { ...NO_SIGNALS, campaigns: { total: 2, active: 2, paused: 0, names: [] }, staleness: { statsAgeHours: 2, dayCount: 14 } },
+    internal: { channelId: "C1", messages: 18, raw: 23, capped: false, text: "10:00 Kiril: shipping today" },
+    external: { channelId: "C2", messages: 5, raw: 5, capped: false, text: "09:00 Client: any update?" },
+    call: { title: "QC <> Bluevia Weekly", ageDays: 5, owner: "Kiril", startedAt: Date.parse("2026-08-12T19:00:00Z"), attendees: ["Kiril Ivlev", "Dan Shapiro"], durationMinutes: 33, summary: "Agreed to send the new list.", transcript: "Kiril: we will send the list Thursday.", truncated: false },
+  }, OUTCOME);
+
+  assert.equal(steps.length, 5);
+  assert.deepEqual(steps.map((step) => step.source), ["Slack channels", "Granola", "HeyReach", "Anthropic", "Slack post"]);
+  assert.ok(steps.every((step) => step.state === "ok"), `every source was live: ${steps.filter((step) => step.state !== "ok").map((step) => step.source)}`);
+  assert.match(stepFor(steps, "Anthropic").result, /Fed 3 of 3 sources to claude-sonnet-4-6/);
+});
+
+test("a source that came back empty is not allowed to read as working", () => {
+  // The failure this is here for: two sources posting a brief that looks exactly like three. The state is
+  // what the page colours the step on, so it is the state that has to be wrong-proof, not the wording.
+  const steps = briefTrace(WORKSPACE, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "C1", messages: 0, raw: 0, capped: false, text: "", error: "QC Bot is not in that channel." },
+    external: { channelId: "", messages: 0, raw: 0, capped: false, text: "" },
+    call: null,
+    callReason: 'No meeting with "Bluevia" in the title was found in the last 14 days.',
+  }, OUTCOME);
+
+  assert.equal(stepFor(steps, "Slack channels").state, "missing");
+  assert.match(stepFor(steps, "Slack channels").facts.join(" "), /QC Bot is not in that channel/);
+  assert.equal(stepFor(steps, "Granola").state, "missing");
+  // The reason the matcher gave, verbatim — it is the only thing that says whether to add a teammate's
+  // key or type a name into the config page.
+  assert.match(stepFor(steps, "Granola").result, /No meeting with "Bluevia" in the title/);
+  assert.equal(stepFor(steps, "HeyReach").state, "missing");
+  assert.match(stepFor(steps, "Anthropic").result, /Fed 0 of 3 sources/);
+});
+
+test("figures too old to trust do not read as a working source", () => {
+  // Stale figures are the failure that looks like success: every number is present and every one is from
+  // Tuesday. A green tick against them is worse than no trace at all.
+  const stale = { ...NO_SIGNALS, campaigns: { total: 3, active: 1, paused: 2, names: [] }, staleness: { statsAgeHours: 70, dayCount: 14 } };
+  const steps = briefTrace(WORKSPACE, { signals: stale, internal: { channelId: "", messages: 0, text: "" }, external: { channelId: "", messages: 0, text: "" } }, OUTCOME);
+  assert.equal(stepFor(steps, "HeyReach").state, "partial");
+  assert.match(stepFor(steps, "HeyReach").facts.join(" "), /last collected 70 hours ago/);
+});
+
+test("every campaign the model was given is listed, and the ones it was not are counted", () => {
+  const names = Array.from({ length: 10 }, (_, index) => ({ name: `Campaign ${index + 1}`, status: "ACTIVE", sent: 100, accepted: 25, replies: 4, pending: 50 }));
+  const steps = briefTrace(WORKSPACE, {
+    signals: { ...NO_SIGNALS, campaigns: { total: 23, active: 10, paused: 13, names }, staleness: { statsAgeHours: 3, dayCount: 21 } },
+    internal: { channelId: "", messages: 0, text: "" },
+    external: { channelId: "", messages: 0, text: "" },
+  }, OUTCOME);
+  const facts = stepFor(steps, "HeyReach").facts.join("\n");
+  for (const campaign of names) assert.match(facts, new RegExp(`“${campaign.name}”`));
+  // A campaign left out of the prompt must be said to have been left out, or the trace reads as the
+  // complete picture while the model was working from ten of twenty-three.
+  assert.match(facts, /13 smaller campaigns were left out/);
+  assert.match(facts, /25%/);
+});
+
+test("the trace states the true size of what it is only showing part of", () => {
+  // A 60,000-character transcript shown 1,400 characters at a time must not report itself as 1,400, or
+  // the next person to wonder whether the whole call was sent will conclude it was not.
+  const transcript = "Kiril: ".concat("a".repeat(60_000));
+  const steps = briefTrace(WORKSPACE, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "", messages: 0, text: "" },
+    external: { channelId: "", messages: 0, text: "" },
+    call: { title: "QC <> Bluevia Weekly", ageDays: 1, owner: "Kiril", startedAt: Date.parse("2026-08-16T19:00:00Z"), attendees: [], durationMinutes: null, summary: "", transcript, truncated: true },
+  }, OUTCOME);
+  const call = stepFor(steps, "Granola");
+  const excerpt = call.excerpts.find((piece) => piece.label.startsWith("Transcript"));
+  assert.equal(excerpt.chars, transcript.length);
+  assert.ok(excerpt.text.length < 2_000, `the excerpt is cut: ${excerpt.text.length}`);
+  assert.match(call.facts.join(" "), /only the last part was sent/);
+  assert.match(call.facts.join(" "), /The note carried no attendee list/);
+});
+
+test("a preview is a finished run, and a refused post is not", () => {
+  const inputs = { signals: NO_SIGNALS, internal: { channelId: "", messages: 0, text: "" }, external: { channelId: "", messages: 0, text: "" } };
+  const preview = stepFor(briefTrace(WORKSPACE, inputs, OUTCOME), "Slack post");
+  assert.equal(preview.state, "ok");
+  assert.match(preview.result, /Nothing was posted/);
+
+  const refused = stepFor(briefTrace(WORKSPACE, inputs, { ...OUTCOME, destination: "internal", channelId: "C1", posted: false, sendError: "QC Bot is not in that channel." }), "Slack post");
+  assert.equal(refused.state, "missing");
+  assert.match(refused.result, /QC Bot is not in that channel/);
+});
+
+test("messages Slack sent but the brief dropped are accounted for", () => {
+  // A channel full of joins reads as silent, and silence is a finding the brief will act on. The raw
+  // count is the only thing that tells the two apart.
+  const steps = briefTrace(WORKSPACE, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "C1", messages: 2, raw: 40, capped: false, text: "10:00 Kiril: hi" },
+    external: { channelId: "", messages: 0, raw: 0, capped: false, text: "" },
+  }, OUTCOME);
+  const slack = stepFor(steps, "Slack channels");
+  assert.equal(slack.state, "partial", "one channel of two is not a complete read");
+  assert.match(slack.facts.join(" "), /38 dropped as joins or empty/);
+  assert.match(slack.result, /got 40 messages\. 2 carried text/);
+});
+
+test("the trace is built from what the model was given, not from a second set of notes", () => {
+  // The guarantee that makes it worth reading: one object goes to `briefUserContent` and to `briefTrace`,
+  // so the trace cannot drift into describing a run that did not happen.
+  assert.match(route, /const inputs = \{ signals, \.\.\.channels, call: call\.call, callReason: call\.callReason \};/);
+  assert.match(route, /const content = briefUserContent\(workspace, inputs\);/);
+  assert.match(route, /briefTrace\(workspace, inputs, \{/);
+  // Not stored. The excerpts quote every client call verbatim, and the row is kept for a year.
+  assert.doesNotMatch(route, /signals: \{ \.\.\.signals, sources, steps/);
 });

@@ -30,6 +30,7 @@ import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import { DAY_NAMES, DEFAULT_SCHEDULE, describeSchedule, type BriefSchedule, type Readiness } from "../lib/morning-brief-schedule";
+import type { TraceStep } from "../lib/morning-brief";
 import "../reports/reports.css";
 
 type BriefClient = {
@@ -70,7 +71,8 @@ type RunResult = {
   posted?: boolean;
   channelId?: string | null;
   channelNotes?: string[];
-  sources?: { internalMessages?: number; externalMessages?: number; call?: { title: string; ageDays: number | null; owner: string } | null; callReason?: string | null };
+  /** Every request the run made, in order. Shown under the brief; see `briefTrace`. */
+  steps?: TraceStep[];
 };
 
 /** Where a brief goes. Not sent with the request until the button is pressed, so a misclick costs nothing. */
@@ -407,19 +409,45 @@ export default function SlackPage() {
                       <span>The brief</span>
                       <span>{result.posted ? `Posted to ${result.channelId}` : "Not posted"}</span>
                     </div>
-                    {/* What the model was actually given, above the text it produced, because a thin brief
-                        is nearly always a thin source and the numbers say which one. */}
-                    {result.sources && (
-                      <p className="brief-sources">
-                        {result.sources.internalMessages ?? 0} internal · {result.sources.externalMessages ?? 0} external ·{" "}
-                        {result.sources.call ? `call "${result.sources.call.title}" via ${result.sources.call.owner}` : result.sources.callReason || "no call"}
-                      </p>
-                    )}
                     {/* Shown exactly as Slack will render the text, which is to say not rendered at all:
                         a preview that prettified the mrkdwn would hide the one thing worth checking. */}
                     <pre className="slack-brief-body">{result.brief}</pre>
                   </>
                 )}
+
+                {/* Under the brief, not above it: the brief is the answer and this is the working. The
+                    excerpts are collapsed because each one is a wall of transcript, and open by default
+                    they would bury the four lines that say which source came back thin. */}
+                {result?.steps?.length ? (
+                  <>
+                    <div className="hub-group-label">
+                      <span>What it did</span>
+                      <span>{result.steps.length} steps</span>
+                    </div>
+                    <ol className="brief-trace">
+                      {result.steps.map((step, index) => (
+                        <li key={`${step.source}-${index}`} className={`brief-trace-step is-${step.state}`}>
+                          <div className="brief-trace-head">
+                            <b>{index + 1}</b>
+                            <strong>{step.source}</strong>
+                            <span>{step.result}</span>
+                          </div>
+                          {step.facts.length > 0 && (
+                            <ul className="brief-trace-facts">
+                              {step.facts.map((fact) => <li key={fact}>{fact}</li>)}
+                            </ul>
+                          )}
+                          {step.excerpts.map((piece) => (
+                            <details className="brief-trace-excerpt" key={piece.label}>
+                              <summary>{piece.label} — {piece.chars.toLocaleString("en-US")} characters</summary>
+                              <pre>{piece.text}</pre>
+                            </details>
+                          ))}
+                        </li>
+                      ))}
+                    </ol>
+                  </>
+                ) : null}
               </>
             )}
           </main>

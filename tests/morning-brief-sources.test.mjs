@@ -122,7 +122,8 @@ test("a note with no id is not a call", () => {
 });
 
 test("needles read back the way somebody would say them", () => {
-  assert.equal(describeNeedles(parseTitleNeedles("", "Vitalic Health")), "vitalic health or vitalic");
+  assert.equal(describeNeedles(parseTitleNeedles("", "Vitalic Health")), "Vitalic Health or Vitalic");
+  assert.equal(describeNeedles(parseTitleNeedles("bluevia health", "Bluevia")), "Bluevia Health or Bluevia");
   assert.equal(describeNeedles([]), "");
 });
 

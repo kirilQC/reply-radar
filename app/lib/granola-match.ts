@@ -33,13 +33,20 @@
 
 type Row = Record<string, unknown>;
 
-/** A Granola note, reduced to the three things the choice depends on. */
+/** A Granola note, reduced to what the choice depends on and what a reader needs to recognise it. */
 export type GranolaNote = {
   id: string;
   title: string;
   /** Epoch ms, or 0 when the note carried no readable date. */
   startedAt: number;
   summary: string;
+  /**
+   * Who was on the call, by name. Empty from the list endpoint, which carries no attendees at all —
+   * which is the whole reason matching is on the title. Populated for the one note that is opened.
+   */
+  attendees: string[];
+  /** How long the meeting was scheduled for, or null. Display only; nothing matches on it. */
+  durationMinutes: number | null;
 };
 
 /**
@@ -109,25 +116,69 @@ export function titleMatches(title: unknown, needles: string[][]): boolean {
   );
 }
 
-/** The needles as they read on a page: `Vitalic Health` or `Bluevia`. */
+/**
+ * The needles as they read on a page: "Vitalic Health or Vitalic".
+ *
+ * Capitalised because matching is case-insensitive but a config page that echoes back "vitalic health"
+ * reads as a typo the reader then goes looking for. This is display only — nothing matches on it.
+ */
 export function describeNeedles(needles: string[][]): string {
-  return needles.map((needle) => needle.join(" ")).join(" or ");
+  return needles.map((needle) => needle.map((word) => word[0].toUpperCase() + word.slice(1)).join(" ")).join(" or ");
 }
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 
-/** Epoch ms from whichever of the date fields the note actually carried. */
-function noteStartedAt(note: Row): number {
-  const event = (note.calendar_event ?? note.google_calendar_event ?? {}) as Row;
-  // `scheduled_start_time` is what Granola's note detail calls it, and it is the only one of these that is
-  // the meeting's own time rather than the time the note was written. `created_at` is last for that
-  // reason: it is close enough on the day, and wrong for a note written up afterwards.
-  const candidates = [event.scheduled_start_time, note.started_at, note.start_time, note.meeting_date, event.start_time, (event.start as Row)?.dateTime, event.start, note.created_at, note.updated_at];
+/** The first of these that parses as a real date, in epoch ms, or 0. */
+function firstDate(candidates: unknown[]): number {
   for (const candidate of candidates) {
     const parsed = Date.parse(text(candidate));
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return 0;
+}
+
+const calendarOf = (note: Row) => (note.calendar_event ?? note.google_calendar_event ?? {}) as Row;
+
+/** Epoch ms from whichever of the date fields the note actually carried. */
+function noteStartedAt(note: Row): number {
+  const event = calendarOf(note);
+  // `scheduled_start_time` is what Granola's note detail calls it, and it is the only one of these that is
+  // the meeting's own time rather than the time the note was written. `created_at` is last for that
+  // reason: it is close enough on the day, and wrong for a note written up afterwards.
+  return firstDate([event.scheduled_start_time, note.started_at, note.start_time, note.meeting_date, event.start_time, (event.start as Row)?.dateTime, event.start, note.created_at, note.updated_at]);
+}
+
+/**
+ * How long the meeting was scheduled for, in whole minutes, or null.
+ *
+ * The scheduled length, not the recorded one — a call that ran twenty minutes over leaves no trace of it
+ * in the note, and a figure that is really the invite's length should not be presented as the call's.
+ */
+function noteDurationMinutes(note: Row): number | null {
+  const event = calendarOf(note);
+  const start = firstDate([event.scheduled_start_time, event.start_time, (event.start as Row)?.dateTime, event.start]);
+  const end = firstDate([event.scheduled_end_time, event.end_time, (event.end as Row)?.dateTime, event.end]);
+  if (!start || !end || end <= start) return null;
+  return Math.round((end - start) / 60_000);
+}
+
+/**
+ * Who was on the call, by name.
+ *
+ * Read from the note detail, which is the only place attendees exist — see the top of this file for why
+ * that makes them useless for *finding* a call. Once the call is found, reading them costs nothing, and
+ * "who was in the room" is how somebody checks that the brief used the meeting they were thinking of.
+ * The email is the last fallback rather than the first: a name is what a reader recognises.
+ */
+function noteAttendees(note: Row): string[] {
+  const event = calendarOf(note);
+  const list = [note.attendees, event.attendees, note.participants, event.participants].find(Array.isArray) as unknown[] | undefined;
+  const names = (list ?? []).map((raw) => {
+    if (typeof raw === "string") return raw.trim();
+    const person = (raw ?? {}) as Row;
+    return (text(person.name) || text(person.display_name) || text(person.displayName) || text(person.email) || "").trim();
+  });
+  return [...new Set(names.filter(Boolean))];
 }
 
 /** One note as the matcher needs it, or null if it has no id to fetch a transcript with. */
@@ -142,6 +193,8 @@ export function normalizeNote(raw: unknown): GranolaNote | null {
     // Empty from the list endpoint, which returns no summary. Kept because the note fetched for the
     // winning call does carry one.
     summary: text(note.summary_markdown) || text(note.summary) || text(note.overview),
+    attendees: noteAttendees(note),
+    durationMinutes: noteDurationMinutes(note),
   };
 }
 

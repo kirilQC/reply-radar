@@ -41,6 +41,14 @@ export const morningBriefPromptKey = (slug?: string | null) =>
 export const BRIEF_WINDOW_DAYS = 7;
 
 /**
+ * How many messages of one channel to read. Two hundred is a busy week; past that the oldest are noise.
+ *
+ * Here rather than beside the fetch because the trace has to be able to say the cap was reached, and a
+ * cap stated in one file and reported from another is a cap that eventually stops matching.
+ */
+export const BRIEF_MAX_MESSAGES = 200;
+
+/**
  * How far back to look for a call. Longer than the Slack window on purpose: weeklies get moved, skipped
  * for a holiday, or held every other week, and the commitments made on the last one stand until the next
  * one happens. A fortnight finds the call that is still in force rather than only this week's.
@@ -226,12 +234,32 @@ export type BriefCall = {
   summary: string;
   transcript: string;
   truncated: boolean;
+  /**
+   * The three below are for the trace, not the prompt. The model is told the call's age in words because
+   * that is what changes how it should read a commitment; who was in the room and how long it ran change
+   * nothing it writes, and would only be more context to get wrong.
+   */
+  startedAt?: number;
+  attendees?: string[];
+  durationMinutes?: number | null;
+};
+
+/** One channel as it was read: what was configured, what came back, and what survived filtering. */
+export type BriefChannel = {
+  channelId: string;
+  messages: number;
+  text: string;
+  error?: string;
+  /** What Slack returned before joins and empty messages were dropped. */
+  raw?: number;
+  /** Whether `BRIEF_MAX_MESSAGES` was reached, which means the oldest of the window is missing. */
+  capped?: boolean;
 };
 
 export type BriefInputs = {
   signals: BriefSignals;
-  internal: { channelId: string; messages: number; text: string; error?: string };
-  external: { channelId: string; messages: number; text: string; error?: string };
+  internal: BriefChannel;
+  external: BriefChannel;
   /** Null when there was no call to find, or none could be read. `callReason` says which. */
   call?: BriefCall | null;
   callReason?: string;
@@ -281,4 +309,196 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     // "should be running three campaigns" is written down.
     brief ? `# Client brief\n\nStanding context. Anything in here that states what this account is supposed to be doing counts as an expectation the figures above can be measured against.\n\n${brief.slice(0, 8_000)}` : "",
   ].filter(Boolean).join("\n\n---\n\n");
+}
+
+/**
+ * ── The trace: what one run actually did ────────────────────────────────────────────────────────
+ *
+ * "Generate" reaches four systems, and any of them can come back thin without anything looking wrong: a
+ * bot nobody invited to the channel, a key that cannot see this week's call, a HeyReach sync that stopped
+ * on Tuesday. The brief says what it was missing in one line, which is right for a Slack message and no
+ * use at all for working out why. This is the other half — every request made, what came back, and the
+ * first part of the text verbatim, so a thin brief can be traced to the source that was thin.
+ *
+ * Built after the run from the same inputs the model was given, rather than recorded as the run goes. That
+ * is the whole reason it can be trusted: there is no second set of instrumentation to keep in step, and
+ * nothing here can claim a source the brief did not actually use.
+ */
+export type TraceStep = {
+  /** The system that was asked, as the shortest thing that names it. */
+  source: string;
+  /** One line: what was asked for and what came back. */
+  result: string;
+  /** `partial` is its own state because two of these sources are routinely half-there. */
+  state: "ok" | "partial" | "missing";
+  /** The figures behind the line above, one short line each. */
+  facts: string[];
+  /** What was handed on, verbatim and cut to length, with the full size stated. */
+  excerpts: Array<{ label: string; chars: number; text: string }>;
+};
+
+/** What the model call and the send did, which is only known once both have happened. */
+export type BriefOutcome = {
+  model: string;
+  promptChars: number;
+  contentChars: number;
+  briefChars: number;
+  destination: string;
+  channelId: string;
+  posted: boolean;
+  sendError?: string;
+};
+
+/** Long enough to recognise what was read, short enough to scroll past. */
+const EXCERPT_CHARS = 1_400;
+
+const excerptOf = (label: string, body: string) => ({ label, chars: body.length, text: body.slice(0, EXCERPT_CHARS).trim() });
+const count = (value: number) => value.toLocaleString("en-US");
+const plural = (value: number, one: string, many = `${one}s`) => `${count(value)} ${value === 1 ? one : many}`;
+
+export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outcome: BriefOutcome): TraceStep[] {
+  const timezone = workspace.timezone || "America/New_York";
+  const steps: TraceStep[] = [];
+
+  // 1 — Slack. Both channels in one step, because "we read the channels" is one act and a client with no
+  // external channel is the normal case rather than a failure worth its own line.
+  {
+    const both: Array<[string, BriefChannel]> = [["Internal", inputs.internal], ["External", inputs.external]];
+    const facts: string[] = [];
+    let read = 0;
+    let raw = 0;
+    for (const [label, channel] of both) {
+      if (!channel.channelId) {
+        facts.push(`${label}: no channel is configured.`);
+        continue;
+      }
+      if (channel.error) {
+        facts.push(`${label} ${channel.channelId}: could not be read — ${channel.error}`);
+        continue;
+      }
+      read += 1;
+      raw += channel.raw ?? channel.messages;
+      const skipped = (channel.raw ?? channel.messages) - channel.messages;
+      facts.push(`${label} ${channel.channelId}: ${plural(channel.messages, "message")} over ${BRIEF_WINDOW_DAYS} days${skipped > 0 ? `, ${count(skipped)} dropped as joins or empty` : ""}.`);
+      if (channel.capped) facts.push(`${label} hit the ${count(BRIEF_MAX_MESSAGES)}-message ceiling, so the oldest of the window was not read.`);
+    }
+    const used = inputs.internal.messages + inputs.external.messages;
+    const excerpts: TraceStep["excerpts"] = [];
+    if (inputs.internal.text) excerpts.push(excerptOf("Internal channel, as the model read it", inputs.internal.text));
+    if (inputs.external.text) excerpts.push(excerptOf("External channel, as the model read it", inputs.external.text));
+    steps.push({
+      source: "Slack channels",
+      result: read
+        ? `Pulled ${read === 2 ? "both channels" : "one channel"} and got ${plural(raw, "message")}. ${count(used)} carried text and went to the model.`
+        : "No channel could be read, so nothing anyone said this week is in this brief.",
+      state: read === 2 ? "ok" : read ? "partial" : "missing",
+      facts,
+      excerpts,
+    });
+  }
+
+  // 2 — Granola. The one source whose absence is routine and whose absence must still be legible.
+  {
+    const call = inputs.call;
+    if (!call) {
+      steps.push({
+        source: "Granola",
+        result: inputs.callReason || "No transcript of a recent call with this client was available.",
+        state: "missing",
+        facts: [`Searched the last ${CALL_WINDOW_DAYS} days of every stored key by meeting title.`],
+        excerpts: [],
+      });
+    } else {
+      const on = call.startedAt
+        ? new Date(call.startedAt).toLocaleDateString("en-US", { timeZone: timezone, weekday: "long", month: "long", day: "numeric" })
+        : "";
+      const age = call.ageDays === null ? "" : call.ageDays === 0 ? "today" : call.ageDays === 1 ? "yesterday" : `${call.ageDays} days ago`;
+      const attendees = call.attendees ?? [];
+      const facts = [`Found in ${call.owner}'s Granola, out of every stored key.`];
+      facts.push(attendees.length ? `${plural(attendees.length, "attendee")}: ${attendees.join(", ")}.` : "The note carried no attendee list.");
+      if (call.durationMinutes) facts.push(`Scheduled for ${plural(call.durationMinutes, "minute")}.`);
+      facts.push(call.transcript
+        ? `Transcript: ${plural(call.transcript.length, "character")}${call.truncated ? ", of which only the last part was sent — the end of a call is where next steps get agreed" : ", sent whole"}.`
+        : "The transcript could not be read, so only Granola's own summary was sent.");
+      const excerpts: TraceStep["excerpts"] = [];
+      if (call.summary) excerpts.push(excerptOf("Granola's own summary", call.summary));
+      if (call.transcript) excerpts.push(excerptOf("Transcript, as the model read it", call.transcript));
+      steps.push({
+        source: "Granola",
+        result: `Found “${call.title}”${on ? `, ${on}` : ""}${age ? ` (${age})` : ""}.`,
+        state: call.transcript ? "ok" : "partial",
+        facts,
+        excerpts,
+      });
+    }
+  }
+
+  // 3 — HeyReach. Every campaign the model was given, in full, because the figures are the part of a
+  // brief nobody checks and the only way to check them is to see the same numbers the model saw.
+  {
+    const { campaigns, sending, replies, acceptance, staleness } = inputs.signals;
+    const facts: string[] = [];
+    for (const campaign of campaigns.names) {
+      const accepted = rate(campaign.accepted, campaign.sent);
+      facts.push(`“${campaign.name}” (${campaign.status}): ${count(campaign.sent)} sent, ${count(campaign.accepted)} accepted${accepted === null ? "" : ` (${accepted}%)`}, ${count(campaign.replies)} replies, ${count(campaign.pending)} not yet contacted.`);
+    }
+    const untold = campaigns.total - campaigns.names.length;
+    if (untold > 0) facts.push(`${plural(untold, "smaller campaign")} were left out, to keep the prompt to the ones with volume in them.`);
+    facts.push(`Connection requests: ${count(sending.thisWeek)} this week against ${count(sending.lastWeek)} the week before${sending.changePercent === null ? "" : ` (${sending.changePercent > 0 ? "+" : ""}${sending.changePercent}%)`}.`);
+    facts.push(`Replies: ${count(replies.thisWeek)} this week against ${count(replies.lastWeek)} the week before.`);
+    if (acceptance.thisWeek !== null) facts.push(`Acceptance: ${acceptance.thisWeek}%${acceptance.lastWeek === null ? "" : ` against ${acceptance.lastWeek}% the week before`}.`);
+    if (!sending.lastDayWithSends) facts.push("No sending at all is on record for the last three weeks.");
+    else if (sending.quietDays >= 2) facts.push(`Nothing sent since ${sending.lastDayWithSends} — ${plural(sending.quietDays, "day")} quiet.`);
+    if (staleness.statsAgeHours !== null) facts.push(`Campaign figures were last collected ${plural(staleness.statsAgeHours, "hour")} ago.`);
+    const known = Boolean(campaigns.total || staleness.dayCount);
+    steps.push({
+      source: "HeyReach",
+      result: known
+        ? `Read ${plural(campaigns.total, "campaign")} and ${plural(staleness.dayCount, "day")} of daily figures — ${campaigns.active} active, ${campaigns.paused} paused or stopped.`
+        : "No figures have ever been collected for this client, so the brief was told to report none.",
+      // Stale figures are the failure that looks like success, so they are not allowed to read as `ok`.
+      state: !known ? "missing" : staleness.statsAgeHours !== null && staleness.statsAgeHours > 36 ? "partial" : "ok",
+      facts,
+      excerpts: [],
+    });
+  }
+
+  // 4 — The model. Stated as a count of live sources, because "two of three" is the fact that explains a
+  // brief which reads thin, and it is the one thing the brief itself cannot say convincingly about itself.
+  {
+    const live = [
+      Boolean(inputs.internal.messages || inputs.external.messages),
+      Boolean(inputs.call),
+      Boolean(inputs.signals.campaigns.total || inputs.signals.staleness.dayCount),
+    ].filter(Boolean).length;
+    steps.push({
+      source: "Anthropic",
+      result: `Fed ${live} of 3 sources to ${outcome.model} and got ${plural(outcome.briefChars, "character")} back.`,
+      state: live === 3 ? "ok" : live ? "partial" : "missing",
+      facts: [
+        `Instructions: ${plural(outcome.promptChars, "character")}.`,
+        `Everything above as one message: ${plural(outcome.contentChars, "character")}.`,
+        "Every figure in the brief was computed here and handed over as fact. The model was not asked to count anything.",
+      ],
+      excerpts: [],
+    });
+  }
+
+  // 5 — The send. A preview is a finished run, not an abandoned one, so it gets a line rather than nothing.
+  {
+    const preview = outcome.destination === "preview";
+    steps.push({
+      source: "Slack post",
+      result: preview
+        ? "Nothing was posted. This run was a preview, so the brief exists only on this page."
+        : outcome.posted
+          ? `Posted to ${outcome.channelId} as QC Bot.`
+          : `Slack refused the message: ${outcome.sendError || "no reason given"}.`,
+      state: preview || outcome.posted ? "ok" : "missing",
+      facts: preview ? [] : [`Destination: the ${outcome.destination} channel.`],
+      excerpts: [],
+    });
+  }
+
+  return steps;
 }

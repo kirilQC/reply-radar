@@ -12,21 +12,20 @@
  */
 
 import {
+  BRIEF_MAX_MESSAGES,
   BRIEF_WINDOW_DAYS,
   CALL_WINDOW_DAYS,
   DEFAULT_MORNING_BRIEF_PROMPT,
   morningBriefPromptKey,
-  type BriefCall,
   type BriefInputs,
   type BriefWorkspace,
 } from "./morning-brief";
 import { channelHistory, resolveUserNames, transcript } from "./slack";
-import { findClientCall, type GranolaKey } from "./granola";
+import { findClientCall, type ClientCall, type GranolaKey } from "./granola";
 import { readConfig } from "./app-config";
 
-const MODEL = "claude-sonnet-4-6";
-/** A week of one channel. Two hundred messages is a busy week; more than that and the oldest are noise. */
-const MAX_MESSAGES = 200;
+/** Exported so the trace can name the model that was actually asked, rather than a second copy of it. */
+export const BRIEF_MODEL = "claude-sonnet-4-6";
 /** A brief is 120–300 words by design, so this is headroom rather than a target. */
 const MAX_OUTPUT_TOKENS = 1_400;
 /**
@@ -56,13 +55,20 @@ export async function morningBriefPrompt(slug?: string | null): Promise<string> 
 export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<BriefInputs, "internal" | "external">> {
   const timezone = workspace.timezone || "America/New_York";
   const readChannel = async (channelId: string) => {
-    if (!channelId) return { channelId: "", messages: 0, text: "" };
+    if (!channelId) return { channelId: "", messages: 0, raw: 0, capped: false, text: "" };
     try {
-      const messages = await channelHistory(channelId, BRIEF_WINDOW_DAYS, MAX_MESSAGES);
-      const names = await resolveUserNames(messages.map((message) => message.author));
-      return { channelId, messages: messages.length, text: transcript(messages, names, timezone) };
+      const history = await channelHistory(channelId, BRIEF_WINDOW_DAYS, BRIEF_MAX_MESSAGES);
+      const names = await resolveUserNames(history.messages.map((message) => message.author));
+      return {
+        channelId,
+        messages: history.messages.length,
+        raw: history.raw,
+        // Slack returned exactly as many as were asked for, which means there were probably more.
+        capped: history.raw >= BRIEF_MAX_MESSAGES,
+        text: transcript(history.messages, names, timezone),
+      };
     } catch (error) {
-      return { channelId, messages: 0, text: "", error: error instanceof Error ? error.message : "This channel could not be read." };
+      return { channelId, messages: 0, raw: 0, capped: false, text: "", error: error instanceof Error ? error.message : "This channel could not be read." };
     }
   };
   const [internal, external] = await Promise.all([
@@ -89,7 +95,7 @@ export async function granolaKeys(read: (path: string) => Promise<unknown>): Pro
 export async function gatherCall(
   read: (path: string) => Promise<unknown>,
   workspace: BriefWorkspace,
-): Promise<{ call: BriefCall | null; callReason?: string; errors: string[] }> {
+): Promise<{ call: ClientCall | null; callReason?: string; errors: string[] }> {
   try {
     const keys = await granolaKeys(read);
     const found = await findClientCall(keys, workspace.granola_title_match, workspace.name, CALL_WINDOW_DAYS);
@@ -100,7 +106,7 @@ export async function gatherCall(
 }
 
 /** Calls Anthropic once and returns the brief. One call, because a brief is short by design. */
-export async function writeBrief(systemPrompt: string, userContent: string, model = MODEL): Promise<string> {
+export async function writeBrief(systemPrompt: string, userContent: string, model = BRIEF_MODEL): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set, so no brief can be written.");
   const response = await fetch("https://api.anthropic.com/v1/messages", {

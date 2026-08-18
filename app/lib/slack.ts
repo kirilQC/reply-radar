@@ -133,25 +133,32 @@ export type SlackMessage = {
  *
  * Threads are counted but not walked. A brief cares that a question got eleven replies; reading all
  * eleven costs a `conversations.replies` call per thread and buys detail the brief would not use.
+ *
+ * `raw` is how many messages Slack handed over before any were dropped. A channel that reads as quiet
+ * because it is full of joins and empty messages is indistinguishable from a channel nobody posted in,
+ * and the two need opposite responses, so the count before filtering is reported rather than discarded.
  */
-export async function channelHistory(channelId: string, days: number, limit = 200): Promise<SlackMessage[]> {
+export async function channelHistory(channelId: string, days: number, limit = 200): Promise<{ messages: SlackMessage[]; raw: number }> {
   const oldest = (Date.now() - days * 24 * 60 * 60 * 1000) / 1000;
   const params = new URLSearchParams({ channel: channelId, oldest: oldest.toFixed(6), limit: String(Math.min(1000, Math.max(1, limit))) });
   const body = await call(`conversations.history?${params.toString()}`, { method: "GET" });
   const messages = Array.isArray(body.messages) ? (body.messages as Record<string, unknown>[]) : [];
-  return messages
-    .filter((message) => typeof message.text === "string" && String(message.text).trim())
-    // Channel joins and leaves are noise a brief must never read as activity: a quiet channel that
-    // somebody joined is still a quiet channel.
-    .filter((message) => !String(message.subtype ?? "").startsWith("channel_"))
-    .map((message) => ({
-      ts: String(message.ts ?? ""),
-      at: new Date(Number(message.ts ?? 0) * 1000),
-      author: String(message.user ?? message.bot_id ?? "unknown"),
-      text: String(message.text ?? ""),
-      replies: Number(message.reply_count ?? 0),
-    }))
-    .reverse();
+  return {
+    raw: messages.length,
+    messages: messages
+      .filter((message) => typeof message.text === "string" && String(message.text).trim())
+      // Channel joins and leaves are noise a brief must never read as activity: a quiet channel that
+      // somebody joined is still a quiet channel.
+      .filter((message) => !String(message.subtype ?? "").startsWith("channel_"))
+      .map((message) => ({
+        ts: String(message.ts ?? ""),
+        at: new Date(Number(message.ts ?? 0) * 1000),
+        author: String(message.user ?? message.bot_id ?? "unknown"),
+        text: String(message.text ?? ""),
+        replies: Number(message.reply_count ?? 0),
+      }))
+      .reverse(),
+  };
 }
 
 /**

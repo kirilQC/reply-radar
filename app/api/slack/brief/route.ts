@@ -25,8 +25,8 @@
  */
 
 import { NextResponse } from "next/server";
-import { briefUserContent, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
-import { gatherCall, gatherChannels, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
+import { briefTrace, briefUserContent, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
+import { BRIEF_MODEL, gatherCall, gatherChannels, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
 import {
   alreadySentToday,
   DEFAULT_SCHEDULE,
@@ -314,7 +314,9 @@ export async function POST(request: Request) {
       morningBriefPrompt(workspace.slug),
     ]);
 
-    const body_ = await writeBrief(systemPrompt, briefUserContent(workspace, { signals, ...channels, call: call.call, callReason: call.callReason }));
+    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason };
+    const content = briefUserContent(workspace, inputs);
+    const body_ = await writeBrief(systemPrompt, content);
 
     let messageTs = "";
     let sendError = "";
@@ -337,6 +339,20 @@ export async function POST(request: Request) {
       callReason: call.callReason ?? null,
     };
 
+    // Returned, not stored. The trace quotes the transcript and both channels verbatim, and a row that
+    // carried those would be putting a copy of every client call in a table nobody remembers is there.
+    // `sources` above is the durable record, and it is figures only.
+    const steps = briefTrace(workspace, inputs, {
+      model: BRIEF_MODEL,
+      promptChars: systemPrompt.length,
+      contentChars: content.length,
+      briefChars: body_.length,
+      destination,
+      channelId,
+      posted: Boolean(messageTs),
+      sendError,
+    });
+
     await insertBrief(url, key, {
       workspace_id: workspace.id,
       automation: AUTOMATION,
@@ -354,6 +370,7 @@ export async function POST(request: Request) {
       brief: body_,
       signals,
       sources,
+      steps,
       posted: Boolean(messageTs),
       channelId: channelId || null,
       messageTs: messageTs || null,

@@ -5801,11 +5801,111 @@ span.brain-mark.is-lg {
   gap: 8px;
 }
 
-.brief-sources {
-  margin: 0 0 10px;
-  font-size: 11px;
+/* ── The run trace ───────────────────────────────────────────────────────────────────────────────
+   Five steps under the brief, each one system that was asked. The left rule carries the state, so a
+   run with a source missing is legible from the shape of the list without reading a word of it —
+   which is the point, because the reason to open this is that something came back thin. */
+.brief-trace {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.brief-trace-step {
+  padding: 12px 14px 12px 16px;
+  border: 1px solid var(--report-line);
+  border-left: 3px solid var(--report-brand);
+  border-radius: 10px;
+  background: var(--report-inset);
+}
+
+.brief-trace-step.is-partial {
+  border-left-color: var(--report-warning, #c98a2e);
+}
+
+.brief-trace-step.is-missing {
+  border-left-color: var(--report-danger, #d4574a);
+}
+
+.brief-trace-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The step number, so five steps read as a sequence rather than five unrelated boxes. */
+.brief-trace-head b {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
   color: var(--report-ink-soft);
   font-variant-numeric: tabular-nums;
+}
+
+.brief-trace-head strong {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 660;
+  color: var(--report-ink);
+}
+
+.brief-trace-head span {
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--report-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.brief-trace-facts {
+  margin: 8px 0 0;
+  padding: 0 0 0 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.brief-trace-facts li {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--report-ink-soft);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.brief-trace-excerpt {
+  margin: 8px 0 0 22px;
+}
+
+.brief-trace-excerpt summary {
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 620;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--report-ink-soft);
+}
+
+/* Capped and scrollable: a transcript excerpt is 1,400 characters and would otherwise be the tallest
+   thing on the page, pushing the four steps after it out of sight. */
+.brief-trace-excerpt pre {
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  max-height: 260px;
+  overflow: auto;
+  border-radius: 9px;
+  border: 1px solid var(--report-line);
+  background: var(--report-surface);
+  color: var(--report-ink);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ── Granola keys ────────────────────────────────────────────────────────────────────────────────
@@ -5914,6 +6014,22 @@ span.brain-mark.is-lg {
   .brief-client-actions,
   .granola-key-actions {
     justify-content: flex-start;
+  }
+  /* The step's own sentence onto its own line: beside a source name at this width it was four words
+     per line and the number column made it three. */
+  .brief-trace-head {
+    flex-wrap: wrap;
+  }
+  .brief-trace-head span {
+    flex: 1 0 100%;
+  }
+  .brief-trace-facts,
+  .brief-trace-excerpt {
+    padding-left: 0;
+    margin-left: 0;
+  }
+  .brief-trace-facts {
+    padding-left: 14px;
   }
   .brief-schedule-row {
     flex-direction: column;
