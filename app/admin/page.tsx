@@ -1703,6 +1703,13 @@ function AiHubView() {
     typeof window !== "undefined" && window.location.hash === "#ai-morning-brief" ? "prompts" : "overview");
   const [savedTemplates, setSavedTemplates] = useState<Array<{ id: string; kind: string; name: string; summary: string; prompt: string }>>([]);
 
+  // The browser's own hash scroll fires before this tab's panels exist, so it lands on nothing and the
+  // link drops you at the top of a long page. Re-run it once the panel is actually in the document.
+  useEffect(() => {
+    if (activeTab !== "prompts" || window.location.hash !== "#ai-morning-brief") return;
+    document.getElementById("ai-morning-brief")?.scrollIntoView({ block: "start" });
+  }, [activeTab]);
+
   const loadSavedTemplates = () => fetch("/api/ai/templates", { cache: "no-store" })
     .then((r) => r.json())
     .then((payload) => setSavedTemplates(Array.isArray(payload?.templates) ? payload.templates : []))
