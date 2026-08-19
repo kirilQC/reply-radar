@@ -30,9 +30,33 @@ import AppSidebar from "../components/AppSidebar";
 import BriefView from "../components/BriefView";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
-import { DAY_NAMES, DEFAULT_SCHEDULE, describeSchedule, type BriefSchedule, type Readiness } from "../lib/morning-brief-schedule";
+import { DAY_NAMES, DEFAULT_SCHEDULE, describeSchedule, type BriefSchedule, type Check } from "../lib/morning-brief-schedule";
 import type { TraceStep } from "../lib/morning-brief";
 import "../reports/reports.css";
+
+/**
+ * The two Slack automations, and the one screen that drives both.
+ *
+ * They are the same object with different sources: a morning brief reconciles three (campaign figures,
+ * Slack, the last call); a call analysis reads one (the weekly call transcript). So the hub is written
+ * once and parameterised by which automation is open — the endpoint, the labels, the readiness checks and
+ * the destinations all come off `automation` rather than being duplicated into two near-identical pages.
+ */
+type Automation = "morning_brief" | "call_analysis";
+
+/** Which route each automation talks to. Both expose the same GET/POST/PATCH shape. */
+const API: Record<Automation, string> = {
+  morning_brief: "/api/slack/brief",
+  call_analysis: "/api/slack/call-analysis",
+};
+
+const AUTOMATION_LABEL: Record<Automation, string> = {
+  morning_brief: "Morning brief",
+  call_analysis: "Call analysis",
+};
+
+/** A morning brief has HeyReach, a call analysis does not — so that check is optional here. */
+type ClientReadiness = { heyreach?: Check; slack: Check; granola: Check; ready: boolean };
 
 type BriefClient = {
   id: string;
@@ -43,9 +67,12 @@ type BriefClient = {
   internalChannelId: string;
   externalChannelId: string;
   granolaTitleMatch: string;
-  morningBriefEnabled: boolean;
-  hasBrief: boolean;
-  readiness: Readiness;
+  /** The morning brief's opt-in flag. Present on the brief directory only. */
+  morningBriefEnabled?: boolean;
+  /** The call analysis's opt-in flag. Present on the call-analysis directory only. */
+  callAnalysisEnabled?: boolean;
+  hasBrief?: boolean;
+  readiness: ClientReadiness;
   sentToday: boolean;
   lastBriefAt: string | null;
   lastBriefStatus: string | null;
@@ -79,14 +106,14 @@ type RunResult = {
 };
 
 /**
- * Where a manually run brief goes.
+ * Where a manually run automation goes.
  *
- * Three, not four. The internal channel is the one a brief is actually for, so running one by hand and
- * having nowhere to put it meant copying text out of the preview and pasting it into Slack as a person,
- * which loses the header and the thread. The client's external channel is still not offered: the brief is
- * the team's own outstanding-work list, and there is no version of sending it to the client that is right.
+ * A morning brief offers three: preview, the test channel, and the client's internal channel — the brief
+ * is the team's own outstanding-work list, so its external channel is never a destination. A call
+ * analysis offers a fourth, external, because a call summary is a thing a client is often glad to
+ * receive. Which of the four are shown comes off the open automation, not off this type.
  */
-type Destination = "preview" | "test" | "internal";
+type Destination = "preview" | "test" | "internal" | "external";
 
 /** The zones the team actually works in. A free-text field here would be a typo away from a silent no-op. */
 const TIMEZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Asia/Jerusalem", "UTC"];
@@ -106,7 +133,10 @@ const formatWhen = (iso: string) => {
 
 export default function SlackPage() {
   const [view, setView] = useState<"automations" | "clients" | "brief">("automations");
-  const [directory, setDirectory] = useState<Directory | null>(null);
+  const [automation, setAutomation] = useState<Automation>("morning_brief");
+  // Both directories are held at once so the landing screen can show each automation's card without
+  // opening it. `directory` below is whichever one is currently open.
+  const [directories, setDirectories] = useState<Record<Automation, Directory | null>>({ morning_brief: null, call_analysis: null });
   const [error, setError] = useState("");
   const [activeSlug, setActiveSlug] = useState("");
   const [destination, setDestination] = useState<Destination>("preview");
@@ -119,34 +149,60 @@ export default function SlackPage() {
   const [scheduleError, setScheduleError] = useState("");
   const [togglingSlug, setTogglingSlug] = useState("");
 
-  const load = async () => {
-    const payload = (await fetch("/api/slack/brief", { cache: "no-store" }).then((response) => response.json()).catch(() => null)) as Directory | null;
+  const directory = directories[automation];
+
+  const load = async (which: Automation = automation) => {
+    const payload = (await fetch(API[which], { cache: "no-store" }).then((response) => response.json()).catch(() => null)) as Directory | null;
     if (!payload || payload.ok === false || payload.error) {
       setError(payload?.error || "The client list could not be loaded.");
       return;
     }
     setError("");
-    setDirectory(payload);
+    setDirectories((current) => ({ ...current, [which]: payload }));
     return payload;
   };
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const payload = await load();
-      // The draft is seeded once from the server and then owned by the form. Re-seeding on every reload
-      // would throw away half-made edits the moment a brief finished writing in another part of the page.
-      if (!cancelled && payload?.schedule) setDraft(payload.schedule);
+      // Both automations up front, so the landing cards are populated and switching between them is
+      // instant. The draft is seeded from whichever one is open, once, and then owned by the form.
+      const [brief] = await Promise.all([load("morning_brief"), load("call_analysis")]);
+      if (!cancelled && brief?.schedule) setDraft(brief.schedule);
     })();
     return () => { cancelled = true; };
   }, []);
 
-  const clients = directory?.workspaces ?? [];
+  const clients = useMemo(() => directory?.workspaces ?? [], [directory]);
   const active = useMemo(() => clients.find((client) => client.slug === activeSlug) ?? null, [clients, activeSlug]);
 
-  /** How many clients could actually receive a brief — all three sources, not just a channel. */
+  /** Whether this client is opted into whichever automation is open. */
+  const isEnabled = (client: BriefClient) => automation === "call_analysis" ? Boolean(client.callAnalysisEnabled) : Boolean(client.morningBriefEnabled);
+
+  /** How many clients could actually receive this automation — every source, not just a channel. */
   const readyCount = clients.filter((client) => client.readiness?.ready).length;
-  const enabledCount = clients.filter((client) => client.morningBriefEnabled).length;
+
+  /** The destinations this automation offers, in the order they are shown. */
+  const destinationsFor = (client: BriefClient | null): Array<[Destination, string, string]> => {
+    const testChannelId = directory?.slack.testChannelId ?? "";
+    const rows: Array<[Destination, string, string]> = [
+      ["preview", "Show it here", "Nothing is posted"],
+      ["test", "Test channel", testChannelId || "SLACK_TEST_CHANNEL_ID not set"],
+      ["internal", "Internal channel", client?.internalChannelId || "No internal channel is set"],
+    ];
+    // Only the call analysis may post to the client's external channel; the brief never does.
+    if (automation === "call_analysis") rows.push(["external", "External channel", client?.externalChannelId || "No external channel is set"]);
+    return rows;
+  };
+
+  const openAutomation = (which: Automation) => {
+    setAutomation(which);
+    setScheduleOpen(false);
+    setScheduleError("");
+    const schedule = directories[which]?.schedule;
+    if (schedule) setDraft(schedule);
+    setView("clients");
+  };
 
   const openClient = (slug: string) => {
     setActiveSlug(slug);
@@ -158,7 +214,7 @@ export default function SlackPage() {
   const saveSchedule = async (schedule: BriefSchedule = draft) => {
     setSavingSchedule(true);
     setScheduleError("");
-    const response = await fetch("/api/slack/brief", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ schedule }) }).catch(() => null);
+    const response = await fetch(API[automation], { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ schedule }) }).catch(() => null);
     const payload = await response?.json().catch(() => ({}));
     setSavingSchedule(false);
     if (!response?.ok || !payload?.ok) {
@@ -185,7 +241,7 @@ export default function SlackPage() {
   const toggleClient = async (client: BriefClient) => {
     setTogglingSlug(client.slug);
     setScheduleError("");
-    const response = await fetch("/api/slack/brief", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace: client.slug, enabled: !client.morningBriefEnabled }) }).catch(() => null);
+    const response = await fetch(API[automation], { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace: client.slug, enabled: !isEnabled(client) }) }).catch(() => null);
     const payload = await response?.json().catch(() => ({}));
     setTogglingSlug("");
     if (!response?.ok || !payload?.ok) {
@@ -200,7 +256,7 @@ export default function SlackPage() {
     setRunning(true);
     setResult(null);
     try {
-      const response = await fetch("/api/slack/brief", {
+      const response = await fetch(API[automation], {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ workspace: active.slug, destination }),
@@ -248,20 +304,26 @@ export default function SlackPage() {
 
             <div className="hub-group-label">
               <span>Automations</span>
-              <span>1 automation</span>
+              <span>2 automations</span>
             </div>
             <div className="hub-card-grid">
-              <div className="hub-card">
-                <button type="button" className="hub-card-open" onClick={() => setView("clients")}>
-                  <h3>Morning brief</h3>
-                  <div className="hub-card-meta">
-                    {/* Three facts fit only because the schedule is the shortest of them when it is off. */}
-                    <b>{directory?.schedule.enabled ? describeSchedule(directory.schedule) : "Off"}</b>
-                    <span>·</span>
-                    <span>{enabledCount === 1 ? "1 client on" : `${enabledCount} clients on`}</span>
+              {(["morning_brief", "call_analysis"] as Automation[]).map((which) => {
+                const dir = directories[which];
+                const on = (dir?.workspaces ?? []).filter((client) => which === "call_analysis" ? client.callAnalysisEnabled : client.morningBriefEnabled).length;
+                return (
+                  <div className="hub-card" key={which}>
+                    <button type="button" className="hub-card-open" onClick={() => openAutomation(which)}>
+                      <h3>{AUTOMATION_LABEL[which]}</h3>
+                      <div className="hub-card-meta">
+                        {/* Two facts fit only because the schedule is the shortest of them when it is off. */}
+                        <b>{dir?.schedule.enabled ? describeSchedule(dir.schedule) : "Off"}</b>
+                        <span>·</span>
+                        <span>{on === 1 ? "1 client on" : `${on} clients on`}</span>
+                      </div>
+                    </button>
                   </div>
-                </button>
-              </div>
+                );
+              })}
             </div>
 
             {/* Both of these are silent failures at run time, so they are said here instead. */}
@@ -280,8 +342,8 @@ export default function SlackPage() {
           <main className="reports-hub">
             <button type="button" className="config-back" onClick={() => setView("automations")}>← Slack automations</button>
             <div className="hub-lede hub-lede-split">
-              <h1>Morning brief</h1>
-              <a className="text-button" href="/admin?section=ai-hub#ai-morning-brief">Edit the prompt →</a>
+              <h1>{AUTOMATION_LABEL[automation]}</h1>
+              <a className="text-button" href={automation === "call_analysis" ? "/admin?section=ai-hub#ai-call-analysis" : "/admin?section=ai-hub#ai-morning-brief"}>Edit the prompt →</a>
             </div>
 
             <div className="hub-group-label">
@@ -325,8 +387,18 @@ export default function SlackPage() {
                     {TIMEZONES.map((zone) => <option key={zone} value={zone}>{zone.split("/").pop()?.replace(/_/g, " ")}</option>)}
                   </select>
                 </label>
-                {/* No destination picker. A scheduled brief goes to the client's internal channel, which
-                    is the only place it was ever for — the field only existed to be got wrong. */}
+                {/* A scheduled morning brief has no destination picker: it goes to the client's internal
+                    channel, the only place it was ever for. A call analysis does, because it legitimately
+                    goes to one of two channels and the team picks which — internal by default. */}
+                {automation === "call_analysis" && (
+                  <label className="brief-field">
+                    CHANNEL
+                    <select value={draft.destination} onChange={(event) => setDraft((current) => ({ ...current, destination: event.target.value }))}>
+                      <option value="internal">Internal</option>
+                      <option value="external">External</option>
+                    </select>
+                  </label>
+                )}
                 <button className="config-generate" type="button" onClick={() => saveSchedule()} disabled={savingSchedule}>{savingSchedule ? "Saving…" : "Save schedule"}</button>
               </div>}
               {/* The one thing a schedule cannot show about itself: whether it would fire right now. */}
@@ -342,8 +414,10 @@ export default function SlackPage() {
             </div>
             <ul className="brief-client-list">
               {clients.map((client) => {
+                // HeyReach is a morning-brief source only; a call analysis reads Slack and Granola. So the
+                // row shows two marks or three depending on which automation is open.
                 const checks: Array<[string, { ok: boolean; detail: string }]> = [
-                  ["HeyReach", client.readiness.heyreach],
+                  ...(client.readiness.heyreach ? [["HeyReach", client.readiness.heyreach] as [string, { ok: boolean; detail: string }]] : []),
                   ["Slack", client.readiness.slack],
                   ["Granola", client.readiness.granola],
                 ];
@@ -372,12 +446,12 @@ export default function SlackPage() {
                           post is complete, and a half-sourced brief reads exactly like a whole one. */}
                       <button
                         type="button"
-                        className={client.morningBriefEnabled ? "brief-switch is-on" : "brief-switch"}
+                        className={isEnabled(client) ? "brief-switch is-on" : "brief-switch"}
                         onClick={() => toggleClient(client)}
-                        disabled={togglingSlug === client.slug || (!client.morningBriefEnabled && !client.readiness.ready)}
-                        title={client.readiness.ready ? "" : "All three sources have to be working first."}
+                        disabled={togglingSlug === client.slug || (!isEnabled(client) && !client.readiness.ready)}
+                        title={client.readiness.ready ? "" : "Every source has to be working first."}
                       >
-                        <span />{client.morningBriefEnabled ? "On" : "Off"}
+                        <span />{isEnabled(client) ? "On" : "Off"}
                       </button>
                       <button type="button" className="secondary-button" onClick={() => openClient(client.slug)}>Generate</button>
                     </div>
@@ -405,14 +479,13 @@ export default function SlackPage() {
                 <div className="hub-group-label"><span>Where it goes</span></div>
                 {/* Preview first and selected by default, so the destination has to be chosen deliberately
                     to post anywhere. The internal channel is the real one; the test channel is for checking
-                    a prompt change without putting it in front of the team. */}
+                    a prompt change without putting it in front of the team. A call analysis adds external. */}
                 <div className="slack-destinations">
-                  {([
-                    ["preview", "Show it here", "Nothing is posted"],
-                    ["test", "Test channel", testChannel || "SLACK_TEST_CHANNEL_ID not set"],
-                    ["internal", "Internal channel", active.internalChannelId || "No internal channel is set"],
-                  ] as Array<[Destination, string, string]>).map(([id, label, detail]) => {
-                    const unavailable = (id === "test" && !testChannel) || (id === "internal" && !active.internalChannelId);
+                  {destinationsFor(active).map(([id, label, detail]) => {
+                    const unavailable =
+                      (id === "test" && !testChannel) ||
+                      (id === "internal" && !active.internalChannelId) ||
+                      (id === "external" && !active.externalChannelId);
                     return (
                       <button
                         key={id}
@@ -430,12 +503,27 @@ export default function SlackPage() {
 
                 <div className="slack-run-row">
                   <button className="config-generate" onClick={runBrief} disabled={running}>
-                    {running ? "Writing the brief…" : destination === "preview" ? "Write the brief" : "Write and post"}
+                    {running
+                      ? (automation === "call_analysis" ? "Writing the analysis…" : "Writing the brief…")
+                      : destination === "preview"
+                        ? (automation === "call_analysis" ? "Write the analysis" : "Write the brief")
+                        : "Write and post"}
                   </button>
                   <span className="slack-run-note">
-                    {[active.readiness.heyreach, active.readiness.slack, active.readiness.granola].filter((check) => !check.ok).length === 0
-                      ? "All three sources are working."
-                      : `Missing: ${[["campaign figures", active.readiness.heyreach], ["Slack channels", active.readiness.slack], ["the client's call", active.readiness.granola]].filter(([, check]) => !(check as { ok: boolean }).ok).map(([label]) => label).join(", ")}.`}
+                    {(() => {
+                      // The morning brief has three sources, the call analysis two. Only list the ones this
+                      // automation actually reads, and only the ones that are not working.
+                      const sources: Array<[string, Check | undefined]> = [
+                        ["campaign figures", active.readiness.heyreach],
+                        ["Slack channels", active.readiness.slack],
+                        ["the client's call", active.readiness.granola],
+                      ];
+                      const present = sources.filter(([, check]) => check);
+                      const missing = present.filter(([, check]) => !check?.ok).map(([label]) => label);
+                      return missing.length === 0
+                        ? `All ${present.length === 2 ? "two" : "three"} sources are working.`
+                        : `Missing: ${missing.join(", ")}.`;
+                    })()}
                   </span>
                 </div>
 
@@ -445,10 +533,10 @@ export default function SlackPage() {
                 {result?.brief && (
                   <>
                     <div className="hub-group-label">
-                      <span>The brief</span>
+                      <span>{automation === "call_analysis" ? "The analysis" : "The brief"}</span>
                       <span>{result.posted ? `Posted to ${result.channelId}` : "Not posted"}</span>
                     </div>
-                    {/* On the website the brief reads as a document: the stored Slack mrkdwn is parsed
+                    {/* On the website the result reads as a document: the stored Slack mrkdwn is parsed
                         back into headings and lists (BriefView), rather than shown as the raw markup Slack
                         itself receives. The mrkdwn is still what posts; this is only how it looks here. */}
                     <BriefView body={result.brief} mentions={result.mentions} />

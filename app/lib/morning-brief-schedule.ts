@@ -147,6 +147,39 @@ export function readinessOf(input: ReadinessInput, now = Date.now()): Readiness 
   return { heyreach, slack, granola, ready: heyreach.ok && slack.ok && granola.ok };
 }
 
+export type CallReadinessInput = {
+  internalChannelId: string;
+  externalChannelId: string;
+  granolaTitleMatch: string;
+  granolaKeyCount: number;
+};
+export type CallReadiness = { slack: Check; granola: Check; ready: boolean };
+
+/**
+ * The two sources a call analysis needs, each working or with a reason it is not.
+ *
+ * Fewer checks than a morning brief because a call analysis reads one thing — the transcript Granola
+ * captured — and posts it to Slack. There is no HeyReach in it: it is not reporting on campaigns from
+ * figures, it is summarising what was said on the call. The Slack check still requires an internal
+ * channel, because internal is where a call analysis posts by default and the client's external channel
+ * is an opt-in override rather than the fallback.
+ */
+export function callReadinessOf(input: CallReadinessInput): CallReadiness {
+  const slack: Check = !input.internalChannelId
+    ? { ok: false, detail: "No internal channel" }
+    : input.externalChannelId
+      ? { ok: true, detail: "Internal + external" }
+      : { ok: true, detail: "Internal only" };
+
+  const granola: Check = !input.granolaKeyCount
+    ? { ok: false, detail: "No Granola keys added" }
+    : !input.granolaTitleMatch.trim()
+      ? { ok: false, detail: "No name to match titles on" }
+      : { ok: true, detail: `${input.granolaKeyCount === 1 ? "1 key" : `${input.granolaKeyCount} keys`} · matching “${input.granolaTitleMatch.trim()}”` };
+
+  return { slack, granola, ready: slack.ok && granola.ok };
+}
+
 /** "Mon, Wed and Fri at 8:00 AM" — the schedule as a sentence, for the one line above the controls. */
 export function describeSchedule(schedule: BriefSchedule): string {
   const days = [...schedule.sendDays].sort((a, b) => a - b).map((day) => DAY_NAMES[day]?.slice(0, 3)).filter(Boolean);

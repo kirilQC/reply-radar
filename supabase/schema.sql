@@ -32,6 +32,11 @@ create table if not exists rr_workspaces (
   -- client added on a Tuesday must not post into a channel on Wednesday morning before anybody has read
   -- one of its briefs. Opting in is a decision somebody makes on the Slack tab, once.
   morning_brief_enabled boolean not null default false,
+  -- Whether the scheduled call analysis may post for this client. Same reasoning and same default as the
+  -- morning brief flag above, and kept as its own column rather than folded into one "automations on"
+  -- switch because the two are opted into separately: a client can have their weekly call summarised long
+  -- before their morning brief is trusted to send, or the other way round.
+  call_analysis_enabled boolean not null default false,
   -- What has to appear in a Granola meeting title for it to be this client's call. Null is the normal
   -- case and means the client's own `name` is used; this is only for when the calendar names them
   -- differently. Matched on the title rather than the attendee list because Granola's list endpoint

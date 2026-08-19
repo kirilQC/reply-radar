@@ -1325,6 +1325,69 @@ async function sendDueBrief() {
   }
 }
 
+// ── Call analysis ───────────────────────────────────────────────────
+/**
+ * The scheduled call analysis: the morning brief's sibling, run the same way and for the same reasons.
+ *
+ * The app decides what is due — same schedule maths, same readiness rules the page draws, kept in one
+ * place so the worker cannot drift from it. One client per cycle, so a full roster of weekly-call
+ * summaries spreads over half an hour rather than firing twelve concurrent model calls into Granola's
+ * rate limit at once. The only differences from the brief are the endpoint and the default destination:
+ * a call analysis may go to the client's internal or external channel, and GET returns which.
+ */
+let lastCallAnalysisRun = 0;
+
+async function sendDueCallAnalysis() {
+  if (!appBaseUrl) return;
+  if (Date.now() - lastCallAnalysisRun < BRIEF_LOOP_MS) return;
+  lastCallAnalysisRun = Date.now();
+
+  const listed = await fetch(`${appBaseUrl}/api/slack/call-analysis`, { cache: "no-store" }).catch(() => null);
+  if (!listed?.ok) return;
+  const payload = await listed.json().catch(() => null);
+  const due = Array.isArray(payload?.due) ? payload.due.filter((slug) => typeof slug === "string" && slug) : [];
+  if (!due.length) return;
+
+  const slug = due[0];
+  const startedAt = new Date().toISOString();
+  // Internal unless the schedule says external — the call analysis, unlike the brief, is allowed both.
+  const destination = payload?.schedule?.destination === "external" ? "external" : "internal";
+  try {
+    const response = await fetch(`${appBaseUrl}/api/slack/call-analysis`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspace: slug, destination }),
+    });
+    const result = await response.json().catch(() => ({}));
+    const failed = !response.ok || result?.ok === false;
+    console.info("reply_radar_call_analysis_sent", { slug, destination, posted: Boolean(result?.posted), remaining: due.length - 1 });
+    await writeSyncRun({
+      workspace_id: null,
+      run_type: "call_analysis",
+      source: "render-worker",
+      status: failed ? "error" : "success",
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      records_seen: due.length,
+      records_written: failed ? 0 : 1,
+      error_text: failed ? String(result?.error || `HTTP ${response.status}`).slice(0, 500) : null,
+    });
+  } catch (error) {
+    console.error("reply_radar_call_analysis_failed", { slug, error: String(error) });
+    await writeSyncRun({
+      workspace_id: null,
+      run_type: "call_analysis",
+      source: "render-worker",
+      status: "error",
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      records_seen: due.length,
+      records_written: 0,
+      error_text: String(error).slice(0, 500),
+    });
+  }
+}
+
 // ── Main loop ───────────────────────────────────────────────────────
 
 async function runOnce() {
@@ -1378,6 +1441,10 @@ async function runOnce() {
   // At most one client's brief per cycle, and before the AI pipeline: a brief that is due at 8am is
   // time-sensitive in a way the pipeline is not, and the pipeline's budget can hold a cycle open.
   try { await sendDueBrief(); } catch (error) { console.error("reply_radar_morning_brief_cycle_failed", error); }
+
+  // And at most one client's call analysis per cycle, the same way and for the same reason. Separate
+  // timer from the brief so the two automations spread independently rather than firing together.
+  try { await sendDueCallAnalysis(); } catch (error) { console.error("reply_radar_call_analysis_cycle_failed", error); }
 
   // Every cycle, so a reply that arrives while nobody is on the site is already analysed,
   // ICP-scored and follow-up-scored by the time it is opened.
