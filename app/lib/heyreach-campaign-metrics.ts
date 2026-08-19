@@ -41,6 +41,15 @@ export type CampaignFunnelRow = {
   connectionsAccepted: number;
   /** Percent, 0-100. HeyReach's own figure where it gives one, else accepted ÷ sent. */
   acceptanceRate: number;
+  /**
+   * Replies as HeyReach counts them, messages and InMails together.
+   *
+   * Carried but deliberately unused by `reportMetrics` — see the note at the top of this file about why a
+   * client report divides our own reply count by our own denominator. The morning brief is the other case:
+   * it is read by the team, three mornings a week, next to HeyReach's own screen, and a reply count that
+   * disagrees with what they can see there is the thing that stops the brief being trusted.
+   */
+  replies: number;
 };
 
 export type CampaignFunnel = {
@@ -92,6 +101,7 @@ export function summariseFunnel(rows: unknown[]): CampaignFunnel {
         connectionsSent: sent,
         connectionsAccepted: accepted,
         acceptanceRate: asPercent(row.connectionAcceptanceRate, accepted, sent),
+        replies: count(row.totalMessageReplies) + count(row.totalInmailReplies),
       };
     });
 
@@ -125,6 +135,7 @@ export async function campaignFunnelFor(
   campaignIds: string[],
   since: string,
   until: string,
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<CampaignFunnel> {
   const key = text(apiKey);
   if (!key) return emptyFunnel("No HeyReach API key is saved for this client.");
@@ -142,7 +153,7 @@ export async function campaignFunnelFor(
       method: "POST",
       headers: { "X-API-KEY": key, "content-type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ accountIds: [], campaignIds: ids, startDate: since, endDate: until }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       cache: "no-store",
     });
     if (!response.ok) throw new Error(`HeyReach campaign stats returned ${response.status}`);
@@ -152,6 +163,68 @@ export async function campaignFunnelFor(
     return funnel;
   } catch (error) {
     return emptyFunnel(error instanceof Error ? error.message : "HeyReach could not be reached.");
+  }
+}
+
+/** One day of the account's sending, as HeyReach reports it. */
+export type DailyStat = { day: string; sent: number; accepted: number; replies: number };
+
+/**
+ * `byDayStats` sorted into a series, newest first.
+ *
+ * HeyReach keys it by timestamp and only writes a key for a day something happened, so a gap is a day
+ * with no sending and must stay a gap — filling it with a zero row would make "nothing has been sent for
+ * five days" indistinguishable from "five days were collected and four of them were quiet".
+ */
+export function summariseDailyStats(payload: unknown): DailyStat[] {
+  const byDay = object(object(payload).byDayStats);
+  const days: DailyStat[] = [];
+  for (const [stamp, value] of Object.entries(byDay)) {
+    const day = text(stamp).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+    const row = object(value);
+    days.push({
+      day,
+      sent: count(row.connectionsSent),
+      accepted: count(row.connectionsAccepted),
+      replies: count(row.totalMessageReplies) + count(row.totalInmailReplies),
+    });
+  }
+  return days.sort((a, b) => b.day.localeCompare(a.day));
+}
+
+/**
+ * The account's day-by-day sending over a window, narrowed to a set of campaigns.
+ *
+ * Narrowed deliberately. Several clients ran their own outbound before the engagement, on the same
+ * account behind the same key, and an unscoped series counts their sends as ours — which is how a brief
+ * comes to report a week of sending on a client where nothing of ours went out at all.
+ *
+ * Never throws. An empty series is indistinguishable from a quiet fortnight, so the caller has to be
+ * told the difference: `null` is "could not ask".
+ */
+export async function dailyStatsFor(
+  apiKey: string,
+  campaignIds: string[],
+  since: string,
+  until: string,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<DailyStat[] | null> {
+  const key = text(apiKey);
+  const ids = campaignIds.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+  if (!key || !ids.length) return null;
+  try {
+    const response = await fetch(`${API_BASE.replace(/\/$/, "")}/stats/GetOverallStats`, {
+      method: "POST",
+      headers: { "X-API-KEY": key, "content-type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ accountIds: [], campaignIds: ids, startDate: since, endDate: until }),
+      signal: AbortSignal.timeout(timeoutMs),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return summariseDailyStats(await response.json().catch(() => ({})));
+  } catch {
+    return null;
   }
 }
 

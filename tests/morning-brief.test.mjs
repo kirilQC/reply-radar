@@ -19,6 +19,9 @@ import { transcript } from "../app/lib/slack.ts";
 
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const route = readFileSync(new URL("../app/api/slack/brief/route.ts", import.meta.url), "utf8");
+// `morning-brief-run.ts` imports its neighbours by relative path, which Node's type-stripping cannot
+// resolve at runtime, so the parts of it that cannot be imported are asserted on as source.
+const runFile = readFileSync(new URL("../app/lib/morning-brief-run.ts", import.meta.url), "utf8");
 const slackLib = readFileSync(new URL("../app/lib/slack.ts", import.meta.url), "utf8");
 
 const WORKSPACE = { id: "w1", name: "Willow", slug: "willow", timezone: "America/New_York" };
@@ -145,6 +148,158 @@ test("a running campaign is counted however HeyReach spells the status", async (
   // "13 campaigns, 0 active, 2 paused" leaves eleven unexplained and reads as a bug in the report.
   const { total, active, paused, finished } = signals.campaigns;
   assert.equal(active + paused + finished, total);
+});
+
+// ── Where the figures came from ──────────────────────────────────────
+//
+// The brief is read three mornings a week by people sitting next to HeyReach's own screen, so it now asks
+// HeyReach during the run rather than printing the copy the overnight worker took. That copy is refreshed
+// one client per cycle on a 24-hour cadence, which is how a brief came to state a pending-lead count a
+// full day of sending out of date.
+//
+// It is still there for the run where HeyReach cannot be reached inside the sixty seconds the route has.
+// These tests are about the one rule that makes that safe: the fallback is announced, never silent, and
+// the two sources are summed by the same code so a fallback run differs only in what it says about itself.
+
+/** Shaped like `CampaignFacts` — what either source hands over before the brief's wording is applied. */
+const facts = (over) => ({
+  name: "W040: Website ICP Visitors",
+  status: "IN_PROGRESS",
+  isActive: true,
+  sent: 0,
+  accepted: 0,
+  replies: 0,
+  pending: 0,
+  senders: [],
+  senderIds: [],
+  ...over,
+});
+
+/** The same days `dayRows` builds, in the shape HeyReach's series arrives in. */
+const liveDays = (startDaysAgo, count, sent, accepted = 0, replies = 0) =>
+  dayRows(startDaysAgo, count, sent, accepted, replies).map((row) => ({
+    day: row.day,
+    sent: row.connections_sent,
+    accepted: row.connections_accepted,
+    replies: row.replies,
+  }));
+
+test("a live read does not touch the stored tables at all", async () => {
+  // Not as a cross-check and not as a fallback for the odd missing field. Two sources for one figure means
+  // the brief eventually states the wrong one and nobody can tell which.
+  const refuse = async (path) => {
+    throw new Error(`the stored tables must not be read on a live run: ${path}`);
+  };
+  const signals = await gatherSignals(refuse, WORKSPACE, {
+    available: true,
+    reason: "",
+    campaigns: [facts({ sent: 400, accepted: 120, replies: 30, pending: 900, senderIds: ["11", "12"] })],
+    days: liveDays(0, 7, 100, 40, 6),
+  });
+  assert.equal(signals.source.live, true);
+  assert.equal(signals.source.reason, "");
+  assert.equal(signals.campaigns.total, 1);
+  assert.equal(signals.sending.thisWeek, 700);
+  assert.equal(signals.replies.thisWeek, 42);
+  assert.equal(signals.runway.pending, 900);
+  assert.equal(signals.runway.senders, 2);
+});
+
+test("a client with no campaigns of ours is a live answer, not a reason to read the copy", async () => {
+  const refuse = async (path) => {
+    throw new Error(`unexpected read: ${path}`);
+  };
+  const signals = await gatherSignals(refuse, WORKSPACE, { available: true, reason: "", campaigns: [], days: [] });
+  assert.equal(signals.source.live, true);
+  assert.equal(signals.campaigns.total, 0);
+  // And it is not told to ask for campaigns, because there is no engagement here to have run dry.
+  assert.equal(signals.runway.needsCampaigns, false);
+});
+
+test("both sources are summed by the same code, so a fallback changes only its provenance", async () => {
+  // The point of one composer. If the arithmetic were duplicated, the morning HeyReach was unreachable
+  // would change the numbers as well as the caveat, and the caveat is the only part anybody would see.
+  const refreshed = new Date(Date.now() - 26 * 3_600_000).toISOString();
+  const stored = await gatherSignals(
+    readerFor(
+      [{ name: "W040: Website ICP Visitors", status: "IN_PROGRESS", connections_sent: 400, connections_accepted: 120, replies: 30, leads_pending: 900, sender_ids: ["11", "12"], refreshed_at: refreshed }],
+      dayRows(0, 7, 100, 40, 6),
+    ),
+    WORKSPACE,
+    { available: false, reason: "HeyReach campaign stats returned 502", campaigns: [], days: [] },
+  );
+  const live = await gatherSignals(
+    async (path) => {
+      throw new Error(`unexpected read: ${path}`);
+    },
+    WORKSPACE,
+    {
+      available: true,
+      reason: "",
+      campaigns: [facts({ sent: 400, accepted: 120, replies: 30, pending: 900, senderIds: ["11", "12"] })],
+      days: liveDays(0, 7, 100, 40, 6),
+    },
+  );
+  assert.deepEqual(
+    { ...stored, source: null, staleness: null },
+    { ...live, source: null, staleness: null },
+  );
+  assert.equal(stored.source.live, false);
+  assert.equal(stored.source.reason, "HeyReach campaign stats returned 502");
+  assert.equal(stored.staleness.statsAgeHours, 26);
+});
+
+test("a run on the stored copy says so in the figures, with the reason", async () => {
+  const signals = await gatherSignals(
+    readerFor([{ name: "W040", status: "IN_PROGRESS", connections_sent: 10, connections_accepted: 4, replies: 1, leads_pending: 20, refreshed_at: new Date(Date.now() - 26 * 3_600_000).toISOString() }], dayRows(0, 7, 50)),
+    WORKSPACE,
+    { available: false, reason: "The operation was aborted due to timeout", campaigns: [], days: [] },
+  );
+  const text = signalsAsText(signals);
+  assert.match(text, /comes from our own stored copy rather than from HeyReach/);
+  assert.match(text, /last collected 26 hours ago/);
+  assert.match(text, /The operation was aborted due to timeout/);
+  // And the model is told to say it once, not against every campaign, or the brief reads as a disclaimer.
+  assert.match(text, /Do not repeat it per campaign/);
+});
+
+test("no API key is a different sentence from HeyReach failing", async () => {
+  // The two send whoever reads the brief to two different places: one is a config page, the other is a
+  // service having a bad morning. A single "figures may be stale" line would conflate them.
+  const signals = await gatherSignals(readerFor([], dayRows(0, 7, 50)), WORKSPACE, { available: false, reason: "", campaigns: [], days: [] });
+  assert.match(signalsAsText(signals), /HeyReach was not asked, because no API key is saved for this client/);
+});
+
+test("a live read says it is current, and says it once", async () => {
+  const signals = await gatherSignals(
+    async (path) => {
+      throw new Error(`unexpected read: ${path}`);
+    },
+    WORKSPACE,
+    { available: true, reason: "", campaigns: [facts({ sent: 10, accepted: 4, pending: 20 })], days: liveDays(0, 7, 50) },
+  );
+  const text = signalsAsText(signals);
+  assert.match(text, /read from HeyReach just now/);
+  assert.doesNotMatch(text, /stored copy/);
+  assert.doesNotMatch(text, /last collected/);
+});
+
+test("the live fetch is all three calls or none of them", () => {
+  /*
+   * A partial live read is the worst option available. Without the rollup every campaign reports 0 sent
+   * and 0 accepted; without the series the brief states that nothing has been sent in three weeks. Both
+   * are confidently wrong in the direction that starts a conversation about a dead account, and neither is
+   * distinguishable in the output from the truth.
+   */
+  assert.match(runFile, /if \(!funnel\.available\) return nothing\(/);
+  assert.match(runFile, /if \(!days\) return nothing\(/);
+  // Scoped to this client's own campaigns on every call. An empty id list would read as "the whole
+  // account", which counts the outbound a client ran before the engagement as ours.
+  assert.match(runFile, /campaignFunnelFor\(key, ids,/);
+  assert.match(runFile, /dailyStatsFor\(key, ids,/);
+  // And it is asked for before the stored reads, because its answer decides whether they happen.
+  assert.match(route, /const live = await gatherLiveFigures\(/);
+  assert.match(route, /gatherSignals\(read, workspace, live\)/);
 });
 
 // ── The sending runway ───────────────────────────────────────────────
@@ -336,7 +491,7 @@ test("the figures reach the model as prose, and are labelled as facts", async ()
 
 test("a channel that could not be read becomes a line in the brief", () => {
   const content = briefUserContent(WORKSPACE, {
-    signals: { campaigns: { total: 0, active: 0, paused: 0, finished: 0, names: [] }, runway: { daysLeft: null, pending: 0, senders: 0, needsCampaigns: false }, sending: { thisWeek: 0, lastWeek: 0, changePercent: null, lastDayWithSends: null, quietDays: 0 }, replies: { thisWeek: 0, lastWeek: 0 }, acceptance: { thisWeek: null, lastWeek: null }, staleness: { statsAgeHours: null, dayCount: 0 } },
+    signals: { campaigns: { total: 0, active: 0, paused: 0, finished: 0, names: [] }, runway: { daysLeft: null, pending: 0, senders: 0, needsCampaigns: false }, sending: { thisWeek: 0, lastWeek: 0, changePercent: null, lastDayWithSends: null, quietDays: 0 }, replies: { thisWeek: 0, lastWeek: 0 }, acceptance: { thisWeek: null, lastWeek: null }, staleness: { statsAgeHours: null, dayCount: 0 }, source: { live: true, reason: "" } },
     internal: { channelId: "C1", messages: 0, text: "", error: "The Reply Radar bot is not in that channel. Invite it, then try again." },
     external: { channelId: "", messages: 0, text: "" },
   });
@@ -854,6 +1009,7 @@ const NO_SIGNALS = {
   replies: { thisWeek: 0, lastWeek: 0 },
   acceptance: { thisWeek: null, lastWeek: null },
   staleness: { statsAgeHours: null, dayCount: 0 },
+  source: { live: true, reason: "" },
 };
 
 const OUTCOME = { model: "claude-sonnet-4-6", promptChars: 6_000, contentChars: 48_000, briefChars: 1_400, destination: "preview", channelId: "", posted: false };
@@ -1013,13 +1169,35 @@ test("a source that came back empty is not allowed to read as working", () => {
   assert.match(stepFor(steps, "Anthropic").result, /Fed 0 of 4 sources/);
 });
 
-test("figures too old to trust do not read as a working source", () => {
-  // Stale figures are the failure that looks like success: every number is present and every one is from
-  // Tuesday. A green tick against them is worse than no trace at all.
-  const stale = { ...NO_SIGNALS, campaigns: { total: 3, active: 1, paused: 2, finished: 0, names: [] }, staleness: { statsAgeHours: 70, dayCount: 14 } };
+test("figures that did not come from HeyReach do not read as a working source", () => {
+  // The stored copy is the failure that looks like success: every number is present and every one is from
+  // Tuesday. A green tick against them is worse than no trace at all, and the reason has to be on the step
+  // — "HeyReach timed out" and "no key is saved" send whoever is reading to two different places.
+  const stale = {
+    ...NO_SIGNALS,
+    campaigns: { total: 3, active: 1, paused: 2, finished: 0, names: [] },
+    staleness: { statsAgeHours: 70, dayCount: 14 },
+    source: { live: false, reason: "HeyReach campaign stats returned 502" },
+  };
   const steps = briefTrace(WORKSPACE, { signals: stale, internal: { channelId: "", messages: 0, text: "" }, external: { channelId: "", messages: 0, text: "" } }, OUTCOME);
   assert.equal(stepFor(steps, "HeyReach").state, "partial");
-  assert.match(stepFor(steps, "HeyReach").facts.join(" "), /last collected 70 hours ago/);
+  const facts = stepFor(steps, "HeyReach").facts.join(" ");
+  assert.match(facts, /last collected 70 hours ago/);
+  assert.match(facts, /HeyReach was not the source of these figures\. HeyReach campaign stats returned 502/);
+});
+
+test("a live read says so on the step, and does not report an age", () => {
+  // The age of a live figure is zero hours, and printing that invites the reader to wonder which of "zero
+  // hours" and "just now" to believe.
+  const steps = briefTrace(WORKSPACE, {
+    signals: { ...NO_SIGNALS, campaigns: { total: 3, active: 1, paused: 2, finished: 0, names: [] }, staleness: { statsAgeHours: 0, dayCount: 14 } },
+    internal: { channelId: "", messages: 0, text: "" },
+    external: { channelId: "", messages: 0, text: "" },
+  }, OUTCOME);
+  const step = stepFor(steps, "HeyReach");
+  assert.equal(step.state, "ok");
+  assert.match(step.facts[0], /Read from HeyReach during this run/);
+  assert.doesNotMatch(step.facts.join(" "), /last collected/);
 });
 
 test("every campaign the model was given is listed, and the ones it was not are counted", () => {

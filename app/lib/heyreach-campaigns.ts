@@ -57,6 +57,14 @@ const PAGE_CEILING = 300;
  */
 const REQUESTED_STATUSES = ["IN_PROGRESS", "STARTING", "SCHEDULED", "PAUSED"];
 /**
+ * Ask for every status instead.
+ *
+ * The morning brief states a campaign count, and a count that silently omits the finished ones cannot
+ * be checked against HeyReach's own screen — which is the only check anybody ever performs on it. A
+ * report is asking "what is live?" and is right to leave them out; a count is not.
+ */
+export const ALL_STATUSES: string[] = [];
+/**
  * A page of 66 campaigns normally comes back in about a second, but the first call after a quiet
  * period has been seen to take 26 — HeyReach appears to cold-start. The timeout is set above that
  * outlier deliberately: a report that waits is annoying, one that tells a client nothing is running
@@ -136,6 +144,14 @@ export type CampaignStatusRow = {
    * The runway is computed from the count for exactly that reason.
    */
   senderNames: string[];
+  /**
+   * The accounts themselves, named or not.
+   *
+   * A count cannot be added up across campaigns: two campaigns on the same four accounts have four
+   * between them, not eight, and the total runway is only meaningful over the distinct set. The ids are
+   * never printed — see `senderNames` for what happened the one time a number reached a brief.
+   */
+  senderIds: string[];
   /** Days of sending left at the current sender count. Null when the sender count is unknown. */
   daysLeftInSending: number | null;
 };
@@ -195,6 +211,16 @@ export type CampaignStatus = {
   /** Total campaigns HeyReach returned, so a count can be sanity-checked against the app. */
   total: number;
   /**
+   * Every campaign the status covers, the finished and draft ones included, in no particular order.
+   *
+   * The four lists above deliberately leave the archive out, and for "what is live?" that is right. It is
+   * wrong for two other questions. A second HeyReach call scoped to this client needs every id or it
+   * under-reports: a day-by-day series narrowed to the four lists drops the sends made by a campaign that
+   * finished on Tuesday, and this week's total then comes out below the client's own dashboard. And a
+   * count of how many campaigns exist has to count the finished ones, or it cannot be checked by eye.
+   */
+  all: CampaignStatusRow[];
+  /**
    * Status strings we did not recognise. HeyReach can add one, and a new status must surface as a
    * question rather than quietly demoting a live campaign out of `active`.
    */
@@ -246,6 +272,7 @@ export const emptyStatus = (reason: string): CampaignStatus => ({
   scheduled: [],
   paused: [],
   total: 0,
+  all: [],
   unrecognised: [],
 });
 
@@ -307,6 +334,7 @@ export function summariseCampaigns(
       progress,
       senders: refs.length,
       senderNames: refs.map((ref) => ref.name || senderNamesById.get(ref.id) || "").filter(Boolean),
+      senderIds: refs.map((ref) => ref.id),
       daysLeftInSending: sendingDaysLeft(progress.pending, refs.length),
     });
   }
@@ -322,6 +350,7 @@ export function summariseCampaigns(
     scheduled: [...buckets.scheduled].sort(byLaunch),
     paused: [...buckets.paused].sort(byLaunch),
     total: Object.values(buckets).reduce((sum, bucket) => sum + bucket.length, 0),
+    all: Object.values(buckets).flat(),
     unrecognised: [...unrecognised],
   };
 }
@@ -361,18 +390,20 @@ export function selectCampaigns(status: CampaignStatus, ids: string[] | undefine
     workedThrough: filter(status.workedThrough),
     scheduled: filter(status.scheduled),
     paused: filter(status.paused),
+    all: filter(status.all),
   };
 }
 
 const cache = new Map<string, { expires: number; status: CampaignStatus }>();
 
-async function fetchCampaignPages(apiKey: string): Promise<unknown[]> {
+async function fetchCampaignPages(apiKey: string, statuses: string[]): Promise<unknown[]> {
   const rows: unknown[] = [];
   for (let offset = 0; offset < PAGE_CEILING; offset += PAGE_SIZE) {
     const response = await fetch(`${API_BASE.replace(/\/$/, "")}/campaign/GetAll`, {
       method: "POST",
       headers: { "X-API-KEY": apiKey, "content-type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ offset, limit: PAGE_SIZE, statuses: REQUESTED_STATUSES }),
+      // An empty list is omitted rather than sent: HeyReach reads `statuses: []` as "none of them".
+      body: JSON.stringify({ offset, limit: PAGE_SIZE, ...(statuses.length ? { statuses } : {}) }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       cache: "no-store",
     });
@@ -433,17 +464,20 @@ async function fetchSenderNames(apiKey: string): Promise<Map<string, string>> {
  * The two calls run together because neither needs the other's answer, and the accounts list is small
  * and identical for every campaign in the workspace — one lookup serves the whole report.
  */
-export async function campaignStatusFor(apiKey: string): Promise<CampaignStatus> {
+export async function campaignStatusFor(apiKey: string, statuses: string[] = REQUESTED_STATUSES): Promise<CampaignStatus> {
   const key = text(apiKey);
   if (!key) return emptyStatus("No HeyReach API key is saved for this client.");
 
-  const cached = cache.get(key);
+  // The statuses are part of the cache key. Without them a report asking for the live four would be
+  // served the brief's every-status answer, and its campaign count would silently include the archive.
+  const cacheKey = `${key}:${statuses.join(",")}`;
+  const cached = cache.get(cacheKey);
   if (cached && cached.expires > Date.now()) return cached.status;
 
   try {
-    const [rows, senderNames] = await Promise.all([fetchCampaignPages(key), fetchSenderNames(key)]);
+    const [rows, senderNames] = await Promise.all([fetchCampaignPages(key, statuses), fetchSenderNames(key)]);
     const status = summariseCampaigns(rows, senderNames);
-    cache.set(key, { expires: Date.now() + CACHE_TTL_MS, status });
+    cache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, status });
     return status;
   } catch (error) {
     return emptyStatus(error instanceof Error ? error.message : "HeyReach could not be reached.");

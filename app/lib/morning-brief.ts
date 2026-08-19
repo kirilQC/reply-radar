@@ -299,6 +299,45 @@ export type BriefCampaign = {
   daysLeft: number | null;
 };
 
+/**
+ * One campaign as either source hands it over, before the brief's own wording is applied.
+ *
+ * The two differ in one respect that matters: `isActive` from HeyReach means running *and* with leads
+ * still to contact, where the stored copy can only match on the status string. So the flag is supplied
+ * rather than derived here, and both sources are held to producing the same shape.
+ */
+export type CampaignFacts = {
+  name: string;
+  status: string;
+  isActive: boolean;
+  sent: number;
+  accepted: number;
+  replies: number;
+  pending: number;
+  /** Names only, and only the ones actually known. Never ids. See `BriefCampaign.senders`. */
+  senders: string[];
+  /** Every assigned account, named or not. The runway is counted from these, so they must be ids. */
+  senderIds: string[];
+};
+
+/** One day of sending. Both sources supply these newest first, and a quiet day is an absent row. */
+export type BriefDay = { day: string; sent: number; accepted: number; replies: number };
+
+/**
+ * The figures as HeyReach itself holds them, fetched while this brief is being written.
+ *
+ * Built by `gatherLiveFigures` in `morning-brief-run.ts`. `available: false` is not a reason to fall
+ * back quietly — `reason` is printed to the model and recorded in the trace, because a brief whose
+ * numbers came from yesterday's copy while reading as though they were live is the single fastest way
+ * to lose the team's trust in every other number in it.
+ */
+export type LiveFigures = {
+  available: boolean;
+  reason: string;
+  campaigns: CampaignFacts[];
+  days: BriefDay[];
+};
+
 export type BriefSignals = {
   // `finished` is counted so that the three buckets add up to `total`. Without it a client whose work is
   // mostly done reads as "13 campaigns, 0 active, 2 paused", and the eleven unaccounted for look like a bug.
@@ -321,6 +360,14 @@ export type BriefSignals = {
   // was sent" apart from "nothing has been collected". `statsAgeHours` comes from the campaign rows and
   // is advisory: it can be unknown while the daily figures are perfectly good.
   staleness: { statsAgeHours: number | null; dayCount: number };
+  /**
+   * Where these figures came from, and why it was not HeyReach if it was not.
+   *
+   * The brief is checked against HeyReach's own screen by the people reading it, so a figure taken from
+   * our overnight copy has to say so on its face. `live: false` is a degraded run, not a normal one, and
+   * it is stated in the figures, in the trace and in the stored row.
+   */
+  source: { live: boolean; reason: string };
 };
 
 const int = (value: unknown) => (Number.isFinite(Number(value)) ? Number(value) : 0);
@@ -334,7 +381,20 @@ const rate = (accepted: number, sent: number) => (sent > 0 ? Math.round((accepte
  * recurring brief is really asking. `quietDays` is counted from the last day with any sends at all
  * rather than from today, so a client that stopped a fortnight ago reads as a fortnight, not as zero.
  */
-export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Promise<BriefSignals> {
+export async function gatherSignals(
+  read: Reader,
+  workspace: BriefWorkspace,
+  /**
+   * What HeyReach said, if it was asked and answered.
+   *
+   * When it did, the stored tables are not read at all — not as a cross-check, not as a fallback for the
+   * odd missing field. Two sources for one figure means the brief eventually states the wrong one and
+   * nobody can tell which. When it did not, the reads below run and the figures say they are a copy.
+   */
+  live?: LiveFigures | null,
+): Promise<BriefSignals> {
+  if (live?.available) return composeSignals(live.campaigns, live.days, { live: true, reason: "", statsAgeHours: 0 });
+
   const filter = `workspace_id=eq.${encodeURIComponent(workspace.id)}`;
   const [campaignRows, dailyRows, senderRows] = await Promise.all([
     read(`rr_campaign_stats?select=name,status,connections_sent,connections_accepted,replies,leads_pending,sender_ids,refreshed_at&${filter}&order=connections_sent.desc&limit=60`),
@@ -345,7 +405,6 @@ export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Pr
     read(`rr_daily_stats?select=sender_id,sender_name&${filter}&sender_id=neq.&order=day.desc&limit=400`),
   ]);
   const campaigns = Array.isArray(campaignRows) ? (campaignRows as Row[]) : [];
-  const days = Array.isArray(dailyRows) ? (dailyRows as Row[]) : [];
 
   const senderNames = new Map<string, string>();
   for (const row of Array.isArray(senderRows) ? (senderRows as Row[]) : []) {
@@ -353,68 +412,102 @@ export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Pr
     const name = String(row.sender_name ?? "").trim();
     if (id && name && !senderNames.has(id)) senderNames.set(id, name);
   }
-  /** A campaign's assigned accounts, named where the daily figures have seen them. */
-  const sendersOf = (row: Row) =>
-    (Array.isArray(row.sender_ids) ? row.sender_ids : [])
-      .map((id) => String(id ?? "").trim())
-      .filter(Boolean);
 
   // HeyReach sends these as `IN_PROGRESS`, `PAUSED`, `FINISHED`, so the separator has to allow an
   // underscore — matching only "in progress" quietly filed every running campaign under none of these.
   const isActive = (status: unknown) => /active|running|in[ _-]?progress/i.test(String(status ?? ""));
+
+  const facts: CampaignFacts[] = campaigns.map((row) => {
+    const senderIds = (Array.isArray(row.sender_ids) ? row.sender_ids : [])
+      .map((id) => String(id ?? "").trim())
+      .filter(Boolean);
+    return {
+      name: String(row.name ?? ""),
+      status: String(row.status ?? "unknown"),
+      isActive: isActive(row.status),
+      sent: int(row.connections_sent),
+      accepted: int(row.connections_accepted),
+      replies: int(row.replies),
+      pending: int(row.leads_pending),
+      // An id that resolves to no name is dropped rather than printed. `senderIds` keeps the full set, so
+      // a campaign with three unnamed accounts still reads as three senders.
+      senders: senderIds.map((id) => senderNames.get(id) || "").filter(Boolean),
+      senderIds,
+    };
+  });
+  const days: BriefDay[] = (Array.isArray(dailyRows) ? (dailyRows as Row[]) : []).map((row) => ({
+    day: String(row.day ?? ""),
+    sent: int(row.connections_sent),
+    accepted: int(row.connections_accepted),
+    replies: int(row.replies),
+  }));
+  const freshest = campaigns.reduce((newest, row) => Math.max(newest, Date.parse(String(row.refreshed_at ?? "")) || 0), 0);
+
+  return composeSignals(facts, days, {
+    live: false,
+    reason: live?.reason ?? "",
+    statsAgeHours: freshest ? Math.round((Date.now() - freshest) / 3_600_000) : null,
+  });
+}
+
+/**
+ * The arithmetic, once, over whichever source supplied the rows.
+ *
+ * Both the live fetch and the stored copy come through here, and that is the point: a live figure and a
+ * copied one must be summed, windowed and rounded by the same code, or the day HeyReach is unreachable
+ * the brief would change more than its provenance.
+ */
+export function composeSignals(
+  facts: CampaignFacts[],
+  /** Newest first. A day with no sending is an absent row, not a zero row. */
+  days: BriefDay[],
+  source: { live: boolean; reason: string; statsAgeHours: number | null },
+): BriefSignals {
   const isPaused = (status: unknown) => /pause|stopped|hold/i.test(String(status ?? ""));
   const isFinished = (status: unknown) => /finish|complet|done|ended/i.test(String(status ?? ""));
 
-  // `days` is newest first, so the first seven rows are the recent window and the next seven the one
-  // before it. Rows are only written for days HeyReach reported, so a gap is a day with no sending.
-  const window = (from: number, to: number) => days.slice(from, to);
-  const sum = (rows: Row[], column: string) => rows.reduce((total, row) => total + int(row[column]), 0);
-  const recent = window(0, 7);
-  const previous = window(7, 14);
-  const thisWeek = sum(recent, "connections_sent");
-  const lastWeek = sum(previous, "connections_sent");
+  // The first seven rows are the recent window and the next seven the one before it.
+  const sum = (rows: BriefDay[], column: "sent" | "accepted" | "replies") =>
+    rows.reduce((total, row) => total + row[column], 0);
+  const recent = days.slice(0, 7);
+  const previous = days.slice(7, 14);
+  const thisWeek = sum(recent, "sent");
+  const lastWeek = sum(previous, "sent");
 
-  const withSends = days.find((row) => int(row.connections_sent) > 0);
-  const lastDayWithSends = withSends ? String(withSends.day ?? "") : null;
+  const withSends = days.find((row) => row.sent > 0);
+  const lastDayWithSends = withSends ? withSends.day : null;
   const quietDays = lastDayWithSends
     ? Math.max(0, Math.round((Date.now() - Date.parse(`${lastDayWithSends}T12:00:00Z`)) / 86_400_000))
     : days.length;
 
-  const freshest = campaigns.reduce((newest, row) => Math.max(newest, Date.parse(String(row.refreshed_at ?? "")) || 0), 0);
-
   // The runway is computed over every active campaign, not the ten reported below, and over the distinct
   // senders across all of them — two campaigns sharing four accounts have four between them, not eight.
-  const running = campaigns.filter((row) => isActive(row.status));
-  const runwayPending = running.reduce((total, row) => total + int(row.leads_pending), 0);
-  const runwaySenders = new Set(running.flatMap(sendersOf)).size;
+  const running = facts.filter((row) => row.isActive);
+  const runwayPending = running.reduce((total, row) => total + row.pending, 0);
+  const runwaySenders = new Set(running.flatMap((row) => row.senderIds)).size;
   const runwayDaysLeft = sendingDaysLeft(runwayPending, runwaySenders);
 
   return {
     campaigns: {
-      total: campaigns.length,
-      active: campaigns.filter((row) => isActive(row.status)).length,
-      paused: campaigns.filter((row) => isPaused(row.status)).length,
-      finished: campaigns.filter((row) => isFinished(row.status)).length,
+      total: facts.length,
+      active: running.length,
+      paused: facts.filter((row) => isPaused(row.status)).length,
+      finished: facts.filter((row) => isFinished(row.status)).length,
       // Every active campaign, then the biggest of the rest up to ten. Volume alone was the wrong order:
       // a campaign switched on yesterday has sent almost nothing and is the one the team needs to hear
       // about, while the finished campaign at the top of the list changes nothing anybody does today.
-      names: [...running, ...campaigns.filter((row) => !isActive(row.status))].slice(0, 10).map((row) => {
-        const senders = sendersOf(row);
-        return {
-          name: String(row.name ?? ""),
-          status: String(row.status ?? "unknown"),
-          isActive: isActive(row.status),
-          sent: int(row.connections_sent),
-          accepted: int(row.connections_accepted),
-          replies: int(row.replies),
-          pending: int(row.leads_pending),
-          // Names only, and an id that resolves to nothing is dropped rather than printed. The count below
-          // is still the full one, so a campaign with three unnamed accounts reads as three senders.
-          senders: senders.map((id) => senderNames.get(id) || "").filter(Boolean),
-          senderCount: senders.length,
-          daysLeft: sendingDaysLeft(int(row.leads_pending), senders.length),
-        };
-      }),
+      names: [...running, ...facts.filter((row) => !row.isActive)].slice(0, 10).map((row) => ({
+        name: row.name,
+        status: row.status,
+        isActive: row.isActive,
+        sent: row.sent,
+        accepted: row.accepted,
+        replies: row.replies,
+        pending: row.pending,
+        senders: row.senders,
+        senderCount: row.senderIds.length,
+        daysLeft: sendingDaysLeft(row.pending, row.senderIds.length),
+      })),
     },
     runway: {
       daysLeft: runwayDaysLeft,
@@ -423,7 +516,7 @@ export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Pr
       // Only claimed when there are campaign records to judge: a client whose HeyReach has never synced
       // has an unknown runway, and "start building campaigns" on the strength of no data is the kind of
       // wrong instruction that gets the whole brief ignored.
-      needsCampaigns: campaigns.length > 0 && (runwayDaysLeft === null || runwayDaysLeft < RUNWAY_ALARM_DAYS),
+      needsCampaigns: facts.length > 0 && (runwayDaysLeft === null || runwayDaysLeft < RUNWAY_ALARM_DAYS),
     },
     sending: {
       thisWeek,
@@ -434,10 +527,11 @@ export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Pr
     },
     replies: { thisWeek: sum(recent, "replies"), lastWeek: sum(previous, "replies") },
     acceptance: {
-      thisWeek: rate(sum(recent, "connections_accepted"), thisWeek),
-      lastWeek: rate(sum(previous, "connections_accepted"), lastWeek),
+      thisWeek: rate(sum(recent, "accepted"), thisWeek),
+      lastWeek: rate(sum(previous, "accepted"), lastWeek),
     },
-    staleness: { statsAgeHours: freshest ? Math.round((Date.now() - freshest) / 3_600_000) : null, dayCount: days.length },
+    staleness: { statsAgeHours: source.statsAgeHours, dayCount: days.length },
+    source: { live: source.live, reason: source.reason },
   };
 }
 
@@ -450,7 +544,22 @@ export async function gatherSignals(read: Reader, workspace: BriefWorkspace): Pr
  */
 export function signalsAsText(signals: BriefSignals): string {
   const lines: string[] = [];
-  const { campaigns, runway, sending, replies, acceptance, staleness } = signals;
+  const { campaigns, runway, sending, replies, acceptance, staleness, source } = signals;
+
+  /*
+   * Provenance first, above everything, and on every run.
+   *
+   * These figures are read next to HeyReach's own screen by people who know the account, so the one thing
+   * they must never do is present last night's copy as this morning's truth. When HeyReach answered, the
+   * line says so and costs nine words. When it did not, the line is the most important thing in the
+   * figures: it says the numbers are a copy, how old, and why the live read failed.
+   */
+  if (source.live) lines.push("These figures were read from HeyReach just now, so they are current as of this minute.");
+  else {
+    const age = staleness.statsAgeHours === null ? "" : ` They were last collected ${staleness.statsAgeHours} hours ago.`;
+    const why = source.reason ? ` HeyReach could not be reached: ${source.reason}` : " HeyReach was not asked, because no API key is saved for this client.";
+    lines.push(`Every figure below comes from our own stored copy rather than from HeyReach.${age}${why} Say once, in one short clause, that the numbers are as of then and not live. Do not repeat it per campaign.`);
+  }
 
   // "Nothing has been collected" is the only case where the figures must be withheld, and it is not the
   // same as "no campaign row carried a timestamp": the daily figures are written by their own sync and
@@ -459,7 +568,6 @@ export function signalsAsText(signals: BriefSignals): string {
     lines.push("No figures have ever been collected for this client, so nothing below is known. Say so rather than reporting zeros.");
     return lines.join("\n");
   }
-  if (staleness.statsAgeHours !== null && staleness.statsAgeHours > 36) lines.push(`These figures were last collected ${staleness.statsAgeHours} hours ago, so they may be behind.`);
 
   if (!campaigns.total) lines.push("No campaign records have been collected for this client, so which campaigns these figures came from is not known.");
   else lines.push(`Campaigns: ${campaigns.total} total, ${campaigns.active} active, ${campaigns.paused} paused, ${campaigns.finished} finished.`);
@@ -1105,8 +1213,12 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
   // 3 — HeyReach. Every campaign the model was given, in full, because the figures are the part of a
   // brief nobody checks and the only way to check them is to see the same numbers the model saw.
   {
-    const { campaigns, runway, sending, replies, acceptance, staleness } = inputs.signals;
+    const { campaigns, runway, sending, replies, acceptance, staleness, source } = inputs.signals;
     const facts: string[] = [];
+    // First fact, before any figure, because it is the one that decides how much the rest are worth.
+    facts.push(source.live
+      ? "Read from HeyReach during this run, scoped to this client's own campaigns."
+      : `HeyReach was not the source of these figures. ${source.reason || "No API key is saved for this client."} The stored copy was used instead and the brief was told to say so.`);
     for (const campaign of campaigns.names) {
       const accepted = rate(campaign.accepted, campaign.sent);
       // The trace is where somebody goes to find out why a brief said what it said, so an unnamed sender is
@@ -1131,15 +1243,18 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
     if (acceptance.thisWeek !== null) facts.push(`Acceptance: ${acceptance.thisWeek}%${acceptance.lastWeek === null ? "" : ` against ${acceptance.lastWeek}% the week before`}.`);
     if (!sending.lastDayWithSends) facts.push("No sending at all is on record for the last three weeks.");
     else if (sending.quietDays >= 2) facts.push(`Nothing sent since ${sending.lastDayWithSends} — ${plural(sending.quietDays, "day")} quiet.`);
-    if (staleness.statsAgeHours !== null) facts.push(`Campaign figures were last collected ${plural(staleness.statsAgeHours, "hour")} ago.`);
+    // Only worth stating on a fallback run. A live read is hours-old by zero hours, and printing that
+    // invites the reader to wonder which of the two figures — zero, or "just now" — to believe.
+    if (!source.live && staleness.statsAgeHours !== null) facts.push(`Campaign figures were last collected ${plural(staleness.statsAgeHours, "hour")} ago.`);
     const known = Boolean(campaigns.total || staleness.dayCount);
     steps.push({
       source: "HeyReach",
       result: known
         ? `Read ${plural(campaigns.total, "campaign")} and ${plural(staleness.dayCount, "day")} of daily figures — ${campaigns.active} active, ${campaigns.paused} paused, ${campaigns.finished} finished.`
         : "No figures have ever been collected for this client, so the brief was told to report none.",
-      // Stale figures are the failure that looks like success, so they are not allowed to read as `ok`.
-      state: !known ? "missing" : staleness.statsAgeHours !== null && staleness.statsAgeHours > 36 ? "partial" : "ok",
+      // A stored copy is the failure that looks like success: every number is present and every one is from
+      // yesterday. It is never allowed to read as `ok`, however recently the copy was taken.
+      state: !known ? "missing" : !source.live ? "partial" : "ok",
       facts,
       excerpts: [],
     });

@@ -10,7 +10,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyFunnel, reportMetrics, summariseFunnel } from "../app/lib/heyreach-campaign-metrics.ts";
+import { dailyStatsFor, emptyFunnel, reportMetrics, summariseDailyStats, summariseFunnel } from "../app/lib/heyreach-campaign-metrics.ts";
 
 /** Shaped like a row from `/stats/GetOverallStatsByCampaign`, trimmed to what is read. */
 const row = (over) => ({
@@ -108,6 +108,92 @@ test("no accepted connections means no rate rather than a division by zero", () 
   assert.equal(metrics.replyRate, 0);
   assert.equal(metrics.positiveReplyRate, 0);
   assert.ok(Number.isFinite(metrics.replyRate));
+});
+
+test("replies are carried per campaign, messages and InMails together", () => {
+  // The morning brief prints these next to HeyReach's own screen, where the two kinds are one number.
+  const funnel = summariseFunnel([row({ totalMessageReplies: 9, totalInmailReplies: 3 })]);
+  assert.equal(funnel.rows[0].replies, 12);
+  // A campaign with neither field reports none rather than NaN.
+  assert.equal(summariseFunnel([row({})]).rows[0].replies, 0);
+});
+
+// ── The day-by-day series ────────────────────────────────────────────
+//
+// The brief's "nothing has been sent since Tuesday" line is read straight off this, and it is the line
+// most likely to start a conversation with a client. So a gap has to stay a gap: a day HeyReach did not
+// write a key for is a day nothing went out, and turning it into a zero row would make five quiet days
+// indistinguishable from five days that were never collected.
+
+test("byDayStats is read into a series, newest day first", () => {
+  const days = summariseDailyStats({
+    byDayStats: {
+      "2026-08-14T00:00:00Z": { connectionsSent: 40, connectionsAccepted: 12, totalMessageReplies: 2, totalInmailReplies: 1 },
+      "2026-08-17T00:00:00Z": { connectionsSent: 55, connectionsAccepted: 20, totalMessageReplies: 4, totalInmailReplies: 0 },
+      "2026-08-16T00:00:00Z": { connectionsSent: 0, connectionsAccepted: 0 },
+    },
+  });
+  assert.deepEqual(days.map((day) => day.day), ["2026-08-17", "2026-08-16", "2026-08-14"]);
+  assert.deepEqual(days[0], { day: "2026-08-17", sent: 55, accepted: 20, replies: 4 });
+  // 15 August has no key, and it must not appear — see the note above.
+  assert.equal(days.length, 3);
+  assert.equal(days[2].replies, 3);
+});
+
+test("a key that is not a date is dropped rather than becoming a day", () => {
+  const days = summariseDailyStats({
+    byDayStats: { total: { connectionsSent: 900 }, "": {}, "not-a-date": { connectionsSent: 5 }, "2026-08-17T00:00:00Z": { connectionsSent: 1 } },
+  });
+  assert.deepEqual(days.map((day) => day.day), ["2026-08-17"]);
+});
+
+test("a payload with no series at all is an empty series, not a throw", () => {
+  assert.deepEqual(summariseDailyStats(null), []);
+  assert.deepEqual(summariseDailyStats({ byDayStats: "nope" }), []);
+  assert.deepEqual(summariseDailyStats({}), []);
+});
+
+test("the series is asked for only this client's campaigns, and never for the whole account", async () => {
+  // HeyReach reads an empty `campaignIds` as "every campaign on the key". Several clients ran their own
+  // outbound on the same key before the engagement, so an unscoped ask reports their sending as ours.
+  const sent = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    sent.push({ url: String(url), body: JSON.parse(init.body) });
+    return { ok: true, json: async () => ({ byDayStats: { "2026-08-17T00:00:00Z": { connectionsSent: 3 } } }) };
+  };
+  try {
+    const days = await dailyStatsFor("key", ["7", "9"], "2026-08-01T00:00:00.000Z", "2026-08-18T00:00:00.000Z");
+    assert.deepEqual(days, [{ day: "2026-08-17", sent: 3, accepted: 0, replies: 0 }]);
+    assert.match(sent[0].url, /\/stats\/GetOverallStats$/);
+    assert.deepEqual(sent[0].body.campaignIds, [7, 9]);
+
+    // No ids means the caller narrowed to nothing. Asking anyway would answer for the whole account, so
+    // the call is not made at all and the caller is told it could not be read.
+    assert.equal(await dailyStatsFor("key", [], "2026-08-01T00:00:00.000Z", "2026-08-18T00:00:00.000Z"), null);
+    assert.equal(await dailyStatsFor("", ["7"], "2026-08-01T00:00:00.000Z", "2026-08-18T00:00:00.000Z"), null);
+    assert.equal(sent.length, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a series that could not be read is null, which is not the same as a quiet fortnight", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 502, json: async () => ({}) });
+  try {
+    assert.equal(await dailyStatsFor("key", ["7"], "2026-08-01T00:00:00.000Z", "2026-08-18T00:00:00.000Z"), null);
+  } finally {
+    globalThis.fetch = original;
+  }
+  globalThis.fetch = async () => {
+    throw new Error("socket hang up");
+  };
+  try {
+    assert.equal(await dailyStatsFor("key", ["7"], "2026-08-01T00:00:00.000Z", "2026-08-18T00:00:00.000Z"), null);
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test("an unavailable funnel stays unavailable, with its reason, so no rate is printed as zero", () => {

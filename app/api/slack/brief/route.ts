@@ -28,7 +28,7 @@
 
 import { NextResponse } from "next/server";
 import { briefHeaderText, briefTrace, briefUserContent, briefWithFooter, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
-import { BRIEF_MODEL, gatherCalls, gatherChannels, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
+import { BRIEF_MODEL, gatherCalls, gatherChannels, gatherLiveFigures, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
 import { brainContext } from "../../../lib/brain-context";
 import {
   alreadySentToday,
@@ -321,7 +321,7 @@ export async function POST(request: Request) {
     // Two selects, because the extra-source columns are an additive migration and PostgREST fails the
     // whole read over one unknown column. A database without the migration still writes briefs; it just
     // writes them from the two channels and the one call, which is what it had before.
-    const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match";
+    const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,heyreach_api_key_ciphertext";
     const rows = await read(`rr_workspaces?select=${columns},slack_extra_channel_ids,granola_extra_title_matches,airtable_base_id&slug=eq.${encodeURIComponent(slug)}&limit=1`)
       .catch(() => read(`rr_workspaces?select=${columns}&slug=eq.${encodeURIComponent(slug)}&limit=1`));
     const found = (Array.isArray(rows) ? (rows as Row[]) : [])[0];
@@ -347,8 +347,21 @@ export async function POST(request: Request) {
     // GitHub read rather than a database one, which is why it is a fifth request and not part of the row
     // above: it is the agency's own written record of this client, and it is what turns a figure that
     // dropped into a figure that dropped against a plan.
+    /*
+     * HeyReach is asked first, and its answer decides whether the stored figures are read at all.
+     *
+     * Not part of the batch below, because `gatherSignals` needs the answer: given a live one it does not
+     * touch `rr_campaign_stats` or `rr_daily_stats`, and given a failure it reads them and the brief says
+     * on its face that the numbers are a copy. Two sources for one figure would mean the brief eventually
+     * states the wrong one with no way to tell which.
+     *
+     * Sequential rather than parallel costs a second or two of the sixty. Worth it: everything after this
+     * point is either cheap or already parallel, and the alternative is starting the stored reads for every
+     * client on every run to throw them away.
+     */
+    const live = await gatherLiveFigures(String((found as Row).heyreach_api_key_ciphertext ?? ""));
     const [signals, channels, call, systemPrompt, brain] = await Promise.all([
-      gatherSignals(read, workspace),
+      gatherSignals(read, workspace, live),
       gatherChannels(workspace),
       gatherCalls(read, workspace),
       morningBriefPrompt(workspace.slug),

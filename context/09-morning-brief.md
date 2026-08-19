@@ -49,8 +49,8 @@ Five reads in one `Promise.all` (`route.ts:326`), because the calls are the slow
 likely to be missing and must not hold up or fail the others. Neither `gatherCalls` nor
 `brainContext` ever throws.
 
-1. **Figures** — `gatherSignals`, computed from our own records. Facts. The model may not restate a
-   figure differently or compute a new one.
+1. **Figures** — `gatherSignals`, computed from HeyReach read live during the run. Facts. The model may
+   not restate a figure differently or compute a new one. See below.
 2. **The internal channel** — every message of the last fortnight, thread replies indented under the
    message they answer.
 3. **The external channel** — shared with the client. Anything said here was said to their face.
@@ -61,6 +61,49 @@ Plus, optionally, **extra channels** and **extra calls** somebody added for cont
 deliberately second class in the prompt: most extra calls are our own internal meetings, where what
 is said is what we *intend* rather than anything the client agreed to. Never the sole basis for a
 finding.
+
+### The figures are read from HeyReach during the run
+
+They used to come from `rr_campaign_stats` and `rr_daily_stats`, which the overnight worker fills **one
+client per cycle on a 24-hour cadence**. So a brief could state a pending-lead count a full day of
+sending out of date, and did:
+
+> "look at this. it just sent the morning brief and the heyreach numbers are off! I WANT LIVE AND
+> ACCURATE HEYREACH DATA."
+
+`gatherLiveFigures` in `morning-brief-run.ts` now makes three calls before anything else, all scoped to
+this client's own campaigns:
+
+| Call | For | Window |
+|---|---|---|
+| `/campaign/GetAll` via `campaignStatusFor(key, ALL_STATUSES)` | Every campaign, status and pending count | — |
+| `/stats/GetOverallStatsByCampaign` | Sent, accepted and replies per campaign | Pinned to `2020-01-01` for lifetime totals |
+| `/stats/GetOverallStats` | The day-by-day series behind this week vs last | 21 days |
+
+Four things about this are load-bearing.
+
+**The statuses are widened to all of them, and the ids come from `CampaignStatus.all`.** The four live
+lists are right for "what is live?" and wrong here twice over: a count that omits the finished campaigns
+cannot be checked against HeyReach's own screen, and a day series narrowed to the live lists drops the
+sends made by a campaign that finished on Tuesday, putting this week's total below the client's own
+dashboard.
+
+**Both narrowed calls are given real ids or are not made at all.** HeyReach reads an empty `campaignIds`
+as *the whole account*, and several clients ran their own outbound on the same key before the engagement
+— which is how the stored series (fetched with `campaignIds: []`) counted their sending as ours.
+
+**All three or none.** A partial read is the worst outcome available: without the rollup every campaign
+reports 0 sent, without the series the brief states nothing has been sent in three weeks. Both are
+confidently wrong in the direction that starts a conversation about a dead account, and neither is
+distinguishable in the output from the truth.
+
+**The fallback is announced, never silent.** The timeout is 12s — knowingly under HeyReach's measured 26s
+cold start, because 40 of the route's 60 seconds belong to the model call that has to happen afterwards.
+A run that falls back to the stored copy says so in three places: `BriefSignals.source` leads the Figures
+block with an instruction to state it once, the HeyReach trace step reads `partial` with the reason on it,
+and the provenance is kept in `rr_slack_briefs.signals`. `composeSignals` is the only place the windows,
+runway, counts and rates are computed, so a fallback run differs from a live one **only** in what it says
+about itself.
 
 ## The rules that are load-bearing
 

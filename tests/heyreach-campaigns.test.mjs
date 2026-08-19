@@ -139,6 +139,40 @@ test("each state lands in its own list and drafts stay out of all of them", () =
   assert.equal(status.total, 5);
 });
 
+test("the closed and draft campaigns are still reachable, because a second call needs their ids", () => {
+  /*
+   * The four lists above answer "what is live?" and are right to leave the archive out. Two other
+   * questions need it. A day-by-day series narrowed to the live lists drops the sends made by a campaign
+   * that finished on Tuesday, so this week's total comes out below the client's own dashboard. And a
+   * campaign count that omits the finished ones cannot be checked against HeyReach's own screen, which is
+   * the only check anybody ever performs on it.
+   */
+  const pending = { progressStats: { totalUsers: 10, totalUsersPending: 10 } };
+  const status = summariseCampaigns([
+    { id: 1, name: "CT001: Live", status: "IN_PROGRESS", ...pending },
+    { id: 4, name: "CT004: Done", status: "FINISHED" },
+    { id: 5, name: "CT005: Never launched", status: "DRAFT", ...pending },
+  ]);
+  assert.deepEqual(status.all.map((row) => row.name).sort(), ["CT001: Live", "CT004: Done", "CT005: Never launched"]);
+  assert.deepEqual(status.all.map((row) => row.id).sort(), ["1", "4", "5"]);
+  // Still only the client's own campaigns: `all` widens the statuses, never the ownership.
+  assert.deepEqual(summariseCampaigns([{ id: 9, name: "Their own list", status: "FINISHED" }]).all, []);
+  // And narrowing a report narrows this too, or a report scoped to one campaign would fetch three.
+  assert.deepEqual(selectCampaigns(status, ["4"]).all.map((row) => row.name), ["CT004: Done"]);
+  assert.deepEqual(emptyStatus("unreachable").all, []);
+});
+
+test("sender ids are carried alongside the names, because the runway is counted from them", () => {
+  // A campaign with four accounts assigned and two of them named still has four days' worth of sending
+  // capacity. Counting the names would halve the runway, and the ids are never printed anywhere.
+  const status = summariseCampaigns(
+    [{ id: 1, name: "CT001: Live", status: "IN_PROGRESS", campaignAccountIds: [11, 12, 13], progressStats: { totalUsersPending: 10 } }],
+    new Map([["11", "Kori Katz"]]),
+  );
+  assert.deepEqual(status.active[0].senderIds, ["11", "12", "13"]);
+  assert.deepEqual(status.active[0].senderNames, ["Kori Katz"]);
+});
+
 test("a campaign the client launched before hiring us is not reported at all", () => {
   // The whole point of the code prefix. These four ran before the engagement, and counting them would
   // credit us with work we did not do — and, through `launchedAt`, back-date the engagement itself.
