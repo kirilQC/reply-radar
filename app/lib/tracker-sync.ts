@@ -44,7 +44,7 @@
  */
 import type { AirtableRecord } from "./airtable";
 import type { BriefCampaign } from "./morning-brief";
-import type { TrackerItem } from "./tracker-extract";
+import type { OpenItem, TrackerItem } from "./tracker-extract";
 
 /** See the note at the top of the file. Two missed briefs, not a round number. */
 export const STALE_DAYS = 5;
@@ -221,6 +221,74 @@ export function normaliseKey(value: unknown): string {
   return (parts[parts.length - 1] ?? "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+/**
+ * What is already on the board, in the form the extraction shows the model.
+ *
+ * Only the brief's own rows: an item somebody typed by hand is not the brief's to reuse the key of,
+ * and offering it would invite the model to file its own item against a stranger's row. The key is
+ * normalised on the way out so that the key the model copies back is the key this file matches on.
+ */
+export function openItems(rows: AirtableRecord[]): OpenItem[] {
+  const open: OpenItem[] = [];
+  for (const row of rows) {
+    if (row.fields["Raised by Brief"] !== true) continue;
+    const key = normaliseKey(row.fields["Brief Key"]);
+    const title = String(row.fields.Title ?? "").trim();
+    if (key && title) open.push({ key, title, owner: String(row.fields.Owner ?? "").trim() });
+  }
+  return open;
+}
+
+/**
+ * Words worth comparing two titles on. The rest are the words every title has.
+ */
+const STOPWORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "into", "is", "it", "its", "of", "on", "or",
+  "our", "out", "over", "so", "that", "the", "their", "them", "they", "this", "to", "up", "we", "with",
+]);
+
+const words = (text: unknown) => String(text ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((word) => word && !STOPWORDS.has(word));
+
+/**
+ * Two words that are the same word. `send` and `senders`, `upgrade` and `upgrading`.
+ *
+ * A shared prefix rather than a stemmer, and four characters rather than three, because the whole job
+ * is telling one four-word title from another and `up` matching `upgrade` would do the opposite.
+ */
+const alike = (left: string, right: string) => left === right || (Math.min(left.length, right.length) >= 4 && (left.startsWith(right) || right.startsWith(left)));
+
+/**
+ * Whether two titles are two ways of saying the same piece of work.
+ *
+ * ── Why this exists at all ────────────────────────────────────────────────────────────────────────
+ * The key is written by a model, so it is only as stable as the model's wording. Changing the prompt
+ * that produces the titles re-slugged every item in one client's tracker and the next run filed a
+ * second copy of all nine — the same work, twice, under `hubspot-email-bounce-issue` and
+ * `hubspot-bounce`. Handing the model the keys already on the board is the first defence and this is
+ * the second, because the first one depends on the model doing as it is told and this one does not.
+ *
+ * ── Why containment and not a symmetric score ─────────────────────────────────────────────────────
+ * The rewording that causes this is nearly always a shortening: a title that read "Investigate HubSpot
+ * email bounce issue and confirm the domain warmup" comes back as "Chase HubSpot bounce issue". Almost
+ * every word of the short one is in the long one, and hardly any of the long one is in the short one,
+ * so scoring against the shorter title is what actually catches it.
+ *
+ * ── The number guard ──────────────────────────────────────────────────────────────────────────────
+ * `Add senders to BV007` and `Add senders to BV009` are three quarters the same words and two
+ * completely different jobs. Where both titles carry a figure and none of them agree, they are held to
+ * be different however much of the rest matches. A false merge silently loses an item, which is worse
+ * than the duplicate this is here to prevent.
+ */
+export function sameWork(left: string, right: string): boolean {
+  const [a, b] = [words(left), words(right)];
+  if (!a.length || !b.length) return false;
+  const figures = (list: string[]) => list.filter((word) => /\d/.test(word));
+  const [fa, fb] = [figures(a), figures(b)];
+  if (fa.length && fb.length && !fa.some((one) => fb.some((two) => alike(one, two)))) return false;
+  const shared = a.filter((word) => b.some((other) => alike(word, other))).length;
+  return shared / Math.min(a.length, b.length) >= 0.6;
+}
+
 /** Whole days between two `YYYY-MM-DD` dates, or null if either is not one. */
 export function daysBetween(from: unknown, to: string): number | null {
   const start = Date.parse(`${String(from ?? "").slice(0, 10)}T00:00:00Z`);
@@ -245,6 +313,8 @@ export function planProjects(
   staleDays = STALE_DAYS,
 ): ProjectPlan {
   const plan: ProjectPlan = { creates: [], updates: [], deletes: [], notes: [] };
+  let dropped = 0;
+  let duplicated = 0;
   /*
    * The base's own spelling of the option, not ours. Without `typecast` Airtable rejects a value that
    * is not already an option, and the rejection fails the whole record — so a base whose Priority set
@@ -254,16 +324,36 @@ export function planProjects(
     const option = resolveChoice(allowed, [wanted]);
     return option ? { [column]: option } : {};
   };
-  const ours = (row: AirtableRecord) => row.fields["Raised by Brief"] === true;
-  const existing = new Map<string, AirtableRecord>();
-  for (const row of rows) {
+  const mine = rows.filter((row) => row.fields["Raised by Brief"] === true);
+  const byKey = new Map<string, AirtableRecord>();
+  for (const row of mine) {
     const key = normaliseKey(row.fields["Brief Key"]);
-    if (key && ours(row) && !existing.has(key)) existing.set(key, row);
+    if (key && !byKey.has(key)) byKey.set(key, row);
   }
 
-  const seen = new Set<string>();
+  /*
+   * Every row one item resolves to, best first.
+   *
+   * There is usually one. There are two when a previous run has already filed a duplicate, and the
+   * extra ones are deleted rather than left to age out — an item that is on the board twice is not
+   * evidence of anything, it is the same note written down twice, and waiting five days to remove the
+   * copy leaves the flooded view up for five days.
+   */
+  const claimed = new Set<string>();
+  const rowsFor = (item: TrackerItem): AirtableRecord[] => {
+    const found: AirtableRecord[] = [];
+    const keyed = byKey.get(item.key);
+    if (keyed && !claimed.has(keyed.id)) found.push(keyed);
+    for (const row of mine) {
+      if (claimed.has(row.id) || found.includes(row)) continue;
+      if (sameWork(item.title, String(row.fields.Title ?? ""))) found.push(row);
+    }
+    for (const row of found) claimed.add(row.id);
+    return found;
+  };
+
   for (const item of items) {
-    seen.add(item.key);
+    const [keep, ...duplicates] = rowsFor(item);
     const linked = campaignIds.get(item.campaignCode);
     const fields: Record<string, unknown> = {
       Title: item.title,
@@ -277,22 +367,27 @@ export function planProjects(
       ...choose(choices.priority ?? [], item.priority, "Priority"),
       ...(linked ? { Campaign: [linked] } : {}),
     };
-    const row = existing.get(item.key);
-    if (row) plan.updates.push({ id: row.id, fields });
+    if (keep) plan.updates.push({ id: keep.id, fields });
     else plan.creates.push({ ...fields, "First Raised": today, "Raised by Brief": true });
+    for (const duplicate of duplicates) plan.deletes.push(duplicate.id);
+    duplicated += duplicates.length;
   }
 
-  for (const row of rows) {
-    if (!ours(row)) continue;
-    const key = normaliseKey(row.fields["Brief Key"]);
-    if (key && seen.has(key)) continue;
+  for (const row of mine) {
+    if (claimed.has(row.id)) continue;
     // A person saying it is done outranks the wait. The wait exists for silence, not for a decision.
     const closed = /^(done|complete|completed|cancelled|canceled)$/i.test(String((row.fields.Status as { name?: string })?.name ?? row.fields.Status ?? ""));
     const age = daysBetween(row.fields["Last Seen"] ?? row.fields["First Raised"], today);
-    if (closed || (age !== null && age >= staleDays)) plan.deletes.push(row.id);
+    if (closed || (age !== null && age >= staleDays)) {
+      plan.deletes.push(row.id);
+      dropped += 1;
+    }
   }
 
-  if (plan.deletes.length) plan.notes.push(`${plan.deletes.length} item${plan.deletes.length === 1 ? "" : "s"} the brief raised stopped appearing in it and ${plan.deletes.length === 1 ? "was" : "were"} removed.`);
+  // Counted apart because they mean opposite things. A dropped item is work that finished or went
+  // quiet; a duplicate is this code having filed the same note twice, which is a bug showing itself.
+  if (dropped) plan.notes.push(`${dropped} item${dropped === 1 ? "" : "s"} the brief raised stopped appearing in it and ${dropped === 1 ? "was" : "were"} removed.`);
+  if (duplicated) plan.notes.push(`${duplicated} duplicate row${duplicated === 1 ? "" : "s"} of items already on the board ${duplicated === 1 ? "was" : "were"} merged into one.`);
   return plan;
 }
 

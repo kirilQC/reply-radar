@@ -11,7 +11,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { campaignCode, campaignState, daysBetween, normaliseKey, planCampaigns, planProjects, STALE_DAYS } from "../app/lib/tracker-sync.ts";
+import { campaignCode, campaignState, daysBetween, normaliseKey, openItems, planCampaigns, planProjects, sameWork, STALE_DAYS } from "../app/lib/tracker-sync.ts";
 import { parseTrackerItems, resolveOwner, rosterOf, TITLE_MAX } from "../app/lib/tracker-extract.ts";
 
 /** Bluevia's real Status choices, which say "Launched" and "Completed" rather than "Active" and "Finished". */
@@ -312,6 +312,120 @@ test("a title long enough to be cut off on a gallery card is not accepted", () =
   const real = "Pin down Morgan Rose on upgrading to LinkedIn Sales Navigator";
   const items = parseTrackerItems(JSON.stringify({ items: [{ title: real, key: "morgan-navigator" }] }));
   assert.ok(items[0].title.length <= 40, `"${items[0].title}" is still ${items[0].title.length} characters`);
+});
+
+/* ── The same work under a different name ──────────────────────────────────────────────────────── */
+
+/*
+ * Every pair below is a real one. The first tracker run against Ema Health filed nine items; changing
+ * the prompt that writes the titles re-slugged all nine, and the next run filed a second copy of every
+ * one of them rather than updating any. These are those nine titles, before and after.
+ */
+const REWORDED = [
+  ["Upgrade Morgan Rose LinkedIn Premium", "Pin down Morgan Rose on upgrading to LinkedIn Premium"],
+  ["Investigate HubSpot bounce issue", "Investigate HubSpot email bounce issue and confirm the domain warmup"],
+  ["Mark up messaging doc with brand voice", "Mark up proposed messaging doc with the new brand voice"],
+  ["Review Ema list and send sender split", "Review 534-contact Ema list and hand over sender split"],
+  ["Segment list and build HeyReach campaign", "Segment contact list by persona and build the first campaign"],
+];
+
+test("a title the model reworded still finds the row it belongs to", () => {
+  for (const [now, before] of REWORDED) {
+    assert.equal(sameWork(now, before), true, `"${now}" did not match "${before}"`);
+  }
+});
+
+test("two campaigns are not one item however alike the sentence is", () => {
+  // The failure that matters in the other direction. A false merge silently loses an item, which is
+  // worse than the duplicate this whole mechanism exists to prevent.
+  assert.equal(sameWork("Add two senders to BV007", "Add two senders to BV009"), false);
+  assert.equal(sameWork("Launch W003", "Launch W004"), false);
+});
+
+test("two genuinely different items are left apart", () => {
+  assert.equal(sameWork("Schedule onboarding call with Stephanie", "Investigate HubSpot bounce issue"), false);
+  assert.equal(sameWork("Share Figma mockups of Ema build", "Chase the surgeon offices list"), false);
+  assert.equal(sameWork("", "Anything at all"), false);
+});
+
+test("a reworded item updates its row instead of filing a second copy", () => {
+  const board = [row("rec1", { "Brief Key": "hubspot-email-bounce-issue", Title: "Investigate HubSpot email bounce issue and confirm the domain warmup", "Raised by Brief": true, "Last Seen": "2026-08-18" })];
+  const plan = planProjects([item({ key: "hubspot-bounce", title: "Investigate HubSpot bounce issue" })], board, PROJECT_CHOICES, new Map(), "2026-08-18");
+  assert.equal(plan.creates.length, 0);
+  assert.equal(plan.updates.length, 1);
+  assert.equal(plan.updates[0].id, "rec1");
+  // The row takes the new key, so the next run matches on the key and never reaches the fuzzy path.
+  assert.equal(plan.updates[0].fields["Brief Key"], "hubspot-bounce");
+  assert.deepEqual(plan.deletes, []);
+});
+
+test("a duplicate already on the board is merged away now, not in five days", () => {
+  /*
+   * The state Ema Health was actually left in: the same work under two keys. One row survives with
+   * today's wording and the other goes immediately — a copy is not evidence of anything, and waiting
+   * out the stale window would leave the flooded view up for the whole wait.
+   */
+  const board = [
+    row("recOld", { "Brief Key": "hubspot-email-bounce-issue", Title: "Investigate HubSpot email bounce issue and confirm the domain warmup", "Raised by Brief": true, "Last Seen": "2026-08-18" }),
+    row("recNew", { "Brief Key": "hubspot-bounce", Title: "Investigate HubSpot bounce issue", "Raised by Brief": true, "Last Seen": "2026-08-18" }),
+  ];
+  const plan = planProjects([item({ key: "hubspot-bounce", title: "Investigate HubSpot bounce issue" })], board, PROJECT_CHOICES, new Map(), "2026-08-18");
+  assert.equal(plan.creates.length, 0);
+  // The keyed row is the one kept, so the key the model just used stays the key on the board.
+  assert.equal(plan.updates[0].id, "recNew");
+  assert.deepEqual(plan.deletes, ["recOld"]);
+  assert.match(plan.notes.join(" "), /duplicate row/);
+});
+
+test("a duplicate is reported as a duplicate and not as work that finished", () => {
+  const board = [
+    row("recA", { "Brief Key": "a", Title: "Investigate HubSpot bounce issue", "Raised by Brief": true, "Last Seen": "2026-08-18" }),
+    row("recB", { "Brief Key": "b", Title: "Investigate HubSpot email bounce issue", "Raised by Brief": true, "Last Seen": "2026-08-18" }),
+    row("recGone", { "Brief Key": "gone", Title: "Chase the surgeon offices list", "Raised by Brief": true, "Last Seen": "2026-08-01" }),
+  ];
+  const plan = planProjects([item({ key: "a", title: "Investigate HubSpot bounce issue" })], board, PROJECT_CHOICES, new Map(), "2026-08-18");
+  const notes = plan.notes.join(" ");
+  assert.match(notes, /1 item the brief raised stopped appearing/);
+  assert.match(notes, /1 duplicate row/);
+  assert.equal(plan.deletes.length, 2);
+});
+
+test("one row is only ever claimed by one item", () => {
+  // Two items that both look like the row would otherwise update it twice and delete it as a copy of
+  // itself, which is a plan that cannot be executed.
+  const board = [row("rec1", { "Brief Key": "senders", Title: "Add two senders to BV007", "Raised by Brief": true, "Last Seen": "2026-08-18" })];
+  const plan = planProjects(
+    [item({ key: "senders", title: "Add two senders to BV007" }), item({ key: "senders-again", title: "Add the two senders to BV007" })],
+    board,
+    PROJECT_CHOICES,
+    new Map(),
+    "2026-08-18",
+  );
+  assert.equal(plan.updates.length, 1);
+  assert.equal(plan.creates.length, 1);
+  assert.deepEqual(plan.deletes, []);
+});
+
+test("a hand-typed row is never merged into a brief item, however alike the titles are", () => {
+  // The ownership boundary outranks the matching. Somebody's own note is not a duplicate of ours.
+  const board = [row("recTheirs", { "Brief Key": "", Title: "Investigate HubSpot email bounce issue", "Raised by Brief": false })];
+  const plan = planProjects([item({ key: "hubspot-bounce", title: "Investigate HubSpot bounce issue" })], board, PROJECT_CHOICES, new Map(), "2026-08-18");
+  assert.equal(plan.creates.length, 1);
+  assert.deepEqual(plan.updates, []);
+  assert.deepEqual(plan.deletes, []);
+});
+
+/* ── What the model is shown of the board ──────────────────────────────────────────────────────── */
+
+test("the board handed to the model is the brief's own rows, under the keys it matches on", () => {
+  const open = openItems([
+    row("rec1", { "Brief Key": "client:2026-08-18:surgeon-offices", Title: "Chase surgeon offices list", Owner: "Kiril Ivlev", "Raised by Brief": true }),
+    row("rec2", { "Brief Key": "theirs", Title: "Somebody's own note", "Raised by Brief": false }),
+    row("rec3", { "Brief Key": "", Title: "No key at all", "Raised by Brief": true }),
+  ]);
+  // The dated prefix is stripped, because the key the model copies back is the key `planProjects`
+  // compares — handing over the raw one would guarantee a miss on every old row.
+  assert.deepEqual(open, [{ key: "surgeon-offices", title: "Chase surgeon offices list", owner: "Kiril Ivlev" }]);
 });
 
 /* ── Owners are people, not user ids ───────────────────────────────────────────────────────────── */

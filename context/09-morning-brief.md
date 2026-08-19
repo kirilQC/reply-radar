@@ -117,9 +117,30 @@ alternative — reading Slack and Granola again — would produce a second opini
 disagrees with the message the team read that morning is worse than no tracker. This way Airtable is a
 projection of the brief and the two cannot drift.
 
+**The board is read before the brief is mined, not after.** `readTrackers` is its own step and runs
+first, so the extraction can be shown the keys already on the board and told to reuse them. Reading
+afterwards is what filed one client's whole tracker twice: the key is written by a model, so it is only
+as stable as the model's wording, and changing the prompt that produces the titles re-slugged all nine
+items in Ema Health — the next run created nine second copies instead of updating anything.
+
+**And the matching does not depend on the model obeying.** `sameWork` compares two titles on their
+significant words, matching `send` to `senders` on a shared four-character prefix and scoring against
+the *shorter* title, because the rewording that causes this is nearly always a shortening. Over 0.6 is
+the same item. Where both titles carry a figure and none of them agree it is not — `Add two senders to
+BV007` and `Add two senders to BV009` are three quarters the same words and two different jobs, and a
+false merge silently loses an item, which is worse than the duplicate.
+
+**A duplicate found on the board is merged away immediately.** Not aged out over `STALE_DAYS`: a second
+copy is not evidence of anything, it is this code having written the same note twice, so it goes on the
+run that notices it. The keyed row is the one kept, so the key the model just used stays on the board
+and the next run matches on the key without ever reaching the fuzzy path. Duplicates are counted apart
+from stale removals in the trace, because they mean opposite things — one is work finishing, the other
+is a bug showing itself.
+
 **Deleting is only safe because ownership is provable.** `Raised by Brief` is ticked on creation and
 checked before every update and every delete. A row somebody typed by hand is never touched, however
-stale it looks, and unticking the box takes a row out of the brief's reach permanently.
+stale it looks, never merged into a brief item however alike the titles are, and unticking the box takes
+a row out of the brief's reach permanently. One row is only ever claimed by one item.
 
 **A missing item waits five days.** Briefs run three mornings a week, so `STALE_DAYS = 5` is at least
 two runs that did not mention it — one thin model run is not destructive. An item somebody explicitly

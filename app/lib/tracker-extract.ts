@@ -60,6 +60,9 @@ export type TrackerItem = {
   key: string;
 };
 
+/** One row already on the board, as the model is shown it. Built by `openItems` in `tracker-sync.ts`. */
+export type OpenItem = { key: string; title: string; owner: string };
+
 const TYPES = new Set(["Action Item", "Project", "Bottleneck"]);
 const STATUSES = new Set(["Not Started", "In Progress", "Blocked"]);
 const PRIORITIES = new Set(["Urgent", "High", "Medium", "Low"]);
@@ -99,8 +102,16 @@ Return JSON and nothing else: an object with one key, "items", holding an array.
   source   One of "Internal channel", "Client channel", "Call".
   campaignCode  The campaign code such as BV007 when the item is about one campaign, else "".
   key      A short lowercase hyphenated slug naming the thing itself, not the phrasing: "bv007-senders",
-           "surgeon-offices-list", "doximity-enrichment". The same item must produce the same slug on a
-           later brief that words it differently. No dates in it.
+           "surgeon-offices-list", "doximity-enrichment". No dates in it.
+
+           **If the item is already on the board, return the board's key for it, character for
+           character.** The board is listed under the brief. Already on the board means the same piece
+           of work has to happen, however differently this morning's brief words it — "Investigate
+           HubSpot email bounce issue and confirm the warmup" and "Chase HubSpot bounce issue" are one
+           item, not two. A new key for work that is already there files a second copy of it, and the
+           board is read as a list of what is outstanding, so the copy is a job somebody does twice.
+
+           Invent a key only for work that is genuinely not on the board yet.
 
 If the brief raises nothing to work on, return {"items": []}.`;
 
@@ -119,7 +130,9 @@ export async function extractTrackerItems(
     timeoutMs = REQUEST_TIMEOUT_MS,
     /** Everyone the brief was allowed to mention, so an owner comes back as a name. */
     people = [],
-  }: { model?: string; timeoutMs?: number; people?: Array<{ id: string; name: string }> } = {},
+    /** What the tracker already holds, so an item that is on it comes back under the key it is filed under. */
+    open = [],
+  }: { model?: string; timeoutMs?: number; people?: Array<{ id: string; name: string }>; open?: OpenItem[] } = {},
 ): Promise<{ items: TrackerItem[]; error: string }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { items: [], error: "ANTHROPIC_API_KEY is not set." };
@@ -132,6 +145,9 @@ export async function extractTrackerItems(
     // The brief is written for Slack, so every owner in it is a `<@U…>` code. Handed over the codes
     // read as owners called U0A2TQ1V49Y, which is what the tracker filled up with before this.
     roster ? `Who the mention codes in that brief refer to:\n${roster}` : "Nobody in that brief has a mention code on file, so write owners exactly as the brief words them.",
+    open.length
+      ? `The board as it stands. Reuse the key on the left for anything here that the brief raises again:\n${open.map((row) => `- ${row.key} — "${row.title}"${row.owner ? `, ${row.owner}` : ""}`).join("\n")}`
+      : "The board is empty, so every item you return is a new one.",
   ].join("\n\n");
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {

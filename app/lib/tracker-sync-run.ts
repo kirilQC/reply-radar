@@ -6,6 +6,12 @@
  *
  * The rules live in `tracker-sync.ts` and are pure, so they can be tested without a base. This file is
  * the order the requests go out in and the accounting of what came back — read that one first.
+ *
+ * ── Read, then decide, then write ─────────────────────────────────────────────────────────────────
+ * `readTrackers` is deliberately a step of its own rather than the first few lines of `syncTrackers`,
+ * because what is already on the board is needed *before* the brief is read for items — the extraction
+ * is shown the existing rows so that an item already there comes back under the key it is filed under
+ * rather than a fresh one. Reading afterwards is what filed a client's whole board twice.
  */
 import {
   ACTION_ITEMS_TABLE_NAME,
@@ -17,6 +23,8 @@ import {
   getBaseTables,
   listRecords,
   updateRecords,
+  type AirtableRecord,
+  type AirtableTable,
 } from "./airtable";
 import type { BriefCampaign } from "./morning-brief";
 import type { TrackerItem } from "./tracker-extract";
@@ -37,29 +45,52 @@ const blank = (): TrackerSyncResult => ({
  * that quietly did nothing is the thing that would let the trackers rot unnoticed, so every reason it
  * stopped comes back in `notes` and lands in the trace beside the brief.
  */
+export type TrackerBoard = {
+  campaignTable: AirtableTable;
+  projectTable: AirtableTable;
+  campaignRows: AirtableRecord[];
+  projectRows: AirtableRecord[];
+};
+
+/**
+ * Both tracker tables and everything currently in them.
+ *
+ * The only place the trackers are read. `board` is null whenever anything stopped it, with the reason
+ * in `notes` — the caller passes the whole answer to `syncTrackers`, which reports the reason rather
+ * than repeating the work and failing the same way a second time.
+ */
+export async function readTrackers(baseId: string): Promise<{ board: TrackerBoard | null; notes: string[] }> {
+  if (!baseId) return { board: null, notes: ["No Airtable base is mapped to this client."] };
+
+  const schema = await getBaseTables(baseId);
+  if (!schema.ok) return { board: null, notes: [schema.error] };
+  const campaignTable = findTableByName(schema.data, CAMPAIGNS_TABLE_NAME);
+  const projectTable = findTableByName(schema.data, ACTION_ITEMS_TABLE_NAME);
+  if (!campaignTable || !projectTable) {
+    const absent = [!campaignTable ? CAMPAIGNS_TABLE_NAME : "", !projectTable ? ACTION_ITEMS_TABLE_NAME : ""].filter(Boolean);
+    return { board: null, notes: [`That base has no ${absent.join(" and no ")}, so there was nowhere to write.`] };
+  }
+
+  const [campaignRows, projectRows] = await Promise.all([listRecords(baseId, campaignTable.id), listRecords(baseId, projectTable.id)]);
+  if (!campaignRows.ok) return { board: null, notes: [campaignRows.error] };
+  if (!projectRows.ok) return { board: null, notes: [projectRows.error] };
+
+  return { board: { campaignTable, projectTable, campaignRows: campaignRows.data, projectRows: projectRows.data }, notes: [] };
+}
+
 export async function syncTrackers(
   baseId: string,
+  read: { board: TrackerBoard | null; notes: string[] },
   campaigns: BriefCampaign[],
   /** `null` means the extraction failed, so the project half is skipped entirely. See the caller. */
   items: TrackerItem[] | null,
   today: string,
 ): Promise<TrackerSyncResult> {
   const result = blank();
-  if (!baseId) return { ...result, notes: ["No Airtable base is mapped to this client."] };
+  if (!read.board) return { ...result, notes: read.notes };
+  const { campaignTable, projectTable, campaignRows, projectRows } = read.board;
 
-  const schema = await getBaseTables(baseId);
-  if (!schema.ok) return { ...result, notes: [schema.error] };
-  const campaignTable = findTableByName(schema.data, CAMPAIGNS_TABLE_NAME);
-  const projectTable = findTableByName(schema.data, ACTION_ITEMS_TABLE_NAME);
-  if (!campaignTable || !projectTable) {
-    const absent = [!campaignTable ? CAMPAIGNS_TABLE_NAME : "", !projectTable ? ACTION_ITEMS_TABLE_NAME : ""].filter(Boolean);
-    return { ...result, notes: [`That base has no ${absent.join(" and no ")}, so there was nowhere to write.`] };
-  }
-
-  const campaignRows = await listRecords(baseId, campaignTable.id);
-  if (!campaignRows.ok) return { ...result, notes: [campaignRows.error] };
-
-  const campaignPlan = planCampaigns(campaigns, campaignRows.data, choicesFor(campaignTable, "Status"), today);
+  const campaignPlan = planCampaigns(campaigns, campaignRows, choicesFor(campaignTable, "Status"), today);
   result.notes.push(...campaignPlan.notes);
   result.campaigns.finished = campaignPlan.finished;
 
@@ -74,19 +105,16 @@ export async function syncTrackers(
   // Built from the rows that exist now, the newly created ones included, so an item raised about a
   // campaign the brief has only just recorded still links to it on this run rather than the next.
   const campaignIds = new Map<string, string>();
-  for (const row of [...campaignRows.data, ...(made.ok ? made.data : [])]) {
+  for (const row of [...campaignRows, ...(made.ok ? made.data : [])]) {
     const code = String(row.fields["Campaign Code"] ?? "").trim().toUpperCase() || campaignCode(String(row.fields.Title ?? ""));
     if (code) campaignIds.set(code, row.id);
   }
 
   if (!items) return { ...result, ran: true, notes: [...result.notes, "The action items could not be read out of the brief, so the project tracker was left exactly as it was."] };
 
-  const projectRows = await listRecords(baseId, projectTable.id);
-  if (!projectRows.ok) return { ...result, ran: true, notes: [...result.notes, projectRows.error] };
-
   const projectPlan = planProjects(
     items,
-    projectRows.data,
+    projectRows,
     {
       status: choicesFor(projectTable, "Status"),
       type: choicesFor(projectTable, "Type"),

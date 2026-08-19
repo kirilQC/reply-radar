@@ -40,7 +40,8 @@ import {
 } from "../../../lib/morning-brief-schedule";
 import { isAirtableConfigured } from "../../../lib/airtable";
 import { extractTrackerItems } from "../../../lib/tracker-extract";
-import { syncTrackers } from "../../../lib/tracker-sync-run";
+import { openItems } from "../../../lib/tracker-sync";
+import { readTrackers, syncTrackers } from "../../../lib/tracker-sync-run";
 import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
 
 /*
@@ -414,11 +415,20 @@ export async function POST(request: Request) {
     else {
       tracker.attempted = true;
       const today = localDayKey(new Date(), workspace.timezone || "America/New_York");
+      /*
+       * The board is read before the brief is mined, not after, and this order is the whole fix for a
+       * tracker that filled up with second copies of its own rows. The extraction is handed the keys
+       * already on the board so that an item raised again this morning comes back under the key it is
+       * already filed under; reading afterwards left the model inventing a fresh key each time the
+       * wording moved, and every re-run added a duplicate instead of updating.
+       */
+      const board = await readTrackers(baseId);
       // The same roster the brief was told to mention people from. It has to come back the other way or
       // the tracker's Owner column fills up with the `<@U…>` codes the brief is written in.
       const extracted = await extractTrackerItems(body_, signals, {
         timeoutMs: Math.min(TRACKER_MODEL_MS, remaining - 10_000),
         people: [...(channels.internal.people ?? []), ...(channels.external.people ?? [])],
+        open: openItems(board.board?.projectRows ?? []),
       });
       tracker.items = extracted.items.length;
       if (extracted.error) tracker.reason = extracted.error;
@@ -428,7 +438,7 @@ export async function POST(request: Request) {
        * about nothing at all. Three failed extractions in a row would otherwise quietly empty a
        * client's project tracker, and the campaign half — which needs no model — still runs either way.
        */
-      tracker.result = await syncTrackers(baseId, signals.campaigns.names, extracted.error ? null : extracted.items, today);
+      tracker.result = await syncTrackers(baseId, board, signals.campaigns.names, extracted.error ? null : extracted.items, today);
     }
 
     // `sources` rides along in the same column as the figures because it is the same kind of fact: what
