@@ -45,9 +45,9 @@ That sentence is the design brief. Everything below serves it.
 
 ### Where the model's input comes from
 
-Five reads in one `Promise.all` (`route.ts:326`), because the calls are the slowest and the most
-likely to be missing and must not hold up or fail the others. Neither `gatherCalls` nor
-`brainContext` ever throws.
+Six reads in one `Promise.all` (`route.ts:363`), because the calls are the slowest and the most
+likely to be missing and must not hold up or fail the others. None of `gatherCalls`, `brainContext`
+or `gatherPriorBriefs` ever throws.
 
 1. **Figures** — `gatherSignals`, computed from HeyReach read live during the run. Facts. The model may
    not restate a figure differently or compute a new one. See below.
@@ -56,6 +56,8 @@ likely to be missing and must not hold up or fail the others. Neither `gatherCal
 3. **The external channel** — shared with the client. Anything said here was said to their face.
 4. **The last call** — the full Granola transcript, matched by meeting title.
 5. **The client brief and the QC Brain** — what this account is supposed to be doing.
+6. **The last one or two briefs, and the replies to them** — `gatherPriorBriefs`. The brief's own
+   memory. See below.
 
 Plus, optionally, **extra channels** and **extra calls** somebody added for context. These are
 deliberately second class in the prompt: most extra calls are our own internal meetings, where what
@@ -104,6 +106,45 @@ block with an instruction to state it once, the HeyReach trace step reads `parti
 and the provenance is kept in `rr_slack_briefs.signals`. `composeSignals` is the only place the windows,
 runway, counts and rates are computed, so a fallback run differs from a live one **only** in what it says
 about itself.
+
+### The brief reads its own last brief, and the replies to it
+
+`gatherPriorBriefs` (`morning-brief-run.ts`) fetches the last one or two briefs this client actually
+had, and the human replies left in each brief's Slack thread. Two failures drove it.
+
+> "action item number 1 is Dan should send over an account list and says he has not... HE LITERALLY
+> SENT IT OVER LAST NIGHT... it takes multiple systems BUT THEY DO NOT TALK TO EACH OTHER, JUST LAYER
+> ON TOP OF EACH OTHER. it needs to be able to have context."
+
+That was a **reconciliation** bug, not a retrieval one: the 14-day window fetched Dan's message; the
+brief read a call that asked for the list and never noticed the later channel message that delivered
+it. The fix is the `# How to weigh what you are given` block, built in code in `briefUserContent` so a
+stored per-client prompt override cannot drop it: **newest evidence wins.** A later "done", a later
+link, a later reply closes an item an earlier source left open, even when the earlier source is a call
+and the later one is one line in a channel. Dates are on every source for exactly this.
+
+> "the reply radar system should know whats been resolved or not by checking if we replied to its
+> morning brief... so if i reply to that bluevia message and say 'checked with ali about cold calling.
+> dead end. resolved' then dont bring it up again."
+
+That is the second half: **a reply to a brief is the newest, most authoritative word on the item it
+answers.** `conversations.replies` takes any ts in a thread and returns the whole thread, so the stored
+`slack_message_ts` (the brief reply itself, not the header) is enough — **no migration.** `threadReplies`
+in `slack.ts` filters `!message.bot_id`, which drops the header and the brief and leaves only what a
+person typed. A reply that says handled / done / sorted / dead end / resolved closes that item and it is
+not raised again. The prompt also forbids reprinting a still-open item verbatim, and forbids ever
+mentioning the past briefs, the replies, or the section they came from.
+
+Load-bearing details:
+
+- **Only delivered internal briefs are read** (`destination=eq.internal`, `status=eq.success`,
+  `slack_message_ts=not.is.null`). A preview has no thread anyone can reply in; a failed send has no ts.
+- **The bodies are free** — they were already stored in `rr_slack_briefs`. Only the replies cost a live
+  call, one `conversations.replies` per brief, inside the existing `Promise.all`.
+- **The trace step is conditional.** "Prior briefs" appears between "Slack channels" and "Granola" only
+  when there are priors, so the six fixed steps and their order are untouched on a client's first brief,
+  and it is **not** counted into the Anthropic "N of 4" source tally.
+- **Never throws.** An empty list is the ordinary answer for a first brief and for unreadable Slack.
 
 ## The rules that are load-bearing
 

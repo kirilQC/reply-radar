@@ -102,6 +102,7 @@ You will be given, for one client:
 - **The last call**, the full transcript of the most recent call with this client, if there was one. This is where the agency states out loud what it will do next, so it is the strongest evidence of what was promised.
 - **The client brief** and **the QC Brain**, which may state what this account is supposed to be doing.
 - Sometimes **extra channels** and **extra calls**, which somebody added for context.
+- Sometimes **your last brief or two**, with the replies the team left in the Slack thread under each. This is your own memory: what you already told them, and what they said back.
 
 Those first four are the account. The internal channel, the external channel and the client's own call are where things are actually committed to, and the Figures are the record of what happened. Extra channels and extra calls are not on that footing: they are supporting material, and most extra calls are our own internal meetings, where what is said is what we intend rather than anything the client has agreed to. Use them to explain, corroborate or put an owner on something, never as the sole basis for a finding, and never report something from an internal call as agreed with the client.
 
@@ -110,6 +111,10 @@ The client brief and the QC Brain are different again. They are not this week; t
 ## Before you write a single action item: check whether it is already done
 
 This is the rule that decides whether the brief is trusted. An item that has already been handled, raised again the next morning, teaches everybody reading that the brief does not know what is going on, and once they believe that, the real items go unread too.
+
+The newest evidence always wins. Every source you are given is a snapshot from a different moment, and they will disagree: a call on Tuesday asks for a lead list, a channel message on Wednesday says it was sent. When that happens the later one is the truth. An item a call left open is closed the moment a channel message, a figure or a reply shows it was done, even when the thing that closes it is a single line in a channel and the thing that opened it was a whole call. Read the date on every finding before you raise it, and only raise it if nothing more recent has settled it.
+
+**If you were given your last brief or two, read the replies to them first, because a reply is the newest word there is.** When somebody answered a past brief in its thread with "handled", "done", "sorted", "dead end", "resolved", or the like, they were answering the exact item you raised, so that reply outranks the channels and the call on that item. It is closed: do not raise it again, in any wording. And do not simply reprint an item from your last brief because it is still open, they have already read it once; the only reason to raise it again is that it changed or went wrong again since. Never mention the past briefs or the replies in what you write, and never say the standing reminder or the section they came from; use them only to decide what to leave out.
 
 So every candidate item gets checked twice, in this order:
 
@@ -679,6 +684,28 @@ export type BriefChannel = {
   people?: Array<{ id: string; name: string }>;
 };
 
+/** One reply a teammate left in a past brief's thread. QC Bot's own header and brief are never here. */
+export type PriorBriefReply = { who: string; text: string };
+
+/**
+ * A brief this client already got, and how the team replied to it.
+ *
+ * The point of carrying this is that the brief has, until now, had no memory of itself: it re-derived the
+ * whole account from the sources every morning, so an item somebody replied "resolved, dead end" to under
+ * yesterday's brief came back this morning as though it had never been mentioned. The reply is the team
+ * correcting the brief to its face, and it has to be read back in or the correction is lost.
+ */
+export type PriorBrief = {
+  /** How the brief's date reads, e.g. "Monday, August 17th", in the client's timezone. */
+  postedOn: string;
+  /** Whole days since it was posted. Null when the stored date could not be read. */
+  ageDays: number | null;
+  /** The brief exactly as it was posted. */
+  body: string;
+  /** The team's replies in that brief's thread, oldest first. */
+  replies: PriorBriefReply[];
+};
+
 export type BriefInputs = {
   signals: BriefSignals;
   internal: BriefChannel;
@@ -709,6 +736,16 @@ export type BriefInputs = {
    * of which are ordinary and none of which fail a brief.
    */
   brain?: string;
+  /**
+   * The last one or two briefs this client got, and the replies the team left in their Slack threads.
+   *
+   * This is the brief's memory of itself, and the replies are the newest and most authoritative word on
+   * the account: a reply that closes an item is the team correcting the brief, and it outranks anything the
+   * channels or the call still say, because it is later than all of them and aimed straight at the brief.
+   * Empty on a client's first brief, when Slack cannot be read, and when nothing was replied — none of
+   * which fail a brief.
+   */
+  priorBriefs?: PriorBrief[];
 };
 
 /**
@@ -1004,6 +1041,33 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     return `# How to mention people\n\nWhen the brief names somebody, write their mention code from this table exactly as it appears, including the angle brackets. Slack turns it into a real mention that notifies them; their name typed as plain text does not, and an owner who is not notified is an owner who does not know.\n\n${lines}\n\nAnybody not in this table is written as plain text. Do not invent a mention code, and do not mention the client's own people even if they appear here.`;
   })();
 
+  /**
+   * The last brief(s) you wrote, and how the team replied to them.
+   *
+   * This is the memory that stops the brief from being a goldfish. Two things live here. First, the body
+   * of the last brief or two, so today's does not open by repeating an item that was already raised and is
+   * still working its way through — say it once, then let the reply carry it. Second, and the reason this
+   * section outranks everything else in the pack: the replies to those briefs. When someone answers a
+   * brief in its Slack thread with "handled", "done", "dead end", "resolved", that reply is the single most
+   * recent, most authoritative word on that item — more recent than any channel message or call, because it
+   * was written *in response to* the brief raising it. A reply that closes an item means the item is closed.
+   */
+  const priorBriefsSection = (() => {
+    const priors = inputs.priorBriefs ?? [];
+    if (!priors.length) return "";
+    const when = (age: number | null) =>
+      age === null ? "" : age === 0 ? " (today)" : age === 1 ? " (yesterday)" : ` (${age} days ago)`;
+    const blocks = priors
+      .map((prior) => {
+        const replies = prior.replies.length
+          ? `The team replied in the thread:\n${prior.replies.map((reply) => `    ↳ ${reply.who}: ${reply.text}`).join("\n")}`
+          : "No one replied to this brief.";
+        return `## ${prior.postedOn}${when(prior.ageDays)}\n\n${prior.body}\n\n${replies}`;
+      })
+      .join("\n\n");
+    return `# Your last brief${priors.length > 1 ? "s" : ""}, and how the team replied\n\nThis is what you already told them, and what they said back. Read it before you write, and apply two rules. First: a reply that says an item is handled, done, sorted, a dead end or resolved closes that item — do not raise it again, in any wording. The person replying knows more than every other source here, because they are answering the exact item you raised. Second: do not repeat an item from a brief below verbatim just because it is still open — you have already said it once. The only reason to raise something again is that it changed or went wrong again since. Never mention this section, these past briefs, or the replies in what you write; use them only to decide what not to say.\n\n${blocks}`;
+  })();
+
   return [
     // The weekday note is handed over rather than worked out, like every other fact here: which day it is
     // depends on a calendar the model has no reason to reason about.
@@ -1017,8 +1081,16 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
         ? `Today carries a standing reminder, which is added to the foot of the brief automatically once you are done. Do not write it yourself and do not write anything like it. End on your last finding.`
         : "There is no standing reminder for today. End on your last finding.",
     ].join("\n\n"),
+    // The one rule that reconciles the pack. Every source below is a snapshot from a different moment, and
+    // the failure that made this rule necessary was a brief that read a Tuesday call saying "Dan will send
+    // the list", never noticed the Wednesday channel message where Dan sent it, and reported the list as
+    // still owed. Newest evidence wins: a later "done", a later link, a later reply settles an item an
+    // earlier source left open, even when the earlier source is a call and the later one is one line in a
+    // channel. Dates are on every source for exactly this; use them.
+    `# How to weigh what you are given\n\nEverything below is a snapshot from a different moment. When two sources disagree, the newer one wins — a call can ask for something and a later channel message can show it was already done, and if so it is done. Check the date on a finding before you raise it: an item is only open if nothing more recent has closed it. A reply on one of your past briefs (if any are included below) is the newest word of all, because it was written in answer to you raising the item.`,
     `# Figures\n\nThese are facts. Do not restate them differently and do not compute new ones.\n\n${signalsAsText(inputs.signals)}`,
     roster,
+    priorBriefsSection,
     section(inputs.internal, "internal"),
     section(inputs.external, "external"),
     callSection,
@@ -1155,6 +1227,33 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
       facts,
       excerpts,
     });
+  }
+
+  // 1b — Prior briefs. Conditional so it never appears on the first brief for an account, and so the six
+  // fixed steps below keep their order. When it is here it is the memory step: the last brief or two and
+  // the replies to them, which is how the model knows what was already said and what has since been closed.
+  {
+    const priors = inputs.priorBriefs ?? [];
+    if (priors.length) {
+      const replies = priors.reduce((sum, prior) => sum + prior.replies.length, 0);
+      const facts = priors.map((prior) => {
+        const age = prior.ageDays === null ? "an earlier day" : prior.ageDays === 0 ? "today" : prior.ageDays === 1 ? "yesterday" : `${prior.ageDays} days ago`;
+        return `${prior.postedOn} (${age}): ${prior.replies.length ? plural(prior.replies.length, "reply", "replies") + " in the thread" : "no replies"}.`;
+      });
+      const excerpts: TraceStep["excerpts"] = priors.map((prior) =>
+        excerptOf(`Brief from ${prior.postedOn}, and its replies, as the model read them`,
+          prior.replies.length
+            ? `${prior.body}\n\n---\n${prior.replies.map((reply) => `${reply.who}: ${reply.text}`).join("\n")}`
+            : prior.body),
+      );
+      steps.push({
+        source: "Prior briefs",
+        result: `Read the last ${priors.length === 1 ? "brief" : `${count(priors.length)} briefs`} and ${replies ? `${plural(replies, "reply", "replies")} to ${priors.length === 1 ? "it" : "them"}, which settle what has already been handled` : "found no replies, so nothing has been marked handled since"}.`,
+        state: replies ? "ok" : "partial",
+        facts,
+        excerpts,
+      });
+    }
   }
 
   // 2 — Granola. The one source whose absence is routine and whose absence must still be legible.

@@ -230,6 +230,36 @@ export async function channelHistory(
 }
 
 /**
+ * The human replies in one thread, oldest first, with QC Bot's own messages taken out.
+ *
+ * This is how a brief reads the team's answer to its last brief. The brief is posted as a header in the
+ * channel with the brief itself hanging off it in a thread, and a teammate replies in that thread to say
+ * an item is handled. `conversations.replies` takes the timestamp of *any* message in a thread and returns
+ * the whole thread, so the `slack_message_ts` already stored against a brief is enough to find its replies
+ * — the header's own timestamp does not have to be kept as well.
+ *
+ * QC Bot's two messages, the header and the brief, both carry a `bot_id`, so dropping every message with
+ * one leaves exactly the human replies. A thread with no human reply comes back empty, which is the normal
+ * case and not an error: most briefs are read and acted on without anybody writing back.
+ *
+ * Never throws for a thread that cannot be read. A renamed channel or a deleted message is one brief's
+ * replies going missing, not a reason to fail the brief being written now.
+ */
+export async function threadReplies(channelId: string, threadTs: string): Promise<SlackMessage[]> {
+  if (!channelId || !threadTs) return [];
+  const query = new URLSearchParams({ channel: channelId, ts: threadTs, limit: "200" });
+  try {
+    const body = await call(`conversations.replies?${query.toString()}`, { method: "GET" });
+    const all = Array.isArray(body.messages) ? (body.messages as RawMessage[]) : [];
+    // `bot_id` is set on both of QC Bot's own messages and absent on a person's, so this one filter drops
+    // the header and the brief and keeps the replies, without having to know the bot's user id.
+    return all.filter((message) => !message.bot_id && isRealMessage(message)).map((message) => asMessage(message, true));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Display names for the user ids that appear in a transcript.
  *
  * Without this the model is handed `U04AB12CD said` and the brief comes out talking about user ids,

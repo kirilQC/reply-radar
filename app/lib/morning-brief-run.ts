@@ -21,8 +21,11 @@ import {
   type BriefWorkspace,
   type CampaignFacts,
   type LiveFigures,
+  type PriorBrief,
+  type PriorBriefReply,
 } from "./morning-brief";
-import { channelHistory, resolveUserNames, transcript } from "./slack";
+import { localDayKey } from "./morning-brief-schedule";
+import { channelHistory, resolveUserNames, threadReplies, transcript } from "./slack";
 import { findClientCalls, type ClientCall, type GranolaKey } from "./granola";
 import { ALL_STATUSES, campaignStatusFor } from "./heyreach-campaigns";
 import { campaignFunnelFor, dailyStatsFor } from "./heyreach-campaign-metrics";
@@ -120,6 +123,66 @@ export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<Br
     ...extraIds.map((id) => readChannel(id)),
   ]);
   return { internal, external, extraChannels };
+}
+
+/**
+ * How many past briefs to read back in.
+ *
+ * Two, because on a three-a-week cadence the item somebody replied "resolved" to could have been in either
+ * of the last two, and a reply often lands the morning after the brief rather than the same one. More than
+ * two is a third page-long body in the prompt buying almost nothing: an item left genuinely outstanding for
+ * a week is being carried by the channels and the figures as well, not by a brief from six sends ago.
+ */
+const PRIOR_BRIEF_COUNT = 2;
+
+/**
+ * The last one or two briefs this client got, and the replies the team left underneath them.
+ *
+ * This is the brief's memory of itself. The bodies come from `rr_slack_briefs`, which already stored them,
+ * so the brief text costs no Slack call; only the replies are read live, one `conversations.replies` per
+ * brief. A reply that closes an item is the team's own correction, and reading it back in is the whole
+ * point — see the note on `threadReplies` and the prompt section in `briefUserContent`.
+ *
+ * Only briefs that were actually posted to the client's internal channel are considered: a preview has no
+ * thread for anyone to reply in, and a failed send has no `slack_message_ts` to find replies by. Never
+ * throws. An empty list is the ordinary answer for a client's first brief and for a workspace whose Slack
+ * cannot be read, and neither is a reason to fail the brief being written now.
+ */
+export async function gatherPriorBriefs(
+  read: (path: string) => Promise<unknown>,
+  workspace: BriefWorkspace,
+): Promise<PriorBrief[]> {
+  const timezone = workspace.timezone || "America/New_York";
+  try {
+    const rows = await read(
+      `rr_slack_briefs?select=body,created_at,slack_channel_id,slack_message_ts`
+      + `&workspace_id=eq.${encodeURIComponent(workspace.id)}&automation=eq.morning_brief`
+      + `&destination=eq.internal&status=eq.success&slack_message_ts=not.is.null`
+      + `&order=created_at.desc&limit=${PRIOR_BRIEF_COUNT}`,
+    ).catch(() => []);
+    const briefs = (Array.isArray(rows) ? (rows as Row[]) : []).filter((row) => String(row.body ?? "").trim());
+    const todayKey = localDayKey(new Date(), timezone);
+
+    return await Promise.all(briefs.map(async (row): Promise<PriorBrief> => {
+      const channelId = String(row.slack_channel_id ?? "").trim();
+      const ts = String(row.slack_message_ts ?? "").trim();
+      const messages = await threadReplies(channelId, ts);
+      const names = await resolveUserNames(messages.map((message) => message.author));
+      const replies: PriorBriefReply[] = messages
+        .map((message) => ({ who: names.get(message.author) ?? message.author, text: message.text.replace(/\s+/g, " ").trim() }))
+        .filter((reply) => reply.text);
+      const created = new Date(String(row.created_at ?? ""));
+      const valid = !Number.isNaN(created.getTime());
+      return {
+        postedOn: valid ? created.toLocaleDateString("en-US", { timeZone: timezone, weekday: "long", month: "long", day: "numeric" }) : "an earlier day",
+        ageDays: valid ? Math.max(0, Math.round((Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${localDayKey(created, timezone)}T00:00:00Z`)) / 86_400_000)) : null,
+        body: String(row.body ?? ""),
+        replies,
+      };
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /**

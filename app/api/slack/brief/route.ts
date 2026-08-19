@@ -28,7 +28,7 @@
 
 import { NextResponse } from "next/server";
 import { briefHeaderText, briefTrace, briefUserContent, briefWithFooter, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
-import { BRIEF_MODEL, gatherCalls, gatherChannels, gatherLiveFigures, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
+import { BRIEF_MODEL, gatherCalls, gatherChannels, gatherLiveFigures, gatherPriorBriefs, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
 import { brainContext } from "../../../lib/brain-context";
 import {
   alreadySentToday,
@@ -360,15 +360,16 @@ export async function POST(request: Request) {
      * client on every run to throw them away.
      */
     const live = await gatherLiveFigures(String((found as Row).heyreach_api_key_ciphertext ?? ""));
-    const [signals, channels, call, systemPrompt, brain] = await Promise.all([
+    const [signals, channels, call, systemPrompt, brain, priorBriefs] = await Promise.all([
       gatherSignals(read, workspace, live),
       gatherChannels(workspace),
       gatherCalls(read, workspace),
       morningBriefPrompt(workspace.slug),
       brainContext(workspace),
+      gatherPriorBriefs(read, workspace),
     ]);
 
-    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason, extraCalls: call.extras, brain: brain.block };
+    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason, extraCalls: call.extras, brain: brain.block, priorBriefs };
     const content = briefUserContent(workspace, inputs);
     // Monday's sync reminder and Friday's report reminder are appended here rather than written by the
     // model, so they land in the same place, worded the same way, with the same indent, every week. They

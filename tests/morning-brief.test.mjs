@@ -533,6 +533,74 @@ test("thread replies are explained to the model, not just handed to it", async (
   assert.match(content, /last 14 days/);
 });
 
+test("the recency rule is code-built, so a stored prompt override cannot drop it", async () => {
+  // The whole reason it lives in `briefUserContent` and not only in the editable system prompt: a client
+  // with a saved override would otherwise never see it, and reconciling stale sources is the correctness
+  // fix, not a style preference. The Dan-already-sent-it bug is exactly a stale call outranking a fresh
+  // channel message, which this block forbids.
+  const signals = await gatherSignals(readerFor([], dayRows(0, 7, 100)), WORKSPACE);
+  const content = briefUserContent(WORKSPACE, {
+    signals,
+    internal: { channelId: "C1", messages: 4, text: "10:00 Kiril: hi" },
+    external: { channelId: "", messages: 0, text: "" },
+  });
+  assert.match(content, /How to weigh what you are given/);
+  assert.match(content, /the newer one wins/);
+});
+
+test("the prior briefs and their replies are handed over, with the resolution rule", async () => {
+  // The feature: today's brief reads its last brief and the thread replies to it. A reply that closes an
+  // item must close it, and the section itself must never leak into what the model writes.
+  const signals = await gatherSignals(readerFor([], dayRows(0, 7, 100)), WORKSPACE);
+  const content = briefUserContent(WORKSPACE, {
+    signals,
+    internal: { channelId: "C1", messages: 4, text: "10:00 Kiril: hi" },
+    external: { channelId: "", messages: 0, text: "" },
+    priorBriefs: [
+      {
+        postedOn: "Monday, August 17",
+        ageDays: 2,
+        body: "1. <@U1> to send Dan the account list",
+        replies: [{ who: "Kiril", text: "checked with Ali about cold calling. dead end. resolved" }],
+      },
+    ],
+  });
+  assert.match(content, /Your last brief, and how the team replied/);
+  assert.match(content, /Monday, August 17 \(2 days ago\)/);
+  assert.match(content, /send Dan the account list/);
+  assert.match(content, /Kiril: checked with Ali about cold calling\. dead end\. resolved/);
+  // The rule that makes a reply authoritative, and the rule that keeps the section invisible.
+  assert.match(content, /handled, done, sorted, a dead end or resolved closes that item/);
+  assert.match(content, /Never mention this section/);
+});
+
+test("a brief with no replies still says so, and pluralises the heading for two", async () => {
+  const signals = await gatherSignals(readerFor([], dayRows(0, 7, 100)), WORKSPACE);
+  const content = briefUserContent(WORKSPACE, {
+    signals,
+    internal: { channelId: "C1", messages: 4, text: "10:00 Kiril: hi" },
+    external: { channelId: "", messages: 0, text: "" },
+    priorBriefs: [
+      { postedOn: "Monday, August 17", ageDays: 2, body: "1. thing one", replies: [] },
+      { postedOn: "Friday, August 14", ageDays: 5, body: "1. thing two", replies: [{ who: "Dan", text: "on it" }] },
+    ],
+  });
+  assert.match(content, /Your last briefs, and how the team replied/);
+  assert.match(content, /No one replied to this brief\./);
+  assert.match(content, /Dan: on it/);
+});
+
+test("no prior briefs means no prior-briefs section at all", async () => {
+  const signals = await gatherSignals(readerFor([], dayRows(0, 7, 100)), WORKSPACE);
+  const content = briefUserContent(WORKSPACE, {
+    signals,
+    internal: { channelId: "C1", messages: 4, text: "10:00 Kiril: hi" },
+    external: { channelId: "", messages: 0, text: "" },
+    priorBriefs: [],
+  });
+  assert.doesNotMatch(content, /how the team replied/);
+});
+
 test("a client override is a different key from the global prompt", () => {
   assert.equal(morningBriefPromptKey(), "morning_brief_prompt");
   assert.equal(morningBriefPromptKey("willow"), "morning_brief_prompt_willow");
@@ -1275,9 +1343,69 @@ test("replies read out of threads are counted apart from the channel's own messa
 test("the trace is built from what the model was given, not from a second set of notes", () => {
   // The guarantee that makes it worth reading: one object goes to `briefUserContent` and to `briefTrace`,
   // so the trace cannot drift into describing a run that did not happen.
-  assert.match(route, /const inputs = \{ signals, \.\.\.channels, call: call\.call, callReason: call\.callReason, extraCalls: call\.extras, brain: brain\.block \};/);
+  assert.match(route, /const inputs = \{ signals, \.\.\.channels, call: call\.call, callReason: call\.callReason, extraCalls: call\.extras, brain: brain\.block, priorBriefs \};/);
   assert.match(route, /const content = briefUserContent\(workspace, inputs\);/);
   assert.match(route, /briefTrace\(workspace, inputs, \{/);
   // Not stored. The excerpts quote every client call verbatim, and the row is kept for a year.
   assert.doesNotMatch(route, /signals: \{ \.\.\.signals, sources, steps/);
+});
+
+test("the prior-briefs trace step is conditional, so it never disturbs the six fixed steps", () => {
+  // With no prior briefs the trace is exactly the six steps the rest of the system depends on. Add one,
+  // and a seventh step appears between Slack and Granola, naming the replies that settle old items.
+  const base = {
+    signals: NO_SIGNALS,
+    internal: { channelId: "C1", messages: 4, raw: 4, capped: false, text: "10:00 Kiril: hi" },
+    external: { channelId: "", messages: 0, raw: 0, capped: false, text: "" },
+  };
+  const without = briefTrace(WORKSPACE, base, OUTCOME);
+  assert.equal(stepFor(without, "Prior briefs"), undefined);
+
+  const withPriors = briefTrace(WORKSPACE, {
+    ...base,
+    priorBriefs: [
+      { postedOn: "Monday, August 17", ageDays: 2, body: "1. send the list", replies: [{ who: "Kiril", text: "done" }] },
+    ],
+  }, OUTCOME);
+  const step = stepFor(withPriors, "Prior briefs");
+  assert.ok(step, "the step is present when prior briefs are");
+  assert.equal(step.state, "ok");
+  assert.match(step.result, /Read the last brief and 1 reply/);
+  assert.match(step.facts.join(" "), /Monday, August 17 \(2 days ago\): 1 reply in the thread/);
+  // Ordered right after Slack channels, and it is not counted into the Anthropic "N of 4" source tally.
+  assert.equal(withPriors[0].source, "Slack channels");
+  assert.equal(withPriors[1].source, "Prior briefs");
+});
+
+test("a prior brief nobody answered is a partial step, not a failure", () => {
+  const withPriors = briefTrace(WORKSPACE, {
+    signals: NO_SIGNALS,
+    internal: { channelId: "C1", messages: 4, raw: 4, capped: false, text: "10:00 Kiril: hi" },
+    external: { channelId: "", messages: 0, raw: 0, capped: false, text: "" },
+    priorBriefs: [{ postedOn: "Monday, August 17", ageDays: 2, body: "1. send the list", replies: [] }],
+  }, OUTCOME);
+  const step = stepFor(withPriors, "Prior briefs");
+  assert.equal(step.state, "partial");
+  assert.match(step.result, /found no replies, so nothing has been marked handled since/);
+});
+
+test("threadReplies pulls a whole thread and drops the bot's own header and brief", () => {
+  // `conversations.replies` takes any ts in a thread and returns the lot, so the stored brief ts is enough
+  // to fetch the human replies. The bot's messages carry `bot_id`, which is how the header and the brief
+  // itself are filtered out, leaving only what a person typed back.
+  assert.match(slackLib, /export async function threadReplies/);
+  assert.match(slackLib, /conversations\.replies\?/);
+  assert.match(slackLib, /!message\.bot_id && isRealMessage\(message\)/);
+});
+
+test("gatherPriorBriefs reads only delivered internal briefs, newest first, and never throws", () => {
+  // Asserted as source because the file imports its neighbours by relative path. Only briefs that were
+  // posted to the internal channel have a thread to read, so previews and failed sends are excluded, and
+  // an empty answer is the ordinary result for a client's first brief.
+  assert.match(runFile, /export async function gatherPriorBriefs/);
+  assert.match(runFile, /destination=eq\.internal&status=eq\.success&slack_message_ts=not\.is\.null/);
+  assert.match(runFile, /order=created_at\.desc&limit=\$\{PRIOR_BRIEF_COUNT\}/);
+  assert.match(runFile, /await threadReplies\(channelId, ts\)/);
+  // The read is guarded and the whole function is wrapped, so unreadable Slack degrades to an empty list.
+  assert.match(runFile, /\}\s*catch\s*\{\s*return \[\];\s*\}/);
 });
