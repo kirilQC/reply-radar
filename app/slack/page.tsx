@@ -101,6 +101,18 @@ type RunResult = {
   posted?: boolean;
   channelId?: string | null;
   channelNotes?: string[];
+  /** The call the analysis read, so a manual run can show its date, who was on it, and how long it ran. */
+  sources?: {
+    call?: {
+      title?: string;
+      startedAt?: number;
+      ageDays?: number;
+      owner?: string;
+      attendees?: string[];
+      durationMinutes?: number;
+      transcriptChars?: number;
+    } | null;
+  };
   /** Every request the run made, in order. Shown under the brief; see `briefTrace`. */
   steps?: TraceStep[];
 };
@@ -536,6 +548,16 @@ export default function SlackPage() {
                       <span>{automation === "call_analysis" ? "The analysis" : "The brief"}</span>
                       <span>{result.posted ? `Posted to ${result.channelId}` : "Not posted"}</span>
                     </div>
+                    {/* Which meeting the recap read: the date it was on, who was there, how long it ran. Shown
+                        only for a call analysis, and only when a call came back — a run with no call has no
+                        metadata to name. `startedAt` is epoch millis from Granola. */}
+                    {automation === "call_analysis" && result.sources?.call && (
+                      <div className="call-meta">
+                        {result.sources.call.startedAt ? <span>{new Date(result.sources.call.startedAt).toLocaleDateString("en-US", { weekday: "short", month: "long", day: "numeric" })}</span> : null}
+                        {result.sources.call.attendees?.length ? <span>{result.sources.call.attendees.join(", ")}</span> : null}
+                        {typeof result.sources.call.durationMinutes === "number" ? <span>{result.sources.call.durationMinutes} min</span> : null}
+                      </div>
+                    )}
                     {/* On the website the result reads as a document: the stored Slack mrkdwn is parsed
                         back into headings and lists (BriefView), rather than shown as the raw markup Slack
                         itself receives. The mrkdwn is still what posts; this is only how it looks here. */}

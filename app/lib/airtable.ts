@@ -73,6 +73,7 @@ const LEGACY_TRACKER_NAME_NEEDLE = "campaigns & projects";
  */
 export const CAMPAIGNS_TABLE_NAME = "Campaign Tracker";
 export const ACTION_ITEMS_TABLE_NAME = "Project Tracker";
+export const WEEKLY_CALLS_TABLE_NAME = "Weekly Calls";
 
 /**
  * The fields the brief needs in order to write an action item.
@@ -122,6 +123,26 @@ export const REQUIRED_CAMPAIGN_FIELDS: { name: string; type: string; why: string
   { name: "Senders", type: "singleLineText", why: "sender names, never ids" },
   { name: "Finished On", type: "date", why: "the day the figures became final" },
   { name: "Last Synced", type: "date", why: "a date that stopped moving means the brief lost the campaign" },
+];
+
+/**
+ * What the call analysis needs in order to file one week's recap.
+ *
+ * `Call ID` is the Granola note id, and it is what makes a re-run safe: the writer finds the row this
+ * call already has and updates it instead of adding a second recap for the same meeting. The rest are
+ * the facts a manual run already shows — the date, who was on it, how long it ran — plus the recap body
+ * itself, so the week can be read back in Airtable without opening Slack.
+ */
+export const REQUIRED_WEEKLY_CALL_FIELDS: { name: string; type: string; why: string }[] = [
+  { name: "Title", type: "singleLineText", why: "the call, as Granola titled it" },
+  { name: "Call Date", type: "date", why: "which week this recap belongs to" },
+  { name: "Attendees", type: "singleLineText", why: "who was on the call" },
+  { name: "Host", type: "singleLineText", why: "whose call it was" },
+  { name: "Duration (min)", type: "number", why: "how long it ran" },
+  { name: "Recap", type: "multilineText", why: "the recap the model wrote" },
+  { name: "Posted To", type: "singleSelect", why: "internal, external, test or a preview that posted nowhere" },
+  { name: "Call ID", type: "singleLineText", why: "so a re-run updates instead of duplicating" },
+  { name: "Last Synced", type: "date", why: "the last run that refreshed this row" },
 ];
 
 export type AirtableBase = { id: string; name: string; permissionLevel?: string };
@@ -367,6 +388,7 @@ export type TrackerAudit = {
   ready: boolean;
   campaigns: TableAudit;
   actionItems: TableAudit;
+  weeklyCalls: TableAudit;
   /** True when the base still has the old combined tracker and has not been split. */
   needsSplit: boolean;
   legacyTable: { id: string; name: string } | null;
@@ -418,13 +440,15 @@ function auditOneTable(tables: AirtableTable[], name: string, required: { name: 
 export function auditTrackerTables(baseId: string, tables: AirtableTable[]): TrackerAudit {
   const campaigns = auditOneTable(tables, CAMPAIGNS_TABLE_NAME, REQUIRED_CAMPAIGN_FIELDS);
   const actionItems = auditOneTable(tables, ACTION_ITEMS_TABLE_NAME, REQUIRED_ACTION_ITEM_FIELDS);
+  const weeklyCalls = auditOneTable(tables, WEEKLY_CALLS_TABLE_NAME, REQUIRED_WEEKLY_CALL_FIELDS);
   const legacy = findLegacyTracker(tables);
   const clean = (audit: TableAudit) => Boolean(audit.table) && !audit.missing.length && !audit.mistyped.length;
   return {
     baseId,
-    ready: clean(campaigns) && clean(actionItems),
+    ready: clean(campaigns) && clean(actionItems) && clean(weeklyCalls),
     campaigns,
     actionItems,
+    weeklyCalls,
     // Only worth saying when the new tables are genuinely absent. A base mid-migration, with both the
     // old tracker and the new tables, is not asking to be split again.
     needsSplit: Boolean(legacy) && !campaigns.table && !actionItems.table,

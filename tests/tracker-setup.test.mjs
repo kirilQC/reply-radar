@@ -11,13 +11,15 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CAMPAIGN_TABLE_SPEC, PROJECT_TABLE_SPEC, fieldsAtStage, planSetup } from "../app/lib/tracker-setup.ts";
-import { REQUIRED_ACTION_ITEM_FIELDS, REQUIRED_CAMPAIGN_FIELDS } from "../app/lib/airtable.ts";
+import { CAMPAIGN_TABLE_SPEC, PROJECT_TABLE_SPEC, WEEKLY_CALLS_TABLE_SPEC, fieldsAtStage, planSetup } from "../app/lib/tracker-setup.ts";
+import { REQUIRED_ACTION_ITEM_FIELDS, REQUIRED_CAMPAIGN_FIELDS, REQUIRED_WEEKLY_CALL_FIELDS } from "../app/lib/airtable.ts";
 
 const names = (fields) => fields.map((field) => field.name);
 
+const TABLE_IDS = { "Campaign Tracker": "tblCampaign00001", "Project Tracker": "tblProject000001", "Weekly Calls": "tblWeeklyCalls01" };
+
 const tableOf = (spec, only = () => true) => ({
-  id: spec.name === "Campaign Tracker" ? "tblCampaign00001" : "tblProject000001",
+  id: TABLE_IDS[spec.name],
   name: spec.name,
   fields: spec.fields.filter(only).map((field) => ({ id: `fld${field.name.replace(/\W/g, "")}`, name: field.name, type: field.type })),
 });
@@ -27,30 +29,46 @@ test("the spec covers every field the writer will actually try to write", () => 
   // lists that can drift is a base that passes setup and then fails the audit, so they are tied here.
   for (const field of REQUIRED_CAMPAIGN_FIELDS) assert.ok(names(CAMPAIGN_TABLE_SPEC.fields).includes(field.name), `Campaign Tracker spec is missing ${field.name}`);
   for (const field of REQUIRED_ACTION_ITEM_FIELDS) assert.ok(names(PROJECT_TABLE_SPEC.fields).includes(field.name), `Project Tracker spec is missing ${field.name}`);
+  for (const field of REQUIRED_WEEKLY_CALL_FIELDS) assert.ok(names(WEEKLY_CALLS_TABLE_SPEC.fields).includes(field.name), `Weekly Calls spec is missing ${field.name}`);
 });
 
-test("a base with both tables fully built has nothing to do", () => {
+test("a base with all three tables fully built has nothing to do", () => {
   // The second press of the button. Getting this wrong gives a client two Campaign Trackers and splits
   // their campaigns across both with no error anywhere.
-  const plan = planSetup(tableOf(CAMPAIGN_TABLE_SPEC), tableOf(PROJECT_TABLE_SPEC));
+  const plan = planSetup(tableOf(CAMPAIGN_TABLE_SPEC), tableOf(PROJECT_TABLE_SPEC), tableOf(WEEKLY_CALLS_TABLE_SPEC));
   assert.equal(plan.changes, 0);
   assert.equal(plan.campaign.create, false);
   assert.equal(plan.project.create, false);
+  assert.equal(plan.weeklyCalls.create, false);
   assert.deepEqual(plan.campaign.missing, []);
   assert.deepEqual(plan.project.missing, []);
+  assert.deepEqual(plan.weeklyCalls.missing, []);
 });
 
-test("an empty base is planned as two whole tables", () => {
-  const plan = planSetup(null, null);
+test("an empty base is planned as three whole tables", () => {
+  const plan = planSetup(null, null, null);
   assert.equal(plan.campaign.create, true);
   assert.equal(plan.project.create, true);
+  assert.equal(plan.weeklyCalls.create, true);
   assert.deepEqual(plan.campaign.missing, CAMPAIGN_TABLE_SPEC.fields);
   assert.deepEqual(plan.project.missing, PROJECT_TABLE_SPEC.fields);
+  assert.deepEqual(plan.weeklyCalls.missing, WEEKLY_CALLS_TABLE_SPEC.fields);
+});
+
+test("a base with the two old tables but no Weekly Calls is planned the third table only", () => {
+  // The upgrade path for an existing client: the campaign and project tables are already there, and the
+  // one thing to add is the calls table, created whole.
+  const plan = planSetup(tableOf(CAMPAIGN_TABLE_SPEC), tableOf(PROJECT_TABLE_SPEC), null);
+  assert.equal(plan.campaign.create, false);
+  assert.equal(plan.project.create, false);
+  assert.equal(plan.weeklyCalls.create, true);
+  // The one new table, counted as its create plus each field it will be built with.
+  assert.equal(plan.changes, 1 + WEEKLY_CALLS_TABLE_SPEC.fields.length);
 });
 
 test("a half-built table is topped up rather than replaced", () => {
   const partial = tableOf(CAMPAIGN_TABLE_SPEC, (field) => field.name !== "Days Left" && field.name !== "Senders");
-  const plan = planSetup(partial, tableOf(PROJECT_TABLE_SPEC));
+  const plan = planSetup(partial, tableOf(PROJECT_TABLE_SPEC), tableOf(WEEKLY_CALLS_TABLE_SPEC));
   assert.equal(plan.campaign.create, false);
   assert.deepEqual(names(plan.campaign.missing), ["Days Left", "Senders"]);
   assert.equal(plan.changes, 2);
@@ -64,14 +82,14 @@ test("a column that exists is left alone even when its type is wrong", () => {
    */
   const odd = tableOf(CAMPAIGN_TABLE_SPEC);
   odd.fields = odd.fields.map((field) => (field.name === "Leads Sent" ? { ...field, type: "singleLineText" } : field));
-  const plan = planSetup(odd, tableOf(PROJECT_TABLE_SPEC));
+  const plan = planSetup(odd, tableOf(PROJECT_TABLE_SPEC), tableOf(WEEKLY_CALLS_TABLE_SPEC));
   assert.equal(plan.changes, 0);
 });
 
 test("a column matches whatever the base's spacing and capitals are", () => {
   const shouty = tableOf(PROJECT_TABLE_SPEC);
   shouty.fields = shouty.fields.map((field) => (field.name === "Brief Key" ? { ...field, name: "  brief   KEY " } : field));
-  const plan = planSetup(tableOf(CAMPAIGN_TABLE_SPEC), shouty);
+  const plan = planSetup(tableOf(CAMPAIGN_TABLE_SPEC), shouty, tableOf(WEEKLY_CALLS_TABLE_SPEC));
   assert.equal(plan.changes, 0);
 });
 
@@ -111,12 +129,26 @@ test("every formula only references fields the spec actually creates", () => {
 
 test("the first field of each table can be a primary field", () => {
   // Airtable takes the first field as the primary and refuses several types for it, including checkbox
-  // and every computed type. Both tables lead with the title, which is also what the gallery shows.
-  for (const spec of [CAMPAIGN_TABLE_SPEC, PROJECT_TABLE_SPEC]) {
+  // and every computed type. All three tables lead with the title, which is also what the gallery shows.
+  for (const spec of [CAMPAIGN_TABLE_SPEC, PROJECT_TABLE_SPEC, WEEKLY_CALLS_TABLE_SPEC]) {
     assert.equal(spec.fields[0].name, "Title");
     assert.equal(spec.fields[0].type, "singleLineText");
     assert.equal(spec.fields[0].stage, "base");
   }
+});
+
+test("the Weekly Calls table is standalone: every field is a base-stage field", () => {
+  // A recap is a record of one meeting, not a thing the brief moves through states, so there is no link
+  // and no formula to hold back to a later stage. All of it can be made in the create.
+  for (const field of WEEKLY_CALLS_TABLE_SPEC.fields) assert.equal(field.stage, "base", `${field.name} is not a base field`);
+  assert.deepEqual(fieldsAtStage(WEEKLY_CALLS_TABLE_SPEC.fields, "link"), []);
+  assert.deepEqual(fieldsAtStage(WEEKLY_CALLS_TABLE_SPEC.fields, "formula"), []);
+});
+
+test("nothing the calls writer files could make Airtable invent a Posted To option", () => {
+  // `typecast` is never set, so every destination the row builder writes has to already be an option here.
+  const postedTo = WEEKLY_CALLS_TABLE_SPEC.fields.find((field) => field.name === "Posted To").options.choices.map((choice) => choice.name);
+  for (const wanted of ["Internal", "External", "Test", "Preview"]) assert.ok(postedTo.includes(wanted), `a base built by this file cannot say ${wanted}`);
 });
 
 test("the statuses the brief drives a campaign through are all in the choice set it creates", () => {

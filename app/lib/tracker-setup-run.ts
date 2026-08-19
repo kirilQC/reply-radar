@@ -52,15 +52,18 @@ export async function setUpTrackers(baseId: string): Promise<TrackerSetupResult>
 
   const campaignTable = findTableByName(schema.data, "Campaign Tracker");
   const projectTable = findTableByName(schema.data, "Project Tracker");
-  const plan = planSetup(campaignTable, projectTable);
+  const weeklyCallsTable = findTableByName(schema.data, "Weekly Calls");
+  const plan = planSetup(campaignTable, projectTable, weeklyCallsTable);
   if (!plan.changes) {
     result.ok = true;
-    result.skipped.push("Both tables were already there with every column the brief needs.");
+    result.skipped.push("All three tables were already there with every column they need.");
     return result;
   }
 
   const campaignId = await settle(baseId, plan.campaign, campaignTable, result);
   const projectId = await settle(baseId, plan.project, projectTable, result);
+  // Standalone: no link and no formula, so once its rows are settled there is nothing left to do for it.
+  await settle(baseId, plan.weeklyCalls, weeklyCallsTable, result);
 
   // The link is made from Project Tracker only. Airtable writes the matching field onto Campaign
   // Tracker itself, and asking for it from both sides leaves the base with two links between one pair

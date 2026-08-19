@@ -24,6 +24,8 @@ import {
   LEGACY_TRACKER_TABLE_ID,
   REQUIRED_ACTION_ITEM_FIELDS,
   REQUIRED_CAMPAIGN_FIELDS,
+  REQUIRED_WEEKLY_CALL_FIELDS,
+  WEEKLY_CALLS_TABLE_NAME,
 } from "../app/lib/airtable.ts";
 
 const BASES = [
@@ -169,14 +171,42 @@ const actionItemsTable = () => ({
   ],
 });
 
-const splitBase = () => [campaignsTable(), actionItemsTable()];
+const weeklyCallsTable = () => ({
+  id: "tblWeeklyCalls001",
+  name: WEEKLY_CALLS_TABLE_NAME,
+  fields: [
+    field("fldWCTitle0000001", "Title", "singleLineText"),
+    field("fldWCCallDate0001", "Call Date", "date"),
+    field("fldWCAttendees001", "Attendees", "singleLineText"),
+    field("fldWCHost00000001", "Host", "singleLineText"),
+    field("fldWCDuration0001", "Duration (min)", "number"),
+    field("fldWCRecap0000001", "Recap", "multilineText"),
+    field("fldWCPostedTo0001", "Posted To", "singleSelect", ["Internal", "External", "Test", "Preview"]),
+    field("fldWCCallID000001", "Call ID", "singleLineText"),
+    field("fldWCLastSynced01", "Last Synced", "date"),
+  ],
+});
 
-test("a split base with both tables reports ready", () => {
+const splitBase = () => [campaignsTable(), actionItemsTable(), weeklyCallsTable()];
+
+test("a base with all three tables reports ready", () => {
   const audit = auditTrackerTables("appoVGkvrA146CmzF", splitBase());
   assert.equal(audit.ready, true);
   assert.equal(audit.needsSplit, false);
   assert.equal(audit.campaigns.table.id, "tblrq38rkLIPujZUs");
   assert.equal(audit.actionItems.table.id, "tbljRlffgDz7B6BBZ");
+  assert.equal(audit.weeklyCalls.table.id, "tblWeeklyCalls001");
+});
+
+test("a base with the two old tables but no Weekly Calls is not ready until it is added", () => {
+  // The upgrade path: an existing client base has campaigns and projects but not the calls table yet, so
+  // the setup button must light up rather than reporting the base as done.
+  const audit = auditTrackerTables("appoVGkvrA146CmzF", [campaignsTable(), actionItemsTable()]);
+  assert.equal(audit.ready, false);
+  assert.equal(audit.weeklyCalls.table, null);
+  assert.equal(audit.weeklyCalls.missing.length, REQUIRED_WEEKLY_CALL_FIELDS.length);
+  // And it is not mistaken for an unsplit base: the two new tables are already there.
+  assert.equal(audit.needsSplit, false);
 });
 
 test("the choice sets are reported rather than judged", () => {

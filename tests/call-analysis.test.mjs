@@ -18,6 +18,7 @@ import {
   callAnalysisPromptKey,
   callAnalysisHeaderText,
   callAnalysisUserContent,
+  callAnalysisRow,
   DEFAULT_CALL_ANALYSIS_PROMPT,
 } from "../app/lib/call-analysis.ts";
 import { callReadinessOf } from "../app/lib/morning-brief-schedule.ts";
@@ -52,10 +53,24 @@ test("the default prompt keeps the exact heading format the website parses", () 
   assert.match(DEFAULT_CALL_ANALYSIS_PROMPT, /\*:signal_strength: _Campaigns_ :signal_strength:\*/);
 });
 
-test("the header names the client and the automation", () => {
+test("the prompt orders the sections campaigns, deals, action items, discussed, next steps", () => {
+  const order = ["Campaigns", "Deals", "Action Items", "Discussed", "Next Steps"].map((name) => DEFAULT_CALL_ANALYSIS_PROMPT.indexOf(`_${name}_`));
+  for (const at of order) assert.ok(at > -1, "a section heading is missing");
+  assert.deepEqual([...order].sort((a, b) => a - b), order, "the sections are not in the intended order");
+});
+
+test("the prompt bans the em dash and forbids double-asterisk bold, like the brief", () => {
+  // The formatting must match the morning brief: Slack mrkdwn, no em dashes, single-asterisk bold.
+  assert.match(DEFAULT_CALL_ANALYSIS_PROMPT, /Never use an em dash/);
+  assert.match(DEFAULT_CALL_ANALYSIS_PROMPT, /no underline in Slack/i);
+});
+
+test("the header names the client and the day of the call, threaded, with no weekday", () => {
   const header = callAnalysisHeaderText(WORKSPACE, new Date("2026-08-19T16:00:00.000Z"));
-  assert.match(header, /Willow Call Analysis/);
-  assert.match(header, /:clipboard:/);
+  assert.match(header, /Willow Weekly Sync Recap \(August 19th\)/);
+  assert.match(header, /:thread:/);
+  // No weekday, unlike the morning brief: a recap is dated by the calendar day of the meeting.
+  assert.doesNotMatch(header, /Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday/);
 });
 
 test("the content hands the model the transcript, the attendees and the client context", () => {
@@ -64,6 +79,20 @@ test("the content hands the model the transcript, the attendees and the client c
   assert.match(content, /Kiril, Dana/);
   assert.match(content, /sustainable furniture/);
   assert.match(content, /42 minutes/);
+});
+
+test("the content hands the model a mention roster and the brain, the way the brief does", () => {
+  const content = callAnalysisUserContent(WORKSPACE, {
+    call: CALL,
+    brain: "# QC Brain\n\nWillow is scaling ASC outbound.",
+    people: [{ id: "U01", name: "Kiril" }, { id: "U02", name: "Dana" }],
+  });
+  // The roster is name → mention code, copied verbatim so the owner is actually notified.
+  assert.match(content, /How to mention people/);
+  assert.match(content, /Kiril → <@U01>/);
+  assert.match(content, /Dana → <@U02>/);
+  // The QC Brain rides along as standing context, the same block the morning brief is given.
+  assert.match(content, /Willow is scaling ASC outbound\./);
 });
 
 test("with no call, the content tells the model to say so and stop", () => {
@@ -95,6 +124,40 @@ test("the route is the second automation, may reach the external channel, and lo
   // Reuses the brief's framing and the shared log table rather than inventing its own.
   assert.match(route, /briefFraming/);
   assert.match(route, /rr_slack_briefs/);
+});
+
+test("the route files the recap into the client's Weekly Calls table after posting", () => {
+  assert.match(route, /fileWeeklyCall/);
+  // Files from the mapped base, and the note it returns rides along in the trace, never a failed recap.
+  assert.match(route, /airtable_base_id/);
+  assert.match(route, /filingNotes/);
+});
+
+const WEEKLY_CALL_ROW = callAnalysisRow(WORKSPACE, { call: CALL, recap: "1. do the thing", destination: "internal", syncedAt: new Date("2026-08-21T10:00:00.000Z") });
+
+test("a Weekly Calls row carries the call's facts and is keyed on the Granola note id", () => {
+  assert.equal(WEEKLY_CALL_ROW["Call ID"], "n1");
+  assert.equal(WEEKLY_CALL_ROW.Title, "Willow <> QC Weekly");
+  assert.equal(WEEKLY_CALL_ROW.Attendees, "Kiril, Dana");
+  assert.equal(WEEKLY_CALL_ROW.Host, "Kiril");
+  assert.equal(WEEKLY_CALL_ROW["Duration (min)"], 42);
+  assert.equal(WEEKLY_CALL_ROW.Recap, "1. do the thing");
+  // The day of the call in the client's zone, not the day it was filed.
+  assert.equal(WEEKLY_CALL_ROW["Call Date"], "2026-08-19");
+  assert.equal(WEEKLY_CALL_ROW["Last Synced"], "2026-08-21");
+});
+
+test("the row's Posted To is one of the four options the table offers", () => {
+  assert.equal(WEEKLY_CALL_ROW["Posted To"], "Internal");
+  assert.equal(callAnalysisRow(WORKSPACE, { call: CALL, recap: "x", destination: "preview" })["Posted To"], "Preview");
+  assert.equal(callAnalysisRow(WORKSPACE, { call: CALL, recap: "x", destination: "external" })["Posted To"], "External");
+});
+
+test("a field with nothing to say is left off the row rather than written blank", () => {
+  const bare = callAnalysisRow(WORKSPACE, { call: { ...CALL, attendees: [], owner: "", durationMinutes: 0 }, recap: "x", destination: "test" });
+  assert.ok(!("Attendees" in bare), "an empty attendee list should not be written");
+  assert.ok(!("Host" in bare), "an empty host should not be written");
+  assert.ok(!("Duration (min)" in bare), "a zero-minute duration is not a real call length");
 });
 
 test("the enabling column exists and the worker drains the call-analysis queue one client per cycle", () => {

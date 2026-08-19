@@ -212,11 +212,57 @@ export const PROJECT_TABLE_SPEC: TrackerTableSpec = {
   ],
 };
 
+/**
+ * One row per weekly call, written by the call analysis. Standalone — no link, no formula — because a
+ * recap is a record of one meeting, not a thing the brief moves through states. `Call ID` is the Granola
+ * note id and the reason a re-run of the same call updates its row instead of adding a second recap.
+ */
+export const WEEKLY_CALLS_TABLE_SPEC: TrackerTableSpec = {
+  name: "Weekly Calls",
+  description:
+    "One row per weekly call, filed by the call analysis. Each row is a meeting: its date, who was on it, how long it ran, and the recap the model wrote. A re-run of the same call updates its row rather than adding a second, keyed on Call ID. Group a view by Call Date to read the weeks in order.",
+  fields: [
+    { stage: "base", name: "Title", type: "singleLineText", description: "The call, as Granola titled it." },
+    { stage: "base", name: "Call Date", type: "date", options: localDate, description: "The day the call was on — not the day the recap was filed." },
+    { stage: "base", name: "Attendees", type: "singleLineText", description: "Who was on the call, by name." },
+    { stage: "base", name: "Host", type: "singleLineText", description: "Whose call it was." },
+    { stage: "base", name: "Duration (min)", type: "number", options: wholeNumber, description: "How long the call ran, in minutes." },
+    { stage: "base", name: "Recap", type: "multilineText", description: "The recap the model wrote, the same text posted to Slack." },
+    {
+      stage: "base",
+      name: "Posted To",
+      type: "singleSelect",
+      description: "Where the recap went.",
+      options: {
+        choices: [
+          { name: "Internal", color: "blueLight2" },
+          { name: "External", color: "cyanLight2" },
+          { name: "Test", color: "yellowLight2" },
+          { name: "Preview", color: "grayLight2" },
+        ],
+      },
+    },
+    {
+      stage: "base",
+      name: "Call ID",
+      type: "singleLineText",
+      description: "The Granola note id. What lets a re-run update this row instead of adding a second copy. Do not edit.",
+    },
+    {
+      stage: "base",
+      name: "Last Synced",
+      type: "date",
+      options: isoDate,
+      description: "The last call analysis that refreshed this row.",
+    },
+  ],
+};
+
 const flatten = (value: unknown) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
 export type TablePlan = { spec: TrackerTableSpec; create: boolean; missing: TrackerFieldSpec[] };
 
-export type SetupPlan = { campaign: TablePlan; project: TablePlan; changes: number };
+export type SetupPlan = { campaign: TablePlan; project: TablePlan; weeklyCalls: TablePlan; changes: number };
 
 /**
  * What one base is short of, decided without touching the network.
@@ -226,7 +272,11 @@ export type SetupPlan = { campaign: TablePlan; project: TablePlan; changes: numb
  * is not checked, because a column somebody has already filled in is theirs, and "wrong type" is a
  * thing to report rather than a thing to correct underneath them.
  */
-export function planSetup(campaignTable: AirtableTable | null, projectTable: AirtableTable | null): SetupPlan {
+export function planSetup(
+  campaignTable: AirtableTable | null,
+  projectTable: AirtableTable | null,
+  weeklyCallsTable: AirtableTable | null,
+): SetupPlan {
   const plan = (spec: TrackerTableSpec, table: AirtableTable | null): TablePlan => {
     if (!table) return { spec, create: true, missing: spec.fields };
     const have = new Set((table.fields ?? []).map((field) => flatten(field.name)));
@@ -235,7 +285,15 @@ export function planSetup(campaignTable: AirtableTable | null, projectTable: Air
 
   const campaign = plan(CAMPAIGN_TABLE_SPEC, campaignTable);
   const project = plan(PROJECT_TABLE_SPEC, projectTable);
-  return { campaign, project, changes: (campaign.create ? 1 : 0) + (project.create ? 1 : 0) + campaign.missing.length + project.missing.length };
+  const weeklyCalls = plan(WEEKLY_CALLS_TABLE_SPEC, weeklyCallsTable);
+  const changes =
+    (campaign.create ? 1 : 0) +
+    (project.create ? 1 : 0) +
+    (weeklyCalls.create ? 1 : 0) +
+    campaign.missing.length +
+    project.missing.length +
+    weeklyCalls.missing.length;
+  return { campaign, project, weeklyCalls, changes };
 }
 
 /** The fields of one stage, in the order they are written down. */

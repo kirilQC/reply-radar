@@ -10,10 +10,12 @@
  * sending are one request so a written analysis can never be edited between the two; every attempt is
  * logged to `rr_slack_briefs` whether Slack accepted it or not; and the worker asks GET what is due
  * rather than keeping a second copy of the schedule maths it cannot import. What differs is the input and
- * the reach. A call analysis reads one source — the transcript Granola captured of the weekly call — so
- * there is no HeyReach in it and no tracker after it. And unlike a brief, it may go to the client's
- * external channel: a brief is the team's own outstanding-work list, but a call summary is a thing a
- * client is often glad to receive, so internal is the default and external is an offered choice.
+ * the reach. A call analysis reads one source, the transcript Granola captured of the weekly call, so
+ * there is no HeyReach in it. It files what it writes into the base's Weekly Calls table, the third
+ * tracker, rather than into the campaign and project tables the brief keeps. And unlike a brief, it may
+ * go to the client's external channel: a brief is the team's own outstanding-work list, but a call
+ * summary is a thing a client is often glad to receive, so internal is the default and external is an
+ * offered choice.
  *
  * ── Why it reuses the brief's tables with no new schema ──────────────────────────────────────────
  * `rr_slack_automations` is keyed by automation name and `rr_slack_briefs` carries an `automation`
@@ -23,9 +25,10 @@
 
 import { NextResponse } from "next/server";
 import { briefFraming, type BriefWorkspace } from "../../../lib/morning-brief";
-import { gatherCalls, writeBrief } from "../../../lib/morning-brief-run";
-import { callAnalysisHeaderText, callAnalysisUserContent, type CallAnalysisInputs } from "../../../lib/call-analysis";
-import { callAnalysisPrompt } from "../../../lib/call-analysis-run";
+import { gatherCalls, gatherChannels, writeBrief } from "../../../lib/morning-brief-run";
+import { brainContext } from "../../../lib/brain-context";
+import { callAnalysisHeaderText, callAnalysisUserContent, type CallAnalysisDestination, type CallAnalysisInputs } from "../../../lib/call-analysis";
+import { callAnalysisPrompt, fileWeeklyCall, type WeeklyCallFileResult } from "../../../lib/call-analysis-run";
 import {
   alreadySentToday,
   callReadinessOf,
@@ -266,8 +269,8 @@ export async function POST(request: Request) {
     destination = ["test", "internal", "external"].includes(String(body.destination)) ? String(body.destination) : "preview";
     if (!slug) return NextResponse.json({ error: "No client was named." }, { status: 400 });
 
-    const columns = "id,name,slug,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match";
-    const rows = await read(`rr_workspaces?select=${columns},granola_extra_title_matches&slug=eq.${encodeURIComponent(slug)}&limit=1`)
+    const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,airtable_base_id";
+    const rows = await read(`rr_workspaces?select=${columns},slack_extra_channel_ids,granola_extra_title_matches&slug=eq.${encodeURIComponent(slug)}&limit=1`)
       .catch(() => read(`rr_workspaces?select=${columns}&slug=eq.${encodeURIComponent(slug)}&limit=1`));
     const found = (Array.isArray(rows) ? (rows as Row[]) : [])[0];
     if (!found) return NextResponse.json({ error: "That client does not exist." }, { status: 404 });
@@ -291,18 +294,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `${SLACK_TOKEN_ENV} is not set, so nothing can be posted to Slack.` }, { status: 400 });
     }
 
-    // The transcript and the prompt in parallel. `gatherCalls` never throws — a missing call is an
-    // analysis that says so in one line, not a failed run.
-    const [call, systemPrompt] = await Promise.all([
+    // The transcript, the prompt, the channel roster and the QC Brain in parallel. `gatherCalls`,
+    // `gatherChannels` and `brainContext` never throw — a missing source is a recap that leaves that
+    // section out, not a failed run. The channels are read only for the people in them: the recap names
+    // an action item owner and needs the mention codes to notify them, the same roster the brief uses.
+    const [call, systemPrompt, channels, brain] = await Promise.all([
       gatherCalls(read, workspace),
       callAnalysisPrompt(workspace.slug),
+      gatherChannels(workspace),
+      brainContext(workspace),
     ]);
+
+    // Name and id together, so the recap can turn "Kori will send it" into a mention Kori is notified by.
+    const people = [...(channels.internal.people ?? []), ...(channels.external.people ?? [])];
 
     const inputs: CallAnalysisInputs = {
       call: call.call,
       callReason: call.callReason,
       extraCalls: call.extras,
       brief: String((workspace as Row).client_brief ?? ""),
+      brain: brain.block,
+      people,
     };
     const content = callAnalysisUserContent(workspace, inputs);
     // Framed the same way the brief is — each heading fenced and centred — so the two automations read
@@ -310,12 +322,17 @@ export async function POST(request: Request) {
     // that is a morning-brief ritual, and a call analysis is a record of one meeting, not a daily note.
     const body_ = briefFraming(await writeBrief(systemPrompt, content));
 
+    // The header names the day of the call, not today: a recap of Monday's sync run on Wednesday is still
+    // Monday's, and `startedAt` is epoch millis from Granola. No call means nothing was posted anyway, so
+    // the fallback to now never actually reaches Slack.
+    const headerDate = call.call ? new Date(call.call.startedAt) : new Date();
+
     let messageTs = "";
     let analysisTs = "";
     let sendError = "";
     if (channelId) {
       try {
-        messageTs = await postMessage(channelId, callAnalysisHeaderText(workspace));
+        messageTs = await postMessage(channelId, callAnalysisHeaderText(workspace, headerDate));
         analysisTs = await postMessage(channelId, body_, messageTs);
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Slack refused the message.";
@@ -324,11 +341,32 @@ export async function POST(request: Request) {
     }
     const posted = Boolean(analysisTs);
 
+    // The call's own facts ride along so a manual run can show which meeting it read: the date, who was on
+    // it, and how long it ran. `startedAt` is epoch millis; the UI turns it into a date in the client's zone.
     const sources = {
-      call: call.call ? { title: call.call.title, ageDays: call.call.ageDays, owner: call.call.owner, transcriptChars: call.call.transcript.length } : null,
+      call: call.call
+        ? {
+            title: call.call.title,
+            startedAt: call.call.startedAt,
+            ageDays: call.call.ageDays,
+            owner: call.call.owner,
+            attendees: call.call.attendees,
+            durationMinutes: call.call.durationMinutes,
+            transcriptChars: call.call.transcript.length,
+          }
+        : null,
       extraCalls: call.extras.map((extra) => ({ title: extra.title, ageDays: extra.ageDays, owner: extra.owner, transcriptChars: extra.transcript.length })),
       callReason: call.callReason ?? null,
     };
+
+    // File the recap into the client's Weekly Calls table, keyed on the call so a re-run updates rather
+    // than duplicates. After posting and non-fatal by design: a base that is unmapped or missing the table
+    // is a note in the trace, never a failed recap. Skipped when there is no call to file.
+    const baseId = String((workspace as Row).airtable_base_id ?? "").trim();
+    const filing: WeeklyCallFileResult = call.call
+      ? await fileWeeklyCall(baseId, workspace, { call: call.call, recap: body_, destination: destination as CallAnalysisDestination })
+      : { filed: null, note: "" };
+    const filingNotes = filing.note ? [filing.note] : [];
 
     await insertRun(url, key, {
       workspace_id: workspace.id,
@@ -337,7 +375,7 @@ export async function POST(request: Request) {
       slack_channel_id: channelId || null,
       slack_message_ts: analysisTs || null,
       body: body_,
-      signals: { sources },
+      signals: { sources, weeklyCall: { filed: filing.filed, note: filing.note || null } },
       status: sendError ? "error" : "success",
       error_text: sendError || null,
     });
@@ -345,15 +383,15 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: !sendError,
       brief: body_,
-      // No mentions map: a call analysis attributes action items by name in bold, not by `<@U…>` code,
-      // because the attendees come from Granola as names with no Slack ids to resolve them to.
-      mentions: {},
+      // The mention roster the recap was written against, so the website renders `<@U…>` as `@name` the
+      // same way the morning brief does. Action item owners are the agency team, who are in these channels.
+      mentions: Object.fromEntries(people.map((person) => [person.id, person.name])),
       sources,
       posted,
       channelId: channelId || null,
       messageTs: analysisTs || null,
       threadTs: messageTs || null,
-      channelNotes: call.errors.filter(Boolean),
+      channelNotes: [...call.errors, ...filingNotes].filter(Boolean),
       error: sendError || undefined,
     });
   } catch (error) {

@@ -316,7 +316,7 @@ export default function AdminPage() {
    * one client, and the answer for the other forty-nine would be thrown away.
    */
   type TableAudit = { name: string; table: { id: string; name: string } | null; missing: { name: string }[]; mistyped: { name: string; expected: string; actual: string }[] };
-  const [tracker, setTracker] = useState<{ ready: boolean; campaigns: TableAudit; actionItems: TableAudit; needsSplit: boolean; legacyTable: { name: string } | null } | null>(null);
+  const [tracker, setTracker] = useState<{ ready: boolean; campaigns: TableAudit; actionItems: TableAudit; weeklyCalls: TableAudit; needsSplit: boolean; legacyTable: { name: string } | null } | null>(null);
   const [trackerState, setTrackerState] = useState<"idle" | "checking" | "error">("idle");
   const [trackerError, setTrackerError] = useState("");
   const [trackerChecks, setTrackerChecks] = useState(0);
@@ -372,12 +372,12 @@ export default function AdminPage() {
     if (trackerState === "checking") return "Checking the tables in that base.";
     if (trackerState === "error") return trackerError;
     if (!tracker) return "";
-    if (tracker.ready) return "Campaign Tracker and Project Tracker are both ready.";
+    if (tracker.ready) return "Campaign Tracker, Project Tracker and Weekly Calls are all ready.";
     // Said as the thing to go and do. "Not ready" is three different jobs depending on why, and the
     // one that reads as a missing column is usually a base nobody has split yet.
     if (tracker.needsSplit) return `That base still has the old ${tracker.legacyTable?.name ?? "combined tracker"}. It needs splitting into Campaign Tracker and Project Tracker before the brief can write to it.`;
     const faults: string[] = [];
-    for (const audit of [tracker.campaigns, tracker.actionItems]) {
+    for (const audit of [tracker.campaigns, tracker.actionItems, tracker.weeklyCalls]) {
       if (!audit.table) { faults.push(`${audit.name} is missing`); continue; }
       for (const field of audit.missing) faults.push(`${audit.name}: ${field.name} is missing`);
       for (const field of audit.mistyped) faults.push(`${audit.name}: ${field.name} is a ${field.actual}, not a ${field.expected}`);

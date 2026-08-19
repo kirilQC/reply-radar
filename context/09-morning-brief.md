@@ -341,11 +341,11 @@ rather than fork it, so both render identically in Slack and on the website.
 
 | Where | What it does |
 |---|---|
-| `app/lib/call-analysis.ts` | Pure. The prompt key, the default prompt, the header, the user content. No relative value imports, so its text is asserted directly. |
-| `app/lib/call-analysis-run.ts` | The one I/O bit: resolves the stored prompt (per-client, else global, else default). |
-| `app/api/slack/call-analysis/route.ts` | `GET` lists clients and readiness; `PATCH` edits the schedule and toggles a client; `POST` writes and posts one analysis. |
+| `app/lib/call-analysis.ts` | Pure. The prompt key, the default prompt, the header, the user content, and `callAnalysisRow` (the Weekly Calls fields object). No relative value imports, so its text is asserted directly. |
+| `app/lib/call-analysis-run.ts` | The I/O: resolves the stored prompt (per-client, else global, else default), and `fileWeeklyCall`, which files the recap into the base's Weekly Calls table. |
+| `app/api/slack/call-analysis/route.ts` | `GET` lists clients and readiness; `PATCH` edits the schedule and toggles a client; `POST` writes, posts and files one analysis. |
 | `worker/render-worker.mjs` (`sendDueCallAnalysis`) | Drains the call-analysis queue, one client per cycle, right after `sendDueBrief`. |
-| `tests/call-analysis.test.mjs` | 8 tests: the pure module, `callReadinessOf`, and source-text checks on the route, schema and worker. |
+| `tests/call-analysis.test.mjs` | The pure module (prompt, section order, header, content, roster, the row builder), `callReadinessOf`, and source-text checks on the route, schema and worker. |
 
 What it **reuses**, on purpose, with no new tables:
 
@@ -358,26 +358,53 @@ What it **reuses**, on purpose, with no new tables:
 
 What is genuinely different, and why:
 
-- **One source, not six.** It reads a single transcript. `gatherCalls` already fetches it for the brief,
-  so the analysis borrows that and nothing else — no HeyReach, no tracker, no prior briefs.
+- **One source of news, not six.** It reads a single transcript. `gatherCalls` fetches it for the brief,
+  so the analysis borrows that. It also reads `gatherChannels` (for the mention roster only) and
+  `brainContext` (standing context), the same two the brief uses — no HeyReach, no prior briefs.
 - **`callReadinessOf` has no HeyReach leg.** A brief needs a sender source; an analysis needs only an
   internal Slack channel and a Granola key. The shape is `{slack, granola, ready}`, and the UI hides the
   HeyReach row conditionally rather than showing a check that can never apply.
 - **Internal is the default, external is allowed.** The brief only ever goes internal; an analysis may
   be posted to the client-facing channel, so the route accepts `["test", "internal", "external"]` and the
   schedule editor grows a channel `<select>` for this automation only.
-- **Action items are attributed by bold name, not `<@U…>`.** Granola attendees have no Slack ids, so the
-  analysis returns `mentions: {}` and names people in bold text — there is no roster to notify against.
-- **Only new state is `rr_workspaces.call_analysis_enabled`** (default false), the opt-in per client:
+- **Action items are `<@U…>` mentions, from the same roster the brief uses.** Granola attendees have no
+  Slack ids, but the action-item owners are the agency team, who *are* in the client's Slack channels. So
+  the route hands the model the `gatherChannels` roster (`name → <@id>`) to copy verbatim and returns the
+  `mentions` map, exactly as the brief does — the owner is actually notified, and the website renders the
+  code as `@name`. The client's own people, not in the roster, stay bold plain text.
+- **Header dated by the call, threaded, no weekday.** `*{Client} Weekly Sync Recap (August 18th)*  :thread:`,
+  with the recap posted as a threaded reply underneath. The date is the day of the *call* (`startedAt`),
+  not today — a Monday call recapped on Wednesday is still Monday's. No weekday, unlike the brief: a recap
+  is named by its calendar date, not the morning it went out.
+- **A manual run shows which meeting it read.** The route returns `sources.call` (date, attendees,
+  duration) and the Slack page renders it as a faint `.call-meta` line above the recap.
+- **It files into a third Airtable table, `Weekly Calls`.** After posting, `fileWeeklyCall` writes the
+  recap into the base's Weekly Calls table, keyed on the Granola note id so a re-run updates the row
+  rather than duplicating it. Non-fatal like the brief's tracker sync: an unmapped base or a missing
+  table is a note in the trace, never a failed recap. The table is standalone (no link, no formula) and
+  is built by the same setup button as the other two — see below.
+- **Only new Supabase state is `rr_workspaces.call_analysis_enabled`** (default false), the opt-in per
+  client:
 
   ```sql
   alter table rr_workspaces add column if not exists call_analysis_enabled boolean not null default false;
   ```
 
 The default prompt's headings follow the brief's exact `*:emoji: _Title_ :emoji:*` shape so the same
-`briefFraming` regex fences them: `_Action Items_`, `_Discussed_`, `_Deals_`, `_Campaigns_`,
-`_Next Steps_`. Change an underscore or an asterisk and a heading renders as a plain line — a test
-asserts the three that the website parser depends on.
+`briefFraming` regex fences them, in the order `_Campaigns_`, `_Deals_`, `_Action Items_`, `_Discussed_`,
+`_Next Steps_`. Formatting mirrors the brief throughout: Slack mrkdwn (single-asterisk bold, no `**`), no
+em dashes, numbered items with a single `•` sub-bullet, and a hard 200-word cap. Change an underscore or
+an asterisk and a heading renders as a plain line — a test asserts the three the website parser depends on.
+
+### The Weekly Calls table
+
+The client-base template is now **three** tracker tables, not two. `Weekly Calls` (`tracker-setup.ts`,
+`WEEKLY_CALLS_TABLE_SPEC`) sits beside Campaign Tracker and Project Tracker, and the same **Build the
+tables** button provisions all three additively. Its fields: Title, Call Date, Attendees, Host,
+Duration (min), Recap, Posted To (Internal/External/Test/Preview), Call ID (the Granola note id, the
+dedupe key), Last Synced. Group a view by Call Date to read the weeks in order. Because the audit's
+`ready` now requires the third table too, an existing two-table base reads as not-ready until the button
+adds it — which is the intended upgrade prompt.
 
 This is a first pass and is expected to be refined.
 

@@ -1916,6 +1916,28 @@ body.light-mode .prompt-dialog-backdrop {
   margin: 30px 0 12px;
 }
 
+/* The call's own facts under the "The analysis" label: date, attendees, runtime. Faint chips, not a
+   paragraph — the recap below is the content, this only says which meeting produced it. */
+.call-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: -4px 0 14px;
+  font-size: 12px;
+  color: var(--report-ink-soft);
+}
+
+.call-meta span {
+  position: relative;
+}
+
+.call-meta span + span::before {
+  content: "·";
+  position: absolute;
+  left: -9px;
+  color: var(--report-ink-faint);
+}
+
 .hub-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
