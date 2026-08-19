@@ -501,9 +501,17 @@ export async function POST(request: Request) {
       error_text: sendError || null,
     });
 
+    // The roster the brief was written against, as an id→name map. The brief carries people only as
+    // `<@U…>` codes; the website has no other way to turn one back into a name, so it rides down with the
+    // brief and BriefView resolves the codes on render. Same list the tracker extraction was handed.
+    const mentions = Object.fromEntries(
+      [...(channels.internal.people ?? []), ...(channels.external.people ?? [])].map((person) => [person.id, person.name]),
+    );
+
     return NextResponse.json({
       ok: !sendError,
       brief: body_,
+      mentions,
       signals,
       sources,
       steps,

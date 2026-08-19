@@ -27,6 +27,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
+import BriefView from "../components/BriefView";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import { DAY_NAMES, DEFAULT_SCHEDULE, describeSchedule, type BriefSchedule, type Readiness } from "../lib/morning-brief-schedule";
@@ -68,6 +69,8 @@ type RunResult = {
   ok?: boolean;
   error?: string;
   brief?: string;
+  /** id→name for the `<@U…>` codes in `brief`, so the website can render them as people. */
+  mentions?: Record<string, string>;
   posted?: boolean;
   channelId?: string | null;
   channelNotes?: string[];
@@ -445,9 +448,10 @@ export default function SlackPage() {
                       <span>The brief</span>
                       <span>{result.posted ? `Posted to ${result.channelId}` : "Not posted"}</span>
                     </div>
-                    {/* Shown exactly as Slack will render the text, which is to say not rendered at all:
-                        a preview that prettified the mrkdwn would hide the one thing worth checking. */}
-                    <pre className="slack-brief-body">{result.brief}</pre>
+                    {/* On the website the brief reads as a document: the stored Slack mrkdwn is parsed
+                        back into headings and lists (BriefView), rather than shown as the raw markup Slack
+                        itself receives. The mrkdwn is still what posts; this is only how it looks here. */}
+                    <BriefView body={result.brief} mentions={result.mentions} />
                   </>
                 )}
 

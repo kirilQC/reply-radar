@@ -5506,6 +5506,128 @@ span.brain-mark.is-lg {
   overflow-wrap: anywhere;
 }
 
+/* The same brief, read rather than proofread: on the website the stored mrkdwn is parsed back into a
+   document (see BriefView), so the asterisks and fences that matter in the Slack preview above become
+   the headings and lists they stood for. Deliberately quieter than a report — this is the team's own
+   working copy, not a client deliverable — but spaced so it can be read top to bottom in one pass. */
+.brief-doc {
+  padding: 20px 22px;
+  border-radius: 12px;
+  border: 1px solid var(--report-line);
+  background: var(--report-inset);
+  color: var(--report-ink);
+  font-size: 13.5px;
+  line-height: 1.62;
+  overflow-wrap: anywhere;
+}
+
+.brief-doc > *:first-child {
+  margin-top: 0;
+}
+
+.brief-doc-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 26px 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--report-ink);
+}
+
+.brief-doc-heading-mark {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.brief-doc-paragraph {
+  margin: 0 0 12px;
+}
+
+.brief-doc-list {
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.brief-doc-item {
+  position: relative;
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.brief-doc-item::before {
+  content: "•";
+  position: absolute;
+  left: 4px;
+  color: var(--report-ink-faint);
+}
+
+.brief-doc-item[data-depth="1"] {
+  padding-left: 34px;
+  color: var(--report-ink-soft);
+}
+
+.brief-doc-item[data-depth="1"]::before {
+  content: "◦";
+  left: 20px;
+}
+
+.brief-doc-item[data-depth="2"] {
+  padding-left: 50px;
+  color: var(--report-ink-soft);
+}
+
+.brief-doc-item[data-depth="2"]::before {
+  content: "◦";
+  left: 36px;
+}
+
+.brief-doc-numbered {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.brief-doc-number {
+  font-weight: 700;
+  color: var(--report-ink-soft);
+}
+
+.brief-doc-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 14px 0;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--report-line);
+  background: var(--report-surface);
+  color: var(--report-ink);
+  font-weight: 600;
+}
+
+.brief-doc-callout-mark {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.brief-doc-mention {
+  font-weight: 600;
+  color: var(--report-brand);
+}
+
+.brief-doc-link {
+  color: var(--report-brand);
+  text-decoration: underline;
+}
+
+.brief-doc-emoji {
+  font-style: normal;
+}
+
 @media (max-width: 900px) {
   .slack-destinations {
     grid-template-columns: minmax(0, 1fr);
