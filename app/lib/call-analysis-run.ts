@@ -22,6 +22,10 @@ import {
   updateRecords,
   WEEKLY_CALLS_TABLE_NAME,
 } from "./airtable";
+import { brainConfigured, brainTree, writeBrainFile } from "./brain";
+import { brainFolderFor } from "../../shared/brain-link.mjs";
+import { clientsIn } from "../../shared/brain-structure.mjs";
+import { weeklyCallBrainDoc } from "./weekly-call-brain";
 import type { ClientCall } from "./granola";
 import type { BriefWorkspace } from "./morning-brief";
 
@@ -76,4 +80,57 @@ export async function fileWeeklyCall(
 
   const made = await createRecords(baseId, table.id, [fields]);
   return made.ok ? { filed: "created", note: "" } : { filed: null, note: made.error };
+}
+
+/**
+ * Files the same recap into the client's QC Brain folder, or says why it could not.
+ *
+ * The brain's sibling of `fileWeeklyCall`: the identical field set, plus the whole untruncated transcript,
+ * written as a markdown file under `clients/<folder>/Weekly calls/`. Every field that lands in Airtable
+ * lands here too, so a person reading the client in the brain sees their calls without opening the base.
+ *
+ * Runs after the recap is posted and, like every filing step, never throws and never turns a delivered
+ * recap into a failed run — a brain that is not connected, a client with no matching folder, or a GitHub
+ * hiccup all come back as a note for the trace. The client is matched to its folder with the same
+ * `brainFolderFor` rule the QC Brain tab and the morning brief use, so one client never files under
+ * another's folder. The path is keyed on the day of the call and its title, so a re-run overwrites the
+ * one file rather than filing a second.
+ */
+export async function fileWeeklyCallToBrain(
+  workspace: BriefWorkspace,
+  input: { call: ClientCall; recap: string; destination: CallAnalysisDestination; mentions?: Record<string, string> },
+): Promise<WeeklyCallFileResult> {
+  if (!brainConfigured()) return { filed: null, note: "The QC Brain is not connected, so the recap was not filed to it." };
+
+  try {
+    const paths = (await brainTree()).map((file) => file.path);
+    const { folder } = brainFolderFor(
+      { slug: workspace.slug, name: workspace.name, brainFolder: workspace.brain_folder },
+      clientsIn(paths),
+    ) as { folder: string };
+    if (!folder) return { filed: null, note: `No QC Brain folder matches ${workspace.name || "this client"}, so the recap was not filed to it.` };
+
+    // The recap is stored as Slack mrkdwn; the brain reads as plain markdown, so it is flattened the same
+    // way the Airtable cell is, against the same mention map the recap was written with.
+    const recap = recapPlainText(input.recap, input.mentions ?? {});
+    const { path, text } = weeklyCallBrainDoc(folder, workspace, { call: input.call, recap, destination: input.destination });
+    const existed = paths.includes(path);
+
+    const written = await writeBrainFile({
+      path,
+      text,
+      summary: `Weekly call recap: ${workspace.name} (${weeklyCallDate(workspace, input.call.startedAt)})`,
+      author: "Reply Radar",
+    });
+    // `writeBrainFile` reports created vs replaced from the SHA it found; the tree lookup is the fallback
+    // for the rare case the file was written between the two reads.
+    return { filed: written.created && !existed ? "created" : "updated", note: "" };
+  } catch (error) {
+    return { filed: null, note: error instanceof Error ? error.message : "The recap could not be filed to the QC Brain." };
+  }
+}
+
+/** The day of the call in the client's zone, for the commit message — the same date the file is named for. */
+function weeklyCallDate(workspace: BriefWorkspace, startedAt: number): string {
+  return new Date(startedAt).toLocaleDateString("en-CA", { timeZone: workspace.timezone || "America/New_York" });
 }

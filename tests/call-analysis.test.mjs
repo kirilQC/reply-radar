@@ -22,9 +22,11 @@ import {
   DEFAULT_CALL_ANALYSIS_PROMPT,
 } from "../app/lib/call-analysis.ts";
 import { callReadinessOf } from "../app/lib/morning-brief-schedule.ts";
+import { weeklyCallBrainDoc, weeklyCallSlug } from "../app/lib/weekly-call-brain.ts";
 
 const route = readFileSync(new URL("../app/api/slack/call-analysis/route.ts", import.meta.url), "utf8");
 const runSource = readFileSync(new URL("../app/lib/call-analysis-run.ts", import.meta.url), "utf8");
+const brainSource = readFileSync(new URL("../app/lib/brain.ts", import.meta.url), "utf8");
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const worker = readFileSync(new URL("../worker/render-worker.mjs", import.meta.url), "utf8");
 
@@ -182,4 +184,64 @@ test("the enabling column exists and the worker drains the call-analysis queue o
   assert.match(schema, /call_analysis_enabled boolean not null default false/);
   assert.match(worker, /sendDueCallAnalysis/);
   assert.match(worker, /api\/slack\/call-analysis/);
+});
+
+const BRAIN_DOC = weeklyCallBrainDoc("willow", WORKSPACE, {
+  call: CALL,
+  recap: "1. do the thing",
+  destination: "internal",
+  syncedAt: new Date("2026-08-21T10:00:00.000Z"),
+});
+
+test("the brain doc files under the client's Weekly calls folder, keyed by call date and title", () => {
+  // Named the way the brain names its own call notes: YYYY-MM-DD-<slug>, so a re-run overwrites this file.
+  assert.equal(BRAIN_DOC.path, "clients/willow/Weekly calls/2026-08-19-willow-qc-weekly.md");
+  assert.equal(weeklyCallSlug("Willow <> QC Weekly"), "willow-qc-weekly");
+  assert.equal(weeklyCallSlug(""), "weekly-call");
+});
+
+test("the brain doc carries every Weekly Calls field as frontmatter and the full transcript in the body", () => {
+  // Same fields the Airtable row has: title, date, id, posted-to, attendees, host, duration, last synced.
+  assert.match(BRAIN_DOC.text, /call_date: 2026-08-19/);
+  assert.match(BRAIN_DOC.text, /call_id: n1/);
+  assert.match(BRAIN_DOC.text, /posted_to: Internal/);
+  assert.match(BRAIN_DOC.text, /attendees: Kiril, Dana/);
+  assert.match(BRAIN_DOC.text, /host: Kiril/);
+  assert.match(BRAIN_DOC.text, /duration_min: 42/);
+  assert.match(BRAIN_DOC.text, /last_synced: 2026-08-21/);
+  // A title with a colon-like character is quoted so the frontmatter stays valid YAML.
+  assert.match(BRAIN_DOC.text, /title: "Willow <> QC Weekly"/);
+  // The recap and then the whole transcript, uncut — the brain has no cell-size limit to slice for.
+  assert.match(BRAIN_DOC.text, /## Recap\n\n1\. do the thing/);
+  assert.match(BRAIN_DOC.text, /## Transcript\n\nKiril: let's launch the new campaign\./);
+  assert.ok(BRAIN_DOC.text.includes(CALL.transcript), "the full transcript should be written verbatim");
+});
+
+test("a field with nothing to say is left off the brain frontmatter too", () => {
+  const bare = weeklyCallBrainDoc("willow", WORKSPACE, {
+    call: { ...CALL, attendees: [], owner: "", durationMinutes: 0 },
+    recap: "x",
+    destination: "test",
+  });
+  assert.doesNotMatch(bare.text, /attendees:/);
+  assert.doesNotMatch(bare.text, /host:/);
+  assert.doesNotMatch(bare.text, /duration_min:/);
+});
+
+test("the brain writes straight to main, create-or-replace, and never deletes", () => {
+  // The direct-commit counterpart to proposeBrainEdit: it writes on the default branch, not a PR branch.
+  assert.match(brainSource, /export async function writeBrainFile/);
+  assert.match(brainSource, /branch: baseBranch/);
+  // No delete capability was added — only create or overwrite.
+  assert.doesNotMatch(brainSource, /method: "DELETE"/);
+});
+
+test("the route files the recap to the QC Brain alongside Airtable, and neither stops the other", () => {
+  assert.match(route, /fileWeeklyCallToBrain/);
+  // Both filings run together; a note from either rides along in the trace, never a failed recap.
+  assert.match(route, /Promise\.all\(\[[\s\S]*fileWeeklyCall\([\s\S]*fileWeeklyCallToBrain\(/);
+  assert.match(route, /weeklyCallBrain/);
+  // The brain filer resolves the client's folder with the shared join, not a second fuzzy match.
+  assert.match(runSource, /brainFolderFor/);
+  assert.match(runSource, /writeBrainFile/);
 });

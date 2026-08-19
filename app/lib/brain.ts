@@ -332,6 +332,59 @@ export async function proposeBrainFile(input: { path: string; text: string; summ
   return proposeBrainEdit({ ...input, sha: "" });
 }
 
+/**
+ * Writes a file straight onto the default branch — created if new, replaced if it exists, never deleted.
+ *
+ * The counterpart to `proposeBrainEdit`, for what an automation appends rather than what a person edits.
+ * The pull-request rail above exists so a human reviews a change to a *curated* document before it becomes
+ * everyone's truth; a weekly call recap is a new dated file nobody reviews, and a pull request per call per
+ * client is a pile of merges nobody would ever clear. The brain is the agency's centralized memory, so
+ * these land on `main` where everyone reads them, which is the whole point of it being centralized.
+ *
+ * The one guard that stays is that this only ever creates or overwrites the single path it is handed —
+ * there is no delete here, by design. The SHA is looked up rather than passed in, because the caller is a
+ * background job with no open copy to have locked against; a 404 on that lookup is the ordinary "nothing
+ * here yet" and means a create, and any other lookup failure surfaces on the write itself.
+ */
+export async function writeBrainFile({
+  path,
+  text,
+  summary,
+  author = "Reply Radar",
+}: {
+  path: string;
+  text: string;
+  summary: string;
+  author?: string;
+}): Promise<{ path: string; sha: string; created: boolean; url: string }> {
+  const base = (await github(`/repos/${BRAIN_REPO}`)) as Record<string, unknown>;
+  const baseBranch = String(base.default_branch || "main");
+
+  let sha = "";
+  try {
+    const existing = (await github(`/repos/${BRAIN_REPO}/contents/${encodePath(path)}?ref=${baseBranch}`)) as Record<string, unknown>;
+    if (!Array.isArray(existing)) sha = String(existing.sha ?? "");
+  } catch {
+    /* no such file yet: this is a create, and the write below omits the SHA */
+  }
+
+  const data = (await github(`/repos/${BRAIN_REPO}/contents/${encodePath(path)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      message: summary,
+      content: encode(text),
+      branch: baseBranch,
+      committer: { name: author, email: "brain@qcgrowth.com" },
+      ...(sha ? { sha } : {}),
+    }),
+  })) as Record<string, unknown>;
+
+  fileCache.delete(path);
+  forgetBrainTree();
+  const content = (data.content ?? {}) as Record<string, unknown>;
+  return { path, sha: String(content.sha ?? ""), created: !sha, url: `${BRAIN_URL}/blob/${baseBranch}/${encodePath(path)}` };
+}
+
 const encodePath = (path: string) => path.split("/").map(encodeURIComponent).join("/");
 
 /** A path, as a branch-name-safe fragment. */

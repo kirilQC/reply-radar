@@ -28,7 +28,7 @@ import { briefFraming, type BriefWorkspace } from "../../../lib/morning-brief";
 import { gatherCalls, gatherChannels, writeBrief } from "../../../lib/morning-brief-run";
 import { brainContext } from "../../../lib/brain-context";
 import { callAnalysisHeaderText, callAnalysisUserContent, type CallAnalysisDestination, type CallAnalysisInputs } from "../../../lib/call-analysis";
-import { callAnalysisPrompt, fileWeeklyCall, type WeeklyCallFileResult } from "../../../lib/call-analysis-run";
+import { callAnalysisPrompt, fileWeeklyCall, fileWeeklyCallToBrain, type WeeklyCallFileResult } from "../../../lib/call-analysis-run";
 import {
   alreadySentToday,
   callReadinessOf,
@@ -366,11 +366,18 @@ export async function POST(request: Request) {
     // names both on the website and in the plain-text recap the Weekly Calls row stores.
     const mentions = Object.fromEntries(people.map((person) => [person.id, person.name]));
 
+    // Filed to both the Airtable Weekly Calls table and the client's QC Brain folder, in parallel and
+    // independently: the base is the operational record, the brain is the agency's shared memory, and one
+    // being unmapped or unreachable must not stop the other. Both mirror the same fields off the same call;
+    // the brain also gets the full untruncated transcript. Skipped entirely when there was no call to file.
     const baseId = String((workspace as Row).airtable_base_id ?? "").trim();
-    const filing: WeeklyCallFileResult = call.call
-      ? await fileWeeklyCall(baseId, workspace, { call: call.call, recap: body_, destination: destination as CallAnalysisDestination, mentions })
-      : { filed: null, note: "" };
-    const filingNotes = filing.note ? [filing.note] : [];
+    const [filing, brainFiling]: [WeeklyCallFileResult, WeeklyCallFileResult] = call.call
+      ? await Promise.all([
+          fileWeeklyCall(baseId, workspace, { call: call.call, recap: body_, destination: destination as CallAnalysisDestination, mentions }),
+          fileWeeklyCallToBrain(workspace, { call: call.call, recap: body_, destination: destination as CallAnalysisDestination, mentions }),
+        ])
+      : [{ filed: null, note: "" }, { filed: null, note: "" }];
+    const filingNotes = [filing.note, brainFiling.note].filter(Boolean);
 
     await insertRun(url, key, {
       workspace_id: workspace.id,
@@ -379,7 +386,11 @@ export async function POST(request: Request) {
       slack_channel_id: channelId || null,
       slack_message_ts: analysisTs || null,
       body: body_,
-      signals: { sources, weeklyCall: { filed: filing.filed, note: filing.note || null } },
+      signals: {
+        sources,
+        weeklyCall: { filed: filing.filed, note: filing.note || null },
+        weeklyCallBrain: { filed: brainFiling.filed, note: brainFiling.note || null },
+      },
       status: sendError ? "error" : "success",
       error_text: sendError || null,
     });

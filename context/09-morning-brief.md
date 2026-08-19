@@ -356,7 +356,8 @@ rather than fork it, so both render identically in Slack and on the website.
 | Where | What it does |
 |---|---|
 | `app/lib/call-analysis.ts` | Pure. The prompt key, the default prompt, the header, the user content, and `callAnalysisRow` (the Weekly Calls fields object). No relative value imports, so its text is asserted directly. |
-| `app/lib/call-analysis-run.ts` | The I/O: resolves the stored prompt (per-client, else global, else default), and `fileWeeklyCall`, which files the recap into the base's Weekly Calls table. |
+| `app/lib/weekly-call-brain.ts` | Pure. `weeklyCallBrainDoc` builds the `{ path, text }` for the client's QC Brain: the Weekly Calls fields as frontmatter, the recap, and the full transcript. Asserted directly. |
+| `app/lib/call-analysis-run.ts` | The I/O: resolves the stored prompt (per-client, else global, else default); `fileWeeklyCall` files the recap into the base's Weekly Calls table; `fileWeeklyCallToBrain` files the same into the client's QC Brain folder. |
 | `app/api/slack/call-analysis/route.ts` | `GET` lists clients and readiness; `PATCH` edits the schedule and toggles a client; `POST` writes, posts and files one analysis. |
 | `worker/render-worker.mjs` (`sendDueCallAnalysis`) | Drains the call-analysis queue, one client per cycle, right after `sendDueBrief`. |
 | `tests/call-analysis.test.mjs` | The pure module (prompt, section order, header, content, roster, the row builder), `callReadinessOf`, and source-text checks on the route, schema and worker. |
@@ -397,13 +398,29 @@ What is genuinely different, and why:
   rather than duplicating it. Non-fatal like the brief's tracker sync: an unmapped base or a missing
   table is a note in the trace, never a failed recap. The table is standalone (no link, no formula) and
   is built by the same setup button as the other two — see below.
-- **The Airtable recap is plain text, and the full transcript rides along.** The `Recap` cell renders no
+- **The Airtable recap is plain text, and the transcript rides along.** The `Recap` cell renders no
   Slack mrkdwn, so `fileWeeklyCall` flattens the posted body with `recapPlainText` (`brief-format.ts`):
   the `===` fences, `*bold*`, `_italic_`, `:emoji:` shortcodes and `<@U…>` codes are dropped, the codes
-  resolved to names via the same mention map the website uses. A `Transcript` column holds the **full**
-  transcript, filed to Airtable and nowhere else (never to Slack), capped at 100k chars from the end for
-  Airtable's cell limit. Older bases without the column still file — `fileWeeklyCall` drops the field when
-  the column is absent rather than failing the write, and the setup button adds it.
+  resolved to names via the same mention map the website uses. A `Transcript` column holds the
+  transcript, never posted to Slack, capped at 100k chars from the end for Airtable's cell limit. Older
+  bases without the column still file — `fileWeeklyCall` drops the field when the column is absent rather
+  than failing the write, and the setup button adds it.
+- **The same recap is filed into the client's QC Brain, uncut.** `fileWeeklyCallToBrain`
+  (`call-analysis-run.ts`) runs beside `fileWeeklyCall`, in a `Promise.all` so one being unmapped or
+  unreachable does not stop the other. It resolves the client's brain folder with `brainFolderFor` (the
+  same shared join `brainContext` and the QC Brain tab use — never a second fuzzy match) and writes a
+  markdown file at `clients/<folder>/Weekly calls/<call date>-<title slug>.md`. `weekly-call-brain.ts`
+  (pure) builds it: every Weekly Calls field as YAML frontmatter, then the recap, then the **full**
+  `call.transcript` (the 320k copy `gatherCalls` kept, not the 100k Airtable slice — a git file has no
+  cell limit). The path is keyed on the day of the call and its title, so a re-run overwrites the one
+  file. Non-fatal like every filing step: no brain token, no matching folder, or a GitHub hiccup is a
+  note in the trace (`signals.weeklyCallBrain`), never a failed recap.
+- **Brain writes now have a direct-to-main path, not only PRs.** `writeBrainFile` (`brain.ts`) commits
+  straight onto the default branch, create-or-replace, **never a delete** — the counterpart to
+  `proposeBrainEdit`, which stays the way a person edits a *curated* document (a PR someone reviews). The
+  automation appends dated call files nobody reviews, and a PR per call per client would be a pile of
+  merges nobody clears; the brain is the agency's centralized memory, so these land where everyone reads
+  them. The SHA is looked up rather than passed in, since a background job has no open copy to lock against.
 - **Only new Supabase state is `rr_workspaces.call_analysis_enabled`** (default false), the opt-in per
   client:
 
@@ -422,8 +439,9 @@ an asterisk and a heading renders as a plain line — a test asserts the three t
 The client-base template is now **three** tracker tables, not two. `Weekly Calls` (`tracker-setup.ts`,
 `WEEKLY_CALLS_TABLE_SPEC`) sits beside Campaign Tracker and Project Tracker, and the same **Build the
 tables** button provisions all three additively. Its fields: Title, Call Date, Attendees, Host,
-Duration (min), Recap (plain text, not Slack mrkdwn), Transcript (the full call, filed only here), Posted
-To (Internal/External/Test/Preview), Call ID (the Granola note id, the dedupe key), Last Synced. Group a
+Duration (min), Recap (plain text, not Slack mrkdwn), Transcript (never posted to Slack; the uncut copy
+goes to the QC Brain), Posted To (Internal/External/Test/Preview), Call ID (the Granola note id, the
+dedupe key), Last Synced. Group a
 view by Call Date to read the weeks in order. Because the audit's
 `ready` now requires the third table too, an existing two-table base reads as not-ready until the button
 adds it — which is the intended upgrade prompt.
