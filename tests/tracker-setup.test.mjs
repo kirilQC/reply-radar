@@ -159,6 +159,18 @@ test("nothing the calls writer files could make Airtable invent a Posted To opti
   for (const wanted of ["Internal", "External", "Test", "Preview"]) assert.ok(postedTo.includes(wanted), `a base built by this file cannot say ${wanted}`);
 });
 
+test("the campaign table carries the columns the timeline is drawn from", () => {
+  // The timeline needs a start and an end and the top of the funnel. Launch Date is the start and Finished
+  // On the end, both plain date columns; Total Leads is the list size the morning brief fills from HeyReach.
+  const field = (name) => CAMPAIGN_TABLE_SPEC.fields.find((one) => one.name === name);
+  assert.equal(field("Launch Date").type, "date");
+  assert.equal(field("Finished On").type, "date");
+  const total = field("Total Leads");
+  assert.ok(total, "the spec must define a Total Leads column");
+  assert.equal(total.type, "number");
+  assert.equal(total.stage, "base");
+});
+
 test("the statuses the brief drives a campaign through are all in the choice set it creates", () => {
   const status = CAMPAIGN_TABLE_SPEC.fields.find((field) => field.name === "Status");
   const choices = status.options.choices.map((choice) => choice.name);

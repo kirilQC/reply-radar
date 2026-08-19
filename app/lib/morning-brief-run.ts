@@ -274,6 +274,10 @@ export async function gatherLiveFigures(apiKey: string): Promise<LiveFigures> {
       accepted: total?.connectionsAccepted ?? 0,
       replies: total?.replies ?? 0,
       pending: row.progress.pending,
+      // The top of the funnel and the campaign's start date, both straight from HeyReach so the timeline
+      // in Airtable is dated by when the campaign actually went live rather than when a row was first written.
+      total: row.progress.listSize,
+      launchedAt: row.launchedAt,
       senders: row.senderNames,
       senderIds: row.senderIds,
     };

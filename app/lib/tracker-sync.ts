@@ -98,6 +98,20 @@ export function resolveChoice(choices: string[], wanted: string[]): string | nul
 }
 
 /**
+ * A write payload with every field the table has no column for dropped.
+ *
+ * Airtable rejects a whole record when its payload names a column that is not there, and `Total Leads`
+ * is a column that reaches bases set up before it existed. Without this the first brief after the column
+ * was added would 422 every campaign write on an older base until the client re-ran setup — so the newer
+ * field is planned unconditionally and filtered out here against the columns that base actually has.
+ * Matched on the flattened name, the same way the setup planner decides a column is already present.
+ */
+export function onlyKnownColumns(fields: Record<string, unknown>, columns: string[]): Record<string, unknown> {
+  const have = new Set(columns.map((name) => flat(name)));
+  return Object.fromEntries(Object.entries(fields).filter(([name]) => have.has(flat(name))));
+}
+
+/**
  * The code at the front of a campaign name: `BV007: ASCs v2` is `BV007`.
  *
  * This is the join between a tracker row and the lead table it came from, and it is taken from the
@@ -174,16 +188,34 @@ export function planCampaigns(campaigns: BriefCampaign[], rows: AirtableRecord[]
       Senders: campaign.senders.join(", "),
       "Last Synced": today,
     };
+    // The top of the funnel, and only from a source that actually knows it. A zero here means the stored
+    // fallback supplied the figures, which never carries a list size, so writing it would blank a real
+    // count on the row. HeyReach's live read is the only thing that fills it.
+    if (Number(campaign.total) > 0) figures["Total Leads"] = campaign.total;
+
+    // The campaign's start date, dated to the day. Written once — see the create and the update below —
+    // because it is a fact about when the campaign went live, not a figure that moves every morning.
+    const launchDate = String(campaign.launchDate ?? "").slice(0, 10);
 
     const choice = state ? option(state) : null;
     if (state && !choice) missing.add(state);
     if (choice) figures.Status = choice;
 
     if (!existing) {
-      plan.creates.push({ Title: campaign.name, "Campaign Code": code, ...figures, ...(state === "finished" ? { "Finished On": today } : {}) });
+      plan.creates.push({
+        Title: campaign.name,
+        "Campaign Code": code,
+        ...figures,
+        ...(launchDate ? { "Launch Date": launchDate } : {}),
+        ...(state === "finished" ? { "Finished On": today } : {}),
+      });
       if (state === "finished") plan.finished.push(campaign.name);
       continue;
     }
+
+    // Set only when the row has none yet: the true launch is the first date we saw, and a base where
+    // somebody typed one by hand is left as they set it rather than walked forward every run.
+    if (launchDate && !existing.fields["Launch Date"]) figures["Launch Date"] = launchDate;
 
     const wasFinished = Boolean(existing.fields["Finished On"]);
     if (state === "finished" && !wasFinished) {

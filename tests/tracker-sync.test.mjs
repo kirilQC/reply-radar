@@ -11,7 +11,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { campaignCode, campaignState, daysBetween, normaliseKey, openItems, planCampaigns, planProjects, sameWork, STALE_DAYS } from "../app/lib/tracker-sync.ts";
+import { campaignCode, campaignState, daysBetween, normaliseKey, onlyKnownColumns, openItems, planCampaigns, planProjects, sameWork, STALE_DAYS } from "../app/lib/tracker-sync.ts";
 import { parseTrackerItems, resolveOwner, rosterOf, TITLE_MAX } from "../app/lib/tracker-extract.ts";
 
 /** Bluevia's real Status choices, which say "Launched" and "Completed" rather than "Active" and "Finished". */
@@ -164,6 +164,48 @@ test("a row for a campaign the brief did not see is not touched at all", () => {
   const rows = [row("rec1", { "Campaign Code": "BV001" }), row("rec2", { "Campaign Code": "BV007" })];
   const plan = planCampaigns([campaign()], rows, STATUS_CHOICES, "2026-08-18");
   assert.deepEqual(plan.updates.map((update) => update.id), ["rec2"]);
+});
+
+test("the campaign's start date and total leads reach the row for the timeline", () => {
+  // The two figures the timeline view is built on: when the campaign went live, and how many leads are on
+  // its list. Both come from the live HeyReach read; the stored fallback carries neither.
+  const plan = planCampaigns([campaign({ launchDate: "2026-08-04T09:12:00.000Z", total: 640 })], [], STATUS_CHOICES, "2026-08-18");
+  assert.equal(plan.creates[0]["Launch Date"], "2026-08-04");
+  assert.equal(plan.creates[0]["Total Leads"], 640);
+});
+
+test("a fallback run carries no list size, and a zero total is left unwritten rather than blanking a real one", () => {
+  // The stored copy hands over total 0, which means "unknown", not "none". Writing it would wipe the
+  // figure a live run had already filed.
+  const plan = planCampaigns([campaign({ total: 0 })], [row("rec1", { "Campaign Code": "BV007", "Total Leads": 640 })], STATUS_CHOICES, "2026-08-18");
+  assert.equal("Total Leads" in plan.updates[0].fields, false);
+});
+
+test("the launch date is written once and never walked forward", () => {
+  // It is a fact about when the campaign went live, not a figure that moves. A row that already has one
+  // is left as it is, so a hand-entered date and the true first launch both survive.
+  const fresh = planCampaigns([campaign({ launchDate: "2026-08-04T00:00:00.000Z" })], [row("rec1", { "Campaign Code": "BV007" })], STATUS_CHOICES, "2026-08-18");
+  assert.equal(fresh.updates[0].fields["Launch Date"], "2026-08-04");
+  const already = planCampaigns([campaign({ launchDate: "2026-08-11T00:00:00.000Z" })], [row("rec1", { "Campaign Code": "BV007", "Launch Date": "2026-08-04" })], STATUS_CHOICES, "2026-08-18");
+  assert.equal("Launch Date" in already.updates[0].fields, false);
+});
+
+test("a campaign HeyReach has no start date for is left without one rather than dated today", () => {
+  // A scheduled campaign has no launch yet. An empty date must not become the sync's run date.
+  const plan = planCampaigns([campaign({ launchDate: "" })], [], STATUS_CHOICES, "2026-08-18");
+  assert.equal("Launch Date" in plan.creates[0], false);
+});
+
+test("a payload is trimmed to the columns the base actually has", () => {
+  // The planner names Total Leads unconditionally; a base set up before that column existed has no place
+  // for it, and Airtable fails the whole record on an unknown field. The rest of the figures must survive.
+  const columns = ["Title", "Campaign Code", "Leads Sent", "Accepted", "Replies", "Pending Leads", "Days Left", "Senders", "Last Synced", "Status"];
+  const kept = onlyKnownColumns({ Title: "BV007", "Leads Sent": 420, "Total Leads": 640, "Launch Date": "2026-08-04" }, columns);
+  assert.equal(kept["Leads Sent"], 420);
+  assert.equal("Total Leads" in kept, false);
+  assert.equal("Launch Date" in kept, false);
+  // Matched the way the setup planner matches, so spacing and capitals in the base's own names still count.
+  assert.equal("Title" in onlyKnownColumns({ Title: "x" }, ["  title "]), true);
 });
 
 test("senders are written by name and left blank when there are none", () => {

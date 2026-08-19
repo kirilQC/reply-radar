@@ -28,7 +28,7 @@ import {
 } from "./airtable";
 import type { BriefCampaign } from "./morning-brief";
 import type { TrackerItem } from "./tracker-extract";
-import { campaignCode, planCampaigns, planProjects, type TrackerSyncResult } from "./tracker-sync";
+import { campaignCode, onlyKnownColumns, planCampaigns, planProjects, type TrackerSyncResult } from "./tracker-sync";
 
 const blank = (): TrackerSyncResult => ({
   ran: false,
@@ -94,11 +94,18 @@ export async function syncTrackers(
   result.notes.push(...campaignPlan.notes);
   result.campaigns.finished = campaignPlan.finished;
 
-  const made = await createRecords(baseId, campaignTable.id, campaignPlan.creates);
+  // A base set up before `Total Leads` existed has no column for it, and Airtable fails the whole record
+  // on an unknown field. The planner names it regardless; here it is dropped for bases that lack it, so
+  // an older base still gets every figure it does have rather than none.
+  const columns = (campaignTable.fields ?? []).map((field) => field.name);
+  const creates = campaignPlan.creates.map((fields) => onlyKnownColumns(fields, columns));
+  const updates = campaignPlan.updates.map((update) => ({ id: update.id, fields: onlyKnownColumns(update.fields, columns) }));
+
+  const made = await createRecords(baseId, campaignTable.id, creates);
   if (!made.ok) result.notes.push(made.error);
   else result.campaigns.created = made.data.length;
 
-  const changed = await updateRecords(baseId, campaignTable.id, campaignPlan.updates);
+  const changed = await updateRecords(baseId, campaignTable.id, updates);
   if (!changed.ok) result.notes.push(changed.error);
   else result.campaigns.updated = changed.data.length;
 

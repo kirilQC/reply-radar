@@ -241,6 +241,20 @@ to everybody on its list sits at `IN_PROGRESS` in HeyReach forever — nothing s
 waiting for HeyReach's word would mean no campaign is ever closed. `pending === 0 && sent > 0` is the
 end. `pending === 0 && sent === 0` is *not started* and must stay off the board.
 
+**Every campaign metric is pushed to Campaign Tracker on every brief, for the timeline.** The row carries
+the state (resolved to the base's own Status word), the figures (Total Leads, Leads Sent, Accepted,
+Replies, Pending Leads, Days Left; Acceptance Rate % and Reply Rate % are computed formulas), and the two
+dates the timeline is drawn from: **Launch Date** (the start) and **Finished On** (the end), plus **Last
+Synced** stamped with each run. Launch Date and Total Leads come from HeyReach's live read only —
+`CampaignStatusRow.launchedAt` and `progress.listSize`, threaded through `CampaignFacts` → `BriefCampaign`
+→ `planCampaigns`. The stored fallback carries neither, so a fallback run hands over `total: 0` and an
+empty launch date, and both are then left unwritten rather than blanking a real figure on the row.
+**Launch Date is written once and never walked forward** — it is a fact about when the campaign went live,
+so a row that already has one (a true first launch, or a hand-entered date) is left as it is. Because
+`Total Leads` is newer than some client bases, `onlyKnownColumns` trims each payload to the columns that
+base actually has before writing, so an older base still files every figure it does have rather than
+having Airtable reject the whole record over one unknown field.
+
 **Titles are short on purpose.** `TITLE_MAX = 40`, cut at a word boundary. A gallery card gives the
 title two lines and then an ellipsis, and two lines at that width is about forty characters — the first
 version shipped at 64 and produced a board where most cards had to be opened to be understood, which is

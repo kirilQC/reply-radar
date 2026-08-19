@@ -170,6 +170,8 @@ const facts = (over) => ({
   accepted: 0,
   replies: 0,
   pending: 0,
+  total: 0,
+  launchedAt: "",
   senders: [],
   senderIds: [],
   ...over,
@@ -203,6 +205,22 @@ test("a live read does not touch the stored tables at all", async () => {
   assert.equal(signals.replies.thisWeek, 42);
   assert.equal(signals.runway.pending, 900);
   assert.equal(signals.runway.senders, 2);
+});
+
+test("a live read carries the launch date and the list size through to the campaign row", async () => {
+  // The two the Airtable timeline is drawn from. They ride from HeyReach's own figures straight into the
+  // per-campaign record the tracker sync writes, untouched by the brief's prose.
+  const refuse = async (path) => {
+    throw new Error(`the stored tables must not be read on a live run: ${path}`);
+  };
+  const signals = await gatherSignals(refuse, WORKSPACE, {
+    available: true,
+    reason: "",
+    campaigns: [facts({ total: 640, launchedAt: "2026-08-04T09:12:00.000Z" })],
+    days: liveDays(0, 7, 100, 40, 6),
+  });
+  assert.equal(signals.campaigns.names[0].total, 640);
+  assert.equal(signals.campaigns.names[0].launchDate, "2026-08-04T09:12:00.000Z");
 });
 
 test("a client with no campaigns of ours is a live answer, not a reason to read the copy", async () => {

@@ -284,6 +284,16 @@ export type BriefCampaign = {
   replies: number;
   pending: number;
   /**
+   * Leads on the campaign's list, the top of the funnel. Zero when the source did not carry it — the
+   * stored fallback never does — and a zero is left unwritten rather than clobbering a real figure.
+   */
+  total: number;
+  /**
+   * When the campaign went live, as HeyReach dates it, or empty when unknown. The timeline's start date:
+   * written once and never overwritten, so a scheduled campaign that later gets a real date keeps it.
+   */
+  launchDate: string;
+  /**
    * The senders whose names are actually known. **Never ids.**
    *
    * It used to fall back to the numeric id when a name could not be found, and that produced the worst
@@ -319,6 +329,16 @@ export type CampaignFacts = {
   accepted: number;
   replies: number;
   pending: number;
+  /**
+   * Leads on the campaign's list, HeyReach's total-users figure and the top of the funnel. Zero from the
+   * stored copy, which never carried it, so a zero here means "unknown" and is left unwritten downstream.
+   */
+  total: number;
+  /**
+   * When the campaign went live, ISO, as HeyReach dates it. Empty from the stored copy and for a scheduled
+   * campaign HeyReach has no start date for. This is the timeline's start date.
+   */
+  launchedAt: string;
   /** Names only, and only the ones actually known. Never ids. See `BriefCampaign.senders`. */
   senders: string[];
   /** Every assigned account, named or not. The runway is counted from these, so they must be ids. */
@@ -434,6 +454,10 @@ export async function gatherSignals(
       accepted: int(row.connections_accepted),
       replies: int(row.replies),
       pending: int(row.leads_pending),
+      // The stored copy carries neither the list size nor a launch date, so both are handed over empty
+      // and the tracker sync leaves those columns untouched on a fallback run rather than zeroing them.
+      total: 0,
+      launchedAt: "",
       // An id that resolves to no name is dropped rather than printed. `senderIds` keeps the full set, so
       // a campaign with three unnamed accounts still reads as three senders.
       senders: senderIds.map((id) => senderNames.get(id) || "").filter(Boolean),
@@ -509,6 +533,8 @@ export function composeSignals(
         accepted: row.accepted,
         replies: row.replies,
         pending: row.pending,
+        total: row.total,
+        launchDate: row.launchedAt,
         senders: row.senders,
         senderCount: row.senderIds.length,
         daysLeft: sendingDaysLeft(row.pending, row.senderIds.length),
