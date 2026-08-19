@@ -384,6 +384,31 @@ create table if not exists rr_slack_automations (
   updated_at timestamptz not null default now()
 );
 
+/*
+ * The Granola heartbeat's own log: one row per hourly poll, in working hours.
+ *
+ * Its own table, not `rr_sync_runs`, for the same reason `rr_slack_briefs` is separate — that table is
+ * swept at 48 hours, and the health page has to be able to say "the poll has not run since Friday" on a
+ * Monday. Each row is what one poll saw: how many keys it asked, how many clients it checked, how many
+ * calls it found and how many of those were new, plus the per-client sightings in `clients` so the card
+ * can name the meeting found for each. The page reads the newest row's `checked_at` and calls the
+ * connection down when it is over six hours old *and* the window is open — a rule the app owns, not this
+ * table. Only in-window polls are ever written, so a stored row always means a poll that was due.
+ */
+create table if not exists rr_granola_heartbeats (
+  id uuid primary key default gen_random_uuid(),
+  checked_at timestamptz not null default now(),
+  in_window boolean not null default true,
+  keys_seen integer not null default 0,
+  clients_checked integer not null default 0,
+  calls_found integer not null default 0,
+  new_calls integer not null default 0,
+  status text not null default 'ok',
+  -- The per-client sightings the poll returned: slug, name, the matched call's note id, title and time.
+  clients jsonb not null default '[]'::jsonb,
+  error_text text
+);
+
 create index if not exists rr_workspaces_created_idx on rr_workspaces(created_at);
 create index if not exists rr_profile_workspaces_workspace_idx on rr_profile_workspaces(workspace_id);
 -- rr_leads is filtered by workspace and by profile URL on every ingestion pass.
@@ -418,6 +443,8 @@ create index if not exists rr_campaign_stats_refreshed_idx on rr_campaign_stats(
 create index if not exists rr_daily_stats_workspace_day_idx on rr_daily_stats(workspace_id, day desc);
 -- The Slack tab asks "when did this client last get a brief" once per client per open page.
 create index if not exists rr_slack_briefs_workspace_created_idx on rr_slack_briefs(workspace_id, automation, created_at desc);
+-- The health page reads the newest Granola heartbeat on every check; the worker's own log query is the same.
+create index if not exists rr_granola_heartbeats_checked_idx on rr_granola_heartbeats(checked_at desc);
 
 create or replace function rr_set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at = now(); return new; end; $$;
 drop trigger if exists rr_workspaces_updated_at on rr_workspaces;

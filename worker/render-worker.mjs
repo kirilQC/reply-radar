@@ -1325,50 +1325,78 @@ async function sendDueBrief() {
   }
 }
 
-// ── Call analysis ───────────────────────────────────────────────────
+// ── Granola heartbeat and call analysis ─────────────────────────────
 /**
- * The scheduled call analysis: the morning brief's sibling, run the same way and for the same reasons.
+ * The Granola heartbeat, and the call analyses it triggers.
  *
- * The app decides what is due — same schedule maths, same readiness rules the page draws, kept in one
- * place so the worker cannot drift from it. One client per cycle, so a full roster of weekly-call
- * summaries spreads over half an hour rather than firing twelve concurrent model calls into Granola's
- * rate limit at once. The only differences from the brief are the endpoint and the default destination:
- * a call analysis may go to the client's internal or external channel, and GET returns which.
+ * This replaced the old fixed Mon/Wed/Fri 8am schedule: a weekly call does not happen on a timetable the
+ * agency controls, so waiting for 8am meant a Wednesday call sat unsummarised until Friday. Instead the
+ * worker asks Granola every hour, in working hours, what calls it can see — the app enforces the 5am–8pm
+ * Eastern window and answers `inWindow: false` outside it — and posts an analysis for each call it has not
+ * posted before, keyed on the Granola note id so the same meeting is never summarised twice.
+ *
+ * One new call per cycle, deliberately. A fresh deploy sees every client's most recent call at once and
+ * would otherwise post a dozen recaps into a dozen channels in one burst; capping to one per hourly cycle
+ * drains any backlog steadily while a genuinely new call — the case that matters — is still posted inside
+ * the hour, because there is only ever one of it.
  */
-let lastCallAnalysisRun = 0;
+const GRANOLA_HEARTBEAT_LOOP_MS = 60 * 60 * 1000;
+let lastGranolaHeartbeatRun = 0;
 
-async function sendDueCallAnalysis() {
+async function runGranolaHeartbeat() {
   if (!appBaseUrl) return;
-  if (Date.now() - lastCallAnalysisRun < BRIEF_LOOP_MS) return;
-  lastCallAnalysisRun = Date.now();
+  if (Date.now() - lastGranolaHeartbeatRun < GRANOLA_HEARTBEAT_LOOP_MS) return;
+  lastGranolaHeartbeatRun = Date.now();
 
-  const listed = await fetch(`${appBaseUrl}/api/slack/call-analysis`, { cache: "no-store" }).catch(() => null);
-  if (!listed?.ok) return;
-  const payload = await listed.json().catch(() => null);
-  const due = Array.isArray(payload?.due) ? payload.due.filter((slug) => typeof slug === "string" && slug) : [];
-  if (!due.length) return;
-
-  const slug = due[0];
   const startedAt = new Date().toISOString();
-  // Internal unless the schedule says external — the call analysis, unlike the brief, is allowed both.
-  const destination = payload?.schedule?.destination === "external" ? "external" : "internal";
+  const listed = await fetch(`${appBaseUrl}/api/granola/heartbeat`, { cache: "no-store" }).catch(() => null);
+  if (!listed) return;
+  const payload = await listed.json().catch(() => null);
+  // Outside the window the app polls nothing and stores nothing; the worker matches it and does not log a
+  // run either, so the heartbeat table only ever holds hours the poll was actually due.
+  if (!payload || payload.inWindow === false) return;
+
+  const newCalls = Array.isArray(payload?.newCalls) ? payload.newCalls.filter((slug) => typeof slug === "string" && slug) : [];
+  console.info("reply_radar_granola_heartbeat", {
+    ok: Boolean(payload?.ok),
+    keysSeen: payload?.keysSeen ?? 0,
+    clientsChecked: payload?.clientsChecked ?? 0,
+    callsFound: payload?.callsFound ?? 0,
+    newCalls: newCalls.length,
+  });
+  await writeSyncRun({
+    workspace_id: null,
+    run_type: "granola_heartbeat",
+    source: "render-worker",
+    status: payload?.ok === false ? "error" : "success",
+    started_at: startedAt,
+    finished_at: new Date().toISOString(),
+    records_seen: Number(payload?.clientsChecked ?? 0),
+    records_written: newCalls.length,
+    error_text: payload?.ok === false ? String(payload?.error || "Granola heartbeat failed").slice(0, 500) : null,
+  }).catch((error) => console.warn("reply_radar_granola_heartbeat_log_failed", { reason: String(error) }));
+
+  // One new call per cycle: the newest unposted call goes now, the rest are picked up on following hours.
+  if (!newCalls.length) return;
+  const slug = newCalls[0];
+  const postStartedAt = new Date().toISOString();
   try {
     const response = await fetch(`${appBaseUrl}/api/slack/call-analysis`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workspace: slug, destination }),
+      body: JSON.stringify({ workspace: slug, destination: "internal" }),
     });
     const result = await response.json().catch(() => ({}));
     const failed = !response.ok || result?.ok === false;
-    console.info("reply_radar_call_analysis_sent", { slug, destination, posted: Boolean(result?.posted), remaining: due.length - 1 });
+    console.info("reply_radar_call_analysis_sent", { slug, destination: "internal", posted: Boolean(result?.posted), remaining: newCalls.length - 1 });
     await writeSyncRun({
       workspace_id: null,
       run_type: "call_analysis",
       source: "render-worker",
       status: failed ? "error" : "success",
-      started_at: startedAt,
+      started_at: postStartedAt,
       finished_at: new Date().toISOString(),
-      records_seen: due.length,
+      records_seen: newCalls.length,
       records_written: failed ? 0 : 1,
       error_text: failed ? String(result?.error || `HTTP ${response.status}`).slice(0, 500) : null,
     });
@@ -1379,9 +1407,9 @@ async function sendDueCallAnalysis() {
       run_type: "call_analysis",
       source: "render-worker",
       status: "error",
-      started_at: startedAt,
+      started_at: postStartedAt,
       finished_at: new Date().toISOString(),
-      records_seen: due.length,
+      records_seen: newCalls.length,
       records_written: 0,
       error_text: String(error).slice(0, 500),
     });
@@ -1442,9 +1470,9 @@ async function runOnce() {
   // time-sensitive in a way the pipeline is not, and the pipeline's budget can hold a cycle open.
   try { await sendDueBrief(); } catch (error) { console.error("reply_radar_morning_brief_cycle_failed", error); }
 
-  // And at most one client's call analysis per cycle, the same way and for the same reason. Separate
-  // timer from the brief so the two automations spread independently rather than firing together.
-  try { await sendDueCallAnalysis(); } catch (error) { console.error("reply_radar_call_analysis_cycle_failed", error); }
+  // Every hour, in working hours: ask Granola what calls it can see and post an analysis for any it has
+  // not posted before. Its own timer, so it runs on the hour independently of the brief's daily cadence.
+  try { await runGranolaHeartbeat(); } catch (error) { console.error("reply_radar_granola_heartbeat_cycle_failed", error); }
 
   // Every cycle, so a reply that arrives while nobody is on the site is already analysed,
   // ICP-scored and follow-up-scored by the time it is opened.

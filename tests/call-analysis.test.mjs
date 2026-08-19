@@ -180,9 +180,11 @@ test("a field with nothing to say is left off the row rather than written blank"
   assert.ok(!("Duration (min)" in bare), "a zero-minute duration is not a real call length");
 });
 
-test("the enabling column exists and the worker drains the call-analysis queue one client per cycle", () => {
+test("the enabling column exists and the worker posts call analyses via the Granola heartbeat", () => {
   assert.match(schema, /call_analysis_enabled boolean not null default false/);
-  assert.match(worker, /sendDueCallAnalysis/);
+  // The old daily schedule trigger was replaced by the hourly Granola heartbeat, which posts one new
+  // call per cycle to the same route.
+  assert.match(worker, /runGranolaHeartbeat/);
   assert.match(worker, /api\/slack\/call-analysis/);
 });
 

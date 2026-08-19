@@ -358,14 +358,18 @@ rather than fork it, so both render identically in Slack and on the website.
 | `app/lib/call-analysis.ts` | Pure. The prompt key, the default prompt, the header, the user content, and `callAnalysisRow` (the Weekly Calls fields object). No relative value imports, so its text is asserted directly. |
 | `app/lib/weekly-call-brain.ts` | Pure. `weeklyCallBrainDoc` builds the `{ path, text }` for the client's QC Brain: the Weekly Calls fields as frontmatter, the recap, and the full transcript. Asserted directly. |
 | `app/lib/call-analysis-run.ts` | The I/O: resolves the stored prompt (per-client, else global, else default); `fileWeeklyCall` files the recap into the base's Weekly Calls table; `fileWeeklyCallToBrain` files the same into the client's QC Brain folder. |
-| `app/api/slack/call-analysis/route.ts` | `GET` lists clients and readiness; `PATCH` edits the schedule and toggles a client; `POST` writes, posts and files one analysis. |
-| `worker/render-worker.mjs` (`sendDueCallAnalysis`) | Drains the call-analysis queue, one client per cycle, right after `sendDueBrief`. |
-| `tests/call-analysis.test.mjs` | The pure module (prompt, section order, header, content, roster, the row builder), `callReadinessOf`, and source-text checks on the route, schema and worker. |
+| `app/api/slack/call-analysis/route.ts` | `GET` lists clients and readiness; `PATCH` edits the (now vestigial) schedule and toggles a client; `POST` writes, posts and files one analysis. |
+| `app/lib/granola-heartbeat.ts` | Pure. The 5am–8pm Eastern window (`inGranolaWindow`), the down verdict (`granolaHeartbeatState`: idle/starting/ok/down), and `selectNewCalls` (dedupe by note id). No relative value imports; asserted directly. |
+| `app/lib/granola.ts` (`latestCallsAcrossKeys`) | One list pass across every key, matched per client, **no transcript opened** — the heartbeat's cheap question, distinct from `findClientCalls`. |
+| `app/api/granola/heartbeat/route.ts` | The hourly poll: enforces the window (`inWindow: false` outside it), reads posted note ids from `rr_slack_briefs.signals.sources.call.noteId`, returns `newCalls` slugs and writes one `rr_granola_heartbeats` row. |
+| `worker/render-worker.mjs` (`runGranolaHeartbeat`) | Every hour, calls the heartbeat route; posts one **new** call per cycle to `/api/slack/call-analysis` (internal). Replaced `sendDueCallAnalysis`. |
+| `tests/call-analysis.test.mjs`, `tests/granola-heartbeat.test.mjs` | The pure modules, `callReadinessOf`, the window/down/dedupe logic, and source-text checks on the routes, schema and worker. |
 
 What it **reuses**, on purpose, with no new tables:
 
-- **`rr_slack_automations`** keyed by `automation='call_analysis'` for the schedule. The table was
-  already keyed by automation, so a second row is the whole change.
+- **`rr_slack_automations`** keyed by `automation='call_analysis'` still holds a schedule row, but it is
+  **vestigial** — the worker no longer reads it. The Granola heartbeat (below) drives posting now; the row
+  survives only so the admin editor and `callReadinessOf` keep working unchanged.
 - **`rr_slack_briefs`** with `automation='call_analysis'` for the log — the same shared table, so the
   health panel shows both without a new query.
 - **`briefFraming`** and **`writeBrief`** — the framing, fencing and the single Anthropic call are the
@@ -434,6 +438,54 @@ The default prompt's headings follow the brief's exact `*:emoji: _Title_ :emoji:
 em dashes, numbered items with a single `•` sub-bullet, and a hard 200-word cap. Change an underscore or
 an asterisk and a heading renders as a plain line — a test asserts the three the website parser depends on.
 
+### The Granola heartbeat
+
+Call analysis used to fire on a Mon/Wed/Fri 8am schedule. It now runs off an **hourly poll of Granola**,
+windowed to **5:00 AM – 8:00 PM Eastern, every day**. The worker hits `GET /api/granola/heartbeat` once an
+hour; the route is the thing that decides whether a poll is even due, and posts one new call per cycle.
+
+Three rules make the verdict trustworthy, and each is asserted in `tests/granola-heartbeat.test.mjs`:
+
+- **The window is enforced by the route, not the caller.** Outside 5am–8pm the route returns
+  `{ inWindow: false }` and does *not* poll Granola or write a heartbeat. So a stored heartbeat row always
+  means a poll that was actually due — the health page can read "down" as a real fault, not 3am. The window
+  follows the wall clock through DST (`inGranolaWindow` reads `America/New_York` via `Intl`, not a fixed
+  offset), so it opens at the local 5am in both January and August.
+- **"Down" is only a fault inside the window.** `granolaHeartbeatState` returns `idle` outside the window
+  whatever the age of the last poll, `starting` when nothing has ever been stored, `ok` when the last poll
+  is recent, and `down` only when a poll is over **six hours** (`GRANOLA_DOWN_SECONDS`) stale *and* the
+  window is open. This is what kills the nightly false-red: a heartbeat that is six hours old at 3am is
+  `idle`, not `down`.
+- **A call is posted once, keyed on its Granola note id.** The heartbeat reads posted note ids from
+  `rr_slack_briefs.signals.sources.call.noteId` (the call route records `noteId: call.call.noteId` for
+  exactly this) and `selectNewCalls` keeps only clients whose latest note id has not been posted. So the
+  same call never posts twice, and "within an hour of the call" holds without a schedule.
+
+The poll does the **cheap** half of `findClientCalls`: `latestCallsAcrossKeys` does one `listNotes` pass
+across every key and matches the latest note per client, **without opening a transcript**, so the whole
+roster fits inside the 60s ceiling. The expensive half (transcript + Anthropic) only happens when the
+worker then POSTs the one new call to `/api/slack/call-analysis`. Posting one new call per cycle also
+drains a first-deploy backlog one client per hour rather than firing a dozen model calls at once.
+
+Each poll writes a row to **`rr_granola_heartbeats`** (the one new table), which the health route reads
+back for the "Granola API heartbeat" service light and the per-client sightings panel:
+
+```sql
+create table if not exists rr_granola_heartbeats (
+  id uuid primary key default gen_random_uuid(),
+  checked_at timestamptz not null default now(),
+  in_window boolean not null default true,
+  keys_seen integer not null default 0,
+  clients_checked integer not null default 0,
+  calls_found integer not null default 0,
+  new_calls integer not null default 0,
+  status text not null default 'ok',
+  clients jsonb not null default '[]'::jsonb,
+  error_text text
+);
+create index if not exists rr_granola_heartbeats_checked_idx on rr_granola_heartbeats(checked_at desc);
+```
+
 ### The Weekly Calls table
 
 The client-base template is now **three** tracker tables, not two. `Weekly Calls` (`tracker-setup.ts`,
@@ -463,7 +515,9 @@ This is a first pass and is expected to be refined.
   panel added without a number defaults to `order: 0` and jumps above the client summary whatever the
   JSX says. The Slack panel is `order: 6`, `.heartbeat-last-checked` is `7`.
 - **The worker defaults `destination` to `"test"`** (`worker/render-worker.mjs:1289`), so scheduled
-  briefs currently land in `#kiril-automation` rather than the client's internal channel.
+  briefs currently land in `#kiril-automation` rather than the client's internal channel. Call analyses
+  are the exception: the Granola heartbeat hard-codes `destination: "internal"`, so a recap goes to the
+  client's internal channel, not the test channel.
 - **One client per cycle.** A brief is a 40-second model call plus two Granola calls plus two Slack
   reads; twelve at once would rate-limit and each failure would look like a broken client. One per
   cycle spreads a full roster over about half an hour, which for an 8am brief is invisible.

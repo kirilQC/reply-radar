@@ -346,6 +346,9 @@ export async function POST(request: Request) {
     const sources = {
       call: call.call
         ? {
+            // The Granola note id, so the hourly heartbeat can tell a call it has already posted from a
+            // genuinely new one and never post the same meeting twice.
+            noteId: call.call.noteId,
             title: call.call.title,
             startedAt: call.call.startedAt,
             ageDays: call.call.ageDays,

@@ -273,6 +273,55 @@ export async function findClientCalls(
   };
 }
 
+/** The lightest thing worth knowing about a client's last call: enough to key on and to show, no transcript. */
+export type CallSighting = {
+  noteId: string;
+  title: string;
+  startedAt: number;
+  ageDays: number | null;
+  /** Whose key found it. */
+  owner: string;
+};
+
+/**
+ * Each client's most recent matching call, found in one list pass across every key and never opened.
+ *
+ * This is the hourly heartbeat's question, and it is deliberately not `findClientCalls`: the heartbeat only
+ * needs to know *whether* a new call exists and enough about it to show and to key on, so it stops at the
+ * list response — the note id, title and start time are all in it — and never fetches a transcript. One
+ * burst of list requests answers the whole roster, because the same listed notes serve every client's
+ * needles; adding a client to the poll costs nothing but a match against a pile already in hand.
+ *
+ * A key that refuses contributes an error and no notes, exactly as it does for a brief. A client whose
+ * name matches nothing gets `null`, which the caller reads as "no call this week," not as a fault.
+ */
+export async function latestCallsAcrossKeys(
+  keys: GranolaKey[],
+  clients: Array<{ slug: string; titleMatch: unknown; clientName: unknown }>,
+  windowDays: number,
+): Promise<{ found: Record<string, CallSighting | null>; keysSeen: number; errors: string[] }> {
+  const errors: string[] = [];
+  const found: Record<string, CallSighting | null> = {};
+  for (const client of clients) found[client.slug] = null;
+  if (!keys.length) return { found, keysSeen: 0, errors: ["No Granola API keys have been added, so no calls can be seen."] };
+
+  const listed = await listNotes(keys, windowDays, errors);
+  for (const client of clients) {
+    const needles = parseTitleNeedles(client.titleMatch, client.clientName);
+    if (!needles.length) continue;
+    const winner = pickWinner(listed, needles, new Set());
+    if (!winner) continue;
+    found[client.slug] = {
+      noteId: winner.note.id,
+      title: winner.note.title,
+      startedAt: winner.note.startedAt,
+      ageDays: callAgeDays(winner.note.startedAt),
+      owner: winner.key.label || "a teammate",
+    };
+  }
+  return { found, keysSeen: keys.length, errors };
+}
+
 /**
  * What each key can actually see, for when a call that definitely happened was definitely not found.
  *

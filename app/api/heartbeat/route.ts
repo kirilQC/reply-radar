@@ -2,6 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
+import { GRANOLA_DOWN_SECONDS, GRANOLA_TIMEZONE, granolaHeartbeatState } from "../../lib/granola-heartbeat";
 
 type Row = Record<string, unknown>;
 const ageSeconds = (value: unknown) =>
@@ -65,6 +66,14 @@ export async function GET() {
       label: "AI Ark enrichment",
       configured: !aiArkEnabled || Boolean(process.env.AI_ARK_API_KEY),
       status: aiArkEnabled ? "checking" : "disabled",
+      detail: "",
+      latencyMs: null as number | null,
+    },
+    {
+      id: "granola",
+      label: "Granola API heartbeat",
+      configured: false,
+      status: "checking",
       detail: "",
       latencyMs: null as number | null,
     },
@@ -152,6 +161,7 @@ export async function GET() {
       aiArkUsageResult,
       recentLeadResult,
       slackBriefResult,
+      granolaHeartbeatResult,
       anthropicResult,
     ] = await Promise.all([
       request("rr_workspaces?select=*&order=name.asc"),
@@ -177,6 +187,16 @@ export async function GET() {
        */
       request(
         "rr_slack_briefs?select=id,workspace_id,automation,status,destination,slack_channel_id,error_text,created_at&order=created_at.desc&limit=60",
+      ),
+      /*
+       * The Granola heartbeat's own log — the hourly poll's record of what it saw.
+       *
+       * Its own table, not `rr_sync_runs`, for the same reason the Slack log is separate: this table is not
+       * swept, so a poll that stopped on Friday is still visible on Monday, and it carries the calls each hour
+       * found, which is the thing the health card shows. Newest first; a handful is enough to show the trend.
+       */
+      request(
+        "rr_granola_heartbeats?select=*&order=checked_at.desc&limit=12",
       ),
       anthropicCheck,
     ]);
@@ -334,6 +354,70 @@ export async function GET() {
       error: slackBriefResult.response.ok ? null : `The Slack automation log could not be read (HTTP ${slackBriefResult.response.status}).`,
       runs: slackRuns.slice(0, 30),
     };
+
+    /*
+     * The Granola heartbeat: what the hourly poll last saw, and whether it is late.
+     *
+     * "Down" is only a verdict inside the 5am–8pm Eastern window — outside it the worker deliberately does
+     * not poll, so a six-hour-old heartbeat overnight is the system working, not failing. `granolaHeartbeatState`
+     * owns that rule; here we only read the newest stored poll and hand it the clock. The service light in the
+     * top grid is green when the state is ok, idle (paused overnight) or still starting up, and red only on down.
+     */
+    const granolaRows = Array.isArray(granolaHeartbeatResult.body) ? (granolaHeartbeatResult.body as Row[]) : [];
+    const latestGranola = granolaRows[0] ?? null;
+    const granolaState = granolaHeartbeatState({
+      lastCheckedAt: latestGranola ? String(latestGranola.checked_at ?? "") : null,
+      downSeconds: GRANOLA_DOWN_SECONDS,
+    });
+    const granolaClients = Array.isArray(latestGranola?.clients) ? (latestGranola.clients as Row[]) : [];
+    const granola = {
+      state: granolaState.state,
+      inWindow: granolaState.inWindow,
+      timezone: GRANOLA_TIMEZONE,
+      windowLabel: "5:00 AM – 8:00 PM Eastern, every day",
+      downThresholdSeconds: GRANOLA_DOWN_SECONDS,
+      pollIntervalLabel: "Every hour",
+      readable: granolaHeartbeatResult.response.ok,
+      lastCheckedAt: latestGranola ? String(latestGranola.checked_at ?? "") : null,
+      lastCheckedAgeSeconds: granolaState.ageSeconds,
+      keysSeen: Number(latestGranola?.keys_seen ?? 0),
+      clientsChecked: Number(latestGranola?.clients_checked ?? 0),
+      callsFound: Number(latestGranola?.calls_found ?? 0),
+      newCalls: Number(latestGranola?.new_calls ?? 0),
+      error: latestGranola?.error_text ? String(latestGranola.error_text) : null,
+      // The calls the last poll saw, so the card can name each client and the meeting found for them.
+      clients: granolaClients.map((client) => ({
+        slug: String(client.slug ?? ""),
+        name: String(client.name ?? ""),
+        title: client.title ? String(client.title) : null,
+        startedAt: client.startedAt ?? null,
+        ageDays: client.ageDays ?? null,
+        owner: client.owner ? String(client.owner) : null,
+        isNew: Boolean(client.isNew),
+      })),
+      // The recent polls, newest first, so an absence of rows is itself visible as the poll having stopped.
+      recentChecks: granolaRows.map((row) => ({
+        checkedAt: row.checked_at ? String(row.checked_at) : null,
+        inWindow: Boolean(row.in_window),
+        keysSeen: Number(row.keys_seen ?? 0),
+        clientsChecked: Number(row.clients_checked ?? 0),
+        callsFound: Number(row.calls_found ?? 0),
+        newCalls: Number(row.new_calls ?? 0),
+        status: String(row.status ?? ""),
+      })),
+    };
+    // Green whenever the poll is doing what it should — running (ok), paused overnight (idle) or waiting for
+    // its first cycle (starting). Red only when it is inside working hours and has gone silent for six hours.
+    services[4].status = granolaState.state === "down" ? "down" : "healthy";
+    services[4].configured = granolaState.state !== "down";
+    services[4].detail =
+      granolaState.state === "down"
+        ? "No Granola poll has been recorded for over six hours during working hours."
+        : granolaState.state === "idle"
+          ? "Paused outside working hours (5 AM – 8 PM Eastern)."
+          : granolaState.state === "starting"
+            ? "Waiting for the first hourly poll."
+            : `Last poll ${granola.callsFound} call(s) across ${granola.clientsChecked} client(s).`;
 
     const clients = rows.map((row) => {
       const webhookAgeSeconds = ageSeconds(row.last_webhook_received_at);
@@ -504,6 +588,7 @@ export async function GET() {
       worker,
       aiArk,
       slack,
+      granola,
       checkedAt,
       thresholds,
       diagnostics: {
