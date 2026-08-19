@@ -227,7 +227,13 @@ export const WEEKLY_CALLS_TABLE_SPEC: TrackerTableSpec = {
     { stage: "base", name: "Attendees", type: "singleLineText", description: "Who was on the call, by name." },
     { stage: "base", name: "Host", type: "singleLineText", description: "Whose call it was." },
     { stage: "base", name: "Duration (min)", type: "number", options: wholeNumber, description: "How long the call ran, in minutes." },
-    { stage: "base", name: "Recap", type: "multilineText", description: "The recap the model wrote, the same text posted to Slack." },
+    { stage: "base", name: "Recap", type: "multilineText", description: "The recap the model wrote, in plain text — the Slack formatting stripped out so it reads in a cell." },
+    {
+      stage: "base",
+      name: "Transcript",
+      type: "multilineText",
+      description: "The full transcript of the call, filed here and nowhere else. Kept from the end when a call runs past Airtable's cell limit.",
+    },
     {
       stage: "base",
       name: "Posted To",

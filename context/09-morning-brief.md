@@ -383,6 +383,13 @@ What is genuinely different, and why:
   rather than duplicating it. Non-fatal like the brief's tracker sync: an unmapped base or a missing
   table is a note in the trace, never a failed recap. The table is standalone (no link, no formula) and
   is built by the same setup button as the other two — see below.
+- **The Airtable recap is plain text, and the full transcript rides along.** The `Recap` cell renders no
+  Slack mrkdwn, so `fileWeeklyCall` flattens the posted body with `recapPlainText` (`brief-format.ts`):
+  the `===` fences, `*bold*`, `_italic_`, `:emoji:` shortcodes and `<@U…>` codes are dropped, the codes
+  resolved to names via the same mention map the website uses. A `Transcript` column holds the **full**
+  transcript, filed to Airtable and nowhere else (never to Slack), capped at 100k chars from the end for
+  Airtable's cell limit. Older bases without the column still file — `fileWeeklyCall` drops the field when
+  the column is absent rather than failing the write, and the setup button adds it.
 - **Only new Supabase state is `rr_workspaces.call_analysis_enabled`** (default false), the opt-in per
   client:
 
@@ -401,8 +408,9 @@ an asterisk and a heading renders as a plain line — a test asserts the three t
 The client-base template is now **three** tracker tables, not two. `Weekly Calls` (`tracker-setup.ts`,
 `WEEKLY_CALLS_TABLE_SPEC`) sits beside Campaign Tracker and Project Tracker, and the same **Build the
 tables** button provisions all three additively. Its fields: Title, Call Date, Attendees, Host,
-Duration (min), Recap, Posted To (Internal/External/Test/Preview), Call ID (the Granola note id, the
-dedupe key), Last Synced. Group a view by Call Date to read the weeks in order. Because the audit's
+Duration (min), Recap (plain text, not Slack mrkdwn), Transcript (the full call, filed only here), Posted
+To (Internal/External/Test/Preview), Call ID (the Granola note id, the dedupe key), Last Synced. Group a
+view by Call Date to read the weeks in order. Because the audit's
 `ready` now requires the third table too, an existing two-table base reads as not-ready until the button
 adds it — which is the intended upgrade prompt.
 

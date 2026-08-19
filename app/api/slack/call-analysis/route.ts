@@ -362,9 +362,13 @@ export async function POST(request: Request) {
     // File the recap into the client's Weekly Calls table, keyed on the call so a re-run updates rather
     // than duplicates. After posting and non-fatal by design: a base that is unmapped or missing the table
     // is a note in the trace, never a failed recap. Skipped when there is no call to file.
+    // The mention roster the recap was written against: name and id together, so `<@U…>` codes resolve to
+    // names both on the website and in the plain-text recap the Weekly Calls row stores.
+    const mentions = Object.fromEntries(people.map((person) => [person.id, person.name]));
+
     const baseId = String((workspace as Row).airtable_base_id ?? "").trim();
     const filing: WeeklyCallFileResult = call.call
-      ? await fileWeeklyCall(baseId, workspace, { call: call.call, recap: body_, destination: destination as CallAnalysisDestination })
+      ? await fileWeeklyCall(baseId, workspace, { call: call.call, recap: body_, destination: destination as CallAnalysisDestination, mentions })
       : { filed: null, note: "" };
     const filingNotes = filing.note ? [filing.note] : [];
 
@@ -385,7 +389,7 @@ export async function POST(request: Request) {
       brief: body_,
       // The mention roster the recap was written against, so the website renders `<@U…>` as `@name` the
       // same way the morning brief does. Action item owners are the agency team, who are in these channels.
-      mentions: Object.fromEntries(people.map((person) => [person.id, person.name])),
+      mentions,
       sources,
       posted,
       channelId: channelId || null,

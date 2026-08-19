@@ -263,3 +263,51 @@ export function parseSlackBrief(body: string, mentions: Record<string, string> =
   flushParagraph();
   return blocks;
 }
+
+/**
+ * The same stored brief, flattened to plain text for a place Slack mrkdwn only reads as noise.
+ *
+ * The Airtable recap cell is the one this exists for. A recap posted to Slack is stored as the exact bytes
+ * that went out — `*bold*`, `_italic_`, `<@U012ABCDE>` codes, `:emoji:` shortcodes, and a rule of `=`
+ * fencing every heading — which is right in Slack and a wall of markup in a spreadsheet cell, where nothing
+ * renders it. So this reuses the same block parse the website does and reads it back out as text: a heading
+ * becomes its words, a mention becomes the person's name, the fences and the emphasis marks are dropped,
+ * and one blank line is kept between items so the list still reads as a list. The sub-bullet stays glued
+ * under the item it belongs to, indented, with no blank line before it.
+ *
+ * `mentions` maps `U…` ids to names, the same map the website renders with; without it a `<@U…>` falls
+ * back to its raw id, which is wrong but visible rather than silently dropped.
+ */
+export function recapPlainText(body: string, mentions: Record<string, string> = {}): string {
+  const inline = (nodes: InlineNode[]): string =>
+    nodes
+      .map((node) => {
+        switch (node.type) {
+          case "text":
+            return node.value;
+          case "bold":
+          case "italic":
+            return inline(node.children);
+          case "emoji":
+            return node.glyph;
+          case "mention":
+            return node.name;
+          case "link":
+            return node.label;
+        }
+      })
+      .join("");
+
+  const lines: string[] = [];
+  for (const block of parseSlackBrief(body, mentions)) {
+    if (block.type === "bullet") {
+      lines.push(`${"  ".repeat(block.depth + 1)}• ${inline(block.children)}`);
+      continue;
+    }
+    if (lines.length) lines.push("");
+    if (block.type === "heading") lines.push(inline(block.title));
+    else if (block.type === "numbered") lines.push(`${block.number}. ${inline(block.children)}`);
+    else lines.push(inline(block.children));
+  }
+  return lines.join("\n").trim();
+}

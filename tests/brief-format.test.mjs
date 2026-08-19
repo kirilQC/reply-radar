@@ -12,7 +12,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseSlackBrief, parseInline, EMOJI, emojiGlyph } from "../app/lib/brief-format.ts";
+import { parseSlackBrief, parseInline, recapPlainText, EMOJI, emojiGlyph } from "../app/lib/brief-format.ts";
 
 /** The shape a real posted brief has: fenced centred headings, bullets indented four per level, a footer. */
 const DIVIDER = "=".repeat(37);
@@ -122,4 +122,48 @@ test("a stray delimiter with no partner stays literal text", () => {
   assert.equal(nodes.length, 1);
   assert.equal(nodes[0].type, "text");
   assert.equal(nodes[0].value, "2 * 3 = 6");
+});
+
+/* ── The recap, flattened for a spreadsheet cell ────────────────────────────────────────────────── */
+
+const RECAP = [
+  `${DIVIDER}`,
+  ``,
+  `                    *:dart: _Action Items_ :dart:*`,
+  ``,
+  `${DIVIDER}`,
+  ``,
+  `1. <@U01> to *send the leads*`,
+  `    • _agreed on the call_`,
+  ``,
+  `2. *Dana* to review the copy`,
+].join("\n");
+
+test("the plain-text recap drops every Slack marker the cell cannot render", () => {
+  const text = recapPlainText(RECAP, { U01: "Kiril" });
+  assert.ok(!text.includes("="), "the heading fences must be gone");
+  assert.ok(!text.includes("*"), "single-asterisk bold must be stripped");
+  assert.ok(!text.includes("_"), "underscore italics must be stripped");
+  assert.ok(!text.includes("<@"), "raw mention codes must be resolved");
+  assert.ok(!text.includes(":dart:"), "emoji shortcodes must not survive");
+});
+
+test("the plain-text recap keeps the words, the numbers and the names", () => {
+  const text = recapPlainText(RECAP, { U01: "Kiril" });
+  assert.match(text, /Action Items/);
+  assert.match(text, /1\. Kiril to send the leads/);
+  assert.match(text, /2\. Dana to review the copy/);
+});
+
+test("the plain-text recap keeps a blank line between items and glues the sub-bullet under its own", () => {
+  const text = recapPlainText(RECAP, { U01: "Kiril" });
+  // The detail clause sits directly under item one, no blank line before it.
+  assert.match(text, /1\. Kiril to send the leads\n\s+• agreed on the call/);
+  // A blank line separates one numbered item from the next.
+  assert.match(text, /agreed on the call\n\n2\. Dana/);
+});
+
+test("an unmapped mention falls back to its id, visible rather than dropped", () => {
+  const text = recapPlainText("1. <@U99> to do it");
+  assert.match(text, /1\. U99 to do it/);
 });

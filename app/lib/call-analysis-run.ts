@@ -12,6 +12,7 @@
  */
 
 import { callAnalysisPromptKey, callAnalysisRow, DEFAULT_CALL_ANALYSIS_PROMPT, type CallAnalysisDestination } from "./call-analysis";
+import { recapPlainText } from "./brief-format";
 import { readConfig } from "./app-config";
 import {
   createRecords,
@@ -46,7 +47,7 @@ export type WeeklyCallFileResult = { filed: "created" | "updated" | null; note: 
 export async function fileWeeklyCall(
   baseId: string,
   workspace: BriefWorkspace,
-  input: { call: ClientCall; recap: string; destination: CallAnalysisDestination },
+  input: { call: ClientCall; recap: string; destination: CallAnalysisDestination; mentions?: Record<string, string> },
 ): Promise<WeeklyCallFileResult> {
   if (!baseId) return { filed: null, note: "No Airtable base is mapped to this client, so the recap was not filed." };
 
@@ -58,7 +59,14 @@ export async function fileWeeklyCall(
   const rows = await listRecords(baseId, table.id);
   if (!rows.ok) return { filed: null, note: rows.error };
 
-  const fields = callAnalysisRow(workspace, input);
+  // The recap posted to Slack is stored as Slack mrkdwn; a spreadsheet cell renders none of it, so it is
+  // flattened to plain text on the way in, with the same mention map the recap was written against.
+  const recap = recapPlainText(input.recap, input.mentions ?? {});
+  const fields = callAnalysisRow(workspace, { call: input.call, recap, destination: input.destination });
+  // Transcript is a newer column. A base set up before it exists still files its recap rather than failing
+  // the whole write on an unknown field; once the setup button adds the column, transcripts start landing.
+  const hasTranscript = (table.fields ?? []).some((field) => field.name.trim().toLowerCase() === "transcript");
+  if (!hasTranscript) delete fields.Transcript;
   const existing = rows.data.find((row) => String(row.fields["Call ID"] ?? "").trim() === input.call.noteId);
 
   if (existing) {

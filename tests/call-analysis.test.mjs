@@ -24,6 +24,7 @@ import {
 import { callReadinessOf } from "../app/lib/morning-brief-schedule.ts";
 
 const route = readFileSync(new URL("../app/api/slack/call-analysis/route.ts", import.meta.url), "utf8");
+const runSource = readFileSync(new URL("../app/lib/call-analysis-run.ts", import.meta.url), "utf8");
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const worker = readFileSync(new URL("../worker/render-worker.mjs", import.meta.url), "utf8");
 
@@ -131,6 +132,15 @@ test("the route files the recap into the client's Weekly Calls table after posti
   // Files from the mapped base, and the note it returns rides along in the trace, never a failed recap.
   assert.match(route, /airtable_base_id/);
   assert.match(route, /filingNotes/);
+  // The mention roster is handed to the filer so the plain-text recap resolves its `<@U…>` codes to names.
+  assert.match(route, /fileWeeklyCall\([^)]*mentions/s);
+});
+
+test("the filer stores the recap as plain text, not the Slack mrkdwn that was posted", () => {
+  // The cell renders no mrkdwn, so the posted body is flattened on the way in.
+  assert.match(runSource, /recapPlainText/);
+  // A base without the newer Transcript column still files rather than failing the whole write.
+  assert.match(runSource, /delete fields\.Transcript/);
 });
 
 const WEEKLY_CALL_ROW = callAnalysisRow(WORKSPACE, { call: CALL, recap: "1. do the thing", destination: "internal", syncedAt: new Date("2026-08-21T10:00:00.000Z") });
@@ -145,6 +155,14 @@ test("a Weekly Calls row carries the call's facts and is keyed on the Granola no
   // The day of the call in the client's zone, not the day it was filed.
   assert.equal(WEEKLY_CALL_ROW["Call Date"], "2026-08-19");
   assert.equal(WEEKLY_CALL_ROW["Last Synced"], "2026-08-21");
+});
+
+test("the full transcript rides along in the row, and only in the row", () => {
+  // Filed to Airtable and nowhere else — the transcript never goes to Slack, only the recap does.
+  assert.equal(WEEKLY_CALL_ROW.Transcript, CALL.transcript);
+  // A call with no transcript leaves the field off rather than writing an empty cell.
+  const bare = callAnalysisRow(WORKSPACE, { call: { ...CALL, transcript: "" }, recap: "x", destination: "test" });
+  assert.ok(!("Transcript" in bare), "an empty transcript should not be written");
 });
 
 test("the row's Posted To is one of the four options the table offers", () => {

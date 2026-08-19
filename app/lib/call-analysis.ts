@@ -100,6 +100,7 @@ A worked example of the shape and the spacing, content stripped out. Match this.
 
 
 1. *BV007: ASCs v2* ready to relaunch with ~300 filtered contacts
+
 2. *BV009: Ortho Offices* paused pending new copy
 
 
@@ -107,6 +108,7 @@ A worked example of the shape and the spacing, content stripped out. Match this.
 
 
 1. *Intermountain Health* lost, competitor already embedded, keep warm for 6 months
+
 2. *UCSF / Kleiner Perkins* incubation, warm intro made, top live opportunity
 
 
@@ -123,6 +125,7 @@ A worked example of the shape and the spacing, content stripped out. Match this.
 
 
 1. ASC list scraped to ~2,000, matched to LinkedIn, ~300 usable contacts
+
 2. Health system IT committees flagged as a structural blocker to deals
 
 
@@ -136,6 +139,13 @@ export type CallAnalysisDestination = "preview" | "test" | "internal" | "externa
 
 /** The four destinations, spelled as the Weekly Calls `Posted To` options are. `typecast` is never set. */
 const POSTED_TO: Record<string, string> = { preview: "Preview", test: "Test", internal: "Internal", external: "External" };
+
+/**
+ * Airtable's long-text cell tops out near a hundred thousand characters, past which the write is refused.
+ * A call rarely runs that long, so this is a safety cut, not a routine one — and it takes the end, where
+ * the decisions and next steps are, for the same reason the model is handed the tail of a long transcript.
+ */
+const AIRTABLE_LONG_TEXT_LIMIT = 100_000;
 
 /**
  * One Weekly Calls row from a finished analysis, as a fields object Airtable takes verbatim.
@@ -162,6 +172,9 @@ export function callAnalysisRow(
   if (input.call.attendees.length) row.Attendees = input.call.attendees.join(", ");
   if (input.call.owner) row.Host = input.call.owner;
   if (input.call.durationMinutes) row["Duration (min)"] = input.call.durationMinutes;
+  // The transcript is filed only here, never to Slack. `call.transcript` already holds at least the last
+  // stretch of the call, so its tail is the tail of the whole meeting whatever the model was handed.
+  if (input.call.transcript) row.Transcript = input.call.transcript.slice(-AIRTABLE_LONG_TEXT_LIMIT);
   return row;
 }
 

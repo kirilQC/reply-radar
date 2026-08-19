@@ -145,6 +145,14 @@ test("the Weekly Calls table is standalone: every field is a base-stage field", 
   assert.deepEqual(fieldsAtStage(WEEKLY_CALLS_TABLE_SPEC.fields, "formula"), []);
 });
 
+test("the calls table carries a plain multilineText Transcript column for the full transcript", () => {
+  // The transcript is filed to Airtable and nowhere else, so the column the writer targets has to exist.
+  const transcript = WEEKLY_CALLS_TABLE_SPEC.fields.find((field) => field.name === "Transcript");
+  assert.ok(transcript, "the spec must define a Transcript column");
+  assert.equal(transcript.type, "multilineText");
+  assert.equal(transcript.stage, "base");
+});
+
 test("nothing the calls writer files could make Airtable invent a Posted To option", () => {
   // `typecast` is never set, so every destination the row builder writes has to already be an option here.
   const postedTo = WEEKLY_CALLS_TABLE_SPEC.fields.find((field) => field.name === "Posted To").options.choices.map((choice) => choice.name);
