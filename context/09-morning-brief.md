@@ -136,8 +136,22 @@ to everybody on its list sits at `IN_PROGRESS` in HeyReach forever — nothing s
 waiting for HeyReach's word would mean no campaign is ever closed. `pending === 0 && sent > 0` is the
 end. `pending === 0 && sent === 0` is *not started* and must stay off the board.
 
-**Titles are short on purpose.** `TITLE_MAX = 64`, cut at a word boundary. The gallery view shows the
-title and little else; the fine print goes in `Detail`.
+**Titles are short on purpose.** `TITLE_MAX = 40`, cut at a word boundary. A gallery card gives the
+title two lines and then an ellipsis, and two lines at that width is about forty characters — the first
+version shipped at 64 and produced a board where most cards had to be opened to be understood, which is
+the flooded view this feature exists to prevent arriving by another route. Fine print goes in `Detail`.
+
+**Owners are names, never user ids.** The brief writes owners as `<@U04AB12CD>` because that is the
+only form Slack notifies on, so the same roster the brief was given is handed back to the extraction and
+`resolveOwner` translates every mention code and bare id it finds. An id nobody can name is dropped
+rather than written through: a column of ids cannot be read or grouped on, and blank is the honest
+answer. A group name like "QC Campaign Approval and Launch" passes through untouched.
+
+**Priority is always written.** One of Urgent, High, Medium, Low, defaulting to Medium rather than
+blank, because a column that is mostly empty cannot be sorted on. Like every other select it is written
+in the base's own spelling via `resolveChoice`, and left out entirely where the base has no such field —
+without `typecast` Airtable refuses an unknown option and fails the whole record, which would take the
+title and the detail down with the priority.
 
 **The step gets whatever is left of the sixty seconds.** It runs after the post, needs
 `TRACKER_BUDGET_MS` to start, and skips with a legible note otherwise. A delivered brief must never

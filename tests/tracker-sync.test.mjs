@@ -12,7 +12,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { campaignCode, campaignState, daysBetween, normaliseKey, planCampaigns, planProjects, STALE_DAYS } from "../app/lib/tracker-sync.ts";
-import { parseTrackerItems, TITLE_MAX } from "../app/lib/tracker-extract.ts";
+import { parseTrackerItems, resolveOwner, rosterOf, TITLE_MAX } from "../app/lib/tracker-extract.ts";
 
 /** Bluevia's real Status choices, which say "Launched" and "Completed" rather than "Active" and "Finished". */
 const STATUS_CHOICES = ["Not Started", "Sent for Approval", "Launched", "On Hold", "Completed", "Cancelled"];
@@ -20,6 +20,7 @@ const PROJECT_CHOICES = {
   status: ["Not Started", "In Progress", "Blocked", "Done", "Cancelled"],
   type: ["Action Item", "Project", "Bottleneck"],
   source: ["Internal channel", "Client channel", "Call", "Manual"],
+  priority: ["Urgent", "High", "Medium", "Low"],
 };
 
 const campaign = (over = {}) => ({
@@ -40,6 +41,7 @@ const item = (over = {}) => ({
   title: "Add two senders to BV007",
   type: "Action Item",
   status: "Not Started",
+  priority: "High",
   owner: "Kiril Ivlev",
   detail: "Kori asked on Aug 17 and the figures still show three senders.",
   source: "Internal channel",
@@ -298,6 +300,88 @@ test("a long title is cut at a word boundary, because the gallery shows the titl
 test("an at sign left on an owner is stripped, so the column can be grouped on", () => {
   const items = parseTrackerItems('{"items":[{"title":"T","key":"k","owner":"@Kiril Ivlev"}]}');
   assert.equal(items[0].owner, "Kiril Ivlev");
+});
+
+test("a title long enough to be cut off on a gallery card is not accepted", () => {
+  /*
+   * The cap is the whole point of the column, so it is asserted as a number rather than only as a
+   * bound: a card gives the title two lines and then an ellipsis, and the first version shipped at 64
+   * and filled the board with "Pin down Morgan Rose on upgrading to LinkedI…".
+   */
+  assert.equal(TITLE_MAX, 40);
+  const real = "Pin down Morgan Rose on upgrading to LinkedIn Sales Navigator";
+  const items = parseTrackerItems(JSON.stringify({ items: [{ title: real, key: "morgan-navigator" }] }));
+  assert.ok(items[0].title.length <= 40, `"${items[0].title}" is still ${items[0].title.length} characters`);
+});
+
+/* ── Owners are people, not user ids ───────────────────────────────────────────────────────────── */
+
+test("a Slack mention code becomes the person's name", () => {
+  // The brief is written for Slack, so every owner in it arrives as `<@U…>`. Left alone, the Owner
+  // column reads U0A2TQ1V49Y, which is what the client's tracker actually filled up with.
+  const names = rosterOf([{ id: "U0A2TQ1V49Y", name: "Kiril Ivlev" }]);
+  const items = parseTrackerItems('{"items":[{"title":"T","key":"k","owner":"<@U0A2TQ1V49Y>"}]}', names);
+  assert.equal(items[0].owner, "Kiril Ivlev");
+});
+
+test("a bare user id with the brackets already stripped off is still resolved", () => {
+  const names = rosterOf([{ id: "U09BWJMV8DT", name: "Dan Cole" }]);
+  assert.equal(resolveOwner("U09BWJMV8DT", names), "Dan Cole");
+  assert.equal(resolveOwner("@U09BWJMV8DT", names), "Dan Cole");
+  assert.equal(resolveOwner("<@U09BWJMV8DT|dan>", names), "Dan Cole");
+});
+
+test("an id nobody can name is dropped rather than written through", () => {
+  // A column of ids cannot be read or grouped on, and it is not a better answer than blank — it is a
+  // different question. Blank says the brief named nobody we can identify, which is true.
+  assert.equal(resolveOwner("<@UNKNOWN12345>", new Map()), "");
+});
+
+test("one unknown id among two owners leaves the other one standing", () => {
+  const names = rosterOf([{ id: "U0A2TQ1V49Y", name: "Kiril Ivlev" }]);
+  assert.equal(resolveOwner("<@U0A2TQ1V49Y>, <@UGHOST99999>", names), "Kiril Ivlev");
+  assert.equal(resolveOwner("<@UGHOST99999>, <@U0A2TQ1V49Y>", names), "Kiril Ivlev");
+});
+
+test("a group name that is not a person is left exactly as it is", () => {
+  // "QC Campaign Approval and Launch" is a real owner in the brief and has no user id behind it.
+  assert.equal(resolveOwner("QC Campaign Approval and Launch", new Map()), "QC Campaign Approval and Launch");
+});
+
+test("a campaign code in an owner is not mistaken for a user id", () => {
+  assert.equal(resolveOwner("BV007 owners", new Map()), "BV007 owners");
+});
+
+test("the roster keeps the first name given for an id and ignores half-filled entries", () => {
+  const names = rosterOf([{ id: "U1", name: "First" }, { id: "U1", name: "Second" }, { id: "", name: "Nobody" }, { id: "U2", name: "" }]);
+  assert.deepEqual([...names], [["U1", "First"]]);
+});
+
+/* ── Priority ──────────────────────────────────────────────────────────────────────────────────── */
+
+test("an item with no priority is Medium, because an empty column cannot be sorted on", () => {
+  const items = parseTrackerItems('{"items":[{"title":"T","key":"k"}]}');
+  assert.equal(items[0].priority, "Medium");
+  assert.equal(parseTrackerItems('{"items":[{"title":"T","key":"k","priority":"P1"}]}')[0].priority, "Medium");
+});
+
+test("the priority reaches the row", () => {
+  const plan = planProjects([item({ priority: "Urgent" })], [], PROJECT_CHOICES, new Map(), "2026-08-18");
+  assert.equal(plan.creates[0].Priority, "Urgent");
+});
+
+test("a base with no Priority field gets no Priority key rather than a rejected write", () => {
+  // Without `typecast` Airtable refuses a value that is not an option and fails the whole record, so
+  // an unwritable priority would take the title and the detail down with it.
+  const plan = planProjects([item()], [], { ...PROJECT_CHOICES, priority: [] }, new Map(), "2026-08-18");
+  assert.equal("Priority" in plan.creates[0], false);
+  assert.equal(plan.creates[0].Title, "Add two senders to BV007");
+});
+
+test("a choice is written in the base's own spelling, not ours", () => {
+  const plan = planProjects([item({ priority: "High", type: "Bottleneck" })], [], { ...PROJECT_CHOICES, priority: ["urgent", "high"], type: ["bottleneck"] }, new Map(), "2026-08-18");
+  assert.equal(plan.creates[0].Priority, "high");
+  assert.equal(plan.creates[0].Type, "bottleneck");
 });
 
 test("a type or status the tracker has no column value for falls back rather than being written through", () => {

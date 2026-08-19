@@ -239,12 +239,21 @@ export function daysBetween(from: unknown, to: string): number | null {
 export function planProjects(
   items: TrackerItem[],
   rows: AirtableRecord[],
-  choices: { status: string[]; type: string[]; source: string[] },
+  choices: { status: string[]; type: string[]; source: string[]; priority?: string[] },
   campaignIds: Map<string, string>,
   today: string,
   staleDays = STALE_DAYS,
 ): ProjectPlan {
   const plan: ProjectPlan = { creates: [], updates: [], deletes: [], notes: [] };
+  /*
+   * The base's own spelling of the option, not ours. Without `typecast` Airtable rejects a value that
+   * is not already an option, and the rejection fails the whole record — so a base whose Priority set
+   * reads "high" in lower case would lose the title and the detail along with the priority.
+   */
+  const choose = (allowed: string[], wanted: string, column: string) => {
+    const option = resolveChoice(allowed, [wanted]);
+    return option ? { [column]: option } : {};
+  };
   const ours = (row: AirtableRecord) => row.fields["Raised by Brief"] === true;
   const existing = new Map<string, AirtableRecord>();
   for (const row of rows) {
@@ -262,9 +271,10 @@ export function planProjects(
       Owner: item.owner,
       "Brief Key": item.key,
       "Last Seen": today,
-      ...(resolveChoice(choices.type, [item.type]) ? { Type: item.type } : {}),
-      ...(resolveChoice(choices.status, [item.status]) ? { Status: item.status } : {}),
-      ...(resolveChoice(choices.source, [item.source]) ? { Source: item.source } : {}),
+      ...choose(choices.type, item.type, "Type"),
+      ...choose(choices.status, item.status, "Status"),
+      ...choose(choices.source, item.source, "Source"),
+      ...choose(choices.priority ?? [], item.priority, "Priority"),
       ...(linked ? { Campaign: [linked] } : {}),
     };
     const row = existing.get(item.key);

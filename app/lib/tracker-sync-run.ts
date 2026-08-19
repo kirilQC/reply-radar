@@ -87,7 +87,12 @@ export async function syncTrackers(
   const projectPlan = planProjects(
     items,
     projectRows.data,
-    { status: choicesFor(projectTable, "Status"), type: choicesFor(projectTable, "Type"), source: choicesFor(projectTable, "Source") },
+    {
+      status: choicesFor(projectTable, "Status"),
+      type: choicesFor(projectTable, "Type"),
+      source: choicesFor(projectTable, "Source"),
+      priority: choicesFor(projectTable, "Priority"),
+    },
     campaignIds,
     today,
   );

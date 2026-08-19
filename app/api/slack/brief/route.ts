@@ -414,7 +414,12 @@ export async function POST(request: Request) {
     else {
       tracker.attempted = true;
       const today = localDayKey(new Date(), workspace.timezone || "America/New_York");
-      const extracted = await extractTrackerItems(body_, signals, { timeoutMs: Math.min(TRACKER_MODEL_MS, remaining - 10_000) });
+      // The same roster the brief was told to mention people from. It has to come back the other way or
+      // the tracker's Owner column fills up with the `<@U…>` codes the brief is written in.
+      const extracted = await extractTrackerItems(body_, signals, {
+        timeoutMs: Math.min(TRACKER_MODEL_MS, remaining - 10_000),
+        people: [...(channels.internal.people ?? []), ...(channels.external.people ?? [])],
+      });
       tracker.items = extracted.items.length;
       if (extracted.error) tracker.reason = extracted.error;
       /*
