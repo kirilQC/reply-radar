@@ -331,6 +331,56 @@ cosmetic failure; a truncated one is a lie about the week.
   top and once where it belonged. The one `:warning:` line is the entire urgency mechanism.
 - **A "Worth knowing" section.** Same reason.
 
+## The second automation: call analysis
+
+The brief has a sibling. **Call analysis** is one Anthropic call over a single Granola transcript,
+framed and posted to Slack exactly like the brief. It exists because the brief reads *everything* about
+a client and answers "what is the state of the account"; sometimes the only thing worth reading is the
+last call, and the only question is "what did we agree on it". Built to reuse the brief's machinery
+rather than fork it, so both render identically in Slack and on the website.
+
+| Where | What it does |
+|---|---|
+| `app/lib/call-analysis.ts` | Pure. The prompt key, the default prompt, the header, the user content. No relative value imports, so its text is asserted directly. |
+| `app/lib/call-analysis-run.ts` | The one I/O bit: resolves the stored prompt (per-client, else global, else default). |
+| `app/api/slack/call-analysis/route.ts` | `GET` lists clients and readiness; `PATCH` edits the schedule and toggles a client; `POST` writes and posts one analysis. |
+| `worker/render-worker.mjs` (`sendDueCallAnalysis`) | Drains the call-analysis queue, one client per cycle, right after `sendDueBrief`. |
+| `tests/call-analysis.test.mjs` | 8 tests: the pure module, `callReadinessOf`, and source-text checks on the route, schema and worker. |
+
+What it **reuses**, on purpose, with no new tables:
+
+- **`rr_slack_automations`** keyed by `automation='call_analysis'` for the schedule. The table was
+  already keyed by automation, so a second row is the whole change.
+- **`rr_slack_briefs`** with `automation='call_analysis'` for the log — the same shared table, so the
+  health panel shows both without a new query.
+- **`briefFraming`** and **`writeBrief`** — the framing, fencing and the single Anthropic call are the
+  brief's, unmodified. The analysis differs only in prompt and input.
+
+What is genuinely different, and why:
+
+- **One source, not six.** It reads a single transcript. `gatherCalls` already fetches it for the brief,
+  so the analysis borrows that and nothing else — no HeyReach, no tracker, no prior briefs.
+- **`callReadinessOf` has no HeyReach leg.** A brief needs a sender source; an analysis needs only an
+  internal Slack channel and a Granola key. The shape is `{slack, granola, ready}`, and the UI hides the
+  HeyReach row conditionally rather than showing a check that can never apply.
+- **Internal is the default, external is allowed.** The brief only ever goes internal; an analysis may
+  be posted to the client-facing channel, so the route accepts `["test", "internal", "external"]` and the
+  schedule editor grows a channel `<select>` for this automation only.
+- **Action items are attributed by bold name, not `<@U…>`.** Granola attendees have no Slack ids, so the
+  analysis returns `mentions: {}` and names people in bold text — there is no roster to notify against.
+- **Only new state is `rr_workspaces.call_analysis_enabled`** (default false), the opt-in per client:
+
+  ```sql
+  alter table rr_workspaces add column if not exists call_analysis_enabled boolean not null default false;
+  ```
+
+The default prompt's headings follow the brief's exact `*:emoji: _Title_ :emoji:*` shape so the same
+`briefFraming` regex fences them: `_Action Items_`, `_Discussed_`, `_Deals_`, `_Campaigns_`,
+`_Next Steps_`. Change an underscore or an asterisk and a heading renders as a plain line — a test
+asserts the three that the website parser depends on.
+
+This is a first pass and is expected to be refined.
+
 ## Operational notes
 
 - **`rr_slack_briefs` is the automation log.** Every attempt including failures, with `status`,
