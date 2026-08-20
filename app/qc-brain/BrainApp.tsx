@@ -91,10 +91,13 @@ const hue = clientHue as (name: string) => number;
  * Folders shown as a folder tile rather than flattened into loose files.
  *
  * A client's extra files are otherwise flattened out of their subfolders, because which subfolder somebody
- * committed one into is not worth a second click. Weekly calls are the exception: one document lands here
- * every week, so a single folder that lists them by date beats a tab per call cluttering the strip.
+ * committed one into is not worth a second click. Two folders are the exception: weekly calls, where one
+ * document lands every week, and campaign messaging, where the Google-Doc sync files one document per tab —
+ * dozens for a busy client. Left flattened, either buries the seven core documents under a wall of tiles, so
+ * each stays a single folder tile that opens to its own listing.
  */
-const isFolderShown = (folder: string) => folder.trim().toLowerCase() === "weekly calls";
+const SHOWN_FOLDERS = new Set(["weekly calls", "campaign messaging"]);
+const isFolderShown = (folder: string) => SHOWN_FOLDERS.has(folder.trim().toLowerCase());
 
 /** A client's extra files split into the folders shown as folders and the rest, flattened as before. */
 function splitClientFiles(groups: Group[]) {
