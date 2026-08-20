@@ -109,6 +109,17 @@ type Step = { tool: string; label: string; status: "doing" | "ok" | "fail" };
  */
 const PROGRESS_THROTTLE_MS = 800;
 
+/**
+ * How often the progress message ticks over on its own, with no tool event to prompt it.
+ *
+ * A tool call updates the message; the long silences are between tools and — the failure this fixes —
+ * after the last tool, while the model composes the answer. That final stretch can run fifteen seconds or
+ * more with the list frozen on a wall of ticks, which reads as a crash. A five-second heartbeat rewrites
+ * the message with the running time so there is always something moving, and it is far enough under
+ * `chat.update`'s rate limit to never be the thing that trips it.
+ */
+const HEARTBEAT_MS = 5_000;
+
 /** The emoji QC Bot wears on the asking message while it works, and takes off once the answer is posted. */
 const REACTION = "eyes";
 
@@ -148,12 +159,16 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
     // Edits are chained so they apply in the order they were queued: a late progress edit can never land
     // after the final answer and overwrite it, because the answer is the last link added to the chain.
     const steps: Step[] = [];
+    const startedAt = Date.now();
     let chain: Promise<void> = Promise.resolve();
     let lastEditAt = 0;
     const queueEdit = (text: string) => {
       if (!statusTs) return;
       chain = chain.then(() => updateMessage(channel, statusTs, text).catch(() => {}));
     };
+    // The progress message, always stamped with how long the run has been going so a heartbeat edit and a
+    // tool edit differ even when the step list has not changed.
+    const render = () => progressText(steps, { elapsedMs: Date.now() - startedAt });
 
     // The agent's tool lifecycle, turned into ticks on the progress message. Other event kinds (the token
     // stream, files) carry nothing a Slack reader can use here and are ignored.
@@ -170,11 +185,24 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
       const now = Date.now();
       if (now - lastEditAt < PROGRESS_THROTTLE_MS) return;
       lastEditAt = now;
-      queueEdit(progressText(steps));
+      queueEdit(render());
     };
 
+    // The heartbeat: while the run is alive, keep the message moving even when no tool event has fired —
+    // the long tail is the model composing its answer with the tool list already complete. Only fires when
+    // a full beat has passed since the last edit, so it never races a burst of tool ticks.
+    const heartbeat = statusTs
+      ? setInterval(() => {
+          if (Date.now() - lastEditAt < HEARTBEAT_MS) return;
+          lastEditAt = Date.now();
+          queueEdit(render());
+        }, HEARTBEAT_MS)
+      : null;
+
     // The finished answer, delivered by rewriting the progress message — or posted fresh if there was none.
+    // The heartbeat is stopped first so it cannot queue another edit behind the answer.
     const deliver = async (text: string) => {
+      if (heartbeat) clearInterval(heartbeat);
       if (statusTs) {
         queueEdit(text);
         await chain;
@@ -200,8 +228,11 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
       const answer = result.reply ? toSlackText(result.reply) : "I couldn't find an answer to that.";
       await deliver(truncateForSlack(`${answer}${cut}`));
     } catch (error) {
+      if (heartbeat) clearInterval(heartbeat);
       const detail = error instanceof Error ? error.message : "something went wrong";
       await deliver(`I hit an error answering that: ${detail}`);
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
     }
   } finally {
     // The answer is out (or the attempt is over); take the :eyes: back off so the message reads as done.

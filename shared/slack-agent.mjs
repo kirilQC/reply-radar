@@ -295,17 +295,32 @@ const MAX_PROGRESS_STEPS = 8;
  * hourglass — so the reader sees the bot working through sources rather than a frozen spinner. Only the
  * most recent handful are shown; a thirty-round research loop would otherwise post a wall of ticks.
  *
+ * `elapsedMs`, when given, drives the heartbeat: the running time is shown in the header, and when every
+ * visible step is finished — the gap where the model has stopped calling tools and is composing the
+ * answer — a trailing "still working" line is added. Without it the message would sit on a wall of ticks
+ * with nothing moving, which reads as a crash even though the bot is mid-sentence. The elapsed figure is
+ * what makes two heartbeat edits differ, so Slack does not reject the second as a no-op.
+ *
  * @param {Array<{ label: string; status: "doing" | "ok" | "fail" }>} steps
+ * @param {{ elapsedMs?: number }} [opts]
  * @returns {string}
  */
-export function progressText(steps) {
+export function progressText(steps, opts = {}) {
   const list = Array.isArray(steps) ? steps : [];
   const shown = list.slice(-MAX_PROGRESS_STEPS);
   const hidden = list.length - shown.length;
   const icon = (status) => (status === "ok" ? "✓" : status === "fail" ? "⚠️" : "⏳");
   const lines = shown.map((step) => `${icon(step.status)}  ${step.label}`);
-  const head = hidden > 0 ? `:mag: *Looking into it…* _(+${hidden} earlier)_` : ":mag: *Looking into it…*";
-  return [head, "", ...lines].join("\n").trimEnd();
+  const elapsedMs = typeof opts?.elapsedMs === "number" && opts.elapsedMs >= 0 ? opts.elapsedMs : null;
+  const clock = elapsedMs === null ? "" : ` _(${Math.round(elapsedMs / 1000)}s)_`;
+  const base = hidden > 0 ? `:mag: *Looking into it…* _(+${hidden} earlier)_` : ":mag: *Looking into it…*";
+  const head = `${base}${clock}`;
+  // Between tool calls — or once the last one is done and the answer is being written — nothing on the
+  // list is moving. The heartbeat line is the only proof the bot is still alive, so add it whenever a
+  // clock is being shown and no step is currently running.
+  const stillWorking = elapsedMs !== null && list.length > 0 && !list.some((step) => step.status === "doing");
+  const tail = stillWorking ? ["⏳  Still working on it…"] : [];
+  return [head, "", ...lines, ...tail].join("\n").trimEnd();
 }
 
 /** How many turns back the assistant reads a thread. A long back-and-forth is trimmed to the recent ones. */

@@ -205,6 +205,32 @@ test("the progress message shows only the most recent steps and counts the rest"
   assert.ok(!out.includes("step 0"), "the oldest step has rolled off");
 });
 
+test("a heartbeat stamps the running time so two edits differ even when the steps have not", () => {
+  const steps = [{ label: "Listing clients", status: "ok" }];
+  const at5 = progressText(steps, { elapsedMs: 5_000 });
+  const at12 = progressText(steps, { elapsedMs: 12_400 });
+  assert.ok(at5.includes("(5s)"), "the elapsed seconds are shown");
+  assert.ok(at12.includes("(12s)"), "and rounded, so the number moves");
+  assert.notEqual(at5, at12, "a later heartbeat is a different string, so Slack does not reject it as a no-op");
+});
+
+test("once every step is done the heartbeat says it is still working, so a frozen list does not read as a crash", () => {
+  const out = progressText([{ label: "Reading the QC Brain", status: "ok" }], { elapsedMs: 40_000 });
+  assert.ok(out.includes("Still working on it"), "the composing gap after the last tool needs a sign of life");
+});
+
+test("while a step is still running the heartbeat adds no second working line", () => {
+  const out = progressText([{ label: "Searching leads", status: "doing" }], { elapsedMs: 8_000 });
+  assert.ok(out.includes("⏳  Searching leads"), "the running step already carries the hourglass");
+  assert.ok(!out.includes("Still working on it"), "so a redundant footer would just be noise");
+});
+
+test("with no elapsed given the message is unchanged — no clock, no working line", () => {
+  const out = progressText([{ label: "Listing clients", status: "ok" }]);
+  assert.ok(!out.includes("(0s)") && !/\(\d+s\)/.test(out), "no clock without an elapsed figure");
+  assert.ok(!out.includes("Still working on it"), "and no heartbeat footer");
+});
+
 /** The bot is stamped either with this user id or this bot id on any post it wrote. */
 const IDENTITY = { userId: "U123BOT", botId: "B123BOT" };
 

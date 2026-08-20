@@ -20,6 +20,7 @@
  */
 
 import { TOOLS, runTool, takeFile } from "./assistant-tools";
+import { publicBaseUrl } from "./public-url";
 import {
   applyStreamEvent as applyEvent,
   createStreamState,
@@ -122,6 +123,32 @@ const applyStreamEvent = applyEvent as (
  * printed as a fraction. The tool descriptions cover *what* each tool returns; this covers what the
  * numbers mean.
  */
+/**
+ * The "link back to the app" section of the prompt, built from the deployment's own public address.
+ *
+ * The answer is read in Slack and in the MCP tab, and much of what it reports has a page in the web app
+ * that shows the same thing live and in full. Telling the model those URLs lets it close an answer with a
+ * link to exactly the view the question was about — the client's analytics, their QC Brain page — so the
+ * reader can go deeper without hunting for it. Two of the four pages carry a client slug in the URL; the
+ * inbox and the database are single global views with the client chosen inside them, and the prompt says
+ * so, so the model does not invent a `?client=` the page would ignore. Omitted entirely when no public
+ * address is configured, because a half-formed link is worse than none.
+ */
+function appLinksSection(): string {
+  const base = publicBaseUrl();
+  if (!base) return "";
+  return `
+
+Linking back to the app:
+- Reply Radar has a web app at ${base}, and most of what you report has a page there that shows it live and in full detail. When your answer is about one client and one of these views, end it with a single markdown link to that page — one line, phrased as an offer, e.g. "[See the full analytics for Cotool →](${base}/analytics?client=cotool)". The slug is the one client_summary and list_clients return.
+- The pages:
+  - Analytics (campaigns, reply rates, senders), scoped to a client: ${base}/analytics?client=<slug>
+  - QC Brain (a client's ICP, personas, strategy, call notes), scoped to a client: ${base}/qc-brain/<slug>
+  - Inbox (the live queue of replies to work) — one global page, not client-scoped: ${base}/inbox
+  - Database (every lead and conversation) — one global page, not client-scoped: ${base}/database
+- Link the page that matches the question: analytics for campaign or reply figures, the brain for strategy or positioning, the inbox for replies waiting, the database for leads. At most one link, and only when it genuinely matches — an answer spanning several clients, or one no page fits, gets no link. Never link a page that does not exist, and never put a \`?client=\` on the inbox or database, which do not read it.`;
+}
+
 export const SYSTEM = `You are the Reply Radar assistant. Reply Radar belongs to QC, an agency that runs LinkedIn outbound for startup clients. You answer questions about that work using the tools you have been given.
 
 What the system is:
@@ -253,7 +280,7 @@ csv, pdf
 
 Working out loud:
 - Say what you are about to do, in one short sentence, immediately before you do it. "Let me pull Steadywell's lists first." Then make the calls. Then say what you found and what that means for the next step, and make those calls. The reader watches this happen live, and each sentence is shown next to the lookups it introduces.
-- One sentence, not a paragraph, and only when you are about to run more tools. The full answer comes at the end, after the last lookup — do not start writing it early and do not repeat these sentences in it.`;
+- One sentence, not a paragraph, and only when you are about to run more tools. The full answer comes at the end, after the last lookup — do not start writing it early and do not repeat these sentences in it.${appLinksSection()}`;
 
 /**
  * One streamed Anthropic call, reassembled into the content array the next turn has to send back.
