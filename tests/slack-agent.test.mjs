@@ -197,10 +197,10 @@ test("the progress message marks finished steps done and the running one as pend
   assert.ok(out.includes("⏳  Searching the QC Brain"));
 });
 
-test("the progress message shows only the most recent steps and counts the rest", () => {
+test("the progress message shows only the most recent steps and drops the rest silently", () => {
   const many = Array.from({ length: 12 }, (_, i) => ({ label: `step ${i}`, status: "ok" }));
   const out = progressText(many);
-  assert.ok(out.includes("+4 earlier"), "the eight shown leave four older ones summarised");
+  assert.ok(!out.includes("earlier"), "older steps roll off without a running count in the header");
   assert.ok(out.includes("step 11"), "the newest step is shown");
   assert.ok(!out.includes("step 0"), "the oldest step has rolled off");
 });

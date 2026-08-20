@@ -308,13 +308,11 @@ const MAX_PROGRESS_STEPS = 8;
 export function progressText(steps, opts = {}) {
   const list = Array.isArray(steps) ? steps : [];
   const shown = list.slice(-MAX_PROGRESS_STEPS);
-  const hidden = list.length - shown.length;
   const icon = (status) => (status === "ok" ? "✓" : status === "fail" ? "⚠️" : "⏳");
   const lines = shown.map((step) => `${icon(step.status)}  ${step.label}`);
   const elapsedMs = typeof opts?.elapsedMs === "number" && opts.elapsedMs >= 0 ? opts.elapsedMs : null;
   const clock = elapsedMs === null ? "" : ` _(${Math.round(elapsedMs / 1000)}s)_`;
-  const base = hidden > 0 ? `:mag: *Looking into it…* _(+${hidden} earlier)_` : ":mag: *Looking into it…*";
-  const head = `${base}${clock}`;
+  const head = `:mag: *Looking into it…*${clock}`;
   // Between tool calls — or once the last one is done and the answer is being written — nothing on the
   // list is moving. The heartbeat line is the only proof the bot is still alive, so add it whenever a
   // clock is being shown and no step is currently running.
