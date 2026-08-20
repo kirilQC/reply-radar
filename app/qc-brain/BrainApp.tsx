@@ -87,6 +87,45 @@ const kindOf = fileKind as (path: string) => string;
 const initials = clientInitials as (label: string) => string;
 const hue = clientHue as (name: string) => number;
 
+/**
+ * Folders shown as a folder tile rather than flattened into loose files.
+ *
+ * A client's extra files are otherwise flattened out of their subfolders, because which subfolder somebody
+ * committed one into is not worth a second click. Weekly calls are the exception: one document lands here
+ * every week, so a single folder that lists them by date beats a tab per call cluttering the strip.
+ */
+const isFolderShown = (folder: string) => folder.trim().toLowerCase() === "weekly calls";
+
+/** A client's extra files split into the folders shown as folders and the rest, flattened as before. */
+function splitClientFiles(groups: Group[]) {
+  const folders: Group[] = [];
+  const loose: { path: string; name: string; title: string; folder: string }[] = [];
+  for (const group of groups) {
+    if (group.folder && isFolderShown(group.folder)) folders.push(group);
+    else for (const file of group.files) loose.push({ ...file, folder: group.folder });
+  }
+  return { folders, loose };
+}
+
+/** The day a dated file is for, read from its `YYYY-MM-DD-…` name; empty for anything not dated. */
+const fileDate = (path: string) => (path.split("/").pop() ?? "").match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? "";
+
+/**
+ * Splits a document's markdown at its Transcript heading.
+ *
+ * A weekly-call file ends with the whole transcript — hundreds of lines nobody scrolls past to reach the
+ * next thing — so it is tucked behind a disclosure rather than run down the page. No transcript heading
+ * means the whole document is the body, which is every document that is not a call.
+ */
+function splitTranscript(markdown: string): { body: string; transcript: string } {
+  const text = String(markdown ?? "");
+  const heading = text.match(/^#{1,6}[ \t]+transcript[ \t]*$/im);
+  if (!heading || heading.index == null) return { body: text, transcript: "" };
+  const body = text.slice(0, heading.index).trimEnd();
+  const transcript = text.slice(heading.index + heading[0].length).trim();
+  return { body, transcript };
+}
+
 const json = async (url: string) => {
   const response = await fetch(url, { cache: "no-store" });
   const body = await response.json().catch(() => ({}));
@@ -99,7 +138,7 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
   // and are now two, because a home page that is really a document viewer with a tab strip on top
   // gives a client no place to put anything that is not a document — their campaign figures, what is
   // missing, how much there is.
-  const [view, setView] = useState<"index" | "client" | "doc" | "area" | "skills" | "solo">(initialClient ? "client" : "index");
+  const [view, setView] = useState<"index" | "client" | "folder" | "doc" | "area" | "skills" | "solo">(initialClient ? "client" : "index");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -121,6 +160,8 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
    * comparison instead of a second render.
    */
   const [openPath, setOpenPath] = useState("");
+  /** The folder whose dated listing is on screen, when a folder tile is opened rather than a document. */
+  const [folderName, setFolderName] = useState("");
   const [loaded, setLoaded] = useState<FileDoc | null>(null);
   const [failed, setFailed] = useState<{ path: string; message: string } | null>(null);
   const doc = loaded && loaded.path === openPath ? loaded : null;
@@ -273,6 +314,19 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
     setView("client");
   }, []);
 
+  /**
+   * Opening a folder — the dated listing of one client subfolder, not a document.
+   *
+   * The client's detail is already in hand, so this is a view change and not a fetch. The open path is
+   * dropped: a folder listing highlights nothing, and leaving one set would put a stray "open" mark on a
+   * document that is no longer on the page.
+   */
+  const openFolder = useCallback((name: string) => {
+    setOpenPath("");
+    setFolderName(name);
+    setView("folder");
+  }, []);
+
   // Landing straight on a client's URL. The view is already "client"; only the data is missing.
   useEffect(() => {
     if (initialClient) loadClient(initialClient);
@@ -347,6 +401,9 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
     };
     const root = { label: "QC Brain", href: "/qc-brain", onClick: back };
     if (view === "client" && detail) return [root, { label: detail.label }];
+    if (view === "folder" && detail) {
+      return [root, { label: detail.label, href: "/qc-brain", onClick: toClient }, { label: folderName }];
+    }
     // Three deep, because a document now sits under the client it belongs to rather than under the
     // repository — and getting back to the client rather than all the way home is the common move.
     if (view === "doc" && detail) {
@@ -356,7 +413,7 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
     if (view === "skills") return [root, { label: "Skills" }];
     if (view === "solo") return [root, { label: doc?.title ?? "Document" }];
     return [{ label: "QC Brain" }];
-  }, [view, detail, area, doc?.title, home]);
+  }, [view, detail, area, folderName, doc?.title, home]);
 
   return (
     <div className="app-shell">
@@ -414,6 +471,18 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
           ) : view === "client" ? (
             <ClientHome
               detail={detail}
+              onFolder={openFolder}
+              onOpen={(path) => {
+                setOpenPath(path);
+                setView("doc");
+              }}
+            />
+          ) : view === "folder" ? (
+            <ClientFolder
+              detail={detail}
+              folder={folderName}
+              onHome={backToClient}
+              onFolder={openFolder}
               onOpen={(path) => {
                 setOpenPath(path);
                 setView("doc");
@@ -426,6 +495,7 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
               openPath={openPath}
               onOpen={setOpenPath}
               onHome={backToClient}
+              onFolder={openFolder}
               doc={doc}
               docError={docError}
             />
@@ -559,7 +629,15 @@ function ClientMark({ label, logo, slug, size }: { label: string; logo: string; 
  * document that happens to mention a code, because "how is this client actually doing" is a question
  * about the client and not about one file.
  */
-function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (path: string) => void }) {
+function ClientHome({
+  detail,
+  onOpen,
+  onFolder,
+}: {
+  detail: ClientDetail | null;
+  onOpen: (path: string) => void;
+  onFolder: (name: string) => void;
+}) {
   /**
    * The generated document, held here rather than fetched into a route of its own.
    *
@@ -613,8 +691,9 @@ function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (
   // Every other file in the client's folder, flattened out of its folders and into the same grid as
   // the seven core ones. The folders were a second, quieter directory below the first: a call note
   // and an ICP are both "a document about this client", and which subfolder somebody happened to
-  // commit one into is not a fact worth two clicks.
-  const rest = detail.groups.flatMap((group) => group.files.map((file) => ({ ...file, folder: group.folder })));
+  // commit one into is not a fact worth two clicks. Weekly calls are the exception — one lands every
+  // week, so they stay a folder tile that opens to a dated listing rather than a tile per call.
+  const { folders, loose } = splitClientFiles(detail.groups);
 
   return (
     <div className="brain-home">
@@ -677,7 +756,20 @@ function ClientHome({ detail, onOpen }: { detail: ClientDetail | null; onOpen: (
             <span className="brain-doccard-label">{entry.label}</span>
           </button>
         ))}
-        {rest.map((file) => (
+        {folders.map((group) => (
+          <button
+            key={group.folder}
+            className="brain-doccard is-folder"
+            onClick={() => onFolder(group.folder)}
+            title={`${group.files.length} ${group.files.length === 1 ? "file" : "files"} in ${group.folder}`}
+          >
+            <span className="brain-doccard-icon" aria-hidden="true">
+              <FolderIcon />
+            </span>
+            <span className="brain-doccard-label">{group.folder}</span>
+          </button>
+        ))}
+        {loose.map((file) => (
           <button
             key={file.path}
             className="brain-doccard is-other"
@@ -827,6 +919,15 @@ function KindIcon({ kind }: { kind: string }) {
   );
 }
 
+/** A folder, for the one tile that opens to a listing rather than a document. */
+function FolderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 6a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
+    </svg>
+  );
+}
+
 /** "icp, personas and voice" — an English list, because this goes inside a sentence. */
 const list = (words: string[]) =>
   words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
@@ -876,6 +977,7 @@ function ClientDoc({
   openPath,
   onOpen,
   onHome,
+  onFolder,
   doc,
   docError,
 }: {
@@ -884,56 +986,154 @@ function ClientDoc({
   openPath: string;
   onOpen: (path: string) => void;
   onHome: () => void;
+  onFolder: (name: string) => void;
   doc: FileDoc | null;
   docError: string;
 }) {
   if (!detail) return <p className="brain-quiet">Opening…</p>;
 
-  const rest = detail.groups.flatMap((group) => group.files);
+  return (
+    <div className="brain-client">
+      <ClientTabs detail={detail} openPath={openPath} activeFolder="" onHome={onHome} onOpen={onOpen} onFolder={onFolder} />
+      <Reader doc={doc} error={docError} campaigns={campaigns} />
+    </div>
+  );
+}
+
+/**
+ * The document strip along the top of a client's screen: Homepage, the seven core documents, the
+ * folders shown as folders, and every loose file after them.
+ *
+ * Shared by the reader and a folder listing so both wear the same strip — a folder is one more place
+ * inside a client, not a different screen — and so a folder tab reads as open whether you are looking
+ * at its listing or at a document that lives in it.
+ */
+function ClientTabs({
+  detail,
+  openPath,
+  activeFolder,
+  onHome,
+  onOpen,
+  onFolder,
+}: {
+  detail: ClientDetail;
+  openPath: string;
+  activeFolder: string;
+  onHome: () => void;
+  onOpen: (path: string) => void;
+  onFolder: (name: string) => void;
+}) {
+  const { folders, loose } = splitClientFiles(detail.groups);
+  return (
+    <nav className="brain-tabs" aria-label="Documents">
+      {/* First, because it is the way out. Reading a document is where people end up, and until now
+          the only way back to the client was the breadcrumb at the top of the page. */}
+      <button className="brain-tab is-home" onClick={onHome}>
+        Homepage
+      </button>
+      {detail.docs.map((entry) => {
+        const age = stale(entry.updated);
+        return (
+          <button
+            key={entry.key}
+            className={`brain-tab${openPath === entry.path && entry.present ? " is-open" : ""}${entry.present ? "" : " is-missing"}`}
+            onClick={() => entry.present && onOpen(entry.path)}
+            disabled={!entry.present}
+            title={entry.present ? entry.blurb : `Nobody has written ${entry.label.toLowerCase()} for ${detail.label} yet`}
+          >
+            {entry.label}
+            {/* Two different absences, said differently: a dash is "never written", a dot is "not
+                touched in months". They call for different work, so they cannot look the same. */}
+            {!entry.present && <span className="brain-tab-flag" aria-label="Not written">—</span>}
+            {entry.present && age.stale && (
+              <span className="brain-tab-flag is-stale" title={`Last changed ${ago(entry.updated)}`} aria-label="Not changed in months">
+                ·
+              </span>
+            )}
+          </button>
+        );
+      })}
+      {folders.map((group) => {
+        // Open when its listing is on screen, or when the open document is one of its files — so
+        // reading a call keeps its folder lit rather than leaving the strip pointing nowhere.
+        const active = activeFolder === group.folder || group.files.some((file) => file.path === openPath);
+        return (
+          <button
+            key={group.folder}
+            className={`brain-tab is-folder${active ? " is-open" : ""}`}
+            onClick={() => onFolder(group.folder)}
+            title={`${group.files.length} ${group.files.length === 1 ? "file" : "files"} in ${group.folder}`}
+          >
+            {group.folder}
+          </button>
+        );
+      })}
+      {loose.map((file) => (
+        <button
+          key={file.path}
+          className={`brain-tab${openPath === file.path ? " is-open" : ""}`}
+          onClick={() => onOpen(file.path)}
+          title={file.name}
+        >
+          {file.title}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/**
+ * A folder inside a client, as the one thing a folder is for: a list of what is in it, newest first.
+ *
+ * This exists for the weekly calls. One document lands here every week, and a tab per call would push
+ * everything else off the strip within two months — so the folder stays one tab, and opening it shows
+ * every call by date. Dated files sort newest first because the call somebody wants is almost always
+ * the last one; anything without a date in its name falls to the bottom in the order it arrived.
+ */
+function ClientFolder({
+  detail,
+  folder,
+  onHome,
+  onOpen,
+  onFolder,
+}: {
+  detail: ClientDetail | null;
+  folder: string;
+  onHome: () => void;
+  onOpen: (path: string) => void;
+  onFolder: (name: string) => void;
+}) {
+  if (!detail) return <p className="brain-quiet">Opening…</p>;
+
+  const group = detail.groups.find((entry) => entry.folder === folder);
+  const files = [...(group?.files ?? [])].sort((a, b) => fileDate(b.path).localeCompare(fileDate(a.path)));
 
   return (
     <div className="brain-client">
-      <nav className="brain-tabs" aria-label="Documents">
-        {/* First, because it is the way out. Reading a document is where people end up, and until now
-            the only way back to the client was the breadcrumb at the top of the page. */}
-        <button className="brain-tab is-home" onClick={onHome}>
-          Homepage
-        </button>
-        {detail.docs.map((entry) => {
-          const age = stale(entry.updated);
-          return (
-            <button
-              key={entry.key}
-              className={`brain-tab${openPath === entry.path && entry.present ? " is-open" : ""}${entry.present ? "" : " is-missing"}`}
-              onClick={() => entry.present && onOpen(entry.path)}
-              disabled={!entry.present}
-              title={entry.present ? entry.blurb : `Nobody has written ${entry.label.toLowerCase()} for ${detail.label} yet`}
-            >
-              {entry.label}
-              {/* Two different absences, said differently: a dash is "never written", a dot is "not
-                  touched in months". They call for different work, so they cannot look the same. */}
-              {!entry.present && <span className="brain-tab-flag" aria-label="Not written">—</span>}
-              {entry.present && age.stale && (
-                <span className="brain-tab-flag is-stale" title={`Last changed ${ago(entry.updated)}`} aria-label="Not changed in months">
-                  ·
-                </span>
-              )}
-            </button>
-          );
-        })}
-        {rest.map((file) => (
-          <button
-            key={file.path}
-            className={`brain-tab${openPath === file.path ? " is-open" : ""}`}
-            onClick={() => onOpen(file.path)}
-            title={file.name}
-          >
-            {file.title}
-          </button>
-        ))}
-      </nav>
-
-      <Reader doc={doc} error={docError} campaigns={campaigns} />
+      <ClientTabs detail={detail} openPath="" activeFolder={folder} onHome={onHome} onOpen={onOpen} onFolder={onFolder} />
+      <div className="brain-folder">
+        <h2 className="brain-folder-head">{folder}</h2>
+        {files.length ? (
+          <ul className="brain-folder-list">
+            {files.map((file) => {
+              const date = fileDate(file.path);
+              return (
+                <li key={file.path}>
+                  <button className="brain-folder-entry" onClick={() => onOpen(file.path)}>
+                    <span className="brain-folder-icon" aria-hidden="true">
+                      <KindIcon kind={kindOf(file.path)} />
+                    </span>
+                    {date && <span className="brain-folder-date">{date}</span>}
+                    <span className="brain-folder-name">{file.title}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="brain-quiet">Nothing here yet.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1202,9 +1402,32 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
         // The layout when there is one and it was asked for; the file itself otherwise. A failed
         // layout shows the file with no explanation of its own — the document is still readable, and
         // the reason it could not be laid out is not the reader's problem to solve.
-        <Markdown>{showing ? layout.markdown : doc.text}</Markdown>
+        <DocBody markdown={showing ? layout.markdown : doc.text} />
       )}
     </div>
+  );
+}
+
+/**
+ * A document, with its transcript folded away.
+ *
+ * A weekly-call file is a short recap followed by the whole transcript — hundreds of lines nobody
+ * reads top to bottom, but wants to be able to search when they do. So the transcript is split off at
+ * its heading and put behind a disclosure that starts closed: the recap is the page, the transcript is
+ * one click. Everything that is not a call has no such heading and is shown whole, unchanged.
+ */
+function DocBody({ markdown }: { markdown: string }) {
+  const { body, transcript } = splitTranscript(markdown);
+  return (
+    <>
+      <Markdown>{body}</Markdown>
+      {transcript && (
+        <details className="brain-transcript">
+          <summary>See full transcript</summary>
+          <Markdown>{transcript}</Markdown>
+        </details>
+      )}
+    </>
   );
 }
 

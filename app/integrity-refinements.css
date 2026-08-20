@@ -3897,6 +3897,15 @@ span.brain-mark.is-lg {
   opacity: 0.65;
   cursor: default;
 }
+/* A folder tile: one document a week lands inside, so it opens to a dated listing rather than being a
+   tile per call. Sits with the loose files but keeps a full-weight label, because a folder holding a
+   run of calls is a place worth going, not a single note. */
+.brain-doccard.is-folder .brain-doccard-icon {
+  color: var(--accent);
+}
+.brain-doccard.is-folder .brain-doccard-icon svg {
+  fill: color-mix(in srgb, var(--accent) 14%, transparent);
+}
 
 /* Read-mostly is a choice, so the way to do the other thing has to be said somewhere. The end of a
    client's page is where somebody has finished looking and still has the question they came with. */
@@ -4038,6 +4047,107 @@ span.brain-mark.is-lg {
   border-right: 1px solid var(--border);
   border-radius: 7px 0 0 7px;
   font-weight: 550;
+}
+/* A folder tab opens a listing, not a document, so it carries the accent as a hint that it behaves
+   differently from the file tabs around it. */
+.brain-tab.is-folder {
+  color: var(--accent);
+}
+.brain-tab.is-folder.is-open {
+  color: var(--text);
+}
+
+/* A folder inside a client: the dated listing of what is in it, newest first. This is what the weekly
+   calls open to — a run of dates rather than a tab each, so the strip stays readable as the calls pile
+   up week on week. */
+.brain-folder-head {
+  margin: 0 0 14px;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.brain-folder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.brain-folder-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  text-align: left;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.brain-folder-entry:hover {
+  border-color: var(--accent);
+}
+.brain-folder-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  color: var(--muted-2);
+}
+.brain-folder-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.brain-folder-entry:hover .brain-folder-icon {
+  color: var(--accent);
+}
+.brain-folder-date {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.brain-folder-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The transcript, folded away. A weekly call is a short recap followed by the whole transcript, which
+   nobody reads top to bottom but everybody wants searchable — so it starts closed and opens on a
+   click, set off by a rule so it reads as a thing you chose to open rather than more of the recap. */
+.brain-transcript {
+  margin-top: 26px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-soft);
+}
+.brain-transcript > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.brain-transcript > summary::-webkit-details-marker {
+  display: none;
+}
+.brain-transcript > summary::before {
+  content: "▸";
+  font-size: 11px;
+}
+.brain-transcript[open] > summary::before {
+  content: "▾";
 }
 
 .brain-split {
