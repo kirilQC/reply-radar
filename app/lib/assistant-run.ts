@@ -65,15 +65,15 @@ export const THINKING_BUDGET = 3_072;
  * is told it may not use tools, and the final turn writes the answer with thinking off (see `streamTurn`),
  * which measures at roughly ten to fourteen seconds.
  *
- * The number is set by working backwards from the sixty-second platform ceiling: reserve the compose turn
- * plus a safety margin, then subtract the worst case where a tool round starts a moment before the
- * deadline and overruns it by its own duration. Twenty-six seconds leaves that whole tail inside sixty
- * with room to spare — a single-client question finishes its research well before it, and a sprawling
+ * The number is set by working backwards from the three-hundred-second Pro ceiling: reserve the compose
+ * turn plus a safety margin, then subtract the worst case where a tool round starts a moment before the
+ * deadline and overruns it by its own duration. Two hundred and fifty seconds leaves a fifty-second tail
+ * inside three hundred — a single-client question finishes its research long before it, and a sprawling
  * "across every client" one stops here and answers from what it has rather than being killed mid-write.
- * It was 34s, which was tuned before the compose turn carried extended thinking and left no such margin;
- * a genuinely long answer would routinely blow the ceiling and the reply would never post at all.
+ * It was 26s, tuned to the old sixty-second Hobby ceiling that killed a real research task at 55s with the
+ * answer still unwritten; the account is on Pro now, so the whole budget is available.
  */
-export const TOOL_DEADLINE_MS = 26_000;
+export const TOOL_DEADLINE_MS = 250_000;
 /** Enough for a summary and a table of what was found. Not enough to start a new investigation. */
 export const FINAL_MAX_TOKENS = 4_096;
 

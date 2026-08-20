@@ -56,12 +56,11 @@ import {
  * The real ceiling, not the one we would like.
  *
  * Vercel's limit is a property of the plan and a larger number is **silently clamped**, not rejected.
- * On Hobby the function is killed at sixty seconds — and because the answer is a stream, that kill
- * arrives as a stream that simply stops. So the ceiling is stated honestly and the loop works to it:
+ * On Pro the function may run to three hundred seconds, so that is the ceiling the loop works to:
  * `TOOL_DEADLINE_MS` inside `runAgent` stops it starting new tool rounds in time to write an answer
- * from what it already has. Raise both together if this ever moves to a plan with a longer limit.
+ * from what it already has. This and the Slack route's ceiling move together — both are the same agent.
  */
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 

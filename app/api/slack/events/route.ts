@@ -49,8 +49,8 @@ import {
   verifySlackSignature,
 } from "../../../../shared/slack-agent.mjs";
 
-/** Same ceiling as the MCP route: the agent's tool budget is tuned to answer inside sixty seconds. */
-export const maxDuration = 60;
+/** Same ceiling as the MCP route: the agent's tool budget is tuned to answer inside three hundred seconds. */
+export const maxDuration = 300;
 
 type Row = Record<string, unknown>;
 
