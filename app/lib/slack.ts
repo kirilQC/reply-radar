@@ -106,7 +106,7 @@ export function slackErrorText(error: unknown, status?: number, actor: SlackActo
   if (code === "invalid_auth" || code === "not_authed" || code === "token_revoked") return `The ${env} is not valid. Re-issue it and set it again.`;
   if (code === "missing_scope") {
     return actor === "write"
-      ? `The ${SLACK_TOKEN_ENV} is missing a scope. It needs chat:write.`
+      ? `The ${SLACK_TOKEN_ENV} is missing a scope. It needs chat:write, and files:write to attach files.`
       : `The ${env} is missing a scope. It needs channels:history, groups:history, channels:read and users:read.`;
   }
   if (code === "ratelimited") return "Slack is rate limiting us. Wait a minute and try again.";
@@ -453,6 +453,54 @@ export async function removeReaction(channelId: string, ts: string, name: string
     headers: { "content-type": "application/json; charset=utf-8" },
     body: JSON.stringify({ channel: channelId, timestamp: ts, name }),
   }, "write");
+}
+
+/**
+ * Uploads a file to a channel, and to a thread within it when one is given.
+ *
+ * This is how a CSV the assistant produced — a HeyReach lead list, almost always — actually reaches the
+ * person who asked, instead of being described in prose and dropped. It is Slack's three-step external
+ * upload, the only upload flow Slack still supports: reserve a URL for the bytes, PUT the bytes to it, then
+ * finalise the reserved file into the channel. `initial_comment` rides along on the finalise so the file
+ * lands with a line of context rather than bare. Bot token throughout, because the file is from QC Bot.
+ *
+ * `content` is the file's text as-is (the export tools return decoded CSV, not base64), so its byte length
+ * is measured in UTF-8 — the reserve step rejects a length that does not match what is uploaded.
+ */
+export async function uploadFile(
+  channelId: string,
+  file: { name: string; content: string },
+  opts: { threadTs?: string; comment?: string } = {},
+): Promise<void> {
+  const token = botToken();
+  if (!token) throw new Error(`${SLACK_TOKEN_ENV} is not set, so no file can be uploaded to Slack.`);
+
+  const length = Buffer.byteLength(file.content, "utf8");
+  const query = new URLSearchParams({ filename: file.name, length: String(length) });
+  const reserved = await raw(token, `files.getUploadURLExternal?${query.toString()}`, { method: "GET" });
+  if (!reserved.ok) throw new Error(slackErrorText(reserved.error, reserved.status, "write"));
+  const uploadUrl = String(reserved.upload_url ?? "");
+  const fileId = String(reserved.file_id ?? "");
+  if (!uploadUrl || !fileId) throw new Error("Slack did not return an upload URL for the file.");
+
+  // The bytes go to the reserved URL as multipart form data, the shape Slack's own client uses; this URL is
+  // not a Slack API method, so it takes no token and returns a bare 200 rather than an `ok` envelope.
+  const form = new FormData();
+  form.append("file", new Blob([file.content]), file.name);
+  const put = await fetch(uploadUrl, { method: "POST", body: form, cache: "no-store" });
+  if (!put.ok) throw new Error(`Slack rejected the file upload (HTTP ${put.status}).`);
+
+  const complete = await raw(token, "files.completeUploadExternal", {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({
+      files: [{ id: fileId, title: file.name }],
+      channel_id: channelId,
+      ...(opts.threadTs ? { thread_ts: opts.threadTs } : {}),
+      ...(opts.comment ? { initial_comment: opts.comment } : {}),
+    }),
+  });
+  if (!complete.ok) throw new Error(slackErrorText(complete.error, complete.status, "write"));
 }
 
 /* ── Diagnostics ─────────────────────────────────────────────────────────────────────────────────

@@ -142,6 +142,21 @@ test("a markdown table becomes a fixed-width code block", () => {
   assert.ok(!out.includes("|---|"), "the markdown separator row should not survive");
 });
 
+test("a wide table is rendered vertically so it cannot break on a phone", () => {
+  const md = [
+    "| Campaign | Replies | Positive | Reply rate |",
+    "|---|---|---|---|",
+    "| Founders Q3 | 12 | 5 | 8.2% |",
+    "| CTO outreach | 7 | 3 | 5.1% |",
+  ].join("\n");
+  const out = toSlackText(md);
+  assert.ok(!out.includes("```"), "a four-column table must not be a monospace block that wraps on mobile");
+  assert.ok(out.includes("*Founders Q3*"), "each row's first cell becomes a bold heading");
+  assert.ok(out.includes("Reply rate: 8.2%"), "the other cells become Header: value lines");
+  assert.ok(!out.includes("Campaign:"), "the first column is the heading, not a labelled line");
+  assert.ok(!out.includes("|---|"), "the markdown separator row should not survive");
+});
+
 test("headings become bold and a real code block is left untouched", () => {
   const md = ["## Summary", "", "```js", "const x = **not bold here**;", "```"].join("\n");
   const out = toSlackText(md);

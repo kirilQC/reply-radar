@@ -124,12 +124,49 @@ function stripVisualBlocks(markdown) {
 const plainCell = (cell) => inlineToMrkdwn(cell).replace(/\*/g, "").trim();
 
 /**
- * Rewrites GitHub-flavoured tables as a monospace block, because Slack has no table.
+ * The widest a padded monospace table may be before it is rendered vertically instead.
  *
- * A markdown table is a header row, a `---` separator, then body rows. Slack renders none of that, so
- * the columns are measured and padded into a code block, which Slack shows in a fixed-width font — the
- * only way rows and columns stay lined up in a message. A run of non-table lines passes through
- * untouched.
+ * A code block is the only way columns line up in Slack — but only while the whole row fits the reader's
+ * viewport. On a phone a block wider than this wraps mid-row and the alignment the padding bought is
+ * destroyed, which is exactly the "broken table" a desktop author never sees. Past this width, and for any
+ * table of four or more columns, the vertical layout below is used instead: it has no columns to misalign,
+ * so it survives every view. The number is a hair under Slack's mobile monospace wrap point.
+ */
+const MAX_TABLE_WIDTH = 44;
+
+/**
+ * One markdown table as a stack of per-row blocks, for when a padded grid would be too wide to hold its
+ * shape on a narrow screen.
+ *
+ * Each body row becomes its own small block: the first cell — almost always the row's name — is bolded as a
+ * heading, and every other cell is written `Header: value` on its own line. There is nothing to align, so
+ * nothing can break; a phone reflows the text and the meaning is intact. Empty cells are dropped rather than
+ * printed as a dangling label.
+ *
+ * @param {string[]} header
+ * @param {string[][]} grid  The header and body rows, already reduced to plain-text cells.
+ * @returns {string[]}
+ */
+function tableToVertical(header, grid) {
+  const blocks = grid.slice(1).map((row) => {
+    const title = row[0] ? `*${row[0]}*` : "";
+    const rest = row
+      .slice(1)
+      .map((cell, column) => (cell ? `${header[column + 1]}: ${cell}` : ""))
+      .filter(Boolean);
+    return [title, ...rest].filter(Boolean).join("\n");
+  });
+  return blocks.filter(Boolean).join("\n\n").split("\n");
+}
+
+/**
+ * Rewrites GitHub-flavoured tables so they read in Slack, which has no table of its own.
+ *
+ * A markdown table is a header row, a `---` separator, then body rows. A narrow one is measured and padded
+ * into a monospace code block — the fixed-width font is the only thing that keeps rows and columns lined up.
+ * A wide one (or one of four-plus columns) cannot hold that shape on a phone, so it is rendered vertically
+ * instead, one block per row, where there is no alignment left to break. A run of non-table lines passes
+ * through untouched.
  *
  * @param {string} markdown
  * @returns {string}
@@ -160,6 +197,12 @@ function tablesToText(markdown) {
       const widths = Array.from({ length: columns }, (_, column) =>
         Math.max(...grid.map((row) => row[column].length)),
       );
+      // Two spaces between every column, matching the padded render below.
+      const rowWidth = widths.reduce((total, width) => total + width, 0) + (columns - 1) * 2;
+      if (columns > 3 || rowWidth > MAX_TABLE_WIDTH) {
+        out.push(...tableToVertical(grid[0], grid));
+        continue;
+      }
       const pad = (row) => row.map((cell, column) => cell.padEnd(widths[column])).join("  ").trimEnd();
       const rendered = ["```", pad(grid[0]), ...grid.slice(1).map(pad), "```"];
       out.push(...rendered);

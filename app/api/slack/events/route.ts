@@ -39,6 +39,7 @@ import {
   slackConfigured,
   threadPosts,
   updateMessage,
+  uploadFile,
 } from "../../../lib/slack";
 import {
   botParticipated,
@@ -193,9 +194,16 @@ async function runAndReply(opts: {
     // tool edit differ even when the step list has not changed.
     const render = () => progressText(steps, { elapsedMs: Date.now() - startedAt });
 
-    // The agent's tool lifecycle, turned into ticks on the progress message. Other event kinds (the token
-    // stream, files) carry nothing a Slack reader can use here and are ignored.
+    // A file a tool produced — a HeyReach CSV export, in practice. Held until the answer is delivered, then
+    // uploaded into the same thread, so the person who asked for a list gets the list and not just its
+    // description. The token stream carries nothing a Slack reader can use and is ignored.
+    const files: Array<{ name: string; content: string }> = [];
+    // The agent's tool lifecycle, turned into ticks on the progress message.
     const emit = (agentEvent: AgentEvent) => {
+      if (agentEvent.type === "file") {
+        files.push({ name: agentEvent.name, content: agentEvent.content });
+        return;
+      }
       if (!statusTs) return;
       if (agentEvent.type === "tool") {
         steps.push({ tool: agentEvent.tool, label: progressLabel(agentEvent.tool, agentEvent.input), status: "doing" });
@@ -282,6 +290,15 @@ async function runAndReply(opts: {
       // progress message, which is now deleted, so this is the only duration the thread keeps.
       const seconds = Math.round((Date.now() - startedAt) / 1000);
       await deliver(`${truncateForSlack(`${answer}${cut}`)}\n\n_Answered in ${seconds}s_`);
+      // Any file a tool produced (a HeyReach CSV, in practice) is uploaded into the same thread after the
+      // answer, so the list the person asked for actually arrives. Best-effort: a failed upload leaves a
+      // one-line note rather than breaking the answer that is already posted.
+      for (const file of files) {
+        await uploadFile(channel, file, { threadTs, comment: `Here's *${file.name}*.` }).catch(async (error) => {
+          const why = error instanceof Error ? error.message : "the upload failed";
+          await postMessage(channel, `I built *${file.name}* but couldn't attach it: ${why}`, threadTs).catch(() => {});
+        });
+      }
       // The answer is out; mark the asking message answered so the thread reads as done at a glance.
       if (reactTs) await addReaction(channel, reactTs, DONE_REACTION).catch(() => {});
       await logRun(result.stopReason === "max_tokens" ? "truncated" : result.outOfTime ? "out_of_time" : "success", result);
