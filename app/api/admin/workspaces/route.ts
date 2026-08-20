@@ -1,11 +1,26 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { isAiArkEnrichmentEnabled } from "../../../lib/lead-identity";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { isOurWebhookUrl, publicBaseUrl, webhookUrlFor } from "../../../lib/public-url";
 import { normalizeChannelId } from "../../../lib/slack-channel";
+import { syncMessagingDocForSlug } from "../../../lib/messaging-sync";
+
+/**
+ * The moment a client's messaging doc is present on a saved workspace, pull its tabs into the brain.
+ *
+ * Fired through `after` so the save responds immediately and the sync — a Docs read plus a few GitHub
+ * writes — runs on the tail of the same invocation. It is deliberately unconditional on the URL having
+ * *changed*: the sync files only net-new tabs, so re-running it on an unrelated save is cheap and cannot
+ * duplicate anything. Failures are swallowed here on purpose — a messaging doc that will not open must
+ * never turn a workspace save into an error.
+ */
+function fileMessagingAfterSave(slug: string, guardrails: Record<string, unknown>): void {
+  if (!slug || !String(guardrails?.messaging_doc_url ?? "").trim()) return;
+  after(() => syncMessagingDocForSlug(slug).catch(() => {}));
+}
 
 function supabaseConfig() {
   return { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
@@ -96,6 +111,7 @@ export async function POST(request: Request) {
     if (!rows.length) return NextResponse.json({ ok: false, error: "The workspace no longer exists. Refresh and try again." }, { status: 404 });
     await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.updated", entityType: "workspace", entityId: String(rows[0]?.id ?? id), details: { source: "admin", status: "success", workspaceId: rows[0]?.id ?? id, workspaceName: rows[0]?.name ?? payload.name, summary: `${rows[0]?.name ?? payload.name ?? "The client workspace"} configuration was saved successfully.` } });
     const workspaces = rows.map((row: Record<string, unknown>) => ({ ...row, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined }));
+    fileMessagingAfterSave(String(rows[0]?.slug ?? payload.slug ?? ""), existingGuardrails);
     return NextResponse.json({ ok: true, workspaces }, { status: 200 });
   }
   let response = await fetch(`${url}/rest/v1/rr_workspaces?on_conflict=slug`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(record) });
@@ -116,6 +132,7 @@ export async function POST(request: Request) {
   let data: unknown = null; try { data = body ? JSON.parse(body) : null; } catch { data = body; }
   const workspaces = Array.isArray(data) ? data.map((row: Record<string, unknown>) => ({ ...row, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined })) : data;
   if (response.ok && Array.isArray(data) && data[0]) await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.created", entityType: "workspace", entityId: String(data[0].id ?? ""), details: { source: "admin", status: "success", workspaceId: data[0].id, workspaceName: data[0].name ?? payload.name, summary: `${data[0].name ?? payload.name ?? "A client workspace"} was added to Reply Radar.` } });
+  if (response.ok && Array.isArray(data) && data[0]) fileMessagingAfterSave(String(data[0].slug ?? payload.slug ?? ""), existingGuardrails);
   return NextResponse.json({ ok: response.ok, workspaces, error: response.ok ? undefined : data }, { status: response.ok ? 201 : response.status });
 }
 

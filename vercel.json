@@ -4,6 +4,10 @@
     {
       "path": "/api/brain/warm",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/messaging/sync",
+      "schedule": "0 8 * * *"
     }
   ]
 }
