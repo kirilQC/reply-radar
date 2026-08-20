@@ -231,6 +231,84 @@ export function toSlackText(markdown) {
 }
 
 /**
+ * A tool call, said the way a person would say it — so the progress message reads as "checking campaign
+ * analytics" rather than "heyreach_campaign_metrics".
+ *
+ * The tool names are an implementation detail; what the reader wants is the *source* being consulted.
+ * Where a call is scoped to one client the name is folded in, because "Reading Cotool's context" is more
+ * reassuring than a bare verb — it shows the bot understood which client was asked about. An unknown tool
+ * degrades to its name with the underscores softened rather than being dropped, so a tool added later
+ * still shows something rather than a blank line.
+ */
+const PROGRESS_LABELS = {
+  list_clients: "Listing clients",
+  client_summary: "Reading the client summary",
+  database_totals: "Counting the lead database",
+  recent_replies: "Pulling recent replies",
+  awaiting_reply: "Finding leads awaiting a reply",
+  find_person: "Looking up a person",
+  search_leads: "Searching leads",
+  read_conversation: "Reading a conversation",
+  heyreach_campaigns: "Listing campaigns",
+  heyreach_campaign_metrics: "Checking campaign analytics",
+  heyreach_senders: "Checking sender accounts",
+  heyreach_person_campaigns: "Checking a person's campaigns",
+  heyreach_campaign_sequence: "Reading a campaign sequence",
+  heyreach_lists: "Listing HeyReach lists",
+  heyreach_export_list: "Exporting a list",
+  heyreach_workspace_totals: "Totalling the HeyReach workspace",
+  heyreach_inbox_search: "Searching the HeyReach inbox",
+  heyreach_person_profile: "Reading a LinkedIn profile",
+  brain_search: "Searching the QC Brain",
+  brain_read: "Reading from the QC Brain",
+  brain_client: "Reading the client's QC Brain",
+  brain_write: "Drafting a QC Brain edit",
+  brain_skills: "Checking QC playbooks",
+  airtable_tables: "Reading the Airtable schema",
+  airtable_records: "Reading Airtable records",
+  airtable_create_records: "Adding rows to Airtable",
+  airtable_update_records: "Updating rows in Airtable",
+};
+
+/**
+ * The human phrase for one tool call.
+ *
+ * @param {string} tool
+ * @param {unknown} [input]
+ * @returns {string}
+ */
+export function progressLabel(tool, input) {
+  const base = PROGRESS_LABELS[tool] ?? (String(tool ?? "").replace(/_/g, " ").trim() || "Working");
+  const client = input && typeof input === "object" ? String(input.client ?? "").trim() : "";
+  if (client && (tool === "client_summary" || tool === "brain_client")) return `Reading ${client}'s context`;
+  if (client) return `${base} · ${client}`;
+  return base;
+}
+
+/** How many step lines the progress message shows; older steps roll off the top so it never grows unbounded. */
+const MAX_PROGRESS_STEPS = 8;
+
+/**
+ * The live "thinking" message, rebuilt from the steps so far.
+ *
+ * Finished steps carry a check (or a warning if the lookup failed), the ones still running carry an
+ * hourglass — so the reader sees the bot working through sources rather than a frozen spinner. Only the
+ * most recent handful are shown; a thirty-round research loop would otherwise post a wall of ticks.
+ *
+ * @param {Array<{ label: string; status: "doing" | "ok" | "fail" }>} steps
+ * @returns {string}
+ */
+export function progressText(steps) {
+  const list = Array.isArray(steps) ? steps : [];
+  const shown = list.slice(-MAX_PROGRESS_STEPS);
+  const hidden = list.length - shown.length;
+  const icon = (status) => (status === "ok" ? "✓" : status === "fail" ? "⚠️" : "⏳");
+  const lines = shown.map((step) => `${icon(step.status)}  ${step.label}`);
+  const head = hidden > 0 ? `:mag: *Looking into it…* _(+${hidden} earlier)_` : ":mag: *Looking into it…*";
+  return [head, "", ...lines].join("\n").trimEnd();
+}
+
+/**
  * Slack accepts a large message but shows a truncated one, so an answer longer than this is cut with a
  * marker rather than sent whole and clipped invisibly. The ceiling is well under Slack's own limit,
  * leaving room for the marker and for the header the route may prepend.

@@ -14,6 +14,8 @@ import { createHmac } from "node:crypto";
 import {
   cleanMention,
   inlineToMrkdwn,
+  progressLabel,
+  progressText,
   toSlackText,
   truncateForSlack,
   verifySlackSignature,
@@ -163,4 +165,40 @@ test("a cut that lands inside a code fence closes the fence before the marker", 
   const fences = (out.match(/```/g) ?? []).length;
   assert.equal(fences % 2, 0, "every opened fence must be closed so the marker is not swallowed");
   assert.ok(out.includes("truncated for Slack"));
+});
+
+test("a tool is described as a source, not by its function name", () => {
+  assert.equal(progressLabel("heyreach_campaign_metrics"), "Checking campaign analytics");
+  assert.equal(progressLabel("brain_search"), "Searching the QC Brain");
+  assert.equal(progressLabel("airtable_create_records"), "Adding rows to Airtable");
+});
+
+test("a client-scoped lookup names the client", () => {
+  assert.equal(progressLabel("client_summary", { client: "Cotool" }), "Reading Cotool's context");
+  assert.equal(progressLabel("search_leads", { client: "Willow" }), "Searching leads · Willow");
+});
+
+test("an unknown tool still gets a readable label rather than a blank", () => {
+  assert.equal(progressLabel("some_new_tool"), "some new tool");
+  assert.equal(progressLabel(""), "Working");
+});
+
+test("the progress message marks finished steps done and the running one as pending", () => {
+  const out = progressText([
+    { label: "Listing clients", status: "ok" },
+    { label: "Checking campaign analytics", status: "fail" },
+    { label: "Searching the QC Brain", status: "doing" },
+  ]);
+  assert.ok(out.includes("Looking into it"));
+  assert.ok(out.includes("✓  Listing clients"));
+  assert.ok(out.includes("⚠️  Checking campaign analytics"));
+  assert.ok(out.includes("⏳  Searching the QC Brain"));
+});
+
+test("the progress message shows only the most recent steps and counts the rest", () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ label: `step ${i}`, status: "ok" }));
+  const out = progressText(many);
+  assert.ok(out.includes("+4 earlier"), "the eight shown leave four older ones summarised");
+  assert.ok(out.includes("step 11"), "the newest step is shown");
+  assert.ok(!out.includes("step 0"), "the oldest step has rolled off");
 });

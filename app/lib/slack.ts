@@ -341,6 +341,30 @@ export async function postMessage(channelId: string, text: string, threadTs = ""
   return String(body.ts ?? "");
 }
 
+/**
+ * Edits a message already posted, by the `ts` `postMessage` returned.
+ *
+ * This is how the Slack assistant shows its working: one message is posted the moment a question lands
+ * and then rewritten in place as the agent moves through its sources, and rewritten a last time with the
+ * finished answer — so the thread carries a single reply that fills in, not a placeholder followed by a
+ * duplicate. Same bot token, same mrkdwn and no-unfurl treatment as `postMessage`, because it is the
+ * same message.
+ */
+export async function updateMessage(channelId: string, ts: string, text: string): Promise<void> {
+  await call("chat.update", {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({
+      channel: channelId,
+      ts,
+      text,
+      mrkdwn: true,
+      unfurl_links: false,
+      unfurl_media: false,
+    }),
+  }, "write");
+}
+
 /* ── Diagnostics ─────────────────────────────────────────────────────────────────────────────────
  *
  * Three tokens look alike and behave nothing alike. `xoxb-` is a bot, `xoxp-` is a person, `xapp-` is

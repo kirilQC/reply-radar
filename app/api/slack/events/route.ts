@@ -28,9 +28,16 @@
  */
 
 import { after } from "next/server";
-import { runAgent } from "../../../lib/assistant-run";
-import { postMessage, slackConfigured } from "../../../lib/slack";
-import { cleanMention, toSlackText, truncateForSlack, verifySlackSignature } from "../../../../shared/slack-agent.mjs";
+import { runAgent, type AgentEvent } from "../../../lib/assistant-run";
+import { postMessage, slackConfigured, updateMessage } from "../../../lib/slack";
+import {
+  cleanMention,
+  progressLabel,
+  progressText,
+  toSlackText,
+  truncateForSlack,
+  verifySlackSignature,
+} from "../../../../shared/slack-agent.mjs";
 
 /** Same ceiling as the MCP route: the agent's tool budget is tuned to answer inside sixty seconds. */
 export const maxDuration = 60;
@@ -83,6 +90,19 @@ async function claimEvent(eventId: string): Promise<boolean> {
  * The whole answer, from question to posted reply. Runs in `after`, so a throw here cannot fail the
  * request — but it can leave the person who asked staring at nothing, so every exit posts something.
  */
+/** A tool the agent has run or is running, in the order it was called, for the live progress message. */
+type Step = { tool: string; label: string; status: "doing" | "ok" | "fail" };
+
+/**
+ * How long, at least, between edits of the progress message.
+ *
+ * `chat.update` is rate limited, and the agent can fire several tool calls in a burst; editing on every
+ * one would both risk a 429 and flicker. Eight hundred milliseconds is slower than the eye needs and far
+ * under the limit, and because real tool calls each carry network latency the events naturally space out
+ * around it. The final answer is written outside this throttle, so nothing it says is ever dropped.
+ */
+const PROGRESS_THROTTLE_MS = 800;
+
 async function answerMention(event: Row): Promise<void> {
   const channel = str(event.channel);
   // Reply in the thread the mention is in; if it was a top-level message, start a thread under it so the
@@ -102,11 +122,59 @@ async function answerMention(event: Row): Promise<void> {
     return;
   }
 
+  // One reply, posted now and rewritten as the answer forms. If the placeholder cannot be posted at all,
+  // `statusTs` stays empty and the answer is posted fresh at the end instead — the feature degrades to
+  // the old post-once behaviour rather than losing the answer.
+  let statusTs = "";
   try {
-    const result = await runAgent({ apiKey, messages: [{ role: "user", content: question }] });
+    statusTs = await postMessage(channel, ":mag: _On it — reading the room…_", threadTs);
+  } catch {
+    /* posting failed; fall back to a single post at the end */
+  }
+
+  // Edits are chained so they apply in the order they were queued: a late progress edit can never land
+  // after the final answer and overwrite it, because the answer is the last link added to the chain.
+  const steps: Step[] = [];
+  let chain: Promise<void> = Promise.resolve();
+  let lastEditAt = 0;
+  const queueEdit = (text: string) => {
+    if (!statusTs) return;
+    chain = chain.then(() => updateMessage(channel, statusTs, text).catch(() => {}));
+  };
+
+  // The agent's tool lifecycle, turned into ticks on the progress message. Other event kinds (the token
+  // stream, files) carry nothing a Slack reader can use here and are ignored.
+  const emit = (agentEvent: AgentEvent) => {
+    if (!statusTs) return;
+    if (agentEvent.type === "tool") {
+      steps.push({ tool: agentEvent.tool, label: progressLabel(agentEvent.tool, agentEvent.input), status: "doing" });
+    } else if (agentEvent.type === "tool_done") {
+      const entry = [...steps].reverse().find((step) => step.tool === agentEvent.tool && step.status === "doing");
+      if (entry) entry.status = agentEvent.ok ? "ok" : "fail";
+    } else {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastEditAt < PROGRESS_THROTTLE_MS) return;
+    lastEditAt = now;
+    queueEdit(progressText(steps));
+  };
+
+  // The finished answer, delivered by rewriting the progress message — or posted fresh if there was none.
+  const deliver = async (text: string) => {
+    if (statusTs) {
+      queueEdit(text);
+      await chain;
+    } else {
+      await postMessage(channel, text, threadTs).catch(() => {});
+    }
+  };
+
+  try {
+    const result = await runAgent({ apiKey, messages: [{ role: "user", content: question }], emit });
 
     if (result.maxedTurns) {
-      await postMessage(channel, "I ran out of research steps on that one before I could answer. Try asking something narrower.", threadTs);
+      await deliver("I ran out of research steps on that one before I could answer. Try asking something narrower.");
       return;
     }
 
@@ -117,10 +185,10 @@ async function answerMention(event: Row): Promise<void> {
           ? `\n\n_Answered from ${result.steps.length} lookup${result.steps.length === 1 ? "" : "s"} before the time limit — ask for a narrower slice to let me look further._`
           : "";
     const answer = result.reply ? toSlackText(result.reply) : "I couldn't find an answer to that.";
-    await postMessage(channel, truncateForSlack(`${answer}${cut}`), threadTs);
+    await deliver(truncateForSlack(`${answer}${cut}`));
   } catch (error) {
     const detail = error instanceof Error ? error.message : "something went wrong";
-    await postMessage(channel, `I hit an error answering that: ${detail}`, threadTs).catch(() => {});
+    await deliver(`I hit an error answering that: ${detail}`);
   }
 }
 

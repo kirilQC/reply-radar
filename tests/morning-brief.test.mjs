@@ -637,9 +637,12 @@ test("a brief posts as the bot even when only a user token is set", () => {
   // The user token exists so reads need no channel invitations. Letting a post fall back to it would put
   // a brief into a client-facing channel under a person's name, and the client would reply to them.
   assert.match(slackLib, /const token = actor === "write" \? botToken\(\) : readToken\(\);/);
-  // Exactly one `call()` asks for the write credential, and it is the one that posts.
-  assert.equal(slackLib.match(/\}, "write"\);/g)?.length, 1);
+  // The only calls that ask for the write credential are the two that write: posting a message and
+  // editing one (the Slack assistant rewrites its reply in place as the answer forms). Reads must never
+  // reach for the write token, so this count guards against a read quietly acquiring it.
+  assert.equal(slackLib.match(/\}, "write"\);/g)?.length, 2);
   assert.match(slackLib, /chat\.postMessage[\s\S]{0,700}\}, "write"\);/);
+  assert.match(slackLib, /chat\.update[\s\S]{0,700}\}, "write"\);/);
 });
 
 test("the brief goes in a thread under a header, not flat into the channel", () => {
