@@ -47,6 +47,15 @@
  */
 
 import { campaignStatusFor } from "./heyreach-campaigns";
+import {
+  createRecords as airtableCreate,
+  findTableByName,
+  getBaseTables,
+  listRecords as airtableList,
+  updateRecords as airtableUpdate,
+  type AirtableResult,
+  type AirtableTable,
+} from "./airtable";
 import { countRows } from "./rest-count";
 import { isOurCampaign } from "../../shared/campaign-code.mjs";
 import { containsAny } from "../../shared/postgrest-filter.mjs";
@@ -198,6 +207,68 @@ async function connectedClient(name: unknown): Promise<Client> {
   if (!client.apiKey) throw new Error(`${client.name} has no HeyReach API key saved, so HeyReach cannot be queried for them.`);
   return client;
 }
+
+/* ── Airtable, addressed only ever by client ────────────────────────────────────────────────────
+ *
+ * The assistant never sees a base id and cannot be handed one — a base is reached by naming the
+ * client, and this resolves their `airtable_base_id`. That is the whole guard on writes: the model can
+ * only touch a base that belongs to a client Reply Radar already knows, never an arbitrary one it was
+ * told about in a message. A client with no base linked is a plain error, not an empty result, because
+ * "this client is not on Airtable" and "Airtable is broken" want opposite responses.
+ */
+async function airtableBaseFor(name: unknown): Promise<{ client: Client; baseId: string }> {
+  const client = await resolveClient(name);
+  const rows_ = rows(await db(`rr_workspaces?select=airtable_base_id&id=eq.${encodeURIComponent(client.id)}&limit=1`));
+  const baseId = text(rows_[0]?.airtable_base_id);
+  if (!baseId) throw new Error(`${client.name} has no Airtable base linked in Reply Radar, so their Airtable cannot be reached. Link one on the admin page.`);
+  return { client, baseId };
+}
+
+/** Unwraps an Airtable result, turning its failure into a thrown error the loop reports to the model. */
+function airtableData<T>(result: AirtableResult<T>): T {
+  if (!result.ok) throw new Error(result.error);
+  return result.data;
+}
+
+/**
+ * One table in a base, found by exact id or by name.
+ *
+ * Resolved against the live schema every time, never trusted from the model, because a base's field
+ * names and even table ids drift between clients (see `app/lib/airtable.ts`) — an id half-remembered
+ * from another client's base would otherwise write into the wrong place with nothing to show it was
+ * wrong. On a miss it lists the real tables so the next turn picks the right one.
+ */
+function resolveAirtableTable(tables: AirtableTable[], wanted: unknown): AirtableTable {
+  const asked = text(wanted);
+  if (!asked) throw new Error(`Name a table. The tables are: ${tables.map((t) => t.name).join(", ")}.`);
+  const byId = tables.find((t) => t.id === asked);
+  const table = byId ?? findTableByName(tables, asked);
+  if (!table) throw new Error(`There is no table called "${asked}" in this base. The tables are: ${tables.map((t) => t.name).join(", ")}.`);
+  return table;
+}
+
+/**
+ * The field names a table actually has, and the check that a write only uses them.
+ *
+ * A value written to a field that does not exist is rejected by Airtable rather than guessed at, and
+ * this catches it one step earlier with a message that names every real field — which is what turns a
+ * model's wrong guess into a corrected second attempt instead of a dead write. Field names are the
+ * contract and they differ per client, so this is deliberately strict.
+ */
+function checkFields(table: AirtableTable, fields: Row): Row {
+  const known = new Set((table.fields ?? []).map((field) => field.name));
+  const unknown = Object.keys(fields).filter((name) => !known.has(name));
+  if (unknown.length) {
+    throw new Error(
+      `${table.name} has no field${unknown.length === 1 ? "" : "s"} called ${unknown.map((name) => `"${name}"`).join(", ")}. Its fields are: ${[...known].join(", ")}. Read the table first and use the exact names.`,
+    );
+  }
+  return fields;
+}
+
+/** How many rows a read returns to the model, and the ceiling on one write, so neither runs away. */
+const AIRTABLE_READ_ROWS = 50;
+const AIRTABLE_WRITE_ROWS = 50;
 
 /* ── Conversations, enriched with the person behind them ─────────────────────────────────────── */
 
@@ -579,6 +650,69 @@ export const TOOLS: ToolDefinition[] = [
         skill: { type: "string", description: "The command to fetch in full, with or without the slash, e.g. \"willow-weekly\" or \"/account-research\". Omit to list every skill." },
         client: { type: "string", description: "Optional: when listing, restrict to skills belonging to one client, e.g. \"willow\"." },
       },
+    },
+  },
+  {
+    name: "airtable_tables",
+    description:
+      "The tables in one client's Airtable base, each with its fields: the field name, its type, and — for single-select and status fields — the exact set of options it allows. This is QC's own working record for the client: campaign trackers, project and action items, weekly call recaps, and whatever else that base has grown. ALWAYS call this before reading rows from or writing to a table, because field names and select options differ between clients and a write to a name or option that does not exist is rejected. Addressed by client only; there is no base id to pass.",
+    input_schema: { type: "object", properties: { ...CLIENT_ARG }, required: ["client"] },
+  },
+  {
+    name: "airtable_records",
+    description:
+      "Read rows from one table in a client's Airtable base. Returns each row's record id and its fields, plus the total number of rows in the table so you can say whether the list is complete. Identify the table by the name or id from airtable_tables. Use this to answer what is in a tracker, to find a row before updating it, or to check whether something is already recorded. The record id it returns is what airtable_update_records needs to change a row.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...CLIENT_ARG,
+        table: { type: "string", description: "Table name or id, from airtable_tables." },
+        limit: { type: "integer", description: `How many rows to return, up to ${AIRTABLE_READ_ROWS}. Default ${AIRTABLE_READ_ROWS}. The total row count is returned regardless.` },
+      },
+      required: ["client", "table"],
+    },
+  },
+  {
+    name: "airtable_create_records",
+    description:
+      "Add one or more rows to a table in a client's Airtable base. This writes immediately and cannot be undone through this assistant, so read the table with airtable_tables first, use the exact field names and — for select fields — the exact options it lists, and show the person what you are about to add before you do it. Each record is an object of field name to value. Returns the created rows with their new record ids. Use this when someone asks to add, log, record or file something in a client's Airtable.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...CLIENT_ARG,
+        table: { type: "string", description: "Table name or id, from airtable_tables." },
+        records: {
+          type: "array",
+          description: `The rows to add, each an object mapping field name to value. Up to ${AIRTABLE_WRITE_ROWS} at once. Field names must match the table exactly.`,
+          items: { type: "object" },
+        },
+      },
+      required: ["client", "table", "records"],
+    },
+  },
+  {
+    name: "airtable_update_records",
+    description:
+      "Change fields on existing rows in a client's Airtable base. This writes immediately and cannot be undone through this assistant. You must identify each row by its record id, which you get from airtable_records — never guess an id, and if you cannot find the row, say so rather than creating a duplicate with airtable_create_records. Only the fields you pass are changed; the rest of the row is untouched. Use the exact field names and select options from airtable_tables. Returns the updated rows. There is deliberately no way to delete a row here — that is done by hand in Airtable.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...CLIENT_ARG,
+        table: { type: "string", description: "Table name or id, from airtable_tables." },
+        records: {
+          type: "array",
+          description: `The rows to change, each { id, fields }, where id is the record id from airtable_records and fields maps field name to new value. Up to ${AIRTABLE_WRITE_ROWS} at once.`,
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "The record id from airtable_records." },
+              fields: { type: "object", description: "Field name to new value. Only these fields change." },
+            },
+            required: ["id", "fields"],
+          },
+        },
+      },
+      required: ["client", "table", "records"],
     },
   },
 ];
@@ -1273,6 +1407,90 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         // The folder was only ever there to match `client=willow` against; the model gets the label.
         skills: skills.map((skill) => ({ command: skill.command, does: skill.does, client: skill.client })),
         note: "Call brain_skills again with a skill name to get its full instructions, then carry them out yourself.",
+      };
+    }
+
+    case "airtable_tables": {
+      const { client, baseId } = await airtableBaseFor(input.client);
+      const tables = airtableData(await getBaseTables(baseId));
+      return {
+        client: client.name,
+        note: "Field names and select options differ per client. Use the exact names below when reading or writing, and one of the listed options for a select field.",
+        tables: tables.map((table) => ({
+          id: table.id,
+          name: table.name,
+          fields: (table.fields ?? []).map((field) => ({
+            name: field.name,
+            type: field.type,
+            // Only present for the select-style fields, where writing anything off the list is refused.
+            ...(field.options?.choices?.length
+              ? { options: field.options.choices.map((choice) => choice.name).filter(Boolean) }
+              : {}),
+          })),
+        })),
+      };
+    }
+
+    case "airtable_records": {
+      const { client, baseId } = await airtableBaseFor(input.client);
+      const tables = airtableData(await getBaseTables(baseId));
+      const table = resolveAirtableTable(tables, input.table);
+      const all = airtableData(await airtableList(baseId, table.id));
+      const limit = rowLimit(input.limit, AIRTABLE_READ_ROWS, AIRTABLE_READ_ROWS);
+      const shown = all.slice(0, limit);
+      return {
+        client: client.name,
+        table: table.name,
+        total: all.length,
+        returned: shown.length,
+        ...(all.length > shown.length
+          ? { note: `${all.length} rows in total; showing the first ${shown.length}. Raise limit for more.` }
+          : {}),
+        records: shown.map((record) => ({ id: record.id, fields: record.fields })),
+      };
+    }
+
+    case "airtable_create_records": {
+      const { client, baseId } = await airtableBaseFor(input.client);
+      const tables = airtableData(await getBaseTables(baseId));
+      const table = resolveAirtableTable(tables, input.table);
+      const incoming = rows(input.records);
+      if (!incoming.length) throw new Error("Give at least one record to create, each an object of field name to value.");
+      if (incoming.length > AIRTABLE_WRITE_ROWS) {
+        throw new Error(`That is ${incoming.length} records at once; the ceiling is ${AIRTABLE_WRITE_ROWS}. Split it into smaller writes.`);
+      }
+      const payload = incoming.map((record) => checkFields(table, record));
+      const created = airtableData(await airtableCreate(baseId, table.id, payload));
+      return {
+        client: client.name,
+        table: table.name,
+        created: created.length,
+        note: "Written to Airtable. This is a real, immediate change — say what was added and give the record ids.",
+        records: created.map((record) => ({ id: record.id, fields: record.fields })),
+      };
+    }
+
+    case "airtable_update_records": {
+      const { client, baseId } = await airtableBaseFor(input.client);
+      const tables = airtableData(await getBaseTables(baseId));
+      const table = resolveAirtableTable(tables, input.table);
+      const incoming = rows(input.records);
+      if (!incoming.length) throw new Error("Give at least one record to update, each { id, fields }.");
+      if (incoming.length > AIRTABLE_WRITE_ROWS) {
+        throw new Error(`That is ${incoming.length} records at once; the ceiling is ${AIRTABLE_WRITE_ROWS}. Split it into smaller writes.`);
+      }
+      const payload = incoming.map((record) => {
+        const id = text(record.id);
+        if (!id) throw new Error("Every update needs the row's record id, from airtable_records. Never guess one.");
+        return { id, fields: checkFields(table, object(record.fields)) };
+      });
+      const updated = airtableData(await airtableUpdate(baseId, table.id, payload));
+      return {
+        client: client.name,
+        table: table.name,
+        updated: updated.length,
+        note: "Written to Airtable. This is a real, immediate change — say which rows changed and to what.",
+        records: updated.map((record) => ({ id: record.id, fields: record.fields })),
       };
     }
 

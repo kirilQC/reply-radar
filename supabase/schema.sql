@@ -162,6 +162,12 @@ create table if not exists rr_blocked_leads (
   profile_key text primary key, name text, reason text,
   blocked_at timestamptz not null default now()
 );
+-- Slack deliveries already claimed, so a retry of one the QC Bot is still answering posts nothing. The
+-- insert is the lock: event_id is Slack's own id and the primary key, so a retry's insert is refused.
+create table if not exists rr_slack_events (
+  event_id text primary key,
+  created_at timestamptz not null default now()
+);
 create table if not exists rr_documents (
   id uuid primary key default gen_random_uuid(), workspace_id uuid not null references rr_workspaces(id) on delete cascade,
   file_name text not null, storage_path text not null, mime_type text, file_size bigint,
@@ -470,6 +476,7 @@ alter table rr_conversations enable row level security;
 alter table rr_messages enable row level security;
 alter table rr_scores enable row level security;
 alter table rr_blocked_leads enable row level security;
+alter table rr_slack_events enable row level security;
 alter table rr_documents enable row level security;
 alter table rr_graphs enable row level security;
 alter table rr_webhook_events enable row level security;
