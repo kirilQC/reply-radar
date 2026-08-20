@@ -61,11 +61,19 @@ export const MAX_TOKENS = 16_384;
  */
 export const THINKING_BUDGET = 3_072;
 /**
- * When to stop researching and start answering, measured from the loop's start. A final turn of
- * `FINAL_MAX_TOKENS` measures at roughly fifteen to twenty seconds, so this leaves that plus the round
- * trip inside a sixty-second platform ceiling. Past this point the model is told it may not use tools.
+ * When to stop researching and start answering, measured from the loop's start. Past this point the model
+ * is told it may not use tools, and the final turn writes the answer with thinking off (see `streamTurn`),
+ * which measures at roughly ten to fourteen seconds.
+ *
+ * The number is set by working backwards from the sixty-second platform ceiling: reserve the compose turn
+ * plus a safety margin, then subtract the worst case where a tool round starts a moment before the
+ * deadline and overruns it by its own duration. Twenty-six seconds leaves that whole tail inside sixty
+ * with room to spare — a single-client question finishes its research well before it, and a sprawling
+ * "across every client" one stops here and answers from what it has rather than being killed mid-write.
+ * It was 34s, which was tuned before the compose turn carried extended thinking and left no such margin;
+ * a genuinely long answer would routinely blow the ceiling and the reply would never post at all.
  */
-export const TOOL_DEADLINE_MS = 34_000;
+export const TOOL_DEADLINE_MS = 26_000;
 /** Enough for a summary and a table of what was found. Not enough to start a new investigation. */
 export const FINAL_MAX_TOKENS = 4_096;
 
@@ -298,8 +306,16 @@ async function streamTurn(
 ): Promise<{ content: Block[]; stopReason: string; usage: { input: number; output: number } }> {
   // The tools stay declared even on the final turn — the conversation already contains tool_use and
   // tool_result blocks, and a request that omits the definitions those blocks refer to is rejected.
-  // `tool_choice: none` is how the API says "answer in words", and it is compatible with thinking.
+  // `tool_choice: none` is how the API says "answer in words".
   const finalTurn = options.allowTools === false;
+  // Thinking is on while the model is choosing tools — it measurably improves that — and off on the final
+  // turn, where the reasoning is already done and the only job is to write the answer up. Turning it off
+  // there is the difference between a compose turn that fits inside the platform ceiling and one that
+  // spends its first seconds thinking and gets killed mid-sentence. Historical thinking blocks already in
+  // `messages` are accepted with thinking off; the API only requires them while it is on.
+  const thinking = finalTurn
+    ? { type: "disabled" as const }
+    : { type: "enabled" as const, budget_tokens: THINKING_BUDGET };
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
@@ -310,8 +326,9 @@ async function streamTurn(
       tools: TOOLS,
       ...(finalTurn ? { tool_choice: { type: "none" } } : {}),
       messages,
-      // Temperature is deliberately unset: extended thinking requires the default.
-      thinking: { type: "enabled", budget_tokens: THINKING_BUDGET },
+      // Temperature is deliberately unset: extended thinking requires the default, and leaving it unset on
+      // the final turn too keeps behaviour consistent.
+      thinking,
       stream: true,
     }),
     signal: AbortSignal.timeout(240_000),
