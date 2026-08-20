@@ -131,6 +131,8 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
+  const [messagingSyncing, setMessagingSyncing] = useState(false);
+  const [messagingSyncResult, setMessagingSyncResult] = useState("");
   const [themePreset, setThemePreset] = useState("midnight");
   const [logos, setLogos] = useState<Record<string, string>>({});
   const [accentOverrides, setAccentOverrides] = useState<Record<string, string>>(() => {
@@ -442,6 +444,23 @@ export default function AdminPage() {
     void navigator.clipboard?.writeText(client.webhookUrl);
     showSavedConfirmation();
   };
+  const syncMessagingDoc = async () => {
+    const slug = client.slug;
+    if (!slug || !workspaceDraft.messagingDocUrl.trim()) return;
+    setMessagingSyncing(true);
+    setMessagingSyncResult("");
+    const response = await fetch(`/api/messaging/sync?workspace=${encodeURIComponent(slug)}`, { method: "POST" }).catch(() => null);
+    const payload = await response?.json().catch(() => null) as { ok?: boolean; filed?: number; results?: Array<{ filed: number; skipped: number; note: string }>; error?: string } | null;
+    if (!payload?.ok) {
+      setMessagingSyncResult(payload?.error || "Sync failed. Check the document sharing and try again.");
+    } else {
+      const result = payload.results?.[0];
+      const filed = result?.filed ?? payload.filed ?? 0;
+      const skipped = result?.skipped ?? 0;
+      setMessagingSyncResult(result?.note || `Filed ${filed} new tab${filed === 1 ? "" : "s"}${skipped ? `, ${skipped} already in the brain` : ""}.`);
+    }
+    setMessagingSyncing(false);
+  };
   return (
     <div className="app-shell">
       <AppSidebar />
@@ -624,7 +643,12 @@ export default function AdminPage() {
                       <label className="field-label">
                         CLIENT MESSAGING DOC
                         <input value={workspaceDraft.messagingDocUrl} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, messagingDocUrl: event.target.value }))} placeholder="https://docs.google.com/document/d/…" type="url" />
-                        <small>Shown as the document shortcut in this client’s inbox.</small>
+                        <div className="messaging-doc-sync">
+                          <button type="button" onClick={syncMessagingDoc} disabled={messagingSyncing || isNewWorkspace || !workspaceDraft.messagingDocUrl.trim()}>
+                            {messagingSyncing ? "Pulling tabs…" : "Sync tabs to brain"}
+                          </button>
+                          {messagingSyncResult && <small className="messaging-doc-sync-result">{messagingSyncResult}</small>}
+                        </div>
                       </label>
                       <div className="endpoint-box">
                         <div>
