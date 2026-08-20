@@ -119,11 +119,23 @@ export async function fetchMessagingTabs(docUrlOrId: string): Promise<DocTab[]> 
     { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
   );
   if (!response.ok) {
-    if (response.status === 403 || response.status === 404) {
-      throw new Error("Reply Radar cannot open that document. Set it to \u201Canyone with the link\u201D and try again.");
+    // Google's own message, not just the status: a 403 is "the doc is not readable by the service
+    // account" and "the Docs API is not enabled on this project" with the same code, and the operator
+    // needs to know which one they are looking at.
+    const body = await response.text().catch(() => "");
+    let reason = "";
+    try {
+      reason = String((JSON.parse(body) as { error?: { message?: string } })?.error?.message ?? "").trim();
+    } catch {
+      reason = body.slice(0, 200).trim();
     }
-    const detail = await response.text().catch(() => "");
-    throw new Error(`Google Docs returned ${response.status}. ${detail.slice(0, 200)}`.trim());
+    if (response.status === 403 || response.status === 404) {
+      const hint =
+        "Reply Radar cannot open that document. Either set it to \u201Canyone with the link\u201D, " +
+        "or enable the Google Docs API on the service account's project.";
+      throw new Error(reason ? `${hint} (Google: ${reason})` : hint);
+    }
+    throw new Error(`Google Docs returned ${response.status}. ${reason}`.trim());
   }
   const doc = (await response.json().catch(() => ({}))) as { tabs?: unknown[] };
   return flattenDocTabs(doc.tabs ?? []) as DocTab[];
