@@ -358,67 +358,71 @@ export default function SlackPage() {
               <a className="text-button" href={automation === "call_analysis" ? "/admin?section=ai-hub#ai-call-analysis" : "/admin?section=ai-hub#ai-morning-brief"}>Edit the prompt →</a>
             </div>
 
-            <div className="hub-group-label">
-              <span>Schedule</span>
-              <span>{describeSchedule(draft)}</span>
-            </div>
-            <div className="brief-schedule">
-              {/* The switch and one button. The days, the time and the zone are set once and then not
-                  touched for months, and open on the page they were four controls standing between the
-                  schedule and the client list, which is what somebody actually came here for. */}
-              <div className="brief-schedule-row">
-                <button type="button" className={draft.enabled ? "brief-switch is-on" : "brief-switch"} onClick={toggleSchedule} disabled={savingSchedule}>
-                  <span />{draft.enabled ? "On" : "Off"}
-                </button>
-                <button type="button" className="secondary-button" onClick={() => setScheduleOpen((open) => !open)}>
-                  {scheduleOpen ? "Done" : "Edit time and date"}
-                </button>
-              </div>
-              {scheduleOpen && <div className="brief-schedule-row">
-                <div className="brief-days">
-                  {DAY_NAMES.map((name, day) => (
-                    <button key={name} type="button" className={draft.sendDays.includes(day) ? "brief-day is-on" : "brief-day"} onClick={() => toggleDay(day)} title={name}>
-                      {name.slice(0, 1)}
-                    </button>
-                  ))}
+            {/* Call analysis has no schedule: it runs off the hourly Granola heartbeat, posting a recap
+                the hour a new call is found. The morning brief still keeps its day/time schedule. */}
+            {automation === "call_analysis" ? (
+              <>
+                <div className="hub-group-label">
+                  <span>Trigger</span>
+                  <span>Hourly Granola heartbeat</span>
                 </div>
-                <label className="brief-field">
-                  TIME
-                  <span className="brief-time">
-                    <select value={draft.sendHour} onChange={(event) => setDraft((current) => ({ ...current, sendHour: Number(event.target.value) }))}>
-                      {Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}</option>)}
-                    </select>
-                    <select value={draft.sendMinute} onChange={(event) => setDraft((current) => ({ ...current, sendMinute: Number(event.target.value) }))}>
-                      {[0, 15, 30, 45].map((minute) => <option key={minute} value={minute}>{String(minute).padStart(2, "0")}</option>)}
-                    </select>
-                  </span>
-                </label>
-                <label className="brief-field">
-                  ZONE
-                  <select value={draft.timezone} onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))}>
-                    {TIMEZONES.map((zone) => <option key={zone} value={zone}>{zone.split("/").pop()?.replace(/_/g, " ")}</option>)}
-                  </select>
-                </label>
-                {/* A scheduled morning brief has no destination picker: it goes to the client's internal
-                    channel, the only place it was ever for. A call analysis does, because it legitimately
-                    goes to one of two channels and the team picks which — internal by default. */}
-                {automation === "call_analysis" && (
-                  <label className="brief-field">
-                    CHANNEL
-                    <select value={draft.destination} onChange={(event) => setDraft((current) => ({ ...current, destination: event.target.value }))}>
-                      <option value="internal">Internal</option>
-                      <option value="external">External</option>
-                    </select>
-                  </label>
-                )}
-                <button className="config-generate" type="button" onClick={() => saveSchedule()} disabled={savingSchedule}>{savingSchedule ? "Saving…" : "Save schedule"}</button>
-              </div>}
-              {/* The one thing a schedule cannot show about itself: whether it would fire right now. */}
-              {directory?.scheduleDueNow && directory.schedule.enabled && (
-                <p className="brief-schedule-note">Due now. {directory.due.length ? `${directory.due.length} client${directory.due.length === 1 ? "" : "s"} waiting on the worker.` : "Every enabled client has had one today."}</p>
-              )}
-              {scheduleError && <div className="config-error">{scheduleError}</div>}
-            </div>
+                <div className="brief-schedule">
+                  <p className="brief-schedule-note">Polls every Granola key each hour, 5:00 AM – 8:00 PM Eastern. A new call is analysed and posted to the client&rsquo;s internal channel within the hour it is found. Enable a client below to include it.</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="hub-group-label">
+                  <span>Schedule</span>
+                  <span>{describeSchedule(draft)}</span>
+                </div>
+                <div className="brief-schedule">
+                  {/* The switch and one button. The days, the time and the zone are set once and then not
+                      touched for months, and open on the page they were four controls standing between the
+                      schedule and the client list, which is what somebody actually came here for. */}
+                  <div className="brief-schedule-row">
+                    <button type="button" className={draft.enabled ? "brief-switch is-on" : "brief-switch"} onClick={toggleSchedule} disabled={savingSchedule}>
+                      <span />{draft.enabled ? "On" : "Off"}
+                    </button>
+                    <button type="button" className="secondary-button" onClick={() => setScheduleOpen((open) => !open)}>
+                      {scheduleOpen ? "Done" : "Edit time and date"}
+                    </button>
+                  </div>
+                  {scheduleOpen && <div className="brief-schedule-row">
+                    <div className="brief-days">
+                      {DAY_NAMES.map((name, day) => (
+                        <button key={name} type="button" className={draft.sendDays.includes(day) ? "brief-day is-on" : "brief-day"} onClick={() => toggleDay(day)} title={name}>
+                          {name.slice(0, 1)}
+                        </button>
+                      ))}
+                    </div>
+                    <label className="brief-field">
+                      TIME
+                      <span className="brief-time">
+                        <select value={draft.sendHour} onChange={(event) => setDraft((current) => ({ ...current, sendHour: Number(event.target.value) }))}>
+                          {Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}</option>)}
+                        </select>
+                        <select value={draft.sendMinute} onChange={(event) => setDraft((current) => ({ ...current, sendMinute: Number(event.target.value) }))}>
+                          {[0, 15, 30, 45].map((minute) => <option key={minute} value={minute}>{String(minute).padStart(2, "0")}</option>)}
+                        </select>
+                      </span>
+                    </label>
+                    <label className="brief-field">
+                      ZONE
+                      <select value={draft.timezone} onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))}>
+                        {TIMEZONES.map((zone) => <option key={zone} value={zone}>{zone.split("/").pop()?.replace(/_/g, " ")}</option>)}
+                      </select>
+                    </label>
+                    <button className="config-generate" type="button" onClick={() => saveSchedule()} disabled={savingSchedule}>{savingSchedule ? "Saving…" : "Save schedule"}</button>
+                  </div>}
+                  {/* The one thing a schedule cannot show about itself: whether it would fire right now. */}
+                  {directory?.scheduleDueNow && directory.schedule.enabled && (
+                    <p className="brief-schedule-note">Due now. {directory.due.length ? `${directory.due.length} client${directory.due.length === 1 ? "" : "s"} waiting on the worker.` : "Every enabled client has had one today."}</p>
+                  )}
+                  {scheduleError && <div className="config-error">{scheduleError}</div>}
+                </div>
+              </>
+            )}
 
             <div className="hub-group-label">
               <span>Clients</span>

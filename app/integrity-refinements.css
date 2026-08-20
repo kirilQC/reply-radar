@@ -288,6 +288,11 @@
 .health-shell .heartbeat-last-checked {
   order: 7;
 }
+/* The Granola heartbeat sits last, below everything else — it is the newest and least urgent panel, and
+   without a number of its own it defaults to 0 and jumps above the client summary. */
+.health-shell .granola-heartbeat-health {
+  order: 8;
+}
 .health-actions {
   display: grid !important;
   justify-items: end;

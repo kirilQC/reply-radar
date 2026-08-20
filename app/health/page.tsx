@@ -664,102 +664,6 @@ export default function HealthPage() {
               )}
             </section>
 
-            <section
-              className={`admin-panel granola-heartbeat-health ${granola?.state === "down" ? "has-alert" : ""}`}
-            >
-              <div className="panel-heading">
-                <div>
-                  <h2>Granola API heartbeat</h2>
-                </div>
-                <span className={`health-state ${granolaState}`}>
-                  {granola?.state === "ok"
-                    ? "RUNNING"
-                    : granola?.state === "idle"
-                      ? "PAUSED"
-                      : granola?.state === "starting"
-                        ? "STARTING"
-                        : granola?.state === "down"
-                          ? "DOWN"
-                          : "NOT CHECKED"}
-                </span>
-              </div>
-              {granola ? (
-                <>
-                  <div className="heartbeat-kid-grid">
-                    <div className={granola.state === "down" ? "bad" : "ok"}>
-                      <b>{granola.state === "down" ? "!" : granola.inWindow ? "✓" : "i"}</b>
-                      <span>
-                        <strong>Polling window</strong>
-                        <small>
-                          {granola.windowLabel} · {granola.pollIntervalLabel} ·{" "}
-                          {granola.inWindow ? "open now" : "closed now"}
-                        </small>
-                      </span>
-                    </div>
-                    <div className={granola.state === "down" ? "bad" : "ok"}>
-                      <b>{granola.state === "down" ? "!" : "✓"}</b>
-                      <span>
-                        <strong>Last poll</strong>
-                        <small>
-                          {granola.lastCheckedAt
-                            ? `${formatStamp(granola.lastCheckedAt)} · ${formatAge(granola.lastCheckedAgeSeconds)}`
-                            : "No poll has run yet."}
-                        </small>
-                      </span>
-                    </div>
-                    <div className="ok">
-                      <b>i</b>
-                      <span>
-                        <strong>Calls found · last poll</strong>
-                        <small>
-                          {granola.callsFound} call(s) across {granola.clientsChecked}{" "}
-                          client(s) · {granola.newCalls} new · {granola.keysSeen} key(s)
-                        </small>
-                      </span>
-                    </div>
-                  </div>
-                  {granola.error && <p className="error-text">{granola.error}</p>}
-                  {granola.clients && granola.clients.length ? (
-                    <div className="slack-run-list">
-                      {granola.clients.map((client) => (
-                        <div
-                          className={`slack-run ${client.isNew ? "run-ok" : "run-quiet"}`}
-                          key={client.slug}
-                        >
-                          <span className="slack-run-client">{client.name}</span>
-                          <span className="slack-run-where">
-                            {client.title
-                              ? `${client.title}${client.owner ? ` · via ${client.owner}` : ""}`
-                              : "No matching call found"}
-                          </span>
-                          <span className="slack-run-status">
-                            {client.startedAt ? formatStamp(new Date(client.startedAt).toISOString()) : "—"}
-                          </span>
-                          {client.isNew && <span className="slack-run-status">New</span>}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="empty-state">
-                      {granola.inWindow
-                        ? "The last poll found no matching calls."
-                        : "Polling is paused until working hours."}
-                    </p>
-                  )}
-                  {mode === "advanced" && (
-                    <details className="diagnostic-details" open>
-                      <summary>Granola heartbeat log — last twelve polls</summary>
-                      <pre>{JSON.stringify(granola ?? null, null, 2)}</pre>
-                    </details>
-                  )}
-                </>
-              ) : (
-                <p className="empty-state">
-                  No Granola heartbeat was returned by the health check.
-                </p>
-              )}
-            </section>
-
             <section className="admin-panel client-heartbeat-panel">
               <div className="panel-heading">
                 <div>
@@ -867,6 +771,102 @@ export default function HealthPage() {
                     );
                   })}
                 </div>
+              )}
+            </section>
+
+            <section
+              className={`admin-panel granola-heartbeat-health ${granola?.state === "down" ? "has-alert" : ""}`}
+            >
+              <div className="panel-heading">
+                <div>
+                  <h2>Granola API heartbeat</h2>
+                </div>
+                <span className={`health-state ${granolaState}`}>
+                  {granola?.state === "ok"
+                    ? "RUNNING"
+                    : granola?.state === "idle"
+                      ? "PAUSED"
+                      : granola?.state === "starting"
+                        ? "STARTING"
+                        : granola?.state === "down"
+                          ? "DOWN"
+                          : "NOT CHECKED"}
+                </span>
+              </div>
+              {granola ? (
+                <>
+                  <div className="heartbeat-kid-grid">
+                    <div className={granola.state === "down" ? "bad" : "ok"}>
+                      <b>{granola.state === "down" ? "!" : granola.inWindow ? "✓" : "i"}</b>
+                      <span>
+                        <strong>Polling window</strong>
+                        <small>
+                          {granola.windowLabel} · {granola.pollIntervalLabel} ·{" "}
+                          {granola.inWindow ? "open now" : "closed now"}
+                        </small>
+                      </span>
+                    </div>
+                    <div className={granola.state === "down" ? "bad" : "ok"}>
+                      <b>{granola.state === "down" ? "!" : "✓"}</b>
+                      <span>
+                        <strong>Last poll</strong>
+                        <small>
+                          {granola.lastCheckedAt
+                            ? `${formatStamp(granola.lastCheckedAt)} · ${formatAge(granola.lastCheckedAgeSeconds)}`
+                            : "No poll has run yet."}
+                        </small>
+                      </span>
+                    </div>
+                    <div className="ok">
+                      <b>i</b>
+                      <span>
+                        <strong>Calls found · last poll</strong>
+                        <small>
+                          {granola.callsFound} call(s) across {granola.clientsChecked}{" "}
+                          client(s) · {granola.newCalls} new · {granola.keysSeen} key(s)
+                        </small>
+                      </span>
+                    </div>
+                  </div>
+                  {granola.error && <p className="error-text">{granola.error}</p>}
+                  {granola.clients && granola.clients.length ? (
+                    <div className="slack-run-list">
+                      {granola.clients.map((client) => (
+                        <div
+                          className={`slack-run ${client.isNew ? "run-ok" : "run-quiet"}`}
+                          key={client.slug}
+                        >
+                          <span className="slack-run-client">{client.name}</span>
+                          <span className="slack-run-where">
+                            {client.title
+                              ? `${client.title}${client.owner ? ` · via ${client.owner}` : ""}`
+                              : "No matching call found"}
+                          </span>
+                          <span className="slack-run-status">
+                            {client.startedAt ? formatStamp(new Date(client.startedAt).toISOString()) : "—"}
+                          </span>
+                          {client.isNew && <span className="slack-run-status">New</span>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty-state">
+                      {granola.inWindow
+                        ? "The last poll found no matching calls."
+                        : "Polling is paused until working hours."}
+                    </p>
+                  )}
+                  {mode === "advanced" && (
+                    <details className="diagnostic-details" open>
+                      <summary>Granola heartbeat log — last twelve polls</summary>
+                      <pre>{JSON.stringify(granola ?? null, null, 2)}</pre>
+                    </details>
+                  )}
+                </>
+              ) : (
+                <p className="empty-state">
+                  No Granola heartbeat was returned by the health check.
+                </p>
               )}
             </section>
           </section>

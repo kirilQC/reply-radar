@@ -77,6 +77,22 @@ export async function GET() {
       detail: "",
       latencyMs: null as number | null,
     },
+    {
+      id: "slack",
+      label: "Slack automations",
+      configured: Boolean(process.env.SLACK_BOT_TOKEN || process.env.SLACK_USER_TOKEN),
+      status: "checking",
+      detail: "",
+      latencyMs: null as number | null,
+    },
+    {
+      id: "airtable",
+      label: "Airtable API",
+      configured: Boolean(process.env.AIRTABLE_API_KEY),
+      status: "checking",
+      detail: "",
+      latencyMs: null as number | null,
+    },
   ];
   if (!url || !key)
     return NextResponse.json({
@@ -152,6 +168,65 @@ export async function GET() {
           durationMs: 0,
           body: "API key missing",
         });
+    /*
+     * A live Slack auth check, not just "is a token set".
+     *
+     * `auth.test` returns HTTP 200 even for a bad token, with `{ ok: false, error: "invalid_auth" }` in the
+     * body, so the verdict has to read `body.ok`, not the HTTP status. This is the whole automation surface —
+     * if it is down, no brief and no call analysis posts — so it earns its own light rather than being inferred
+     * from whether the last brief happened to succeed.
+     */
+    const slackToken = process.env.SLACK_BOT_TOKEN || process.env.SLACK_USER_TOKEN;
+    const slackStarted = Date.now();
+    const slackApiCheck = slackToken
+      ? fetch("https://slack.com/api/auth.test", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${slackToken}` },
+          cache: "no-store",
+          signal: AbortSignal.timeout(8_000),
+        })
+          .then(async (response) => {
+            const body = await safeJson(response);
+            return {
+              ok: Boolean(response.ok && body && (body as Row).ok),
+              status: response.status,
+              durationMs: Date.now() - slackStarted,
+              body,
+            };
+          })
+          .catch((error) => ({
+            ok: false,
+            status: 0,
+            durationMs: Date.now() - slackStarted,
+            body: error instanceof Error ? error.message : "Slack check failed",
+          }))
+      : Promise.resolve({ ok: false, status: 0, durationMs: 0, body: "No Slack token is set" });
+    /*
+     * A live Airtable check via `meta/whoami`, the cheapest authenticated call the token can make. Like Slack
+     * and Anthropic, a set token is not a working token, and this is where every tracker and Weekly Calls write
+     * lands, so it gets its own light.
+     */
+    const airtableToken = process.env.AIRTABLE_API_KEY;
+    const airtableStarted = Date.now();
+    const airtableCheck = airtableToken
+      ? fetch("https://api.airtable.com/v0/meta/whoami", {
+          headers: { Authorization: `Bearer ${airtableToken}` },
+          cache: "no-store",
+          signal: AbortSignal.timeout(8_000),
+        })
+          .then(async (response) => ({
+            ok: response.ok,
+            status: response.status,
+            durationMs: Date.now() - airtableStarted,
+            body: await safeJson(response),
+          }))
+          .catch((error) => ({
+            ok: false,
+            status: 0,
+            durationMs: Date.now() - airtableStarted,
+            body: error instanceof Error ? error.message : "Airtable check failed",
+          }))
+      : Promise.resolve({ ok: false, status: 0, durationMs: 0, body: "No Airtable token is set" });
     const [
       workspaceResult,
       syncResult,
@@ -163,6 +238,8 @@ export async function GET() {
       slackBriefResult,
       granolaHeartbeatResult,
       anthropicResult,
+      slackApiResult,
+      airtableResult,
     ] = await Promise.all([
       request("rr_workspaces?select=*&order=name.asc"),
       request("rr_sync_runs?select=*&order=started_at.desc&limit=25"),
@@ -199,6 +276,8 @@ export async function GET() {
         "rr_granola_heartbeats?select=*&order=checked_at.desc&limit=12",
       ),
       anthropicCheck,
+      slackApiCheck,
+      airtableCheck,
     ]);
     services[0].status = workspaceResult.response.ok ? "healthy" : "down";
     services[0].detail = workspaceResult.response.ok
@@ -418,6 +497,30 @@ export async function GET() {
           : granolaState.state === "starting"
             ? "Waiting for the first hourly poll."
             : `Last poll ${granola.callsFound} call(s) across ${granola.clientsChecked} client(s).`;
+    // Slack: the token is only useful if Slack accepts it, so the light is the live auth.test verdict.
+    services[5].status = !services[5].configured
+      ? "down"
+      : slackApiResult.ok
+        ? "healthy"
+        : "down";
+    services[5].detail = !services[5].configured
+      ? "No Slack token is set (SLACK_BOT_TOKEN)."
+      : slackApiResult.ok
+        ? "Slack accepted the token."
+        : `Slack rejected the token or is unreachable${slackApiResult.status ? ` (HTTP ${slackApiResult.status})` : ""}.`;
+    services[5].latencyMs = slackApiResult.durationMs;
+    // Airtable: same shape — a set token that Airtable rejects is still down.
+    services[6].status = !services[6].configured
+      ? "down"
+      : airtableResult.ok
+        ? "healthy"
+        : "down";
+    services[6].detail = !services[6].configured
+      ? "No Airtable token is set (AIRTABLE_API_KEY)."
+      : airtableResult.ok
+        ? "Airtable accepted the token."
+        : `Airtable rejected the token or is unreachable${airtableResult.status ? ` (HTTP ${airtableResult.status})` : ""}.`;
+    services[6].latencyMs = airtableResult.durationMs;
 
     const clients = rows.map((row) => {
       const webhookAgeSeconds = ageSeconds(row.last_webhook_received_at);
