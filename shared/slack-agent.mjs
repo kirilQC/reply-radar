@@ -308,6 +308,61 @@ export function progressText(steps) {
   return [head, "", ...lines].join("\n").trimEnd();
 }
 
+/** How many turns back the assistant reads a thread. A long back-and-forth is trimmed to the recent ones. */
+const MAX_THREAD_TURNS = 20;
+
+/** Whether a post was written by QC Bot itself, by either of the two ids Slack might stamp it with. */
+const isOurBot = (post, identity) => {
+  const userId = identity?.userId ?? "";
+  const botId = identity?.botId ?? "";
+  return Boolean((userId && post?.author === userId) || (botId && post?.botId === botId));
+};
+
+/**
+ * Whether QC Bot has already spoken in this thread.
+ *
+ * This is the gate on answering a reply that did not mention the bot: an ongoing conversation is one the
+ * bot is already part of, so a reply in a thread it has never posted in is somebody else's discussion and
+ * is left alone. Without this the bot would jump into every threaded reply in every channel it can see.
+ *
+ * @param {Array<{ author: string; botId: string }>} posts
+ * @param {{ userId?: string; botId?: string }} identity
+ * @returns {boolean}
+ */
+export function botParticipated(posts, identity) {
+  return (Array.isArray(posts) ? posts : []).some((post) => isOurBot(post, identity));
+}
+
+/**
+ * A thread of Slack posts turned into the alternating turns the model expects.
+ *
+ * QC Bot's own posts become `assistant` turns — its memory of what it already said — and everyone else's
+ * become `user` turns, with the bot mention stripped the same way a fresh question is. Two turns from the
+ * same side in a row are merged, because Anthropic rejects consecutive same-role messages and two people
+ * (or a person across two messages) reading as one voice is closer to the truth than an error. Any
+ * assistant turns at the very front are dropped so the conversation opens on a person, and only the most
+ * recent turns are kept so a long thread cannot blow the token budget.
+ *
+ * @param {Array<{ author: string; botId: string; text: string }>} posts
+ * @param {{ userId?: string; botId?: string }} identity
+ * @returns {Array<{ role: "user" | "assistant"; content: string }>}
+ */
+export function threadToTurns(posts, identity) {
+  const turns = [];
+  for (const post of (Array.isArray(posts) ? posts : []).slice(-MAX_THREAD_TURNS)) {
+    const bot = isOurBot(post, identity);
+    const text = bot ? String(post?.text ?? "").trim() : cleanMention(String(post?.text ?? ""));
+    if (!text) continue;
+    const role = bot ? "assistant" : "user";
+    const previous = turns.at(-1);
+    if (previous && previous.role === role) previous.content = `${previous.content}\n\n${text}`;
+    else turns.push({ role, content: text });
+  }
+  // A conversation the model can answer opens on a person and ends on one; lead assistant turns are noise.
+  while (turns.length && turns[0].role !== "user") turns.shift();
+  return turns;
+}
+
 /**
  * Slack accepts a large message but shows a truncated one, so an answer longer than this is cut with a
  * marker rather than sent whole and clipped invisibly. The ceiling is well under Slack's own limit,

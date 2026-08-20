@@ -12,10 +12,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import {
+  botParticipated,
   cleanMention,
   inlineToMrkdwn,
   progressLabel,
   progressText,
+  threadToTurns,
   toSlackText,
   truncateForSlack,
   verifySlackSignature,
@@ -201,4 +203,50 @@ test("the progress message shows only the most recent steps and counts the rest"
   assert.ok(out.includes("+4 earlier"), "the eight shown leave four older ones summarised");
   assert.ok(out.includes("step 11"), "the newest step is shown");
   assert.ok(!out.includes("step 0"), "the oldest step has rolled off");
+});
+
+/** The bot is stamped either with this user id or this bot id on any post it wrote. */
+const IDENTITY = { userId: "U123BOT", botId: "B123BOT" };
+
+test("the bot counts as a participant whether Slack stamped its user id or its bot id", () => {
+  assert.equal(botParticipated([{ author: "U9HUMAN", botId: "" }, { author: "U123BOT", botId: "" }], IDENTITY), true);
+  assert.equal(botParticipated([{ author: "", botId: "B123BOT" }], IDENTITY), true);
+});
+
+test("a thread the bot has never spoken in is not one it has joined", () => {
+  assert.equal(botParticipated([{ author: "U9HUMAN", botId: "" }, { author: "U9OTHER", botId: "" }], IDENTITY), false);
+  assert.equal(botParticipated([], IDENTITY), false);
+});
+
+test("a thread becomes alternating user and assistant turns, with the bot's mention stripped from questions", () => {
+  const posts = [
+    { author: "U9HUMAN", botId: "", text: "<@U123BOT> how did Cotool do?" },
+    { author: "U123BOT", botId: "", text: "It replied to 12 leads." },
+    { author: "U9HUMAN", botId: "", text: "and Willow?" },
+  ];
+  assert.deepEqual(threadToTurns(posts, IDENTITY), [
+    { role: "user", content: "how did Cotool do?" },
+    { role: "assistant", content: "It replied to 12 leads." },
+    { role: "user", content: "and Willow?" },
+  ]);
+});
+
+test("two posts from the same side in a row are merged so no role repeats", () => {
+  const posts = [
+    { author: "U9A", botId: "", text: "first thing" },
+    { author: "U9B", botId: "", text: "second thing" },
+    { author: "", botId: "B123BOT", text: "on it" },
+  ];
+  assert.deepEqual(threadToTurns(posts, IDENTITY), [
+    { role: "user", content: "first thing\n\nsecond thing" },
+    { role: "assistant", content: "on it" },
+  ]);
+});
+
+test("a thread that opens with the bot drops the lead assistant turns so it starts on a person", () => {
+  const posts = [
+    { author: "", botId: "B123BOT", text: "morning brief: Cotool is up" },
+    { author: "U9HUMAN", botId: "", text: "<@U123BOT> why?" },
+  ];
+  assert.deepEqual(threadToTurns(posts, IDENTITY), [{ role: "user", content: "why?" }]);
 });

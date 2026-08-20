@@ -28,12 +28,22 @@
  */
 
 import { after } from "next/server";
-import { runAgent, type AgentEvent } from "../../../lib/assistant-run";
-import { postMessage, slackConfigured, updateMessage } from "../../../lib/slack";
+import { runAgent, type AgentEvent, type Turn } from "../../../lib/assistant-run";
 import {
+  addReaction,
+  botIdentity,
+  postMessage,
+  removeReaction,
+  slackConfigured,
+  threadPosts,
+  updateMessage,
+} from "../../../lib/slack";
+import {
+  botParticipated,
   cleanMention,
   progressLabel,
   progressText,
+  threadToTurns,
   toSlackText,
   truncateForSlack,
   verifySlackSignature,
@@ -86,10 +96,6 @@ async function claimEvent(eventId: string): Promise<boolean> {
   }
 }
 
-/**
- * The whole answer, from question to posted reply. Runs in `after`, so a throw here cannot fail the
- * request — but it can leave the person who asked staring at nothing, so every exit posts something.
- */
 /** A tool the agent has run or is running, in the order it was called, for the live progress message. */
 type Step = { tool: string; label: string; status: "doing" | "ok" | "fail" };
 
@@ -103,6 +109,121 @@ type Step = { tool: string; label: string; status: "doing" | "ok" | "fail" };
  */
 const PROGRESS_THROTTLE_MS = 800;
 
+/** The emoji QC Bot wears on the asking message while it works, and takes off once the answer is posted. */
+const REACTION = "eyes";
+
+/**
+ * The whole answer, from a built conversation to a posted reply, shared by both ways in: a fresh @-mention
+ * and a follow-up reply in a thread the bot is already part of.
+ *
+ * `reactTs` is the message the person just sent. :eyes: goes on it the moment work starts and comes off in
+ * the `finally`, so the reaction stays a truthful "working / done" even when the answer turns out to be an
+ * error. Runs in `after`, so a throw here cannot fail the request — but it can leave the asker staring at
+ * nothing, so every exit posts something.
+ */
+async function runAndReply(opts: { channel: string; threadTs: string; reactTs: string; messages: Turn[] }): Promise<void> {
+  const { channel, threadTs, reactTs, messages } = opts;
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    await postMessage(channel, "I can't reach the model right now — `ANTHROPIC_API_KEY` is not set.", threadTs).catch(() => {});
+    return;
+  }
+
+  // :eyes: on the asking message the instant work begins, so the room sees the bot picked it up before any
+  // text is posted. Removed in the `finally` below whether the answer succeeds or fails.
+  if (reactTs) await addReaction(channel, reactTs, REACTION).catch(() => {});
+
+  try {
+    // One reply, posted now and rewritten as the answer forms. If the placeholder cannot be posted at all,
+    // `statusTs` stays empty and the answer is posted fresh at the end instead — the feature degrades to
+    // the old post-once behaviour rather than losing the answer.
+    let statusTs = "";
+    try {
+      statusTs = await postMessage(channel, ":mag: _On it — reading the room…_", threadTs);
+    } catch {
+      /* posting failed; fall back to a single post at the end */
+    }
+
+    // Edits are chained so they apply in the order they were queued: a late progress edit can never land
+    // after the final answer and overwrite it, because the answer is the last link added to the chain.
+    const steps: Step[] = [];
+    let chain: Promise<void> = Promise.resolve();
+    let lastEditAt = 0;
+    const queueEdit = (text: string) => {
+      if (!statusTs) return;
+      chain = chain.then(() => updateMessage(channel, statusTs, text).catch(() => {}));
+    };
+
+    // The agent's tool lifecycle, turned into ticks on the progress message. Other event kinds (the token
+    // stream, files) carry nothing a Slack reader can use here and are ignored.
+    const emit = (agentEvent: AgentEvent) => {
+      if (!statusTs) return;
+      if (agentEvent.type === "tool") {
+        steps.push({ tool: agentEvent.tool, label: progressLabel(agentEvent.tool, agentEvent.input), status: "doing" });
+      } else if (agentEvent.type === "tool_done") {
+        const entry = [...steps].reverse().find((step) => step.tool === agentEvent.tool && step.status === "doing");
+        if (entry) entry.status = agentEvent.ok ? "ok" : "fail";
+      } else {
+        return;
+      }
+      const now = Date.now();
+      if (now - lastEditAt < PROGRESS_THROTTLE_MS) return;
+      lastEditAt = now;
+      queueEdit(progressText(steps));
+    };
+
+    // The finished answer, delivered by rewriting the progress message — or posted fresh if there was none.
+    const deliver = async (text: string) => {
+      if (statusTs) {
+        queueEdit(text);
+        await chain;
+      } else {
+        await postMessage(channel, text, threadTs).catch(() => {});
+      }
+    };
+
+    try {
+      const result = await runAgent({ apiKey, messages, emit });
+
+      if (result.maxedTurns) {
+        await deliver("I ran out of research steps on that one before I could answer. Try asking something narrower.");
+        return;
+      }
+
+      const cut =
+        result.stopReason === "max_tokens"
+          ? "\n\n_This answer hit the length limit. Ask for a narrower slice to see the rest._"
+          : result.outOfTime
+            ? `\n\n_Answered from ${result.steps.length} lookup${result.steps.length === 1 ? "" : "s"} before the time limit — ask for a narrower slice to let me look further._`
+            : "";
+      const answer = result.reply ? toSlackText(result.reply) : "I couldn't find an answer to that.";
+      await deliver(truncateForSlack(`${answer}${cut}`));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "something went wrong";
+      await deliver(`I hit an error answering that: ${detail}`);
+    }
+  } finally {
+    // The answer is out (or the attempt is over); take the :eyes: back off so the message reads as done.
+    if (reactTs) await removeReaction(channel, reactTs, REACTION).catch(() => {});
+  }
+}
+
+/**
+ * The thread as the model should read it, or a single-question fallback.
+ *
+ * The whole thread is read back so a follow-up carries its history; if that read comes back empty — a new
+ * top-level mention, or Slack briefly unreachable — the bare question stands on its own so the bot still
+ * answers. The turns are already alternating and mention-stripped by `threadToTurns`.
+ */
+async function conversationTurns(channel: string, threadTs: string, fallback: string): Promise<Turn[]> {
+  const identity = await botIdentity();
+  const turns = threadToTurns(await threadPosts(channel, threadTs), identity) as Turn[];
+  if (turns.length) return turns;
+  return fallback ? [{ role: "user", content: fallback }] : [];
+}
+
+/** A fresh @-mention: the classic ask, answered in-thread with the whole thread as context. */
 async function answerMention(event: Row): Promise<void> {
   const channel = str(event.channel);
   // Reply in the thread the mention is in; if it was a top-level message, start a thread under it so the
@@ -116,80 +237,50 @@ async function answerMention(event: Row): Promise<void> {
     return;
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    await postMessage(channel, "I can't reach the model right now — `ANTHROPIC_API_KEY` is not set.", threadTs).catch(() => {});
-    return;
-  }
+  const messages = await conversationTurns(channel, threadTs, question);
+  if (!messages.length) return;
+  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages });
+}
 
-  // One reply, posted now and rewritten as the answer forms. If the placeholder cannot be posted at all,
-  // `statusTs` stays empty and the answer is posted fresh at the end instead — the feature degrades to
-  // the old post-once behaviour rather than losing the answer.
-  let statusTs = "";
-  try {
-    statusTs = await postMessage(channel, ":mag: _On it — reading the room…_", threadTs);
-  } catch {
-    /* posting failed; fall back to a single post at the end */
-  }
+/**
+ * A follow-up reply in a thread the bot is already in — the ongoing-conversation path.
+ *
+ * A `message` event fires for every message in a channel the bot can see, so most are none of its business.
+ * `isThreadReply` has already filtered out its own posts, edits and top-level messages; here two more gates
+ * apply, both needing Slack's answer. A reply that @-mentions the bot is left to `answerMention` (Slack
+ * delivers it as an `app_mention` too, and answering in both places would double-post), and a thread the
+ * bot has never spoken in is somebody else's discussion, so `botParticipated` keeps it out.
+ */
+async function answerThreadReply(event: Row): Promise<void> {
+  const channel = str(event.channel);
+  const threadTs = str(event.thread_ts);
+  if (!channel || !threadTs) return;
 
-  // Edits are chained so they apply in the order they were queued: a late progress edit can never land
-  // after the final answer and overwrite it, because the answer is the last link added to the chain.
-  const steps: Step[] = [];
-  let chain: Promise<void> = Promise.resolve();
-  let lastEditAt = 0;
-  const queueEdit = (text: string) => {
-    if (!statusTs) return;
-    chain = chain.then(() => updateMessage(channel, statusTs, text).catch(() => {}));
-  };
+  const identity = await botIdentity();
+  // A reply that names the bot is the app_mention path's job; answering here as well would post twice.
+  if (identity.userId && str(event.text).includes(`<@${identity.userId}>`)) return;
 
-  // The agent's tool lifecycle, turned into ticks on the progress message. Other event kinds (the token
-  // stream, files) carry nothing a Slack reader can use here and are ignored.
-  const emit = (agentEvent: AgentEvent) => {
-    if (!statusTs) return;
-    if (agentEvent.type === "tool") {
-      steps.push({ tool: agentEvent.tool, label: progressLabel(agentEvent.tool, agentEvent.input), status: "doing" });
-    } else if (agentEvent.type === "tool_done") {
-      const entry = [...steps].reverse().find((step) => step.tool === agentEvent.tool && step.status === "doing");
-      if (entry) entry.status = agentEvent.ok ? "ok" : "fail";
-    } else {
-      return;
-    }
-    const now = Date.now();
-    if (now - lastEditAt < PROGRESS_THROTTLE_MS) return;
-    lastEditAt = now;
-    queueEdit(progressText(steps));
-  };
+  const posts = await threadPosts(channel, threadTs);
+  if (!botParticipated(posts, identity)) return;
 
-  // The finished answer, delivered by rewriting the progress message — or posted fresh if there was none.
-  const deliver = async (text: string) => {
-    if (statusTs) {
-      queueEdit(text);
-      await chain;
-    } else {
-      await postMessage(channel, text, threadTs).catch(() => {});
-    }
-  };
+  const messages = threadToTurns(posts, identity) as Turn[];
+  // Only answer when the thread ends on a human's turn — otherwise there is nothing new to respond to.
+  if (!messages.length || messages[messages.length - 1].role !== "user") return;
+  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages });
+}
 
-  try {
-    const result = await runAgent({ apiKey, messages: [{ role: "user", content: question }], emit });
-
-    if (result.maxedTurns) {
-      await deliver("I ran out of research steps on that one before I could answer. Try asking something narrower.");
-      return;
-    }
-
-    const cut =
-      result.stopReason === "max_tokens"
-        ? "\n\n_This answer hit the length limit. Ask for a narrower slice to see the rest._"
-        : result.outOfTime
-          ? `\n\n_Answered from ${result.steps.length} lookup${result.steps.length === 1 ? "" : "s"} before the time limit — ask for a narrower slice to let me look further._`
-          : "";
-    const answer = result.reply ? toSlackText(result.reply) : "I couldn't find an answer to that.";
-    await deliver(truncateForSlack(`${answer}${cut}`));
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "something went wrong";
-    await deliver(`I hit an error answering that: ${detail}`);
-  }
+/**
+ * Whether a `message` event is a human's threaded reply worth considering.
+ *
+ * Message events also carry the bot's own posts, edits and deletes (as subtypes), and top-level messages;
+ * none of those are a follow-up question. A reply is a message with no `bot_id`, no subtype, and a
+ * `thread_ts` that points at a parent other than itself. The mention and participation checks that decide
+ * whether to actually answer need Slack's identity, so they live in `answerThreadReply`, not here.
+ */
+function isThreadReply(event: Row): boolean {
+  if (event.bot_id || str(event.subtype)) return false;
+  const threadTs = str(event.thread_ts);
+  return Boolean(threadTs) && threadTs !== str(event.ts);
 }
 
 export async function POST(request: Request) {
@@ -222,12 +313,16 @@ export async function POST(request: Request) {
 
   if (payload.type === "event_callback") {
     const event = asObject(payload.event);
-    // Only mentions of the bot, and never a message the bot itself posted — the latter would loop.
-    if (event.type === "app_mention" && !event.bot_id) {
+    // Two ways in: a fresh @-mention, and a follow-up reply in a thread the bot is already part of. Both are
+    // claimed by event id first so a Slack redelivery cannot answer twice, and both run after the 200 so the
+    // three-second deadline is met; the reply is posted when it is ready. A mention is never a message the
+    // bot itself posted (that would loop), and the thread-reply gate is `isThreadReply`.
+    const mention = event.type === "app_mention" && !event.bot_id;
+    const threadReply = event.type === "message" && isThreadReply(event);
+    if (mention || threadReply) {
       const claimed = await claimEvent(str(payload.event_id));
       if (claimed && slackConfigured()) {
-        // Answered after the 200 so Slack's three-second deadline is met; the reply is posted when ready.
-        after(() => answerMention(event));
+        after(() => (mention ? answerMention(event) : answerThreadReply(event)));
       }
     }
   }

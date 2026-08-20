@@ -365,6 +365,80 @@ export async function updateMessage(channelId: string, ts: string, text: string)
   }, "write");
 }
 
+/**
+ * Who QC Bot is, so its own messages can be told apart from everyone else's.
+ *
+ * The Slack assistant reads back a whole thread to carry a conversation, and it has to know which posts
+ * are its own — those are the assistant's prior turns, everyone else's are the human's. A message from
+ * QC Bot carries either `user` equal to this user id or `bot_id` equal to this bot id, and which of the
+ * two Slack fills in is not something to rely on, so both are captured. Asked of Slack once and cached:
+ * the identity does not change for the life of the token, and `auth.test` is the one call every token
+ * type accepts.
+ */
+let cachedIdentity: { userId: string; botId: string } | null = null;
+export async function botIdentity(): Promise<{ userId: string; botId: string }> {
+  if (cachedIdentity) return cachedIdentity;
+  const token = botToken();
+  if (!token) return (cachedIdentity = { userId: "", botId: "" });
+  const body = await raw(token, "auth.test", { method: "POST" }).catch(() => ({ ok: false, status: 0 } as SlackReply & { status: number }));
+  cachedIdentity = body.ok ? { userId: String(body.user_id ?? ""), botId: String(body.bot_id ?? "") } : { userId: "", botId: "" };
+  return cachedIdentity;
+}
+
+/** One post in a thread, reduced to what an ongoing conversation needs: who said it and what they said. */
+export type ThreadPost = { author: string; botId: string; text: string; ts: string };
+
+/**
+ * The whole thread, QC Bot's own messages included.
+ *
+ * Unlike `threadReplies`, which drops every `bot_id` message because a brief reads human activity, this
+ * keeps them: the assistant's past answers are the memory that makes a follow-up a conversation rather
+ * than a cold start. Only channel-noise subtypes (joins, leaves) and empty messages are dropped;
+ * `author` and `botId` are handed back raw so the caller can decide which posts were the bot's own.
+ */
+export async function threadPosts(channelId: string, threadTs: string): Promise<ThreadPost[]> {
+  if (!channelId || !threadTs) return [];
+  const query = new URLSearchParams({ channel: channelId, ts: threadTs, limit: "200" });
+  try {
+    const body = await call(`conversations.replies?${query.toString()}`, { method: "GET" });
+    const all = Array.isArray(body.messages) ? (body.messages as RawMessage[]) : [];
+    return all
+      .filter((message) => typeof message.text === "string" && String(message.text).trim().length > 0 && !String(message.subtype ?? "").startsWith("channel_"))
+      .map((message) => ({
+        author: String(message.user ?? ""),
+        botId: String(message.bot_id ?? ""),
+        text: String(message.text ?? ""),
+        ts: String(message.ts ?? ""),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Adds and removes an emoji reaction, which is how the assistant signals "I'm on it".
+ *
+ * The bot puts :eyes: on the message that asked the moment it starts, and takes it off when the answer is
+ * posted — a quiet, in-place "working / done" that does not add a message to the thread. Slack answers
+ * `already_reacted` if the emoji is already there and `no_reaction` if it was never added; both mean the
+ * state is already what we wanted, so the caller treats a throw here as nothing to worry about.
+ */
+export async function addReaction(channelId: string, ts: string, name: string): Promise<void> {
+  await call("reactions.add", {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ channel: channelId, timestamp: ts, name }),
+  }, "write");
+}
+
+export async function removeReaction(channelId: string, ts: string, name: string): Promise<void> {
+  await call("reactions.remove", {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ channel: channelId, timestamp: ts, name }),
+  }, "write");
+}
+
 /* ── Diagnostics ─────────────────────────────────────────────────────────────────────────────────
  *
  * Three tokens look alike and behave nothing alike. `xoxb-` is a bot, `xoxp-` is a person, `xapp-` is
