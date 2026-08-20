@@ -366,6 +366,22 @@ export async function updateMessage(channelId: string, ts: string, text: string)
 }
 
 /**
+ * Removes a message QC Bot posted, by the `ts` `postMessage` returned.
+ *
+ * The Slack assistant posts a live "searching" message while it works and then deletes it once the answer
+ * is ready, so the thread is left with the answer alone rather than a spent progress log above it. Only the
+ * bot's own messages can be deleted with the bot token, which is exactly what this is used for. Best-effort
+ * by convention at the call site: a failed delete is a stray progress message, never a lost answer.
+ */
+export async function deleteMessage(channelId: string, ts: string): Promise<void> {
+  await call("chat.delete", {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ channel: channelId, ts }),
+  }, "write");
+}
+
+/**
  * Who QC Bot is, so its own messages can be told apart from everyone else's.
  *
  * The Slack assistant reads back a whole thread to carry a conversation, and it has to know which posts

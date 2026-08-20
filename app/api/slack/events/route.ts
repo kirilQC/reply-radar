@@ -32,6 +32,7 @@ import { runAgent, type AgentEvent, type Turn } from "../../../lib/assistant-run
 import {
   addReaction,
   botIdentity,
+  deleteMessage,
   postMessage,
   removeReaction,
   slackConfigured,
@@ -120,8 +121,10 @@ const PROGRESS_THROTTLE_MS = 800;
  */
 const HEARTBEAT_MS = 5_000;
 
-/** The emoji QC Bot wears on the asking message while it works, and takes off once the answer is posted. */
-const REACTION = "eyes";
+/** The emoji QC Bot wears on the asking message while it works; taken off once the answer is posted. */
+const WORKING_REACTION = "eyes";
+/** The emoji left on the asking message once the answer is out, so the thread reads as answered at a glance. */
+const DONE_REACTION = "heavy_check_mark";
 
 /**
  * The whole answer, from a built conversation to a posted reply, shared by both ways in: a fresh @-mention
@@ -143,7 +146,7 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
 
   // :eyes: on the asking message the instant work begins, so the room sees the bot picked it up before any
   // text is posted. Removed in the `finally` below whether the answer succeeds or fails.
-  if (reactTs) await addReaction(channel, reactTs, REACTION).catch(() => {});
+  if (reactTs) await addReaction(channel, reactTs, WORKING_REACTION).catch(() => {});
 
   try {
     // One reply, posted now and rewritten as the answer forms. If the placeholder cannot be posted at all,
@@ -151,7 +154,7 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
     // the old post-once behaviour rather than losing the answer.
     let statusTs = "";
     try {
-      statusTs = await postMessage(channel, ":mag: _On it — reading the room…_", threadTs);
+      statusTs = await postMessage(channel, ":mag: _On it — Searching the Reply Radar…_", threadTs);
     } catch {
       /* posting failed; fall back to a single post at the end */
     }
@@ -199,25 +202,16 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
         }, HEARTBEAT_MS)
       : null;
 
-    // The finished answer, delivered by rewriting the progress message in place — with a fallback that is
-    // the whole point of this function. A long run edits the one status message dozens of times (a
-    // heartbeat every few seconds, plus one per tool), and Slack rate-limits repeated updates to a single
-    // message; when that limit is hit the *answer's* edit is refused too. The old code swallowed that
-    // failure, so the thread froze on the last heartbeat ("Still working on it…") and the answer — already
-    // computed — was thrown away. So the final edit is tried directly, and if it is refused the answer is
-    // posted as a fresh message in the thread, which is a new `ts` and not subject to the same limit.
+    // The finished answer: the spent progress message is deleted and the answer is posted as its own reply,
+    // so the thread is left with the answer alone rather than a wall of ticks with the answer crammed on the
+    // end. Posting fresh also sidesteps the failure the in-place edit used to hit — a long run updates the
+    // one status message dozens of times, and Slack rate-limits repeated updates to a single message, so the
+    // answer's own edit could be refused and silently lost. A new `ts` is not subject to that limit.
     const deliver = async (text: string) => {
       if (heartbeat) clearInterval(heartbeat);
-      // Drain any progress edits still queued so the answer is the last thing written, not overtaken.
+      // Drain any progress edits still queued, then take the progress message down before the answer goes up.
       await chain.catch(() => {});
-      if (statusTs) {
-        try {
-          await updateMessage(channel, statusTs, text);
-          return;
-        } catch {
-          /* the in-place edit was refused — most likely the same-message update limit — so post it fresh */
-        }
-      }
+      if (statusTs) await deleteMessage(channel, statusTs).catch(() => {});
       await postMessage(channel, text, threadTs).catch(() => {});
     };
 
@@ -236,7 +230,12 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
             ? `\n\n_Answered from ${result.steps.length} lookup${result.steps.length === 1 ? "" : "s"} before the time limit — ask for a narrower slice to let me look further._`
             : "";
       const answer = result.reply ? toSlackText(result.reply) : "I couldn't find an answer to that.";
-      await deliver(truncateForSlack(`${answer}${cut}`));
+      // The total time the whole run took, shown once on the answer — the live per-beat clock was on the
+      // progress message, which is now deleted, so this is the only duration the thread keeps.
+      const seconds = Math.round((Date.now() - startedAt) / 1000);
+      await deliver(`${truncateForSlack(`${answer}${cut}`)}\n\n_Answered in ${seconds}s_`);
+      // The answer is out; mark the asking message answered so the thread reads as done at a glance.
+      if (reactTs) await addReaction(channel, reactTs, DONE_REACTION).catch(() => {});
     } catch (error) {
       if (heartbeat) clearInterval(heartbeat);
       const detail = error instanceof Error ? error.message : "something went wrong";
@@ -245,8 +244,9 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
       if (heartbeat) clearInterval(heartbeat);
     }
   } finally {
-    // The answer is out (or the attempt is over); take the :eyes: back off so the message reads as done.
-    if (reactTs) await removeReaction(channel, reactTs, REACTION).catch(() => {});
+    // The answer is out (or the attempt is over); take the :eyes: back off. On success a :heavy_check_mark:
+    // has already been added, so the asking message is left reading as answered rather than still working.
+    if (reactTs) await removeReaction(channel, reactTs, WORKING_REACTION).catch(() => {});
   }
 }
 
