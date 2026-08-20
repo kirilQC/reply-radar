@@ -1744,6 +1744,8 @@ type AiConfig = {
 type PastReplyRef = { body: string; senderName: string; leadName: string; campaignName: string };
 type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; workspaceLogoUrl: string | null; leadName: string | null; leadPhotoUrl: string | null; conversationId?: string | null; draft?: string | null; reason?: string | null; inboundMessage?: string | null; campaignName?: string | null; leadTitle?: string | null; leadCompany?: string | null; pastReplies?: string[]; pastReplyContext?: PastReplyRef[] };
 type AiAuditData = { ok?: boolean; events: AiAuditEvent[]; drafts?: AiAuditEvent[]; summary: { totalCalls: number; successful: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
+type SlackLogEvent = { id: string; timestamp: string; action: string; surface: string; channel: string | null; askedBy: string | null; question: string | null; outcome: string; durationMs: number | null; toolCount: number; inputTokens: number; outputTokens: number; model: string | null; error: string | null; workspaceLogoUrl: string | null };
+type SlackLogData = { ok?: boolean; events: SlackLogEvent[]; summary: { total: number; succeeded: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
 
 /**
  * Vetted prompts offered as a choice, with the current one named.
@@ -1963,7 +1965,7 @@ function AiHubView() {
   const [clientSaving, setClientSaving] = useState(false);
   const [clientSaved, setClientSaved] = useState(false);
   // Opened straight on the prompt when the Slack hub linked here, because that link exists for one reason.
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "clients">(() =>
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "clients" | "slack-log">(() =>
     typeof window !== "undefined" && window.location.hash === "#ai-morning-brief" ? "prompts" : "overview");
   const [savedTemplates, setSavedTemplates] = useState<Array<{ id: string; kind: string; name: string; summary: string; prompt: string }>>([]);
 
@@ -2051,6 +2053,20 @@ function AiHubView() {
     document.addEventListener("visibilitychange", onVisible);
     return () => { clearInterval(interval); document.removeEventListener("visibilitychange", onVisible); };
   }, []);
+  const [slackLog, setSlackLog] = useState<SlackLogData | null>(null);
+  const [slackLogVisible, setSlackLogVisible] = useState(25);
+  useEffect(() => {
+    const load = () => fetch("/api/ai/slack-log", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((payload: SlackLogData) => { if (payload?.ok !== false) setSlackLog(payload); })
+      .catch(() => null);
+    load();
+    const interval = setInterval(load, 5_000);
+    const onVisible = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { clearInterval(interval); document.removeEventListener("visibilitychange", onVisible); };
+  }, []);
+
   useEffect(() => {
     if (selectedClient) loadConfig(selectedClient);
   }, [selectedClient]);
@@ -2140,6 +2156,7 @@ function AiHubView() {
       <button className={activeTab === "overview" ? "active" : ""} onClick={() => setActiveTab("overview")}>Overview</button>
       <button className={activeTab === "prompts" ? "active" : ""} onClick={() => setActiveTab("prompts")}>Prompts</button>
       <button className={activeTab === "clients" ? "active" : ""} onClick={() => setActiveTab("clients")}>Client AI context</button>
+      <button className={activeTab === "slack-log" ? "active" : ""} onClick={() => setActiveTab("slack-log")}>Slack bot log</button>
     </div>
 
     {activeTab === "overview" && <>
@@ -2195,6 +2212,53 @@ function AiHubView() {
             </div>;
           }) : <p className="audit-empty">No AI audit events yet. Events will appear after the first reply is analyzed.</p>}
           {audit?.events && audit.events.length > auditVisible && <button className="audit-see-more" onClick={() => setAuditVisible((v) => v + 25)}>See 25 more</button>}
+        </div>
+      </section>
+    </>}
+
+    {activeTab === "slack-log" && <>
+      <div className="admin-grid">
+        <section className="admin-panel">
+          <div className="panel-heading"><div><h2>QC Bot activity</h2><p>Every question answered over Slack — mentions, DMs, and thread replies.</p></div></div>
+          <div className="ai-hub-kpis">
+            <div className="ai-hub-kpi"><span>Total runs</span><strong>{slackLog?.summary?.total ?? "—"}</strong></div>
+            <div className="ai-hub-kpi"><span>Answered</span><strong>{slackLog?.summary?.succeeded ?? "—"}</strong></div>
+            <div className="ai-hub-kpi"><span>Failed</span><strong>{slackLog?.summary?.failed ?? "—"}</strong></div>
+            <div className="ai-hub-kpi"><span>Input tokens</span><strong>{slackLog?.summary?.totalInputTokens?.toLocaleString() ?? "—"}</strong></div>
+            <div className="ai-hub-kpi"><span>Output tokens</span><strong>{slackLog?.summary?.totalOutputTokens?.toLocaleString() ?? "—"}</strong></div>
+          </div>
+        </section>
+      </div>
+
+      <section className="admin-panel ai-audit-section">
+        <div className="panel-heading"><div className="ai-audit-title"><h2 style={{ fontSize: 22 }}>Slack bot log</h2><span className="ai-audit-live"><i />live</span></div>
+          <button className="secondary-button" onClick={() => {
+            if (!slackLog?.events?.length) return;
+            const csv = ["When,Surface,User,Question,Outcome,Tools,Input Tokens,Output Tokens,Duration (ms)",
+              ...slackLog.events.map((e) => `"${e.timestamp}","${e.surface}","${e.askedBy ?? ""}","${(e.question ?? "").replaceAll('"', '""')}","${e.outcome}",${e.toolCount},${e.inputTokens},${e.outputTokens},${e.durationMs ?? ""}`)
+            ].join("\n");
+            const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = `slack-bot-log-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(link.href);
+          }}>Export CSV ↓</button>
+        </div>
+        <div className="ai-audit-table slack-log-table">
+          <div className="ai-audit-head"><span>When</span><span>Surface</span><span>User</span><span>Question</span><span>Tools</span><span>Tokens</span><span>Duration</span><span>Outcome</span></div>
+          {slackLog?.events?.length ? slackLog.events.slice(0, slackLogVisible).map((event) => {
+            const d = event.timestamp ? new Date(event.timestamp) : null;
+            const when = d && !isNaN(d.getTime()) ? `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}` : "—";
+            const surfaceLabel: Record<string, string> = { mention: "@mention", dm: "DM", thread: "Thread" };
+            const outcomeClass = event.outcome === "success" ? "success" : event.outcome === "error" ? "error" : "warning";
+            return <div className="ai-audit-row" key={event.id}>
+              <time>{when}</time>
+              <span><strong>{surfaceLabel[event.surface] ?? event.surface}</strong></span>
+              <span className="ai-audit-lead-cell">{event.workspaceLogoUrl ? <img className="ai-audit-logo" src={event.workspaceLogoUrl} alt="" /> : null}{event.askedBy || "—"}</span>
+              <span className="slack-log-question" title={event.question ?? ""}>{event.question || "—"}</span>
+              <span>{event.toolCount || "—"}</span>
+              <span>{event.inputTokens || event.outputTokens ? `${event.inputTokens} in · ${event.outputTokens} out` : "—"}</span>
+              <span>{event.durationMs ? `${(event.durationMs / 1000).toFixed(1)}s` : "—"}</span>
+              <span className={`audit-status ${outcomeClass}`} title={event.error ?? ""}>{event.outcome}</span>
+            </div>;
+          }) : <p className="audit-empty">No Slack runs yet. Activity appears after the bot answers its first mention or DM.</p>}
+          {slackLog?.events && slackLog.events.length > slackLogVisible && <button className="audit-see-more" onClick={() => setSlackLogVisible((v) => v + 25)}>See 25 more</button>}
         </div>
       </section>
     </>}

@@ -76,6 +76,16 @@ export const THINKING_BUDGET = 3_072;
 export const TOOL_DEADLINE_MS = 250_000;
 /** Enough for a summary and a table of what was found. Not enough to start a new investigation. */
 export const FINAL_MAX_TOKENS = 4_096;
+/**
+ * Transient Anthropic failures worth retrying: 529 is its own "overloaded", 429 is rate limiting, and the
+ * 5xx family is a gateway blip. Everything else — a 400 for a malformed request, a 401 for a bad key — is a
+ * fault retrying cannot fix, so it surfaces immediately.
+ */
+const OVERLOAD_STATUS = new Set([429, 500, 502, 503, 529]);
+/** How many extra attempts after the first. Three keeps a ~30s worst case well inside the turn budget. */
+const OVERLOAD_RETRIES = 3;
+/** Base backoff, doubled each attempt (1s, 2s, 4s), unless the API's Retry-After header says otherwise. */
+const OVERLOAD_BACKOFF_MS = 1_000;
 
 export type Row = Record<string, unknown>;
 export type Block = Row;
@@ -111,6 +121,23 @@ export type AgentResult = {
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
+
+/**
+ * The current time as "7:55 PM EST", QC's default clock.
+ *
+ * HeyReach figures are stamped with when they were pulled, and the stamp is formatted here rather than
+ * left as a raw timestamp for the model to convert: given only an ISO UTC time it would either mis-convert
+ * it or, worse, narrate the timezone ("Willow's timezone is not configured, so this is UTC") into the
+ * answer. Eastern is the house default; the label is fixed at EST because that is what the team asked for,
+ * not computed from the date.
+ */
+const easternStamp = (): string =>
+  `${new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date())} EST`;
 
 /**
  * The reassembler is plain `.mjs`, so its callback parameter is inferred from a `() => {}` default and
@@ -176,7 +203,7 @@ Rules that change the answer:
 - Active means running AND still contacting new leads. HeyReach reports a campaign as in progress while leads already in the sequence finish, so a campaign with no pending leads left is finished in every sense the client cares about, whatever HeyReach says.
 - Averages across clients mislead. Some clients get twenty replies a day and some get one; the mean of those describes nobody. Give the range, or the per-client figures, or say which client you mean.
 - Reply rates from the HeyReach tools are already percentages. Do not convert them again.
-- HeyReach data is live. Every HeyReach tool hits HeyReach the moment you call it — there is no cache — so its figures are current as of that call, and each HeyReach result carries a \`pulledAt\` timestamp (ISO, UTC) saying when. When your answer reports HeyReach's own numbers — campaign status, per-campaign or workspace counts, senders, lists, rates — end it with a short stamp of when they were pulled, formatted in the client's timezone (client_summary gives it): \`_HeyReach data pulled @ 2:43 PM_\`. Use the most recent \`pulledAt\` among the HeyReach calls behind the answer. This stamp is for HeyReach's live figures only; Reply Radar's own database counts do not get it.
+- HeyReach data is live. Every HeyReach tool hits HeyReach the moment you call it — there is no cache — so its figures are current as of that call, and each HeyReach result carries a \`pulledAt\` field already formatted as a clock time, e.g. "7:55 PM EST". When your answer reports HeyReach's own numbers — campaign status, per-campaign or workspace counts, senders, lists, rates — end it with a short stamp: \`_HeyReach data pulled @ 7:55 PM EST_\`, using the \`pulledAt\` value verbatim. Take the latest \`pulledAt\` among the HeyReach calls behind the answer. Print it exactly as given — never convert the time, never append or explain a timezone, never say a client's timezone is unknown; the stamp is complete as delivered. This stamp is for HeyReach's live figures only; Reply Radar's own database counts do not get it.
 - replyRatePercent is HeyReach's own reply rate. You do not know its denominator, so never present it as a share of conversations started, messages sent or leads contacted, and never put it in a table column next to a count that implies one. If you want a rate against a specific denominator, compute it from the raw counts and say which two numbers you divided.
 - Reply Radar's judgement of a conversation is three fields and no others: sentiment (positive, neutral or negative) on the latest inbound message, followUpUrgency (0-10) on that same message, and leadScore on the person, which is how well they fit the client's ideal customer. There is no overall conversation score and no tier. Do not describe one, do not say a ranking is unavailable without one, and do not promise one is coming.
 - A null judgement means that row was never analysed. It is not a zero, not a low score, and not a queue that will clear if you wait — some conversations are simply never analysed. Rank by the rows that do have values, say how many did not, and never tell someone to check back later.
@@ -295,11 +322,16 @@ csv, pdf
 - When heyreach_export_list has delivered a file, do not add an export block to that answer. The file is already attached to it; a second download button beside it would offer to rebuild the same list out of your prose, which would be a worse copy of a file the reader already has.
 - To narrow a list you already delivered — "just the CTOs", "only the ones at agencies" — call heyreach_export_list again on the same list with titleContains, companyContains or nameContains. That is the only way, because you never held those rows. Never tell someone a delivered list cannot be filtered.
 
-Weekly reports come condensed first:
-- When someone asks for a weekly report or weekly summary on a client, deliver the condensed version — the handful of numbers that say how the week went, read in under a minute. Do the full research; report only the critical points.
-- The condensed report is: which campaigns are live and their status, leads contacted and pending, replies received and how many were positive, the reply rate, and anything that needs attention (a campaign about to run out of leads). Leave out the long tail — quoted best replies, reply-by-reply breakdowns, full sender tables, message-level detail. Those belong in the full report, not this one.
-- If a weekly-report skill exists in the brain, run it to gather the data and follow its rules, but still deliver the condensed shape first — its full output is what "the full report" means when they ask for it.
-- End the condensed report with exactly this line and nothing after it: "This is the condensed report. Do you want the full report with all the data?" Produce the full version only when they say yes.
+Weekly reports come condensed first, and "condensed" is strict:
+- A weekly report or weekly summary on a client gets the condensed version, and only the condensed version, until they ask for more. Do the full research; report almost none of it. The whole thing is read in under a minute and is short enough to fit on a phone screen.
+- The condensed report is exactly this and nothing else:
+  1. One sentence saying how the week went.
+  2. A stats block (or one small table, at most four columns) covering only: replies received, positive replies, reply rate, and how many campaigns are still active.
+  3. Up to three bullets of what needs attention — a campaign about to run out of leads, a booked meeting to action, a sender switched off. No more than three.
+  4. The offer line, below.
+- Banned from the condensed report, no matter what a skill or the reader's phrasing implies: an executive summary, a per-campaign breakdown table, a sender-performance table, quoted or translated replies, a "top replies this week" section, blockquote callouts, and any message-level detail. If you are about to write one of these, you are writing the full report — stop and cut it.
+- If a weekly-report skill exists in the brain, run it to gather and check the data and to learn what the full report contains — but do not reproduce its sections here. Its full output is what "the full report" means when they say yes. The skill defines the full report; this rule defines the condensed one, and the condensed one wins first.
+- End with exactly this line and nothing after it: "This is the condensed report. Do you want the full report with all the data?" Produce the full version only when they say yes.
 
 Working out loud:
 - Say what you are about to do, in one short sentence, immediately before you do it. "Let me pull Steadywell's lists first." Then make the calls. Then say what you found and what that means for the next step, and make those calls. The reader watches this happen live, and each sentence is shown next to the lookups it introduces.
@@ -331,7 +363,7 @@ async function streamTurn(
   const thinking = finalTurn
     ? { type: "disabled" as const }
     : { type: "enabled" as const, budget_tokens: THINKING_BUDGET };
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const requestInit: RequestInit = {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
@@ -346,9 +378,32 @@ async function streamTurn(
       thinking,
       stream: true,
     }),
-    signal: AbortSignal.timeout(240_000),
     cache: "no-store",
-  });
+  };
+
+  // Anthropic returns 529 (overloaded) and, less often, 429 or a 5xx under load — all transient, and a
+  // whole research turn should not be lost to one. Retry a few times with growing backoff, honouring a
+  // Retry-After header when the API sends one. The retry is only safe here, before the body is read: once
+  // the stream starts the turn is committed, so a mid-stream failure still surfaces as an error below.
+  const response = await (async () => {
+    let last: Response | null = null;
+    for (let attempt = 0; attempt <= OVERLOAD_RETRIES; attempt += 1) {
+      const attemptResponse = await fetch("https://api.anthropic.com/v1/messages", {
+        ...requestInit,
+        signal: AbortSignal.timeout(240_000),
+      });
+      if (attemptResponse.ok || !OVERLOAD_STATUS.has(attemptResponse.status) || attempt === OVERLOAD_RETRIES) {
+        return attemptResponse;
+      }
+      last = attemptResponse;
+      // Drain the failed body so the connection can be reused, then wait before trying again.
+      await attemptResponse.text().catch(() => {});
+      const retryAfter = Number(attemptResponse.headers.get("retry-after"));
+      const backoff = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : OVERLOAD_BACKOFF_MS * 2 ** attempt;
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+    }
+    return last as Response;
+  })();
 
   if (!response.ok || !response.body) {
     const payload = (await response.json().catch(() => ({}))) as Row;
@@ -451,11 +506,13 @@ export async function runAgent(opts: {
           const { file, rest } = takeFile(result);
           // HeyReach is fetched live on every call (no-store), so the moment a HeyReach tool returns is
           // genuinely when its figures were pulled. Stamp it on the result — grounded, not guessed — so
-          // the model can tell the reader how fresh the numbers are. Only plain objects are stamped;
-          // the HeyReach tools all return objects, so this reaches every one without reshaping arrays.
+          // the model can tell the reader how fresh the numbers are. The time is pre-formatted in Eastern
+          // (QC's default clock) so the model prints it verbatim rather than converting it and, when a
+          // client's own timezone is unknown, narrating the gap. Only plain objects are stamped; the
+          // HeyReach tools all return objects, so this reaches every one without reshaping arrays.
           const stamped =
             name.startsWith("heyreach_") && rest && typeof rest === "object" && !Array.isArray(rest)
-              ? { ...(rest as Row), pulledAt: new Date().toISOString() }
+              ? { ...(rest as Row), pulledAt: easternStamp() }
               : rest;
           if (file) emit({ type: "file", name: file.name, mime: file.mime, content: file.content });
           steps.push({ tool: name, input, ok: true, detail: "" });

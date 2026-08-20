@@ -28,7 +28,8 @@
  */
 
 import { after } from "next/server";
-import { runAgent, type AgentEvent, type Turn } from "../../../lib/assistant-run";
+import { MODEL, runAgent, type AgentEvent, type AgentResult, type Turn } from "../../../lib/assistant-run";
+import { writeAuditEvent } from "../../../lib/audit-log";
 import {
   addReaction,
   botIdentity,
@@ -57,6 +58,18 @@ type Row = Record<string, unknown>;
 
 const asObject = (value: unknown): Row => (value && typeof value === "object" ? (value as Row) : {});
 const str = (value: unknown) => (typeof value === "string" ? value : "");
+
+/** The question actually asked — the last human turn — for the Slack bot log, whether it came as text or blocks. */
+function lastUserText(messages: Turn[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role !== "user") continue;
+    const content = messages[i].content;
+    if (typeof content === "string") return content;
+    const block = content.find((entry) => entry.type === "text");
+    return typeof block?.text === "string" ? block.text : "";
+  }
+  return "";
+}
 
 function supabaseCredentials() {
   const url = process.env.SUPABASE_URL;
@@ -135,8 +148,15 @@ const DONE_REACTION = "heavy_check_mark";
  * error. Runs in `after`, so a throw here cannot fail the request — but it can leave the asker staring at
  * nothing, so every exit posts something.
  */
-async function runAndReply(opts: { channel: string; threadTs: string; reactTs: string; messages: Turn[] }): Promise<void> {
-  const { channel, threadTs, reactTs, messages } = opts;
+async function runAndReply(opts: {
+  channel: string;
+  threadTs: string;
+  reactTs: string;
+  messages: Turn[];
+  askedBy: string;
+  surface: "mention" | "dm" | "thread";
+}): Promise<void> {
+  const { channel, threadTs, reactTs, messages, askedBy, surface } = opts;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -215,11 +235,39 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
       await postMessage(channel, text, threadTs).catch(() => {});
     };
 
+    // One row per run in the Slack bot log (rr_audit_log, actor slack_bot), read back by the AI section's
+    // "Slack bot log" view. Written for every outcome — answered, ran out, errored — so the log is a true
+    // record of what the team asked and what it cost, not only the successes. It never throws (the writer
+    // swallows its own failures), so it cannot turn a delivered answer into a crash.
+    const logRun = async (outcome: string, result: AgentResult | null, errorText?: string) => {
+      const credential = supabaseCredentials();
+      if (!credential) return;
+      await writeAuditEvent(credential, {
+        actor: "slack_bot",
+        action: outcome === "error" ? "slack.failed" : "slack.answered",
+        entityId: askedBy || undefined,
+        details: {
+          surface,
+          channel,
+          askedBy,
+          question: lastUserText(messages).slice(0, 2000),
+          outcome,
+          durationMs: Date.now() - startedAt,
+          toolCount: result ? result.steps.length : steps.length,
+          inputTokens: result?.usage.inputTokens ?? 0,
+          outputTokens: result?.usage.outputTokens ?? 0,
+          model: MODEL,
+          ...(errorText ? { error: errorText.slice(0, 500) } : {}),
+        },
+      });
+    };
+
     try {
       const result = await runAgent({ apiKey, messages, emit });
 
       if (result.maxedTurns) {
         await deliver("I ran out of research steps on that one before I could answer. Try asking something narrower.");
+        await logRun("maxed_turns", result);
         return;
       }
 
@@ -236,10 +284,12 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
       await deliver(`${truncateForSlack(`${answer}${cut}`)}\n\n_Answered in ${seconds}s_`);
       // The answer is out; mark the asking message answered so the thread reads as done at a glance.
       if (reactTs) await addReaction(channel, reactTs, DONE_REACTION).catch(() => {});
+      await logRun(result.stopReason === "max_tokens" ? "truncated" : result.outOfTime ? "out_of_time" : "success", result);
     } catch (error) {
       if (heartbeat) clearInterval(heartbeat);
       const detail = error instanceof Error ? error.message : "something went wrong";
       await deliver(`I hit an error answering that: ${detail}`);
+      await logRun("error", null, detail);
     } finally {
       if (heartbeat) clearInterval(heartbeat);
     }
@@ -280,7 +330,7 @@ async function answerMention(event: Row): Promise<void> {
 
   const messages = await conversationTurns(channel, threadTs, question);
   if (!messages.length) return;
-  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages });
+  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "mention" });
 }
 
 /**
@@ -307,7 +357,7 @@ async function answerThreadReply(event: Row): Promise<void> {
   const messages = threadToTurns(posts, identity) as Turn[];
   // Only answer when the thread ends on a human's turn — otherwise there is nothing new to respond to.
   if (!messages.length || messages[messages.length - 1].role !== "user") return;
-  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages });
+  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "thread" });
 }
 
 /**
@@ -322,6 +372,35 @@ function isThreadReply(event: Row): boolean {
   if (event.bot_id || str(event.subtype)) return false;
   const threadTs = str(event.thread_ts);
   return Boolean(threadTs) && threadTs !== str(event.ts);
+}
+
+/**
+ * Whether a `message` event is a human writing to the bot in a DM.
+ *
+ * A direct message arrives as a `message` event with `channel_type: "im"`. In a one-to-one DM there is no
+ * one else to talk to, so there is no @-mention to wait for and no participation gate — every human message
+ * is for the bot. The same subtype filter as `isThreadReply` keeps out the bot's own posts, edits and the
+ * "you were added" system messages. Threaded DM replies are handled by `answerThreadReply` for their
+ * history, so this only claims the top-level ones.
+ */
+function isDirectMessage(event: Row): boolean {
+  if (event.bot_id || str(event.subtype)) return false;
+  if (str(event.channel_type) !== "im") return false;
+  const threadTs = str(event.thread_ts);
+  return !threadTs || threadTs === str(event.ts);
+}
+
+/** A DM to the bot: answered in the DM, with the message itself as the question. */
+async function answerDirectMessage(event: Row): Promise<void> {
+  const channel = str(event.channel);
+  if (!channel) return;
+  // A DM can still be @-mentioned; strip it if so, otherwise take the whole message as the question.
+  const question = cleanMention(str(event.text));
+  if (!question) return;
+  const threadTs = str(event.ts);
+  const messages = await conversationTurns(channel, threadTs, question);
+  if (!messages.length) return;
+  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "dm" });
 }
 
 export async function POST(request: Request) {
@@ -354,16 +433,19 @@ export async function POST(request: Request) {
 
   if (payload.type === "event_callback") {
     const event = asObject(payload.event);
-    // Two ways in: a fresh @-mention, and a follow-up reply in a thread the bot is already part of. Both are
-    // claimed by event id first so a Slack redelivery cannot answer twice, and both run after the 200 so the
-    // three-second deadline is met; the reply is posted when it is ready. A mention is never a message the
-    // bot itself posted (that would loop), and the thread-reply gate is `isThreadReply`.
+    // Three ways in: a fresh @-mention in a channel, a follow-up reply in a thread the bot is already part
+    // of, and a direct message to the bot. All are claimed by event id first so a Slack redelivery cannot
+    // answer twice, and all run after the 200 so the three-second deadline is met; the reply is posted when
+    // it is ready. A mention is never a message the bot itself posted (that would loop); the thread-reply
+    // gate is `isThreadReply`; the DM gate is `isDirectMessage`.
     const mention = event.type === "app_mention" && !event.bot_id;
-    const threadReply = event.type === "message" && isThreadReply(event);
-    if (mention || threadReply) {
+    const directMessage = event.type === "message" && isDirectMessage(event);
+    const threadReply = event.type === "message" && !directMessage && isThreadReply(event);
+    if (mention || directMessage || threadReply) {
       const claimed = await claimEvent(str(payload.event_id));
       if (claimed && slackConfigured()) {
-        after(() => (mention ? answerMention(event) : answerThreadReply(event)));
+        const answer = mention ? answerMention : directMessage ? answerDirectMessage : answerThreadReply;
+        after(() => answer(event));
       }
     }
   }
