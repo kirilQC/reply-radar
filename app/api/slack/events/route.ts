@@ -199,16 +199,26 @@ async function runAndReply(opts: { channel: string; threadTs: string; reactTs: s
         }, HEARTBEAT_MS)
       : null;
 
-    // The finished answer, delivered by rewriting the progress message — or posted fresh if there was none.
-    // The heartbeat is stopped first so it cannot queue another edit behind the answer.
+    // The finished answer, delivered by rewriting the progress message in place — with a fallback that is
+    // the whole point of this function. A long run edits the one status message dozens of times (a
+    // heartbeat every few seconds, plus one per tool), and Slack rate-limits repeated updates to a single
+    // message; when that limit is hit the *answer's* edit is refused too. The old code swallowed that
+    // failure, so the thread froze on the last heartbeat ("Still working on it…") and the answer — already
+    // computed — was thrown away. So the final edit is tried directly, and if it is refused the answer is
+    // posted as a fresh message in the thread, which is a new `ts` and not subject to the same limit.
     const deliver = async (text: string) => {
       if (heartbeat) clearInterval(heartbeat);
+      // Drain any progress edits still queued so the answer is the last thing written, not overtaken.
+      await chain.catch(() => {});
       if (statusTs) {
-        queueEdit(text);
-        await chain;
-      } else {
-        await postMessage(channel, text, threadTs).catch(() => {});
+        try {
+          await updateMessage(channel, statusTs, text);
+          return;
+        } catch {
+          /* the in-place edit was refused — most likely the same-message update limit — so post it fresh */
+        }
       }
+      await postMessage(channel, text, threadTs).catch(() => {});
     };
 
     try {
