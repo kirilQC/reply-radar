@@ -134,27 +134,54 @@ const plainCell = (cell) => inlineToMrkdwn(cell).replace(/\*/g, "").trim();
  */
 const MAX_TABLE_WIDTH = 44;
 
+/** A header that names a row-number column rather than real data — "#", "No.", "Rank", "ID". */
+const isIndexHeader = (header) => /^(#|no\.?|nr\.?|rank|id|s\/?no\.?|item)$/i.test(String(header ?? "").trim());
+
 /**
  * One markdown table as a stack of per-row blocks, for when a padded grid would be too wide to hold its
  * shape on a narrow screen.
  *
- * Each body row becomes its own small block: the first cell — almost always the row's name — is bolded as a
- * heading, and every other cell is written `Header: value` on its own line. There is nothing to align, so
- * nothing can break; a phone reflows the text and the meaning is intact. Empty cells are dropped rather than
- * printed as a dangling label.
+ * Each body row becomes its own small block headed by the row's name, with every other cell written
+ * `Header: value` on its own line beneath it. There is nothing to align, so nothing can break; a phone
+ * reflows the text and the meaning is intact. Empty cells are dropped rather than printed as a dangling
+ * label.
+ *
+ * Two columns get special treatment so the heading reads like a person would write it. A leading index
+ * column — "#", "No.", a column that is nothing but row numbers — is not spelled out as "#: 1"; it is
+ * folded into the heading as "1. ". And the *name* of each row is not assumed to be the first column,
+ * because when there is an index the name is the second: the first non-index column with a header is used
+ * as the title, so "1  Final review" heads its block rather than a bare, useless "1".
  *
  * @param {string[]} header
  * @param {string[][]} grid  The header and body rows, already reduced to plain-text cells.
  * @returns {string[]}
  */
 function tableToVertical(header, grid) {
-  const blocks = grid.slice(1).map((row) => {
-    const title = row[0] ? `*${row[0]}*` : "";
-    const rest = row
-      .slice(1)
-      .map((cell, column) => (cell ? `${header[column + 1]}: ${cell}` : ""))
+  const body = grid.slice(1);
+  // Column 0 is an index if its header says so, or if every cell under it is a bare number.
+  const indexColumn =
+    header.length > 1 &&
+    (isIndexHeader(header[0]) || body.every((row) => /^\d+$/.test(row[0] ?? "") || !(row[0] ?? "").trim()))
+      ? 0
+      : -1;
+  // The title is the first column that is neither the index nor blank-headed — the one that names the row.
+  let titleColumn = header.findIndex((cell, column) => column !== indexColumn && String(cell ?? "").trim());
+  if (titleColumn < 0) titleColumn = indexColumn === 0 ? Math.min(1, header.length - 1) : 0;
+
+  const blocks = body.map((row) => {
+    const number = indexColumn >= 0 ? (row[indexColumn] ?? "").trim() : "";
+    const name = (row[titleColumn] ?? "").trim();
+    const heading = name
+      ? `*${number ? `${number}. ` : ""}${name}*`
+      : number
+        ? `*${number}*`
+        : "";
+    const rest = header
+      .map((label, column) =>
+        column === indexColumn || column === titleColumn || !row[column] ? "" : `${label}: ${row[column]}`,
+      )
       .filter(Boolean);
-    return [title, ...rest].filter(Boolean).join("\n");
+    return [heading, ...rest].filter(Boolean).join("\n");
   });
   return blocks.filter(Boolean).join("\n\n").split("\n");
 }

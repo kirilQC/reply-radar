@@ -157,6 +157,22 @@ test("a wide table is rendered vertically so it cannot break on a phone", () => 
   assert.ok(!out.includes("|---|"), "the markdown separator row should not survive");
 });
 
+test("a table with a # index column heads each block with the name, not the row number", () => {
+  const md = [
+    "| # | Title | Status | Owner |",
+    "|---|---|---|---|",
+    "| 1 | Final review HS | Blocked | Kori Bivens |",
+    "| 2 | Add senders to BV007 | Not Started | Kiril Ivlev |",
+  ].join("\n");
+  const out = toSlackText(md);
+  assert.ok(!out.includes("```"), "a four-column tracker must not be a monospace block");
+  assert.ok(out.includes("*1. Final review HS*"), "the index folds into the heading, ahead of the title");
+  assert.ok(!/^\*1\*$/m.test(out), "the row number alone must never be the heading");
+  assert.ok(!out.includes("#: 1"), "an index column is not spelled out as a labelled line");
+  assert.ok(!out.includes("Title:"), "the title column is the heading, not a labelled line");
+  assert.ok(out.includes("Owner: Kori Bivens"), "the remaining columns stay as Header: value lines");
+});
+
 test("headings become bold and a real code block is left untouched", () => {
   const md = ["## Summary", "", "```js", "const x = **not bold here**;", "```"].join("\n");
   const out = toSlackText(md);
