@@ -435,6 +435,14 @@ async function answerThreadReply(event: Row): Promise<void> {
   const credential = supabaseCredentials();
   if (credential) {
     const briefThread = await findBriefThread(credential, channel, posts).catch(() => null);
+    // One breadcrumb per brief-thread reply, so a reply that lands on the generic agent instead of the
+    // editor is diagnosable from the logs: was the lookup even reached, and did it match a stored brief.
+    console.info("reply_radar_brief_thread_lookup", {
+      channel,
+      posts: posts.length,
+      matched: Boolean(briefThread),
+      automation: briefThread?.automation ?? null,
+    });
     if (briefThread) {
       await replyToBrief({ channel, threadTs, reactTs: str(event.ts), identity, posts, briefThread, askedBy: str(event.user) });
       return;
