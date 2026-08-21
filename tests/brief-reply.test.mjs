@@ -27,6 +27,12 @@ test("the morning-brief prompt tells the model to strike done items with tildes 
   assert.ok(/morning brief/i.test(prompt), "the prompt knows which document it is editing");
 });
 
+test("the morning-brief prompt says to drop the owner mention so a struck item is not left half-formatted", () => {
+  const prompt = briefReplySystemPrompt(MORNING_BRIEF);
+  assert.ok(/mention pill cannot be struck/i.test(prompt), "the model is told why the mention must go, not just that it must");
+  assert.ok(/remove that mention/i.test(prompt), "the owner mention is removed rather than wrapped");
+});
+
 test("the EOW prompt tells the model to keep the client-ready style and only change what was asked", () => {
   const prompt = briefReplySystemPrompt(EOW_REPORT);
   assert.ok(/End-of-Week/i.test(prompt), "the prompt knows it is the weekly report");

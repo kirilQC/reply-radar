@@ -388,15 +388,22 @@ async function replyToBrief(opts: {
     const { reply, updatedBody } = await writeBriefReply(briefThread.automation, briefThread.body, replies);
 
     // Only edit when the model returned a body and the guard clears it as a real change rather than a wipe.
+    let edited = false;
     if (updatedBody && briefEditIsSafe(briefThread.body, updatedBody)) {
       await updateMessage(channel, briefThread.bodyTs, updatedBody).catch(() => {});
       const credential = supabaseCredentials();
       if (credential) await updateStoredBody(credential, channel, briefThread.bodyTs, updatedBody);
+      edited = true;
     }
 
+    // When the edit itself is the answer — a strike or a reword the person asked for — the changed message is
+    // the confirmation, so a checkmark on the ask is all that is wanted and a "Got it, done" reply would just
+    // be noise in the thread. A reply that changed nothing (a question, or an edit we could not safely apply)
+    // still gets its answer posted.
+    if (reactTs) await addReaction(channel, reactTs, DONE_REACTION).catch(() => {});
+    if (edited) return;
     const text = reply.trim() || "Done.";
     await postMessage(channel, toSlackText(text), threadTs).catch(() => {});
-    if (reactTs) await addReaction(channel, reactTs, DONE_REACTION).catch(() => {});
   } catch (error) {
     const detail = error instanceof Error ? error.message : "something went wrong";
     await postMessage(channel, `I hit an error on that: ${detail}`, threadTs).catch(() => {});

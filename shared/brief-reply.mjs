@@ -56,9 +56,11 @@ Rules that protect the message:
     return `${shared}
 
 This message is a morning brief: the team's own internal working list of what to do for this client.
-- When the reply says an item is done, handled, already sent, or no longer needed, edit the brief so that item's line is struck through, wrapping the item's text in ~tildes~ (Slack strikethrough). Strike only that item. Do not delete the line, do not reorder anything, do not touch any other line, and do not touch the section headings.
+- When the reply says an item is done, handled, already sent, or no longer needed, strike that whole item through. Wrap the item's task text, and every sub-bullet beneath it, in ~tildes~ (Slack strikethrough), so the entire item reads as struck with nothing left in plain text.
+- If the item begins with an owner mention such as <@U123ABC> (usually followed by the word "to"), remove that mention and the "to", because a finished item has no owner, then strike the rest. A Slack mention pill cannot be struck through, so leaving it in is exactly what makes an item look half-struck. Keep the list number in place.
+- Strike only that item. Do not delete the whole line, do not reorder anything, do not touch any other line, and do not touch the section headings.
 - If you cannot tell which item they mean, do not guess and do not edit: ask which one in "reply".
-- Confirm what you struck through in "reply", briefly.`;
+- Keep "reply" to a short confirmation of what you struck.`;
   }
 
   if (automation === EOW_REPORT) {
