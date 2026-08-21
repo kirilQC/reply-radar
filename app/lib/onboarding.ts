@@ -118,16 +118,21 @@ function templateFromRow(row: Row): TemplateStep {
 export async function listOnboardingClients(): Promise<OnboardingClient[]> {
   const { url, key } = config();
   if (!url || !key) return [];
+  // Every client, not only the ones added through the hub: the whole directory belongs here, ranked by how
+  // far along onboarding is. An established client simply starts at 0% and gets its checklist the first time
+  // someone opens it (see getOnboardingClient's lazy snapshot).
   const workspaces = await rows(
     url,
     key,
-    `rr_workspaces?select=id,name,slug,logo_url,accent_color,onboarding_status,onboarding_started_at,onboarding_completed_at&onboarding_status=not.is.null&order=onboarding_started_at.desc.nullslast`,
+    `rr_workspaces?select=id,name,slug,logo_url,accent_color,onboarding_status,onboarding_started_at,onboarding_completed_at&order=name.asc`,
   );
-  if (!workspaces.length) return [];
-  const ids = workspaces.map((w) => str(w.id)).filter(Boolean);
-  const taskRows = ids.length
-    ? await rows(url, key, `rr_onboarding_tasks?select=id,workspace_id,parent_id,is_done&workspace_id=in.(${ids.map(encodeURIComponent).join(",")})`)
-    : [];
+  const named = workspaces.filter((w) => str(w.name).trim());
+  if (!named.length) return [];
+  const ids = named.map((w) => str(w.id)).filter(Boolean);
+  const [taskRows, templateLeaves] = await Promise.all([
+    ids.length ? rows(url, key, `rr_onboarding_tasks?select=id,workspace_id,parent_id,is_done&workspace_id=in.(${ids.map(encodeURIComponent).join(",")})`) : Promise.resolve([] as Row[]),
+    templateLeafCount(url, key),
+  ]);
   const byWorkspace = new Map<string, Array<{ id: string; parentId: string | null; isDone: boolean }>>();
   for (const row of taskRows) {
     const wid = str(row.workspace_id);
@@ -135,8 +140,12 @@ export async function listOnboardingClients(): Promise<OnboardingClient[]> {
     list.push({ id: str(row.id), parentId: row.parent_id ? str(row.parent_id) : null, isDone: Boolean(row.is_done) });
     byWorkspace.set(wid, list);
   }
-  return workspaces.map((w) => {
+  const clients = named.map((w) => {
     const id = str(w.id);
+    const tasks = byWorkspace.get(id) ?? [];
+    // A client not yet snapshotted has no tasks; show the template's own leaf count as the denominator so
+    // its bar and its rank read correctly before the first open fills it in.
+    const progress = tasks.length ? computeProgress(tasks) : { doneLeaves: 0, totalLeaves: templateLeaves, pct: 0, complete: false };
     return {
       id,
       name: str(w.name),
@@ -146,12 +155,28 @@ export async function listOnboardingClients(): Promise<OnboardingClient[]> {
       status: w.onboarding_status ? str(w.onboarding_status) : null,
       startedAt: w.onboarding_started_at ? str(w.onboarding_started_at) : null,
       completedAt: w.onboarding_completed_at ? str(w.onboarding_completed_at) : null,
-      progress: computeProgress(byWorkspace.get(id) ?? []),
+      progress,
     };
   });
+  return clients.sort((a, b) => b.progress.pct - a.progress.pct || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }
 
-/** One client with its full ordered checklist, or null if the slug is not an onboarding client. */
+/** How many active template steps are leaves — the denominator a client shows before it is snapshotted. */
+async function templateLeafCount(url: string, key: string): Promise<number> {
+  const steps = await rows(url, key, `rr_onboarding_template_steps?select=id,parent_id&is_active=eq.true`);
+  const parents = new Set(steps.filter((s) => s.parent_id).map((s) => str(s.parent_id)));
+  return steps.filter((s) => !parents.has(str(s.id))).length;
+}
+
+/**
+ * One client with its full ordered checklist, or null if the slug is not a workspace at all.
+ *
+ * Lazily snapshots the template the first time a client is opened with no steps: this is what lets an
+ * established client — or one added before the template existed — get its checklist on first view instead
+ * of sitting empty. Opening it also marks the client `in_progress` if it had no onboarding status yet. The
+ * snapshot only runs when the checklist is genuinely empty, so re-opening never duplicates or resurrects
+ * steps the teammate deliberately cleared in the same session's work.
+ */
 export async function getOnboardingClient(slug: string): Promise<{ client: OnboardingClient; tasks: OnboardingTask[] } | null> {
   const { url, key } = config();
   if (!url || !key) return null;
@@ -163,7 +188,18 @@ export async function getOnboardingClient(slug: string): Promise<{ client: Onboa
   const w = workspaces[0];
   if (!w) return null;
   const id = str(w.id);
-  const taskRows = await rows(url, key, `rr_onboarding_tasks?select=*&workspace_id=eq.${encodeURIComponent(id)}&order=position.asc`);
+  let taskRows = await rows(url, key, `rr_onboarding_tasks?select=*&workspace_id=eq.${encodeURIComponent(id)}&order=position.asc`);
+  let status = w.onboarding_status ? str(w.onboarding_status) : null;
+  let startedAt = w.onboarding_started_at ? str(w.onboarding_started_at) : null;
+  if (!taskRows.length) {
+    await snapshotTemplate(url, key, id);
+    taskRows = await rows(url, key, `rr_onboarding_tasks?select=*&workspace_id=eq.${encodeURIComponent(id)}&order=position.asc`);
+    if (taskRows.length && !status) {
+      status = "in_progress";
+      startedAt = new Date().toISOString();
+      await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify({ onboarding_status: "in_progress", onboarding_started_at: startedAt }) }).catch(() => {});
+    }
+  }
   const tasks = taskRows.map(taskFromRow);
   return {
     client: {
@@ -172,8 +208,8 @@ export async function getOnboardingClient(slug: string): Promise<{ client: Onboa
       slug: str(w.slug),
       logoUrl: w.logo_url ? str(w.logo_url) : null,
       accentColor: w.accent_color ? str(w.accent_color) : null,
-      status: w.onboarding_status ? str(w.onboarding_status) : null,
-      startedAt: w.onboarding_started_at ? str(w.onboarding_started_at) : null,
+      status,
+      startedAt,
       completedAt: w.onboarding_completed_at ? str(w.onboarding_completed_at) : null,
       progress: computeProgress(tasks),
     },

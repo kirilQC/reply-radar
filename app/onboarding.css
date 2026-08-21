@@ -24,6 +24,7 @@
 .onb-status { font-size: 8px; letter-spacing: .1em; font-weight: 750; text-transform: uppercase; padding: 3px 7px; border-radius: 999px; margin-left: auto; flex: none; }
 .onb-status.in_progress { color: var(--amber); background: color-mix(in srgb, var(--amber) 16%, transparent); }
 .onb-status.complete { color: var(--green); background: color-mix(in srgb, var(--green) 16%, transparent); }
+.onb-status.not_started { color: var(--muted-2); background: color-mix(in srgb, var(--muted-2) 14%, transparent); }
 .onb-progress { height: 5px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .onb-progress span { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .25s ease; }
 .onb-progress.done span { background: var(--green); }
@@ -78,26 +79,38 @@
 .onb-done-by { font-size: 9px; color: var(--muted-2); font-style: italic; white-space: nowrap; }
 
 /* ── Template editor ── */
-.onb-tpl-list { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
-.onb-tpl-step { border-top: 1px solid var(--border-soft); padding: 12px 16px; }
+.onb-tpl-list { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); overflow: hidden; }
+.onb-tpl-step { border-top: 1px solid var(--border-soft); }
 .onb-tpl-step:first-child { border-top: 0; }
-.onb-tpl-sub { padding-left: 40px; background: color-mix(in srgb, var(--panel) 92%, var(--bg)); }
-.onb-tpl-row { display: flex; align-items: center; gap: 10px; }
-.onb-tpl-row .onb-tpl-title { font-size: 13px; flex: 1; min-width: 0; }
-.onb-tpl-row .onb-tpl-title small { display: block; color: var(--muted-2); font-size: 10px; margin-top: 3px; }
-.onb-tpl-inactive .onb-tpl-title { color: var(--muted-2); opacity: .6; }
-.onb-tpl-sectiontag { font-size: 8px; letter-spacing: .07em; text-transform: uppercase; font-weight: 700; color: var(--muted); padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; }
-.onb-iconbtn { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; flex: none; }
-.onb-iconbtn:hover { color: var(--text); border-color: var(--accent); }
-.onb-iconbtn:disabled { opacity: .35; cursor: default; }
-.onb-iconbtn.danger:hover { color: var(--coral, #e5738a); border-color: var(--coral, #e5738a); }
-.onb-tpl-edit { display: grid; gap: 8px; margin-top: 10px; }
-.onb-tpl-edit input, .onb-tpl-edit textarea { border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2, #151821); color: var(--text); padding: 8px 10px; font-size: 12px; outline: none; width: 100%; }
-.onb-tpl-edit input:focus, .onb-tpl-edit textarea:focus { border-color: var(--accent); }
-.onb-tpl-edit textarea { min-height: 54px; resize: vertical; line-height: 1.5; }
-.onb-tpl-edit-actions { display: flex; gap: 8px; }
-.onb-tpl-addsub { margin: 10px 0 2px; }
-.onb-tpl-addstep { margin-top: 16px; }
+.onb-tpl-row { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 16px; position: relative; transition: background .12s ease; }
+.onb-tpl-row:hover { background: color-mix(in srgb, var(--panel) 88%, var(--accent)); }
+.onb-tpl-num { font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums; font-weight: 600; min-width: 17px; text-align: right; flex: none; }
+.onb-tpl-main { flex: 1; min-width: 0; }
+.onb-tpl-name { font-size: 13.5px; letter-spacing: -.01em; }
+.onb-tpl-name small { display: block; color: var(--muted-2); font-size: 10.5px; margin-top: 3px; line-height: 1.5; }
+.onb-tpl-inactive .onb-tpl-name { color: var(--muted-2); opacity: .5; text-decoration: line-through; }
+.onb-tpl-chip { font-size: 8px; letter-spacing: .08em; text-transform: uppercase; font-weight: 750; padding: 3px 9px; border-radius: 999px; white-space: nowrap; flex: none; border: 1px solid currentColor; }
+.onb-tpl-chip i { font-style: normal; opacity: .85; }
+.onb-tpl-actions { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity .12s ease; flex: none; }
+.onb-tpl-row:hover .onb-tpl-actions, .onb-tpl-actions:focus-within { opacity: 1; }
+@media (hover: none) { .onb-tpl-actions { opacity: .55; } }
+.onb-ic { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; border: 0; }
+.onb-ic:hover { background: var(--border); color: var(--text); }
+.onb-ic:disabled { opacity: .28; cursor: default; }
+.onb-ic.danger:hover { background: color-mix(in srgb, var(--coral, #e5738a) 20%, transparent); color: var(--coral, #e5738a); }
+.onb-ic svg { width: 15px; height: 15px; display: block; }
+.onb-tpl-sub .onb-tpl-row { padding-left: 42px; }
+.onb-tpl-sub .onb-tpl-row::before { content: ""; position: absolute; left: 27px; top: -1px; height: 50%; width: 9px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); border-bottom-left-radius: 5px; }
+.onb-tpl-sub .onb-tpl-name { font-size: 12.5px; }
+.onb-tpl-editpanel { padding: 2px 16px 16px 46px; display: grid; gap: 8px; }
+.onb-tpl-sub .onb-tpl-editpanel { padding-left: 42px; }
+.onb-tpl-editpanel input, .onb-tpl-editpanel textarea { border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2, #151821); color: var(--text); padding: 9px 11px; font-size: 12.5px; outline: none; width: 100%; }
+.onb-tpl-editpanel input:focus, .onb-tpl-editpanel textarea:focus { border-color: var(--accent); }
+.onb-tpl-editpanel textarea { min-height: 52px; resize: vertical; line-height: 1.5; }
+.onb-tpl-editactions { display: flex; gap: 8px; align-items: center; }
+.onb-tpl-addrow { display: flex; align-items: center; gap: 9px; padding: 14px 16px; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 12.5px; cursor: pointer; background: transparent; width: 100%; text-align: left; }
+.onb-tpl-addrow:hover { color: var(--accent); background: color-mix(in srgb, var(--panel) 90%, var(--accent)); }
+.onb-tpl-addrow svg { width: 15px; height: 15px; }
 
 @media (max-width: 900px) {
   .onb-directory { grid-template-columns: repeat(2, minmax(0, 1fr)); }

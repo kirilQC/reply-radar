@@ -18,9 +18,32 @@ type Step = {
   position: number;
   isActive: boolean;
 };
-// groupTasks (pure, in shared/) returns rows with children + a derived done; typed loosely there, so the
-// concrete shape is asserted here.
 type Group = Step & { children: Step[]; done: boolean };
+
+// One colour per section, so the ranked list still reads as grouped at a glance without being re-sorted.
+const SECTION_COLORS: Record<string, string> = {
+  "Contract & kickoff": "#8b7cff",
+  "Communication": "#4bb3fd",
+  "Data & tooling": "#57c98b",
+  "Client access & integrations": "#e6a95b",
+  "Reply Radar setup": "#e5738a",
+};
+const sectionColor = (s?: string | null) => (s && SECTION_COLORS[s]) || "var(--muted)";
+
+function Icon({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {d.split("|").map((path, i) => <path key={i} d={path} />)}
+    </svg>
+  );
+}
+const IC = {
+  up: "M6 15l6-6 6 6",
+  down: "M6 9l6 6 6-6",
+  edit: "M12 20h9|M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
+  plus: "M12 5v14|M5 12h14",
+  trash: "M4 7h16|M9 7V5h6v2|M6 7l1 13h10l1-13",
+};
 
 export default function OnboardingTemplatePage() {
   const [steps, setSteps] = useState<Step[]>([]);
@@ -35,6 +58,7 @@ export default function OnboardingTemplatePage() {
   const [addSubFor, setAddSubFor] = useState<string | null>(null);
   const [subTitle, setSubTitle] = useState("");
 
+  const [addingTop, setAddingTop] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newSection, setNewSection] = useState("");
 
@@ -50,27 +74,17 @@ export default function OnboardingTemplatePage() {
 
   const groups = useMemo(() => groupTasks(steps) as Group[], [steps]);
 
-  const patch = async (body: unknown) => {
+  const send = async (method: string, body: unknown) => {
     setBusy(true);
     try {
-      await fetch("/api/onboarding/template", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      await fetch("/api/onboarding/template", { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       await reload();
     } finally { setBusy(false); }
   };
-  const post = async (body: unknown) => {
-    setBusy(true);
-    try {
-      await fetch("/api/onboarding/template", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-      await reload();
-    } finally { setBusy(false); }
-  };
+
   const remove = async (id: string) => {
     if (!window.confirm("Delete this step? Its sub-steps go with it. Clients already onboarding keep their copy.")) return;
-    setBusy(true);
-    try {
-      await fetch("/api/onboarding/template", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) });
-      await reload();
-    } finally { setBusy(false); }
+    await send("DELETE", { id });
   };
 
   // Move a step within its sibling group; hand the server the new order of ids to re-space.
@@ -80,7 +94,7 @@ export default function OnboardingTemplatePage() {
     const ids = siblings.map((s) => s.id);
     const [moved] = ids.splice(index, 1);
     ids.splice(to, 0, moved);
-    void patch({ reorder: ids });
+    void send("PATCH", { reorder: ids });
   };
 
   const beginEdit = (step: Step) => {
@@ -92,31 +106,30 @@ export default function OnboardingTemplatePage() {
   };
   const saveEdit = () => {
     if (!editingId || !editTitle.trim()) return;
-    void patch({ id: editingId, title: editTitle.trim(), section: editSection.trim(), description: editDesc.trim() });
+    void send("PATCH", { id: editingId, title: editTitle.trim(), section: editSection.trim(), description: editDesc.trim() });
     setEditingId(null);
   };
 
-  const addSub = (parent: { id: string; section: string | null; children: Step[] }) => {
+  const addSub = (parent: Group) => {
     if (!subTitle.trim()) return;
-    void post({ title: subTitle.trim(), parentId: parent.id, section: parent.section, position: nextPosition(parent.children) });
+    void send("POST", { title: subTitle.trim(), parentId: parent.id, section: parent.section, position: nextPosition(parent.children) });
     setSubTitle("");
     setAddSubFor(null);
   };
   const addTop = () => {
     if (!newTitle.trim()) return;
-    void post({ title: newTitle.trim(), section: newSection.trim() || null, position: nextPosition(groups) });
+    void send("POST", { title: newTitle.trim(), section: newSection.trim() || null, position: nextPosition(groups) });
     setNewTitle("");
     setNewSection("");
+    setAddingTop(false);
   };
 
-  // A plain render function, not a nested component: rendered as {renderEditForm()} it stays part of this
-  // component's tree, so typing in it does not remount the inputs and drop focus every keystroke.
-  const renderEditForm = () => (
-    <div className="onb-tpl-edit">
-      <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Step title" />
-      <input value={editSection} onChange={(e) => setEditSection(e.target.value)} placeholder="Section (optional)" />
+  const editPanel = (isSub: boolean) => (
+    <div className={`onb-tpl-editpanel ${isSub ? "onb-tpl-sub" : ""}`}>
+      <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Step title" onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }} />
+      {!isSub && <input value={editSection} onChange={(e) => setEditSection(e.target.value)} placeholder="Section (optional)" />}
       <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Description / notes (optional)" />
-      <div className="onb-tpl-edit-actions">
+      <div className="onb-tpl-editactions">
         <button className="primary-button" onClick={saveEdit} disabled={busy || !editTitle.trim()}>Save</button>
         <button className="text-button" onClick={() => setEditingId(null)}>Cancel</button>
       </div>
@@ -133,8 +146,9 @@ export default function OnboardingTemplatePage() {
         <main className="onboarding-shell">
           <div className="onboarding-heading">
             <div>
+              <div className="eyebrow">Template</div>
               <h1>Onboarding template</h1>
-              <p>The master checklist every new client starts from. Reorder, edit, add or remove steps. Changes apply to clients added from here on — clients already onboarding keep the list they started with.</p>
+              <p>The master checklist every new client starts from. Reorder, rename, add or remove steps. Changes apply to clients added from here on — clients already onboarding keep the list they started with.</p>
             </div>
           </div>
 
@@ -142,73 +156,72 @@ export default function OnboardingTemplatePage() {
 
           {!loading && (
             <div className="onb-tpl-list">
-              {groups.map((group, index) => {
-                const editing = editingId === group.id;
-                return (
-                  <div key={group.id} className={`onb-tpl-step ${group.isActive === false ? "onb-tpl-inactive" : ""}`}>
-                    <div className="onb-tpl-row">
-                      <span className="onb-index">{index + 1}</span>
-                      <button className="onb-iconbtn" onClick={() => move(groups, index, -1)} disabled={busy || index === 0} aria-label="Move up">↑</button>
-                      <button className="onb-iconbtn" onClick={() => move(groups, index, 1)} disabled={busy || index === groups.length - 1} aria-label="Move down">↓</button>
-                      <span className="onb-tpl-title">
+              {groups.map((group, index) => (
+                <div key={group.id} className={`onb-tpl-step ${group.isActive === false ? "onb-tpl-inactive" : ""}`}>
+                  <div className="onb-tpl-row">
+                    <span className="onb-tpl-num">{index + 1}</span>
+                    <div className="onb-tpl-main">
+                      <div className="onb-tpl-name">
                         {group.title}
                         {group.description && <small>{group.description}</small>}
-                      </span>
-                      {group.section && <span className="onb-tpl-sectiontag">{group.section}</span>}
-                      <button className="onb-iconbtn" onClick={() => beginEdit(group)} aria-label="Edit">✎</button>
-                      <button className="onb-iconbtn" onClick={() => setAddSubFor(addSubFor === group.id ? null : group.id)} aria-label="Add sub-step">＋</button>
-                      <button className="onb-iconbtn danger" onClick={() => void remove(group.id)} disabled={busy} aria-label="Delete">✕</button>
+                      </div>
                     </div>
+                    {group.section && <span className="onb-tpl-chip" style={{ color: sectionColor(group.section) }}>{group.section}</span>}
+                    <div className="onb-tpl-actions">
+                      <button className="onb-ic" onClick={() => move(groups, index, -1)} disabled={busy || index === 0} aria-label="Move up"><Icon d={IC.up} /></button>
+                      <button className="onb-ic" onClick={() => move(groups, index, 1)} disabled={busy || index === groups.length - 1} aria-label="Move down"><Icon d={IC.down} /></button>
+                      <button className="onb-ic" onClick={() => beginEdit(group)} aria-label="Edit"><Icon d={IC.edit} /></button>
+                      <button className="onb-ic" onClick={() => { setAddSubFor(addSubFor === group.id ? null : group.id); setSubTitle(""); }} aria-label="Add sub-step"><Icon d={IC.plus} /></button>
+                      <button className="onb-ic danger" onClick={() => void remove(group.id)} disabled={busy} aria-label="Delete"><Icon d={IC.trash} /></button>
+                    </div>
+                  </div>
 
-                    {editing && renderEditForm()}
+                  {editingId === group.id && editPanel(false)}
 
-                    {group.children.map((child: Step, childIndex: number) => {
-                      const childEditing = editingId === child.id;
-                      return (
-                        <div key={child.id} className="onb-tpl-sub" style={{ marginTop: 8 }}>
-                          <div className="onb-tpl-row">
-                            <button className="onb-iconbtn" onClick={() => move(group.children, childIndex, -1)} disabled={busy || childIndex === 0} aria-label="Move up">↑</button>
-                            <button className="onb-iconbtn" onClick={() => move(group.children, childIndex, 1)} disabled={busy || childIndex === group.children.length - 1} aria-label="Move down">↓</button>
-                            <span className="onb-tpl-title">
-                              {child.title}
-                              {child.description && <small>{child.description}</small>}
-                            </span>
-                            <button className="onb-iconbtn" onClick={() => beginEdit(child)} aria-label="Edit">✎</button>
-                            <button className="onb-iconbtn danger" onClick={() => void remove(child.id)} disabled={busy} aria-label="Delete">✕</button>
+                  {group.children.map((child, childIndex) => (
+                    <div key={child.id} className="onb-tpl-sub">
+                      <div className="onb-tpl-row">
+                        <div className="onb-tpl-main">
+                          <div className="onb-tpl-name">
+                            {child.title}
+                            {child.description && <small>{child.description}</small>}
                           </div>
-                          {childEditing && renderEditForm()}
                         </div>
-                      );
-                    })}
-
-                    {addSubFor === group.id && (
-                      <div className="onb-tpl-addsub onb-tpl-sub">
-                        <div className="onb-tpl-edit">
-                          <input value={subTitle} placeholder="New sub-step title" onChange={(e) => setSubTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addSub(group); }} />
-                          <div className="onb-tpl-edit-actions">
-                            <button className="primary-button" onClick={() => addSub(group)} disabled={busy || !subTitle.trim()}>Add sub-step</button>
-                            <button className="text-button" onClick={() => { setAddSubFor(null); setSubTitle(""); }}>Cancel</button>
-                          </div>
+                        <div className="onb-tpl-actions">
+                          <button className="onb-ic" onClick={() => move(group.children, childIndex, -1)} disabled={busy || childIndex === 0} aria-label="Move up"><Icon d={IC.up} /></button>
+                          <button className="onb-ic" onClick={() => move(group.children, childIndex, 1)} disabled={busy || childIndex === group.children.length - 1} aria-label="Move down"><Icon d={IC.down} /></button>
+                          <button className="onb-ic" onClick={() => beginEdit(child)} aria-label="Edit"><Icon d={IC.edit} /></button>
+                          <button className="onb-ic danger" onClick={() => void remove(child.id)} disabled={busy} aria-label="Delete"><Icon d={IC.trash} /></button>
                         </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                      {editingId === child.id && editPanel(true)}
+                    </div>
+                  ))}
 
-          {!loading && (
-            <div className="onb-add onb-tpl-addstep">
-              <div className="onb-field">
-                <label htmlFor="onb-new-title">New step</label>
-                <input id="onb-new-title" value={newTitle} placeholder="Step title" onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTop(); }} />
-              </div>
-              <div className="onb-field">
-                <label htmlFor="onb-new-section">Section</label>
-                <input id="onb-new-section" value={newSection} placeholder="optional" onChange={(e) => setNewSection(e.target.value)} />
-              </div>
-              <button className="primary-button" onClick={addTop} disabled={busy || !newTitle.trim()}>Add step</button>
+                  {addSubFor === group.id && (
+                    <div className="onb-tpl-editpanel onb-tpl-sub">
+                      <input value={subTitle} placeholder="New sub-step title" onChange={(e) => setSubTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addSub(group); }} />
+                      <div className="onb-tpl-editactions">
+                        <button className="primary-button" onClick={() => addSub(group)} disabled={busy || !subTitle.trim()}>Add sub-step</button>
+                        <button className="text-button" onClick={() => { setAddSubFor(null); setSubTitle(""); }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {addingTop ? (
+                <div className="onb-tpl-editpanel" style={{ paddingTop: 14 }}>
+                  <input value={newTitle} placeholder="New step title" onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTop(); }} />
+                  <input value={newSection} placeholder="Section (optional)" onChange={(e) => setNewSection(e.target.value)} />
+                  <div className="onb-tpl-editactions">
+                    <button className="primary-button" onClick={addTop} disabled={busy || !newTitle.trim()}>Add step</button>
+                    <button className="text-button" onClick={() => { setAddingTop(false); setNewTitle(""); setNewSection(""); }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button className="onb-tpl-addrow" onClick={() => setAddingTop(true)}><Icon d={IC.plus} /> Add a step</button>
+              )}
             </div>
           )}
         </main>

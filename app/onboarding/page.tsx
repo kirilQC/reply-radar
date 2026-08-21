@@ -21,7 +21,8 @@ type Client = {
 
 function ClientCard({ client }: { client: Client }) {
   const { pct, doneLeaves, totalLeaves } = client.progress;
-  const done = client.status === "complete";
+  const done = client.progress.complete;
+  const started = !done && doneLeaves > 0;
   return (
     <Link href={`/onboarding/${client.slug}`} className="onb-card">
       <div className="onb-card-top">
@@ -30,9 +31,9 @@ function ClientCard({ client }: { client: Client }) {
         </span>
         <span className="onb-card-name">
           <strong>{client.name}</strong>
-          <small>{done ? "Onboarded" : "Onboarding"}</small>
+          <small>{done ? "Onboarded" : started ? "Onboarding" : "Not started"}</small>
         </span>
-        <span className={`onb-status ${done ? "complete" : "in_progress"}`}>{done ? "Complete" : "In progress"}</span>
+        <span className={`onb-status ${done ? "complete" : started ? "in_progress" : "not_started"}`}>{done ? "Complete" : started ? "In progress" : "Not started"}</span>
       </div>
       <div className={`onb-progress ${done ? "done" : ""}`}>
         <span style={{ width: `${pct}%` }} />
@@ -92,8 +93,8 @@ export default function OnboardingDirectoryPage() {
     }
   };
 
-  const inProgress = clients.filter((c) => c.status !== "complete");
-  const complete = clients.filter((c) => c.status === "complete");
+  const complete = clients.filter((c) => c.progress.complete).length;
+  const started = clients.filter((c) => !c.progress.complete && c.progress.doneLeaves > 0).length;
 
   return (
     <div className="app-shell">
@@ -110,7 +111,7 @@ export default function OnboardingDirectoryPage() {
           <div className="onboarding-heading">
             <div>
               <h1>Client onboarding</h1>
-              <p>{loading ? "Loading clients…" : `${inProgress.length} in progress · ${complete.length} complete`}</p>
+              <p>{loading ? "Loading clients…" : `${clients.length} clients · ${started} in progress · ${complete} complete`}</p>
             </div>
             <div className="onb-actions">
               <Link href="/onboarding/template" className="secondary-button">Edit template</Link>
@@ -145,18 +146,8 @@ export default function OnboardingDirectoryPage() {
             <div className="onb-directory"><div className="onb-empty">No clients yet. Add your first one to start its checklist.</div></div>
           )}
 
-          {inProgress.length > 0 && (
-            <>
-              <div className="onb-directory-group-label">In progress</div>
-              <div className="onb-directory">{inProgress.map((c) => <ClientCard key={c.id} client={c} />)}</div>
-            </>
-          )}
-
-          {complete.length > 0 && (
-            <>
-              <div className="onb-directory-group-label">Complete</div>
-              <div className="onb-directory">{complete.map((c) => <ClientCard key={c.id} client={c} />)}</div>
-            </>
+          {clients.length > 0 && (
+            <div className="onb-directory">{clients.map((c) => <ClientCard key={c.id} client={c} />)}</div>
           )}
         </main>
       </section>
