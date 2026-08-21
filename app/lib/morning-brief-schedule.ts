@@ -47,6 +47,22 @@ export const DEFAULT_SCHEDULE: BriefSchedule = {
   destination: "internal",
 };
 
+/**
+ * The End-of-Week report's own default: Fridays at 1pm Eastern, into the internal channel.
+ *
+ * A separate constant rather than a parameterised `DEFAULT_SCHEDULE` because the two automations answer
+ * to different clocks — a brief is a Monday/Wednesday/Friday morning ritual and the EOW report is the one
+ * Friday-afternoon send that wraps the week. Sunday is 0, so 5 is Friday.
+ */
+export const EOW_DEFAULT_SCHEDULE: BriefSchedule = {
+  enabled: false,
+  sendDays: [5],
+  sendHour: 13,
+  sendMinute: 0,
+  timezone: "America/New_York",
+  destination: "internal",
+};
+
 /** The calendar date in a given zone, as `YYYY-MM-DD`. `en-CA` formats in that order by definition. */
 export function localDayKey(date: Date, timeZone: string): string {
   try {
@@ -145,6 +161,41 @@ export function readinessOf(input: ReadinessInput, now = Date.now()): Readiness 
   // Slack alone decides whether a brief can be *sent*, because without a channel there is nowhere to put
   // it. The other two decide how good it will be. `ready` means all three, which is what the grid shows.
   return { heyreach, slack, granola, ready: heyreach.ok && slack.ok && granola.ok };
+}
+
+export type EowReadinessInput = {
+  heyreachKeyConfigured: boolean;
+  lastSuccessfulPollAt: string | null;
+  internalChannelId: string;
+  externalChannelId: string;
+};
+export type EowReadiness = { heyreach: Check; slack: Check; ready: boolean };
+
+/**
+ * The two sources an End-of-Week report needs, each working or with a reason it is not.
+ *
+ * No Granola in it, unlike a morning brief: the EOW report is the week's campaign figures written up, not a
+ * read of any one call, so it needs HeyReach reporting freshly and an internal channel to post into — and
+ * nothing else. The HeyReach staleness rule is the same one the morning brief uses, and the Slack check is
+ * the same internal-channel-is-what-matters rule; the external channel is a note, never a blocker.
+ */
+export function eowReadinessOf(input: EowReadinessInput, now = Date.now()): EowReadiness {
+  const pollAge = input.lastSuccessfulPollAt ? (now - Date.parse(input.lastSuccessfulPollAt)) / 3_600_000 : null;
+  const heyreach: Check = !input.heyreachKeyConfigured
+    ? { ok: false, detail: "No HeyReach key" }
+    : pollAge === null || !Number.isFinite(pollAge)
+      ? { ok: false, detail: "Never polled" }
+      : pollAge > STALE_POLL_HOURS
+        ? { ok: false, detail: `Last polled ${Math.round(pollAge)}h ago` }
+        : { ok: true, detail: pollAge < 1 ? "Polling now" : `Polled ${Math.round(pollAge)}h ago` };
+
+  const slack: Check = !input.internalChannelId
+    ? { ok: false, detail: "No internal channel" }
+    : input.externalChannelId
+      ? { ok: true, detail: "Both channels set" }
+      : { ok: true, detail: "Internal only" };
+
+  return { heyreach, slack, ready: heyreach.ok && slack.ok };
 }
 
 export type CallReadinessInput = {

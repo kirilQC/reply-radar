@@ -42,21 +42,27 @@ import "../reports/reports.css";
  * once and parameterised by which automation is open — the endpoint, the labels, the readiness checks and
  * the destinations all come off `automation` rather than being duplicated into two near-identical pages.
  */
-type Automation = "morning_brief" | "call_analysis";
+type Automation = "morning_brief" | "call_analysis" | "eow_report";
 
-/** Which route each automation talks to. Both expose the same GET/POST/PATCH shape. */
+/** Which route each automation talks to. All expose the same GET/POST/PATCH shape. */
 const API: Record<Automation, string> = {
   morning_brief: "/api/slack/brief",
   call_analysis: "/api/slack/call-analysis",
+  eow_report: "/api/slack/eow-report",
 };
 
 const AUTOMATION_LABEL: Record<Automation, string> = {
   morning_brief: "Morning brief",
   call_analysis: "Call analysis",
+  eow_report: "EOW report",
 };
 
-/** A morning brief has HeyReach, a call analysis does not — so that check is optional here. */
-type ClientReadiness = { heyreach?: Check; slack: Check; granola: Check; ready: boolean };
+/**
+ * A morning brief has three sources, a call analysis reads Slack + Granola, and an EOW report reads
+ * HeyReach + Slack. So HeyReach and Granola are both optional here — a directory carries only the checks
+ * its automation actually depends on.
+ */
+type ClientReadiness = { heyreach?: Check; slack: Check; granola?: Check; ready: boolean };
 
 type BriefClient = {
   id: string;
@@ -71,6 +77,8 @@ type BriefClient = {
   morningBriefEnabled?: boolean;
   /** The call analysis's opt-in flag. Present on the call-analysis directory only. */
   callAnalysisEnabled?: boolean;
+  /** The EOW report's opt-in flag. Present on the eow-report directory only. */
+  eowReportEnabled?: boolean;
   hasBrief?: boolean;
   readiness: ClientReadiness;
   sentToday: boolean;
@@ -85,7 +93,8 @@ type Directory = {
   error?: string;
   slack: { configured: boolean; readable: boolean; readsAsUser: boolean; tokenEnv: string; userTokenEnv: string; testChannelId: string };
   anthropicConfigured: boolean;
-  granolaKeyCount: number;
+  /** Absent on the EOW directory, which reads no call. */
+  granolaKeyCount?: number;
   schedule: BriefSchedule;
   scheduleDueNow: boolean;
   workspaces: BriefClient[];
@@ -148,7 +157,7 @@ export default function SlackPage() {
   const [automation, setAutomation] = useState<Automation>("morning_brief");
   // Both directories are held at once so the landing screen can show each automation's card without
   // opening it. `directory` below is whichever one is currently open.
-  const [directories, setDirectories] = useState<Record<Automation, Directory | null>>({ morning_brief: null, call_analysis: null });
+  const [directories, setDirectories] = useState<Record<Automation, Directory | null>>({ morning_brief: null, call_analysis: null, eow_report: null });
   const [error, setError] = useState("");
   const [activeSlug, setActiveSlug] = useState("");
   const [destination, setDestination] = useState<Destination>("preview");
@@ -179,7 +188,7 @@ export default function SlackPage() {
     void (async () => {
       // Both automations up front, so the landing cards are populated and switching between them is
       // instant. The draft is seeded from whichever one is open, once, and then owned by the form.
-      const [brief] = await Promise.all([load("morning_brief"), load("call_analysis")]);
+      const [brief] = await Promise.all([load("morning_brief"), load("call_analysis"), load("eow_report")]);
       if (!cancelled && brief?.schedule) setDraft(brief.schedule);
     })();
     return () => { cancelled = true; };
@@ -189,7 +198,12 @@ export default function SlackPage() {
   const active = useMemo(() => clients.find((client) => client.slug === activeSlug) ?? null, [clients, activeSlug]);
 
   /** Whether this client is opted into whichever automation is open. */
-  const isEnabled = (client: BriefClient) => automation === "call_analysis" ? Boolean(client.callAnalysisEnabled) : Boolean(client.morningBriefEnabled);
+  const isEnabled = (client: BriefClient) =>
+    automation === "call_analysis"
+      ? Boolean(client.callAnalysisEnabled)
+      : automation === "eow_report"
+        ? Boolean(client.eowReportEnabled)
+        : Boolean(client.morningBriefEnabled);
 
   /** How many clients could actually receive this automation — every source, not just a channel. */
   const readyCount = clients.filter((client) => client.readiness?.ready).length;
@@ -316,12 +330,12 @@ export default function SlackPage() {
 
             <div className="hub-group-label">
               <span>Automations</span>
-              <span>2 automations</span>
+              <span>3 automations</span>
             </div>
             <div className="hub-card-grid">
-              {(["morning_brief", "call_analysis"] as Automation[]).map((which) => {
+              {(["morning_brief", "call_analysis", "eow_report"] as Automation[]).map((which) => {
                 const dir = directories[which];
-                const on = (dir?.workspaces ?? []).filter((client) => which === "call_analysis" ? client.callAnalysisEnabled : client.morningBriefEnabled).length;
+                const on = (dir?.workspaces ?? []).filter((client) => which === "call_analysis" ? client.callAnalysisEnabled : which === "eow_report" ? client.eowReportEnabled : client.morningBriefEnabled).length;
                 return (
                   <div className="hub-card" key={which}>
                     <button type="button" className="hub-card-open" onClick={() => openAutomation(which)}>
@@ -355,7 +369,11 @@ export default function SlackPage() {
             <button type="button" className="config-back" onClick={() => setView("automations")}>← Slack automations</button>
             <div className="hub-lede hub-lede-split">
               <h1>{AUTOMATION_LABEL[automation]}</h1>
-              <a className="text-button" href={automation === "call_analysis" ? "/admin?section=ai-hub#ai-call-analysis" : "/admin?section=ai-hub#ai-morning-brief"}>Edit the prompt →</a>
+              {/* The EOW report runs the built-in Tarsi template from the Reports hub, so there is no
+                  AI-hub prompt to edit — the other two are written in the AI hub. */}
+              {automation !== "eow_report" && (
+                <a className="text-button" href={automation === "call_analysis" ? "/admin?section=ai-hub#ai-call-analysis" : "/admin?section=ai-hub#ai-morning-brief"}>Edit the prompt →</a>
+              )}
             </div>
 
             {/* Call analysis has no schedule: it runs off the hourly Granola heartbeat, posting a recap
@@ -435,7 +453,7 @@ export default function SlackPage() {
                 const checks: Array<[string, { ok: boolean; detail: string }]> = [
                   ...(client.readiness.heyreach ? [["HeyReach", client.readiness.heyreach] as [string, { ok: boolean; detail: string }]] : []),
                   ["Slack", client.readiness.slack],
-                  ["Granola", client.readiness.granola],
+                  ...(client.readiness.granola ? [["Granola", client.readiness.granola] as [string, { ok: boolean; detail: string }]] : []),
                 ];
                 return (
                   <li key={client.slug} className={client.readiness.ready ? "brief-client" : "brief-client is-short"}>
@@ -477,7 +495,7 @@ export default function SlackPage() {
             </ul>
 
             {!clients.length && !error && <div className="hub-empty">No clients yet.</div>}
-            {directory && !directory.granolaKeyCount && (
+            {directory && automation !== "eow_report" && !directory.granolaKeyCount && (
               <div className="hub-empty">No Granola keys are stored, so no client&apos;s call can be read. <a href="/admin">Add one in configuration</a>.</div>
             )}
             {error && <div className="config-error">{error}</div>}
@@ -520,9 +538,9 @@ export default function SlackPage() {
                 <div className="slack-run-row">
                   <button className="config-generate" onClick={runBrief} disabled={running}>
                     {running
-                      ? (automation === "call_analysis" ? "Writing the analysis…" : "Writing the brief…")
+                      ? (automation === "call_analysis" ? "Writing the analysis…" : automation === "eow_report" ? "Writing the report…" : "Writing the brief…")
                       : destination === "preview"
-                        ? (automation === "call_analysis" ? "Write the analysis" : "Write the brief")
+                        ? (automation === "call_analysis" ? "Write the analysis" : automation === "eow_report" ? "Write the report" : "Write the brief")
                         : "Write and post"}
                   </button>
                   <span className="slack-run-note">
@@ -549,7 +567,7 @@ export default function SlackPage() {
                 {result?.brief && (
                   <>
                     <div className="hub-group-label">
-                      <span>{automation === "call_analysis" ? "The analysis" : "The brief"}</span>
+                      <span>{automation === "call_analysis" ? "The analysis" : automation === "eow_report" ? "The report" : "The brief"}</span>
                       <span>{result.posted ? `Posted to ${result.channelId}` : "Not posted"}</span>
                     </div>
                     {/* Which meeting the recap read: the date it was on, who was there, how long it ran. Shown

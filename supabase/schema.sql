@@ -37,6 +37,10 @@ create table if not exists rr_workspaces (
   -- switch because the two are opted into separately: a client can have their weekly call summarised long
   -- before their morning brief is trusted to send, or the other way round.
   call_analysis_enabled boolean not null default false,
+  -- Whether the scheduled End-of-Week report may post for this client. Same reasoning and default as the
+  -- two flags above: opting in is a deliberate decision made once on the Slack tab, so a freshly added
+  -- client never posts a client recap into a channel before anybody has vetted one.
+  eow_report_enabled boolean not null default false,
   -- What has to appear in a Granola meeting title for it to be this client's call. Null is the normal
   -- case and means the client's own `name` is used; this is only for when the calendar names them
   -- differently. Matched on the title rather than the attendee list because Granola's list endpoint

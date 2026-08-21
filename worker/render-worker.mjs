@@ -1325,6 +1325,72 @@ async function sendDueBrief() {
   }
 }
 
+/**
+ * The End-of-Week report, on the same one-per-cycle pattern as the morning brief.
+ *
+ * A sibling automation with its own schedule (`eow_report` in `rr_slack_automations`, Fridays 1pm ET by
+ * default) and its own opt-in flag, so it is asked and dispatched separately. The route's GET does all the
+ * schedule and readiness maths — the worker cannot import TypeScript and must not keep a second copy of the
+ * rules — and this only POSTs the first slug it is handed. The route logs the report row; this logs whether
+ * the schedule fired, same split as the brief.
+ *
+ * Heavier than a brief (generate + compose + two Slack posts), which is why one per cycle matters more
+ * here: the next cycle re-asks, and by then the client has a row and is no longer due, so a full roster
+ * drains itself over the following cycles without this file holding any state.
+ */
+const EOW_REPORT_LOOP_MS = 60 * 1000;
+let lastEowReportRun = 0;
+
+async function sendDueEowReport() {
+  if (!appBaseUrl) return;
+  if (Date.now() - lastEowReportRun < EOW_REPORT_LOOP_MS) return;
+  lastEowReportRun = Date.now();
+
+  const listed = await fetch(`${appBaseUrl}/api/slack/eow-report`, { cache: "no-store" }).catch(() => null);
+  if (!listed?.ok) return;
+  const payload = await listed.json().catch(() => null);
+  const due = Array.isArray(payload?.due) ? payload.due.filter((slug) => typeof slug === "string" && slug) : [];
+  if (!due.length) return;
+
+  const slug = due[0];
+  const startedAt = new Date().toISOString();
+  const destination = typeof payload?.schedule?.destination === "string" ? payload.schedule.destination : "internal";
+  try {
+    const response = await fetch(`${appBaseUrl}/api/slack/eow-report`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspace: slug, destination }),
+    });
+    const result = await response.json().catch(() => ({}));
+    const failed = !response.ok || result?.ok === false;
+    console.info("reply_radar_eow_report_sent", { slug, destination, posted: Boolean(result?.posted), remaining: due.length - 1 });
+    await writeSyncRun({
+      workspace_id: null,
+      run_type: "eow_report",
+      source: "render-worker",
+      status: failed ? "error" : "success",
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      records_seen: due.length,
+      records_written: failed ? 0 : 1,
+      error_text: failed ? String(result?.error || `HTTP ${response.status}`).slice(0, 500) : null,
+    });
+  } catch (error) {
+    console.error("reply_radar_eow_report_failed", { slug, error: String(error) });
+    await writeSyncRun({
+      workspace_id: null,
+      run_type: "eow_report",
+      source: "render-worker",
+      status: "error",
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      records_seen: due.length,
+      records_written: 0,
+      error_text: String(error).slice(0, 500),
+    });
+  }
+}
+
 // ── Granola heartbeat and call analysis ─────────────────────────────
 /**
  * The Granola heartbeat, and the call analyses it triggers.
@@ -1469,6 +1535,10 @@ async function runOnce() {
   // At most one client's brief per cycle, and before the AI pipeline: a brief that is due at 8am is
   // time-sensitive in a way the pipeline is not, and the pipeline's budget can hold a cycle open.
   try { await sendDueBrief(); } catch (error) { console.error("reply_radar_morning_brief_cycle_failed", error); }
+
+  // At most one client's EOW report per cycle, on its own Friday-afternoon schedule. Same one-per-cycle
+  // drain as the brief; the route does the schedule and readiness maths and this only dispatches.
+  try { await sendDueEowReport(); } catch (error) { console.error("reply_radar_eow_report_cycle_failed", error); }
 
   // Every hour, in working hours: ask Granola what calls it can see and post an analysis for any it has
   // not posted before. Its own timer, so it runs on the hour independently of the brief's daily cadence.
