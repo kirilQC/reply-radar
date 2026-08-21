@@ -33,27 +33,27 @@ import {
   isDueNow,
   type BriefSchedule,
 } from "../../../lib/morning-brief-schedule";
-import { BUILT_IN_TEMPLATES } from "../../../lib/report-templates";
+import { type BriefWorkspace } from "../../../lib/morning-brief";
+import { gatherCalls, gatherChannels, gatherLiveFigures, writeBrief } from "../../../lib/morning-brief-run";
+import { gatherSignals } from "../../../lib/morning-brief";
+import { DEFAULT_EOW_REPORT_PROMPT, eowReportUserContent } from "../../../lib/eow-report-run";
+import { brainContext } from "../../../lib/brain-context";
+import { truncateForSlack } from "../../../../shared/slack-agent.mjs";
 import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
-import { toSlackText, truncateForSlack } from "../../../../shared/slack-agent.mjs";
 
 /**
- * Generate, then compose, then two Slack posts — heavier than a morning brief, which is one model call.
- * The generate step scans a week of messages and asks HeyReach for the funnel, and compose is a second
- * model call, so this asks for the full ceiling rather than the brief's sixty seconds.
+ * One model call plus the source reads — the same shape as a morning brief. HeyReach can cold-start near
+ * its own timeout and the QC Brain is a GitHub read, so this asks for headroom above the brief's sixty
+ * seconds rather than the full ceiling the old generate-then-compose flow needed.
  */
 export const maxDuration = 120;
 
 type Row = Record<string, unknown>;
-type Json = Record<string, unknown>;
 
 /** The channel a report goes to when it is being tried out rather than delivered. */
 const TEST_CHANNEL_ENV = "SLACK_TEST_CHANNEL_ID";
 
 const AUTOMATION = "eow_report";
-
-/** The built-in Tarsi template this automation runs. Its prompt and period are the report's definition. */
-const EOW_TEMPLATE = BUILT_IN_TEMPLATES.find((template) => template.id === "weekly-recap");
 
 function credentials() {
   const url = process.env.SUPABASE_URL;
@@ -261,29 +261,18 @@ function shortDate(timeZone: string, now = new Date()): string {
   }
 }
 
-/**
- * Splits the composed email into the one-line header Slack threads under and the body of the report.
- *
- * The header is built here rather than lifted from the email's `Subject:` line: the channel wants a fixed,
- * scannable title — "Bluevia 8/21 EOW Report" — not whatever phrasing the model chose for the subject. So
- * the subject block is dropped when present and the header is composed from the client's name and today's
- * date in their zone. Everything after the subject becomes the threaded reply.
- */
-function splitReport(message: string, clientName: string, timeZone: string): { header: string; body: string } {
-  const blocks = message.split("\n\n");
-  const first = (blocks[0] ?? "").trim();
-  const body = /^Subject:\s*/i.test(first) ? blocks.slice(1).join("\n\n").trim() : message.trim();
-  return { header: `*${clientName} ${shortDate(timeZone)} EOW Report*  :calendar:`, body };
+/** The one-line header the report threads under, e.g. "Bluevia 8/21 EOW Report". */
+function reportHeader(clientName: string, timeZone: string): string {
+  return `*${clientName} ${shortDate(timeZone)} EOW Report*  :calendar:`;
 }
 
 export async function POST(request: Request) {
   const credential = credentials();
   if (!credential) return NextResponse.json({ error: "Supabase not configured" }, { status: 503 });
-  if (!EOW_TEMPLATE) return NextResponse.json({ error: "The EOW report template is missing." }, { status: 500 });
   const { url, key } = credential;
   const read = reader(url, key);
 
-  let workspaceId = "";
+  let workspace: BriefWorkspace | null = null;
   let destination = "preview";
 
   try {
@@ -292,14 +281,19 @@ export async function POST(request: Request) {
     destination = body.destination === "test" || body.destination === "internal" ? body.destination : "preview";
     if (!slug) return NextResponse.json({ error: "No client was named." }, { status: 400 });
 
-    const rows = await read(`rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id&slug=eq.${encodeURIComponent(slug)}&limit=1`);
-    const workspace = (Array.isArray(rows) ? (rows as Row[]) : [])[0];
-    if (!workspace) return NextResponse.json({ error: "That client does not exist." }, { status: 404 });
-    workspaceId = String(workspace.id ?? "");
+    // Two selects, because the extra-source columns are an additive migration and PostgREST fails the whole
+    // read over one unknown column. A database without the migration still writes reports; it just writes
+    // them from the two named channels and the one call. Same columns the morning brief reads.
+    const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,heyreach_api_key_ciphertext";
+    const rows = await read(`rr_workspaces?select=${columns},slack_extra_channel_ids,granola_extra_title_matches&slug=eq.${encodeURIComponent(slug)}&limit=1`)
+      .catch(() => read(`rr_workspaces?select=${columns}&slug=eq.${encodeURIComponent(slug)}&limit=1`));
+    const found = (Array.isArray(rows) ? (rows as Row[]) : [])[0];
+    if (!found) return NextResponse.json({ error: "That client does not exist." }, { status: 404 });
+    workspace = found as BriefWorkspace;
     const clientName = String(workspace.name ?? "");
     const timeZone = String(workspace.timezone ?? "") || "America/New_York";
 
-    // Worked out before the model calls, so a report that has nowhere to go costs nothing to refuse.
+    // Worked out before the model call, so a report that has nowhere to go costs nothing to refuse.
     let channelId = "";
     if (destination === "test") {
       channelId = (process.env[TEST_CHANNEL_ENV] ?? "").trim();
@@ -315,47 +309,29 @@ export async function POST(request: Request) {
 
     const origin = new URL(request.url).origin;
 
-    // The week's numbers, computed by the same endpoint the Reports hub uses.
-    const generateResponse = await fetch(`${origin}/api/reports/generate`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workspaceSlug: slug, period: EOW_TEMPLATE.defaultPeriod, timeZone }),
-      cache: "no-store",
-    });
-    const generated = (await generateResponse.json().catch(() => ({}))) as Json;
-    if (!generateResponse.ok || !generated.ok) {
-      throw new Error(String(generated.error ?? "The report figures could not be generated."));
-    }
-    const clients = Array.isArray(generated.clients) ? generated.clients : [];
-    if (!clients.length) throw new Error("The report figures came back empty.");
+    /*
+     * Every source, the way the morning brief reads them. HeyReach is asked first and on its own, because
+     * its answer decides whether the stored figures are read at all: given a live one, `gatherSignals` does
+     * not touch the stored tables, and given a failure it reads them and the report says the numbers are a
+     * copy. The rest run together — channels, the call and the QC Brain — none of which throws, so a missing
+     * call or an unreachable brain is a thinner report rather than a failed one.
+     */
+    const live = await gatherLiveFigures(String((found as Row).heyreach_api_key_ciphertext ?? ""));
+    const [signals, channels, call, brain] = await Promise.all([
+      gatherSignals(read, workspace, live),
+      gatherChannels(workspace),
+      gatherCalls(read, workspace),
+      brainContext(workspace),
+    ]);
 
-    // The Tarsi prompt turned into the recap email, by the same endpoint the Reports hub uses.
-    const composeResponse = await fetch(`${origin}/api/reports/compose`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        prompt: EOW_TEMPLATE.prompt,
-        templateId: EOW_TEMPLATE.id,
-        clients,
-        periodLabel: String(generated.periodLabel ?? "this week"),
-        // No "Best replies from this week" block: the recap is the week's numbers, and the fuller report a
-        // reader can pull from Reply Radar carries the reply detail if they want it.
-        includeBestReplies: false,
-      }),
-      cache: "no-store",
-    });
-    const composed = (await composeResponse.json().catch(() => ({}))) as Json;
-    if (!composeResponse.ok || !composed.ok) {
-      throw new Error(String(composed.error ?? "The report could not be written."));
-    }
-    const email = String(composed.message ?? "").trim();
-    if (!email) throw new Error("The composed report was empty.");
+    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason, brain: brain.block };
+    const content = eowReportUserContent(workspace, inputs);
+    const report = await writeBrief(DEFAULT_EOW_REPORT_PROMPT, content);
 
-    const { header, body: reportBody } = splitReport(email, clientName, timeZone);
     // A pointer to the fuller report, so the recap stays short and the reader knows where the detail lives.
-    const reportsLink = `<${origin}/reports|Reply Radar reports>`;
-    const footer = `\n\n_Want the detail? Pull a more extensive report any time in ${reportsLink}._`;
-    const slackBody = truncateForSlack(toSlackText(reportBody)) + footer;
+    const footer = `\n\n_Want the detail? Pull a more extensive report any time in <${origin}/reports|Reply Radar reports>._`;
+    const slackBody = truncateForSlack(report) + footer;
+    const header = reportHeader(clientName, timeZone);
 
     // Two messages: a one-line header in the channel, the report itself as a reply in its thread. Same
     // reasoning as the morning brief — a page-long recap posted flat buries the channel.
@@ -373,36 +349,54 @@ export async function POST(request: Request) {
     }
     const posted = Boolean(reportTs);
 
+    // What the model was given, figures only. The transcript and channels are not stored — a copy of every
+    // client call in a log table is exactly what nobody wants — but which sources were thin is recorded.
+    const sources = {
+      internalMessages: channels.internal.messages,
+      externalMessages: channels.external.messages,
+      call: call.call ? { title: call.call.title, ageDays: call.call.ageDays, owner: call.call.owner, transcriptChars: call.call.transcript.length } : null,
+      callReason: call.callReason ?? null,
+      brain: { folder: brain.folder, documents: brain.documents, chars: brain.block.length, reason: brain.reason || null },
+    };
+
     await insertReport(url, key, {
-      workspace_id: workspaceId,
+      workspace_id: workspace.id,
       automation: AUTOMATION,
       destination,
       slack_channel_id: channelId || null,
       slack_message_ts: reportTs || null,
-      body: email,
-      signals: { periodLabel: String(generated.periodLabel ?? ""), templateId: EOW_TEMPLATE.id, model: composed.model ?? null },
+      body: slackBody,
+      signals: { ...signals, sources },
       status: sendError ? "error" : "success",
       error_text: sendError || null,
     });
 
+    // The roster the report was written against, id→name, so BriefView can turn the `<@U…>` mention codes
+    // back into names on the page. Same list the morning brief returns.
+    const mentions = Object.fromEntries(
+      [...(channels.internal.people ?? []), ...(channels.external.people ?? [])].map((person) => [person.id, person.name]),
+    );
+
     return NextResponse.json({
       ok: !sendError,
       // `brief` rather than `report` so the Slack hub renders it through the same BriefView the morning
-      // brief uses. It is the Slack-rendered body — the exact text that posted into the thread.
+      // brief uses. It is the exact text that posted into the thread.
       brief: slackBody,
-      headline: composed.headline ?? null,
+      mentions,
+      signals,
+      sources,
       posted,
       channelId: channelId || null,
       messageTs: reportTs || null,
       threadTs: messageTs || null,
-      periodLabel: String(generated.periodLabel ?? ""),
+      channelNotes: [channels.internal.error, channels.external.error, ...call.errors].filter(Boolean),
       error: sendError || undefined,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The report could not be written.";
-    if (workspaceId) {
+    if (workspace) {
       await insertReport(url, key, {
-        workspace_id: workspaceId,
+        workspace_id: workspace.id,
         automation: AUTOMATION,
         destination,
         body: "",
