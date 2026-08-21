@@ -394,6 +394,18 @@ export function progressText(steps, opts = {}) {
 /** How many turns back the assistant reads a thread. A long back-and-forth is trimmed to the recent ones. */
 const MAX_THREAD_TURNS = 20;
 
+/**
+ * The label put on the bot's own earlier posts when they are folded into the first human turn.
+ *
+ * A conversation the model can answer has to open on a person, but a scheduled morning brief, End-of-Week
+ * report or call analysis is the bot speaking first, unprompted — so the thread opens on the bot, and the
+ * one thing a reply like "we already did this" refers to is exactly that opening post. Dropping it (which is
+ * what this used to do) is why a reply in a brief thread came back "I don't know what you're talking about."
+ * Rather than drop it, the bot's leading posts are quoted into the front of the first human turn under this
+ * heading, so the model reads the reply against the message it answers.
+ */
+const OWN_CONTEXT_HEADING = "Earlier in this thread you (QC Bot) posted:";
+
 /** Whether a post was written by QC Bot itself, by either of the two ids Slack might stamp it with. */
 const isOurBot = (post, identity) => {
   const userId = identity?.userId ?? "";
@@ -422,9 +434,13 @@ export function botParticipated(posts, identity) {
  * QC Bot's own posts become `assistant` turns — its memory of what it already said — and everyone else's
  * become `user` turns, with the bot mention stripped the same way a fresh question is. Two turns from the
  * same side in a row are merged, because Anthropic rejects consecutive same-role messages and two people
- * (or a person across two messages) reading as one voice is closer to the truth than an error. Any
- * assistant turns at the very front are dropped so the conversation opens on a person, and only the most
- * recent turns are kept so a long thread cannot blow the token budget.
+ * (or a person across two messages) reading as one voice is closer to the truth than an error.
+ *
+ * A conversation the model can answer has to open on a person, so any assistant turns at the very front are
+ * not sent as their own turns — but they are not thrown away either. When the bot spoke first (a scheduled
+ * brief, report or call analysis posts unprompted), that opening post is the very thing a reply answers, so
+ * it is quoted into the front of the first human turn rather than dropped. Only the most recent turns are
+ * kept so a long thread cannot blow the token budget.
  *
  * @param {Array<{ author: string; botId: string; text: string }>} posts
  * @param {{ userId?: string; botId?: string }} identity
@@ -441,8 +457,13 @@ export function threadToTurns(posts, identity) {
     if (previous && previous.role === role) previous.content = `${previous.content}\n\n${text}`;
     else turns.push({ role, content: text });
   }
-  // A conversation the model can answer opens on a person and ends on one; lead assistant turns are noise.
-  while (turns.length && turns[0].role !== "user") turns.shift();
+  // Lead assistant turns cannot be sent as-is — the conversation must open on a person — but they are the
+  // context a reply depends on when the bot spoke first, so they are folded into the first human turn.
+  const leading = [];
+  while (turns.length && turns[0].role !== "user") leading.push(turns.shift().content);
+  if (leading.length && turns.length) {
+    turns[0] = { role: "user", content: `${OWN_CONTEXT_HEADING}\n\n${leading.join("\n\n")}\n\n---\n\n${turns[0].content}` };
+  }
   return turns;
 }
 

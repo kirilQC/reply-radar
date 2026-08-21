@@ -51,6 +51,8 @@ import {
   truncateForSlack,
   verifySlackSignature,
 } from "../../../../shared/slack-agent.mjs";
+import { briefEditIsSafe } from "../../../../shared/brief-reply.mjs";
+import { findBriefThread, writeBriefReply, updateStoredBody, type BriefThread } from "../../../lib/brief-reply";
 
 /** Same ceiling as the MCP route: the agent's tool budget is tuned to answer inside three hundred seconds. */
 export const maxDuration = 300;
@@ -351,6 +353,59 @@ async function answerMention(event: Row): Promise<void> {
 }
 
 /**
+ * A reply in the thread under a brief or report QC Bot posted — the correct-the-document path.
+ *
+ * This is the reason the feature exists: a teammate under a morning brief or End-of-Week report is almost
+ * never asking a research question, they are fixing the document ("we already did this", "take that line
+ * out"). The generic agent cannot touch the message it is being asked to change, so this one call returns
+ * both the reply to post and, when the reply asked for it, the whole edited body — which is pushed over the
+ * original message only after `briefEditIsSafe` clears it, because the one failure this must never have is a
+ * reply quietly replacing a page-long brief with a sentence.
+ *
+ * Every human post in the thread is passed as context, not just the newest, so a correction that spans two
+ * messages, or a thread with several asks, is answered against all of them. The stored body is refreshed
+ * best-effort after a safe edit so the next brief reads the struck-through version.
+ */
+async function replyToBrief(opts: {
+  channel: string;
+  threadTs: string;
+  reactTs: string;
+  identity: { userId: string; botId: string };
+  posts: Array<{ author: string; botId: string; text: string; ts: string }>;
+  briefThread: BriefThread;
+  askedBy: string;
+}): Promise<void> {
+  const { channel, threadTs, reactTs, identity, posts, briefThread } = opts;
+
+  const isOurBot = (post: { author: string; botId: string }) =>
+    Boolean((identity.userId && post.author === identity.userId) || (identity.botId && post.botId === identity.botId));
+  const replies = posts.filter((post) => !isOurBot(post)).map((post) => cleanMention(post.text)).filter(Boolean);
+  // Nothing a person actually said (an attachment-only reply, say) — leave it to the generic path's caller.
+  if (!replies.length) return;
+
+  if (reactTs) await addReaction(channel, reactTs, WORKING_REACTION).catch(() => {});
+  try {
+    const { reply, updatedBody } = await writeBriefReply(briefThread.automation, briefThread.body, replies);
+
+    // Only edit when the model returned a body and the guard clears it as a real change rather than a wipe.
+    if (updatedBody && briefEditIsSafe(briefThread.body, updatedBody)) {
+      await updateMessage(channel, briefThread.bodyTs, updatedBody).catch(() => {});
+      const credential = supabaseCredentials();
+      if (credential) await updateStoredBody(credential, channel, briefThread.bodyTs, updatedBody);
+    }
+
+    const text = reply.trim() || "Done.";
+    await postMessage(channel, toSlackText(text), threadTs).catch(() => {});
+    if (reactTs) await addReaction(channel, reactTs, DONE_REACTION).catch(() => {});
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "something went wrong";
+    await postMessage(channel, `I hit an error on that: ${detail}`, threadTs).catch(() => {});
+  } finally {
+    if (reactTs) await removeReaction(channel, reactTs, WORKING_REACTION).catch(() => {});
+  }
+}
+
+/**
  * A follow-up reply in a thread the bot is already in — the ongoing-conversation path.
  *
  * A `message` event fires for every message in a channel the bot can see, so most are none of its business.
@@ -358,6 +413,9 @@ async function answerMention(event: Row): Promise<void> {
  * apply, both needing Slack's answer. A reply that @-mentions the bot is left to `answerMention` (Slack
  * delivers it as an `app_mention` too, and answering in both places would double-post), and a thread the
  * bot has never spoken in is somebody else's discussion, so `botParticipated` keeps it out.
+ *
+ * When the thread hangs under a brief or report we posted, the reply is a correction to that document, not a
+ * research question, so it is handled by `replyToBrief`; everything else falls through to the generic agent.
  */
 async function answerThreadReply(event: Row): Promise<void> {
   const channel = str(event.channel);
@@ -370,6 +428,18 @@ async function answerThreadReply(event: Row): Promise<void> {
 
   const posts = await threadPosts(channel, threadTs);
   if (!botParticipated(posts, identity)) return;
+
+  // A thread hanging under one of our briefs or reports is a correction to that document — handle it with the
+  // dedicated editor that can strike or reword the original message. Falls through to the generic agent when
+  // it is not one of ours, or when Supabase is not reachable to look it up.
+  const credential = supabaseCredentials();
+  if (credential) {
+    const briefThread = await findBriefThread(credential, channel, posts).catch(() => null);
+    if (briefThread) {
+      await replyToBrief({ channel, threadTs, reactTs: str(event.ts), identity, posts, briefThread, askedBy: str(event.user) });
+      return;
+    }
+  }
 
   const messages = threadToTurns(posts, identity) as Turn[];
   // Only answer when the thread ends on a human's turn — otherwise there is nothing new to respond to.

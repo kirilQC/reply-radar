@@ -300,10 +300,28 @@ test("two posts from the same side in a row are merged so no role repeats", () =
   ]);
 });
 
-test("a thread that opens with the bot drops the lead assistant turns so it starts on a person", () => {
+test("a thread that opens with the bot folds its brief into the first human turn so the reply has context", () => {
   const posts = [
     { author: "", botId: "B123BOT", text: "morning brief: Cotool is up" },
     { author: "U9HUMAN", botId: "", text: "<@U123BOT> why?" },
   ];
-  assert.deepEqual(threadToTurns(posts, IDENTITY), [{ role: "user", content: "why?" }]);
+  const turns = threadToTurns(posts, IDENTITY);
+  assert.equal(turns.length, 1, "still one turn, and it opens on the person as the API requires");
+  assert.equal(turns[0].role, "user");
+  assert.ok(turns[0].content.includes("morning brief: Cotool is up"), "the bot's own post is kept as context, not dropped");
+  assert.ok(turns[0].content.endsWith("why?"), "the human's reply is what the turn ends on");
+});
+
+test("the bot's leading header and brief body are both folded in, in order", () => {
+  const posts = [
+    { author: "", botId: "B123BOT", text: "*Cotool Morning Brief*" },
+    { author: "", botId: "B123BOT", text: "Active campaign CT003 has 40 leads left." },
+    { author: "U9HUMAN", botId: "", text: "we already added senders to CT003" },
+  ];
+  const turns = threadToTurns(posts, IDENTITY);
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].role, "user");
+  assert.ok(turns[0].content.includes("*Cotool Morning Brief*"), "the header is kept");
+  assert.ok(turns[0].content.includes("CT003 has 40 leads left"), "the brief body is kept");
+  assert.ok(turns[0].content.includes("we already added senders to CT003"), "the reply is kept");
 });
