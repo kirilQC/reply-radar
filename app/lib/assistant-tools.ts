@@ -216,7 +216,29 @@ async function connectedClient(name: unknown): Promise<Client> {
  * told about in a message. A client with no base linked is a plain error, not an empty result, because
  * "this client is not on Airtable" and "Airtable is broken" want opposite responses.
  */
+
+/**
+ * Bases that are not a client but that the assistant is still allowed to reach, by name.
+ *
+ * The guard above is "only a base Reply Radar already knows, never an arbitrary id from a message" — a
+ * fixed, hardcoded allowlist keyed by name keeps that property intact: this is still a known base reached
+ * by name, not a base id the model was handed in Slack. "Client Template" is QC's shared onboarding
+ * template base; it is deliberately NOT a workspace (it is not a client and would clutter the client list),
+ * so it is reached this way instead. Match is tolerant on purpose — "the client template base" resolves too.
+ */
+const NAMED_BASES: Array<{ key: string; name: string; baseId: string }> = [
+  { key: "client template", name: "Client Template", baseId: "apphji94rxZohBNno" },
+];
+
 async function airtableBaseFor(name: unknown): Promise<{ client: Client; baseId: string }> {
+  const wanted = text(name).trim().toLowerCase();
+  const named = NAMED_BASES.find((entry) => wanted === entry.key || wanted.includes(entry.key));
+  if (named) {
+    // A synthetic client so the rest of the Airtable path is unchanged; it has no workspace row, so its
+    // id and HeyReach key are blank — nothing in the Airtable tools reads them.
+    const client: Client = { id: "", name: named.name, slug: named.key, timezone: "America/New_York", createdAt: "", apiKey: "" };
+    return { client, baseId: named.baseId };
+  }
   const client = await resolveClient(name);
   const rows_ = rows(await db(`rr_workspaces?select=airtable_base_id&id=eq.${encodeURIComponent(client.id)}&limit=1`));
   const baseId = text(rows_[0]?.airtable_base_id);
@@ -655,7 +677,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "airtable_tables",
     description:
-      "The tables in one client's Airtable base, each with its fields: the field name, its type, and — for single-select and status fields — the exact set of options it allows. This is QC's own working record for the client: campaign trackers, project and action items, weekly call recaps, and whatever else that base has grown. ALWAYS call this before reading rows from or writing to a table, because field names and select options differ between clients and a write to a name or option that does not exist is rejected. Addressed by client only; there is no base id to pass.",
+      "The tables in one client's Airtable base, each with its fields: the field name, its type, and — for single-select and status fields — the exact set of options it allows. This is QC's own working record for the client: campaign trackers, project and action items, weekly call recaps, and whatever else that base has grown. ALWAYS call this before reading rows from or writing to a table, because field names and select options differ between clients and a write to a name or option that does not exist is rejected. Addressed by client only; there is no base id to pass. One shared base is also reachable by name and is not a client: pass client: \"Client Template\" to read or write QC's onboarding template base.",
     input_schema: { type: "object", properties: { ...CLIENT_ARG }, required: ["client"] },
   },
   {
