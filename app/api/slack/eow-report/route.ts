@@ -263,7 +263,7 @@ function shortDate(timeZone: string, now = new Date()): string {
 
 /** The one-line header the report threads under, e.g. "Bluevia 8/21 EOW Report". */
 function reportHeader(clientName: string, timeZone: string): string {
-  return `*${clientName} ${shortDate(timeZone)} EOW Report*  :calendar:`;
+  return `*${clientName} ${shortDate(timeZone)} EOW Report*`;
 }
 
 export async function POST(request: Request) {
@@ -307,8 +307,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `${SLACK_TOKEN_ENV} is not set, so nothing can be posted to Slack.` }, { status: 400 });
     }
 
-    const origin = new URL(request.url).origin;
-
     /*
      * Every source, the way the morning brief reads them. HeyReach is asked first and on its own, because
      * its answer decides whether the stored figures are read at all: given a live one, `gatherSignals` does
@@ -326,11 +324,7 @@ export async function POST(request: Request) {
 
     const inputs = { signals, ...channels, call: call.call, callReason: call.callReason, brain: brain.block };
     const content = eowReportUserContent(workspace, inputs);
-    const report = await writeBrief(DEFAULT_EOW_REPORT_PROMPT, content);
-
-    // A pointer to the fuller report, so the recap stays short and the reader knows where the detail lives.
-    const footer = `\n\n_Want the detail? Pull a more extensive report any time in <${origin}/reports|Reply Radar reports>._`;
-    const slackBody = truncateForSlack(report) + footer;
+    const slackBody = truncateForSlack(await writeBrief(DEFAULT_EOW_REPORT_PROMPT, content));
     const header = reportHeader(clientName, timeZone);
 
     // Two messages: a one-line header in the channel, the report itself as a reply in its thread. Same
@@ -371,18 +365,12 @@ export async function POST(request: Request) {
       error_text: sendError || null,
     });
 
-    // The roster the report was written against, id→name, so BriefView can turn the `<@U…>` mention codes
-    // back into names on the page. Same list the morning brief returns.
-    const mentions = Object.fromEntries(
-      [...(channels.internal.people ?? []), ...(channels.external.people ?? [])].map((person) => [person.id, person.name]),
-    );
-
     return NextResponse.json({
       ok: !sendError,
       // `brief` rather than `report` so the Slack hub renders it through the same BriefView the morning
-      // brief uses. It is the exact text that posted into the thread.
+      // brief uses. It is the exact text that posted into the thread. No mention map: this report is
+      // client-facing and carries no `<@U…>` codes to resolve.
       brief: slackBody,
-      mentions,
       signals,
       sources,
       posted,
