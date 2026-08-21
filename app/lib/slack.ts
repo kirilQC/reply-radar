@@ -230,6 +230,85 @@ export async function channelHistory(
 }
 
 /**
+ * A channel read on demand, for the assistant rather than the brief: the last `days`, or — with the days
+ * left at 0 — everything back to the channel's creation, with threads walked exactly as `channelHistory`
+ * walks them. Oldest first.
+ *
+ * Where `channelHistory` reads one page for the brief's fixed fortnight, this follows Slack's cursor across
+ * pages, so it can answer "what has ever been said here". It is bounded on purpose: at most `maxMessages`
+ * channel messages are kept — collected newest-first, then reversed — so a very long channel returns its
+ * most recent stretch with `reachedStart:false` rather than trying to hand a model a year of chat at once.
+ * The page count is capped too, as a stop against an unexpectedly deep history spending the whole request.
+ */
+export async function scanChannel(
+  channelId: string,
+  { days = 0, maxMessages = 800, includeThreads = true }: { days?: number; maxMessages?: number; includeThreads?: boolean } = {},
+): Promise<{ messages: SlackMessage[]; parents: number; threads: number; replies: number; reachedStart: boolean; pages: number }> {
+  const oldest = days > 0 ? ((Date.now() - days * 24 * 60 * 60 * 1000) / 1000).toFixed(6) : "";
+  const collected: RawMessage[] = [];
+  let cursor = "";
+  let pages = 0;
+  let reachedStart = true;
+  const PAGE_CAP = 80; // 80 pages × 200 = up to ~16k raw messages walked before we stop, whatever the cap.
+  while (true) {
+    const params = new URLSearchParams({ channel: channelId, limit: "200" });
+    if (oldest) params.set("oldest", oldest);
+    if (cursor) params.set("cursor", cursor);
+    const body = await call(`conversations.history?${params.toString()}`, { method: "GET" });
+    pages += 1;
+    const batch = Array.isArray(body.messages) ? (body.messages as RawMessage[]) : [];
+    for (const message of batch) if (isRealMessage(message)) collected.push(message);
+    cursor = String((body.response_metadata as { next_cursor?: string } | undefined)?.next_cursor ?? "");
+    if (collected.length >= maxMessages) { reachedStart = false; break; }
+    if (!cursor) break;
+    if (pages >= PAGE_CAP) { reachedStart = false; break; }
+  }
+  // Newest-first across pages; keep the most recent `maxMessages`, then oldest-first for reading.
+  const parents = collected.slice(0, maxMessages).reverse();
+
+  const heads = includeThreads ? parents.filter((message) => Number(message.reply_count ?? 0) > 0) : [];
+  const fetched = await pooled(heads, THREAD_CONCURRENCY, async (head) => {
+    const query = new URLSearchParams({ channel: channelId, ts: String(head.ts ?? ""), limit: "200" });
+    try {
+      const thread = await call(`conversations.replies?${query.toString()}`, { method: "GET" });
+      const all = Array.isArray(thread.messages) ? (thread.messages as RawMessage[]) : [];
+      return all.filter((message) => String(message.ts ?? "") !== String(head.ts ?? "")).filter(isRealMessage);
+    } catch {
+      return [] as RawMessage[];
+    }
+  });
+  const repliesFor = new Map<string, RawMessage[]>();
+  heads.forEach((head, index) => repliesFor.set(String(head.ts ?? ""), fetched[index] ?? []));
+
+  const messages: SlackMessage[] = [];
+  for (const parent of parents) {
+    messages.push(asMessage(parent));
+    for (const reply of repliesFor.get(String(parent.ts ?? "")) ?? []) messages.push(asMessage(reply, true));
+  }
+  return { messages, parents: parents.length, threads: heads.length, replies: messages.filter((message) => message.isReply).length, reachedStart, pages };
+}
+
+/**
+ * Slack names for a set of channel ids, each prefixed with a `#`. A channel that cannot be read — usually
+ * because the reading token is not a member of it — is left out of the map, and callers show the raw id or
+ * a null so the person can see which channel the bot cannot reach. Best-effort: one bad id never throws.
+ */
+export async function resolveChannelNames(ids: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const names = new Map<string, string>();
+  await Promise.all(unique.map(async (id) => {
+    try {
+      const body = await call(`conversations.info?channel=${encodeURIComponent(id)}`, { method: "GET" });
+      const name = String((body.channel as { name?: string } | undefined)?.name ?? "").trim();
+      if (name) names.set(id, `#${name}`);
+    } catch {
+      // Left out; the caller falls back to the id.
+    }
+  }));
+  return names;
+}
+
+/**
  * The human replies in one thread, oldest first, with QC Bot's own messages taken out.
  *
  * This is how a brief reads the team's answer to its last brief. The brief is posted as a header in the

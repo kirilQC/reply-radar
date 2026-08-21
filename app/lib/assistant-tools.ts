@@ -64,6 +64,8 @@ import * as heyreach from "./heyreach-api";
 import { BRAIN_URL, brainConfigured, brainCorpus, brainFile, brainFiles, brainTree, forgetBrainTree, proposeBrainEdit } from "./brain";
 import { searchBrain } from "../../shared/brain-search.mjs";
 import { clientLabel, clientOf, clientSkeleton, clientsIn, fileKind, fileTitle, isReadable, parseSkill, skillClient } from "../../shared/brain-structure.mjs";
+import { scanChannel, resolveChannelNames, resolveUserNames, transcript, slackReadable } from "./slack";
+import { normalizeChannelId } from "./slack-channel";
 
 type Row = Record<string, unknown>;
 
@@ -414,6 +416,13 @@ const WINDOW_ARGS = {
   until: { type: "string", description: "ISO 8601 end of the window, exclusive." },
 };
 
+// How much of a Slack channel a scan reads. A windowed scan defaults to a month; a full scan reads back to
+// the channel's creation, both bounded by a message cap so a long channel cannot flood the model.
+const SLACK_SCAN_DEFAULT_DAYS = 30;
+const SLACK_SCAN_DEFAULT = 400;
+const SLACK_SCAN_FULL_DEFAULT = 1200;
+const SLACK_SCAN_MAX = 1500;
+
 export const TOOLS: ToolDefinition[] = [
   {
     name: "list_clients",
@@ -735,6 +744,28 @@ export const TOOLS: ToolDefinition[] = [
         },
       },
       required: ["client", "table", "records"],
+    },
+  },
+  {
+    name: "slack_channels",
+    description:
+      "The Slack channels QC has configured for each client in Reply Radar: the internal (team) channel, the external (client-facing) channel, and any extras. Pass a client to get just theirs, or omit to list every client's. Returns each channel's id and its Slack name — a null name means the channel could not be read, which usually means the reading token is not a member of it. Use this to see what can be scanned and to get the id to hand slack_scan.",
+    input_schema: { type: "object", properties: { client: { type: "string", description: "Optional client name or slug. Omit to list every client's channels." } } },
+  },
+  {
+    name: "slack_scan",
+    description:
+      "Read the messages in one of a client's configured Slack channels — threads walked, not just the parent messages — so you can answer what was said, find where something was decided, or summarise the channel. By default it reads the last `days` (30 if unset); pass full: true to read all the way back to the channel's creation. Messages come back oldest first, with real names and timestamps. Choose the channel with `channel`: \"internal\" (default), \"external\", or a channel id from slack_channels. A channel longer than the message cap is returned from its most recent stretch and says so — pass a specific `days` for an older window.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...CLIENT_ARG,
+        channel: { type: "string", description: "\"internal\" (default), \"external\", or a channel id from slack_channels." },
+        days: { type: "integer", description: `How many days back to read. Default ${SLACK_SCAN_DEFAULT_DAYS}. Ignored when full is true.` },
+        full: { type: "boolean", description: "Read all the way back to the channel's creation instead of the last `days`." },
+        limit: { type: "integer", description: `Most messages to return, up to ${SLACK_SCAN_MAX}. Default ${SLACK_SCAN_DEFAULT}, or ${SLACK_SCAN_FULL_DEFAULT} for a full scan.` },
+      },
+      required: ["client"],
     },
   },
 ];
@@ -1513,6 +1544,71 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         updated: updated.length,
         note: "Written to Airtable. This is a real, immediate change — say which rows changed and to what.",
         records: updated.map((record) => ({ id: record.id, fields: record.fields })),
+      };
+    }
+
+    case "slack_channels": {
+      if (!slackReadable()) throw new Error("Slack reading is not configured — neither a Slack user nor bot token is set.");
+      const select = "name,slug,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids";
+      const rows_ = text(input.client).trim()
+        ? rows(await db(`rr_workspaces?select=${select}&id=eq.${encodeURIComponent((await resolveClient(input.client)).id)}&limit=1`))
+        : rows(await db(`rr_workspaces?select=${select}&order=name.asc`));
+      const extrasOf = (row: Row) => (Array.isArray(row.slack_extra_channel_ids) ? row.slack_extra_channel_ids : []).map((entry) => text(entry)).filter(Boolean);
+      const ids = new Set<string>();
+      for (const row of rows_) {
+        for (const id of [text(row.slack_internal_channel_id), text(row.slack_external_channel_id), ...extrasOf(row)]) if (id) ids.add(id);
+      }
+      const names = await resolveChannelNames([...ids]);
+      const entryFor = (id: string) => (id ? { id, name: names.get(id) ?? null } : null);
+      const clients = rows_
+        .map((row) => ({
+          client: text(row.name),
+          internal: entryFor(text(row.slack_internal_channel_id)),
+          external: entryFor(text(row.slack_external_channel_id)),
+          extras: extrasOf(row).map((id) => entryFor(id)).filter(Boolean),
+        }))
+        .filter((entry) => entry.internal || entry.external || entry.extras.length);
+      return {
+        note: "A channel with a null name could not be read — usually the reading token is not a member of it. Pass any id here to slack_scan, or \"internal\"/\"external\" with the client.",
+        clients,
+      };
+    }
+
+    case "slack_scan": {
+      if (!slackReadable()) throw new Error("Slack reading is not configured — neither a Slack user nor bot token is set.");
+      const client = await resolveClient(input.client);
+      const ws = rows(await db(`rr_workspaces?select=slack_internal_channel_id,slack_external_channel_id&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0] ?? {};
+      const choice = text(input.channel).trim().toLowerCase() || "internal";
+      let channelId = "";
+      if (choice === "internal") channelId = text(ws.slack_internal_channel_id);
+      else if (choice === "external") channelId = text(ws.slack_external_channel_id);
+      else channelId = normalizeChannelId(text(input.channel));
+      if (!channelId) {
+        throw new Error(
+          choice === "internal" || choice === "external"
+            ? `${client.name} has no ${choice} Slack channel configured. Set it on their configuration page, or pass a channel id from slack_channels.`
+            : `"${text(input.channel)}" is not a channel. Use "internal", "external", or a channel id from slack_channels.`,
+        );
+      }
+      const full = input.full === true;
+      const days = full ? 0 : Math.max(1, Math.min(365, Math.floor(Number(input.days)) || SLACK_SCAN_DEFAULT_DAYS));
+      const cap = Math.max(1, Math.min(SLACK_SCAN_MAX, Math.floor(Number(input.limit)) || (full ? SLACK_SCAN_FULL_DEFAULT : SLACK_SCAN_DEFAULT)));
+      const scan = await scanChannel(channelId, { days, maxMessages: cap });
+      const [names, channelNames] = await Promise.all([
+        resolveUserNames(scan.messages.map((message) => message.author)),
+        resolveChannelNames([channelId]),
+      ]);
+      const body = transcript(scan.messages, names, client.timezone);
+      return {
+        client: client.name,
+        channel: channelNames.get(channelId) ?? channelId,
+        scope: full ? "full history, back to the channel's creation" : `last ${days} days`,
+        messages: scan.messages.length,
+        threads: scan.threads,
+        ...(full && !scan.reachedStart
+          ? { truncated: true, note: `This channel is longer than the ${cap}-message cap, so this is its most recent ${scan.messages.length} messages, not the whole history. Ask for an earlier window with days, or raise limit (max ${SLACK_SCAN_MAX}).` }
+          : {}),
+        transcript: body || "No messages in that window.",
       };
     }
 
