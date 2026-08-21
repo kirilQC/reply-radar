@@ -252,22 +252,28 @@ export async function PATCH(request: Request) {
   }
 }
 
+/** "8/21" in the client's own zone — the date the report is being sent, for the channel header. */
+function shortDate(timeZone: string, now = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone, month: "numeric", day: "numeric" }).format(now);
+  } catch {
+    return new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" }).format(now);
+  }
+}
+
 /**
  * Splits the composed email into the one-line header Slack threads under and the body of the report.
  *
- * The compose route puts the subject on its own first block as `Subject: …`. That line makes a natural
- * channel header — it is written to be scanned — so it is lifted out, and everything after it becomes the
- * threaded reply. A report with no subject line falls back to a named header so the thread still reads as
- * this client's EOW recap rather than an anonymous wall of text.
+ * The header is built here rather than lifted from the email's `Subject:` line: the channel wants a fixed,
+ * scannable title — "Bluevia 8/21 EOW Report" — not whatever phrasing the model chose for the subject. So
+ * the subject block is dropped when present and the header is composed from the client's name and today's
+ * date in their zone. Everything after the subject becomes the threaded reply.
  */
-function splitReport(message: string, clientName: string): { header: string; body: string } {
+function splitReport(message: string, clientName: string, timeZone: string): { header: string; body: string } {
   const blocks = message.split("\n\n");
   const first = (blocks[0] ?? "").trim();
-  const subjectMatch = first.match(/^Subject:\s*(.+)$/i);
-  if (subjectMatch) {
-    return { header: `*${subjectMatch[1].trim()}*  :calendar:`, body: blocks.slice(1).join("\n\n").trim() };
-  }
-  return { header: `*${clientName} — End-of-Week recap*  :calendar:`, body: message.trim() };
+  const body = /^Subject:\s*/i.test(first) ? blocks.slice(1).join("\n\n").trim() : message.trim();
+  return { header: `*${clientName} ${shortDate(timeZone)} EOW Report*  :calendar:`, body };
 }
 
 export async function POST(request: Request) {
@@ -332,6 +338,9 @@ export async function POST(request: Request) {
         templateId: EOW_TEMPLATE.id,
         clients,
         periodLabel: String(generated.periodLabel ?? "this week"),
+        // No "Best replies from this week" block: the recap is the week's numbers, and the fuller report a
+        // reader can pull from Reply Radar carries the reply detail if they want it.
+        includeBestReplies: false,
       }),
       cache: "no-store",
     });
@@ -342,8 +351,11 @@ export async function POST(request: Request) {
     const email = String(composed.message ?? "").trim();
     if (!email) throw new Error("The composed report was empty.");
 
-    const { header, body: reportBody } = splitReport(email, clientName);
-    const slackBody = truncateForSlack(toSlackText(reportBody));
+    const { header, body: reportBody } = splitReport(email, clientName, timeZone);
+    // A pointer to the fuller report, so the recap stays short and the reader knows where the detail lives.
+    const reportsLink = `<${origin}/reports|Reply Radar reports>`;
+    const footer = `\n\n_Want the detail? Pull a more extensive report any time in ${reportsLink}._`;
+    const slackBody = truncateForSlack(toSlackText(reportBody)) + footer;
 
     // Two messages: a one-line header in the channel, the report itself as a reply in its thread. Same
     // reasoning as the morning brief — a page-long recap posted flat buries the channel.
