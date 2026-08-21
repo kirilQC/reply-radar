@@ -70,10 +70,16 @@ async function insertHeartbeat(url: string, key: string, row: Row): Promise<void
  * `signals.sources.call.noteId`. Previews are counted too: a preview does not post to a channel, but it did
  * read that call, and the point of the id is "has this meeting been turned into an analysis," which a preview
  * satisfies. The set is what stops the hourly poll from re-posting the same call every hour it stays newest.
+ *
+ * Errored runs are the one thing left out. A run whose Slack post threw — the bot not in the channel, a stale
+ * channel id — still wrote a row with the note id, and counting it would mark the call posted when it never
+ * reached anyone: the recap lands in the QC Brain and nowhere else, silently, forever. Skipping error rows
+ * lets the next hour retry, so a call that failed to post is picked up again once the channel is fixed.
  */
 function postedNoteIdsFrom(rows: unknown): Set<string> {
   const ids = new Set<string>();
   for (const row of Array.isArray(rows) ? (rows as Row[]) : []) {
+    if (String(row.status ?? "") === "error") continue;
     const signals = (row.signals ?? {}) as Row;
     const sources = (signals.sources ?? {}) as Row;
     const call = (sources.call ?? {}) as Row;
@@ -101,7 +107,7 @@ export async function GET() {
     const [workspaceRows, briefRows, keys] = await Promise.all([
       read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match,call_analysis_enabled&order=name.asc")
         .catch(() => read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match&order=name.asc")),
-      read(`rr_slack_briefs?select=signals&automation=eq.call_analysis&order=created_at.desc&limit=500`).catch(() => []),
+      read(`rr_slack_briefs?select=signals,status&automation=eq.call_analysis&order=created_at.desc&limit=500`).catch(() => []),
       granolaKeys(read),
     ]);
 
