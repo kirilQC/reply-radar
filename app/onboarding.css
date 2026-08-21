@@ -1,0 +1,114 @@
+/* Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/ */
+/* Reply Radar — proprietary. Not licensed for redistribution or resale. */
+
+/* The onboarding hub: the client directory, the per-client checklist, and the template editor. Everything
+   here is drawn from the same CSS-variable palette the rest of the app uses, so it themes with it. */
+
+.onboarding-shell { flex: 1; max-width: 1180px; padding: 42px 42px 90px; margin: 0 auto; width: 100%; }
+.onboarding-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 30px; }
+.onboarding-heading .eyebrow { font-size: 9px; letter-spacing: .14em; color: var(--muted-2); text-transform: uppercase; font-weight: 700; }
+.onboarding-heading h1 { font-size: 28px; letter-spacing: -.05em; margin: 9px 0 5px; }
+.onboarding-heading p { margin: 0; color: var(--muted); font-size: 12px; }
+.onb-actions { display: flex; align-items: center; gap: 10px; }
+
+/* ── Directory ── */
+.onb-directory { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.onb-card { display: block; text-align: left; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); text-decoration: none; transition: border-color .15s ease; min-width: 0; }
+.onb-card:hover { border-color: var(--accent); }
+.onb-card-top { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
+.onb-logo { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; color: #fff; font-weight: 750; font-size: 13px; overflow: hidden; flex: none; }
+.onb-logo img { width: 100%; height: 100%; object-fit: cover; }
+.onb-card-name { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.onb-card-name strong { font-size: 13px; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.onb-card-name small { font-size: 9px; color: var(--muted-2); }
+.onb-status { font-size: 8px; letter-spacing: .1em; font-weight: 750; text-transform: uppercase; padding: 3px 7px; border-radius: 999px; margin-left: auto; flex: none; }
+.onb-status.in_progress { color: var(--amber); background: color-mix(in srgb, var(--amber) 16%, transparent); }
+.onb-status.complete { color: var(--green); background: color-mix(in srgb, var(--green) 16%, transparent); }
+.onb-progress { height: 5px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.onb-progress span { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .25s ease; }
+.onb-progress.done span { background: var(--green); }
+.onb-progress-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.onb-progress-meta b { color: var(--text); font-weight: 600; }
+.onb-empty { grid-column: 1 / -1; padding: 40px 8px; text-align: center; color: var(--muted); font-size: 12px; border: 1px dashed var(--border); border-radius: 10px; }
+.onb-directory-group-label { font-size: 9px; letter-spacing: .13em; text-transform: uppercase; color: var(--muted-2); font-weight: 700; margin: 26px 0 12px; }
+
+/* ── Add-client inline form ── */
+.onb-add { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 18px; margin-bottom: 22px; display: grid; grid-template-columns: 1fr 150px auto; gap: 10px; align-items: end; }
+.onb-field { display: flex; flex-direction: column; gap: 6px; }
+.onb-field label { font-size: 8px; letter-spacing: .11em; font-weight: 700; color: var(--muted-2); text-transform: uppercase; }
+.onb-field input { height: 34px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2, #151821); color: var(--text); padding: 0 10px; font-size: 12px; outline: none; }
+.onb-field input:focus { border-color: var(--accent); }
+.onb-error { color: var(--coral, #e5738a); font-size: 11px; margin-top: 8px; }
+
+/* ── Checklist ── */
+.onb-client-head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+.onb-client-head .onb-logo { width: 44px; height: 44px; font-size: 17px; border-radius: 10px; }
+.onb-client-head h1 { font-size: 24px; letter-spacing: -.04em; margin: 0; }
+.onb-client-head .onb-back { font-size: 11px; color: var(--muted); text-decoration: none; }
+.onb-client-head .onb-back:hover { color: var(--text); }
+.onb-bigbar-wrap { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 18px 20px; margin-bottom: 12px; }
+.onb-bigbar-meta { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 11px; }
+.onb-bigbar-meta strong { font-size: 20px; letter-spacing: -.03em; }
+.onb-bigbar-meta strong span { color: var(--muted-2); font-size: 12px; font-weight: 400; margin-left: 6px; }
+.onb-bigbar-meta .onb-pct { font-size: 13px; color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+.onb-bigbar { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.onb-bigbar span { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .25s ease; }
+.onb-bigbar.done span { background: var(--green); }
+.onb-whoami { display: flex; align-items: center; gap: 8px; margin-bottom: 22px; font-size: 11px; color: var(--muted-2); }
+.onb-whoami input { height: 30px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2, #151821); color: var(--text); padding: 0 9px; font-size: 11px; outline: none; width: 180px; }
+.onb-whoami input:focus { border-color: var(--accent); }
+
+.onb-list { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.onb-step { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px; border-top: 1px solid var(--border-soft); }
+.onb-step:first-child { border-top: 0; }
+.onb-step.sub { padding-left: 46px; background: color-mix(in srgb, var(--panel) 92%, var(--bg)); }
+.onb-index { font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums; min-width: 20px; padding-top: 1px; font-weight: 600; }
+.onb-checkbox { appearance: none; width: 18px; height: 18px; border: 1.5px solid var(--border); border-radius: 5px; background: var(--panel-2, #151821); cursor: pointer; flex: none; margin-top: 1px; position: relative; transition: background .12s ease, border-color .12s ease; }
+.onb-checkbox:hover { border-color: var(--accent); }
+.onb-checkbox:checked { background: var(--accent); border-color: var(--accent); }
+.onb-checkbox:checked::after { content: ""; position: absolute; left: 5px; top: 1.5px; width: 5px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.onb-checkbox:disabled { opacity: .55; cursor: default; }
+.onb-checkbox.derived:checked { background: var(--green); border-color: var(--green); }
+.onb-step-body { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.onb-step-title { font-size: 13px; letter-spacing: -.01em; }
+.onb-step.done .onb-step-title { color: var(--muted-2); text-decoration: line-through; }
+.onb-step-desc { font-size: 10px; color: var(--muted-2); line-height: 1.5; }
+.onb-step-meta { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: none; }
+.onb-section-tag { font-size: 8px; letter-spacing: .07em; text-transform: uppercase; font-weight: 700; color: var(--muted); padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; }
+.onb-done-by { font-size: 9px; color: var(--muted-2); font-style: italic; white-space: nowrap; }
+
+/* ── Template editor ── */
+.onb-tpl-list { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.onb-tpl-step { border-top: 1px solid var(--border-soft); padding: 12px 16px; }
+.onb-tpl-step:first-child { border-top: 0; }
+.onb-tpl-sub { padding-left: 40px; background: color-mix(in srgb, var(--panel) 92%, var(--bg)); }
+.onb-tpl-row { display: flex; align-items: center; gap: 10px; }
+.onb-tpl-row .onb-tpl-title { font-size: 13px; flex: 1; min-width: 0; }
+.onb-tpl-row .onb-tpl-title small { display: block; color: var(--muted-2); font-size: 10px; margin-top: 3px; }
+.onb-tpl-inactive .onb-tpl-title { color: var(--muted-2); opacity: .6; }
+.onb-tpl-sectiontag { font-size: 8px; letter-spacing: .07em; text-transform: uppercase; font-weight: 700; color: var(--muted); padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; }
+.onb-iconbtn { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; flex: none; }
+.onb-iconbtn:hover { color: var(--text); border-color: var(--accent); }
+.onb-iconbtn:disabled { opacity: .35; cursor: default; }
+.onb-iconbtn.danger:hover { color: var(--coral, #e5738a); border-color: var(--coral, #e5738a); }
+.onb-tpl-edit { display: grid; gap: 8px; margin-top: 10px; }
+.onb-tpl-edit input, .onb-tpl-edit textarea { border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2, #151821); color: var(--text); padding: 8px 10px; font-size: 12px; outline: none; width: 100%; }
+.onb-tpl-edit input:focus, .onb-tpl-edit textarea:focus { border-color: var(--accent); }
+.onb-tpl-edit textarea { min-height: 54px; resize: vertical; line-height: 1.5; }
+.onb-tpl-edit-actions { display: flex; gap: 8px; }
+.onb-tpl-addsub { margin: 10px 0 2px; }
+.onb-tpl-addstep { margin-top: 16px; }
+
+@media (max-width: 900px) {
+  .onb-directory { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .onboarding-shell { padding: 30px 22px 70px; }
+  .onb-add { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .onb-directory { grid-template-columns: 1fr; }
+  .onboarding-shell { padding: 24px 15px 60px; }
+  .onboarding-heading { flex-direction: column; align-items: stretch; gap: 14px; }
+  .onb-actions { width: 100%; }
+  .onb-actions .primary-button, .onb-actions .secondary-button { flex: 1; }
+  .onb-step.sub { padding-left: 30px; }
+}

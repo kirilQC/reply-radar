@@ -61,6 +61,10 @@ create table if not exists rr_workspaces (
   -- Stored as the base id, not the name — bases get renamed, and a name would either stop resolving
   -- or start resolving to a different base.
   airtable_base_id text,
+  -- Onboarding hub state. Null means this client was not brought in through the onboarding hub — the
+  -- established clients that predate it — and so never shows in the directory there. 'in_progress' the
+  -- moment a client is added; 'complete' once every leaf step is checked. See app/lib/onboarding.ts.
+  onboarding_status text, onboarding_started_at timestamptz, onboarding_completed_at timestamptz,
   last_webhook_received_at timestamptz, last_successful_poll_at timestamptz, last_reconciled_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
@@ -553,3 +557,51 @@ create or replace function rr_prune_sync_runs() returns void language sql as $$
   delete from public.rr_sync_runs where coalesce(source, '') <> 'ai_ark' and started_at < now() - interval '48 hours';
   delete from public.rr_sync_runs where source = 'ai_ark' and started_at < now() - interval '14 days';
 $$;
+
+-- ── Onboarding hub ───────────────────────────────────────────────────────────────────────────────
+-- A client directory, a per-client checklist snapshotted from an editable master template, and progress
+-- that posts to the client's internal Slack channel as it fills. Added by migration 20260821_onboarding_hub.sql;
+-- kept here so a database rebuilt from this file starts with the default template already seeded. I/O in
+-- app/lib/onboarding.ts, progress maths and Slack text in shared/onboarding.mjs.
+create table if not exists rr_onboarding_template_steps (
+  id          uuid primary key default gen_random_uuid(),
+  parent_id   uuid references rr_onboarding_template_steps(id) on delete cascade,
+  section     text,
+  title       text not null,
+  description text,
+  position    double precision not null default 0,
+  is_active   boolean not null default true,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists rr_onboarding_template_steps_parent_idx on rr_onboarding_template_steps(parent_id);
+
+create table if not exists rr_onboarding_tasks (
+  id               uuid primary key default gen_random_uuid(),
+  workspace_id     uuid not null references rr_workspaces(id) on delete cascade,
+  parent_id        uuid references rr_onboarding_tasks(id) on delete cascade,
+  template_step_id uuid references rr_onboarding_template_steps(id) on delete set null,
+  section          text,
+  title            text not null,
+  description      text,
+  position         double precision not null default 0,
+  is_done          boolean not null default false,
+  done_at          timestamptz,
+  done_by          text,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+create index if not exists rr_onboarding_tasks_workspace_idx on rr_onboarding_tasks(workspace_id);
+create index if not exists rr_onboarding_tasks_parent_idx on rr_onboarding_tasks(parent_id);
+
+drop trigger if exists rr_onboarding_template_steps_updated_at on rr_onboarding_template_steps;
+create trigger rr_onboarding_template_steps_updated_at before update on rr_onboarding_template_steps for each row execute function rr_set_updated_at();
+drop trigger if exists rr_onboarding_tasks_updated_at on rr_onboarding_tasks;
+create trigger rr_onboarding_tasks_updated_at before update on rr_onboarding_tasks for each row execute function rr_set_updated_at();
+
+alter table rr_onboarding_template_steps enable row level security;
+alter table rr_onboarding_tasks enable row level security;
+
+-- The default template is seeded by migration 20260821_onboarding_hub.sql (guarded so it only fills an
+-- empty table). It is intentionally not repeated here: the seed is editable data a teammate reorders, not
+-- schema, and duplicating a 48-row VALUES block invites the two copies drifting apart.
