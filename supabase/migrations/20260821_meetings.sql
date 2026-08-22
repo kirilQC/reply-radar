@@ -38,8 +38,12 @@ create table if not exists rr_meetings (
 );
 create index if not exists rr_meetings_workspace_idx on rr_meetings(workspace_id);
 create index if not exists rr_meetings_at_idx on rr_meetings(meeting_at);
--- One row per Calendly event per client: what lets a reschedule update rather than duplicate.
-create unique index if not exists rr_meetings_external_idx on rr_meetings(workspace_id, external_id) where external_id is not null;
+-- One row per Calendly event per client: what lets a reschedule update rather than duplicate. NOT a partial
+-- index: PostgREST's on_conflict=workspace_id,external_id needs a matching index with no WHERE predicate to use
+-- as the upsert arbiter — a partial one raises 42P10 and every webhook carrying an event id fails to save.
+-- Postgres already treats NULL external_ids as distinct, so manual meetings (no event id) still coexist freely.
+drop index if exists rr_meetings_external_idx;
+create unique index if not exists rr_meetings_external_idx on rr_meetings(workspace_id, external_id);
 
 drop trigger if exists rr_meetings_updated_at on rr_meetings;
 create trigger rr_meetings_updated_at before update on rr_meetings for each row execute function rr_set_updated_at();

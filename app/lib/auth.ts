@@ -32,25 +32,30 @@ export const AUTH_COOKIE = "rr_auth";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 
 /**
- * The shared password's built-in default.
+ * The key the session token is signed with — from AUTH_SECRET (preferred) or the shared password.
  *
- * Set `APP_PASSWORD` in the environment to override it and to keep the real password out of source control.
- * The default is here so the gate works the moment it deploys; the threat it defends against is an anonymous
- * visitor on the internet, not someone who can already read this repository, so a default in source is an
- * acceptable starting point — but rotating it into `APP_PASSWORD` is the right next step.
+ * A fixed label only stands in when neither is configured, and that is harmless: in that state
+ * `validCredentials()` is empty so no login is ever accepted, and the token this signs can never be minted.
  */
-const DEFAULT_PASSWORD = "QueenCity@2026";
-
-/** The key the session token is signed with. Kept stable so a rotation of the shared password can, but need not, invalidate every session. */
 function signingSecret(): string {
-  return process.env.AUTH_SECRET || process.env.APP_PASSWORD || DEFAULT_PASSWORD;
+  return process.env.AUTH_SECRET || process.env.APP_PASSWORD || "reply-radar/unconfigured";
 }
 
-/** The credentials that open the site: the shared password, and the private recovery code when one is set. */
+/**
+ * The credentials that open the site, read ONLY from the environment: the shared password (`APP_PASSWORD`)
+ * and the private recovery code (`APP_RECOVERY_CODE`). Nothing is hardcoded — the password is never in this
+ * source. When neither is set the list is empty and no password is accepted, which is a locked door, not an
+ * open one; setting `APP_PASSWORD` in the environment is what turns the lock.
+ */
 export function validCredentials(): string[] {
-  const primary = (process.env.APP_PASSWORD || DEFAULT_PASSWORD).trim();
+  const primary = (process.env.APP_PASSWORD || "").trim();
   const recovery = (process.env.APP_RECOVERY_CODE || "").trim();
   return [primary, recovery].filter(Boolean);
+}
+
+/** Whether any password is configured at all, so the login screen can say "not set up" rather than just reject. */
+export function authConfigured(): boolean {
+  return validCredentials().length > 0;
 }
 
 const toHex = (buffer: ArrayBuffer) => [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");

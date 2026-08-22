@@ -9,13 +9,13 @@
  * here. That is the security model: not an instruction telling the model to behave, but an allowlist.
  * Adding a tool is a deliberate act; a cleverly worded prompt is not.
  *
- * ── The one tool that is not read-only ──────────────────────────────────────────────────────────
- * `brain_write` is the single exception, and it is a narrow one: it cannot send a message, pause a
- * campaign or touch a database. All it can do is open a pull request against the QC Brain repo, which
- * a person then has to merge. That is deliberate — the brain is what every teammate's Claude Code
- * reads, so a wrong edit becomes everybody's truth silently, and nothing about a wrong ICP announces
- * itself. A proposal that sits until somebody looks at it is the correct shape for a model's write
- * access to shared memory. Nothing else in this file writes anywhere.
+ * ── The tools that are not read-only ────────────────────────────────────────────────────────────
+ * Most tools only read. The writes are few and each is deliberate: `brain_write` opens a pull request
+ * against the QC Brain repo that a person merges (never a direct write — the brain is everybody's truth
+ * and a wrong ICP does not announce itself); the Airtable tools add or update rows in a client's own base;
+ * and `add_meeting` records a booked meeting in `rr_meetings`. There is no tool that sends a message, pauses
+ * a campaign, deletes anything, or writes to the core reply/lead tables. Every write above is in the tool
+ * registry, so it is the same act of deliberate exposure as every read, not something a prompt can reach.
  *
  * ── Why the numbers come from two different places ──────────────────────────────────────────────
  * `rr_messages` has no `workspace_id`. It hangs off `rr_conversations`, which has one, so a
@@ -66,7 +66,9 @@ import { searchBrain } from "../../shared/brain-search.mjs";
 import { clientLabel, clientOf, clientSkeleton, clientsIn, fileKind, fileTitle, isReadable, parseSkill, skillClient } from "../../shared/brain-structure.mjs";
 import { scanChannel, resolveChannelNames, resolveUserNames, transcript, slackReadable } from "./slack";
 import { normalizeChannelId } from "./slack-channel";
-import { addMeeting } from "./meetings";
+import { addMeeting, getClientMeetings, listMeetingClients } from "./meetings";
+import { getClientDeals, listDealClients } from "./deals";
+import { onboardingForAssistant, listOnboardingClients } from "./onboarding";
 
 type Row = Record<string, unknown>;
 
@@ -789,6 +791,24 @@ export const TOOLS: ToolDefinition[] = [
       },
       required: ["client"],
     },
+  },
+  {
+    name: "list_meetings",
+    description:
+      "Booked meetings. Pass a client to get that client's meetings — invitee, company, time, campaign, status and the enrichment on each. Omit the client to get a directory across all clients with each one's meeting count and next upcoming. Use this to answer who a client has booked, when their next call is, or which campaign a meeting came from.",
+    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug. Omit for the all-client directory." } } },
+  },
+  {
+    name: "list_deals",
+    description:
+      "Deals from a client's CRM, with QC's attribution. Pass a client for that client's deals — name, amount, stage, status, and whether each is Confirmed as QC's (a person on it matched someone QC contacted or booked), Possible (same company, review), or not QC. Omit the client for a directory across all clients with how much pipeline traces to QC. Use this for 'how much have we influenced', 'which deals came from us', or a client's pipeline. Attribution is only ever certain when a person-unique identifier matched.",
+    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug. Omit for the all-client directory." } } },
+  },
+  {
+    name: "onboarding_status",
+    description:
+      "A client's onboarding progress and what is still open. Pass a client for their percent complete, status, and the list of not-yet-done steps. Omit the client for a directory of every client's onboarding progress. Use this to answer how far along a new client's setup is, or what is still outstanding before they can go live.",
+    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug. Omit for the all-client directory." } } },
   },
 ];
 
@@ -1655,6 +1675,51 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         note: "Recorded in the client's Meetings. Tell the person it was added, and do not add the same meeting twice.",
         meeting: result.meeting,
       };
+    }
+
+    case "list_meetings": {
+      if (!text(input.client).trim()) {
+        const clients = await listMeetingClients();
+        return { clients: clients.filter((c) => c.total > 0).map((c) => ({ client: c.name, meetings: c.total, upcoming: c.upcoming, nextAt: c.nextAt })) };
+      }
+      const client = await resolveClient(input.client);
+      const data = await getClientMeetings(client.slug);
+      return {
+        client: client.name,
+        meetings: (data?.meetings ?? []).map((m) => ({
+          when: m.meetingAt || m.whenText, invitee: m.inviteeName, email: m.inviteeEmail, title: m.inviteeTitle,
+          company: m.companyName, summary: m.summary, host: m.host, campaign: m.campaign, status: m.status,
+        })),
+      };
+    }
+
+    case "list_deals": {
+      if (!text(input.client).trim()) {
+        const clients = await listDealClients();
+        return { clients: clients.filter((c) => c.total > 0).map((c) => ({ client: c.name, deals: c.total, confirmedForQc: c.confirmed, confirmedValue: c.confirmedValue, possibleToReview: c.possible })) };
+      }
+      const client = await resolveClient(input.client);
+      const data = await getClientDeals(client.slug);
+      return {
+        client: client.name,
+        crm: data?.crm.provider ?? "not connected",
+        note: "A deal is only 'confirmed' as QC's when a person on it matched, by email or LinkedIn, someone QC contacted or booked. 'possible' means only the company matched — review before claiming it.",
+        deals: (data?.deals ?? []).map((d) => ({
+          name: d.name, amount: d.amount, stage: d.stage, status: d.status, company: d.companyName,
+          contact: d.contactName || d.contactEmail, attribution: d.attribution, why: d.attributionReason,
+        })),
+      };
+    }
+
+    case "onboarding_status": {
+      if (!text(input.client).trim()) {
+        const clients = await listOnboardingClients();
+        return { clients: clients.map((c) => ({ client: c.name, percent: c.progress.pct, done: c.progress.doneLeaves, total: c.progress.totalLeaves, status: c.status })) };
+      }
+      const client = await resolveClient(input.client);
+      const data = await onboardingForAssistant(client.slug);
+      if (!data) return { client: client.name, note: "No onboarding checklist has been started for this client yet." };
+      return { client: data.name, status: data.status, percent: data.progress.pct, done: data.progress.doneLeaves, total: data.progress.totalLeaves, openSteps: data.openSteps };
     }
 
     default:

@@ -2,7 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse, type NextRequest } from "next/server";
-import { AUTH_COOKIE, sessionToken, timingSafeEqual } from "./app/lib/auth";
+import { AUTH_COOKIE, authConfigured, sessionToken, timingSafeEqual } from "./app/lib/auth";
 
 /**
  * Two jobs, in order: put the whole site behind one shared password, then — for a request that is allowed
@@ -53,7 +53,9 @@ export async function middleware(request: NextRequest) {
   if (!isAuthPath(pathname) && !isMachinePath(pathname)) {
     const cookie = request.cookies.get(AUTH_COOKIE)?.value ?? "";
     const expected = await sessionToken();
-    const authed = Boolean(cookie) && timingSafeEqual(cookie, expected);
+    // authConfigured() gates first: with no password set the signing secret is a public constant, so a cookie
+    // must never be trusted — everyone is sent to /login, which then says login is not configured.
+    const authed = authConfigured() && Boolean(cookie) && timingSafeEqual(cookie, expected);
     if (!authed) {
       if (pathname.startsWith("/api/")) {
         return NextResponse.json({ ok: false, error: "Not authenticated." }, { status: 401 });

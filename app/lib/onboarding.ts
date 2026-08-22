@@ -217,6 +217,26 @@ export async function getOnboardingClient(slug: string): Promise<{ client: Onboa
   };
 }
 
+/**
+ * A read-only onboarding summary for the assistant: progress and the still-open steps. Deliberately without
+ * the lazy snapshot getOnboardingClient does — a tool that reads must never also write.
+ */
+export async function onboardingForAssistant(slug: string): Promise<{ name: string; status: string | null; progress: ReturnType<typeof computeProgress>; openSteps: Array<{ title: string; section: string | null; parent: string | null }> } | null> {
+  const { url, key } = config();
+  if (!url || !key) return null;
+  const w = (await rows(url, key, `rr_workspaces?select=id,name,onboarding_status&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
+  if (!w) return null;
+  const id = str(w.id);
+  const taskRows = await rows(url, key, `rr_onboarding_tasks?select=id,parent_id,title,section,is_done&workspace_id=eq.${encodeURIComponent(id)}&order=position.asc`);
+  const tasks = taskRows.map((r) => ({ id: str(r.id), parentId: r.parent_id ? str(r.parent_id) : null, title: str(r.title), section: r.section ? str(r.section) : null, isDone: Boolean(r.is_done) }));
+  const parents = new Set(tasks.filter((t) => t.parentId).map((t) => t.parentId));
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const openSteps = tasks
+    .filter((t) => !parents.has(t.id) && !t.isDone)
+    .map((t) => ({ title: t.title, section: t.section, parent: t.parentId ? byId.get(t.parentId)?.title ?? null : null }));
+  return { name: str(w.name), status: w.onboarding_status ? str(w.onboarding_status) : null, progress: computeProgress(tasks), openSteps };
+}
+
 // ── Add a client ───────────────────────────────────────────────────────────────────────────────────────
 
 /**

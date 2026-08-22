@@ -643,7 +643,8 @@ create table if not exists rr_meetings (
 );
 create index if not exists rr_meetings_workspace_idx on rr_meetings(workspace_id);
 create index if not exists rr_meetings_at_idx on rr_meetings(meeting_at);
-create unique index if not exists rr_meetings_external_idx on rr_meetings(workspace_id, external_id) where external_id is not null;
+drop index if exists rr_meetings_external_idx;
+create unique index if not exists rr_meetings_external_idx on rr_meetings(workspace_id, external_id);
 drop trigger if exists rr_meetings_updated_at on rr_meetings;
 create trigger rr_meetings_updated_at before update on rr_meetings for each row execute function rr_set_updated_at();
 alter table rr_meetings enable row level security;

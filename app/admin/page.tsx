@@ -255,7 +255,9 @@ export default function AdminPage() {
   };
   const requestRemoveWorkspace = () => { setPasswordError(""); setWorkspacePassword(""); setPasswordOpen(true); };
   const confirmRemoveWorkspace = async () => {
-    if (workspacePassword !== "QueenCity@2026") { setPasswordError("Incorrect password."); return; }
+    // Type-to-confirm on the client's own name, not a password: the site already sits behind the login gate,
+    // so this only needs to stop an accidental delete — and a password literal in a client bundle is a leak.
+    if (workspacePassword.trim().toLowerCase() !== (client.name || "").trim().toLowerCase()) { setPasswordError("That name does not match."); return; }
     await removeWorkspace();
   };
   const isNewWorkspace = Boolean(client.isNew);
@@ -1049,7 +1051,7 @@ export default function AdminPage() {
           </div>
         </main>
       </section>
-      {passwordOpen && <div className="help-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-title"><div className="help-card delete-confirm-card"><button className="help-close" onClick={() => setPasswordOpen(false)} aria-label="Cancel">×</button><h2 id="delete-workspace-title">Remove workspace?</h2><p>This permanently removes {client.name || "this workspace"} from the local workspace directory. Enter the admin password to continue.</p><label className="field-label">ADMIN PASSWORD<input type="password" value={workspacePassword} onChange={(event) => setWorkspacePassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && confirmRemoveWorkspace()} /></label>{passwordError && <p className="delete-password-error">{passwordError}</p>}<div className="delete-confirm-actions"><button className="secondary-button" onClick={() => setPasswordOpen(false)}>Cancel</button><button className="primary-button delete-danger-button" onClick={confirmRemoveWorkspace}>Remove workspace</button></div></div></div>}
+      {passwordOpen && <div className="help-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-title"><div className="help-card delete-confirm-card"><button className="help-close" onClick={() => setPasswordOpen(false)} aria-label="Cancel">×</button><h2 id="delete-workspace-title">Remove workspace?</h2><p>This permanently removes {client.name || "this workspace"} from the local workspace directory. Type the client&apos;s name to confirm.</p><label className="field-label">TYPE THE CLIENT NAME<input type="text" value={workspacePassword} onChange={(event) => setWorkspacePassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && confirmRemoveWorkspace()} /></label>{passwordError && <p className="delete-password-error">{passwordError}</p>}<div className="delete-confirm-actions"><button className="secondary-button" onClick={() => setPasswordOpen(false)}>Cancel</button><button className="primary-button delete-danger-button" onClick={confirmRemoveWorkspace}>Remove workspace</button></div></div></div>}
     </div>
   );
 }

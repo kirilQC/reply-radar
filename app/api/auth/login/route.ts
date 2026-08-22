@@ -2,7 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
-import { AUTH_COOKIE, SESSION_MAX_AGE, cookieDomain, isValidPassword, sessionToken } from "../../../lib/auth";
+import { AUTH_COOKIE, SESSION_MAX_AGE, authConfigured, cookieDomain, isValidPassword, sessionToken } from "../../../lib/auth";
 
 /**
  * Trades the shared password (or the private recovery code) for the session cookie.
@@ -13,6 +13,9 @@ import { AUTH_COOKIE, SESSION_MAX_AGE, cookieDomain, isValidPassword, sessionTok
  * is never sent in the clear, and scoped to the whole domain so this one login covers every subdomain.
  */
 export async function POST(request: Request) {
+  if (!authConfigured()) {
+    return NextResponse.json({ ok: false, error: "Login is not configured yet. Set APP_PASSWORD in the environment." }, { status: 503 });
+  }
   const body = (await request.json().catch(() => ({}))) as { password?: unknown };
   if (!isValidPassword(body?.password)) {
     await new Promise((resolve) => setTimeout(resolve, 400));
