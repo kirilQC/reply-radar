@@ -421,6 +421,18 @@ export default function McpPage() {
   /** The turn in progress: what it has done so far and what it has started writing. */
   const [live, setLive] = useState<{ entries: Entry[]; answer: string }>({ entries: [], answer: "" });
   /**
+   * How much of the streamed answer is revealed on screen.
+   *
+   * The bytes do not arrive smoothly — the platform flushes the stream in bursts, so `live.answer` jumps
+   * ahead three or four words at a time — and rendering exactly what has arrived makes the answer land in
+   * those same jumps. So the display is decoupled from arrival: `shownAnswer` walks toward `live.answer` a
+   * few characters a painted frame, which turns any arrival cadence into steady typing. `live.answer` stays
+   * the truth (it is what gets persisted as the finished turn); this is only how much of it is drawn yet.
+   */
+  const [shownAnswer, setShownAnswer] = useState("");
+  const liveAnswerRef = useRef("");
+  const shownLenRef = useRef(0);
+  /**
    * Elapsed time is derived from a start stamp rather than counted up in state, so the ticking
    * interval never has to reset anything from inside an effect.
    */
@@ -563,6 +575,39 @@ export default function McpPage() {
     endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [live, thinking]);
 
+  // The latest arrived answer, held in a ref so the drip loop below reads it without being torn down and
+  // restarted on every burst.
+  useEffect(() => {
+    liveAnswerRef.current = live.answer;
+  }, [live.answer]);
+
+  /**
+   * The reveal loop: while a turn streams, walk `shownAnswer` toward what has arrived a few characters per
+   * painted frame, easing faster when it has fallen further behind. A burst of four words becomes a smooth
+   * hundred-millisecond reveal instead of a jump; when the model is quiet the display simply catches up and
+   * waits. A tool call resets the answer buffer server-side, so `shown` past the (now shorter) text snaps
+   * back. State is set only inside the frame callback, never synchronously, so the transcript is untouched.
+   */
+  useEffect(() => {
+    if (!thinking) return;
+    let raf = 0;
+    const tick = () => {
+      const full = liveAnswerRef.current;
+      const shown = shownLenRef.current;
+      if (shown > full.length) {
+        shownLenRef.current = full.length;
+        setShownAnswer(full);
+      } else if (shown < full.length) {
+        const step = Math.min(full.length - shown, Math.max(2, Math.ceil((full.length - shown) / 7)));
+        shownLenRef.current = shown + step;
+        setShownAnswer(full.slice(0, shownLenRef.current));
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [thinking]);
+
   useEffect(() => {
     if (!thinking) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -614,6 +659,11 @@ export default function McpPage() {
     setAttachNote("");
     setThinking(true);
     setLive({ entries: [], answer: "" });
+    // Reset the reveal so the new turn types out from empty rather than from the last answer's tail. Done
+    // here, in the handler, rather than in the drip effect, so no state is set synchronously inside it.
+    setShownAnswer("");
+    shownLenRef.current = 0;
+    liveAnswerRef.current = "";
     startedAt.current = Date.now();
     setNow(Date.now());
 
@@ -1017,7 +1067,7 @@ export default function McpPage() {
                     <b>{elapsed(seconds)}</b>
                   </div>
                   <Timeline entries={live.entries} live />
-                  {live.answer && <Markdown live>{live.answer}</Markdown>}
+                  {shownAnswer && <Markdown live>{shownAnswer}</Markdown>}
                 </article>
               )}
               <div ref={endRef} />
