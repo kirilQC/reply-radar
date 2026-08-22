@@ -52,7 +52,7 @@ import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USE
  * first, and the tracker step gets whatever is left. Running out of time skips it with a note rather
  * than killing the function, because a brief that was delivered must not come back as a failed run.
  */
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 /**
  * How much of the sixty seconds has to be left before the tracker step is worth starting.

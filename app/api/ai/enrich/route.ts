@@ -6,6 +6,9 @@ import { enrichLeadWithAiArk } from "../../../lib/ai-ark-enrichment";
 
 type Row = Record<string, unknown>;
 
+// AI Ark enrichment is an external round trip that can take a while; give it room beyond the 15s default.
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

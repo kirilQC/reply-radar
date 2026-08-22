@@ -32,6 +32,16 @@ function isAuthPath(pathname: string): boolean {
 }
 
 /**
+ * A Vercel cron invocation. Vercel attaches `Authorization: Bearer <CRON_SECRET>` to scheduled requests when
+ * the CRON_SECRET env var is set, and those requests carry no login cookie — so without this they would hit
+ * the gate and 401, which is exactly what silently broke brain/warm and messaging/sync when the gate landed.
+ */
+function isCron(request: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET?.trim();
+  return Boolean(secret) && request.headers.get("authorization") === `Bearer ${secret}`;
+}
+
+/**
  * Endpoints called by machines rather than browsers, which carry no session cookie. Left ungated so the
  * webhooks, the Slack event handler and the scheduled worker keep working; each is self-secured or was
  * already open before the gate existed. Everything else under /api is behind the password.
@@ -50,7 +60,7 @@ function isMachinePath(pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (!isAuthPath(pathname) && !isMachinePath(pathname)) {
+  if (!isAuthPath(pathname) && !isMachinePath(pathname) && !isCron(request)) {
     const cookie = request.cookies.get(AUTH_COOKIE)?.value ?? "";
     const expected = await sessionToken();
     // authConfigured() gates first: with no password set the signing secret is a public constant, so a cookie

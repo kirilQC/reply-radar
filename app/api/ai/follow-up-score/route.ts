@@ -7,6 +7,9 @@ import { briefedSystemPrompt } from "../../../lib/client-context";
 import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
 import { defaultFollowUpPrompt } from "../../../lib/scoring-templates";
 
+// An Anthropic scoring call can run past the 15s default; give it room so scoring is not killed mid-call.
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

@@ -9,6 +9,9 @@ import { defaultIcpPrompt } from "../../../lib/scoring-templates";
 type Row = Record<string, unknown>;
 const object = (v: unknown): Row => v && typeof v === "object" && !Array.isArray(v) ? v as Row : {};
 
+// An Anthropic scoring call can run past the 15s default; give it room so scoring is not killed mid-call.
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

@@ -137,6 +137,10 @@ async function heyReachCampaignList(workspace: Row) {
   return rows;
 }
 
+// Aggregating HeyReach stats plus our own message rows across a client can exceed the 15s default on a
+// busy account; Pro allows the headroom.
+export const maxDuration = 120;
+
 export async function GET(request: Request) {
   const { url, key } = config();
   if (!url || !key) return NextResponse.json({ ok: false, status: "not_configured" }, { status: 503 });

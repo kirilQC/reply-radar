@@ -79,6 +79,9 @@ Rules, in order of importance:
 
 Reply with bare JSON and nothing else: an object whose keys are exactly the section ids you were given, each mapping to a string.`;
 
+// Transcribing dictation then shaping it is slower than the 15s default; give it room.
+export const maxDuration = 120;
+
 export async function POST(request: Request) {
   if (!process.env.ANTHROPIC_API_KEY)
     return NextResponse.json({ ok: false, error: "ANTHROPIC_API_KEY is not set." }, { status: 503 });

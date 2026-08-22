@@ -194,6 +194,23 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
   return { ok: true, synced: records.length, confirmed, possible };
 }
 
+/**
+ * Sync every client that has a CRM connected — the nightly cron's job. Sequential and bounded by the
+ * route's 300s budget; with a handful of connected CRMs that is ample, and if a very large account runs long
+ * the next night simply catches up. Each client's failure is captured, never fatal to the rest.
+ */
+export async function syncAllConnectedDeals(): Promise<{ ok: boolean; results: Array<{ client: string; synced?: number; confirmed?: number; error?: string }> }> {
+  const { url, key } = config();
+  if (!url || !key) return { ok: false, results: [] };
+  const workspaces = await rows(url, key, `rr_workspaces?select=slug,name&crm_provider=not.is.null`);
+  const results: Array<{ client: string; synced?: number; confirmed?: number; error?: string }> = [];
+  for (const w of workspaces) {
+    const result = await syncDeals(str(w.slug));
+    results.push({ client: str(w.name), synced: result.synced, confirmed: result.confirmed, error: result.error });
+  }
+  return { ok: true, results };
+}
+
 /** Every client with their deal totals and how much of the pipeline traces back to QC. */
 export async function listDealClients(): Promise<DealClient[]> {
   const { url, key } = config();

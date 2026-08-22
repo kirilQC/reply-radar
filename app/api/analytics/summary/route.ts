@@ -65,6 +65,9 @@ const shiftDays = (year: number, month: number, day: number, days: number) => {
   return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1, day: shifted.getUTCDate() };
 };
 
+// The all-client summary touches every workspace; give it Pro headroom past the 15s default.
+export const maxDuration = 120;
+
 export async function GET(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

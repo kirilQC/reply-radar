@@ -46,7 +46,7 @@ import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USE
  * its own timeout and the QC Brain is a GitHub read, so this asks for headroom above the brief's sixty
  * seconds rather than the full ceiling the old generate-then-compose flow needed.
  */
-export const maxDuration = 120;
+export const maxDuration = 240;
 
 type Row = Record<string, unknown>;
 

@@ -340,6 +340,9 @@ function assembleEmail(parts: Json, written: Record<string, string>, bestReplies
   return /qc\s*growth\s*$/i.test(email) ? email : `${email}\n\n${SIGN_OFF}`;
 }
 
+// Composing a report is a multi-step AI job; give it the full Pro budget rather than the 15s default.
+export const maxDuration = 300;
+
 export async function POST(request: Request) {
   if (!process.env.ANTHROPIC_API_KEY)
     return NextResponse.json({ ok: false, error: "ANTHROPIC_API_KEY is not configured." }, { status: 503 });

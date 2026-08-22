@@ -149,6 +149,10 @@ function clampReason(value: unknown) {
   return `${(lastSpace > REASON_MAX * 0.6 ? cut.slice(0, lastSpace) : cut).replace(/[,;:.\s]+$/, "")}…`;
 }
 
+// An Anthropic draft call routinely runs past the 15s platform default; give it room (Vercel Pro allows up
+// to 300s). Without this the worker's per-reply drafting was being killed and retried.
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   if (!process.env.ANTHROPIC_API_KEY) return NextResponse.json({ ok: false, error: "ANTHROPIC_API_KEY is not configured." }, { status: 503 });

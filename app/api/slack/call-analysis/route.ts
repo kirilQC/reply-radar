@@ -39,7 +39,7 @@ import {
 import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
 
 /** One model call plus a transcript fetch, comfortably inside Hobby's ceiling — see the brief's note. */
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 type Row = Record<string, unknown>;
 

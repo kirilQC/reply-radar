@@ -98,6 +98,9 @@ function bucketIcp(score: number): "excellent" | "strong" | "moderate" | "weak" 
   return "weak";
 }
 
+// Report generation is a multi-step AI job; Vercel Pro allows up to 300s, so let it run rather than die at the default.
+export const maxDuration = 300;
+
 export async function POST(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
