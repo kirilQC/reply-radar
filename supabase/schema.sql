@@ -605,3 +605,42 @@ alter table rr_onboarding_tasks enable row level security;
 -- The default template is seeded by migration 20260821_onboarding_hub.sql (guarded so it only fills an
 -- empty table). It is intentionally not repeated here: the seed is editable data a teammate reorders, not
 -- schema, and duplicating a 48-row VALUES block invites the two copies drifting apart.
+
+-- ── Booked meetings ──────────────────────────────────────────────────────────────────────────────
+-- Per-client booked meetings, fed mainly by a Zapier webhook off each client's Calendly (routed by the
+-- client name in the payload), and also by hand or by the assistant spotting one. See app/lib/meetings.ts.
+create table if not exists rr_meetings (
+  id                  uuid primary key default gen_random_uuid(),
+  workspace_id        uuid not null references rr_workspaces(id) on delete cascade,
+  invitee_name        text,
+  invitee_email       text,
+  invitee_linkedin    text,
+  invitee_title       text,
+  invitee_location    text,
+  invitee_headline    text,
+  company_name        text,
+  company_domain      text,
+  company_linkedin    text,
+  company_location    text,
+  company_industry    text,
+  company_size        text,
+  company_type        text,
+  company_description text,
+  meeting_at          timestamptz,
+  when_text           text,
+  summary             text,
+  host                text,
+  campaign            text,
+  status              text not null default 'scheduled',
+  source              text not null default 'manual',
+  external_id         text,
+  raw                 jsonb not null default '{}'::jsonb,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+create index if not exists rr_meetings_workspace_idx on rr_meetings(workspace_id);
+create index if not exists rr_meetings_at_idx on rr_meetings(meeting_at);
+create unique index if not exists rr_meetings_external_idx on rr_meetings(workspace_id, external_id) where external_id is not null;
+drop trigger if exists rr_meetings_updated_at on rr_meetings;
+create trigger rr_meetings_updated_at before update on rr_meetings for each row execute function rr_set_updated_at();
+alter table rr_meetings enable row level security;

@@ -66,6 +66,7 @@ import { searchBrain } from "../../shared/brain-search.mjs";
 import { clientLabel, clientOf, clientSkeleton, clientsIn, fileKind, fileTitle, isReadable, parseSkill, skillClient } from "../../shared/brain-structure.mjs";
 import { scanChannel, resolveChannelNames, resolveUserNames, transcript, slackReadable } from "./slack";
 import { normalizeChannelId } from "./slack-channel";
+import { addMeeting } from "./meetings";
 
 type Row = Record<string, unknown>;
 
@@ -764,6 +765,27 @@ export const TOOLS: ToolDefinition[] = [
         days: { type: "integer", description: `How many days back to read. Default ${SLACK_SCAN_DEFAULT_DAYS}. Ignored when full is true.` },
         full: { type: "boolean", description: "Read all the way back to the channel's creation instead of the last `days`." },
         limit: { type: "integer", description: `Most messages to return, up to ${SLACK_SCAN_MAX}. Default ${SLACK_SCAN_DEFAULT}, or ${SLACK_SCAN_FULL_DEFAULT} for a full scan.` },
+      },
+      required: ["client"],
+    },
+  },
+  {
+    name: "add_meeting",
+    description:
+      "Record a booked meeting for a client — use this when a reply, a Slack message, or a call recap makes clear a meeting was actually booked. Give the client and whatever you have: who booked (name, email, title, LinkedIn, company), when it is (ISO 8601), what it is about, who it is with on our side, and which campaign it came from. Missing fields are fine; an invitee name, email or company is the minimum. Most clients' Calendly files these automatically through a webhook, so only add one here for a booking that route would not catch — and tell the person you are recording it, so you are not duplicating a meeting they can already see.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...CLIENT_ARG,
+        invitee_name: { type: "string", description: "Who booked the meeting." },
+        invitee_email: { type: "string" },
+        invitee_title: { type: "string" },
+        invitee_linkedin: { type: "string" },
+        company_name: { type: "string", description: "The invitee's company." },
+        meeting_at: { type: "string", description: "When the meeting is, ISO 8601 if you can, e.g. 2026-08-19T14:00:00Z. Leave out if unknown." },
+        summary: { type: "string", description: "What the meeting is, e.g. \"Steadywell Intro\"." },
+        host: { type: "string", description: "Who it is with on our side, e.g. \"Josh & Tim\"." },
+        campaign: { type: "string", description: "The campaign it came from, if known." },
       },
       required: ["client"],
     },
@@ -1609,6 +1631,29 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
           ? { truncated: true, note: `This channel is longer than the ${cap}-message cap, so this is its most recent ${scan.messages.length} messages, not the whole history. Ask for an earlier window with days, or raise limit (max ${SLACK_SCAN_MAX}).` }
           : {}),
         transcript: body || "No messages in that window.",
+      };
+    }
+
+    case "add_meeting": {
+      const client = await resolveClient(input.client);
+      const fields = {
+        invitee_name: text(input.invitee_name),
+        invitee_email: text(input.invitee_email),
+        invitee_title: text(input.invitee_title),
+        invitee_linkedin: text(input.invitee_linkedin),
+        company_name: text(input.company_name),
+        meeting_at: text(input.meeting_at) || null,
+        summary: text(input.summary),
+        host: text(input.host),
+        campaign: text(input.campaign),
+        raw: input,
+      };
+      const result = await addMeeting(client.slug, fields, "assistant");
+      if (!result.ok) throw new Error(result.error);
+      return {
+        client: client.name,
+        note: "Recorded in the client's Meetings. Tell the person it was added, and do not add the same meeting twice.",
+        meeting: result.meeting,
       };
     }
 
