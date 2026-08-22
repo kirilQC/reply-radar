@@ -65,6 +65,9 @@ create table if not exists rr_workspaces (
   -- established clients that predate it — and so never shows in the directory there. 'in_progress' the
   -- moment a client is added; 'complete' once every leaf step is checked. See app/lib/onboarding.ts.
   onboarding_status text, onboarding_started_at timestamptz, onboarding_completed_at timestamptz,
+  -- The client's CRM, for pulling their deal pipeline and attributing which deals came from QC. The key is
+  -- the client's own CRM token, stored like the HeyReach key. See app/lib/deals.ts and shared/deal-attribution.mjs.
+  crm_provider text, crm_api_key_ciphertext text, crm_last_synced_at timestamptz,
   last_webhook_received_at timestamptz, last_successful_poll_at timestamptz, last_reconciled_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
@@ -644,3 +647,40 @@ create unique index if not exists rr_meetings_external_idx on rr_meetings(worksp
 drop trigger if exists rr_meetings_updated_at on rr_meetings;
 create trigger rr_meetings_updated_at before update on rr_meetings for each row execute function rr_set_updated_at();
 alter table rr_meetings enable row level security;
+
+-- ── Deals & CRM attribution ──────────────────────────────────────────────────────────────────────
+-- Deals pulled from each client's CRM, with QC's attribution attached. CRM connection is on the workspace.
+create table if not exists rr_deals (
+  id                      uuid primary key default gen_random_uuid(),
+  workspace_id            uuid not null references rr_workspaces(id) on delete cascade,
+  provider                text not null,
+  external_id             text not null,
+  name                    text,
+  amount                  numeric,
+  currency                text,
+  stage                   text,
+  pipeline                text,
+  status                  text not null default 'open',
+  close_date              date,
+  owner                   text,
+  contact_name            text,
+  contact_email           text,
+  contact_linkedin        text,
+  company_name            text,
+  company_domain          text,
+  attribution             text not null default 'none',
+  attribution_reason      text,
+  attribution_matched_by  text,
+  attribution_campaign    text,
+  attribution_evidence    jsonb not null default '{}'::jsonb,
+  raw                     jsonb not null default '{}'::jsonb,
+  synced_at               timestamptz not null default now(),
+  created_at              timestamptz not null default now(),
+  updated_at              timestamptz not null default now()
+);
+create index if not exists rr_deals_workspace_idx on rr_deals(workspace_id);
+create index if not exists rr_deals_attribution_idx on rr_deals(workspace_id, attribution);
+create unique index if not exists rr_deals_external_idx on rr_deals(workspace_id, provider, external_id);
+drop trigger if exists rr_deals_updated_at on rr_deals;
+create trigger rr_deals_updated_at before update on rr_deals for each row execute function rr_set_updated_at();
+alter table rr_deals enable row level security;
