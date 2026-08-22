@@ -480,8 +480,9 @@ export async function deleteTemplateStep(id: string): Promise<{ ok: boolean; err
 export async function reorderTemplate(order: Array<{ id: string; position: number }>): Promise<{ ok: boolean; error?: string }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
-  for (const { id, position } of order) {
-    await fetch(`${url}/rest/v1/rr_onboarding_template_steps?id=eq.${encodeURIComponent(str(id))}`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify({ position }) }).catch(() => {});
-  }
+  // The rows are independent, so re-spacing them is one round of parallel patches, not a chain of awaits.
+  await Promise.all(order.map(({ id, position }) =>
+    fetch(`${url}/rest/v1/rr_onboarding_template_steps?id=eq.${encodeURIComponent(str(id))}`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify({ position }) }).catch(() => {}),
+  ));
   return { ok: true };
 }

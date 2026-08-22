@@ -78,7 +78,6 @@ const computeFollowUp = (thread: { direction: string; sentAt: unknown; body: str
   const latestInbound = inboundMessages[inboundMessages.length - 1];
   const latestInboundAt = latestInbound ? new Date(String(latestInbound.sentAt)).getTime() : 0;
   const inboundAgeDays = latestInbound ? (now - latestInboundAt) / (1000 * 60 * 60 * 24) : Infinity;
-  const latestBody = String(latest.body || "").toLowerCase();
   const latestInboundBody = latestInbound ? String(latestInbound.body || "").toLowerCase() : "";
 
   // Skip negative sentiment — lead doesn't want to hear from us
@@ -199,6 +198,16 @@ export async function GET(request: Request) {
     // Duplicate rows are collapsed on read so the thread is correct even before a refresh repairs the
     // records themselves. Shared with the purge, which must judge who spoke first from the same view.
     const deduped = dedupeMessages(messages);
+    // Grouped once, not filtered per conversation: this used to be `deduped.filter(...)` inside both the filter
+    // and the map below, which re-scanned every message for every conversation — O(conversations × messages) on
+    // the hottest route. One pass into a map makes each lookup O(1).
+    const messagesByConversation = new Map<string, Row[]>();
+    for (const message of deduped) {
+      const cid = String(message.conversation_id);
+      const list = messagesByConversation.get(cid);
+      if (list) list.push(message);
+      else messagesByConversation.set(cid, [message]);
+    }
 
     const workspaceById = new Map(selected.map((row) => [String(row.id), row]));
     const leadById = new Map(leads.map((row) => [String(row.id), row]));
@@ -218,7 +227,7 @@ export async function GET(request: Request) {
         return false;
       }
       const verdict = classifyConversationOrigin({
-        messages: deduped.filter((message) => message.conversation_id === conversation.id),
+        messages: messagesByConversation.get(String(conversation.id)) ?? [],
         leadRawData: leadById.get(String(conversation.lead_id))?.raw_data,
       });
       if (verdict.origin !== "inbound_lead") return true;
@@ -234,9 +243,7 @@ export async function GET(request: Request) {
       const enrichment = nested(metadata, "ai_ark");
       const workspace =
         workspaceById.get(String(conversation.workspace_id)) ?? {};
-      const messageRows = deduped.filter(
-        (message) => message.conversation_id === conversation.id,
-      );
+      const messageRows = messagesByConversation.get(String(conversation.id)) ?? [];
       const newestRawMessages = [...messageRows]
         .reverse()
         .map((message) => message.raw_data);

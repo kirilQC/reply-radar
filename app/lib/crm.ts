@@ -105,8 +105,11 @@ async function fetchHubspotDeals(token: string): Promise<CrmDeal[]> {
     assocIds(deal, "contacts").forEach((id) => contactIds.add(id));
     assocIds(deal, "companies").forEach((id) => companyIds.add(id));
   }
-  const contacts = await hubspotBatchRead(token, "contacts", [...contactIds], ["email", "firstname", "lastname", "hs_linkedin_url", "jobtitle"]);
-  const companies = await hubspotBatchRead(token, "companies", [...companyIds], ["domain", "name"]);
+  // The two batch reads are independent — run them together rather than one after the other.
+  const [contacts, companies] = await Promise.all([
+    hubspotBatchRead(token, "contacts", [...contactIds], ["email", "firstname", "lastname", "hs_linkedin_url", "jobtitle"]),
+    hubspotBatchRead(token, "companies", [...companyIds], ["domain", "name"]),
+  ]);
 
   return raw.map((deal) => {
     const props = (deal.properties as Record<string, unknown> | undefined) ?? {};
@@ -172,18 +175,20 @@ function attioReferenceIds(record: Record<string, unknown>, attribute: string): 
 
 async function attioPeople(token: string, ids: string[]): Promise<Map<string, CrmContact>> {
   const map = new Map<string, CrmContact>();
-  for (const id of [...new Set(ids)]) {
-    try {
-      const body = await attio(token, `/v2/objects/people/records/${encodeURIComponent(id)}`, { method: "GET" });
-      const record = (body.data as Record<string, unknown> | undefined) ?? {};
-      map.set(id, {
-        email: attioValue(record, "email_addresses"),
-        linkedin: attioValue(record, "linkedin"),
-        name: attioValue(record, "name"),
-      });
-    } catch {
-      // A person we cannot read just contributes no identifier; the deal is then unattributed, not broken.
-    }
+  const unique = [...new Set(ids)];
+  // A person per GET, but fetched a handful at a time rather than one-after-another — a client with hundreds
+  // of deal contacts would otherwise be hundreds of serial round-trips. Capped so the sync does not hammer Attio.
+  const CONCURRENCY = 6;
+  for (let i = 0; i < unique.length; i += CONCURRENCY) {
+    await Promise.all(unique.slice(i, i + CONCURRENCY).map(async (id) => {
+      try {
+        const body = await attio(token, `/v2/objects/people/records/${encodeURIComponent(id)}`, { method: "GET" });
+        const record = (body.data as Record<string, unknown> | undefined) ?? {};
+        map.set(id, { email: attioValue(record, "email_addresses"), linkedin: attioValue(record, "linkedin"), name: attioValue(record, "name") });
+      } catch {
+        // A person we cannot read just contributes no identifier; the deal is then unattributed, not broken.
+      }
+    }));
   }
   return map;
 }

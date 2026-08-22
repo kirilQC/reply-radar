@@ -168,11 +168,18 @@ async function db(path: string): Promise<unknown> {
 
 type Client = { id: string; name: string; slug: string; timezone: string; createdAt: string; apiKey: string };
 
+// The workspace list is read by resolveClient and a dozen tools, several times within one assistant turn, and
+// it barely changes. A short TTL cache turns that back into one fetch per warm instance every half-minute
+// rather than one per tool call, at the cost of at most 30s of staleness — fine for a read assistant.
+let clientsCache: { at: number; value: Client[] } | null = null;
+const CLIENTS_TTL_MS = 30_000;
+
 async function clients(): Promise<Client[]> {
+  if (clientsCache && Date.now() - clientsCache.at < CLIENTS_TTL_MS) return clientsCache.value;
   const raw = rows(
     await db("rr_workspaces?select=id,name,slug,timezone,created_at,heyreach_api_key_ciphertext&order=name.asc"),
   );
-  return raw.map((row) => ({
+  const value = raw.map((row) => ({
     id: text(row.id),
     name: text(row.name),
     slug: text(row.slug),
@@ -180,6 +187,8 @@ async function clients(): Promise<Client[]> {
     createdAt: text(row.created_at),
     apiKey: text(row.heyreach_api_key_ciphertext),
   }));
+  clientsCache = { at: Date.now(), value };
+  return value;
 }
 
 /**
