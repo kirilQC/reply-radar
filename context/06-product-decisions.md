@@ -162,8 +162,10 @@ brief, AI model, temperature, system prompt, scoring rules, theme/accent, docume
 - Adding or removing a client must update every live view: sidebar, home, general inbox, profile
   assignment choices.
 - "Date created" belongs at the bottom of the client page, not on the directory card.
-- Workspace deletion is gated by the password `QueenCity@2026`. This is an **internal speed bump, not
-  authentication** — do not treat it as a security control or build on it.
+- Workspace deletion is gated by a **type-the-client-name confirm** — an internal speed bump against an
+  accidental delete, not authentication. (It used to require a hardcoded password; that literal was removed
+  because it shipped in the client bundle.) Real access control is the site-wide password gate: `app/lib/auth.ts`
+  + `middleware.ts`, with the password read only from the `APP_PASSWORD` env var.
 
 ---
 

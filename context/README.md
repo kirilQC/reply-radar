@@ -17,6 +17,7 @@ Written to be read in order, but each file stands alone. If you only read one th
 | [`07-verification.md`](07-verification.md) | How to prove a change works when there are no local credentials. The harness pattern. |
 | [`08-session-handoff.md`](08-session-handoff.md) | Where the project stands right now: what shipped recently, what's verified, what's still open. |
 | [`09-morning-brief.md`](09-morning-brief.md) | The Slack morning brief: its sources, the rules that are load-bearing, and why its layout is applied in code rather than asked of the model. |
+| [`10-new-sections.md`](10-new-sections.md) | The sections built after the brief — the password gate, Onboarding, Meetings, Deals & attribution, the assistant's new tools — and the audit that hardened them. Start here for anything added recently. |
 
 ## The thirty-second version
 
@@ -32,7 +33,9 @@ Next.js 16 on Vercel. Supabase reached **only** over the PostgREST REST API. A s
 Render worker (`worker/render-worker.mjs`) polls HeyReach and drives the AI pipeline by calling the
 app's own `/api/ai/*` routes over HTTP.
 
-There is **no authentication** and it is intentionally out of scope.
+The site now sits behind **one shared password** (`middleware.ts` + `app/lib/auth.ts`); the password is read
+only from the `APP_PASSWORD` env var, never hardcoded. Machine endpoints (webhooks, Slack, the worker's AI
+routes) are deliberately left open — they have no cookie. See [`10-new-sections.md`](10-new-sections.md).
 
 There is **no local `.env`**, so no local production data. Anything needing live data has to be a
 button in the app that the owner clicks.

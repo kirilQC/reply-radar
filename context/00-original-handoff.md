@@ -95,7 +95,7 @@ Do not drop or rename the user's unrelated existing tables. Before changing sche
 - Profile fields: full name, profile photo, assigned clients, appearance/layout preferences.
 - Profile saves must persist to Supabase and immediately update dashboard, sidebar, and inbox.
 - Profile photo must render on profile cards and all profile surfaces.
-- Profile deletion requires confirmation; workspace deletion requires password `QueenCity@2026` (this is an internal app requirement, but do not treat it as production-grade authentication).
+- Profile deletion requires confirmation; workspace deletion is gated by a type-the-client-name confirm (a speed bump against accidental deletes, not authentication). The whole site now sits behind a shared password (see the auth gate — `app/lib/auth.ts`, `middleware.ts`); the password lives only in the `APP_PASSWORD` env var, never in source.
 
 ### Client configuration
 

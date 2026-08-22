@@ -33,7 +33,13 @@ waiting before anyone opens the thread.
 | **Lead enrichment** | Company and role data filled in from AI Ark, with company logos matched where available. |
 | **Live lead database** | Every lead across every client, searchable, with exact totals and verified complete deletion. |
 | **Per-client analytics** | Reply and performance reporting, optionally on a client subdomain. |
+| **Onboarding hub** | A client directory and an interactive, ranked checklist snapshotted from an editable master template. Checking a step posts to the client's internal Slack channel; the last one flips them live. |
+| **Booked meetings** | Every client's booked calls, fed by a Zapier webhook off their Calendly (routed by client name), by hand, or by the assistant spotting one — with the full lead and company enrichment on each. |
+| **Deals & attribution** | Pulls a client's CRM pipeline (HubSpot or Attio) and flags which deals came from QC — *certain* only when a person on the deal matches, by email or LinkedIn, someone QC contacted or booked. |
+| **Morning brief & call analysis** | Three mornings a week, a per-client intelligence report into Slack; weekly calls are transcribed, recapped, filed to Airtable, and written into the client's QC Brain. |
+| **Ask-anything assistant** | An in-app Claude with read access to every client's data — inbox, HeyReach, Airtable, Slack channels, meetings, deals, onboarding and the QC Brain — behind an allowlist of tools. |
 | **Heartbeat** | Plain-language and raw-diagnostic health for Supabase, Anthropic, the Render worker and each client. |
+| **Password-gated** | The whole site sits behind one shared password (middleware + a signed cookie, one login across every subdomain). Machine endpoints — webhooks, the worker's routes — stay open by design. |
 
 ## Architecture
 
