@@ -797,11 +797,20 @@ export default function McpPage() {
     [],
   );
 
-  /** The question an answer belongs to, for the export header and the filename. */
-  const questionFor = (index: number) => {
-    for (let step = index - 1; step >= 0; step -= 1) if (messages[step].role === "user") return messages[step].content;
-    return "";
-  };
+  /**
+   * The question an answer belongs to, for the export header and the filename.
+   *
+   * A `useCallback` on `messages`, not a plain function, so it keeps one identity between keystrokes — the
+   * memoised thread below lists it as a dependency, and a fresh function here every render would rebuild
+   * the whole transcript on every character typed, which is exactly the lag this is removing.
+   */
+  const questionFor = useCallback(
+    (index: number) => {
+      for (let step = index - 1; step >= 0; step -= 1) if (messages[step].role === "user") return messages[step].content;
+      return "";
+    },
+    [messages],
+  );
 
   /**
    * Exporting one answer, from the button its own `export` block drew.
@@ -842,6 +851,33 @@ export default function McpPage() {
   );
 
   const liveCount = useMemo(() => live.entries.filter((entry) => entry.kind === "tool").length, [live.entries]);
+
+  /**
+   * The finished transcript as a memoised array of elements.
+   *
+   * This is what makes typing smooth in a long conversation. Every keystroke sets `question` and re-renders
+   * this component, and rebuilding `messages.map(...)` inline meant React re-created and re-reconciled every
+   * turn's element on every character — even though each `Turn` is memoised and does no work, the reconcile
+   * itself is O(turns) per keystroke, and the tab got heavier the longer the chat. Held in a `useMemo` whose
+   * dependencies are only the things a turn actually shows, the array keeps one identity while you type, so
+   * React skips the whole subtree until a turn genuinely changes (a new answer, a trail opened, a print).
+   */
+  const thread = useMemo(
+    () =>
+      messages.map((message, index) => (
+        <Turn
+          key={index}
+          message={message}
+          index={index}
+          asked={questionFor(index)}
+          open={openTrail === index}
+          printing={printing === index}
+          onToggle={toggleTrail}
+          onExport={exportAnswer}
+        />
+      )),
+    [messages, openTrail, printing, toggleTrail, exportAnswer, questionFor],
+  );
 
   return (
     <div className="app-shell">
@@ -967,18 +1003,7 @@ export default function McpPage() {
             </div>
           ) : (
             <div className="mcp-thread">
-              {messages.map((message, index) => (
-                <Turn
-                  key={index}
-                  message={message}
-                  index={index}
-                  asked={questionFor(index)}
-                  open={openTrail === index}
-                  printing={printing === index}
-                  onToggle={toggleTrail}
-                  onExport={exportAnswer}
-                />
-              ))}
+              {thread}
 
               {thinking && (
                 <article className="mcp-turn mcp-assistant mcp-working">
