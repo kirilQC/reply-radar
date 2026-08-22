@@ -55,6 +55,8 @@ export default function OnboardingDirectoryPage() {
   const [accent, setAccent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [webhook, setWebhook] = useState<{ url: string; configured: boolean } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -65,7 +67,22 @@ export default function OnboardingDirectoryPage() {
       } catch { /* leave the empty state */ }
       setLoading(false);
     })();
+    void (async () => {
+      try {
+        const response = await fetch("/api/onboarding/integrations", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (response.ok && payload.meetings) setWebhook(payload.meetings);
+      } catch { /* reference is optional */ }
+    })();
   }, []);
+
+  const copyWebhook = () => {
+    if (!webhook) return;
+    navigator.clipboard?.writeText(webhook.url).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    }).catch(() => { /* clipboard blocked; the URL is selectable anyway */ });
+  };
 
   const addClient = async () => {
     const trimmed = name.trim();
@@ -118,6 +135,14 @@ export default function OnboardingDirectoryPage() {
               <button className="primary-button" onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "Add new client"}</button>
             </div>
           </div>
+
+          {webhook && (
+            <div className="onb-ref">
+              <span className="onb-ref-label">Meetings webhook{!webhook.configured && <em> · set MEETINGS_WEBHOOK_SECRET</em>}</span>
+              <code className="onb-ref-url">{webhook.url}</code>
+              <button className="secondary-button" onClick={copyWebhook}>{copied ? "Copied" : "Copy"}</button>
+            </div>
+          )}
 
           {adding && (
             <div className="onb-add">
