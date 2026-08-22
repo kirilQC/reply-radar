@@ -431,7 +431,9 @@ export default function McpPage() {
    */
   const [shownAnswer, setShownAnswer] = useState("");
   const liveAnswerRef = useRef("");
-  const shownLenRef = useRef(0);
+  // A float, not an int: the reveal moves less than a character some frames, which is the whole point —
+  // it is how the display can be paced slower than 60 characters a second to match a slow, bursty stream.
+  const shownExactRef = useRef(0);
   /**
    * Elapsed time is derived from a start stamp rather than counted up in state, so the ticking
    * interval never has to reset anything from inside an effect.
@@ -582,25 +584,35 @@ export default function McpPage() {
   }, [live.answer]);
 
   /**
-   * The reveal loop: while a turn streams, walk `shownAnswer` toward what has arrived a few characters per
-   * painted frame, easing faster when it has fallen further behind. A burst of four words becomes a smooth
-   * hundred-millisecond reveal instead of a jump; when the model is quiet the display simply catches up and
-   * waits. A tool call resets the answer buffer server-side, so `shown` past the (now shorter) text snaps
-   * back. State is set only inside the frame callback, never synchronously, so the transcript is untouched.
+   * The reveal loop: while a turn streams, walk `shownAnswer` toward what has arrived.
+   *
+   * It is a proportional controller, not a race. Each frame it moves a fraction — 1/`SMOOTH_FRAMES` — of
+   * the remaining gap, so the reveal rate rises and falls with how far behind it is and settles where it
+   * matches the stream: a steady lag of a few dozen characters, which is exactly the cushion that hides the
+   * platform's half-second flushes. The earlier version drained that cushion to nothing at a fixed 120
+   * characters a second and then stalled until the next burst — the "stops for a fraction of a second" you
+   * saw. A small floor still finishes the tail when the stream falls quiet, and a burst that arrives all at
+   * once (a big gap) is caught up quickly because the step scales with the gap. A tool call shortens the
+   * answer server-side, so a `shown` now past the end snaps back. State is set only inside the frame
+   * callback, never synchronously, so the transcript below is never touched by this.
    */
   useEffect(() => {
     if (!thinking) return;
+    // Larger = smoother and a touch more lag; smaller = snappier and closer to the raw stream. ~50 frames
+    // (~0.8s of cushion at 60fps) is what turns the observed bursts into continuous typing.
+    const SMOOTH_FRAMES = 50;
+    const FLOOR = 0.4; // characters per frame — enough to finish a tail without stalling a live stream.
     let raf = 0;
     const tick = () => {
       const full = liveAnswerRef.current;
-      const shown = shownLenRef.current;
-      if (shown > full.length) {
-        shownLenRef.current = full.length;
-        setShownAnswer(full);
-      } else if (shown < full.length) {
-        const step = Math.min(full.length - shown, Math.max(2, Math.ceil((full.length - shown) / 7)));
-        shownLenRef.current = shown + step;
-        setShownAnswer(full.slice(0, shownLenRef.current));
+      const shown = shownExactRef.current;
+      if (shown >= full.length) {
+        if (shown > full.length) { shownExactRef.current = full.length; setShownAnswer(full); }
+      } else {
+        const gap = full.length - shown;
+        const step = Math.min(gap, Math.max(FLOOR, gap / SMOOTH_FRAMES));
+        shownExactRef.current = shown + step;
+        setShownAnswer(full.slice(0, Math.floor(shownExactRef.current)));
       }
       raf = requestAnimationFrame(tick);
     };
@@ -662,7 +674,7 @@ export default function McpPage() {
     // Reset the reveal so the new turn types out from empty rather than from the last answer's tail. Done
     // here, in the handler, rather than in the drip effect, so no state is set synchronously inside it.
     setShownAnswer("");
-    shownLenRef.current = 0;
+    shownExactRef.current = 0;
     liveAnswerRef.current = "";
     startedAt.current = Date.now();
     setNow(Date.now());
