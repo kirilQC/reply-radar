@@ -52,6 +52,14 @@ create table if not exists rr_onboarding_tasks (
 create index if not exists rr_onboarding_tasks_workspace_idx on rr_onboarding_tasks(workspace_id);
 create index if not exists rr_onboarding_tasks_parent_idx on rr_onboarding_tasks(parent_id);
 
+-- Self-heal, because `create table if not exists` above does nothing to a table that already exists. A
+-- partially-applied earlier run of this migration left rr_onboarding_tasks in place WITHOUT this column,
+-- and PostgREST then rejects the snapshot insert with PGRST204 — which the app swallowed, leaving every
+-- client's checklist silently empty. The explicit add-column is the additive pattern the rest of the schema
+-- uses; the notify makes PostgREST pick the new column up at once rather than on its next scheduled reload.
+alter table rr_onboarding_tasks add column if not exists template_step_id uuid references rr_onboarding_template_steps(id) on delete set null;
+notify pgrst, 'reload schema';
+
 -- updated_at triggers, the same rr_set_updated_at() every other table uses.
 drop trigger if exists rr_onboarding_template_steps_updated_at on rr_onboarding_template_steps;
 create trigger rr_onboarding_template_steps_updated_at before update on rr_onboarding_template_steps for each row execute function rr_set_updated_at();

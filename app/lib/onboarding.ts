@@ -242,6 +242,13 @@ async function snapshotTemplate(url: string, key: string, workspaceId: string): 
   const inserted = parentPayload.length
     ? await fetch(`${url}/rest/v1/rr_onboarding_tasks`, { method: "POST", headers: authHeaders(key, true), body: JSON.stringify(parentPayload) })
     : null;
+  // Do not swallow a failed snapshot. This is exactly the write that failed silently — a missing column
+  // rejected every row and left the checklist empty with nothing in the logs to say why. Surfacing it here
+  // means the next schema problem is a line in the Vercel logs rather than a fortnight of "why is it empty".
+  if (inserted && !inserted.ok) {
+    const detail = await inserted.text().catch(() => "");
+    console.error("reply_radar_onboarding_snapshot_failed", { workspaceId, status: inserted.status, detail: detail.slice(0, 300) });
+  }
   const insertedRows: Row[] = inserted && inserted.ok ? await inserted.json().catch(() => []) : [];
   // template step id → the new task id, so a child can find its freshly-created parent.
   const taskIdByTemplateId = new Map<string, string>();
