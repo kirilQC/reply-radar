@@ -574,6 +574,7 @@ create table if not exists rr_onboarding_template_steps (
   description text,
   position    double precision not null default 0,
   is_active   boolean not null default true,
+  task_group  text,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
@@ -591,6 +592,7 @@ create table if not exists rr_onboarding_tasks (
   is_done          boolean not null default false,
   done_at          timestamptz,
   done_by          text,
+  task_group       text,
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now()
 );

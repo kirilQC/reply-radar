@@ -15,6 +15,7 @@
  */
 
 import { postMessage, slackConfigured } from "./slack";
+import { normalizeChannelId } from "./slack-channel";
 import {
   slugify,
   computeProgress,
@@ -29,6 +30,7 @@ export type OnboardingTask = {
   parentId: string | null;
   templateStepId: string | null;
   section: string | null;
+  group: string | null;
   title: string;
   description: string | null;
   position: number;
@@ -41,6 +43,7 @@ export type TemplateStep = {
   id: string;
   parentId: string | null;
   section: string | null;
+  group: string | null;
   title: string;
   description: string | null;
   position: number;
@@ -61,6 +64,7 @@ export type OnboardingClient = {
 
 const str = (value: unknown) => (typeof value === "string" ? value : value == null ? "" : String(value));
 const num = (value: unknown) => (typeof value === "number" ? value : Number(value) || 0);
+const orNull = (value: unknown) => (str(value).trim() ? str(value) : null);
 
 function config() {
   return { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
@@ -88,6 +92,7 @@ function taskFromRow(row: Row): OnboardingTask {
     parentId: row.parent_id ? str(row.parent_id) : null,
     templateStepId: row.template_step_id ? str(row.template_step_id) : null,
     section: row.section ? str(row.section) : null,
+    group: row.task_group ? str(row.task_group) : null,
     title: str(row.title),
     description: row.description ? str(row.description) : null,
     position: num(row.position),
@@ -101,6 +106,7 @@ function templateFromRow(row: Row): TemplateStep {
     id: str(row.id),
     parentId: row.parent_id ? str(row.parent_id) : null,
     section: row.section ? str(row.section) : null,
+    group: row.task_group ? str(row.task_group) : null,
     title: str(row.title),
     description: row.description ? str(row.description) : null,
     position: num(row.position),
@@ -237,6 +243,76 @@ export async function onboardingForAssistant(slug: string): Promise<{ name: stri
   return { name: str(w.name), status: w.onboarding_status ? str(w.onboarding_status) : null, progress: computeProgress(tasks), openSteps };
 }
 
+// ── Reply Radar setup (the required-fields panel at the top of a client's onboarding) ──────────────────
+
+export type ReplyRadarConfig = {
+  id: string;
+  name: string;
+  website: string | null;
+  messagingDoc: string | null;
+  slackInternal: string | null;
+  slackExternal: string | null;
+  airtableBaseId: string | null;
+  webhookUrl: string | null;
+  keyConfigured: boolean;
+  keyMasked: string;
+};
+
+/** The Reply Radar config a teammate fills in before onboarding — read straight off the workspace row. */
+export async function getReplyRadarConfig(slug: string): Promise<ReplyRadarConfig | null> {
+  const { url, key } = config();
+  if (!url || !key) return null;
+  const w = (await rows(url, key, `rr_workspaces?select=id,name,website_url,slack_internal_channel_id,slack_external_channel_id,airtable_base_id,webhook_url,heyreach_api_key_ciphertext,guardrails&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
+  if (!w) return null;
+  const guardrails = w.guardrails && typeof w.guardrails === "object" ? (w.guardrails as Record<string, unknown>) : {};
+  const cipher = str(w.heyreach_api_key_ciphertext);
+  return {
+    id: str(w.id),
+    name: str(w.name),
+    website: orNull(w.website_url),
+    messagingDoc: str(guardrails.messaging_doc_url) || null,
+    slackInternal: orNull(w.slack_internal_channel_id),
+    slackExternal: orNull(w.slack_external_channel_id),
+    airtableBaseId: orNull(w.airtable_base_id),
+    webhookUrl: orNull(w.webhook_url),
+    keyConfigured: Boolean(cipher),
+    keyMasked: cipher ? `••••${cipher.slice(-4)}` : "",
+  };
+}
+
+/**
+ * A TARGETED patch of only the Reply Radar fields. Deliberately not the admin workspaces POST, which rebuilds
+ * the whole row and would null out the brief, logo and model when they are not resent — this touches only what
+ * the panel edits, and merges the messaging doc URL into the existing guardrails rather than replacing them.
+ */
+export async function saveReplyRadarConfig(slug: string, input: { website?: string; messagingDoc?: string; slackInternal?: string; slackExternal?: string; airtableBaseId?: string; heyreachApiKey?: string }): Promise<{ ok: boolean; error?: string }> {
+  const { url, key } = config();
+  if (!url || !key) return { ok: false, error: "Supabase is not configured." };
+  const w = (await rows(url, key, `rr_workspaces?select=id,guardrails&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
+  if (!w) return { ok: false, error: "That client was not found." };
+  const record: Row = {};
+  if ("website" in input) record.website_url = str(input.website).trim() || null;
+  if ("slackInternal" in input) record.slack_internal_channel_id = normalizeChannelId(str(input.slackInternal)) || null;
+  if ("slackExternal" in input) record.slack_external_channel_id = normalizeChannelId(str(input.slackExternal)) || null;
+  if ("airtableBaseId" in input) {
+    const base = str(input.airtableBaseId).trim();
+    if (base && !/^app[A-Za-z0-9]{14}$/.test(base)) return { ok: false, error: "That is not an Airtable base id (starts with app, 17 characters)." };
+    record.airtable_base_id = base || null;
+  }
+  if ("messagingDoc" in input) {
+    const guardrails = w.guardrails && typeof w.guardrails === "object" ? { ...(w.guardrails as Record<string, unknown>) } : {};
+    const doc = str(input.messagingDoc).trim();
+    if (doc) guardrails.messaging_doc_url = doc;
+    else delete guardrails.messaging_doc_url;
+    record.guardrails = guardrails;
+  }
+  // A blank key means "leave the saved one"; only a non-blank value overwrites it.
+  if (str(input.heyreachApiKey).trim()) record.heyreach_api_key_ciphertext = str(input.heyreachApiKey).trim();
+  if (!Object.keys(record).length) return { ok: true };
+  const response = await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(str(w.id))}`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify(record) });
+  return response.ok ? { ok: true } : { ok: false, error: "Could not save the Reply Radar setup." };
+}
+
 // ── Add a client ───────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -255,6 +331,7 @@ async function snapshotTemplate(url: string, key: string, workspaceId: string): 
     workspace_id: workspaceId,
     template_step_id: s.id,
     section: s.section,
+    task_group: s.group,
     title: s.title,
     description: s.description,
     position: s.position,
@@ -434,7 +511,7 @@ export async function listTemplate(): Promise<TemplateStep[]> {
   return (await rows(url, key, `rr_onboarding_template_steps?select=*&order=position.asc`)).map(templateFromRow);
 }
 
-export async function addTemplateStep(input: { title: string; section?: string; description?: string; parentId?: string; position?: number }): Promise<{ ok: boolean; error?: string; step?: TemplateStep }> {
+export async function addTemplateStep(input: { title: string; section?: string; group?: string; description?: string; parentId?: string; position?: number }): Promise<{ ok: boolean; error?: string; step?: TemplateStep }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const title = str(input.title).trim();
@@ -442,6 +519,7 @@ export async function addTemplateStep(input: { title: string; section?: string; 
   const record = {
     title,
     section: str(input.section).trim() || null,
+    task_group: str(input.group).trim() || null,
     description: str(input.description).trim() || null,
     parent_id: str(input.parentId).trim() || null,
     position: typeof input.position === "number" ? input.position : 0,
@@ -452,7 +530,7 @@ export async function addTemplateStep(input: { title: string; section?: string; 
   return created ? { ok: true, step: templateFromRow(created) } : { ok: false, error: "The step was not created." };
 }
 
-export async function updateTemplateStep(id: string, patch: { title?: string; section?: string | null; description?: string | null; isActive?: boolean }): Promise<{ ok: boolean; error?: string }> {
+export async function updateTemplateStep(id: string, patch: { title?: string; section?: string | null; group?: string | null; description?: string | null; isActive?: boolean }): Promise<{ ok: boolean; error?: string }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const stepId = str(id).trim();
@@ -460,6 +538,7 @@ export async function updateTemplateStep(id: string, patch: { title?: string; se
   const record: Row = {};
   if (typeof patch.title === "string") record.title = patch.title.trim();
   if ("section" in patch) record.section = str(patch.section).trim() || null;
+  if ("group" in patch) record.task_group = str(patch.group).trim() || null;
   if ("description" in patch) record.description = str(patch.description).trim() || null;
   if (typeof patch.isActive === "boolean") record.is_active = patch.isActive;
   if (!Object.keys(record).length) return { ok: true };

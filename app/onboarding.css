@@ -54,14 +54,15 @@
 .onb-client-head h1 { font-size: 24px; letter-spacing: -.04em; margin: 0; }
 .onb-client-head .onb-back { font-size: 11px; color: var(--muted); text-decoration: none; }
 .onb-client-head .onb-back:hover { color: var(--text); }
-.onb-bigbar-wrap { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 18px 20px; margin-bottom: 12px; }
-.onb-bigbar-meta { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 11px; }
-.onb-bigbar-meta strong { font-size: 20px; letter-spacing: -.03em; }
+/* Frozen at the top of the page: the progress bar stays visible as you scroll the checklist. */
+.onb-progress-sticky { position: sticky; top: 0; z-index: 8; background: var(--bg); padding: 10px 0 14px; margin: 0 0 6px; }
+.onb-bigbar-wrap { border: 1px solid var(--border); border-radius: 14px; background: var(--panel); padding: 20px 22px; box-shadow: 0 10px 30px rgba(0, 0, 0, .28); }
+.onb-bigbar-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 13px; }
+.onb-bigbar-meta strong { font-size: 22px; letter-spacing: -.03em; }
 .onb-bigbar-meta strong span { color: var(--muted-2); font-size: 12px; font-weight: 400; margin-left: 6px; }
-.onb-bigbar-meta .onb-pct { font-size: 13px; color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
-.onb-bigbar { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
-.onb-bigbar span { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .25s ease; }
-.onb-bigbar.done span { background: var(--green); }
+.onb-bigpct { font-size: 40px; font-weight: 800; letter-spacing: -.04em; font-variant-numeric: tabular-nums; line-height: 1; }
+.onb-bigbar { height: 16px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.onb-bigbar span { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .35s ease, background .35s ease; box-shadow: 0 0 14px rgba(139, 124, 255, .35); }
 .onb-whoami { display: flex; align-items: center; gap: 8px; margin-bottom: 22px; font-size: 11px; color: var(--muted-2); }
 .onb-whoami input { height: 30px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2, #151821); color: var(--text); padding: 0 9px; font-size: 11px; outline: none; width: 180px; }
 .onb-whoami input:focus { border-color: var(--accent); }
@@ -132,3 +133,41 @@
   .onb-actions .primary-button, .onb-actions .secondary-button { flex: 1; }
   .onb-step.sub { padding-left: 30px; }
 }
+
+/* ── Urgency groups, indented sub-steps, and the Reply Radar setup panel (checklist redesign) ── */
+.onb-group { margin-bottom: 8px; }
+.onb-group-head { font-size: 11px; letter-spacing: .13em; text-transform: uppercase; font-weight: 750; color: var(--muted); margin: 24px 2px 11px; display: flex; align-items: center; gap: 12px; }
+.onb-group-head::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+
+.onb-step.onb-sub { padding-left: 56px; background: color-mix(in srgb, var(--panel) 94%, var(--bg)); position: relative; }
+.onb-step.onb-sub::before { content: ""; position: absolute; left: 32px; top: -1px; height: 50%; width: 13px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); border-bottom-left-radius: 6px; }
+.onb-step.onb-sub .onb-step-title { font-size: 12.5px; }
+
+.rr-setup { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); margin-bottom: 22px; overflow: hidden; }
+.rr-setup.complete { border-color: color-mix(in srgb, var(--green) 40%, var(--border)); }
+.rr-setup-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 15px 18px; background: transparent; border: 0; cursor: pointer; text-align: left; }
+.rr-setup-title { font-size: 14px; font-weight: 650; letter-spacing: -.02em; color: var(--text); }
+.rr-setup-badge { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; font-weight: 750; padding: 3px 9px; border-radius: 999px; color: var(--amber); background: color-mix(in srgb, var(--amber) 16%, transparent); }
+.rr-setup-badge.done { color: var(--green); background: color-mix(in srgb, var(--green) 16%, transparent); }
+.rr-caret { margin-left: auto; color: var(--muted-2); font-size: 12px; }
+.rr-setup-body { padding: 4px 18px 18px; border-top: 1px solid var(--border-soft); }
+.rr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+.rr-field { display: flex; flex-direction: column; gap: 6px; }
+.rr-field label { font-size: 8px; letter-spacing: .11em; text-transform: uppercase; color: var(--muted-2); font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.rr-field label i { width: 6px; height: 6px; border-radius: 50%; background: var(--border); flex: none; }
+.rr-field label i.on { background: var(--green); box-shadow: 0 0 6px color-mix(in srgb, var(--green) 60%, transparent); }
+.rr-field input, .rr-field select { height: 36px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2, #151821); color: var(--text); padding: 0 10px; font-size: 12px; outline: none; }
+.rr-field input:focus, .rr-field select:focus { border-color: var(--accent); }
+.rr-webhook { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2, #151821); margin-bottom: 14px; flex-wrap: wrap; }
+.rr-webhook span { font-size: 8px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted-2); font-weight: 700; }
+.rr-webhook code { flex: 1; min-width: 120px; font-size: 11px; color: #b7b4d9; overflow-x: auto; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.rr-actions { display: flex; align-items: center; gap: 10px; }
+.rr-saved { font-size: 11px; color: var(--green); }
+@media (max-width: 700px) { .rr-grid { grid-template-columns: 1fr; } }
+
+/* Template editor: the urgency group chip and the group/section edit row. */
+.onb-tpl-group { font-size: 8px; letter-spacing: .07em; text-transform: uppercase; font-weight: 750; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 3px 8px; border-radius: 999px; white-space: nowrap; flex: none; }
+.onb-tpl-editrow { display: flex; gap: 8px; }
+.onb-tpl-editrow select, .onb-tpl-editrow input { flex: 1; min-width: 0; }
+.onb-tpl-editpanel select { border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2, #151821); color: var(--text); padding: 9px 11px; font-size: 12.5px; outline: none; }
+.onb-tpl-editpanel select:focus { border-color: var(--accent); }

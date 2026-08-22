@@ -13,12 +13,15 @@ type Step = {
   id: string;
   parentId: string | null;
   section: string | null;
+  group: string | null;
   title: string;
   description: string | null;
   position: number;
   isActive: boolean;
 };
 type Group = Step & { children: Step[]; done: boolean };
+
+const GROUPS = ["Immediate", "First week", "Least Urgent"];
 
 // One colour per section, so the ranked list still reads as grouped at a glance without being re-sorted.
 const SECTION_COLORS: Record<string, string> = {
@@ -53,6 +56,7 @@ export default function OnboardingTemplatePage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editSection, setEditSection] = useState("");
+  const [editGroup, setEditGroup] = useState("");
   const [editDesc, setEditDesc] = useState("");
 
   const [addSubFor, setAddSubFor] = useState<string | null>(null);
@@ -61,6 +65,7 @@ export default function OnboardingTemplatePage() {
   const [addingTop, setAddingTop] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newSection, setNewSection] = useState("");
+  const [newGroup, setNewGroup] = useState("Immediate");
 
   const reload = async () => {
     try {
@@ -101,12 +106,14 @@ export default function OnboardingTemplatePage() {
     setEditingId(step.id);
     setEditTitle(step.title);
     setEditSection(step.section || "");
+    setEditGroup(step.group || "");
     setEditDesc(step.description || "");
     setAddSubFor(null);
   };
-  const saveEdit = () => {
+  const saveEdit = (isSub: boolean) => {
     if (!editingId || !editTitle.trim()) return;
-    void send("PATCH", { id: editingId, title: editTitle.trim(), section: editSection.trim(), description: editDesc.trim() });
+    // Group is a top-level concept; a sub-step inherits its parent's group, so it is not sent for one.
+    void send("PATCH", { id: editingId, title: editTitle.trim(), section: editSection.trim(), description: editDesc.trim(), ...(isSub ? {} : { group: editGroup }) });
     setEditingId(null);
   };
 
@@ -118,7 +125,7 @@ export default function OnboardingTemplatePage() {
   };
   const addTop = () => {
     if (!newTitle.trim()) return;
-    void send("POST", { title: newTitle.trim(), section: newSection.trim() || null, position: nextPosition(groups) });
+    void send("POST", { title: newTitle.trim(), section: newSection.trim() || null, group: newGroup, position: nextPosition(groups) });
     setNewTitle("");
     setNewSection("");
     setAddingTop(false);
@@ -126,11 +133,19 @@ export default function OnboardingTemplatePage() {
 
   const editPanel = (isSub: boolean) => (
     <div className={`onb-tpl-editpanel ${isSub ? "onb-tpl-sub" : ""}`}>
-      <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Step title" onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }} />
-      {!isSub && <input value={editSection} onChange={(e) => setEditSection(e.target.value)} placeholder="Section (optional)" />}
+      <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Step title" onKeyDown={(e) => { if (e.key === "Enter") saveEdit(isSub); }} />
+      {!isSub && (
+        <div className="onb-tpl-editrow">
+          <select value={editGroup} onChange={(e) => setEditGroup(e.target.value)}>
+            <option value="">No group</option>
+            {GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <input value={editSection} onChange={(e) => setEditSection(e.target.value)} placeholder="Section (optional)" />
+        </div>
+      )}
       <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Description / notes (optional)" />
       <div className="onb-tpl-editactions">
-        <button className="primary-button" onClick={saveEdit} disabled={busy || !editTitle.trim()}>Save</button>
+        <button className="primary-button" onClick={() => saveEdit(isSub)} disabled={busy || !editTitle.trim()}>Save</button>
         <button className="text-button" onClick={() => setEditingId(null)}>Cancel</button>
       </div>
     </div>
@@ -166,6 +181,7 @@ export default function OnboardingTemplatePage() {
                         {group.description && <small>{group.description}</small>}
                       </div>
                     </div>
+                    {group.group && <span className="onb-tpl-group">{group.group}</span>}
                     {group.section && <span className="onb-tpl-chip" style={{ color: sectionColor(group.section) }}>{group.section}</span>}
                     <div className="onb-tpl-actions">
                       <button className="onb-ic" onClick={() => move(groups, index, -1)} disabled={busy || index === 0} aria-label="Move up"><Icon d={IC.up} /></button>
@@ -213,7 +229,12 @@ export default function OnboardingTemplatePage() {
               {addingTop ? (
                 <div className="onb-tpl-editpanel" style={{ paddingTop: 14 }}>
                   <input value={newTitle} placeholder="New step title" onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTop(); }} />
-                  <input value={newSection} placeholder="Section (optional)" onChange={(e) => setNewSection(e.target.value)} />
+                  <div className="onb-tpl-editrow">
+                    <select value={newGroup} onChange={(e) => setNewGroup(e.target.value)}>
+                      {GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                    <input value={newSection} placeholder="Section (optional)" onChange={(e) => setNewSection(e.target.value)} />
+                  </div>
                   <div className="onb-tpl-editactions">
                     <button className="primary-button" onClick={addTop} disabled={busy || !newTitle.trim()}>Add step</button>
                     <button className="text-button" onClick={() => { setAddingTop(false); setNewTitle(""); setNewSection(""); }}>Cancel</button>

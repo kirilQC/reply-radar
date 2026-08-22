@@ -17,6 +17,7 @@ export async function POST(request: Request) {
   const result = await addTemplateStep({
     title: String(payload?.title ?? ""),
     section: payload?.section,
+    group: payload?.group,
     description: payload?.description,
     parentId: payload?.parentId,
     position: typeof payload?.position === "number" ? payload.position : undefined,
@@ -36,6 +37,7 @@ export async function PATCH(request: Request) {
   const result = await updateTemplateStep(id, {
     title: payload?.title,
     section: payload?.section,
+    group: payload?.group,
     description: payload?.description,
     isActive: payload?.isActive,
   });
