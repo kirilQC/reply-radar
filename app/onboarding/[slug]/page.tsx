@@ -151,6 +151,7 @@ function ReplyRadarSetup({ slug }: { slug: string }) {
               <button className="secondary-button" onClick={() => { navigator.clipboard?.writeText(cfg.webhookUrl || "").then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500); }).catch(() => {}); }}>{copied ? "Copied" : "Copy"}</button>
             </div>
           )}
+          <MeetingsWebhookRow />
           <div className="rr-actions">
             <button className="primary-button" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save setup"}</button>
             {saved && <span className="rr-saved">Saved.</span>}
@@ -161,8 +162,10 @@ function ReplyRadarSetup({ slug }: { slug: string }) {
   );
 }
 
-// The one unified meetings webhook, shown per-client for convenience (same URL for every client).
-function MeetingsWebhookCard() {
+// The one unified meetings webhook. It lives inside the Reply Radar setup panel now — the same URL for
+// every client, given to Zapier/Calendly, which routes by the `client` field. Styled as a setup row so
+// it reads as part of the same block as the HeyReach webhook above it.
+function MeetingsWebhookRow() {
   const [url, setUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -176,9 +179,9 @@ function MeetingsWebhookCard() {
   }, []);
   if (!url) return null;
   return (
-    <div className="onb-ref">
-      <span className="onb-ref-label">Meetings webhook</span>
-      <code className="onb-ref-url">{url}</code>
+    <div className="rr-webhook">
+      <span>Meetings webhook (booked meetings)</span>
+      <code>{url}</code>
       <button className="secondary-button" onClick={() => { navigator.clipboard?.writeText(url).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500); }).catch(() => {}); }}>{copied ? "Copied" : "Copy"}</button>
     </div>
   );
@@ -293,7 +296,6 @@ export default function OnboardingChecklistPage() {
               </div>
 
               <ReplyRadarSetup slug={slug} />
-              <MeetingsWebhookCard />
 
               {sections.map((section) => (
                 <div className="onb-group" key={section.name}>

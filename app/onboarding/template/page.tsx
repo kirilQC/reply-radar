@@ -5,6 +5,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import AppSidebar from "../../components/AppSidebar";
 import Crumb from "../../components/Crumb";
 import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
@@ -160,6 +161,7 @@ export default function OnboardingTemplatePage() {
         <main className="onboarding-shell">
           <div className="onboarding-heading">
             <h1>Onboarding template</h1>
+            <Link href="/onboarding" className="onb-back">← All clients</Link>
           </div>
 
           {loading && <p style={{ color: "var(--muted)", fontSize: 12 }}>Loading template…</p>}

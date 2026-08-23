@@ -20,12 +20,11 @@ import { workspacesByFolder, type BrainWorkspace } from "../../../lib/brain-work
 import { clientLabel, clientSkeleton, fileKind } from "../../../../shared/brain-structure.mjs";
 
 /**
- * Sixty, not three hundred. A plan that does not allow a longer function does not fail the request, it
- * clamps the ceiling and kills the work at sixty seconds — which is exactly what was happening, and is
- * why the button appeared to do nothing at all. The writing is chunked to fit well inside this, and the
- * page comes back for the rest.
+ * Three hundred, the Pro ceiling. With the writing budget raised to fit, a three-to-five page document
+ * now finishes in a single pass rather than being handed back to the page four or five times — and the
+ * continuation loop that remains is a fallback, not the common path.
  */
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 type Skeleton = { client: string; label: string; docs: { found: string; present: boolean }[]; extras: string[] };
 

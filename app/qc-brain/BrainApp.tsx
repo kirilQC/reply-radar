@@ -45,7 +45,7 @@ import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import Markdown from "../components/Markdown";
-import { agoLabel, clientHue, clientInitials, fileKind, spanLabel, staleness } from "../../shared/brain-structure.mjs";
+import { agoLabel, clientHue, clientInitials, fileKind, staleness } from "../../shared/brain-structure.mjs";
 
 type Coverage = { have: number; total: number; fraction: number };
 type IndexClient = { client: string; label: string; logo: string };
@@ -633,10 +633,27 @@ function ClientMark({ label, logo, slug, size }: { label: string; logo: string; 
  * document that happens to mention a code, because "how is this client actually doing" is a question
  * about the client and not about one file.
  */
-/** A committed file path → the human title of the file it points at (its basename, cleaned up). */
-function fileLabel(path: string): string {
-  const base = (path.split("/").pop() ?? path).replace(/\.[a-z0-9]+$/i, "");
-  return base.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+/** "campaign-messaging/foo.md" → "Foo" — a path segment cleaned into a human title. */
+function titleize(segment: string): string {
+  return segment
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * A committed file path → "Folder: File" — the area it lives in and the item itself, so the brain home
+ * can say "Campaign Messaging: Mid Size Health Systems Lyna" rather than just naming the file. The area
+ * is the first segment under `clients/<client>/`; a file sitting directly under the client folder has no
+ * area and shows on its own.
+ */
+function folderAndFile(path: string, client: string): string {
+  const parts = path.split("/").filter(Boolean);
+  const ci = parts.indexOf(client);
+  const rest = ci >= 0 ? parts.slice(ci + 1) : parts;
+  const file = rest[rest.length - 1] ?? path;
+  const folder = rest.length > 1 ? rest[0] : "";
+  return folder ? `${titleize(folder)}: ${titleize(file)}` : titleize(file);
 }
 
 function ClientHome({
@@ -742,24 +759,28 @@ function ClientHome({
                 ))}
               </dl>
             )}
-            {/* Two facts about the engagement itself, read from the folder's commit history: how long
-                we have held the client, and what changed most recently. */}
-            {detail.activity && (detail.activity.since || detail.activity.latestDate) && (
-              <div className="brain-hero-activity">
-                {detail.activity.since && (
-                  <span className="brain-hero-activity-item">
-                    <strong>{spanLabel(detail.activity.since)}</strong> engaged
-                  </span>
-                )}
-                {detail.activity.latestDate && (
-                  <span className="brain-hero-activity-item">
-                    Last added{detail.activity.latestItem ? <> · <b>{fileLabel(detail.activity.latestItem)}</b></> : null} · {agoLabel(detail.activity.latestDate)}
-                  </span>
-                )}
-              </div>
-            )}
           </div>
         </div>
+        {/* Two facts about the engagement itself, to the right of who they are, read from the folder's
+            commit history: how long we have held the client, and what changed most recently. */}
+        {detail.activity && (detail.activity.since || detail.activity.latestDate) && (
+          <aside className="brain-hero-side">
+            {detail.activity.since && (
+              <div className="brain-hero-stat">
+                <span className="brain-hero-stat-label">Engagement started</span>
+                <span className="brain-hero-stat-value">{agoLabel(detail.activity.since)}</span>
+              </div>
+            )}
+            {detail.activity.latestDate && (
+              <div className="brain-hero-stat">
+                <span className="brain-hero-stat-label">Last added · {agoLabel(detail.activity.latestDate)}</span>
+                <span className="brain-hero-stat-value">
+                  {detail.activity.latestItem ? folderAndFile(detail.activity.latestItem, detail.client) : "—"}
+                </span>
+              </div>
+            )}
+          </aside>
+        )}
       </header>
 
       {/* Named in a sentence, not left as an absence to be inferred from a grid. Somebody who came

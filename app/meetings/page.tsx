@@ -24,19 +24,15 @@ type Client = {
 
 function ClientCard({ client }: { client: Client }) {
   return (
-    <Link href={`/meetings/${client.slug}`} className="mtg-card">
-      <div className="mtg-card-top">
-        <span className="mtg-logo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>
-          {client.logoUrl ? <img src={client.logoUrl} alt="" /> : (client.name[0] || "?").toUpperCase()}
-        </span>
-        <span className="mtg-card-name">
-          <strong>{client.name}</strong>
-        </span>
-        <span className="mtg-count">
-          <b>{client.total}</b>
-          <span>{client.total === 1 ? "meeting" : "meetings"}</span>
-        </span>
-      </div>
+    <Link href={`/meetings/${client.slug}`} className={`mtg-card ${client.total > 0 ? "has-meetings" : ""}`}>
+      <span className="mtg-logo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>
+        {client.logoUrl ? <img src={client.logoUrl} alt="" /> : (client.name[0] || "?").toUpperCase()}
+      </span>
+      <span className="mtg-card-name">{client.name}</span>
+      <span className="mtg-count">
+        <b>{client.total}</b>
+        <span>{client.total === 1 ? "meeting" : "meetings"}</span>
+      </span>
     </Link>
   );
 }

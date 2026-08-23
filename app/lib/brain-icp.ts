@@ -61,11 +61,12 @@ const MAX_SOURCE = 90_000;
  * — is indifferent to what the prompt says, which it has to be, because the prompt is edited by hand and
  * cannot be assumed to have any particular number of sections in it.
  */
-const CHUNK_OUTPUT = 2_600;
-/** Well inside a sixty-second ceiling, leaving room for the request and the reply to travel. */
-const CHUNK_BUDGET_MS = 38_000;
+const CHUNK_OUTPUT = 8_000;
+/** On Pro the function ceiling is 300s, so one pass has room to write the whole document — the
+ *  continuation loop below is now the exception, not the rule. Four minutes leaves headroom under 300. */
+const CHUNK_BUDGET_MS = 240_000;
 /** A guard on the loop, not a feature: a document this long means the model is not converging. */
-const MAX_CHUNKS = 8;
+const MAX_CHUNKS = 4;
 
 export const DEFAULT_ICP_DOC_PROMPT = `You are writing the ideal customer profile document for one client of a B2B outbound growth agency. You will be given every file the agency holds on that client — the brief, the ICP notes, personas, tone of voice, engagement rules, call notes, CRM exports, whatever exists. Some of it will be contradictory, out of date or half-written.
 
@@ -161,13 +162,22 @@ export async function writeIcpDoc({
   const { transcript, trimmed } = assembleSources(sources);
   if (!transcript) throw new Error(`There is nothing written about ${label} in the brain to build a document from.`);
 
-  const messages: { role: "user" | "assistant"; content: string }[] = [
-    { role: "user", content: `Client: ${label}\n\nEvery file the brain holds on them follows.\n\n---\n\n${transcript}` },
-  ];
-  // Anthropic rejects a prefilled turn that ends in whitespace, and the continuation has to resume
-  // mid-sentence, so the trailing newline a chunk usually ends on is trimmed and handed back as-is.
+  // The continuation used to be Anthropic's assistant prefill — the text so far handed back as the start
+  // of the model's own turn. Some models (this one included) reject a prefilled assistant turn outright
+  // with "does not support assistant message prefill", which killed every document that needed a second
+  // pass. So the draft-so-far now rides inside the final USER turn instead, with an instruction to
+  // continue it and emit only the new text. The transcript always ends on a user message, which every
+  // model accepts, and the seam is handled by the instruction rather than by the protocol.
+  const base = `Client: ${label}\n\nEvery file the brain holds on them follows.\n\n---\n\n${transcript}`;
   const written = sofar.trimEnd();
-  if (written) messages.push({ role: "assistant", content: written });
+  const messages: { role: "user" | "assistant"; content: string }[] = [
+    {
+      role: "user",
+      content: written
+        ? `${base}\n\n---\n\nA draft of this document has already been started. Continue it seamlessly from exactly where it stops — if it ends mid-sentence, finish that sentence. Output ONLY the continuation: never repeat text that is already written, never add a preamble, never restate an earlier section. When the document is complete, simply stop. The draft so far is between the markers:\n\n<<<DRAFT\n${written}\nDRAFT>>>`
+        : base,
+    },
+  ];
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",

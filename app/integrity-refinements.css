@@ -3711,42 +3711,52 @@ span.brain-mark.is-lg {
   font-size: 12px;
   line-height: 1.4;
 }
-/* The engagement line: how long we have held the client, and the most recent thing added. Quiet — a
-   footnote under the facts, not another fact. */
-.brain-hero-activity {
+/* The engagement panel, sitting to the right of who-they-are: how long we have held the client and the
+   most recent thing added. A pair of small label/value stats, set off from the description by a hairline
+   and its own inset surface. */
+.brain-hero-side {
+  flex: none;
+  align-self: stretch;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 14px;
-  margin: 14px 0 0;
-  font-size: 11.5px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  min-width: 220px;
+  max-width: 300px;
+  padding: 4px 4px 4px 24px;
+  border-left: 1px solid var(--border);
+}
+.brain-hero-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.brain-hero-stat-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
   color: var(--muted-2);
 }
-.brain-hero-activity-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.brain-hero-activity-item + .brain-hero-activity-item::before {
-  content: "";
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--border);
-  margin-right: 9px;
-}
-.brain-hero-activity-item strong {
-  color: var(--text);
-  font-weight: 650;
-}
-.brain-hero-activity-item b {
-  color: var(--muted);
+.brain-hero-stat-value {
+  font-size: 14px;
   font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
 }
 @media (max-width: 900px) {
   .brain-hero {
     flex-direction: column;
     gap: 18px;
+  }
+  .brain-hero-side {
+    align-self: stretch;
+    max-width: none;
+    padding: 18px 4px 4px;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    flex-direction: row;
+    gap: 28px;
   }
 }
 
@@ -4868,29 +4878,31 @@ body.light-mode .brain-icp {
   .brain-icp-sheet .md [data-level="1"] {
     font-size: 20pt;
   }
-  /* Each numbered section starts a page. Eight sections over four pages otherwise break wherever the
-     prose happens to land, and a document sent to a client should not open a page mid-sentence under a
-     heading left on the one before. */
+  /* Sections flow rather than each claiming its own page. Forcing a break before every heading left
+     half-empty pages all through the document; a heading is only kept off the foot of a page (so it is
+     never orphaned from its section) and never split from the paragraph beneath it. */
   .brain-icp-sheet .md [data-level="2"] {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: 0 !important;
-    font-size: 14pt;
-    page-break-before: always;
+    font-size: 15pt;
+    color: #1f2a4c !important;
+    border-bottom: 1px solid #d7d2c4 !important;
+    padding-bottom: 8px;
+    margin-top: 26px;
+    break-before: auto;
+    break-after: avoid;
     page-break-after: avoid;
-  }
-  .brain-icp-sheet .md [data-level="2"]:first-of-type {
-    page-break-before: avoid;
   }
   .brain-icp-sheet .md [data-level="3"] {
-    font-size: 12pt;
+    font-size: 11pt;
+    break-after: avoid;
     page-break-after: avoid;
   }
-  .brain-icp-sheet .md strong,
-  .brain-icp-sheet .md h3,
-  .brain-icp-sheet .md h4,
-  .brain-icp-sheet .md h5 {
+  .brain-icp-sheet .md strong {
     color: #000 !important;
+  }
+  .brain-icp-sheet .md p,
+  .brain-icp-sheet .md li {
+    orphans: 2;
+    widows: 2;
   }
   .brain-icp-sheet .md-table-wrap {
     overflow: visible !important;
