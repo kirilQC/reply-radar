@@ -70,11 +70,10 @@ function config() {
   return { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
 }
 function authHeaders(key: string, write = false) {
-  const headers: Record<string, string> = { apikey: key, Authorization: `Bearer ${key}` };
-  if (write) {
-    headers["content-type"] = "application/json";
-    headers.Prefer = "return=representation";
-  }
+  // content-type is always set: PostgREST ignores the body of a PATCH/POST that lacks it, which is what left
+  // "mark onboarded" and reorder silently doing nothing. It is harmless on a GET, which has no body.
+  const headers: Record<string, string> = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" };
+  if (write) headers.Prefer = "return=representation";
   return headers;
 }
 

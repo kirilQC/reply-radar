@@ -58,7 +58,6 @@ export default function OnboardingTemplatePage() {
   const [editTitle, setEditTitle] = useState("");
   const [editSection, setEditSection] = useState("");
   const [editGroup, setEditGroup] = useState("");
-  const [editDesc, setEditDesc] = useState("");
 
   const [addSubFor, setAddSubFor] = useState<string | null>(null);
   const [subTitle, setSubTitle] = useState("");
@@ -108,13 +107,12 @@ export default function OnboardingTemplatePage() {
     setEditTitle(step.title);
     setEditSection(step.section || "");
     setEditGroup(step.group || "");
-    setEditDesc(step.description || "");
     setAddSubFor(null);
   };
   const saveEdit = (isSub: boolean) => {
     if (!editingId || !editTitle.trim()) return;
     // Group is a top-level concept; a sub-step inherits its parent's group, so it is not sent for one.
-    void send("PATCH", { id: editingId, title: editTitle.trim(), section: editSection.trim(), description: editDesc.trim(), ...(isSub ? {} : { group: editGroup }) });
+    void send("PATCH", { id: editingId, title: editTitle.trim(), section: editSection.trim(), ...(isSub ? {} : { group: editGroup }) });
     setEditingId(null);
   };
 
@@ -144,7 +142,6 @@ export default function OnboardingTemplatePage() {
           <input value={editSection} onChange={(e) => setEditSection(e.target.value)} placeholder="Section (optional)" />
         </div>
       )}
-      <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Description / notes (optional)" />
       <div className="onb-tpl-editactions">
         <button className="primary-button" onClick={() => saveEdit(isSub)} disabled={busy || !editTitle.trim()}>Save</button>
         <button className="text-button" onClick={() => setEditingId(null)}>Cancel</button>
@@ -162,11 +159,7 @@ export default function OnboardingTemplatePage() {
         </header>
         <main className="onboarding-shell">
           <div className="onboarding-heading">
-            <div>
-              <div className="eyebrow">Template</div>
-              <h1>Onboarding template</h1>
-              <p>The master checklist every new client starts from. Reorder, rename, add or remove steps. Changes apply to clients added from here on — clients already onboarding keep the list they started with.</p>
-            </div>
+            <h1>Onboarding template</h1>
           </div>
 
           {loading && <p style={{ color: "var(--muted)", fontSize: 12 }}>Loading template…</p>}
@@ -180,7 +173,6 @@ export default function OnboardingTemplatePage() {
                     <div className="onb-tpl-main">
                       <div className="onb-tpl-name">
                         {group.title}
-                        {group.description && <small>{group.description}</small>}
                       </div>
                     </div>
                     {group.group && <span className="onb-tpl-group">{group.group}</span>}
@@ -202,7 +194,6 @@ export default function OnboardingTemplatePage() {
                         <div className="onb-tpl-main">
                           <div className="onb-tpl-name">
                             {child.title}
-                            {child.description && <small>{child.description}</small>}
                           </div>
                         </div>
                         <div className="onb-tpl-actions">

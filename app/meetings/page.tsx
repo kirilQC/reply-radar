@@ -68,8 +68,6 @@ export default function MeetingsDirectoryPage() {
     })();
   }, []);
 
-  const totalMeetings = clients.reduce((sum, client) => sum + client.total, 0);
-  const totalUpcoming = clients.reduce((sum, client) => sum + client.upcoming, 0);
 
   return (
     <div className="app-shell">
@@ -81,10 +79,7 @@ export default function MeetingsDirectoryPage() {
         </header>
         <main className="mtg-shell">
           <div className="mtg-heading">
-            <div>
-              <h1>Booked meetings</h1>
-              <p>{loading ? "Loading clients…" : `${totalMeetings} meetings across ${clients.filter((c) => c.total > 0).length} clients · ${totalUpcoming} upcoming`}</p>
-            </div>
+            <h1>Booked meetings</h1>
           </div>
 
           {!loading && clients.length === 0 && (

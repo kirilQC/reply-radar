@@ -74,8 +74,6 @@ export default function DealsDirectoryPage() {
     })();
   }, []);
 
-  const attributed = clients.reduce((sum, c) => sum + c.confirmedValue, 0);
-  const connected = clients.filter((c) => c.crmProvider).length;
 
   return (
     <div className="app-shell">
@@ -87,10 +85,7 @@ export default function DealsDirectoryPage() {
         </header>
         <main className="deal-shell">
           <div className="deal-heading">
-            <div>
-              <h1>Deals &amp; attribution</h1>
-              <p>{loading ? "Loading…" : `${money(attributed)} of client pipeline traced to QC · ${connected} CRM${connected === 1 ? "" : "s"} connected`}</p>
-            </div>
+            <h1>Deals &amp; attribution</h1>
           </div>
           {!loading && clients.length === 0 && <div className="deal-directory"><div className="deal-empty">No clients yet.</div></div>}
           {clients.length > 0 && <div className="deal-directory">{clients.map((c) => <ClientCard key={c.id} client={c} />)}</div>}

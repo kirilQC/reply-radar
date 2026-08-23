@@ -56,6 +56,7 @@ export default function OnboardingDirectoryPage() {
   const [accent, setAccent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [showCompleted, setShowCompleted] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -133,12 +134,28 @@ export default function OnboardingDirectoryPage() {
             </div>
           )}
 
-          {!loading && clients.length === 0 && (
-            <div className="onb-directory"><div className="onb-empty">No clients yet. Add your first one to start its checklist.</div></div>
-          )}
-          {clients.length > 0 && (
-            <div className="onb-directory">{clients.map((c) => <ClientCard key={c.id} client={c} />)}</div>
-          )}
+          {(() => {
+            const active = clients.filter((c) => !c.progress.complete);
+            const completed = clients.filter((c) => c.progress.complete);
+            return (
+              <>
+                {!loading && clients.length === 0 && (
+                  <div className="onb-directory"><div className="onb-empty">No clients yet. Add your first one to start its checklist.</div></div>
+                )}
+                {active.length > 0 && (
+                  <div className="onb-directory">{active.map((c) => <ClientCard key={c.id} client={c} />)}</div>
+                )}
+                {completed.length > 0 && (
+                  <>
+                    <button className="onb-completed-toggle" onClick={() => setShowCompleted((v) => !v)}>
+                      {showCompleted ? "▾" : "▸"} Fully onboarded <span>{completed.length}</span>
+                    </button>
+                    {showCompleted && <div className="onb-directory">{completed.map((c) => <ClientCard key={c.id} client={c} />)}</div>}
+                  </>
+                )}
+              </>
+            );
+          })()}
         </main>
       </section>
     </div>
