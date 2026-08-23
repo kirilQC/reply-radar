@@ -6,6 +6,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AppSidebar from "../components/AppSidebar";
+import Crumb from "../components/Crumb";
+import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import "../meetings.css";
 
 type Client = {
@@ -74,7 +76,8 @@ export default function MeetingsDirectoryPage() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <div className="eyebrow" style={{ fontSize: 9, letterSpacing: ".14em", color: "var(--muted-2)", fontWeight: 700, textTransform: "uppercase" }}>Meetings</div>
+          <Crumb trail={[{ label: "Meetings" }]} />
+          <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="mtg-shell">
           <div className="mtg-heading">

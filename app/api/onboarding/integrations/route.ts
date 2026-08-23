@@ -16,7 +16,7 @@ export function GET(request: Request) {
   const host = request.headers.get("host") ?? "replyradar.dev";
   const proto = host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https";
   const secret = (process.env.MEETINGS_WEBHOOK_SECRET ?? "").trim();
-  const configured = Boolean(secret);
-  const meetingsWebhookUrl = `${proto}://${host}/api/webhooks/meeting/${secret || "SET-MEETINGS_WEBHOOK_SECRET"}`;
-  return NextResponse.json({ ok: true, meetings: { url: meetingsWebhookUrl, configured } });
+  // One clean URL for every client. If a secret is set it rides as a query param; if not, the bare URL works.
+  const meetingsWebhookUrl = `${proto}://${host}/api/webhooks/meeting${secret ? `?secret=${encodeURIComponent(secret)}` : ""}`;
+  return NextResponse.json({ ok: true, meetings: { url: meetingsWebhookUrl, configured: Boolean(secret) } });
 }

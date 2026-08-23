@@ -8,6 +8,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import AppSidebar from "../../components/AppSidebar";
+import Crumb from "../../components/Crumb";
+import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import "../../deals.css";
 
 type Deal = {
@@ -123,7 +125,8 @@ export default function ClientDealsPage() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <Link href="/deals" className="deal-back">← Deals</Link>
+          <Crumb trail={[{ label: "Deals", href: "/deals" }, { label: client?.name || "Client" }]} />
+          <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="deal-shell">
           {loading && <p style={{ color: "var(--muted)", fontSize: 12 }}>Loading…</p>}

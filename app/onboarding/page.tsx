@@ -7,6 +7,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
+import Crumb from "../components/Crumb";
+import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 
 type Progress = { doneLeaves: number; totalLeaves: number; pct: number; complete: boolean };
 type Client = {
@@ -31,7 +33,6 @@ function ClientCard({ client }: { client: Client }) {
         </span>
         <span className="onb-card-name">
           <strong>{client.name}</strong>
-          <small>{done ? "Onboarded" : started ? "Onboarding" : "Not started"}</small>
         </span>
         <span className={`onb-status ${done ? "complete" : started ? "in_progress" : "not_started"}`}>{done ? "Complete" : started ? "In progress" : "Not started"}</span>
       </div>
@@ -55,8 +56,6 @@ export default function OnboardingDirectoryPage() {
   const [accent, setAccent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [webhook, setWebhook] = useState<{ url: string; configured: boolean } | null>(null);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -67,22 +66,7 @@ export default function OnboardingDirectoryPage() {
       } catch { /* leave the empty state */ }
       setLoading(false);
     })();
-    void (async () => {
-      try {
-        const response = await fetch("/api/onboarding/integrations", { cache: "no-store" });
-        const payload = await response.json().catch(() => ({}));
-        if (response.ok && payload.meetings) setWebhook(payload.meetings);
-      } catch { /* reference is optional */ }
-    })();
   }, []);
-
-  const copyWebhook = () => {
-    if (!webhook) return;
-    navigator.clipboard?.writeText(webhook.url).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    }).catch(() => { /* clipboard blocked; the URL is selectable anyway */ });
-  };
 
   const addClient = async () => {
     const trimmed = name.trim();
@@ -101,7 +85,6 @@ export default function OnboardingDirectoryPage() {
         setSaving(false);
         return;
       }
-      // A new workspace means the sidebar's client list is now stale — let it re-read on the next page.
       try { window.dispatchEvent(new Event("reply-radar-workspaces-changed")); } catch { /* non-browser */ }
       router.push(`/onboarding/${payload.client.slug}`);
     } catch {
@@ -110,39 +93,22 @@ export default function OnboardingDirectoryPage() {
     }
   };
 
-  const complete = clients.filter((c) => c.progress.complete).length;
-  const started = clients.filter((c) => !c.progress.complete && c.progress.doneLeaves > 0).length;
-
   return (
     <div className="app-shell">
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <div className="onboarding-heading" style={{ margin: 0, width: "100%" }}>
-            <div>
-              <div className="eyebrow">Onboarding</div>
-            </div>
-          </div>
+          <Crumb trail={[{ label: "Onboarding" }]} />
+          <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="onboarding-shell">
           <div className="onboarding-heading">
-            <div>
-              <h1>Client onboarding</h1>
-              <p>{loading ? "Loading clients…" : `${clients.length} clients · ${started} in progress · ${complete} complete`}</p>
-            </div>
+            <h1>Client onboarding</h1>
             <div className="onb-actions">
               <Link href="/onboarding/template" className="secondary-button">Edit template</Link>
               <button className="primary-button" onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "Add new client"}</button>
             </div>
           </div>
-
-          {webhook && (
-            <div className="onb-ref">
-              <span className="onb-ref-label">Meetings webhook{!webhook.configured && <em> · set MEETINGS_WEBHOOK_SECRET</em>}</span>
-              <code className="onb-ref-url">{webhook.url}</code>
-              <button className="secondary-button" onClick={copyWebhook}>{copied ? "Copied" : "Copy"}</button>
-            </div>
-          )}
 
           {adding && (
             <div className="onb-add">
@@ -170,7 +136,6 @@ export default function OnboardingDirectoryPage() {
           {!loading && clients.length === 0 && (
             <div className="onb-directory"><div className="onb-empty">No clients yet. Add your first one to start its checklist.</div></div>
           )}
-
           {clients.length > 0 && (
             <div className="onb-directory">{clients.map((c) => <ClientCard key={c.id} client={c} />)}</div>
           )}

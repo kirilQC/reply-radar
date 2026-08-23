@@ -6,6 +6,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AppSidebar from "../components/AppSidebar";
+import Crumb from "../components/Crumb";
+import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import "../deals.css";
 
 type Client = {
@@ -80,7 +82,8 @@ export default function DealsDirectoryPage() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <div className="eyebrow" style={{ fontSize: 9, letterSpacing: ".14em", color: "var(--muted-2)", fontWeight: 700, textTransform: "uppercase" }}>Deals</div>
+          <Crumb trail={[{ label: "Deals" }]} />
+          <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="deal-shell">
           <div className="deal-heading">

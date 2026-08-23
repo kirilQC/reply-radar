@@ -424,6 +424,19 @@ export async function addOnboardingClient(input: { name: string; logoUrl?: strin
   };
 }
 
+/** Mark every step done and the client complete — the "already fully onboarded" shortcut, no Slack spam. */
+export async function markAllOnboardingDone(slug: string): Promise<{ ok: boolean; error?: string }> {
+  const { url, key } = config();
+  if (!url || !key) return { ok: false, error: "Supabase is not configured." };
+  const w = (await rows(url, key, `rr_workspaces?select=id&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
+  if (!w) return { ok: false, error: "That client was not found." };
+  const id = str(w.id);
+  const now = new Date().toISOString();
+  await fetch(`${url}/rest/v1/rr_onboarding_tasks?workspace_id=eq.${encodeURIComponent(id)}&is_done=eq.false`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify({ is_done: true, done_at: now }) }).catch(() => {});
+  await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify({ onboarding_status: "complete", onboarding_completed_at: now }) }).catch(() => {});
+  return { ok: true };
+}
+
 /** Remove a client from the hub. Deletes the workspace; the tasks cascade with it. */
 export async function deleteOnboardingClient(slug: string): Promise<{ ok: boolean; error?: string }> {
   const { url, key } = config();

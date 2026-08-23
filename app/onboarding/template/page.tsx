@@ -5,8 +5,9 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import AppSidebar from "../../components/AppSidebar";
+import Crumb from "../../components/Crumb";
+import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import { groupTasks, nextPosition } from "../../../shared/onboarding.mjs";
 
 type Step = {
@@ -156,7 +157,8 @@ export default function OnboardingTemplatePage() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <Link href="/onboarding" className="onb-back">← Onboarding</Link>
+          <Crumb trail={[{ label: "Onboarding", href: "/onboarding" }, { label: "Template" }]} />
+          <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="onboarding-shell">
           <div className="onboarding-heading">

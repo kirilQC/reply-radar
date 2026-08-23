@@ -8,6 +8,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import AppSidebar from "../../components/AppSidebar";
+import Crumb from "../../components/Crumb";
+import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import "../../meetings.css";
 
 type Meeting = {
@@ -176,7 +178,8 @@ export default function ClientMeetingsPage() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <Link href="/meetings" className="mtg-back">← Meetings</Link>
+          <Crumb trail={[{ label: "Meetings", href: "/meetings" }, { label: client?.name || "Client" }]} />
+          <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="mtg-shell">
           {loading && <p style={{ color: "var(--muted)", fontSize: 12 }}>Loading meetings…</p>}

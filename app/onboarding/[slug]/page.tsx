@@ -8,6 +8,8 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import AppSidebar from "../../components/AppSidebar";
+import Crumb from "../../components/Crumb";
+import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import { computeProgress, groupTasks } from "../../../shared/onboarding.mjs";
 
 type Task = {
@@ -145,6 +147,29 @@ function ReplyRadarSetup({ slug }: { slug: string }) {
   );
 }
 
+// The one unified meetings webhook, shown per-client for convenience (same URL for every client).
+function MeetingsWebhookCard() {
+  const [url, setUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/onboarding/integrations", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (response.ok && payload.meetings?.url) setUrl(payload.meetings.url);
+      } catch { /* optional */ }
+    })();
+  }, []);
+  if (!url) return null;
+  return (
+    <div className="onb-ref">
+      <span className="onb-ref-label">Meetings webhook</span>
+      <code className="onb-ref-url">{url}</code>
+      <button className="secondary-button" onClick={() => { navigator.clipboard?.writeText(url).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500); }).catch(() => {}); }}>{copied ? "Copied" : "Copy"}</button>
+    </div>
+  );
+}
+
 // ── The checklist ──────────────────────────────────────────────────────────────────────────────────────
 export default function OnboardingChecklistPage() {
   const params = useParams<{ slug: string }>();
@@ -153,6 +178,26 @@ export default function OnboardingChecklistPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [marking, setMarking] = useState(false);
+
+  const reload = async () => {
+    try {
+      const response = await fetch(`/api/onboarding/clients/${encodeURIComponent(slug)}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.client) { setClient(payload.client); setTasks(Array.isArray(payload.tasks) ? payload.tasks : []); }
+    } catch { /* keep current */ }
+  };
+
+  const markComplete = async () => {
+    if (marking || !window.confirm(`Mark ${client?.name ?? "this client"} as fully onboarded? Every step is checked off.`)) return;
+    setMarking(true);
+    try {
+      const response = await fetch(`/api/onboarding/clients/${encodeURIComponent(slug)}`, { method: "PATCH" });
+      if (response.ok) await reload();
+    } finally {
+      setMarking(false);
+    }
+  };
 
   useEffect(() => {
     if (!slug) return;
@@ -204,7 +249,8 @@ export default function OnboardingChecklistPage() {
       <AppSidebar />
       <section className="main-area">
         <header className="topbar">
-          <Link href="/onboarding" className="onb-back">← Onboarding</Link>
+          <Crumb trail={[{ label: "Onboarding", href: "/onboarding" }, { label: client?.name || "Client" }]} />
+          <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="onboarding-shell">
           {loading && <p style={{ color: "var(--muted)", fontSize: 12 }}>Loading checklist…</p>}
@@ -233,6 +279,7 @@ export default function OnboardingChecklistPage() {
               </div>
 
               <ReplyRadarSetup slug={slug} />
+              <MeetingsWebhookCard />
 
               {sections.map((section) => (
                 <div className="onb-group" key={section.name}>
@@ -276,6 +323,12 @@ export default function OnboardingChecklistPage() {
                   </div>
                 </div>
               ))}
+
+              {!done && (
+                <div className="onb-markdone">
+                  <button className="secondary-button" onClick={() => void markComplete()} disabled={marking}>{marking ? "Marking…" : "Mark fully onboarded ✓"}</button>
+                </div>
+              )}
             </>
           )}
         </main>
