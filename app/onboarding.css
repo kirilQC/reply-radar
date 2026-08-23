@@ -5,9 +5,9 @@
    here is drawn from the same CSS-variable palette the rest of the app uses, so it themes with it. */
 
 .onboarding-shell { flex: 1; max-width: 1180px; padding: 42px 42px 90px; margin: 0 auto; width: 100%; }
-.onboarding-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 30px; }
+.onboarding-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 30px; }
 .onboarding-heading .eyebrow { font-size: 9px; letter-spacing: .14em; color: var(--muted-2); text-transform: uppercase; font-weight: 700; }
-.onboarding-heading h1 { font-size: 28px; letter-spacing: -.05em; margin: 9px 0 5px; }
+.onboarding-heading h1 { font-size: 38px; letter-spacing: -.05em; margin: 0; }
 .onboarding-heading p { margin: 0; color: var(--muted); font-size: 12px; }
 .onb-actions { display: flex; align-items: center; gap: 10px; }
 
@@ -171,3 +171,14 @@
 .onb-tpl-editrow select, .onb-tpl-editrow input { flex: 1; min-width: 0; }
 .onb-tpl-editpanel select { border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2, #151821); color: var(--text); padding: 9px 11px; font-size: 12.5px; outline: none; }
 .onb-tpl-editpanel select:focus { border-color: var(--accent); }
+
+/* The "mark fully onboarded" shortcut at the bottom of a client's checklist. */
+.onb-markdone { display: flex; justify-content: center; margin: 24px 0 8px; }
+
+/* Make the header's link-button and real button identical boxes and vertically centred. */
+.onb-actions { align-items: center; }
+.onb-actions .secondary-button, .onb-actions .primary-button { height: 40px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; line-height: 1; box-sizing: border-box; }
+
+/* The collapsible "completed clients" drawer, pushed clear of the grid above it. */
+.onb-completed-toggle { width: 100%; display: flex; align-items: center; gap: 10px; margin: 56px 0 14px; padding: 14px 4px 0; background: transparent; border: 0; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; cursor: pointer; }
+.onb-completed-toggle:hover { color: var(--text); }

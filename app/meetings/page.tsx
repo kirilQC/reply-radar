@@ -22,13 +22,6 @@ type Client = {
   lastAt: string | null;
 };
 
-function shortDate(iso: string | null): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
 function ClientCard({ client }: { client: Client }) {
   return (
     <Link href={`/meetings/${client.slug}`} className="mtg-card">
@@ -38,16 +31,11 @@ function ClientCard({ client }: { client: Client }) {
         </span>
         <span className="mtg-card-name">
           <strong>{client.name}</strong>
-          <small>Booked meetings</small>
         </span>
         <span className="mtg-count">
           <b>{client.total}</b>
           <span>{client.total === 1 ? "meeting" : "meetings"}</span>
         </span>
-      </div>
-      <div className="mtg-card-foot">
-        <span>{client.upcoming > 0 ? <>Next <b>{shortDate(client.nextAt)}</b></> : client.lastAt ? <>Last <b>{shortDate(client.lastAt)}</b></> : "None yet"}</span>
-        {client.upcoming > 0 && <span>{client.upcoming} upcoming</span>}
       </div>
     </Link>
   );

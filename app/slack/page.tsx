@@ -335,16 +335,14 @@ export default function SlackPage() {
             <div className="hub-card-grid">
               {(["morning_brief", "call_analysis", "eow_report"] as Automation[]).map((which) => {
                 const dir = directories[which];
-                const on = (dir?.workspaces ?? []).filter((client) => which === "call_analysis" ? client.callAnalysisEnabled : which === "eow_report" ? client.eowReportEnabled : client.morningBriefEnabled).length;
                 return (
                   <div className="hub-card" key={which}>
                     <button type="button" className="hub-card-open" onClick={() => openAutomation(which)}>
                       <h3>{AUTOMATION_LABEL[which]}</h3>
                       <div className="hub-card-meta">
-                        {/* Two facts fit only because the schedule is the shortest of them when it is off. */}
-                        <b>{dir?.schedule.enabled ? describeSchedule(dir.schedule) : "Off"}</b>
-                        <span>·</span>
-                        <span>{on === 1 ? "1 client on" : `${on} clients on`}</span>
+                        {/* The call analysis has no schedule — it runs the hour a new Granola call is found, so
+                            showing a day/time for it would be a lie. The other two keep their schedule. */}
+                        <b>{which === "call_analysis" ? "Runs when a call lands" : dir?.schedule.enabled ? describeSchedule(dir.schedule) : "Off"}</b>
                       </div>
                     </button>
                   </div>

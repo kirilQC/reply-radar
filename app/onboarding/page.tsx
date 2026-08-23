@@ -148,7 +148,7 @@ export default function OnboardingDirectoryPage() {
                 {completed.length > 0 && (
                   <>
                     <button className="onb-completed-toggle" onClick={() => setShowCompleted((v) => !v)}>
-                      {showCompleted ? "▾" : "▸"} Fully onboarded <span>{completed.length}</span>
+                      {showCompleted ? "▾" : "▸"} Fully onboarded
                     </button>
                     {showCompleted && <div className="onb-directory">{completed.map((c) => <ClientCard key={c.id} client={c} />)}</div>}
                   </>
