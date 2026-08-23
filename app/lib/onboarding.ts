@@ -255,13 +255,15 @@ export type ReplyRadarConfig = {
   webhookUrl: string | null;
   keyConfigured: boolean;
   keyMasked: string;
+  crmProvider: string | null;
+  crmConfigured: boolean;
 };
 
 /** The Reply Radar config a teammate fills in before onboarding — read straight off the workspace row. */
 export async function getReplyRadarConfig(slug: string): Promise<ReplyRadarConfig | null> {
   const { url, key } = config();
   if (!url || !key) return null;
-  const w = (await rows(url, key, `rr_workspaces?select=id,name,website_url,slack_internal_channel_id,slack_external_channel_id,airtable_base_id,webhook_url,heyreach_api_key_ciphertext,guardrails&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
+  const w = (await rows(url, key, `rr_workspaces?select=id,name,website_url,slack_internal_channel_id,slack_external_channel_id,airtable_base_id,webhook_url,heyreach_api_key_ciphertext,crm_provider,crm_api_key_ciphertext,guardrails&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
   if (!w) return null;
   const guardrails = w.guardrails && typeof w.guardrails === "object" ? (w.guardrails as Record<string, unknown>) : {};
   const cipher = str(w.heyreach_api_key_ciphertext);
@@ -276,6 +278,8 @@ export async function getReplyRadarConfig(slug: string): Promise<ReplyRadarConfi
     webhookUrl: orNull(w.webhook_url),
     keyConfigured: Boolean(cipher),
     keyMasked: cipher ? `••••${cipher.slice(-4)}` : "",
+    crmProvider: orNull(w.crm_provider),
+    crmConfigured: Boolean(str(w.crm_api_key_ciphertext)),
   };
 }
 
@@ -284,7 +288,7 @@ export async function getReplyRadarConfig(slug: string): Promise<ReplyRadarConfi
  * the whole row and would null out the brief, logo and model when they are not resent — this touches only what
  * the panel edits, and merges the messaging doc URL into the existing guardrails rather than replacing them.
  */
-export async function saveReplyRadarConfig(slug: string, input: { website?: string; messagingDoc?: string; slackInternal?: string; slackExternal?: string; airtableBaseId?: string; heyreachApiKey?: string }): Promise<{ ok: boolean; error?: string }> {
+export async function saveReplyRadarConfig(slug: string, input: { website?: string; messagingDoc?: string; slackInternal?: string; slackExternal?: string; airtableBaseId?: string; heyreachApiKey?: string; crmProvider?: string; crmApiKey?: string }): Promise<{ ok: boolean; error?: string }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const w = (await rows(url, key, `rr_workspaces?select=id,guardrails&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
@@ -307,6 +311,13 @@ export async function saveReplyRadarConfig(slug: string, input: { website?: stri
   }
   // A blank key means "leave the saved one"; only a non-blank value overwrites it.
   if (str(input.heyreachApiKey).trim()) record.heyreach_api_key_ciphertext = str(input.heyreachApiKey).trim();
+  // Optional CRM — never required to complete setup, but saved here as a convenience when it is on hand.
+  if ("crmProvider" in input) {
+    const provider = str(input.crmProvider).trim().toLowerCase();
+    if (provider && provider !== "hubspot" && provider !== "attio") return { ok: false, error: "CRM provider must be hubspot or attio." };
+    record.crm_provider = provider || null;
+  }
+  if (str(input.crmApiKey).trim()) record.crm_api_key_ciphertext = str(input.crmApiKey).trim();
   if (!Object.keys(record).length) return { ok: true };
   const response = await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(str(w.id))}`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify(record) });
   return response.ok ? { ok: true } : { ok: false, error: "Could not save the Reply Radar setup." };

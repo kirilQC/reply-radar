@@ -182,3 +182,12 @@
 /* The collapsible "completed clients" drawer, pushed clear of the grid above it. */
 .onb-completed-toggle { width: 100%; display: flex; align-items: center; gap: 10px; margin: 56px 0 14px; padding: 14px 4px 0; background: transparent; border: 0; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; cursor: pointer; }
 .onb-completed-toggle:hover { color: var(--text); }
+
+/* Optional CRM key row inside the Reply Radar setup panel — never counted toward the 6/6. */
+.rr-field-optional { margin-bottom: 14px; }
+.rr-field-optional > label em { color: var(--muted-2); font-style: normal; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.rr-crm-row { display: flex; gap: 8px; }
+.rr-crm-row select { flex: 0 0 120px; }
+.rr-crm-row input { flex: 1; min-width: 0; }
+.rr-crm-row select, .rr-crm-row input { height: 36px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2, #151821); color: var(--text); padding: 0 10px; font-size: 12px; outline: none; }
+.rr-crm-row select:focus, .rr-crm-row input:focus { border-color: var(--accent); }

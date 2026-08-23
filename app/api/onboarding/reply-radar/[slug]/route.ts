@@ -23,6 +23,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     slackExternal: body.slackExternal as string | undefined,
     airtableBaseId: body.airtableBaseId as string | undefined,
     heyreachApiKey: body.heyreachApiKey as string | undefined,
+    crmProvider: body.crmProvider as string | undefined,
+    crmApiKey: body.crmApiKey as string | undefined,
   });
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
   // Pull the messaging doc into the brain the moment it is set, same as the admin console does.

@@ -652,6 +652,7 @@ function ClientHome({
   const [writing, setWriting] = useState(false);
   const [icpError, setIcpError] = useState("");
   const [icpSavedUrl, setIcpSavedUrl] = useState("");
+  const [icpProgress, setIcpProgress] = useState(0);
 
   /**
    * Asks for the document until the server says it is finished.
@@ -661,12 +662,13 @@ function ClientHome({
    * opened on the first reply rather than at the end, so the wait is spent reading the first page
    * instead of watching a disabled button — which is what "the button does nothing" actually was.
    */
-  const makeIcp = useCallback(async () => {
+  const makeIcp = useCallback(async (guidance = "") => {
     if (!detail) return;
     setWriting(true);
     setIcpError("");
     setIcp("");
     setIcpSavedUrl("");
+    setIcpProgress(6);
     try {
       let sofar = "";
       let chunk = 0;
@@ -674,13 +676,15 @@ function ClientHome({
         const response = await fetch("/api/brain/icp", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ client: detail.client, sofar, chunk }),
+          body: JSON.stringify({ client: detail.client, sofar, chunk, guidance }),
         });
         const body = await response.json().catch(() => ({}));
         if (!body?.ok) throw new Error(body?.error || "That document could not be written.");
         sofar = String(body.markdown ?? "");
         chunk = Number(body.chunk ?? chunk + 1);
         setIcp(sofar);
+        // A rough, honest fill: it climbs with each pass and lands at 100 when the model says it is done.
+        setIcpProgress(body.more ? Math.min(90, 10 + chunk * 16) : 100);
         if (!body.more) { setIcpSavedUrl(String(body.savedUrl ?? "")); break; }
       }
     } catch (problem) {
@@ -811,7 +815,7 @@ function ClientHome({
 
       <AskTheBrain client={detail.label} />
 
-      {icp && <IcpSheet label={detail.label} markdown={icp} savedUrl={icpSavedUrl} onClose={() => setIcp("")} />}
+      {icp && <IcpSheet label={detail.label} markdown={icp} savedUrl={icpSavedUrl} writing={writing} progress={icpProgress} onRegenerate={(guidance) => void makeIcp(guidance)} onClose={() => setIcp("")} />}
     </div>
   );
 }
@@ -880,16 +884,22 @@ function AskTheBrain({ client }: { client?: string }) {
  * contradict each other in places, and it is going to be read as fact by whoever it is sent to. The
  * person who asked for it should see it first.
  */
-function IcpSheet({ label, markdown, savedUrl, onClose }: { label: string; markdown: string; savedUrl?: string; onClose: () => void }) {
+function IcpSheet({ label, markdown, savedUrl, writing, progress, onRegenerate, onClose }: { label: string; markdown: string; savedUrl?: string; writing?: boolean; progress?: number; onRegenerate?: (guidance: string) => void; onClose: () => void }) {
+  const [instruction, setInstruction] = useState("");
+  const apply = () => {
+    if (writing || !instruction.trim() || !onRegenerate) return;
+    onRegenerate(instruction.trim());
+    setInstruction("");
+  };
   return (
     <div className="brain-icp" role="dialog" aria-label={`ICP document for ${label}`}>
       <div className="brain-icp-bar">
-        <span className="brain-icp-name">{label} · ICP document{savedUrl ? " · saved to the brain" : ""}</span>
+        <span className="brain-icp-name">{label} · ICP document{savedUrl && !writing ? " · saved to the brain" : ""}</span>
         <div className="brain-icp-tools">
-          {savedUrl && (
+          {savedUrl && !writing && (
             <a className="brain-action" href={savedUrl} target="_blank" rel="noreferrer">Open in brain ↗</a>
           )}
-          <button className="brain-action is-primary" onClick={() => window.print()}>
+          <button className="brain-action is-primary" onClick={() => window.print()} disabled={writing}>
             Save as PDF
           </button>
           <button className="brain-action" onClick={onClose}>
@@ -897,6 +907,25 @@ function IcpSheet({ label, markdown, savedUrl, onClose }: { label: string; markd
           </button>
         </div>
       </div>
+      {/* The customization chatbox: plain-language instructions that steer the next rewrite. */}
+      <div className="brain-icp-chat print-hide">
+        <input
+          className="brain-icp-chat-input"
+          value={instruction}
+          placeholder="Tell it what to change — e.g. “make it two pages, drop the exclusions, lead with the trigger signals”"
+          onChange={(event) => setInstruction(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter") apply(); }}
+          disabled={writing}
+        />
+        <button className="brain-action is-primary" onClick={apply} disabled={writing || !instruction.trim()}>
+          {writing ? "Writing…" : "Rewrite"}
+        </button>
+      </div>
+      {writing && (
+        <div className="brain-icp-progress print-hide" role="progressbar" aria-valuenow={progress ?? 0} aria-valuemin={0} aria-valuemax={100}>
+          <span style={{ width: `${Math.max(4, progress ?? 0)}%` }} />
+        </div>
+      )}
       <div className="brain-icp-sheet">
         <Markdown>{markdown}</Markdown>
       </div>

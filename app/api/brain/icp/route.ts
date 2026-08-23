@@ -34,6 +34,8 @@ export async function POST(request: Request) {
   const client = typeof body.client === "string" ? body.client.trim() : "";
   /** The document as it stands. Empty on the first request, and the model's own text after that. */
   const sofar = typeof body.sofar === "string" ? body.sofar : "";
+  /** Free-text instructions from the user's chatbox — what to include, cut, shorten, emphasise. */
+  const guidance = typeof body.guidance === "string" ? body.guidance.trim().slice(0, 2000) : "";
   const chunk = Number.isFinite(Number(body.chunk)) ? Math.max(0, Math.floor(Number(body.chunk))) : 0;
   if (chunk >= ICP_MAX_CHUNKS) {
     return NextResponse.json({ ok: false, error: "That document did not finish in a reasonable number of passes." }, { status: 400 });
@@ -68,7 +70,12 @@ export async function POST(request: Request) {
     const sources = wanted.filter((path) => byPath.has(path)).map((path) => ({ path, text: byPath.get(path) ?? "" }));
 
     const label = linked.get(skeleton.client)?.name || skeleton.label || String(clientLabel(client));
-    const written = await writeIcpDoc({ label, sources, prompt, sofar });
+    // The user's own instructions ride at the end of the system prompt, where they take precedence over the
+    // house defaults — so "make it two pages", "drop the exclusions", "lead with the triggers" all take effect.
+    const finalPrompt = guidance
+      ? `${prompt}\n\n## Instructions from the person requesting this document — follow these over the defaults above\n${guidance}`
+      : prompt;
+    const written = await writeIcpDoc({ label, sources, prompt: finalPrompt, sofar });
 
     // The whole point: once the document is finished, write it into the client's brain folder. `written.markdown`
     // is the full accumulated document (sofar + this chunk), so the last pass carries the complete text. The

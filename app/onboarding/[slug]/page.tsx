@@ -35,12 +35,14 @@ type RRConfig = {
   webhookUrl: string | null;
   keyConfigured: boolean;
   keyMasked: string;
+  crmProvider: string | null;
+  crmConfigured: boolean;
 };
 
 function ReplyRadarSetup({ slug }: { slug: string }) {
   const [cfg, setCfg] = useState<RRConfig | null>(null);
   const [bases, setBases] = useState<Array<{ id: string; name: string }>>([]);
-  const [form, setForm] = useState({ website: "", messagingDoc: "", slackInternal: "", slackExternal: "", airtableBaseId: "", heyreachApiKey: "" });
+  const [form, setForm] = useState({ website: "", messagingDoc: "", slackInternal: "", slackExternal: "", airtableBaseId: "", heyreachApiKey: "", crmProvider: "", crmApiKey: "" });
   const [collapsed, setCollapsed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -58,7 +60,7 @@ function ReplyRadarSetup({ slug }: { slug: string }) {
       const [config, basesResponse] = await Promise.all([loadConfig(), fetch("/api/airtable/bases", { cache: "no-store" })]);
       if (config) {
         setCfg(config);
-        setForm({ website: config.website || "", messagingDoc: config.messagingDoc || "", slackInternal: config.slackInternal || "", slackExternal: config.slackExternal || "", airtableBaseId: config.airtableBaseId || "", heyreachApiKey: "" });
+        setForm({ website: config.website || "", messagingDoc: config.messagingDoc || "", slackInternal: config.slackInternal || "", slackExternal: config.slackExternal || "", airtableBaseId: config.airtableBaseId || "", heyreachApiKey: "", crmProvider: config.crmProvider || "", crmApiKey: "" });
         const complete = config.keyConfigured && config.messagingDoc && config.website && config.slackInternal && config.slackExternal && config.airtableBaseId;
         setCollapsed(Boolean(complete));
       }
@@ -84,8 +86,9 @@ function ReplyRadarSetup({ slug }: { slug: string }) {
     if (saving) return;
     setSaving(true);
     setSaved(false);
-    const body: Record<string, string> = { website: form.website, messagingDoc: form.messagingDoc, slackInternal: form.slackInternal, slackExternal: form.slackExternal, airtableBaseId: form.airtableBaseId };
+    const body: Record<string, string> = { website: form.website, messagingDoc: form.messagingDoc, slackInternal: form.slackInternal, slackExternal: form.slackExternal, airtableBaseId: form.airtableBaseId, crmProvider: form.crmProvider };
     if (form.heyreachApiKey.trim()) body.heyreachApiKey = form.heyreachApiKey.trim();
+    if (form.crmApiKey.trim()) body.crmApiKey = form.crmApiKey.trim();
     try {
       const response = await fetch(`/api/onboarding/reply-radar/${encodeURIComponent(slug)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       if (response.ok) {
@@ -129,6 +132,17 @@ function ReplyRadarSetup({ slug }: { slug: string }) {
             {field("Website", <input value={form.website} placeholder="https://client.com" onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))} />)}
             {field("Slack internal ID", <input value={form.slackInternal} placeholder="C0123ABCD" onChange={(e) => setForm((f) => ({ ...f, slackInternal: e.target.value }))} />)}
             {field("Slack external ID", <input value={form.slackExternal} placeholder="C0123ABCD" onChange={(e) => setForm((f) => ({ ...f, slackExternal: e.target.value }))} />)}
+          </div>
+          <div className="rr-field rr-field-optional">
+            <label htmlFor="rr-crm-provider">Client CRM API key <em>optional — not required to complete</em></label>
+            <div className="rr-crm-row">
+              <select id="rr-crm-provider" value={form.crmProvider} onChange={(e) => setForm((f) => ({ ...f, crmProvider: e.target.value }))}>
+                <option value="">No CRM</option>
+                <option value="hubspot">HubSpot</option>
+                <option value="attio">Attio</option>
+              </select>
+              <input type="password" value={form.crmApiKey} placeholder={cfg?.crmConfigured ? "Saved — leave blank to keep" : "Paste the client's CRM key"} onChange={(e) => setForm((f) => ({ ...f, crmApiKey: e.target.value }))} />
+            </div>
           </div>
           {cfg?.webhookUrl && (
             <div className="rr-webhook">
