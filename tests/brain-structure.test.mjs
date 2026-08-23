@@ -19,6 +19,7 @@ import {
   BRAIN_AREAS,
   CLIENT_DOCS,
   agoLabel,
+  spanLabel,
   briefSummary,
   campaignCodesIn,
   clientHue,
@@ -205,6 +206,17 @@ test("ages read the way a person would say them", () => {
   assert.equal(agoLabel("2026-02-13T00:00:00Z", now), "6 months ago");
   assert.equal(agoLabel("2024-08-13T00:00:00Z", now), "2 years ago");
   assert.equal(agoLabel("", now), "");
+});
+
+test("engagement spans read as a held duration, not a date", () => {
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  assert.equal(spanLabel("2026-08-13T00:00:00Z", now), "1 day");
+  assert.equal(spanLabel("2026-08-10T00:00:00Z", now), "3 days");
+  assert.equal(spanLabel("2026-07-20T00:00:00Z", now), "3 weeks");
+  assert.equal(spanLabel("2026-05-13T00:00:00Z", now), "3 months");
+  assert.equal(spanLabel("2025-08-13T00:00:00Z", now), "1 year");
+  assert.equal(spanLabel("2025-02-13T00:00:00Z", now), "1 year, 6 months");
+  assert.equal(spanLabel("", now), "");
 });
 
 test("the non-client areas cover the folders the repo actually has", () => {

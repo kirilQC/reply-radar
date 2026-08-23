@@ -258,6 +258,67 @@ export async function brainLastTouched(paths: string[]): Promise<Map<string, str
 }
 
 /**
+ * Two facts about a client's folder that the file tree cannot tell you: what changed most recently and
+ * how long the folder has existed. Both are read from the commit history of `clients/<folder>` rather
+ * than the tree, because the tree has no time in it — every file reads as if it appeared at once.
+ *
+ * `latest` is the newest commit touching the folder, and the first file it changed under the folder is
+ * the "item" (a file the client page can name, not a commit hash). `since` is the date of the oldest
+ * such commit — when the folder first appeared — reached by following GitHub's `rel="last"` pagination
+ * link rather than walking every page. Everything is best-effort: a client with no history, or a rate
+ * limit, returns nulls and the page simply omits the line.
+ */
+export async function brainClientActivity(folder: string): Promise<{ latestItem: string; latestDate: string; since: string }> {
+  const empty = { latestItem: "", latestDate: "", since: "" };
+  if (!brainConfigured()) return empty;
+  const prefix = `clients/${folder}`;
+  try {
+    const listUrl = `${API}/repos/${BRAIN_REPO}/commits?per_page=1&path=${encodeURIComponent(prefix)}`;
+    const head = await fetch(listUrl, { headers: headers(), signal: AbortSignal.timeout(TIMEOUT_MS), cache: "no-store" });
+    if (!head.ok) return empty;
+    const newest = (await head.json()) as Array<Record<string, unknown>>;
+    const top = newest?.[0];
+    if (!top) return empty;
+    const latestDate = String((((top.commit as Record<string, unknown>)?.author as Record<string, unknown>)?.date) ?? "");
+    const sha = String(top.sha ?? "");
+
+    // Which file the latest commit touched under this client — fetched only for its file list. The first
+    // path under the folder is the "item"; a commit message would name the change, but the file names
+    // the thing, which is what the page shows.
+    let latestItem = "";
+    if (sha) {
+      try {
+        const detail = (await (await fetch(`${API}/repos/${BRAIN_REPO}/commits/${sha}`, { headers: headers(), signal: AbortSignal.timeout(TIMEOUT_MS), cache: "no-store" })).json()) as Record<string, unknown>;
+        const changed = (detail.files as Array<Record<string, unknown>> | undefined) ?? [];
+        const first = changed.map((f) => String(f.filename ?? "")).find((p) => p.startsWith(`${prefix}/`));
+        if (first) latestItem = first;
+      } catch {
+        /* the name is a nicety; the date is the fact */
+      }
+    }
+
+    // The oldest commit is on the last page of the paginated list. GitHub tells us which page that is in
+    // the Link header, so this is two requests whatever the history's length rather than one per page.
+    let since = latestDate;
+    const link = head.headers.get("link") ?? "";
+    const lastMatch = link.match(/[?&]page=(\d+)[^>]*>;\s*rel="last"/);
+    if (lastMatch) {
+      try {
+        const lastPage = (await (await fetch(`${listUrl}&page=${lastMatch[1]}`, { headers: headers(), signal: AbortSignal.timeout(TIMEOUT_MS), cache: "no-store" })).json()) as Array<Record<string, unknown>>;
+        const oldest = lastPage?.[lastPage.length - 1] ?? lastPage?.[0];
+        const oldestDate = String((((oldest?.commit as Record<string, unknown>)?.author as Record<string, unknown>)?.date) ?? "");
+        if (oldestDate) since = oldestDate;
+      } catch {
+        /* fall back to the newest date, which at least bounds the engagement from below */
+      }
+    }
+    return { latestItem, latestDate, since };
+  } catch {
+    return empty;
+  }
+}
+
+/**
  * Saves a file, on a branch, as a pull request — never straight onto `main`.
  *
  * This is the single most consequential decision in the module and it is worth being explicit about.

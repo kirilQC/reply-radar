@@ -21,7 +21,7 @@
  * free, and sharing the route keeps one definition of what a client is.
  */
 import { NextResponse } from "next/server";
-import { BRAIN_URL, brainConfigured, brainFile, brainLastTouched, brainTree } from "../../../lib/brain";
+import { BRAIN_URL, brainClientActivity, brainConfigured, brainFile, brainLastTouched, brainTree } from "../../../lib/brain";
 import { workspacesByFolder, type BrainWorkspace } from "../../../lib/brain-workspaces";
 import { BRAIN_AREAS, briefSummary, clientLabel, clientLogoIn, clientSkeleton, clientsIn, coverage, fileTitle, groupByFolder } from "../../../../shared/brain-structure.mjs";
 
@@ -100,10 +100,11 @@ export async function GET(request: Request) {
       // came off the page — a routine is something you run in Claude Code, and a chip that opens the
       // markdown behind it was not what anybody wanted from it — so three file reads per client page
       // came off with them. Every command is still listed under Skills.
-      const [touched, linked, brief] = await Promise.all([
+      const [touched, linked, brief, activity] = await Promise.all([
         brainLastTouched(skeleton.docs.map((doc) => doc.found).filter(Boolean)),
         workspacesByFolder(folderNames),
         briefPath ? brainFile(briefPath).catch(() => null) : Promise.resolve(null),
+        brainClientActivity(skeleton.client).catch(() => ({ latestItem: "", latestDate: "", since: "" })),
       ]);
       const workspace = linked.get(skeleton.client);
       const { summary, facts } = briefSummary(brief?.text ?? "") as { summary: string; facts: { label: string; value: string }[] };
@@ -117,6 +118,9 @@ export async function GET(request: Request) {
           summary,
           facts,
           briefPath,
+          // What changed last and how long we have held this client — two facts the file tree cannot
+          // carry, read from the folder's commit history.
+          activity,
           // The other half of this client. Named on the page so somebody can tell a client we run
           // campaigns for from a prospect we only ever wrote notes about — a distinction the brain
           // alone cannot make, and the reason for tethering the two systems at all.

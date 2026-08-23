@@ -45,7 +45,7 @@ import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import Markdown from "../components/Markdown";
-import { agoLabel, clientHue, clientInitials, fileKind, staleness } from "../../shared/brain-structure.mjs";
+import { agoLabel, clientHue, clientInitials, fileKind, spanLabel, staleness } from "../../shared/brain-structure.mjs";
 
 type Coverage = { have: number; total: number; fraction: number };
 type IndexClient = { client: string; label: string; logo: string };
@@ -62,6 +62,7 @@ type ClientDetail = {
   facts: Fact[];
   briefPath: string;
   files: number;
+  activity?: { latestItem: string; latestDate: string; since: string };
   workspace: Workspace | null;
   docs: Doc[];
   groups: Group[];
@@ -632,6 +633,12 @@ function ClientMark({ label, logo, slug, size }: { label: string; logo: string; 
  * document that happens to mention a code, because "how is this client actually doing" is a question
  * about the client and not about one file.
  */
+/** A committed file path → the human title of the file it points at (its basename, cleaned up). */
+function fileLabel(path: string): string {
+  const base = (path.split("/").pop() ?? path).replace(/\.[a-z0-9]+$/i, "");
+  return base.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function ClientHome({
   detail,
   onOpen,
@@ -666,7 +673,9 @@ function ClientHome({
     if (!detail) return;
     setWriting(true);
     setIcpError("");
-    setIcp("");
+    // Do NOT clear the document here — on a regenerate the old one stays on screen (dimmed under the progress
+    // bar) until the new text streams in, so the user is never kicked back to the folder. A fresh run already
+    // has an empty document, and the sheet now mounts on `writing` so its progress bar shows from the click.
     setIcpSavedUrl("");
     setIcpProgress(6);
     try {
@@ -732,6 +741,22 @@ function ClientHome({
                   </div>
                 ))}
               </dl>
+            )}
+            {/* Two facts about the engagement itself, read from the folder's commit history: how long
+                we have held the client, and what changed most recently. */}
+            {detail.activity && (detail.activity.since || detail.activity.latestDate) && (
+              <div className="brain-hero-activity">
+                {detail.activity.since && (
+                  <span className="brain-hero-activity-item">
+                    <strong>{spanLabel(detail.activity.since)}</strong> engaged
+                  </span>
+                )}
+                {detail.activity.latestDate && (
+                  <span className="brain-hero-activity-item">
+                    Last added{detail.activity.latestItem ? <> · <b>{fileLabel(detail.activity.latestItem)}</b></> : null} · {agoLabel(detail.activity.latestDate)}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -815,7 +840,7 @@ function ClientHome({
 
       <AskTheBrain client={detail.label} />
 
-      {icp && <IcpSheet label={detail.label} markdown={icp} savedUrl={icpSavedUrl} writing={writing} progress={icpProgress} onRegenerate={(guidance) => void makeIcp(guidance)} onClose={() => setIcp("")} />}
+      {(icp || writing) && <IcpSheet label={detail.label} markdown={icp} savedUrl={icpSavedUrl} writing={writing} progress={icpProgress} onRegenerate={(guidance) => void makeIcp(guidance)} onClose={() => { setIcp(""); setWriting(false); }} />}
     </div>
   );
 }
@@ -927,7 +952,15 @@ function IcpSheet({ label, markdown, savedUrl, writing, progress, onRegenerate, 
         </div>
       )}
       <div className="brain-icp-sheet">
-        <Markdown>{markdown}</Markdown>
+        {markdown ? (
+          <Markdown>{markdown}</Markdown>
+        ) : (
+          <div className="brain-icp-writing">
+            <div className="brain-icp-spinner" />
+            <p>Writing the ICP document…</p>
+            <small>This can take a minute — it reads the client&apos;s whole brain folder.</small>
+          </div>
+        )}
       </div>
     </div>
   );

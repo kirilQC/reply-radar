@@ -291,6 +291,33 @@ export function agoLabel(iso, now = Date.now()) {
 }
 
 /**
+ * How long an engagement has run, from its start date to now — a duration, not a "when".
+ *
+ * Coarsened the same way {@link agoLabel} is, because "engaged for 47 days" is a number nobody asked
+ * for the precision of: a client is held for weeks, then months, then years, and once it is years the
+ * trailing months are the only remaining useful detail. Returns "" for a missing or unparseable date
+ * so the caller can drop the line rather than print a bare "engaged".
+ */
+export function spanLabel(iso, now = Date.now()) {
+  const { days } = staleness(iso, now);
+  if (days === null) return "";
+  if (days < 7) {
+    const shown = Math.max(days, 1);
+    return `${shown} day${shown === 1 ? "" : "s"}`;
+  }
+  if (days < 60) {
+    const weeks = Math.floor(days / 7);
+    return `${weeks} week${weeks === 1 ? "" : "s"}`;
+  }
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? "" : "s"}`;
+  const years = Math.floor(months / 12);
+  const rem = months % 12;
+  if (!rem) return `${years} year${years === 1 ? "" : "s"}`;
+  return `${years} year${years === 1 ? "" : "s"}, ${rem} month${rem === 1 ? "" : "s"}`;
+}
+
+/**
  * How complete a client's core context is, as a fraction.
  *
  * Deliberately counts only the skeleton and ignores the extras, because a client with thirty call
