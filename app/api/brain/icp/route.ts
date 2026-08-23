@@ -14,7 +14,7 @@
  * meet twelve call notes before the brief.
  */
 import { NextResponse } from "next/server";
-import { brainConfigured, brainFiles, brainTree } from "../../../lib/brain";
+import { brainConfigured, brainFiles, brainTree, writeBrainFile } from "../../../lib/brain";
 import { ICP_MAX_CHUNKS, icpDocPrompt, writeIcpDoc } from "../../../lib/brain-icp";
 import { workspacesByFolder, type BrainWorkspace } from "../../../lib/brain-workspaces";
 import { clientLabel, clientSkeleton, fileKind } from "../../../../shared/brain-structure.mjs";
@@ -69,11 +69,28 @@ export async function POST(request: Request) {
 
     const label = linked.get(skeleton.client)?.name || skeleton.label || String(clientLabel(client));
     const written = await writeIcpDoc({ label, sources, prompt, sofar });
+
+    // The whole point: once the document is finished, write it into the client's brain folder. `written.markdown`
+    // is the full accumulated document (sofar + this chunk), so the last pass carries the complete text. The
+    // ICP slot's canonical path is account/icp.md under the client folder. A save failure does not fail the
+    // request — the page still shows the document — but its URL is returned so the user gets a link to the file.
+    let savedUrl: string | null = null;
+    if (written.done) {
+      const icpPath = skeleton.docs[1]?.found || `clients/${skeleton.client}/account/icp.md`;
+      try {
+        const saved = await writeBrainFile({ path: icpPath, text: written.markdown, summary: `ICP document for ${label}`, author: "Reply Radar" });
+        savedUrl = saved.url;
+      } catch {
+        /* the document is still shown; only the write-back to the repo failed */
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       client: skeleton.client,
       label,
       ...written,
+      savedUrl,
       // How many more times the page may come back before it should stop asking. Counted here so the
       // limit lives with the thing that knows what a request costs.
       chunk: chunk + 1,

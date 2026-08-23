@@ -39,7 +39,9 @@ import { fileKind } from "../../../../shared/brain-structure.mjs";
  * silently clamped — so a deadline set inside an imagined 300s ceiling is not a deadline at all, and
  * every pass that took longer than a minute was killed with its response still unwritten.
  */
-export const maxDuration = 60;
+// On Vercel Pro this can run to 300s, ~5x the docs laid out per pass — which matters when a backlog has built
+// up (e.g. after the cron was down). Once caught up it renders only changed docs, so a long ceiling costs nothing.
+export const maxDuration = 300;
 
 /**
  * When to stop taking new documents on.

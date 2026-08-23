@@ -651,6 +651,7 @@ function ClientHome({
   const [icp, setIcp] = useState("");
   const [writing, setWriting] = useState(false);
   const [icpError, setIcpError] = useState("");
+  const [icpSavedUrl, setIcpSavedUrl] = useState("");
 
   /**
    * Asks for the document until the server says it is finished.
@@ -665,6 +666,7 @@ function ClientHome({
     setWriting(true);
     setIcpError("");
     setIcp("");
+    setIcpSavedUrl("");
     try {
       let sofar = "";
       let chunk = 0;
@@ -679,7 +681,7 @@ function ClientHome({
         sofar = String(body.markdown ?? "");
         chunk = Number(body.chunk ?? chunk + 1);
         setIcp(sofar);
-        if (!body.more) break;
+        if (!body.more) { setIcpSavedUrl(String(body.savedUrl ?? "")); break; }
       }
     } catch (problem) {
       setIcpError(problem instanceof Error ? problem.message : "That document could not be written.");
@@ -809,7 +811,7 @@ function ClientHome({
 
       <AskTheBrain client={detail.label} />
 
-      {icp && <IcpSheet label={detail.label} markdown={icp} onClose={() => setIcp("")} />}
+      {icp && <IcpSheet label={detail.label} markdown={icp} savedUrl={icpSavedUrl} onClose={() => setIcp("")} />}
     </div>
   );
 }
@@ -878,12 +880,15 @@ function AskTheBrain({ client }: { client?: string }) {
  * contradict each other in places, and it is going to be read as fact by whoever it is sent to. The
  * person who asked for it should see it first.
  */
-function IcpSheet({ label, markdown, onClose }: { label: string; markdown: string; onClose: () => void }) {
+function IcpSheet({ label, markdown, savedUrl, onClose }: { label: string; markdown: string; savedUrl?: string; onClose: () => void }) {
   return (
     <div className="brain-icp" role="dialog" aria-label={`ICP document for ${label}`}>
       <div className="brain-icp-bar">
-        <span className="brain-icp-name">{label} · ICP document</span>
+        <span className="brain-icp-name">{label} · ICP document{savedUrl ? " · saved to the brain" : ""}</span>
         <div className="brain-icp-tools">
+          {savedUrl && (
+            <a className="brain-action" href={savedUrl} target="_blank" rel="noreferrer">Open in brain ↗</a>
+          )}
           <button className="brain-action is-primary" onClick={() => window.print()}>
             Save as PDF
           </button>
