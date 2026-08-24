@@ -24,10 +24,13 @@ type Deal = {
   contactEmail: string | null;
   companyName: string | null;
   companyDomain: string | null;
+  contactLinkedin: string | null;
   attribution: string;
   attributionReason: string | null;
   attributionMatchedBy: string | null;
   attributionCampaign: string | null;
+  leadId: string | null;
+  companyLogo: string | null;
 };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Crm = { provider: string | null; connected: boolean; lastSyncedAt: string | null };
@@ -58,6 +61,8 @@ export default function ClientDealsPage() {
   const [filter, setFilter] = useState<"all" | "confirmed" | "possible">("all");
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState("");
+  /** The deal opened in the drawer, and its loaded detail. */
+  const [openDeal, setOpenDeal] = useState<Deal | null>(null);
 
   // Connect form
   const [provider, setProvider] = useState("hubspot");
@@ -125,7 +130,6 @@ export default function ClientDealsPage() {
   const confirmedCount = deals.filter((d) => d.attribution === "confirmed").length;
   const possibleCount = deals.filter((d) => d.attribution === "possible").length;
   const confirmedValue = deals.filter((d) => d.attribution === "confirmed").reduce((s, d) => s + (d.amount || 0), 0);
-  const totalValue = deals.reduce((s, d) => s + (d.amount || 0), 0);
   const currency = deals.find((d) => d.currency)?.currency ?? null;
   const anyValue = deals.some((d) => d.amount);
 
@@ -218,22 +222,17 @@ export default function ClientDealsPage() {
                 </div>
               ) : (
                 <>
-                  {/* The hero: the agency's own scorecard — how much of this pipeline traces to QC. */}
+                  {/* The scorecard: the deals QC sourced, as big as it deserves to be. */}
                   <div className="deal-hero">
                     <div className="deal-hero-big">
-                      <span>Pipeline sourced by QC</span>
-                      <b>{anyValue ? money(confirmedValue, currency) : confirmedCount}</b>
-                      <small>{anyValue ? `${confirmedCount} confirmed deal${confirmedCount === 1 ? "" : "s"}` : "confirmed deals — connect deal values in the CRM to see the sum"}</small>
+                      <span>Deals attributed to QC</span>
+                      <b>{confirmedCount}</b>
+                      <small>{anyValue && confirmedValue ? `${money(confirmedValue, currency)} in confirmed pipeline` : "confirmed — a QC-contacted person is on them"}</small>
                     </div>
                     <div className="deal-hero-cell">
                       <span>To review</span>
                       <b className="amber">{possibleCount}</b>
                       <small>same company, unconfirmed person</small>
-                    </div>
-                    <div className="deal-hero-cell">
-                      <span>Total pipeline</span>
-                      <b>{anyValue ? money(totalValue, currency) : deals.length}</b>
-                      <small>{anyValue ? `${deals.length} deals` : "deals synced"}</small>
                     </div>
                   </div>
 
@@ -283,7 +282,7 @@ export default function ClientDealsPage() {
                           <div className="deal-col-body">
                             {col.deals.length === 0 && <p className="deal-col-empty">—</p>}
                             {col.deals.map((deal) => (
-                              <DealCard key={deal.id} deal={deal} currency={currency} money={money} />
+                              <DealCard key={deal.id} deal={deal} currency={currency} money={money} onOpen={() => setOpenDeal(deal)} />
                             ))}
                           </div>
                         </div>
@@ -318,20 +317,25 @@ export default function ClientDealsPage() {
           )}
         </main>
       </section>
+      {openDeal && <DealDrawer deal={openDeal} money={money} onClose={() => setOpenDeal(null)} />}
     </div>
   );
 }
 
-/** One deal on the board: company, who, the attribution proof, value, and its status badge. */
-function DealCard({ deal, currency, money }: { deal: Deal; currency: string | null; money: (v: number | null, c: string | null) => string }) {
+/** One deal on the board: logo, company, who, the attribution proof, value, and its status. Clickable. */
+function DealCard({ deal, currency, money, onOpen }: { deal: Deal; currency: string | null; money: (v: number | null, c: string | null) => string; onOpen: () => void }) {
   const attr = deal.attribution;
+  const initial = (deal.companyName || deal.name || "?").trim().charAt(0).toUpperCase();
   return (
-    <div className={`dk ${attr}`}>
+    <button className={`dk ${attr}`} onClick={onOpen} type="button">
       <div className="dk-top">
-        <b>{deal.companyName || deal.name || "Untitled"}</b>
+        <span className="dk-logo">{deal.companyLogo ? <img src={deal.companyLogo} alt="" /> : initial}</span>
+        <span className="dk-id">
+          <b>{deal.companyName || deal.name || "Untitled"}</b>
+          {(deal.contactName || deal.contactEmail) && <small>{deal.contactName || deal.contactEmail}</small>}
+        </span>
         {deal.amount ? <span className="dk-val">{money(deal.amount, deal.currency || currency)}</span> : null}
       </div>
-      {(deal.contactName || deal.contactEmail) && <span className="dk-who">{deal.contactName || deal.contactEmail}</span>}
       {attr !== "none" && deal.attributionReason && (
         <span className={`dk-attr ${attr}`}><i />{deal.attributionReason}</span>
       )}
@@ -340,7 +344,103 @@ function DealCard({ deal, currency, money }: { deal: Deal; currency: string | nu
         {attr === "possible" && <span className="dk-tag review">Review</span>}
         <span className={`dk-tag status ${deal.status}`}>{deal.status}</span>
       </div>
-    </div>
+    </button>
   );
 }
 
+type Detail = {
+  lead: { name: string | null; role: string | null; company: string | null; linkedin: string | null; location: string | null; industry: string | null; headline: string | null; photoUrl: string | null; campaigns: string[]; icpScore: number | null } | null;
+  messages: { direction: string; body: string; sentAt: string | null }[];
+};
+
+/**
+ * Everything about one deal, in a drawer: the lead QC contacted, their company, the campaign, and the
+ * whole conversation. The conversation is our mirror of HeyReach — the same messages, read from the
+ * database rather than fetched live, so opening a deal is instant.
+ */
+function DealDrawer({ deal, money, onClose }: { deal: Deal; money: (v: number | null, c: string | null) => string; onClose: () => void }) {
+  const [detail, setDetail] = useState<Detail | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/deals/detail/${encodeURIComponent(deal.id)}`, { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (live && payload.ok) setDetail({ lead: payload.lead, messages: payload.messages ?? [] });
+      } finally { if (live) setLoading(false); }
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deal.id]);
+
+  const lead = detail?.lead;
+  const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "");
+
+  return (
+    <div className="dd-backdrop">
+      <button className="dd-scrim" aria-label="Close" onClick={onClose} />
+      <aside className="dd-panel" role="dialog" aria-label={deal.companyName || "Deal"}>
+        <div className="dd-head">
+          <span className="dd-logo">{deal.companyLogo ? <img src={deal.companyLogo} alt="" /> : (deal.companyName || "?").charAt(0).toUpperCase()}</span>
+          <div className="dd-head-t">
+            <h2>{deal.companyName || deal.name || "Untitled deal"}</h2>
+            <span>{[deal.stage, deal.amount ? money(deal.amount, deal.currency) : null].filter(Boolean).join(" · ")}</span>
+          </div>
+          <button className="dd-x" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        {deal.attribution !== "none" && (
+          <div className={`dd-attr ${deal.attribution}`}>
+            <b>{deal.attribution === "confirmed" ? "Attributed to QC" : "Possible QC deal"}</b>
+            {deal.attributionReason && <p>{deal.attributionReason}</p>}
+            {deal.attributionCampaign && <span className="dd-camp">Campaign: {deal.attributionCampaign}</span>}
+          </div>
+        )}
+
+        {loading ? (
+          <p className="dd-loading">Loading the lead and conversation…</p>
+        ) : (
+          <>
+            {lead ? (
+              <div className="dd-section">
+                <div className="dd-lead">
+                  {lead.photoUrl && <img className="dd-lead-photo" src={lead.photoUrl} alt="" />}
+                  <div>
+                    <b>{lead.name || "—"}</b>
+                    {lead.role && <span>{lead.role}</span>}
+                    {lead.headline && <span className="dd-headline">{lead.headline}</span>}
+                  </div>
+                </div>
+                <dl className="dd-facts">
+                  {lead.company && <><dt>Company</dt><dd>{lead.company}</dd></>}
+                  {lead.industry && <><dt>Industry</dt><dd>{lead.industry}</dd></>}
+                  {lead.location && <><dt>Location</dt><dd>{lead.location}</dd></>}
+                  {lead.icpScore != null && <><dt>ICP score</dt><dd>{lead.icpScore}</dd></>}
+                  {lead.campaigns.length > 0 && <><dt>Campaigns</dt><dd>{lead.campaigns.join(", ")}</dd></>}
+                  {lead.linkedin && <><dt>LinkedIn</dt><dd><a href={lead.linkedin} target="_blank" rel="noreferrer noopener">Profile ↗</a></dd></>}
+                </dl>
+              </div>
+            ) : (
+              <p className="dd-nolead">No QC lead is matched to this deal, so there is no conversation to show. The attribution is company-level — confirm the person in the CRM to link it.</p>
+            )}
+
+            {detail && detail.messages.length > 0 && (
+              <div className="dd-section">
+                <span className="dd-label">Conversation · {detail.messages.length} messages</span>
+                <div className="dd-thread">
+                  {detail.messages.map((m, i) => (
+                    <div key={i} className={`dd-msg ${m.direction.toLowerCase().includes("in") ? "in" : "out"}`}>
+                      <p>{m.body}</p>
+                      <time>{when(m.sentAt)}</time>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </aside>
+    </div>
+  );
+}

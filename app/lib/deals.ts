@@ -13,6 +13,7 @@
  */
 
 import { fetchDeals, fetchPipeline, type CrmProvider, type Pipeline } from "./crm";
+import { campaignsForLead } from "./heyreach-api";
 import { resolveWorkspace } from "./meetings";
 import { buildQcIdentity, attributeDeal } from "../../shared/deal-attribution.mjs";
 
@@ -30,10 +31,13 @@ export type Deal = {
   contactEmail: string | null;
   companyName: string | null;
   companyDomain: string | null;
+  contactLinkedin: string | null;
   attribution: string;
   attributionReason: string | null;
   attributionMatchedBy: string | null;
   attributionCampaign: string | null;
+  leadId: string | null;
+  companyLogo: string | null;
 };
 
 export type DealClient = {
@@ -83,10 +87,13 @@ function dealFromRow(row: Row): Deal {
     contactEmail: orNull(row.contact_email),
     companyName: orNull(row.company_name),
     companyDomain: orNull(row.company_domain),
+    contactLinkedin: orNull(row.contact_linkedin),
     attribution: str(row.attribution) || "none",
     attributionReason: orNull(row.attribution_reason),
     attributionMatchedBy: orNull(row.attribution_matched_by),
     attributionCampaign: orNull(row.attribution_campaign),
+    leadId: orNull(row.attribution_lead_id),
+    companyLogo: orNull(row.company_logo),
   };
 }
 
@@ -115,12 +122,49 @@ function leadDomain(raw: unknown): string {
   return str(summary.website ?? summary.domain ?? company.website ?? company.domain ?? "");
 }
 
+/** A company logo out of a lead's enrichment, for the deal card. Best-effort. */
+function leadLogo(raw: unknown): string {
+  const rr = ((raw as Record<string, unknown>)?.reply_radar ?? {}) as Record<string, unknown>;
+  const enrichment = (rr.ai_ark ?? {}) as Record<string, unknown>;
+  return str(enrichment.companyPhotoSource ?? enrichment.companyPhotoUrl ?? "");
+}
+
+/**
+ * Ask HeyReach, for a batch of LinkedIn profile URLs, which QC campaign (if any) each person is in.
+ *
+ * This is the authoritative source and the reason it runs first: HeyReach knows definitively whether QC
+ * ever messaged a person, and its own URL matching is more forgiving than a string compare against our
+ * mirror. A deal contact HeyReach recognises is a confirmed QC deal, full stop — even if that person
+ * never landed in our leads table for this workspace.
+ *
+ * Bounded concurrency and a cap, because a large board could hold hundreds of contacts and HeyReach is
+ * rate-limited. A lookup that errors just yields no campaign — the deal falls through to local matching.
+ */
+async function heyreachCampaignsFor(apiKey: string, profileUrls: string[]): Promise<Map<string, string>> {
+  const found = new Map<string, string>();
+  if (!apiKey) return found;
+  const unique = [...new Set(profileUrls.filter(Boolean))].slice(0, 500);
+  const LANES = 4;
+  for (let i = 0; i < unique.length; i += LANES) {
+    await Promise.all(unique.slice(i, i + LANES).map(async (profileUrl) => {
+      try {
+        const page = await campaignsForLead(apiKey, { profileUrl }, 5);
+        const campaign = page.items[0]?.name;
+        if (campaign) found.set(profileUrl, campaign);
+      } catch {
+        // A single failed lookup is not fatal — that contact simply relies on local matching instead.
+      }
+    }));
+  }
+  return found;
+}
+
 /** The identifiers that prove QC contact, gathered from leads and meetings for one client. */
 async function gatherQcIdentity(url: string, key: string, workspaceId: string) {
   const [leadRows, meetingRows] = await Promise.all([
     // `company` is the piece that was missing — the company QC contacted each lead at. `raw_data` carries
     // the enriched company, which sometimes holds a website we can turn into a domain for a stronger match.
-    rows(url, key, `rr_leads?select=linkedin_profile_url,campaign_names,name,company,raw_data&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=20000`),
+    rows(url, key, `rr_leads?select=id,linkedin_profile_url,campaign_names,name,company,raw_data&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=20000`),
     rows(url, key, `rr_meetings?select=invitee_email,invitee_linkedin,campaign,company_domain,invitee_name,company_name&workspace_id=eq.${encodeURIComponent(workspaceId)}`),
   ]);
   return buildQcIdentity({
@@ -130,8 +174,10 @@ async function gatherQcIdentity(url: string, key: string, workspaceId: string) {
       name: str(r.name),
       company: str(r.company),
       domain: leadDomain(r.raw_data),
+      leadId: str(r.id),
+      companyLogo: leadLogo(r.raw_data),
     })),
-    meetings: meetingRows.map((r) => ({ email: str(r.invitee_email), linkedin: str(r.invitee_linkedin), campaign: str(r.campaign), domain: str(r.company_domain), name: str(r.invitee_name), company: str(r.company_name) })),
+    meetings: meetingRows.map((r) => ({ email: str(r.invitee_email), linkedin: str(r.invitee_linkedin), campaign: str(r.campaign), domain: str(r.company_domain), name: str(r.invitee_name), company: str(r.company_name), leadId: "", companyLogo: "" })),
   });
 }
 
@@ -144,7 +190,7 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const client = await resolveWorkspace(slug);
   if (!client) return { ok: false, error: `No single client matches "${slug}".` };
-  const workspace = (await rows(url, key, `rr_workspaces?select=id,crm_provider,crm_api_key_ciphertext&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0];
+  const workspace = (await rows(url, key, `rr_workspaces?select=id,crm_provider,crm_api_key_ciphertext,heyreach_api_key_ciphertext&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0];
   const provider = str(workspace?.crm_provider) as CrmProvider;
   const token = str(workspace?.crm_api_key_ciphertext);
   if (!provider || !token) return { ok: false, error: "Connect a CRM for this client first." };
@@ -172,10 +218,29 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
   }
 
   const qc = await gatherQcIdentity(url, key, client.id);
+
+  // HeyReach first, as asked: the authoritative "did we ever message this person" for every LinkedIn URL
+  // on the board. What it confirms overrides local matching, because it is the source our leads mirror.
+  const heyreachKey = str(workspace?.heyreach_api_key_ciphertext);
+  const contactUrls = deals.flatMap((d) => d.contacts.map((c) => c.linkedin).filter(Boolean));
+  const heyreach = await heyreachCampaignsFor(heyreachKey, contactUrls);
+
   let confirmed = 0;
   let possible = 0;
   const records = deals.map((deal) => {
-    const verdict = attributeDeal({ contacts: deal.contacts, companyDomain: deal.companyDomain, companyName: deal.companyName }, qc);
+    // A HeyReach hit on any contact is a confirmed QC deal outright.
+    const hit = deal.contacts.find((c) => c.linkedin && heyreach.has(c.linkedin));
+    const verdict = hit
+      ? {
+          attribution: "confirmed" as const,
+          matchedBy: "heyreach",
+          campaign: heyreach.get(hit.linkedin) || "",
+          reason: `${hit.name || "This contact"} was contacted in ${heyreach.get(hit.linkedin)} — confirmed by HeyReach.`,
+          evidence: { linkedin: hit.linkedin, source: "heyreach" },
+          leadId: "",
+          companyLogo: "",
+        }
+      : attributeDeal({ contacts: deal.contacts, companyDomain: deal.companyDomain, companyName: deal.companyName }, qc);
     if (verdict.attribution === "confirmed") confirmed += 1;
     if (verdict.attribution === "possible") possible += 1;
     const primary = deal.contacts[0];
@@ -201,6 +266,8 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
       attribution_matched_by: verdict.matchedBy,
       attribution_campaign: verdict.campaign || null,
       attribution_evidence: verdict.evidence || {},
+      attribution_lead_id: (verdict as { leadId?: string }).leadId || null,
+      company_logo: (verdict as { companyLogo?: string }).companyLogo || null,
       raw: deal.raw ?? {},
       synced_at: new Date().toISOString(),
     };
@@ -300,4 +367,64 @@ export async function getClientDeals(slug: string): Promise<{ client: { id: stri
     pipeline,
     deals,
   };
+}
+
+/* ── One deal, in full — for the drawer ──────────────────────────────────────────────────────────
+ *
+ * When a deal was attributed to a lead, that lead is the whole story: who QC contacted, at what
+ * company, in which campaign, and every message exchanged. This gathers it from the lead, the deal's
+ * stored evidence, and the conversation the lead is joined to.
+ */
+export type DealDetail = {
+  deal: Deal;
+  lead: {
+    name: string | null; role: string | null; company: string | null; linkedin: string | null;
+    location: string | null; industry: string | null; headline: string | null; photoUrl: string | null;
+    campaigns: string[]; icpScore: number | null;
+  } | null;
+  messages: { direction: string; body: string; sentAt: string | null }[];
+};
+
+export async function getDealDetail(dealId: string): Promise<DealDetail | null> {
+  const { url, key } = config();
+  if (!url || !key) return null;
+  const dealRow = (await rows(url, key, `rr_deals?select=*&id=eq.${encodeURIComponent(dealId)}&limit=1`))[0];
+  if (!dealRow) return null;
+  const deal = dealFromRow(dealRow);
+
+  // Prefer the lead the attribution matched. Fall back to finding a lead by the deal's contact LinkedIn.
+  let leadRow = deal.leadId
+    ? (await rows(url, key, `rr_leads?select=*&id=eq.${encodeURIComponent(deal.leadId)}&limit=1`))[0]
+    : undefined;
+  if (!leadRow && deal.contactLinkedin) {
+    const handle = deal.contactLinkedin.match(/linkedin\.com\/in\/([^/?#\s]+)/i)?.[1];
+    if (handle) leadRow = (await rows(url, key, `rr_leads?select=*&workspace_id=eq.${encodeURIComponent(str(dealRow.workspace_id))}&linkedin_profile_url=ilike.*${encodeURIComponent(handle)}*&limit=1`))[0];
+  }
+
+  let lead: DealDetail["lead"] = null;
+  let messages: DealDetail["messages"] = [];
+  if (leadRow) {
+    const raw = (leadRow.raw_data ?? {}) as Record<string, unknown>;
+    const radar = (raw.reply_radar ?? {}) as Record<string, unknown>;
+    const enrichment = (radar.ai_ark ?? {}) as Record<string, unknown>;
+    lead = {
+      name: orNull(leadRow.name),
+      role: orNull(leadRow.role) || (enrichment.title ? str(enrichment.title) : null),
+      company: orNull(leadRow.company),
+      linkedin: orNull(leadRow.linkedin_profile_url),
+      location: enrichment.location ? str(enrichment.location) : null,
+      industry: enrichment.industry ? str(enrichment.industry) : null,
+      headline: enrichment.headline ? str(enrichment.headline) : null,
+      photoUrl: enrichment.profilePhotoSource ? str(enrichment.profilePhotoSource) : null,
+      campaigns: str(leadRow.campaign_names).split(";").map((c) => c.trim()).filter(Boolean),
+      icpScore: leadRow.icp_score == null ? null : Number(leadRow.icp_score),
+    };
+    const conversations = await rows(url, key, `rr_conversations?select=id&lead_id=eq.${encodeURIComponent(str(leadRow.id))}`);
+    const conversationIds = conversations.map((c) => str(c.id)).filter(Boolean);
+    if (conversationIds.length) {
+      const msgRows = await rows(url, key, `rr_messages?select=direction,body,sent_at&conversation_id=in.(${conversationIds.map(encodeURIComponent).join(",")})&order=sent_at.asc&limit=500`);
+      messages = msgRows.map((m) => ({ direction: str(m.direction), body: str(m.body), sentAt: orNull(m.sent_at) }));
+    }
+  }
+  return { deal, lead, messages };
 }

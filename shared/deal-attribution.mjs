@@ -75,11 +75,14 @@ export function buildQcIdentity(sources) {
   const byEmail = new Map();
   const byLinkedin = new Map();
   const domains = new Set();
-  // The companies QC actually campaigned into, name → campaign, so a company-level match can cite it.
-  // This is the piece that was missing: leads carry the company they were contacted at, and it was never
-  // gathered, so a deal at a QC-worked company went unattributed unless the exact person happened to line up.
+  // The companies QC actually campaigned into, name → info, so a company-level match can cite the campaign
+  // and carry the logo. This is the piece that was missing: leads carry the company they were contacted
+  // at, and it was never gathered, so a deal at a QC-worked company went unattributed unless the exact
+  // person happened to line up. `byCompany` holds every lead under a company (an array), so a company-plus-
+  // name match can find the *specific* person and promote to confirmed.
   const byCompany = new Map();
   const byDomain = new Map();
+  const byName = new Map();
 
   const add = (map, keyFn, raw, info) => {
     const key = keyFn(raw);
@@ -88,27 +91,54 @@ export function buildQcIdentity(sources) {
 
   // `add` only fills a key that is real and not already taken, so a lead never overwrites another lead.
   for (const lead of sources?.leads ?? []) {
-    const info = { source: "campaign", campaign: lead.campaign || "", name: lead.name || "" };
+    const info = { source: "campaign", campaign: lead.campaign || "", name: lead.name || "", leadId: lead.leadId || "", companyLogo: lead.companyLogo || "" };
     add(byEmail, normalizeEmail, lead.email, info);
     add(byLinkedin, normalizeLinkedin, lead.linkedin, info);
-    add(byCompany, normalizeCompany, lead.company, info);
+    const companyKey = normalizeCompany(lead.company);
+    if (companyKey) {
+      const list = byCompany.get(companyKey) ?? [];
+      list.push(info);
+      byCompany.set(companyKey, list);
+    }
+    const nameKey = normalizeName(lead.name);
+    if (nameKey) add(byName, (v) => v, nameKey, info);
     const leadDomain = normalizeDomain(lead.domain);
     if (leadDomain) { domains.add(leadDomain); if (!byDomain.has(leadDomain)) byDomain.set(leadDomain, info); }
   }
   // Meetings are the stronger signal, so they are set directly (overwriting a lead on the same person) — a
   // booked call is a better story than a cold touch, and its info is what a confirmed deal should cite.
   for (const meeting of sources?.meetings ?? []) {
-    const info = { source: "meeting", campaign: meeting.campaign || "", name: meeting.name || "" };
+    const info = { source: "meeting", campaign: meeting.campaign || "", name: meeting.name || "", leadId: meeting.leadId || "", companyLogo: meeting.companyLogo || "" };
     const email = normalizeEmail(meeting.email);
     if (email) byEmail.set(email, info);
     const linked = normalizeLinkedin(meeting.linkedin);
     if (linked) byLinkedin.set(linked, info);
-    const company = normalizeCompany(meeting.company);
-    if (company) byCompany.set(company, info);
+    const companyKey = normalizeCompany(meeting.company);
+    if (companyKey) { const list = byCompany.get(companyKey) ?? []; list.push(info); byCompany.set(companyKey, list); }
+    const nameKey = normalizeName(meeting.name);
+    if (nameKey) byName.set(nameKey, info);
     const domain = normalizeDomain(meeting.domain);
     if (domain) { domains.add(domain); byDomain.set(domain, info); }
   }
-  return { byEmail, byLinkedin, domains, byCompany, byDomain };
+  return { byEmail, byLinkedin, domains, byCompany, byDomain, byName };
+}
+
+/** A person's name reduced to a comparable key: lowercased, single-spaced, punctuation gone. */
+export function normalizeName(value) {
+  const text = typeof value === "string" ? value.toLowerCase() : "";
+  const bare = text.replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
+  // At least two words and five characters — a single first name is too common to match a person on.
+  return bare.split(" ").length >= 2 && bare.replace(/ /g, "").length >= 5 ? bare : "";
+}
+
+/** True when two normalized company keys are the same or one clearly contains the other. */
+function companyMatches(dealKey, leadKey) {
+  if (!dealKey || !leadKey) return false;
+  if (dealKey === leadKey) return true;
+  const [short, long] = dealKey.length <= leadKey.length ? [dealKey, leadKey] : [leadKey, dealKey];
+  // Containment, but only when the shorter key is substantial — so "Unity" matches "Unity Technologies"
+  // while a three-letter fragment cannot drag in an unrelated company.
+  return short.replace(/ /g, "").length >= 5 && (long === short || long.startsWith(short + " ") || long.endsWith(" " + short) || long.includes(" " + short + " "));
 }
 
 /**
@@ -129,19 +159,34 @@ export function attributeDeal(deal, qc) {
     return `${who} ${where}${inCampaign}.`;
   };
 
-  // Person-unique match, email first then LinkedIn. This is the only path to "confirmed".
+  const byCompany = qc?.byCompany ?? new Map();
+  const nameMap = qc?.byName ?? new Map();
+  const confirmed = (matchedBy, info, who, evidence) => ({
+    attribution: "confirmed", matchedBy, campaign: info.campaign || "", reason: how(who, info),
+    evidence: { ...evidence }, leadId: info.leadId || "", companyLogo: info.companyLogo || "",
+  });
+
+  // Person-unique match, email first then LinkedIn — an identifier that belongs to one human.
   for (const contact of contacts) {
     const email = normalizeEmail(contact.email);
-    if (email && emailMap.has(email)) {
-      const info = emailMap.get(email);
-      return { attribution: "confirmed", matchedBy: "email", campaign: info.campaign || "", reason: how(contact.name || email, info), evidence: { email } };
-    }
+    if (email && emailMap.has(email)) return confirmed("email", emailMap.get(email), contact.name || email, { email });
   }
   for (const contact of contacts) {
     const linked = normalizeLinkedin(contact.linkedin);
-    if (linked && linkedinMap.has(linked)) {
-      const info = linkedinMap.get(linked);
-      return { attribution: "confirmed", matchedBy: "linkedin", campaign: info.campaign || "", reason: how(contact.name || `linkedin.com/in/${linked}`, info), evidence: { linkedin: linked } };
+    if (linked && linkedinMap.has(linked)) return confirmed("linkedin", linkedinMap.get(linked), contact.name || `linkedin.com/in/${linked}`, { linkedin: linked });
+  }
+
+  // A person's full name *and* their company both matching is specific enough to confirm — this is the
+  // person QC contacted, at the company QC contacted them at, even when the CRM never recorded a LinkedIn.
+  const dealCompany = normalizeCompany(deal?.companyName);
+  for (const contact of contacts) {
+    const nameKey = normalizeName(contact.name);
+    if (!nameKey) continue;
+    const info = nameMap.get(nameKey);
+    if (info && companyMatches(dealCompany, normalizeCompany(info.name ? undefined : undefined) || dealCompany)) {
+      // The name matched a QC-contacted person; require the company to line up too before confirming.
+      const companyOk = [...byCompany.keys()].some((k) => companyMatches(dealCompany, k) && (byCompany.get(k) || []).some((i) => normalizeName(i.name) === nameKey));
+      if (companyOk) return confirmed("name+company", info, contact.name, { name: contact.name });
     }
   }
 
@@ -150,31 +195,26 @@ export function attributeDeal(deal, qc) {
   // client may have known someone else there. But it is surfaced rather than hidden, because a deal at a
   // company QC worked is worth a human's eyes even when the person does not line up.
   const byDomain = qc?.byDomain ?? new Map();
-  const byCompany = qc?.byCompany ?? new Map();
-
   const domain = normalizeDomain(deal?.companyDomain);
   if (domain && (byDomain.has(domain) || domains.has(domain))) {
-    const info = byDomain.get(domain) ?? { campaign: "" };
+    const info = byDomain.get(domain) ?? { campaign: "", companyLogo: "" };
     return {
-      attribution: "possible",
-      matchedBy: "domain",
-      campaign: info.campaign || "",
+      attribution: "possible", matchedBy: "domain", campaign: info.campaign || "",
       reason: `${deal?.companyName || domain} is a company QC campaigned into${info.campaign ? ` (${info.campaign})` : ""}, but no specific person on this deal matched — worth a look.`,
-      evidence: { domain },
+      evidence: { domain }, leadId: info.leadId || "", companyLogo: info.companyLogo || "",
     };
   }
 
-  const company = normalizeCompany(deal?.companyName);
-  if (company && byCompany.has(company)) {
-    const info = byCompany.get(company);
-    return {
-      attribution: "possible",
-      matchedBy: "company",
-      campaign: info.campaign || "",
-      reason: `${deal?.companyName} matches a company QC campaigned into${info.campaign ? ` (${info.campaign})` : ""} — confirm the person to count it.`,
-      evidence: { company },
-    };
+  for (const [key, list] of byCompany) {
+    if (companyMatches(dealCompany, key)) {
+      const info = list[0];
+      return {
+        attribution: "possible", matchedBy: "company", campaign: info.campaign || "",
+        reason: `${deal?.companyName} matches a company QC campaigned into${info.campaign ? ` (${info.campaign})` : ""} — confirm the person to count it.`,
+        evidence: { company: key }, leadId: info.leadId || "", companyLogo: info.companyLogo || "",
+      };
+    }
   }
 
-  return { attribution: "none", matchedBy: null, campaign: "", reason: "", evidence: {} };
+  return { attribution: "none", matchedBy: null, campaign: "", reason: "", evidence: {}, leadId: "", companyLogo: "" };
 }
