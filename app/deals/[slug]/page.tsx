@@ -134,6 +134,8 @@ export default function ClientDealsPage() {
   const shown = useMemo(() => deals.filter((d) => filter === "all" || d.attribution === filter), [deals, filter]);
   const confirmedCount = deals.filter((d) => d.attribution === "confirmed").length;
   const possibleCount = deals.filter((d) => d.attribution === "possible").length;
+  const qcValue = deals.filter((d) => d.attribution === "confirmed").reduce((s, d) => s + (d.amount || 0), 0);
+  const dealCurrency = deals.find((d) => d.currency)?.currency ?? null;
   const currency = deals.find((d) => d.currency)?.currency ?? null;
 
   /*
@@ -245,6 +247,10 @@ export default function ClientDealsPage() {
                     <div className="deal-hero-cell">
                       <span>To review</span>
                       <b className="amber">{possibleCount}</b>
+                    </div>
+                    <div className="deal-hero-cell">
+                      <span>Value QC delivered</span>
+                      <b className="green">{qcValue ? money(qcValue, dealCurrency) : "—"}</b>
                     </div>
                     <div className="deal-hero-cell">
                       <span>Total deals</span>
@@ -359,7 +365,8 @@ function DealCard({ deal, currency, money, onOpen }: { deal: Deal; currency: str
 }
 
 type Detail = {
-  lead: { name: string | null; role: string | null; company: string | null; linkedin: string | null; location: string | null; industry: string | null; headline: string | null; photoUrl: string | null; campaigns: string[]; icpScore: number | null } | null;
+  clientSlug: string;
+  lead: { leadId: string; name: string | null; role: string | null; company: string | null; linkedin: string | null; location: string | null; industry: string | null; headline: string | null; photoUrl: string | null; campaigns: string[]; icpScore: number | null } | null;
   messages: { direction: string; body: string; sentAt: string | null }[];
 };
 
@@ -372,6 +379,8 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [translated, setTranslated] = useState<string[] | null>(null);
+  const [showOriginal, setShowOriginal] = useState(false);
 
   const review = async (dismissed: boolean) => {
     if (saving) return;
@@ -391,7 +400,17 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
       try {
         const response = await fetch(`/api/deals/detail/${encodeURIComponent(deal.id)}`, { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
-        if (live && payload.ok) setDetail({ lead: payload.lead, messages: payload.messages ?? [] });
+        if (!live || !payload.ok) return;
+        setDetail({ clientSlug: payload.clientSlug ?? "", lead: payload.lead, messages: payload.messages ?? [] });
+        // Willow's outreach is in Hebrew; translate it so a QC operator can read the thread. Only Willow,
+        // and only when there is something to translate.
+        if (payload.clientSlug === "willow" && (payload.messages?.length ?? 0) > 0) {
+          const tr = await fetch("/api/deals/translate", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ messages: payload.messages.map((m: { body: string }) => m.body) }),
+          }).then((r) => r.json()).catch(() => ({}));
+          if (live && tr.ok && Array.isArray(tr.translations)) setTranslated(tr.translations);
+        }
       } finally { if (live) setLoading(false); }
     })();
     return () => { live = false; };
@@ -424,7 +443,9 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
                 <span className="dd-matched-v">{MATCH_LABEL[deal.attributionMatchedBy ?? ""] ?? deal.attributionMatchedBy} · <code>{deal.matchedValue}</code></span>
               </div>
             )}
-            {!deal.dismissed && deal.attributionCampaign && <span className="dd-camp">Campaign: {deal.attributionCampaign}</span>}
+            {!deal.dismissed && (deal.attributionCampaign || (detail?.lead?.campaigns.length ?? 0) > 0) && (
+              <span className="dd-camp">Campaign: {deal.attributionCampaign || detail?.lead?.campaigns.join(", ")}</span>
+            )}
             <div className="dd-review">
               {deal.dismissed ? (
                 <button className="dd-review-btn restore" onClick={() => void review(false)} disabled={saving}>Restore QC attribution</button>
@@ -469,6 +490,9 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
                     {lead.headline && <span className="dd-headline">{lead.headline}</span>}
                   </div>
                 </div>
+                <a className="dd-enrich-btn" href={`/database?lead=${encodeURIComponent(lead.leadId)}`} target="_blank" rel="noreferrer noopener">
+                  View full enriched record ↗
+                </a>
                 <dl className="dd-facts">
                   {lead.company && <><dt>Company</dt><dd>{lead.company}</dd></>}
                   {lead.industry && <><dt>Industry</dt><dd>{lead.industry}</dd></>}
@@ -484,11 +508,19 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
 
             {detail && detail.messages.length > 0 && (
               <div className="dd-section">
-                <span className="dd-label">Conversation · {detail.messages.length} messages</span>
+                <div className="dd-thread-head">
+                  <span className="dd-label">Conversation · {detail.messages.length} messages</span>
+                  {translated && (
+                    <button className="dd-translate-toggle" onClick={() => setShowOriginal((v) => !v)}>
+                      {showOriginal ? "Show translation" : "Show original"}
+                    </button>
+                  )}
+                </div>
+                {translated && !showOriginal && <p className="dd-translated-note">Translated to English from the original.</p>}
                 <div className="dd-thread">
                   {detail.messages.map((m, i) => (
                     <div key={i} className={`dd-msg ${m.direction.toLowerCase().includes("in") ? "in" : "out"}`}>
-                      <p>{m.body}</p>
+                      <p>{translated && !showOriginal ? (translated[i] ?? m.body) : m.body}</p>
                       <time>{when(m.sentAt)}</time>
                     </div>
                   ))}
@@ -533,16 +565,26 @@ function AttributionLog({ deals, onClose, onOpenDeal }: { deals: Deal[]; onClose
           {ordered.map((deal) => {
             const decisive = deal.trace.find((t) => t.matched);
             return (
-              <button key={deal.id} className="dd-log-row" onClick={() => onOpenDeal(deal)} type="button">
-                <span className="dd-log-top">
-                  <span className={`dd-log-badge ${deal.attribution}`}>{deal.attribution === "confirmed" ? "QC ✓" : deal.attribution === "possible" ? "Review" : "Not QC"}</span>
-                  <b>{deal.companyName || deal.name || "Untitled"}</b>
-                  {deal.dismissed && <span className="dd-log-dismissed">dismissed</span>}
-                </span>
-                <span className="dd-log-line">
-                  {decisive ? `${decisive.check} → ${decisive.detail || "matched"}` : `${deal.trace.length} checks, nothing matched`}
-                </span>
-              </button>
+              <div key={deal.id} className="dd-log-row">
+                <button className="dd-log-head" onClick={() => onOpenDeal(deal)} type="button">
+                  <span className="dd-log-top">
+                    <span className={`dd-log-badge ${deal.attribution}`}>{deal.attribution === "confirmed" ? "QC ✓" : deal.attribution === "possible" ? "Review" : "Not QC"}</span>
+                    <b>{deal.companyName || deal.name || "Untitled"}</b>
+                    {deal.dismissed && <span className="dd-log-dismissed">dismissed</span>}
+                  </span>
+                  <span className="dd-log-line">
+                    {decisive ? `Decided by: ${decisive.check}` : `${deal.trace.length} checks, nothing matched`}
+                  </span>
+                </button>
+                <ol className="dd-log-steps">
+                  {deal.trace.map((t, i) => (
+                    <li key={i} className={t.matched ? "hit" : "miss"}>
+                      <span className="dd-trace-mark">{t.matched ? "✓" : "·"}</span>
+                      <span className="dd-log-step-body"><b>{t.check}</b>{t.input && <code>{t.input}</code>}{t.detail && <em>{t.detail}</em>}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
             );
           })}
         </div>

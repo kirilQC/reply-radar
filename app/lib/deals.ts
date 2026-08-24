@@ -433,13 +433,34 @@ export async function getClientDeals(slug: string): Promise<{ client: { id: stri
  */
 export type DealDetail = {
   deal: Deal;
+  clientSlug: string;
   lead: {
-    name: string | null; role: string | null; company: string | null; linkedin: string | null;
+    leadId: string; name: string | null; role: string | null; company: string | null; linkedin: string | null;
     location: string | null; industry: string | null; headline: string | null; photoUrl: string | null;
     campaigns: string[]; icpScore: number | null;
   } | null;
   messages: { direction: string; body: string; sentAt: string | null }[];
 };
+
+/**
+ * A location value into a readable string.
+ *
+ * The enrichment stores location as an object — `{ city, state, country }`, or `{ default }`, or a plain
+ * string — and rendering it directly is what produced "[object Object]" on every drawer. This reduces
+ * whatever shape it is to a line, and returns null for anything it cannot read rather than machine noise.
+ */
+function locationLabel(value: unknown): string | null {
+  if (typeof value === "string") return value.trim() || null;
+  if (!value || typeof value !== "object") return null;
+  const o = value as Record<string, unknown>;
+  const direct = str(o.default) || str(o.full) || str(o.name) || str(o.formatted);
+  if (direct) return direct;
+  const parts = [str(o.city), str(o.state) || str(o.region), str(o.country)].filter(Boolean);
+  // Providers often repeat the region as both state and country; collapse the duplicate.
+  const seen: string[] = [];
+  for (const part of parts) if (!seen.some((p) => p.toLowerCase() === part.toLowerCase())) seen.push(part);
+  return seen.length ? seen.join(", ") : null;
+}
 
 export async function getDealDetail(dealId: string): Promise<DealDetail | null> {
   const { url, key } = config();
@@ -464,11 +485,12 @@ export async function getDealDetail(dealId: string): Promise<DealDetail | null> 
     const radar = (raw.reply_radar ?? {}) as Record<string, unknown>;
     const enrichment = (radar.ai_ark ?? {}) as Record<string, unknown>;
     lead = {
+      leadId: str(leadRow.id),
       name: orNull(leadRow.name),
       role: orNull(leadRow.role) || (enrichment.title ? str(enrichment.title) : null),
       company: orNull(leadRow.company),
       linkedin: orNull(leadRow.linkedin_profile_url),
-      location: enrichment.location ? str(enrichment.location) : null,
+      location: locationLabel(enrichment.location),
       industry: enrichment.industry ? str(enrichment.industry) : null,
       headline: enrichment.headline ? str(enrichment.headline) : null,
       photoUrl: enrichment.profilePhotoSource ? str(enrichment.profilePhotoSource) : null,
@@ -482,5 +504,7 @@ export async function getDealDetail(dealId: string): Promise<DealDetail | null> 
       messages = msgRows.map((m) => ({ direction: str(m.direction), body: str(m.body), sentAt: orNull(m.sent_at) }));
     }
   }
-  return { deal, lead, messages };
+  // The slug (not the id) is what the enriched-records page needs; resolve it once.
+  const wsRow = (await rows(url, key, `rr_workspaces?select=slug&id=eq.${encodeURIComponent(str(dealRow.workspace_id))}&limit=1`))[0];
+  return { deal, lead, messages, clientSlug: str(wsRow?.slug) };
 }

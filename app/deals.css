@@ -272,3 +272,30 @@
 .dd-log-badge.none { color: var(--muted-2); background: var(--panel); }
 .dd-log-dismissed { font-size: 9.5px; color: var(--muted-2); margin-left: auto; }
 .dd-log-line { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.45; }
+
+/* ── Drawer additions: enriched link, translation, and a hero fourth cell ────────────────────────── */
+.deal-hero { grid-template-columns: 1.6fr 1fr 1fr 1fr; }
+.deal-hero-cell b.green { color: var(--green); }
+
+.dd-enrich-btn { display: inline-block; margin-top: 13px; font-size: 11.5px; font-weight: 600; color: var(--accent); text-decoration: none; padding: 7px 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 8px; }
+.dd-enrich-btn:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+.dd-thread-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dd-translate-toggle { font: inherit; font-size: 10.5px; font-weight: 600; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+.dd-translate-toggle:hover { color: var(--text); }
+.dd-translated-note { margin: 8px 0 0; font-size: 10.5px; color: var(--muted-2); font-style: italic; }
+
+/* Log rows now carry their full step trace. */
+.dd-log-row { border: 1px solid var(--border); border-radius: 11px; background: var(--panel-2); overflow: hidden; }
+.dd-log-head { display: block; width: 100%; text-align: left; padding: 12px 14px 10px; background: transparent; border: 0; cursor: pointer; }
+.dd-log-head:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.dd-log-steps { margin: 0; padding: 4px 14px 12px; list-style: none; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.dd-log-steps li { display: grid; grid-template-columns: 14px 1fr; gap: 8px; align-items: start; }
+.dd-log-steps .dd-trace-mark { font-size: 11px; }
+.dd-log-steps li.hit .dd-trace-mark { color: var(--green); }
+.dd-log-steps li.miss .dd-trace-mark { color: var(--muted-2); }
+.dd-log-step-body { min-width: 0; }
+.dd-log-step-body b { font-size: 11px; font-weight: 600; display: inline; }
+.dd-log-steps li.hit .dd-log-step-body b { color: var(--green); }
+.dd-log-step-body code { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--muted-2); margin-top: 1px; word-break: break-word; }
+.dd-log-step-body em { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); margin-top: 1px; }
