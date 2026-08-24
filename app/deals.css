@@ -232,3 +232,43 @@
 .dd-review-btn { font: inherit; font-size: 11.5px; font-weight: 600; padding: 8px 13px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); cursor: pointer; transition: color .12s ease, border-color .12s ease; }
 .dd-review-btn.dismiss:hover { color: var(--coral); border-color: color-mix(in srgb, var(--coral) 45%, transparent); }
 .dd-review-btn.restore { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+
+/* ── Header actions grouped, last-synced beneath ────────────────────────────────────────────────── */
+.deal-head-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; }
+.deal-head-btns { display: flex; align-items: center; gap: 8px; }
+.deal-head-synced { font-size: 10.5px; color: var(--muted-2); }
+
+/* ── The matched-on line in the drawer ──────────────────────────────────────────────────────────── */
+.dd-matched { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 9px; align-items: baseline; }
+.dd-matched-k { font-size: 9px; letter-spacing: .09em; text-transform: uppercase; font-weight: 700; color: var(--muted-2); }
+.dd-matched-v { font-size: 12px; color: var(--text); }
+.dd-matched-v code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 1px 5px; border-radius: 4px; }
+
+/* ── The trace disclosure in the drawer ─────────────────────────────────────────────────────────── */
+.dd-trace { margin-top: 16px; border: 1px solid var(--border); border-radius: 11px; overflow: hidden; }
+.dd-trace > summary { padding: 11px 14px; cursor: pointer; font-size: 11.5px; font-weight: 600; color: var(--muted); list-style: none; }
+.dd-trace > summary::-webkit-details-marker { display: none; }
+.dd-trace[open] > summary { border-bottom: 1px solid var(--border); }
+.dd-trace-list { margin: 0; padding: 8px 14px 12px; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.dd-trace-list li { display: grid; grid-template-columns: 16px 1fr; gap: 9px; }
+.dd-trace-mark { font-size: 12px; text-align: center; }
+.dd-trace-list li.hit .dd-trace-mark { color: var(--green); }
+.dd-trace-list li.miss .dd-trace-mark { color: var(--muted-2); }
+.dd-trace-body b { display: block; font-size: 12px; font-weight: 600; }
+.dd-trace-body small { display: block; font-size: 10.5px; color: var(--muted-2); font-family: ui-monospace, Menlo, monospace; margin-top: 1px; word-break: break-word; }
+.dd-trace-body em { display: block; font-style: normal; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.dd-trace-list li.hit .dd-trace-body b { color: var(--green); }
+
+/* ── The attribution log panel ──────────────────────────────────────────────────────────────────── */
+.dd-log { width: min(640px, 96vw); }
+.dd-log-list { margin-top: 16px; display: flex; flex-direction: column; gap: 7px; }
+.dd-log-row { display: block; width: 100%; text-align: left; padding: 12px 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel-2); cursor: pointer; transition: border-color .12s ease; }
+.dd-log-row:hover { border-color: var(--accent); }
+.dd-log-top { display: flex; align-items: center; gap: 9px; }
+.dd-log-top b { font-size: 13px; font-weight: 620; }
+.dd-log-badge { font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 7px; border-radius: 5px; flex: none; }
+.dd-log-badge.confirmed { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
+.dd-log-badge.possible { color: var(--amber); background: color-mix(in srgb, var(--amber) 15%, transparent); }
+.dd-log-badge.none { color: var(--muted-2); background: var(--panel); }
+.dd-log-dismissed { font-size: 9.5px; color: var(--muted-2); margin-left: auto; }
+.dd-log-line { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.45; }

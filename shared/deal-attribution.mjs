@@ -152,69 +152,78 @@ export function attributeDeal(deal, qc) {
   const emailMap = qc?.byEmail ?? new Map();
   const linkedinMap = qc?.byLinkedin ?? new Map();
   const domains = qc?.domains ?? new Set();
+  const byCompany = qc?.byCompany ?? new Map();
+  const nameMap = qc?.byName ?? new Map();
+  const byDomain = qc?.byDomain ?? new Map();
+
+  /*
+   * The trace records every step the matcher tried and how it came out, in order, so a person can see
+   * exactly why a deal was or was not attributed — which identifier lined up, or that none did. It is the
+   * spine of the attribution log.
+   */
+  const trace = [];
+  const step = (check, input, matched, detail) => { trace.push({ check, input: input || "", matched, detail: detail || "" }); };
 
   const how = (who, info) => {
     const where = info.source === "meeting" ? "booked a meeting through QC" : `was contacted in ${info.campaign || "a QC campaign"}`;
     const inCampaign = info.source === "meeting" && info.campaign ? ` (${info.campaign})` : "";
     return `${who} ${where}${inCampaign}.`;
   };
-
-  const byCompany = qc?.byCompany ?? new Map();
-  const nameMap = qc?.byName ?? new Map();
   const confirmed = (matchedBy, info, who, evidence) => ({
     attribution: "confirmed", matchedBy, campaign: info.campaign || "", reason: how(who, info),
-    evidence: { ...evidence }, leadId: info.leadId || "", companyLogo: info.companyLogo || "",
+    evidence: { ...evidence }, leadId: info.leadId || "", companyLogo: info.companyLogo || "", trace,
   });
 
-  // Person-unique match, email first then LinkedIn — an identifier that belongs to one human.
+  // 1 — Email, an identifier that belongs to one human.
+  let hit = null;
   for (const contact of contacts) {
     const email = normalizeEmail(contact.email);
-    if (email && emailMap.has(email)) return confirmed("email", emailMap.get(email), contact.name || email, { email });
+    if (email && emailMap.has(email)) { hit = { contact, email, info: emailMap.get(email) }; break; }
   }
+  const emailsSeen = contacts.map((c) => normalizeEmail(c.email)).filter(Boolean);
+  step("Contact email vs QC leads & meetings", emailsSeen.join(", ") || "no email on the deal", Boolean(hit), hit ? `matched ${hit.email}` : (emailsSeen.length ? "no QC record with these emails" : "nothing to match on"));
+  if (hit) return confirmed("email", hit.info, hit.contact.name || hit.email, { email: hit.email });
+
+  // 2 — LinkedIn handle.
+  hit = null;
   for (const contact of contacts) {
     const linked = normalizeLinkedin(contact.linkedin);
-    if (linked && linkedinMap.has(linked)) return confirmed("linkedin", linkedinMap.get(linked), contact.name || `linkedin.com/in/${linked}`, { linkedin: linked });
+    if (linked && linkedinMap.has(linked)) { hit = { contact, linked, info: linkedinMap.get(linked) }; break; }
   }
+  const linksSeen = contacts.map((c) => normalizeLinkedin(c.linkedin)).filter(Boolean);
+  step("Contact LinkedIn vs QC leads & meetings", linksSeen.join(", ") || "no LinkedIn on the deal", Boolean(hit), hit ? `matched linkedin.com/in/${hit.linked}` : (linksSeen.length ? "no QC lead with these profiles" : "nothing to match on"));
+  if (hit) return confirmed("linkedin", hit.info, hit.contact.name || `linkedin.com/in/${hit.linked}`, { linkedin: hit.linked });
 
-  // A person's full name *and* their company both matching is specific enough to confirm — this is the
-  // person QC contacted, at the company QC contacted them at, even when the CRM never recorded a LinkedIn.
+  // 3 — Full name AND company both lining up: specific enough to confirm.
   const dealCompany = normalizeCompany(deal?.companyName);
+  hit = null;
   for (const contact of contacts) {
     const nameKey = normalizeName(contact.name);
     if (!nameKey) continue;
     const info = nameMap.get(nameKey);
-    if (info && companyMatches(dealCompany, normalizeCompany(info.name ? undefined : undefined) || dealCompany)) {
-      // The name matched a QC-contacted person; require the company to line up too before confirming.
-      const companyOk = [...byCompany.keys()].some((k) => companyMatches(dealCompany, k) && (byCompany.get(k) || []).some((i) => normalizeName(i.name) === nameKey));
-      if (companyOk) return confirmed("name+company", info, contact.name, { name: contact.name });
-    }
+    if (!info) continue;
+    const companyOk = [...byCompany.keys()].some((k) => companyMatches(dealCompany, k) && (byCompany.get(k) || []).some((i) => normalizeName(i.name) === nameKey));
+    if (companyOk) { hit = { contact, info }; break; }
   }
+  step("Contact name + company vs QC leads", contacts.map((c) => c.name).filter(Boolean).join(", ") + (deal?.companyName ? ` @ ${deal.companyName}` : ""), Boolean(hit), hit ? `${hit.contact.name} matched at this company` : "no QC lead with this person at this company");
+  if (hit) return confirmed("name+company", hit.info, hit.contact.name, { name: hit.contact.name });
 
-  // Weaker: the same company QC campaigned into, but nobody on the deal ties back to a specific person.
-  // Flagged for review, never counted as certain — two companies can share a name or a domain, and the
-  // client may have known someone else there. But it is surfaced rather than hidden, because a deal at a
-  // company QC worked is worth a human's eyes even when the person does not line up.
-  const byDomain = qc?.byDomain ?? new Map();
+  // 4 — Same company by domain: worth a review, never confirmed.
   const domain = normalizeDomain(deal?.companyDomain);
-  if (domain && (byDomain.has(domain) || domains.has(domain))) {
+  const domainHit = domain && (byDomain.has(domain) || domains.has(domain));
+  step("Company domain vs QC campaigns", domain || "no domain on the deal", Boolean(domainHit), domainHit ? `${domain} is a company QC campaigned into` : (domain ? "domain not in any QC campaign" : "nothing to match on"));
+  if (domainHit) {
     const info = byDomain.get(domain) ?? { campaign: "", companyLogo: "" };
-    return {
-      attribution: "possible", matchedBy: "domain", campaign: info.campaign || "",
-      reason: `${deal?.companyName || domain} is a company QC campaigned into${info.campaign ? ` (${info.campaign})` : ""}, but no specific person on this deal matched — worth a look.`,
-      evidence: { domain }, leadId: info.leadId || "", companyLogo: info.companyLogo || "",
-    };
+    return { attribution: "possible", matchedBy: "domain", campaign: info.campaign || "", reason: `${deal?.companyName || domain} is a company QC campaigned into${info.campaign ? ` (${info.campaign})` : ""}, but no specific person on this deal matched — worth a look.`, evidence: { domain }, leadId: info.leadId || "", companyLogo: info.companyLogo || "", trace };
   }
 
-  for (const [key, list] of byCompany) {
-    if (companyMatches(dealCompany, key)) {
-      const info = list[0];
-      return {
-        attribution: "possible", matchedBy: "company", campaign: info.campaign || "",
-        reason: `${deal?.companyName} matches a company QC campaigned into${info.campaign ? ` (${info.campaign})` : ""} — confirm the person to count it.`,
-        evidence: { company: key }, leadId: info.leadId || "", companyLogo: info.companyLogo || "",
-      };
-    }
+  // 5 — Same company by name.
+  let companyHit = null;
+  for (const [key, list] of byCompany) { if (companyMatches(dealCompany, key)) { companyHit = { key, info: list[0] }; break; } }
+  step("Company name vs QC campaigns", deal?.companyName || "no company on the deal", Boolean(companyHit), companyHit ? `matches a company QC campaigned into${companyHit.info.campaign ? ` (${companyHit.info.campaign})` : ""}` : (deal?.companyName ? "company not in any QC campaign" : "nothing to match on"));
+  if (companyHit) {
+    return { attribution: "possible", matchedBy: "company", campaign: companyHit.info.campaign || "", reason: `${deal?.companyName} matches a company QC campaigned into${companyHit.info.campaign ? ` (${companyHit.info.campaign})` : ""} — confirm the person to count it.`, evidence: { company: companyHit.key }, leadId: companyHit.info.leadId || "", companyLogo: companyHit.info.companyLogo || "", trace };
   }
 
-  return { attribution: "none", matchedBy: null, campaign: "", reason: "", evidence: {}, leadId: "", companyLogo: "" };
+  return { attribution: "none", matchedBy: null, campaign: "", reason: "", evidence: {}, leadId: "", companyLogo: "", trace };
 }

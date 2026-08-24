@@ -33,6 +33,8 @@ type Deal = {
   companyLogo: string | null;
   computedAttribution: string;
   dismissed: boolean;
+  matchedValue: string | null;
+  trace: { check: string; input: string; matched: boolean; detail: string }[];
 };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Crm = { provider: string | null; connected: boolean; lastSyncedAt: string | null };
@@ -65,6 +67,7 @@ export default function ClientDealsPage() {
   const [message, setMessage] = useState("");
   /** The deal opened in the drawer, and its loaded detail. */
   const [openDeal, setOpenDeal] = useState<Deal | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
 
   // Connect form
   const [provider, setProvider] = useState("hubspot");
@@ -203,7 +206,18 @@ export default function ClientDealsPage() {
                   <h1>{client.name}</h1>
                   <Link href="/deals" className="deal-back">← All clients</Link>
                 </div>
-                {crm.connected && <button className="primary-button" onClick={() => void sync()} disabled={syncing}>{syncing ? "Syncing…" : "Sync now"}</button>}
+                {crm.connected && (
+                  <div className="deal-head-actions">
+                    <div className="deal-head-btns">
+                      <button className={`deal-chip ${qcOnly ? "on" : ""}`} onClick={() => setQcOnly((v) => !v)}>
+                        {qcOnly ? "✓ QC-sourced only" : "QC-sourced only"}
+                      </button>
+                      <button className="deal-chip" onClick={() => setLogOpen(true)}>Attribution log</button>
+                      <button className="primary-button" onClick={() => void sync()} disabled={syncing}>{syncing ? "Syncing…" : "Sync now"}</button>
+                    </div>
+                    <span className="deal-head-synced">{message || (crm.lastSyncedAt ? `Synced ${new Date(crm.lastSyncedAt).toLocaleString()}` : "Not synced yet")}</span>
+                  </div>
+                )}
               </div>
 
               {!crm.connected ? (
@@ -243,20 +257,13 @@ export default function ClientDealsPage() {
                       <button className={view === "board" ? "active" : ""} onClick={() => setView("board")}>Pipeline</button>
                       <button className={view === "list" ? "active" : ""} onClick={() => setView("list")}>List</button>
                     </div>
-                    <div className="deal-toolbar-right">
-                      {view === "board" ? (
-                        <button className={`deal-chip ${qcOnly ? "on" : ""}`} onClick={() => setQcOnly((v) => !v)}>
-                          {qcOnly ? "✓ QC-sourced only" : "QC-sourced only"}
-                        </button>
-                      ) : (
-                        <div className="deal-filters">
-                          <button className={`deal-filter ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>All ({deals.length})</button>
-                          <button className={`deal-filter ${filter === "confirmed" ? "active" : ""}`} onClick={() => setFilter("confirmed")}>Confirmed ({confirmedCount})</button>
-                          <button className={`deal-filter ${filter === "possible" ? "active" : ""}`} onClick={() => setFilter("possible")}>Review ({possibleCount})</button>
-                        </div>
-                      )}
-                      <span className="deal-synced">{message || (crm.lastSyncedAt ? `Synced ${new Date(crm.lastSyncedAt).toLocaleString()}` : "Not synced yet")}</span>
-                    </div>
+                    {view === "list" && (
+                      <div className="deal-filters">
+                        <button className={`deal-filter ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>All ({deals.length})</button>
+                        <button className={`deal-filter ${filter === "confirmed" ? "active" : ""}`} onClick={() => setFilter("confirmed")}>Confirmed ({confirmedCount})</button>
+                        <button className={`deal-filter ${filter === "possible" ? "active" : ""}`} onClick={() => setFilter("possible")}>Review ({possibleCount})</button>
+                      </div>
+                    )}
                   </div>
 
                   {deals.length === 0 ? (
@@ -319,6 +326,7 @@ export default function ClientDealsPage() {
           )}
         </main>
       </section>
+      {logOpen && <AttributionLog deals={deals} onClose={() => setLogOpen(false)} onOpenDeal={(d) => { setLogOpen(false); setOpenDeal(d); }} />}
       {openDeal && (
         <DealDrawer
           deal={openDeal}
@@ -410,6 +418,12 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
           <div className={`dd-attr ${deal.dismissed ? "dismissed" : deal.attribution}`}>
             <b>{deal.dismissed ? "Dismissed — not a QC deal" : deal.attribution === "confirmed" ? "Attributed to QC" : "Possible QC deal"}</b>
             {!deal.dismissed && deal.attributionReason && <p>{deal.attributionReason}</p>}
+            {!deal.dismissed && deal.matchedValue && (
+              <div className="dd-matched">
+                <span className="dd-matched-k">Matched on</span>
+                <span className="dd-matched-v">{MATCH_LABEL[deal.attributionMatchedBy ?? ""] ?? deal.attributionMatchedBy} · <code>{deal.matchedValue}</code></span>
+              </div>
+            )}
             {!deal.dismissed && deal.attributionCampaign && <span className="dd-camp">Campaign: {deal.attributionCampaign}</span>}
             <div className="dd-review">
               {deal.dismissed ? (
@@ -421,6 +435,24 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
               )}
             </div>
           </div>
+        )}
+
+        {deal.trace.length > 0 && (
+          <details className="dd-trace">
+            <summary>How this was decided · {deal.trace.length} checks</summary>
+            <ol className="dd-trace-list">
+              {deal.trace.map((t, i) => (
+                <li key={i} className={t.matched ? "hit" : "miss"}>
+                  <span className="dd-trace-mark">{t.matched ? "✓" : "·"}</span>
+                  <span className="dd-trace-body">
+                    <b>{t.check}</b>
+                    <small>{t.input}</small>
+                    {t.detail && <em>{t.detail}</em>}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </details>
         )}
 
         {loading ? (
@@ -469,3 +501,53 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
     </div>
   );
 }
+
+const MATCH_LABEL: Record<string, string> = {
+  heyreach: "HeyReach — a QC message on record",
+  email: "Contact email",
+  linkedin: "Contact LinkedIn",
+  "name+company": "Contact name at a QC-worked company",
+  domain: "Company domain",
+  company: "Company name",
+};
+
+/**
+ * The attribution log: every deal and the exact steps the matcher took, so the reasoning is auditable.
+ *
+ * It reads the trace already stored on each deal — the same steps re-run on every sync — so opening it is
+ * instant and always reflects the most recent sync. Attributed deals first, then the ones under review,
+ * then the rest, because the interesting question is usually "why did this one land where it did".
+ */
+function AttributionLog({ deals, onClose, onOpenDeal }: { deals: Deal[]; onClose: () => void; onOpenDeal: (d: Deal) => void }) {
+  const rank = (d: Deal) => (d.attribution === "confirmed" ? 0 : d.attribution === "possible" ? 1 : 2);
+  const ordered = [...deals].sort((a, b) => rank(a) - rank(b) || (a.companyName || "").localeCompare(b.companyName || ""));
+  return (
+    <div className="dd-backdrop">
+      <button className="dd-scrim" aria-label="Close" onClick={onClose} />
+      <aside className="dd-panel dd-log" role="dialog" aria-label="Attribution log">
+        <div className="dd-head">
+          <div className="dd-head-t"><h2>Attribution log</h2><span>Every deal, and exactly how it was judged · re-run each sync</span></div>
+          <button className="dd-x" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="dd-log-list">
+          {ordered.map((deal) => {
+            const decisive = deal.trace.find((t) => t.matched);
+            return (
+              <button key={deal.id} className="dd-log-row" onClick={() => onOpenDeal(deal)} type="button">
+                <span className="dd-log-top">
+                  <span className={`dd-log-badge ${deal.attribution}`}>{deal.attribution === "confirmed" ? "QC ✓" : deal.attribution === "possible" ? "Review" : "Not QC"}</span>
+                  <b>{deal.companyName || deal.name || "Untitled"}</b>
+                  {deal.dismissed && <span className="dd-log-dismissed">dismissed</span>}
+                </span>
+                <span className="dd-log-line">
+                  {decisive ? `${decisive.check} → ${decisive.detail || "matched"}` : `${deal.trace.length} checks, nothing matched`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </aside>
+    </div>
+  );
+}
+

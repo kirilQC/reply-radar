@@ -679,6 +679,7 @@ create table if not exists rr_deals (
   attribution_lead_id     uuid,
   company_logo            text,
   attribution_override    text,
+  attribution_trace       jsonb not null default '[]'::jsonb,
   raw                     jsonb not null default '{}'::jsonb,
   synced_at               timestamptz not null default now(),
   created_at              timestamptz not null default now(),

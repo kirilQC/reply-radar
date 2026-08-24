@@ -42,6 +42,10 @@ export type Deal = {
   computedAttribution: string;
   /** True when a person reviewed this and marked it not-QC; the display attribution is then "none". */
   dismissed: boolean;
+  /** The one identifier that tied this deal to QC — the exact matched data point. */
+  matchedValue: string | null;
+  /** Every step the matcher tried, in order, and how each came out. */
+  trace: { check: string; input: string; matched: boolean; detail: string }[];
 };
 
 export type DealClient = {
@@ -103,6 +107,8 @@ function dealFromRow(row: Row): Deal {
     attributionCampaign: orNull(row.attribution_campaign),
     leadId: orNull(row.attribution_lead_id),
     companyLogo: orNull(row.company_logo),
+    matchedValue: matchedValueFrom(row.attribution_evidence),
+    trace: Array.isArray(row.attribution_trace) ? (row.attribution_trace as Deal["trace"]) : [],
   };
 }
 
@@ -129,6 +135,17 @@ function leadDomain(raw: unknown): string {
   const company = (enrichment.company ?? {}) as Record<string, unknown>;
   const summary = (company.summary ?? {}) as Record<string, unknown>;
   return str(summary.website ?? summary.domain ?? company.website ?? company.domain ?? "");
+}
+
+/** The single identifier that matched, pulled out of the evidence for a plain "matched on X" line. */
+function matchedValueFrom(evidence: unknown): string | null {
+  const e = (evidence ?? {}) as Record<string, unknown>;
+  if (e.email) return String(e.email);
+  if (e.linkedin) return `linkedin.com/in/${String(e.linkedin)}`;
+  if (e.name) return String(e.name);
+  if (e.domain) return String(e.domain);
+  if (e.company) return String(e.company);
+  return null;
 }
 
 /** A company logo out of a lead's enrichment, for the deal card. Best-effort. */
@@ -237,19 +254,30 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
   let confirmed = 0;
   let possible = 0;
   const records = deals.map((deal) => {
-    // A HeyReach hit on any contact is a confirmed QC deal outright.
+    // The HeyReach step is the first thing the trace records — the authoritative "did we ever message
+    // this person" — followed by the local matcher's own steps.
     const hit = deal.contacts.find((c) => c.linkedin && heyreach.has(c.linkedin));
-    const verdict = hit
+    const heyreachInputs = deal.contacts.map((c) => c.linkedin).filter(Boolean);
+    const heyreachStep = {
+      check: "HeyReach — did QC ever message this person",
+      input: heyreachInputs.join(", ") || "no LinkedIn on the deal's contacts",
+      matched: Boolean(hit),
+      detail: hit ? `HeyReach confirms ${hit.name || "this contact"} in ${heyreach.get(hit.linkedin!)}` : (heyreachInputs.length ? "HeyReach has no record of these profiles" : (heyreachKey ? "nothing to look up" : "no HeyReach key connected")),
+    };
+    const local = hit
       ? {
           attribution: "confirmed" as const,
           matchedBy: "heyreach",
-          campaign: heyreach.get(hit.linkedin) || "",
-          reason: `${hit.name || "This contact"} was contacted in ${heyreach.get(hit.linkedin)} — confirmed by HeyReach.`,
+          campaign: heyreach.get(hit.linkedin!) || "",
+          reason: `${hit.name || "This contact"} was contacted in ${heyreach.get(hit.linkedin!)} — confirmed by HeyReach.`,
           evidence: { linkedin: hit.linkedin, source: "heyreach" },
           leadId: "",
           companyLogo: "",
+          trace: [] as unknown[],
         }
       : attributeDeal({ contacts: deal.contacts, companyDomain: deal.companyDomain, companyName: deal.companyName }, qc);
+    const verdict = local;
+    const trace = [heyreachStep, ...(((local as { trace?: unknown[] }).trace) ?? [])];
     if (verdict.attribution === "confirmed") confirmed += 1;
     if (verdict.attribution === "possible") possible += 1;
     const primary = deal.contacts[0];
@@ -277,6 +305,7 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
       attribution_evidence: verdict.evidence || {},
       attribution_lead_id: (verdict as { leadId?: string }).leadId || null,
       company_logo: deal.companyLogo || (verdict as { companyLogo?: string }).companyLogo || null,
+      attribution_trace: trace,
       raw: deal.raw ?? {},
       synced_at: new Date().toISOString(),
     };
