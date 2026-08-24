@@ -106,15 +106,32 @@ export async function connectCrm(slug: string, provider: string, apiKey: string)
   return response.ok ? { ok: true } : { ok: false, error: "Could not save the CRM connection." };
 }
 
+/** A company website/domain out of a lead's enrichment blob, if the provider recorded one. Best-effort. */
+function leadDomain(raw: unknown): string {
+  const rr = ((raw as Record<string, unknown>)?.reply_radar ?? {}) as Record<string, unknown>;
+  const enrichment = (rr.ai_ark ?? {}) as Record<string, unknown>;
+  const company = (enrichment.company ?? {}) as Record<string, unknown>;
+  const summary = (company.summary ?? {}) as Record<string, unknown>;
+  return str(summary.website ?? summary.domain ?? company.website ?? company.domain ?? "");
+}
+
 /** The identifiers that prove QC contact, gathered from leads and meetings for one client. */
 async function gatherQcIdentity(url: string, key: string, workspaceId: string) {
   const [leadRows, meetingRows] = await Promise.all([
-    rows(url, key, `rr_leads?select=linkedin_profile_url,campaign_names,name&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=20000`),
-    rows(url, key, `rr_meetings?select=invitee_email,invitee_linkedin,campaign,company_domain,invitee_name&workspace_id=eq.${encodeURIComponent(workspaceId)}`),
+    // `company` is the piece that was missing — the company QC contacted each lead at. `raw_data` carries
+    // the enriched company, which sometimes holds a website we can turn into a domain for a stronger match.
+    rows(url, key, `rr_leads?select=linkedin_profile_url,campaign_names,name,company,raw_data&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=20000`),
+    rows(url, key, `rr_meetings?select=invitee_email,invitee_linkedin,campaign,company_domain,invitee_name,company_name&workspace_id=eq.${encodeURIComponent(workspaceId)}`),
   ]);
   return buildQcIdentity({
-    leads: leadRows.map((r) => ({ linkedin: str(r.linkedin_profile_url), campaign: str(r.campaign_names), name: str(r.name) })),
-    meetings: meetingRows.map((r) => ({ email: str(r.invitee_email), linkedin: str(r.invitee_linkedin), campaign: str(r.campaign), domain: str(r.company_domain), name: str(r.invitee_name) })),
+    leads: leadRows.map((r) => ({
+      linkedin: str(r.linkedin_profile_url),
+      campaign: str(r.campaign_names),
+      name: str(r.name),
+      company: str(r.company),
+      domain: leadDomain(r.raw_data),
+    })),
+    meetings: meetingRows.map((r) => ({ email: str(r.invitee_email), linkedin: str(r.invitee_linkedin), campaign: str(r.campaign), domain: str(r.company_domain), name: str(r.invitee_name), company: str(r.company_name) })),
   });
 }
 

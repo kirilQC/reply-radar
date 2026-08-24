@@ -71,3 +71,40 @@ test("a meeting overrides a lead on the same person, so the confirmed reason cit
   const result = attributeDeal({ contacts: [{ email: "sam@acme.com" }] }, qc);
   assert.match(result.reason, /booked a meeting through QC/);
 });
+
+test("a deal at a company QC campaigned into — but a different person — is 'possible', not lost", () => {
+  // The gap the redesign exposed: QC ran a campaign into Providence but the CRM deal's contact is someone
+  // else, and no LinkedIn is on the CRM record. Under the old rule this vanished; now it surfaces for review.
+  const qc = buildQcIdentity({ leads: [{ company: "Providence Health, Inc.", campaign: "BV002", name: "Lisa Ivanjack", linkedin: "linkedin.com/in/lisa-ivanjack" }] });
+  const result = attributeDeal({ companyName: "Providence Health", contacts: [{ name: "Someone Else In Procurement" }] }, qc);
+  assert.equal(result.attribution, "possible");
+  assert.equal(result.matchedBy, "company");
+  assert.match(result.reason, /BV002/);
+});
+
+test("the exact person still wins as 'confirmed' over the company match", () => {
+  const qc = buildQcIdentity({ leads: [{ company: "Providence", campaign: "BV002", linkedin: "linkedin.com/in/lisa-ivanjack", name: "Lisa Ivanjack" }] });
+  const result = attributeDeal({ companyName: "Providence", contacts: [{ linkedin: "https://www.linkedin.com/in/lisa-ivanjack/", name: "Lisa Ivanjack" }] }, qc);
+  assert.equal(result.attribution, "confirmed");
+  assert.equal(result.matchedBy, "linkedin");
+});
+
+test("a lead's enriched domain raises a domain-level possible", () => {
+  const qc = buildQcIdentity({ leads: [{ company: "Acme", domain: "https://acme.io", campaign: "BV009" }] });
+  const result = attributeDeal({ companyName: "Acme Inc", companyDomain: "acme.io", contacts: [{ name: "Nobody Matched" }] }, qc);
+  assert.equal(result.attribution, "possible");
+  assert.equal(result.matchedBy, "domain");
+});
+
+test("a company QC never touched stays 'none'", () => {
+  const qc = buildQcIdentity({ leads: [{ company: "Providence", campaign: "BV002" }] });
+  const result = attributeDeal({ companyName: "Totally Unrelated Corp", contacts: [{ name: "X" }] }, qc);
+  assert.equal(result.attribution, "none");
+});
+
+test("a two-character or filler company name never matches", () => {
+  const qc = buildQcIdentity({ leads: [{ company: "The Group", campaign: "X" }] });
+  // "The Group" reduces to "" (both are stripped), so it can never collide with another deal.
+  const result = attributeDeal({ companyName: "The Group", contacts: [] }, qc);
+  assert.equal(result.attribution, "none");
+});

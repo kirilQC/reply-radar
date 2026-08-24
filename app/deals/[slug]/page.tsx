@@ -52,7 +52,7 @@ export default function ClientDealsPage() {
   const [pipeline, setPipeline] = useState<Pipeline>({ stages: [], discoveredAt: null });
   const [view, setView] = useState<"board" | "list">("board");
   /** Board narrows to QC-sourced deals with one toggle — the agency's own question, one click. */
-  const [qcOnly, setQcOnly] = useState(false);
+  const [qcOnly, setQcOnly] = useState(true);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [filter, setFilter] = useState<"all" | "confirmed" | "possible">("all");
@@ -138,27 +138,43 @@ export default function ClientDealsPage() {
    */
   const columns = useMemo(() => {
     const norm = (t: string) => t.trim().toLowerCase();
+    const isQc = (d: Deal) => d.attribution === "confirmed" || d.attribution === "possible";
+    const pool = qcOnly ? deals.filter(isQc) : deals;
+
+    /*
+     * The stage order. Prefer the pipeline discovered from the CRM; when there is none stored yet, fall
+     * back to the stages the deals themselves carry, in first-seen order. Either way the board groups by
+     * real stages rather than tipping everything into one "Other" column.
+     */
+    let stages = pipeline.stages;
+    if (stages.length === 0) {
+      const seen: string[] = [];
+      for (const d of deals) if (d.stage && !seen.some((t) => norm(t) === norm(d.stage!))) seen.push(d.stage);
+      stages = seen.map((title) => ({ title, kind: /won/i.test(title) ? "won" : /lost|dead/i.test(title) ? "lost" : "open", color: null }));
+    }
+
     const buckets = new Map<string, Deal[]>();
-    for (const stage of pipeline.stages) buckets.set(norm(stage.title), []);
+    for (const stage of stages) buckets.set(norm(stage.title), []);
     const other: Deal[] = [];
-    const pool = qcOnly ? deals.filter((d) => d.attribution === "confirmed") : deals;
     for (const deal of pool) {
-      const key = norm(deal.stage ?? "");
-      const bucket = buckets.get(key);
+      const bucket = buckets.get(norm(deal.stage ?? ""));
       if (bucket) bucket.push(deal);
       else other.push(deal);
     }
-    const cols = pipeline.stages.map((stage) => {
-      const rows = buckets.get(norm(stage.title)) ?? [];
+
+    const cols = stages.map((stage) => {
+      const rowsIn = buckets.get(norm(stage.title)) ?? [];
       return {
         stage,
-        deals: rows,
-        qc: rows.filter((d) => d.attribution === "confirmed").length,
-        value: rows.reduce((s, d) => s + (d.amount || 0), 0),
+        deals: rowsIn,
+        qc: rowsIn.filter((d) => d.attribution === "confirmed").length,
+        value: rowsIn.reduce((s, d) => s + (d.amount || 0), 0),
       };
     });
     if (other.length) cols.push({ stage: { title: "Other", kind: "open" as const, color: null }, deals: other, qc: other.filter((d) => d.attribution === "confirmed").length, value: other.reduce((s, d) => s + (d.amount || 0), 0) });
-    return cols;
+
+    // Hide the columns that are empty in the current view — an empty column is noise, not information.
+    return cols.filter((col) => col.deals.length > 0);
   }, [deals, pipeline, qcOnly]);
 
   return (
@@ -246,6 +262,11 @@ export default function ClientDealsPage() {
                     <div className="deal-empty">No deals synced yet. Hit Sync now.</div>
                   ) : view === "board" ? (
                     /* This client's own pipeline, in their own columns and order — discovered at sync. */
+                    columns.length === 0 ? (
+                      <div className="deal-empty">
+                        {qcOnly ? "No QC-sourced deals to show. Toggle off \u201cQC-sourced only\u201d for the full pipeline." : "No deals in this view."}
+                      </div>
+                    ) : (
                     <div className="deal-board">
                       {columns.map((col) => (
                         <div className={`deal-col kind-${col.stage.kind}`} key={col.stage.title}>
@@ -268,6 +289,7 @@ export default function ClientDealsPage() {
                         </div>
                       ))}
                     </div>
+                    )
                   ) : (
                     <div className="deal-list">
                       {shown.length === 0 && <div className="deal-empty">Nothing in this view.</div>}
