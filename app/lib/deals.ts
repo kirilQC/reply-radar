@@ -267,7 +267,7 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
       attribution_campaign: verdict.campaign || null,
       attribution_evidence: verdict.evidence || {},
       attribution_lead_id: (verdict as { leadId?: string }).leadId || null,
-      company_logo: (verdict as { companyLogo?: string }).companyLogo || null,
+      company_logo: deal.companyLogo || (verdict as { companyLogo?: string }).companyLogo || null,
       raw: deal.raw ?? {},
       synced_at: new Date().toISOString(),
     };

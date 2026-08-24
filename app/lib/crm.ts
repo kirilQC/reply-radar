@@ -28,6 +28,7 @@ export type CrmDeal = {
   contacts: CrmContact[];
   companyName: string;
   companyDomain: string;
+  companyLogo: string;
   raw: unknown;
 };
 
@@ -136,6 +137,7 @@ async function fetchHubspotDeals(token: string): Promise<CrmDeal[]> {
       contacts: dealContacts,
       companyName: str(companyProps.name),
       companyDomain: str(companyProps.domain),
+      companyLogo: "",
       raw: deal,
     };
   });
@@ -232,14 +234,27 @@ async function fetchAttioDeals(token: string): Promise<CrmDeal[]> {
   }
 
   const peopleIds = new Set<string>();
-  for (const record of records) attioReferenceIds(record, "associated_people").forEach((id) => peopleIds.add(id));
-  const [people, members] = await Promise.all([attioPeople(token, [...peopleIds]), attioMembers(token)]);
+  const companyIds = new Set<string>();
+  for (const record of records) {
+    attioReferenceIds(record, "associated_people").forEach((id) => peopleIds.add(id));
+    // The company is a *reference* to a company record, not a text field. Reading it as text — which is
+    // what the code did — returned nothing, so every Attio deal came through with no company name and no
+    // domain, which is exactly why company-level attribution never fired and half the deals went unmatched.
+    attioReferenceIds(record, "associated_company").forEach((id) => companyIds.add(id));
+    attioReferenceIds(record, "company").forEach((id) => companyIds.add(id));
+  }
+  const [people, members, companies] = await Promise.all([
+    attioPeople(token, [...peopleIds]),
+    attioMembers(token),
+    attioCompanies(token, [...companyIds]),
+  ]);
 
   return records.map((record) => {
     const id = str(((record.id as Record<string, unknown> | undefined)?.record_id) ?? record.id);
     const stage = attioValue(record, "stage");
     const contacts = attioReferenceIds(record, "associated_people").map((pid) => people.get(pid)).filter((c): c is CrmContact => Boolean(c));
-    const companyName = attioValue(record, "associated_company") || attioValue(record, "company");
+    const companyId = attioReferenceIds(record, "associated_company")[0] ?? attioReferenceIds(record, "company")[0] ?? "";
+    const company = companyId ? companies.get(companyId) : undefined;
     const money = attioMoney(record, "value");
     const ownerId = attioActorId(record, "owner");
     return {
@@ -254,11 +269,41 @@ async function fetchAttioDeals(token: string): Promise<CrmDeal[]> {
       // Resolve the owner reference to a name; fall back to any inline text, else empty.
       owner: (ownerId && members.get(ownerId)) || attioValue(record, "owner"),
       contacts,
-      companyName,
-      companyDomain: attioValue(record, "domains") || attioValue(record, "domain"),
+      // The company name now comes from the linked record, falling back to the deal's own name only when
+      // there is no company attached at all.
+      companyName: company?.name || attioValue(record, "name"),
+      companyDomain: company?.domain || "",
+      companyLogo: company?.logo || "",
       raw: record,
     };
   });
+}
+
+/** Company records by id → name, domain and logo, resolved from the deal's company reference. */
+async function attioCompanies(token: string, ids: string[]): Promise<Map<string, { name: string; domain: string; logo: string }>> {
+  const map = new Map<string, { name: string; domain: string; logo: string }>();
+  const unique = [...new Set(ids)].filter(Boolean);
+  const CONCURRENCY = 6;
+  for (let i = 0; i < unique.length; i += CONCURRENCY) {
+    await Promise.all(unique.slice(i, i + CONCURRENCY).map(async (id) => {
+      try {
+        const body = await attio(token, `/v2/objects/companies/records/${encodeURIComponent(id)}`, { method: "GET" });
+        const record = (body.data as Record<string, unknown> | undefined) ?? {};
+        const values = (record.values as Record<string, unknown> | undefined) ?? {};
+        // The logo attribute is often a URL under a couple of possible keys; take the first that reads.
+        const logoVals = (values.logo_url ?? values.avatar ?? []) as Array<Record<string, unknown>>;
+        const logo = Array.isArray(logoVals) && logoVals[0] ? str(logoVals[0].value ?? logoVals[0].url) : "";
+        map.set(id, {
+          name: attioValue(record, "name"),
+          domain: attioValue(record, "domains") || attioValue(record, "domain"),
+          logo,
+        });
+      } catch {
+        // A company we cannot read leaves the deal with its own name and no logo — degraded, not broken.
+      }
+    }));
+  }
+  return map;
 }
 
 /** Workspace member ids → names, so a deal's owner reference can be shown as a person. */

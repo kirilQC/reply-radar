@@ -205,3 +205,13 @@
 .dd-msg.in { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); }
 
 @media (max-width: 720px) { .deal-hero { grid-template-columns: 1fr; } }
+
+/* ── Board v3: wider columns, cards reduced to a logo + name ─────────────────────────────────────── */
+.deal-hero { grid-template-columns: 2fr 1fr 1fr; }
+.deal-board { gap: 14px; }
+.deal-col { flex: 0 0 320px; }
+
+/* A card is now a tile: the logo and the company name, nothing else. */
+.dk { display: flex; align-items: center; gap: 11px; padding: 12px 13px; }
+.dk-name { font-size: 13.5px; font-weight: 620; letter-spacing: -.01em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-logo { width: 34px; height: 34px; border-radius: 9px; font-size: 13px; }

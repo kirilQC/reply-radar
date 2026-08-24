@@ -129,9 +129,7 @@ export default function ClientDealsPage() {
   const shown = useMemo(() => deals.filter((d) => filter === "all" || d.attribution === filter), [deals, filter]);
   const confirmedCount = deals.filter((d) => d.attribution === "confirmed").length;
   const possibleCount = deals.filter((d) => d.attribution === "possible").length;
-  const confirmedValue = deals.filter((d) => d.attribution === "confirmed").reduce((s, d) => s + (d.amount || 0), 0);
   const currency = deals.find((d) => d.currency)?.currency ?? null;
-  const anyValue = deals.some((d) => d.amount);
 
   /*
    * The board columns, built from *this client's* pipeline, not a fixed set.
@@ -227,12 +225,14 @@ export default function ClientDealsPage() {
                     <div className="deal-hero-big">
                       <span>Deals attributed to QC</span>
                       <b>{confirmedCount}</b>
-                      <small>{anyValue && confirmedValue ? `${money(confirmedValue, currency)} in confirmed pipeline` : "confirmed — a QC-contacted person is on them"}</small>
                     </div>
                     <div className="deal-hero-cell">
                       <span>To review</span>
                       <b className="amber">{possibleCount}</b>
-                      <small>same company, unconfirmed person</small>
+                    </div>
+                    <div className="deal-hero-cell">
+                      <span>Total deals</span>
+                      <b>{deals.length}</b>
                     </div>
                   </div>
 
@@ -282,7 +282,7 @@ export default function ClientDealsPage() {
                           <div className="deal-col-body">
                             {col.deals.length === 0 && <p className="deal-col-empty">—</p>}
                             {col.deals.map((deal) => (
-                              <DealCard key={deal.id} deal={deal} currency={currency} money={money} onOpen={() => setOpenDeal(deal)} />
+                              <DealCard key={deal.id} deal={deal} onOpen={() => setOpenDeal(deal)} />
                             ))}
                           </div>
                         </div>
@@ -322,28 +322,14 @@ export default function ClientDealsPage() {
   );
 }
 
-/** One deal on the board: logo, company, who, the attribution proof, value, and its status. Clickable. */
-function DealCard({ deal, currency, money, onOpen }: { deal: Deal; currency: string | null; money: (v: number | null, c: string | null) => string; onOpen: () => void }) {
-  const attr = deal.attribution;
+/** A board card, pared to the essentials the client asked for: the company logo and its name. The
+ *  contact, the attribution proof and everything else live one click away in the drawer. */
+function DealCard({ deal, onOpen }: { deal: Deal; onOpen: () => void }) {
   const initial = (deal.companyName || deal.name || "?").trim().charAt(0).toUpperCase();
   return (
-    <button className={`dk ${attr}`} onClick={onOpen} type="button">
-      <div className="dk-top">
-        <span className="dk-logo">{deal.companyLogo ? <img src={deal.companyLogo} alt="" /> : initial}</span>
-        <span className="dk-id">
-          <b>{deal.companyName || deal.name || "Untitled"}</b>
-          {(deal.contactName || deal.contactEmail) && <small>{deal.contactName || deal.contactEmail}</small>}
-        </span>
-        {deal.amount ? <span className="dk-val">{money(deal.amount, deal.currency || currency)}</span> : null}
-      </div>
-      {attr !== "none" && deal.attributionReason && (
-        <span className={`dk-attr ${attr}`}><i />{deal.attributionReason}</span>
-      )}
-      <div className="dk-foot">
-        {attr === "confirmed" && <span className="dk-tag qc">QC ✓</span>}
-        {attr === "possible" && <span className="dk-tag review">Review</span>}
-        <span className={`dk-tag status ${deal.status}`}>{deal.status}</span>
-      </div>
+    <button className={`dk ${deal.attribution}`} onClick={onOpen} type="button">
+      <span className="dk-logo">{deal.companyLogo ? <img src={deal.companyLogo} alt="" /> : initial}</span>
+      <b className="dk-name">{deal.companyName || deal.name || "Untitled"}</b>
     </button>
   );
 }
