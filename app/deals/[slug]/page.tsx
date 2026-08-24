@@ -31,6 +31,8 @@ type Deal = {
 };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Crm = { provider: string | null; connected: boolean; lastSyncedAt: string | null };
+type PipelineStage = { title: string; kind: "won" | "lost" | "open"; color: string | null };
+type Pipeline = { stages: PipelineStage[]; discoveredAt: string | null };
 
 function money(value: number | null, currency: string | null): string {
   if (!value) return "—";
@@ -47,6 +49,10 @@ export default function ClientDealsPage() {
   const [client, setClient] = useState<Client | null>(null);
   const [crm, setCrm] = useState<Crm>({ provider: null, connected: false, lastSyncedAt: null });
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [pipeline, setPipeline] = useState<Pipeline>({ stages: [], discoveredAt: null });
+  const [view, setView] = useState<"board" | "list">("board");
+  /** Board narrows to QC-sourced deals with one toggle — the agency's own question, one click. */
+  const [qcOnly, setQcOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [filter, setFilter] = useState<"all" | "confirmed" | "possible">("all");
@@ -68,6 +74,7 @@ export default function ClientDealsPage() {
         setClient(payload.client);
         setCrm(payload.crm ?? { provider: null, connected: false, lastSyncedAt: null });
         setDeals(Array.isArray(payload.deals) ? payload.deals : []);
+        setPipeline(payload.pipeline && Array.isArray(payload.pipeline.stages) ? payload.pipeline : { stages: [], discoveredAt: null });
       }
     } catch { /* leave loading */ }
     setLoading(false);
@@ -119,6 +126,40 @@ export default function ClientDealsPage() {
   const possibleCount = deals.filter((d) => d.attribution === "possible").length;
   const confirmedValue = deals.filter((d) => d.attribution === "confirmed").reduce((s, d) => s + (d.amount || 0), 0);
   const totalValue = deals.reduce((s, d) => s + (d.amount || 0), 0);
+  const currency = deals.find((d) => d.currency)?.currency ?? null;
+  const anyValue = deals.some((d) => d.amount);
+
+  /*
+   * The board columns, built from *this client's* pipeline, not a fixed set.
+   *
+   * Deals are bucketed into the client's own stages by matching the deal's stage title. A deal whose
+   * stage is not in the discovered list — a stage renamed since the last sync, say — lands in a trailing
+   * "Other" column rather than vanishing, so nothing is ever silently dropped from the board.
+   */
+  const columns = useMemo(() => {
+    const norm = (t: string) => t.trim().toLowerCase();
+    const buckets = new Map<string, Deal[]>();
+    for (const stage of pipeline.stages) buckets.set(norm(stage.title), []);
+    const other: Deal[] = [];
+    const pool = qcOnly ? deals.filter((d) => d.attribution === "confirmed") : deals;
+    for (const deal of pool) {
+      const key = norm(deal.stage ?? "");
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(deal);
+      else other.push(deal);
+    }
+    const cols = pipeline.stages.map((stage) => {
+      const rows = buckets.get(norm(stage.title)) ?? [];
+      return {
+        stage,
+        deals: rows,
+        qc: rows.filter((d) => d.attribution === "confirmed").length,
+        value: rows.reduce((s, d) => s + (d.amount || 0), 0),
+      };
+    });
+    if (other.length) cols.push({ stage: { title: "Other", kind: "open" as const, color: null }, deals: other, qc: other.filter((d) => d.attribution === "confirmed").length, value: other.reduce((s, d) => s + (d.amount || 0), 0) });
+    return cols;
+  }, [deals, pipeline, qcOnly]);
 
   return (
     <div className="app-shell">
@@ -161,42 +202,94 @@ export default function ClientDealsPage() {
                 </div>
               ) : (
                 <>
-                  <div className="deal-summary">
-                    <div className="deal-stat win"><span>Attributed to QC</span><b>{money(confirmedValue, null)}</b></div>
-                    <div className="deal-stat"><span>Confirmed deals</span><b>{confirmedCount}</b></div>
-                    <div className="deal-stat"><span>Total pipeline</span><b>{money(totalValue, null)}</b></div>
-                    <div className="deal-stat"><span>All deals</span><b>{deals.length}</b></div>
+                  {/* The hero: the agency's own scorecard — how much of this pipeline traces to QC. */}
+                  <div className="deal-hero">
+                    <div className="deal-hero-big">
+                      <span>Pipeline sourced by QC</span>
+                      <b>{anyValue ? money(confirmedValue, currency) : confirmedCount}</b>
+                      <small>{anyValue ? `${confirmedCount} confirmed deal${confirmedCount === 1 ? "" : "s"}` : "confirmed deals — connect deal values in the CRM to see the sum"}</small>
+                    </div>
+                    <div className="deal-hero-cell">
+                      <span>To review</span>
+                      <b className="amber">{possibleCount}</b>
+                      <small>same company, unconfirmed person</small>
+                    </div>
+                    <div className="deal-hero-cell">
+                      <span>Total pipeline</span>
+                      <b>{anyValue ? money(totalValue, currency) : deals.length}</b>
+                      <small>{anyValue ? `${deals.length} deals` : "deals synced"}</small>
+                    </div>
                   </div>
 
                   <div className="deal-toolbar">
-                    <div className="deal-filters">
-                      <button className={`deal-filter ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>All ({deals.length})</button>
-                      <button className={`deal-filter ${filter === "confirmed" ? "active" : ""}`} onClick={() => setFilter("confirmed")}>Confirmed ({confirmedCount})</button>
-                      <button className={`deal-filter ${filter === "possible" ? "active" : ""}`} onClick={() => setFilter("possible")}>Review ({possibleCount})</button>
+                    <div className="deal-viewtabs">
+                      <button className={view === "board" ? "active" : ""} onClick={() => setView("board")}>Pipeline</button>
+                      <button className={view === "list" ? "active" : ""} onClick={() => setView("list")}>List</button>
                     </div>
-                    <span className="deal-synced">{message || (crm.lastSyncedAt ? `Synced ${new Date(crm.lastSyncedAt).toLocaleString()}` : "Not synced yet")}</span>
+                    <div className="deal-toolbar-right">
+                      {view === "board" ? (
+                        <button className={`deal-chip ${qcOnly ? "on" : ""}`} onClick={() => setQcOnly((v) => !v)}>
+                          {qcOnly ? "✓ QC-sourced only" : "QC-sourced only"}
+                        </button>
+                      ) : (
+                        <div className="deal-filters">
+                          <button className={`deal-filter ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>All ({deals.length})</button>
+                          <button className={`deal-filter ${filter === "confirmed" ? "active" : ""}`} onClick={() => setFilter("confirmed")}>Confirmed ({confirmedCount})</button>
+                          <button className={`deal-filter ${filter === "possible" ? "active" : ""}`} onClick={() => setFilter("possible")}>Review ({possibleCount})</button>
+                        </div>
+                      )}
+                      <span className="deal-synced">{message || (crm.lastSyncedAt ? `Synced ${new Date(crm.lastSyncedAt).toLocaleString()}` : "Not synced yet")}</span>
+                    </div>
                   </div>
 
-                  <div className="deal-list">
-                    {shown.length === 0 && <div className="deal-empty">{deals.length === 0 ? "No deals synced yet. Hit Sync now." : "Nothing in this view."}</div>}
-                    {shown.map((deal) => (
-                      <div className={`deal-row ${deal.attribution}`} key={deal.id}>
-                        <div className="deal-main">
-                          <strong>{deal.name || "Untitled deal"}</strong>
-                          <span className="deal-sub">{[deal.companyName, deal.contactName || deal.contactEmail].filter(Boolean).join(" · ") || "—"}</span>
-                          {deal.attributionReason && <span className={`deal-attr ${deal.attribution === "confirmed" ? "win" : ""}`}>{deal.attributionReason}</span>}
+                  {deals.length === 0 ? (
+                    <div className="deal-empty">No deals synced yet. Hit Sync now.</div>
+                  ) : view === "board" ? (
+                    /* This client's own pipeline, in their own columns and order — discovered at sync. */
+                    <div className="deal-board">
+                      {columns.map((col) => (
+                        <div className={`deal-col kind-${col.stage.kind}`} key={col.stage.title}>
+                          <div className="deal-col-head" style={col.stage.color ? { borderTopColor: col.stage.color } : undefined}>
+                            <div className="deal-col-title">
+                              <b>{col.stage.title}</b>
+                              <span>{col.deals.length}</span>
+                            </div>
+                            <div className="deal-col-sub">
+                              {col.qc > 0 && <span className="deal-col-qc">{col.qc} QC</span>}
+                              {col.value > 0 && <span>{money(col.value, currency)}</span>}
+                            </div>
+                          </div>
+                          <div className="deal-col-body">
+                            {col.deals.length === 0 && <p className="deal-col-empty">—</p>}
+                            {col.deals.map((deal) => (
+                              <DealCard key={deal.id} deal={deal} currency={currency} money={money} />
+                            ))}
+                          </div>
                         </div>
-                        <div className="deal-amount">
-                          <b>{money(deal.amount, deal.currency)}</b>
-                          <span>{deal.stage || deal.status}</span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="deal-list">
+                      {shown.length === 0 && <div className="deal-empty">Nothing in this view.</div>}
+                      {shown.map((deal) => (
+                        <div className={`deal-row ${deal.attribution}`} key={deal.id}>
+                          <div className="deal-main">
+                            <strong>{deal.name || "Untitled deal"}</strong>
+                            <span className="deal-sub">{[deal.companyName, deal.contactName || deal.contactEmail].filter(Boolean).join(" · ") || "—"}</span>
+                            {deal.attributionReason && <span className={`deal-attr ${deal.attribution === "confirmed" ? "win" : ""}`}>{deal.attributionReason}</span>}
+                          </div>
+                          <div className="deal-amount">
+                            <b>{money(deal.amount, deal.currency)}</b>
+                            <span>{deal.stage || deal.status}</span>
+                          </div>
+                          <div className="deal-badges">
+                            <span className={`deal-badge ${deal.attribution}`}>{deal.attribution === "confirmed" ? "QC ✓" : deal.attribution === "possible" ? "Review" : "Not QC"}</span>
+                            <span className="deal-badge status">{deal.status}</span>
+                          </div>
                         </div>
-                        <div className="deal-badges">
-                          <span className={`deal-badge ${deal.attribution}`}>{deal.attribution === "confirmed" ? "QC ✓" : deal.attribution === "possible" ? "Review" : "Not QC"}</span>
-                          <span className="deal-badge status">{deal.status}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
             </>
@@ -206,3 +299,26 @@ export default function ClientDealsPage() {
     </div>
   );
 }
+
+/** One deal on the board: company, who, the attribution proof, value, and its status badge. */
+function DealCard({ deal, currency, money }: { deal: Deal; currency: string | null; money: (v: number | null, c: string | null) => string }) {
+  const attr = deal.attribution;
+  return (
+    <div className={`dk ${attr}`}>
+      <div className="dk-top">
+        <b>{deal.companyName || deal.name || "Untitled"}</b>
+        {deal.amount ? <span className="dk-val">{money(deal.amount, deal.currency || currency)}</span> : null}
+      </div>
+      {(deal.contactName || deal.contactEmail) && <span className="dk-who">{deal.contactName || deal.contactEmail}</span>}
+      {attr !== "none" && deal.attributionReason && (
+        <span className={`dk-attr ${attr}`}><i />{deal.attributionReason}</span>
+      )}
+      <div className="dk-foot">
+        {attr === "confirmed" && <span className="dk-tag qc">QC ✓</span>}
+        {attr === "possible" && <span className="dk-tag review">Review</span>}
+        <span className={`dk-tag status ${deal.status}`}>{deal.status}</span>
+      </div>
+    </div>
+  );
+}
+

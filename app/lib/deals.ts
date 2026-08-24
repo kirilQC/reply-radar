@@ -12,7 +12,7 @@
  * person-unique id; a shared company is "possible" and left for a human.
  */
 
-import { fetchDeals, type CrmProvider } from "./crm";
+import { fetchDeals, fetchPipeline, type CrmProvider, type Pipeline } from "./crm";
 import { resolveWorkspace } from "./meetings";
 import { buildQcIdentity, attributeDeal } from "../../shared/deal-attribution.mjs";
 
@@ -133,10 +133,25 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
   if (!provider || !token) return { ok: false, error: "Connect a CRM for this client first." };
 
   let deals;
+  let pipeline: Pipeline;
   try {
-    deals = await fetchDeals(provider, token);
+    // The deals and the pipeline shape are fetched together: the sync should learn how *this* client
+    // organises their board at the same moment it pulls what is on it.
+    [deals, pipeline] = await Promise.all([fetchDeals(provider, token), fetchPipeline(provider, token)]);
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "The CRM could not be reached." };
+  }
+
+  // Discovery can come back empty if the CRM names its stage attribute unusually. Rather than store
+  // nothing, fall back to the stages actually present on the deals — unordered, but complete, so the
+  // view still has every column the client uses.
+  if (pipeline.stages.length === 0) {
+    const seen: string[] = [];
+    for (const deal of deals) if (deal.stage && !seen.includes(deal.stage)) seen.push(deal.stage);
+    pipeline = {
+      stages: seen.map((title) => ({ title, kind: /won/i.test(title) ? "won" : /lost|dead/i.test(title) ? "lost" : "open", color: null })),
+      discoveredAt: new Date().toISOString(),
+    };
   }
 
   const qc = await gatherQcIdentity(url, key, client.id);
@@ -188,7 +203,11 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
       }
     }
   }
-  await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(client.id)}`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify({ crm_last_synced_at: new Date().toISOString() }) }).catch(() => {});
+  await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(client.id)}`, {
+    method: "PATCH",
+    headers: authHeaders(key),
+    body: JSON.stringify({ crm_last_synced_at: new Date().toISOString(), crm_pipeline: pipeline }),
+  }).catch(() => {});
   return { ok: true, synced: records.length, confirmed, possible };
 }
 
@@ -247,19 +266,21 @@ export async function listDealClients(): Promise<DealClient[]> {
 }
 
 /** One client, its CRM state, and its deals — confirmed first, then by close date. */
-export async function getClientDeals(slug: string): Promise<{ client: { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null }; crm: { provider: string | null; connected: boolean; lastSyncedAt: string | null }; deals: Deal[] } | null> {
+export async function getClientDeals(slug: string): Promise<{ client: { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null }; crm: { provider: string | null; connected: boolean; lastSyncedAt: string | null }; pipeline: Pipeline; deals: Deal[] } | null> {
   const { url, key } = config();
   if (!url || !key) return null;
-  const w = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,crm_provider,crm_api_key_ciphertext,crm_last_synced_at&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
+  const w = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,crm_provider,crm_api_key_ciphertext,crm_last_synced_at,crm_pipeline&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
   if (!w) return null;
   const id = str(w.id);
   const dealRows = await rows(url, key, `rr_deals?select=*&workspace_id=eq.${encodeURIComponent(id)}&order=close_date.desc.nullslast`);
   // Confirmed at the top, then possible, then the rest — the whole point is to see QC's deals first.
   const rank = (a: string) => (a === "confirmed" ? 0 : a === "possible" ? 1 : 2);
   const deals = dealRows.map(dealFromRow).sort((a, b) => rank(a.attribution) - rank(b.attribution));
+  const pipeline = (w.crm_pipeline && typeof w.crm_pipeline === "object" ? w.crm_pipeline : { stages: [], discoveredAt: null }) as Pipeline;
   return {
     client: { id, name: str(w.name), slug: str(w.slug), logoUrl: orNull(w.logo_url), accentColor: orNull(w.accent_color) },
     crm: { provider: orNull(w.crm_provider), connected: Boolean(str(w.crm_api_key_ciphertext)), lastSyncedAt: orNull(w.crm_last_synced_at) },
+    pipeline,
     deals,
   };
 }

@@ -86,3 +86,60 @@
   .deal-row { flex-wrap: wrap; }
   .deal-badges { width: auto; flex-direction: row; }
 }
+
+/* ── The deal hero, dynamic pipeline board, and cards ───────────────────────────────────────────
+   The redesign: lead with QC's slice, then the client's own pipeline discovered at sync — every client
+   organises differently, so no two boards share columns. */
+
+.deal-hero { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 1px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--border); }
+.deal-hero > div { background: var(--panel); padding: 17px 20px; }
+.deal-hero-big { background: linear-gradient(155deg, color-mix(in srgb, var(--green) 13%, var(--panel)), var(--panel) 70%) !important; }
+.deal-hero span, .deal-hero-big span { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted-2); font-weight: 700; }
+.deal-hero b { display: block; margin-top: 6px; font-size: 27px; letter-spacing: -.04em; font-weight: 680; font-variant-numeric: tabular-nums; }
+.deal-hero-big b { color: var(--green); font-size: 33px; }
+.deal-hero b.amber { color: var(--amber); }
+.deal-hero small { display: block; margin-top: 4px; font-size: 10.5px; color: var(--muted-2); }
+
+.deal-toolbar-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.deal-viewtabs { display: flex; gap: 4px; background: var(--panel-2); padding: 3px; border-radius: 9px; }
+.deal-viewtabs button { font-size: 11px; padding: 6px 13px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font-weight: 600; }
+.deal-viewtabs button.active { background: var(--panel); color: var(--text); }
+.deal-chip { font-size: 11px; font-weight: 600; padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.deal-chip.on { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.deal-toolbar .deal-synced { margin-left: 0; }
+
+/* The board: a horizontally-scrolling row of the client's own stages. */
+.deal-board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 10px; align-items: flex-start; }
+.deal-col { flex: 0 0 262px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--panel) 55%, transparent); overflow: hidden; }
+.deal-col-head { padding: 12px 14px 10px; border-bottom: 1px solid var(--border); border-top: 2px solid var(--border); background: var(--panel); }
+.deal-col.kind-won .deal-col-head { border-top-color: var(--green); }
+.deal-col.kind-lost .deal-col-head { border-top-color: var(--coral); }
+.deal-col.kind-open .deal-col-head { border-top-color: var(--accent); }
+.deal-col-title { display: flex; align-items: center; gap: 8px; }
+.deal-col-title b { font-size: 12.5px; font-weight: 640; letter-spacing: -.01em; }
+.deal-col-title span { font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.deal-col-sub { display: flex; gap: 10px; margin-top: 5px; font-size: 10.5px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.deal-col-qc { color: var(--green); font-weight: 700; }
+.deal-col-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; max-height: 640px; overflow-y: auto; }
+.deal-col-empty { margin: 6px 0; text-align: center; color: var(--muted-2); font-size: 12px; }
+
+/* A card on the board. `dk` prefix so it never collides with the client-index `.deal-card`. */
+.dk { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 11px 12px; border-left: 3px solid transparent; }
+.dk.confirmed { border-left-color: var(--green); }
+.dk.possible { border-left-color: var(--amber); }
+.dk-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.dk-top b { font-size: 12.5px; font-weight: 620; letter-spacing: -.01em; min-width: 0; }
+.dk-val { font-size: 12px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dk-who { display: block; margin-top: 3px; font-size: 10.5px; color: var(--muted-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-attr { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 10.5px; line-height: 1.4; color: var(--green); }
+.dk-attr.possible { color: var(--amber); }
+.dk-attr i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; margin-top: 1px; }
+.dk-foot { display: flex; gap: 5px; margin-top: 10px; }
+.dk-tag { font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 7px; border-radius: 5px; }
+.dk-tag.qc { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
+.dk-tag.review { color: var(--amber); background: color-mix(in srgb, var(--amber) 15%, transparent); }
+.dk-tag.status { color: var(--muted); background: var(--panel-2); }
+.dk-tag.status.won { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
+.dk-tag.status.lost { color: var(--coral); background: color-mix(in srgb, var(--coral) 14%, transparent); }
+
+@media (max-width: 720px) { .deal-hero { grid-template-columns: 1fr; } }

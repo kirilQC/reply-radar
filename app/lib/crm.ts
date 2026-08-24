@@ -159,12 +159,39 @@ async function attio(token: string, path: string, init?: RequestInit): Promise<R
   return (await response.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
-/** The first primitive value of an Attio typed attribute (its values are arrays of typed objects). */
+/** The array of typed value-objects Attio stores for one attribute. */
+function attioValues(record: Record<string, unknown>, attribute: string): Array<Record<string, unknown>> {
+  return ((record.values as Record<string, unknown> | undefined)?.[attribute] as Array<Record<string, unknown>> | undefined) ?? [];
+}
+
+/** The first primitive value of an Attio typed attribute. */
 function attioValue(record: Record<string, unknown>, attribute: string): string {
-  const values = ((record.values as Record<string, unknown> | undefined)?.[attribute] as Array<Record<string, unknown>> | undefined) ?? [];
-  const first = values[0];
+  const first = attioValues(record, attribute)[0];
   if (!first) return "";
   return str(first.value ?? first.email_address ?? (first.status as Record<string, unknown> | undefined)?.title ?? first.full_name ?? first.option ?? "");
+}
+
+/**
+ * A deal's monetary value.
+ *
+ * This is the parse that was silently returning nothing. Attio stores a currency attribute as
+ * `{ currency_value, currency_code }`, not a plain `value`, so the old reader found no `.value` and
+ * every amount came through blank — which is why every deal, "Attributed to QC" and "Total pipeline"
+ * showed a dash. Reads both shapes now, and hands the currency code back alongside the number.
+ */
+function attioMoney(record: Record<string, unknown>, attribute: string): { amount: number | null; currency: string } {
+  const first = attioValues(record, attribute)[0];
+  if (!first) return { amount: null, currency: "" };
+  const raw = first.currency_value ?? first.value;
+  const amount = raw == null || str(raw) === "" ? null : Number(raw);
+  return { amount: Number.isFinite(amount as number) ? (amount as number) : null, currency: str(first.currency_code) };
+}
+
+/** An actor-reference attribute's referenced id (deal owner is stored this way, not as text). */
+function attioActorId(record: Record<string, unknown>, attribute: string): string {
+  const first = attioValues(record, attribute)[0];
+  if (!first) return "";
+  return str(first.referenced_actor_id ?? first.actor_id ?? "");
 }
 function attioReferenceIds(record: Record<string, unknown>, attribute: string): string[] {
   const values = ((record.values as Record<string, unknown> | undefined)?.[attribute] as Array<Record<string, unknown>> | undefined) ?? [];
@@ -206,29 +233,136 @@ async function fetchAttioDeals(token: string): Promise<CrmDeal[]> {
 
   const peopleIds = new Set<string>();
   for (const record of records) attioReferenceIds(record, "associated_people").forEach((id) => peopleIds.add(id));
-  const people = await attioPeople(token, [...peopleIds]);
+  const [people, members] = await Promise.all([attioPeople(token, [...peopleIds]), attioMembers(token)]);
 
   return records.map((record) => {
     const id = str(((record.id as Record<string, unknown> | undefined)?.record_id) ?? record.id);
     const stage = attioValue(record, "stage");
     const contacts = attioReferenceIds(record, "associated_people").map((pid) => people.get(pid)).filter((c): c is CrmContact => Boolean(c));
     const companyName = attioValue(record, "associated_company") || attioValue(record, "company");
+    const money = attioMoney(record, "value");
+    const ownerId = attioActorId(record, "owner");
     return {
       externalId: id,
       name: attioValue(record, "name"),
-      amount: attioValue(record, "value") ? Number(attioValue(record, "value")) : null,
-      currency: "",
+      amount: money.amount,
+      currency: money.currency,
       stage,
       pipeline: "",
       status: statusFromStage(stage),
       closeDate: toIsoDate(attioValue(record, "close_date")),
-      owner: attioValue(record, "owner"),
+      // Resolve the owner reference to a name; fall back to any inline text, else empty.
+      owner: (ownerId && members.get(ownerId)) || attioValue(record, "owner"),
       contacts,
       companyName,
       companyDomain: attioValue(record, "domains") || attioValue(record, "domain"),
       raw: record,
     };
   });
+}
+
+/** Workspace member ids → names, so a deal's owner reference can be shown as a person. */
+async function attioMembers(token: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    const body = await attio(token, "/v2/workspace_members", { method: "GET" });
+    for (const member of (body.data as Array<Record<string, unknown>> | undefined) ?? []) {
+      const mid = str(member.workspace_member_id ?? member.id);
+      const name = [str(member.first_name), str(member.last_name)].filter(Boolean).join(" ") || str(member.email_address);
+      if (mid) map.set(mid, name);
+    }
+  } catch {
+    // No member list just means owners show as blank — the deal is intact, only a label is missing.
+  }
+  return map;
+}
+
+/* ── Pipeline discovery ─────────────────────────────────────────────────────────────────────────────
+ *
+ * No two clients organise their pipeline the same way. Bluevia runs Meeting Scheduled → In Conversation
+ * → Champion Identified → Approver Engaged → Cleared to Pilot → Won → Dead; Willow runs Discovery →
+ * Scoping → POV → Commercial → Won → Nurture → Lost. So the deals view cannot be built from a fixed set
+ * of columns — it has to learn each client's own stages, in their own order, at sync time and build
+ * from that. This reads that shape out of the CRM.
+ */
+
+export type PipelineStage = {
+  /** The stage's own name, exactly as the client wrote it — this is the column heading. */
+  title: string;
+  /** "won" | "lost" | "open", inferred from the name, so the view can colour and total them. */
+  kind: "won" | "lost" | "open";
+  /** The client's colour for the stage where the CRM exposes one, for the column accent. */
+  color: string | null;
+};
+export type Pipeline = { stages: PipelineStage[]; discoveredAt: string };
+
+const stageKind = (title: string): "won" | "lost" | "open" => {
+  const s = title.toLowerCase();
+  if (/won|closed[\s_-]*won/.test(s)) return "won";
+  if (/lost|closed[\s_-]*lost|dead|churn|disqualif/.test(s)) return "lost";
+  return "open";
+};
+
+/**
+ * Attio's ordered statuses for the deals `stage` attribute.
+ *
+ * Attempts the statuses endpoint; if the workspace names the stage attribute something else, or the
+ * endpoint shape differs, it returns an empty list rather than throwing — the caller then falls back to
+ * the stages seen on the deals themselves, so a discovery miss degrades to "unordered but complete"
+ * rather than a broken sync.
+ */
+async function fetchAttioPipeline(token: string): Promise<Pipeline> {
+  try {
+    const body = await attio(token, "/v2/objects/deals/attributes/stage/statuses", { method: "GET" });
+    const list = (body.data as Array<Record<string, unknown>> | undefined) ?? [];
+    const stages = list
+      .filter((row) => !row.is_archived)
+      .map((row) => {
+        const title = str(row.title);
+        return { title, kind: stageKind(title), color: row.color ? str(row.color) : null };
+      })
+      .filter((stage) => stage.title);
+    return { stages, discoveredAt: new Date().toISOString() };
+  } catch {
+    return { stages: [], discoveredAt: new Date().toISOString() };
+  }
+}
+
+/**
+ * HubSpot's ordered deal-pipeline stages.
+ *
+ * HubSpot can hold several pipelines; the default (or the first) is used, and its stages come already
+ * ordered with a `displayOrder`. `metadata.isClosed` / `probability` tell won from lost more reliably
+ * than the label does, so those are consulted first.
+ */
+async function fetchHubspotPipeline(token: string): Promise<Pipeline> {
+  try {
+    const body = await hubspot(token, "/crm/v3/pipelines/deals", { method: "GET" });
+    const pipelines = (body.results as Array<Record<string, unknown>> | undefined) ?? [];
+    const chosen = pipelines.find((p) => str(p.id) === "default") ?? pipelines[0];
+    const raw = ((chosen?.stages as Array<Record<string, unknown>> | undefined) ?? [])
+      .slice()
+      .sort((a, b) => Number(a.displayOrder ?? 0) - Number(b.displayOrder ?? 0));
+    const stages = raw.map((row) => {
+      const title = str(row.label);
+      const meta = (row.metadata as Record<string, unknown> | undefined) ?? {};
+      const kind: "won" | "lost" | "open" =
+        str(meta.isClosed) === "true"
+          ? Number(meta.probability) >= 1 ? "won" : "lost"
+          : stageKind(title);
+      return { title, kind, color: null };
+    }).filter((stage) => stage.title);
+    return { stages, discoveredAt: new Date().toISOString() };
+  } catch {
+    return { stages: [], discoveredAt: new Date().toISOString() };
+  }
+}
+
+/** Discover a client's pipeline shape — their own columns, in their own order. */
+export async function fetchPipeline(provider: CrmProvider, token: string): Promise<Pipeline> {
+  if (provider === "hubspot") return fetchHubspotPipeline(token);
+  if (provider === "attio") return fetchAttioPipeline(token);
+  return { stages: [], discoveredAt: new Date().toISOString() };
 }
 
 /** Pull all of a client's deals from their CRM. Throws with the provider's own message on a failure. */

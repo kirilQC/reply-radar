@@ -67,7 +67,7 @@ create table if not exists rr_workspaces (
   onboarding_status text, onboarding_started_at timestamptz, onboarding_completed_at timestamptz,
   -- The client's CRM, for pulling their deal pipeline and attributing which deals came from QC. The key is
   -- the client's own CRM token, stored like the HeyReach key. See app/lib/deals.ts and shared/deal-attribution.mjs.
-  crm_provider text, crm_api_key_ciphertext text, crm_last_synced_at timestamptz,
+  crm_provider text, crm_api_key_ciphertext text, crm_last_synced_at timestamptz, crm_pipeline jsonb,
   last_webhook_received_at timestamptz, last_successful_poll_at timestamptz, last_reconciled_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
