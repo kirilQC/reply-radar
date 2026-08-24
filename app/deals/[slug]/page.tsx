@@ -31,6 +31,8 @@ type Deal = {
   attributionCampaign: string | null;
   leadId: string | null;
   companyLogo: string | null;
+  computedAttribution: string;
+  dismissed: boolean;
 };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Crm = { provider: string | null; connected: boolean; lastSyncedAt: string | null };
@@ -282,7 +284,7 @@ export default function ClientDealsPage() {
                           <div className="deal-col-body">
                             {col.deals.length === 0 && <p className="deal-col-empty">—</p>}
                             {col.deals.map((deal) => (
-                              <DealCard key={deal.id} deal={deal} onOpen={() => setOpenDeal(deal)} />
+                              <DealCard key={deal.id} deal={deal} currency={currency} money={money} onOpen={() => setOpenDeal(deal)} />
                             ))}
                           </div>
                         </div>
@@ -317,19 +319,33 @@ export default function ClientDealsPage() {
           )}
         </main>
       </section>
-      {openDeal && <DealDrawer deal={openDeal} money={money} onClose={() => setOpenDeal(null)} />}
+      {openDeal && (
+        <DealDrawer
+          deal={openDeal}
+          money={money}
+          onClose={() => setOpenDeal(null)}
+          onOverride={(dismissed) => {
+            setDeals((prev) => prev.map((d) => d.id === openDeal.id ? { ...d, dismissed, attribution: dismissed ? "none" : d.computedAttribution } : d));
+            setOpenDeal((prev) => prev ? { ...prev, dismissed, attribution: dismissed ? "none" : prev.computedAttribution } : prev);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-/** A board card, pared to the essentials the client asked for: the company logo and its name. The
- *  contact, the attribution proof and everything else live one click away in the drawer. */
-function DealCard({ deal, onOpen }: { deal: Deal; onOpen: () => void }) {
+/** A board card: the company logo and name, the contact, and the deal value. Everything else — the
+ *  conversation, the full lead — opens in the drawer on click. */
+function DealCard({ deal, currency, money, onOpen }: { deal: Deal; currency: string | null; money: (v: number | null, c: string | null) => string; onOpen: () => void }) {
   const initial = (deal.companyName || deal.name || "?").trim().charAt(0).toUpperCase();
   return (
     <button className={`dk ${deal.attribution}`} onClick={onOpen} type="button">
       <span className="dk-logo">{deal.companyLogo ? <img src={deal.companyLogo} alt="" /> : initial}</span>
-      <b className="dk-name">{deal.companyName || deal.name || "Untitled"}</b>
+      <span className="dk-id">
+        <b>{deal.companyName || deal.name || "Untitled"}</b>
+        {deal.contactName && <small>{deal.contactName}</small>}
+      </span>
+      <span className="dk-amount">{deal.amount ? money(deal.amount, deal.currency || currency) : "—"}</span>
     </button>
   );
 }
@@ -344,9 +360,23 @@ type Detail = {
  * whole conversation. The conversation is our mirror of HeyReach — the same messages, read from the
  * database rather than fetched live, so opening a deal is instant.
  */
-function DealDrawer({ deal, money, onClose }: { deal: Deal; money: (v: number | null, c: string | null) => string; onClose: () => void }) {
+function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (v: number | null, c: string | null) => string; onClose: () => void; onOverride: (dismissed: boolean) => void }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const review = async (dismissed: boolean) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/deals/${encodeURIComponent(deal.id)}/override`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ override: dismissed ? "dismissed" : null }),
+      });
+      if (response.ok) onOverride(dismissed);
+    } finally { setSaving(false); }
+  };
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -376,11 +406,20 @@ function DealDrawer({ deal, money, onClose }: { deal: Deal; money: (v: number | 
           <button className="dd-x" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
-        {deal.attribution !== "none" && (
-          <div className={`dd-attr ${deal.attribution}`}>
-            <b>{deal.attribution === "confirmed" ? "Attributed to QC" : "Possible QC deal"}</b>
-            {deal.attributionReason && <p>{deal.attributionReason}</p>}
-            {deal.attributionCampaign && <span className="dd-camp">Campaign: {deal.attributionCampaign}</span>}
+        {(deal.attribution !== "none" || deal.dismissed) && (
+          <div className={`dd-attr ${deal.dismissed ? "dismissed" : deal.attribution}`}>
+            <b>{deal.dismissed ? "Dismissed — not a QC deal" : deal.attribution === "confirmed" ? "Attributed to QC" : "Possible QC deal"}</b>
+            {!deal.dismissed && deal.attributionReason && <p>{deal.attributionReason}</p>}
+            {!deal.dismissed && deal.attributionCampaign && <span className="dd-camp">Campaign: {deal.attributionCampaign}</span>}
+            <div className="dd-review">
+              {deal.dismissed ? (
+                <button className="dd-review-btn restore" onClick={() => void review(false)} disabled={saving}>Restore QC attribution</button>
+              ) : (
+                <button className="dd-review-btn dismiss" onClick={() => void review(true)} disabled={saving}>
+                  {saving ? "Saving…" : "Not a QC deal — remove attribution"}
+                </button>
+              )}
+            </div>
           </div>
         )}
 

@@ -38,6 +38,10 @@ export type Deal = {
   attributionCampaign: string | null;
   leadId: string | null;
   companyLogo: string | null;
+  /** What the matcher computed, before any human override. */
+  computedAttribution: string;
+  /** True when a person reviewed this and marked it not-QC; the display attribution is then "none". */
+  dismissed: boolean;
 };
 
 export type DealClient = {
@@ -88,7 +92,12 @@ function dealFromRow(row: Row): Deal {
     companyName: orNull(row.company_name),
     companyDomain: orNull(row.company_domain),
     contactLinkedin: orNull(row.contact_linkedin),
-    attribution: str(row.attribution) || "none",
+    // A dismissed deal reads as "none" everywhere the display uses `attribution`, but the matcher's own
+    // verdict is preserved in `computedAttribution` so the decision is reversible and never re-runs on
+    // its own. The counts, the filters and the card colour all follow `attribution`.
+    attribution: str(row.attribution_override) === "dismissed" ? "none" : (str(row.attribution) || "none"),
+    computedAttribution: str(row.attribution) || "none",
+    dismissed: str(row.attribution_override) === "dismissed",
     attributionReason: orNull(row.attribution_reason),
     attributionMatchedBy: orNull(row.attribution_matched_by),
     attributionCampaign: orNull(row.attribution_campaign),
@@ -347,6 +356,24 @@ export async function listDealClients(): Promise<DealClient[]> {
       };
     })
     .sort((a, b) => b.confirmedValue - a.confirmedValue || b.total - a.total || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
+/**
+ * Record a human's review of one deal's attribution.
+ *
+ * "dismissed" means someone looked and decided the deal is not QC's; it overrides the matcher's verdict
+ * for display, but the verdict itself is left in place so the decision can be undone and so a re-sync
+ * never quietly overwrites it — the sync writes `attribution`, never `attribution_override`.
+ */
+export async function setDealOverride(dealId: string, override: "dismissed" | null): Promise<{ ok: boolean; error?: string }> {
+  const { url, key } = config();
+  if (!url || !key) return { ok: false, error: "Supabase is not configured." };
+  const response = await fetch(`${url}/rest/v1/rr_deals?id=eq.${encodeURIComponent(dealId)}`, {
+    method: "PATCH",
+    headers: authHeaders(key),
+    body: JSON.stringify({ attribution_override: override, updated_at: new Date().toISOString() }),
+  });
+  return response.ok ? { ok: true } : { ok: false, error: "Could not save that review." };
 }
 
 /** One client, its CRM state, and its deals — confirmed first, then by close date. */

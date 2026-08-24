@@ -215,3 +215,20 @@
 .dk { display: flex; align-items: center; gap: 11px; padding: 12px 13px; }
 .dk-name { font-size: 13.5px; font-weight: 620; letter-spacing: -.01em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dk-logo { width: 34px; height: 34px; border-radius: 9px; font-size: 13px; }
+
+/* ── Board v4: card carries contact + amount; drawer gets a review control ───────────────────────── */
+.dk { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 11px; align-items: center; }
+.dk-id { min-width: 0; }
+.dk-id b { display: block; font-size: 13px; font-weight: 620; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-id small { display: block; font-size: 10.5px; color: var(--muted-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-amount { font-size: 12.5px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dk.none .dk-amount, .dk .dk-amount { color: var(--muted); }
+.dk.confirmed .dk-amount { color: var(--green); }
+
+/* The review control inside the drawer's attribution card. */
+.dd-attr.dismissed { background: var(--panel-2); border-color: var(--border); }
+.dd-attr.dismissed b { color: var(--muted); }
+.dd-review { margin-top: 11px; padding-top: 11px; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.dd-review-btn { font: inherit; font-size: 11.5px; font-weight: 600; padding: 8px 13px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); cursor: pointer; transition: color .12s ease, border-color .12s ease; }
+.dd-review-btn.dismiss:hover { color: var(--coral); border-color: color-mix(in srgb, var(--coral) 45%, transparent); }
+.dd-review-btn.restore { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
