@@ -402,6 +402,29 @@ export function transcript(messages: SlackMessage[], names: Map<string, string>,
  * Deliberately not `reply_broadcast`: a broadcast reply puts the whole thing back in the channel and
  * undoes the point of threading it.
  */
+/**
+ * Open (or fetch) the bot's direct-message channel with a user, returning the DM channel id.
+ *
+ * `chat.postMessage` will accept a bare user id as `channel` and open the DM itself, but that is undocumented
+ * and fails quietly when it does; `conversations.open` is the explicit path and hands back the `D…` channel id
+ * to post into. Needs the bot's `im:write` scope. Returns "" if it cannot open one.
+ */
+export async function openDm(userId: string): Promise<string> {
+  const id = String(userId ?? "").trim();
+  if (!id) return "";
+  try {
+    const body = await call("conversations.open", {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ users: id }),
+    }, "write");
+    const channel = (body.channel ?? {}) as { id?: string };
+    return String(channel.id ?? "");
+  } catch {
+    return "";
+  }
+}
+
 export async function postMessage(channelId: string, text: string, threadTs = ""): Promise<string> {
   const body = await call("chat.postMessage", {
     method: "POST",

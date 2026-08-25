@@ -6644,3 +6644,29 @@ body.light-mode .brain-icp {
     grid-column: 1 / -1;
   }
 }
+
+/* ── Personal assistant (Slack hub) ──────────────────────────────────────────────────────────────── */
+.pa-note { margin: 0 0 14px; padding: 9px 13px; border-radius: 9px; font-size: 12px; color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); border: 1px solid color-mix(in srgb, var(--green) 26%, transparent); }
+.pa-list { display: flex; flex-direction: column; gap: 12px; }
+.pa-card { border: 1px solid var(--border); border-radius: 13px; background: var(--panel); padding: 15px 17px; }
+.pa-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.pa-card-who { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pa-card-who strong { font-size: 15px; letter-spacing: -.01em; }
+.pa-card-sub { font-size: 11.5px; color: var(--muted); }
+.pa-card-clients { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.pa-tag { font-size: 10.5px; font-weight: 600; color: var(--muted); background: var(--panel-2, #151821); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; }
+.pa-card-actions { display: flex; gap: 8px; margin-top: 13px; }
+.pa-delete { font: inherit; font-size: 11px; color: var(--muted-2); background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.pa-delete:hover:not(:disabled) { color: var(--coral, #e5738a); border-color: var(--coral, #e5738a); }
+.pa-add { align-self: flex-start; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--accent); background: none; border: 1px dashed var(--border); border-radius: 11px; padding: 11px 18px; cursor: pointer; }
+.pa-add:hover { border-color: var(--accent); }
+
+/* Editor */
+.pa-form { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+.pa-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pa-clients { display: flex; flex-wrap: wrap; gap: 8px; }
+.pa-client { font: inherit; font-size: 12px; font-weight: 550; color: var(--muted); background: var(--panel-2, #151821); border: 1px solid var(--border); border-radius: 9px; padding: 7px 13px; cursor: pointer; transition: border-color .12s ease, color .12s ease, background .12s ease; }
+.pa-client:hover { color: var(--text); }
+.pa-client.is-on { color: color-mix(in srgb, var(--accent) 88%, #fff); background: color-mix(in srgb, var(--accent) 15%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.pa-form-actions { display: flex; gap: 10px; }
+@media (max-width: 620px) { .pa-field-row { grid-template-columns: 1fr; } }

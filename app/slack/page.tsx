@@ -30,6 +30,7 @@ import AppSidebar from "../components/AppSidebar";
 import BriefView from "../components/BriefView";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
+import PersonalAssistants from "./PersonalAssistants";
 import { DAY_NAMES, DEFAULT_SCHEDULE, describeSchedule, type BriefSchedule, type Check } from "../lib/morning-brief-schedule";
 import type { TraceStep } from "../lib/morning-brief";
 import "../reports/reports.css";
@@ -153,7 +154,7 @@ const formatWhen = (iso: string) => {
 };
 
 export default function SlackPage() {
-  const [view, setView] = useState<"automations" | "clients" | "brief">("automations");
+  const [view, setView] = useState<"automations" | "clients" | "brief" | "personal">("automations");
   const [automation, setAutomation] = useState<Automation>("morning_brief");
   // Both directories are held at once so the landing screen can show each automation's card without
   // opening it. `directory` below is whichever one is currently open.
@@ -330,7 +331,7 @@ export default function SlackPage() {
 
             <div className="hub-group-label">
               <span>Automations</span>
-              <span>3 automations</span>
+              <span>4 automations</span>
             </div>
             <div className="hub-card-grid">
               {(["morning_brief", "call_analysis", "eow_report"] as Automation[]).map((which) => {
@@ -348,6 +349,13 @@ export default function SlackPage() {
                   </div>
                 );
               })}
+              {/* The personal assistant is per-person, not per-client, so it has its own management view. */}
+              <div className="hub-card">
+                <button type="button" className="hub-card-open" onClick={() => setView("personal")}>
+                  <h3>Personal assistant</h3>
+                  <div className="hub-card-meta"><b>A morning brief per teammate</b></div>
+                </button>
+              </div>
             </div>
 
             {/* Both of these are silent failures at run time, so they are said here instead. */}
@@ -362,6 +370,8 @@ export default function SlackPage() {
             )}
             {error && <div className="config-error">{error}</div>}
           </main>
+        ) : view === "personal" ? (
+          <PersonalAssistants onBack={() => setView("automations")} />
         ) : view === "clients" ? (
           <main className="reports-hub">
             <button type="button" className="config-back" onClick={() => setView("automations")}>← Slack automations</button>

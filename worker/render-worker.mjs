@@ -1348,6 +1348,57 @@ async function sendDueBrief() {
   }
 }
 
+const PERSONAL_LOOP_MS = 60 * 1000;
+let lastPersonalRun = 0;
+
+/**
+ * The personal assistant: one per-person focus DM per cycle, on the same drain-itself pattern as the brief.
+ * The route decides who is due (schedule + not-sent-today) and stamps last_sent_at on the person's row, so
+ * the next cycle no longer sees them due.
+ */
+async function sendDuePersonalBrief() {
+  if (!appBaseUrl) return;
+  if (Date.now() - lastPersonalRun < PERSONAL_LOOP_MS) return;
+  lastPersonalRun = Date.now();
+
+  const listed = await fetch(`${appBaseUrl}/api/slack/personal`, { cache: "no-store" }).catch(() => null);
+  if (!listed?.ok) return;
+  const payload = await listed.json().catch(() => null);
+  const due = Array.isArray(payload?.due) ? payload.due.filter((id) => typeof id === "string" && id) : [];
+  if (!due.length) return;
+
+  const id = due[0];
+  const startedAt = new Date().toISOString();
+  try {
+    const response = await fetch(`${appBaseUrl}/api/slack/personal`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const result = await response.json().catch(() => ({}));
+    const failed = !response.ok || result?.ok === false;
+    console.info("reply_radar_personal_brief_sent", { id, ok: !failed, remaining: due.length - 1 });
+    await writeSyncRun({
+      workspace_id: null,
+      run_type: "personal_brief",
+      source: "render-worker",
+      status: failed ? "error" : "success",
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      records_seen: due.length,
+      records_written: failed ? 0 : 1,
+      error_text: failed ? String(result?.error || `HTTP ${response.status}`).slice(0, 500) : null,
+    });
+  } catch (error) {
+    console.error("reply_radar_personal_brief_failed", { id, error: String(error) });
+    await writeSyncRun({
+      workspace_id: null, run_type: "personal_brief", source: "render-worker", status: "error",
+      started_at: startedAt, finished_at: new Date().toISOString(), records_seen: due.length, records_written: 0,
+      error_text: String(error).slice(0, 500),
+    });
+  }
+}
+
 /**
  * The End-of-Week report, on the same one-per-cycle pattern as the morning brief.
  *
@@ -1562,6 +1613,9 @@ async function runOnce() {
   // At most one client's brief per cycle, and before the AI pipeline: a brief that is due at 8am is
   // time-sensitive in a way the pipeline is not, and the pipeline's budget can hold a cycle open.
   try { await sendDueBrief(); } catch (error) { console.error("reply_radar_morning_brief_cycle_failed", error); }
+
+  // One person's personal focus DM per cycle, same drain-itself pattern as the brief.
+  try { await sendDuePersonalBrief(); } catch (error) { console.error("reply_radar_personal_brief_cycle_failed", error); }
 
   // At most one client's EOW report per cycle, on its own Friday-afternoon schedule. Same one-per-cycle
   // drain as the brief; the route does the schedule and readiness maths and this only dispatches.
