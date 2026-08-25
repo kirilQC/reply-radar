@@ -195,3 +195,27 @@
 .rr-crm-row input { flex: 1; min-width: 0; }
 .rr-crm-row select, .rr-crm-row input { height: 36px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2, #151821); color: var(--text); padding: 0 10px; font-size: 12px; outline: none; }
 .rr-crm-row select:focus, .rr-crm-row input:focus { border-color: var(--accent); }
+
+/* ── Slack check-off prompt ─────────────────────────────────────────────────────────────────────── */
+.onb-modal-back { position: fixed; inset: 0; z-index: 130; display: grid; place-items: center; padding: 20px; }
+.onb-modal-scrim { position: absolute; inset: 0; background: rgba(0,0,0,.55); backdrop-filter: blur(2px); border: 0; cursor: default; }
+.onb-modal { position: relative; width: min(440px, 94vw); background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; }
+.onb-modal h3 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
+.onb-modal p { margin: 6px 0 14px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.onb-modal textarea { width: 100%; resize: vertical; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); color: var(--text); font: inherit; font-size: 12.5px; padding: 10px 12px; }
+.onb-modal-err { margin-top: 10px; font-size: 11.5px; color: var(--coral); }
+.onb-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+
+/* ── Client onboarding updates panel ────────────────────────────────────────────────────────────── */
+.onb-client-update { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); margin-bottom: 22px; overflow: hidden; }
+.onb-cu-head { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 15px 18px; background: transparent; border: 0; cursor: pointer; color: inherit; }
+.onb-cu-head:hover { background: var(--panel-2); }
+.onb-cu-title { font-size: 13px; font-weight: 640; }
+.onb-cu-sub { font-size: 11px; color: var(--muted-2); }
+.onb-cu-head .rr-caret { margin-left: auto; color: var(--muted-2); }
+.onb-cu-body { padding: 4px 18px 18px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--border); }
+.onb-cu-label { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; color: var(--muted-2); }
+.onb-cu-body select, .onb-cu-body textarea { width: 100%; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); color: var(--text); font: inherit; font-size: 12.5px; padding: 9px 11px; }
+.onb-cu-body textarea { resize: vertical; }
+.onb-cu-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.onb-cu-sent { font-size: 11.5px; font-weight: 700; color: var(--green); }

@@ -39,11 +39,11 @@ type RRConfig = {
   crmConfigured: boolean;
 };
 
-function ReplyRadarSetup({ slug }: { slug: string }) {
+function ReplyRadarSetup({ slug, onConfig }: { slug: string; onConfig?: (c: { slackInternal: string; slackExternal: string }) => void }) {
   const [cfg, setCfg] = useState<RRConfig | null>(null);
   const [bases, setBases] = useState<Array<{ id: string; name: string }>>([]);
   const [form, setForm] = useState({ website: "", messagingDoc: "", slackInternal: "", slackExternal: "", airtableBaseId: "", heyreachApiKey: "", crmProvider: "", crmApiKey: "" });
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true); // the Reply Radar setup starts collapsed — it is reference, not the daily view
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -61,8 +61,8 @@ function ReplyRadarSetup({ slug }: { slug: string }) {
       if (config) {
         setCfg(config);
         setForm({ website: config.website || "", messagingDoc: config.messagingDoc || "", slackInternal: config.slackInternal || "", slackExternal: config.slackExternal || "", airtableBaseId: config.airtableBaseId || "", heyreachApiKey: "", crmProvider: config.crmProvider || "", crmApiKey: "" });
-        const complete = config.keyConfigured && config.messagingDoc && config.website && config.slackInternal && config.slackExternal && config.airtableBaseId;
-        setCollapsed(Boolean(complete));
+        // Stays collapsed by default whether or not the setup is complete; the operator expands it when
+        // they need to change a key, and the checklist below is what they came for.
       }
       const basesPayload = await basesResponse.json().catch(() => ({}));
       if (Array.isArray(basesPayload.bases)) setBases(basesPayload.bases);
@@ -70,6 +70,10 @@ function ReplyRadarSetup({ slug }: { slug: string }) {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
+
+  // Keep the parent in step with the two channel ids, so the check-off prompt and the client-update
+  // panel appear the instant one is entered — without a second fetch of the same config.
+  useEffect(() => { onConfig?.({ slackInternal: form.slackInternal.trim(), slackExternal: form.slackExternal.trim() }); }, [form.slackInternal, form.slackExternal, onConfig]);
 
   const filled = {
     "HeyReach API key": Boolean(cfg?.keyConfigured) || Boolean(form.heyreachApiKey.trim()),
@@ -196,6 +200,9 @@ export default function OnboardingChecklistPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [marking, setMarking] = useState(false);
+  const [slack, setSlack] = useState({ slackInternal: "", slackExternal: "" });
+  /** A task just ticked, offered up for a quick Slack note — dismissed or sent. */
+  const [prompt, setPrompt] = useState<Task | null>(null);
 
   const reload = async () => {
     try {
@@ -249,7 +256,10 @@ export default function OnboardingChecklistPage() {
     setTasks((current) => current.map((t) => (t.id === task.id ? { ...t, isDone: next } : t)));
     try {
       const response = await fetch("/api/onboarding/tasks", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: task.id, isDone: next }) });
-      if (!response.ok) setTasks(before);
+      if (!response.ok) { setTasks(before); return; }
+      // Ticking a box (not un-ticking) offers a one-line Slack update — but only when there is an
+      // internal channel to send it to. No channel, no prompt.
+      if (next && slack.slackInternal) setPrompt(task);
     } catch {
       setTasks(before);
     }
@@ -295,7 +305,9 @@ export default function OnboardingChecklistPage() {
                 </div>
               </div>
 
-              <ReplyRadarSetup slug={slug} />
+              <ReplyRadarSetup slug={slug} onConfig={setSlack} />
+
+              {slack.slackExternal && <ClientUpdatePanel slug={slug} clientName={client.name} />}
 
               {sections.map((section) => (
                 <div className="onb-group" key={section.name}>
@@ -340,6 +352,10 @@ export default function OnboardingChecklistPage() {
                 </div>
               ))}
 
+              {prompt && (
+                <SlackTaskPrompt task={prompt} clientName={client.name} slug={slug} onClose={() => setPrompt(null)} />
+              )}
+
               {!done && (
                 <div className="onb-markdone">
                   <button className="secondary-button" onClick={() => void markComplete()} disabled={marking}>{marking ? "Marking…" : "Mark fully onboarded ✓"}</button>
@@ -349,6 +365,117 @@ export default function OnboardingChecklistPage() {
           )}
         </main>
       </section>
+    </div>
+  );
+}
+
+/**
+ * The check-off prompt: a small dialog after a task is ticked, offering a quick note to the internal
+ * Slack channel. Pre-filled with a sensible line the operator can edit, and entirely optional — dismiss
+ * and nothing is sent. It only ever appears when an internal channel id is on the client.
+ */
+function SlackTaskPrompt({ task, clientName, slug, onClose }: { task: Task; clientName: string; slug: string; onClose: () => void }) {
+  const [text, setText] = useState(`✅ ${clientName} onboarding — ${task.title} is done.`);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+
+  const send = async () => {
+    if (sending || !text.trim()) return;
+    setSending(true);
+    setError("");
+    try {
+      const response = await fetch("/api/onboarding/notify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, target: "internal", text }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) { setError(typeof payload.error === "string" ? payload.error : "Slack rejected it."); setSending(false); return; }
+      onClose();
+    } catch { setError("Could not reach Slack."); setSending(false); }
+  };
+
+  return (
+    <div className="onb-modal-back">
+      <button className="onb-modal-scrim" aria-label="Dismiss" onClick={onClose} />
+      <div className="onb-modal" role="dialog" aria-label="Send a Slack update">
+        <h3>Send an update to Slack?</h3>
+        <p>Post a quick note to {clientName}&apos;s internal channel that this task is done.</p>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} />
+        {error && <div className="onb-modal-err">{error}</div>}
+        <div className="onb-modal-actions">
+          <button className="secondary-button" onClick={onClose}>No, skip</button>
+          <button className="primary-button" onClick={() => void send()} disabled={sending || !text.trim()}>{sending ? "Sending…" : "Send to Slack"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Premade client-facing onboarding updates, sent to the external (client) Slack channel.
+ *
+ * A dropdown of starting points, an editable body, one send. The templates are deliberately simple and
+ * meant to be edited before sending — a real update, in QC's voice, not an auto-message. Only rendered
+ * when an external channel id is on the client.
+ */
+const CLIENT_TEMPLATES: { label: string; body: (client: string) => string }[] = [
+  { label: "Kickoff — we're live", body: (c) => `Hi team 👋 We've officially kicked off ${c}'s outbound program. Our senders are warming up and the first campaigns go out shortly — we'll keep you posted here as things move.` },
+  { label: "Campaigns launched", body: () => `Quick update — your first campaigns are now live and reaching prospects. Early replies usually start landing within a few days; we'll flag the good ones as they come in.` },
+  { label: "First replies in", body: () => `Good news — the first replies are coming in. We're reviewing and prioritising the warm ones now, and we'll surface anything that looks like a real opportunity.` },
+  { label: "Weekly check-in", body: () => `Weekly update: campaigns are running smoothly and volume is on track. We'll walk through the numbers together on our next call — anything you'd like us to dig into beforehand?` },
+  { label: "Blank message", body: () => "" },
+];
+
+function ClientUpdatePanel({ slug, clientName }: { slug: string; clientName: string }) {
+  const [open, setOpen] = useState(false);
+  const [template, setTemplate] = useState(0);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+
+  const pick = (index: number) => {
+    setTemplate(index);
+    setText(CLIENT_TEMPLATES[index].body(clientName));
+    setSent(false);
+  };
+
+  const send = async () => {
+    if (sending || !text.trim()) return;
+    setSending(true);
+    setError("");
+    try {
+      const response = await fetch("/api/onboarding/notify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, target: "external", text }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) { setError(typeof payload.error === "string" ? payload.error : "Slack rejected it."); setSending(false); return; }
+      setSent(true); setSending(false); setText("");
+    } catch { setError("Could not reach Slack."); setSending(false); }
+  };
+
+  return (
+    <div className="onb-client-update">
+      <button className="onb-cu-head" onClick={() => setOpen((v) => !v)}>
+        <span className="onb-cu-title">Client onboarding updates</span>
+        <span className="onb-cu-sub">Send a message to {clientName}&apos;s shared channel</span>
+        <span className="rr-caret">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <div className="onb-cu-body">
+          <span className="onb-cu-label">Start from a template</span>
+          <select value={template} onChange={(e) => pick(Number(e.target.value))}>
+            {CLIENT_TEMPLATES.map((t, i) => <option key={i} value={i}>{t.label}</option>)}
+          </select>
+          <textarea value={text} placeholder="Write or edit the update to the client…" rows={4} onChange={(e) => { setText(e.target.value); setSent(false); }} />
+          {error && <div className="onb-modal-err">{error}</div>}
+          <div className="onb-cu-actions">
+            {sent && <span className="onb-cu-sent">Sent ✓</span>}
+            <button className="primary-button" onClick={() => void send()} disabled={sending || !text.trim()}>{sending ? "Sending…" : "Send to client channel"}</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
