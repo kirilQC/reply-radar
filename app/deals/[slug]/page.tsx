@@ -558,7 +558,7 @@ const MATCH_LABEL: Record<string, string> = {
   heyreach: "HeyReach — a QC message on record",
   email: "Contact email",
   linkedin: "Contact LinkedIn",
-  "name+company": "Contact name at a QC-worked company",
+  "name+company": "Contact name at a QC-worked company (review)",
   domain: "Company domain",
   company: "Company name",
 };
