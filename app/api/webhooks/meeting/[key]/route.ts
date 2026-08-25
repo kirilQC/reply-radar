@@ -1,8 +1,8 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
-import { NextResponse } from "next/server";
-import { ingestWebhook } from "../../../../lib/meetings";
+import { NextResponse, after } from "next/server";
+import { ingestWebhook, enrichMeeting } from "../../../../lib/meetings";
 
 /**
  * The booked-meetings webhook, for the Zapier flow off each client's Calendly.
@@ -42,5 +42,8 @@ export async function POST(request: Request, context: { params: Promise<{ key: s
   }
   const result = await ingestWebhook(payload);
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 422 });
-  return NextResponse.json({ ok: true, client: result.client, meetingId: result.meeting?.id });
+  // Fill the empty enrichment after the 200, so the webhook stays fast (see the unified route for why).
+  const meetingId = result.meeting?.id;
+  if (meetingId) after(() => enrichMeeting(meetingId).catch(() => {}));
+  return NextResponse.json({ ok: true, client: result.client, meetingId });
 }

@@ -217,6 +217,10 @@ export async function GET(request: Request) {
     // whole point of that caution is that nothing reaches this filter on a guess.
     const excluded: string[] = [];
     const orphaned: string[] = [];
+    // The classifier's read of each surviving conversation, kept so the non-campaign display filter below can
+    // honour the same abstain-and-keep caution: a thread we could not read confidently ("unknown") is never
+    // hidden on a guess.
+    const originById = new Map<string, string>();
     const result = conversations.filter((conversation) => {
       // A conversation whose lead row is gone is not a lead any more. These used to render as an
       // "Unknown lead" card that could not be dismissed, which is how a deleted lead appeared to
@@ -230,6 +234,7 @@ export async function GET(request: Request) {
         messages: messagesByConversation.get(String(conversation.id)) ?? [],
         leadRawData: leadById.get(String(conversation.lead_id))?.raw_data,
       });
+      originById.set(String(conversation.id), verdict.origin);
       if (verdict.origin !== "inbound_lead") return true;
       excluded.push(String(conversation.id));
       return false;
@@ -299,6 +304,10 @@ export async function GET(request: Request) {
         enrichedLocation: enrichment.location ?? null,
         industry: enrichment.industry ?? null,
         campaignName: campaign.name ?? null,
+        // True when the conversation carries ANY campaign trace (a name or an id, from any source). This is the
+        // "attributed to a campaign" signal the non-campaign display filter keys off — deliberately generous,
+        // so a real reply with only a loosely-derived campaign is kept, never hidden.
+        hasCampaign: Boolean(campaign.name || campaign.id),
         client: String(workspace.name || workspace.slug || "Unknown client"),
         clientSlug: workspace.slug,
         clientTone: String(workspace.accent_color || "#8b7cff"),
@@ -337,11 +346,25 @@ export async function GET(request: Request) {
         messages: thread,
       };
     });
+    // Some clients wire their HeyReach to track every conversation they have, including their own inbound and
+    // their own non-QC outreach. Those come through with no campaign attribution and clutter the queue. Hide
+    // any conversation we could not tie to a campaign — but ONLY when the classifier read the thread
+    // confidently; an "unknown" verdict (history we could not read) is kept, the same abstain-and-keep caution
+    // the origin filter uses, so a genuine QC reply whose attribution was momentarily lost is never hidden on a
+    // guess. This is a DISPLAY filter only: the rows stay in the database untouched, so nothing is lost and the
+    // rule is fully reversible.
+    const hiddenNonCampaign: string[] = [];
+    const visible = result.filter((row) => {
+      if (row.hasCampaign || originById.get(String(row.id)) === "unknown") return true;
+      hiddenNonCampaign.push(String(row.id));
+      return false;
+    });
     // Server log only. Nothing about this reaches the inbox, but a dropped row that turned out to be
     // a real outbound lead would otherwise leave no trace anywhere to find it by.
     if (excluded.length) console.info("reply_radar_inbox_dropped_lead_initiated", { count: excluded.length, conversationIds: excluded.slice(0, 25) });
     if (orphaned.length) console.info("reply_radar_inbox_dropped_orphaned", { count: orphaned.length, conversationIds: orphaned.slice(0, 25) });
-    return NextResponse.json({ ok: true, conversations: result });
+    if (hiddenNonCampaign.length) console.info("reply_radar_inbox_hidden_non_campaign", { count: hiddenNonCampaign.length, conversationIds: hiddenNonCampaign.slice(0, 25) });
+    return NextResponse.json({ ok: true, conversations: visible, hiddenNonCampaign: hiddenNonCampaign.length });
   } catch (error) {
     return NextResponse.json(
       {

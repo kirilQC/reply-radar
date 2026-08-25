@@ -12,6 +12,9 @@
  */
 
 import { normalizeMeeting, meetingIsUsable } from "../../shared/meetings.mjs";
+import { normalizeLinkedin } from "../../shared/deal-attribution.mjs";
+import { enrichLeadWithAiArk } from "./ai-ark-enrichment";
+import { isAiArkEnrichmentEnabled } from "./lead-identity";
 
 type Row = Record<string, unknown>;
 
@@ -185,6 +188,14 @@ export async function getClientMeetings(slug: string): Promise<{ client: Workspa
   };
 }
 
+/** One meeting by id, or null. */
+export async function getMeeting(id: string): Promise<Meeting | null> {
+  const { url, key } = config();
+  if (!url || !key || !id) return null;
+  const row = (await rows(url, key, `rr_meetings?select=*&id=eq.${encodeURIComponent(id)}&limit=1`))[0];
+  return row ? meetingFromRow(row) : null;
+}
+
 /** Build the DB record from a caller's fields, keeping only real columns. */
 function record(workspaceId: string, source: string, fields: Record<string, unknown>): Row {
   const out: Row = { workspace_id: workspaceId, source };
@@ -208,6 +219,124 @@ export async function addMeeting(slug: string, fields: Record<string, unknown>, 
   if (!response.ok) return { ok: false, error: "Could not save the meeting." };
   const created = (await response.json().catch(() => []))[0] as Row | undefined;
   return created ? { ok: true, meeting: meetingFromRow(created) } : { ok: false, error: "The meeting was not created." };
+}
+
+// ── Enrichment ─────────────────────────────────────────────────────────────────────────────────────
+
+const obj = (value: unknown): Row => (value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {});
+
+/** The bare domain out of a website URL: "https://www.acme.io/about" → "acme.io". */
+function domainFromWebsite(website: unknown): string | null {
+  const s = str(website).trim();
+  if (!s) return null;
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`);
+    return parsed.hostname.replace(/^www\./i, "").toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** A location object or string reduced to "City, Region, Country", or null. */
+function locationLabel(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === "string") return value.trim() || null;
+  const o = obj(value);
+  const parts = [o.city, o.state || o.region || o.geographicArea, o.country]
+    .map((part) => str(part).trim())
+    .filter(Boolean);
+  return parts.length ? [...new Set(parts)].join(", ") : null;
+}
+
+/** AI Ark's staff figures turned into a readable size, or null. */
+function companySizeLabel(summary: Row): string | null {
+  const staff = obj(summary.staff);
+  const range = obj(staff.range);
+  const start = str(range.start).trim();
+  const end = str(range.end).trim();
+  if (start || end) return `${start || "?"}–${end || "?"} employees`;
+  if (staff.total) return `${Number(staff.total).toLocaleString()} employees`;
+  return null;
+}
+
+/**
+ * Map a person's AI Ark enrichment onto the meeting's empty columns.
+ *
+ * The nested shape is exactly what the database drawer reads: person fields at the top, the company block
+ * under `company` with `summary`, `link` and `location`. Only columns the meeting does not already have are
+ * filled, so anything the Zap mapped by hand is never overwritten.
+ */
+function enrichmentPatch(meetingRow: Row, enrichment: Row): Row {
+  const company = obj(enrichment.company);
+  const summary = obj(company.summary);
+  const link = obj(company.link);
+  const candidates: Record<string, string | null> = {
+    invitee_location: locationLabel(enrichment.location),
+    invitee_headline: str(enrichment.headline).trim() || null,
+    invitee_title: str(enrichment.title).trim() || null,
+    company_name: (str(summary.name) || str(company.name)).trim() || null,
+    company_domain: domainFromWebsite(link.website),
+    company_linkedin: str(link.linkedin).trim() || null,
+    company_location: locationLabel(obj(company.location).headquarter),
+    company_industry: (str(summary.industry) || str(company.industry) || str(enrichment.industry)).trim() || null,
+    company_size: companySizeLabel(summary),
+    company_type: (str(summary.type) || str(company.type)).trim() || null,
+    company_description: str(summary.description).trim() || null,
+  };
+  const patch: Row = {};
+  for (const [column, value] of Object.entries(candidates)) {
+    if (value && !orNull(meetingRow[column])) patch[column] = value;
+  }
+  return patch;
+}
+
+/**
+ * Fill a booked meeting's enrichment from what we already know about the person, or from AI Ark.
+ *
+ * A meeting almost always arrives with only a name, email and LinkedIn URL; the location, headline and the
+ * whole company block come in empty. Since every lead we have contacted carries a full AI Ark enrichment on
+ * their `rr_leads` row, the cheap path is to find that person by their LinkedIn URL and copy their enrichment
+ * across. Only when the person is not in our database yet (rare) do we spend an AI Ark call to enrich them
+ * fresh — and only if enrichment is switched on.
+ *
+ * Non-destructive: only empty columns are filled, so anything the Zap already mapped is left alone. Best
+ * effort — a miss (no LinkedIn, no match, service down) leaves the meeting exactly as it was and never throws.
+ */
+export async function enrichMeeting(meetingId: string): Promise<boolean> {
+  const { url, key } = config();
+  if (!url || !key || !meetingId) return false;
+  const meetingRow = (await rows(url, key, `rr_meetings?select=*&id=eq.${encodeURIComponent(meetingId)}&limit=1`))[0];
+  if (!meetingRow) return false;
+  const linkedin = str(meetingRow.invitee_linkedin).trim();
+  if (!linkedin) return false; // no LinkedIn URL to look up on
+  const handle = normalizeLinkedin(linkedin);
+
+  // 1. The common path: the person is already a lead we contacted, with a full enrichment on their row.
+  let enrichment: Row | null = null;
+  if (handle) {
+    const leadRows = await rows(url, key, `rr_leads?select=raw_data&linkedin_profile_url=ilike.*${encodeURIComponent(handle)}*&limit=10`);
+    for (const lead of leadRows) {
+      const aiArk = obj(obj(obj(lead.raw_data).reply_radar).ai_ark);
+      if (Object.keys(aiArk).length > 0) { enrichment = aiArk; break; }
+    }
+  }
+
+  // 2. The rare path: not in our database yet, so enrich them fresh from AI Ark — only if it is turned on.
+  if (!enrichment && isAiArkEnrichmentEnabled()) {
+    try {
+      enrichment = (await enrichLeadWithAiArk({ url, key }, str(meetingRow.workspace_id), linkedin, str(meetingRow.company_name))) as Row;
+    } catch {
+      enrichment = null; // no match, or the service was unavailable — leave the meeting untouched
+    }
+  }
+  if (!enrichment) return false;
+
+  const patch = enrichmentPatch(meetingRow, enrichment);
+  if (Object.keys(patch).length === 0) return false;
+  const response = await fetch(`${url}/rest/v1/rr_meetings?id=eq.${encodeURIComponent(meetingId)}`, {
+    method: "PATCH", headers: authHeaders(key), body: JSON.stringify(patch),
+  });
+  return response.ok;
 }
 
 /** Remove one meeting. */

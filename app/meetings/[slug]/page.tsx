@@ -50,6 +50,15 @@ const FIELDS = [
   ["campaign", "Campaign"],
 ] as const;
 
+const initialsOf = (value: string | null) =>
+  (value || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "?";
+
+/** The short date/time shown on the left rail of each row. */
 function whenParts(meeting: Meeting): { top: string; bottom: string; tbd: boolean } {
   if (meeting.meetingAt) {
     const date = new Date(meeting.meetingAt);
@@ -64,9 +73,21 @@ function whenParts(meeting: Meeting): { top: string; bottom: string; tbd: boolea
   return { top: meeting.whenText ? meeting.whenText.slice(0, 16) : "TBD", bottom: "", tbd: true };
 }
 
-function Detail({ meeting, onDelete }: { meeting: Meeting; onDelete: () => void }) {
-  const rows: Array<[string, string | null, "link" | "text"]> = [
-    ["Email", meeting.inviteeEmail, "text"],
+/** The full, human date used inside the expanded detail. */
+function fullWhen(meeting: Meeting): string {
+  if (meeting.meetingAt) {
+    const date = new Date(meeting.meetingAt);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString(undefined, { weekday: "short", month: "long", day: "numeric", year: "numeric" }) +
+        " · " + date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    }
+  }
+  return meeting.whenText || "Time to be confirmed";
+}
+
+function Detail({ meeting, onDelete, onEnrich, enriching }: { meeting: Meeting; onDelete: () => void; onEnrich: () => void; enriching: boolean }) {
+  const leadRows: Array<[string, string | null, "link" | "email" | "text"]> = [
+    ["Email", meeting.inviteeEmail, "email"],
     ["LinkedIn", meeting.inviteeLinkedin, "link"],
     ["Location", meeting.inviteeLocation, "text"],
     ["Headline", meeting.inviteeHeadline, "text"],
@@ -78,31 +99,73 @@ function Detail({ meeting, onDelete }: { meeting: Meeting; onDelete: () => void 
     ["Industry", meeting.companyIndustry, "text"],
     ["Size", meeting.companySize, "text"],
     ["Type", meeting.companyType, "text"],
-    ["About", meeting.companyDescription, "text"],
   ];
-  const cell = (value: string | null, kind: "link" | "text") => {
-    if (!value) return <span style={{ color: "var(--muted-2)" }}>—</span>;
+  const cell = (value: string | null, kind: "link" | "email" | "text") => {
+    if (!value) return <span className="mtg-empty-cell">—</span>;
+    if (kind === "email") return <a href={`mailto:${value}`}>{value}</a>;
     if (kind === "link") {
       const href = value.startsWith("http") ? value : `https://${value}`;
       return <a href={href} target="_blank" rel="noreferrer">{value}</a>;
     }
     return <span>{value}</span>;
   };
+  const logo = meeting.companyDomain ? `https://logo.clearbit.com/${meeting.companyDomain}` : null;
+  const facts: Array<[string, string | null]> = [
+    ["When", fullWhen(meeting)],
+    ["Meeting with", meeting.host],
+    ["Campaign", meeting.campaign],
+    ["Source", meeting.source],
+  ];
+
   return (
     <div className="mtg-detail">
-      <div className="mtg-detail-group">
-        <h4>Lead</h4>
-        {rows.map(([label, value, kind]) => (
-          <div className="mtg-field" key={label}><b>{label}</b>{cell(value, kind)}</div>
-        ))}
+      <div className="mtg-identity">
+        <span className="mtg-avatar">{initialsOf(meeting.inviteeName || meeting.inviteeEmail)}</span>
+        <div className="mtg-identity-main">
+          <strong>{meeting.inviteeName || meeting.inviteeEmail || "Unnamed invitee"}</strong>
+          <span className="mtg-identity-sub">{[meeting.inviteeTitle, meeting.companyName].filter(Boolean).join(" · ") || "Role and company not recorded"}</span>
+          {meeting.inviteeHeadline && <span className="mtg-identity-headline">{meeting.inviteeHeadline}</span>}
+        </div>
+        <div className="mtg-identity-facts">
+          {facts.filter(([, v]) => v).map(([label, value]) => (
+            <div className="mtg-fact" key={label}><span>{label}</span><b>{value}</b></div>
+          ))}
+        </div>
       </div>
-      <div className="mtg-detail-group">
-        <h4>Company</h4>
-        {companyRows.map(([label, value, kind]) => (
-          <div className="mtg-field" key={label}><b>{label}</b>{cell(value, kind)}</div>
-        ))}
+
+      <div className="mtg-cards">
+        <div className="mtg-card-panel">
+          <h4>Lead</h4>
+          {leadRows.map(([label, value, kind]) => (
+            <div className="mtg-field" key={label}><b>{label}</b>{cell(value, kind)}</div>
+          ))}
+        </div>
+        <div className="mtg-card-panel">
+          <div className="mtg-panel-head">
+            <h4>Company</h4>
+            {logo && <img className="mtg-company-logo" src={logo} alt="" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+          </div>
+          {companyRows.map(([label, value, kind]) => (
+            <div className="mtg-field" key={label}><b>{label}</b>{cell(value, kind)}</div>
+          ))}
+        </div>
       </div>
+
+      {meeting.companyDescription && (
+        <div className="mtg-prose">
+          <h4>About {meeting.companyName || "the company"}</h4>
+          <p>{meeting.companyDescription}</p>
+        </div>
+      )}
+      {meeting.summary && (
+        <div className="mtg-prose">
+          <h4>Meeting notes</h4>
+          <p>{meeting.summary}</p>
+        </div>
+      )}
+
       <div className="mtg-detail-actions">
+        <button className="mtg-enrich" onClick={onEnrich} disabled={enriching}>{enriching ? "Enriching…" : "↻ Enrich"}</button>
         <button className="mtg-delete" onClick={onDelete}>Delete meeting</button>
       </div>
     </div>
@@ -121,7 +184,11 @@ export default function ClientMeetingsPage() {
   const [form, setForm] = useState<Record<string, string>>({});
   const [meetingAt, setMeetingAt] = useState("");
   const [saving, setSaving] = useState(false);
+  const [enriching, setEnriching] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // Captured once so the "upcoming" count is computed from a stable clock rather than reading the wall clock
+  // during render (which the compiler rejects as impure); a minute's drift never matters for a count.
+  const [now] = useState(() => Date.now());
 
   const load = async () => {
     try {
@@ -173,6 +240,21 @@ export default function ClientMeetingsPage() {
     await load();
   };
 
+  // Pull the person's enrichment (from our own leads, or AI Ark) and fill this meeting's empty fields.
+  const enrichOne = async (id: string) => {
+    if (enriching) return;
+    setEnriching(id);
+    try {
+      const response = await fetch(`/api/meetings/enrich`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: id }) });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.meeting) setMeetings((list) => list.map((m) => (m.id === id ? payload.meeting : m)));
+    } finally {
+      setEnriching(null);
+    }
+  };
+
+  const upcoming = meetings.filter((m) => m.meetingAt && new Date(m.meetingAt).getTime() >= now && m.status !== "canceled").length;
+
   return (
     <div className="app-shell">
       <AppSidebar />
@@ -191,9 +273,12 @@ export default function ClientMeetingsPage() {
                 <span className="mtg-logo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>
                   {client.logoUrl ? <img src={client.logoUrl} alt="" /> : (client.name[0] || "?").toUpperCase()}
                 </span>
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <h1>{client.name}</h1>
-                  <Link href="/meetings" className="mtg-back">← All clients</Link>
+                  <div className="mtg-head-meta">
+                    <Link href="/meetings" className="mtg-back">← All clients</Link>
+                    <span className="mtg-head-count">{meetings.length} booked{upcoming ? ` · ${upcoming} upcoming` : ""}</span>
+                  </div>
                 </div>
                 <button className="primary-button" onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "Add meeting"}</button>
               </div>
@@ -223,20 +308,22 @@ export default function ClientMeetingsPage() {
                 {meetings.map((meeting) => {
                   const when = whenParts(meeting);
                   const expanded = open === meeting.id;
+                  const enriched = Boolean(meeting.inviteeLocation || meeting.inviteeHeadline || meeting.companyDomain || meeting.companyIndustry);
                   return (
-                    <div className="mtg-item" key={meeting.id}>
+                    <div className={`mtg-item ${expanded ? "open" : ""}`} key={meeting.id}>
                       <div className="mtg-item-head" onClick={() => setOpen(expanded ? null : meeting.id)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") setOpen(expanded ? null : meeting.id); }}>
                         <div className={`mtg-when ${when.tbd ? "tbd" : ""}`}>
                           <b>{when.top}</b>
                           {when.bottom && <span>{when.bottom}</span>}
                         </div>
+                        <span className="mtg-row-avatar">{initialsOf(meeting.inviteeName || meeting.inviteeEmail)}</span>
                         <div className="mtg-who">
                           <strong>{meeting.inviteeName || meeting.inviteeEmail || "Unnamed invitee"}</strong>
                           <span className="mtg-sub">{[meeting.inviteeTitle, meeting.companyName].filter(Boolean).join(" · ") || "—"}</span>
                           <div className="mtg-meta">
-                            {meeting.summary && <span>{meeting.summary}</span>}
+                            {meeting.campaign && <span className="mtg-chip">{meeting.campaign}</span>}
                             {meeting.host && <span>with {meeting.host}</span>}
-                            {meeting.campaign && <span>{meeting.campaign}</span>}
+                            {!enriched && <span className="mtg-chip-warn">Not enriched</span>}
                           </div>
                         </div>
                         <div className="mtg-right">
@@ -245,7 +332,7 @@ export default function ClientMeetingsPage() {
                           <span className="mtg-caret">{expanded ? "▴" : "▾"}</span>
                         </div>
                       </div>
-                      {expanded && <Detail meeting={meeting} onDelete={() => void remove(meeting.id)} />}
+                      {expanded && <Detail meeting={meeting} onDelete={() => void remove(meeting.id)} onEnrich={() => void enrichOne(meeting.id)} enriching={enriching === meeting.id} />}
                     </div>
                   );
                 })}

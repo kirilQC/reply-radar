@@ -1,8 +1,8 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
-import { NextResponse } from "next/server";
-import { getClientMeetings, addMeeting, deleteMeeting } from "../../../../lib/meetings";
+import { NextResponse, after } from "next/server";
+import { getClientMeetings, addMeeting, deleteMeeting, enrichMeeting } from "../../../../lib/meetings";
 
 // One client's booked meetings, a manual add, and a delete.
 export async function GET(_request: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -17,6 +17,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const result = await addMeeting(slug, body, "manual");
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
+  // A manually-added meeting with a LinkedIn URL gets the same enrichment as a webhook one, after the response.
+  const meetingId = result.meeting?.id;
+  if (meetingId) after(() => enrichMeeting(meetingId).catch(() => {}));
   return NextResponse.json({ ok: true, meeting: result.meeting }, { status: 201 });
 }
 

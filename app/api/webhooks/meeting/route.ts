@@ -1,8 +1,8 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
-import { NextResponse } from "next/server";
-import { ingestWebhook } from "../../../lib/meetings";
+import { NextResponse, after } from "next/server";
+import { ingestWebhook, enrichMeeting } from "../../../lib/meetings";
 
 /**
  * The unified booked-meetings webhook — ONE URL for every client. The Zapier flow posts the meeting details
@@ -34,5 +34,10 @@ export async function POST(request: Request) {
   }
   const result = await ingestWebhook(payload);
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 422 });
-  return NextResponse.json({ ok: true, client: result.client, meetingId: result.meeting?.id });
+  // Enrich after the 200 goes back, so Zapier gets its fast acknowledgement and the AI Ark / lead lookup
+  // (which can take a few seconds) never blocks the webhook. The meeting is already saved; this only fills in
+  // the empty location, headline and company block.
+  const meetingId = result.meeting?.id;
+  if (meetingId) after(() => enrichMeeting(meetingId).catch(() => {}));
+  return NextResponse.json({ ok: true, client: result.client, meetingId });
 }
