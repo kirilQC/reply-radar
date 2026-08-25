@@ -26,6 +26,7 @@ export type Meeting = {
   inviteeTitle: string | null;
   inviteeLocation: string | null;
   inviteeHeadline: string | null;
+  inviteePhotoUrl: string | null;
   companyName: string | null;
   companyDomain: string | null;
   companyLinkedin: string | null;
@@ -34,6 +35,7 @@ export type Meeting = {
   companySize: string | null;
   companyType: string | null;
   companyDescription: string | null;
+  companyLogoUrl: string | null;
   meetingAt: string | null;
   whenText: string | null;
   summary: string | null;
@@ -62,9 +64,9 @@ const orNull = (value: unknown) => (str(value).trim() ? str(value) : null);
 // The columns a caller may set. Anything else in an incoming object is ignored, so a webhook or form cannot
 // write to a column it was not meant to.
 const COLUMNS = new Set([
-  "invitee_name", "invitee_email", "invitee_linkedin", "invitee_title", "invitee_location", "invitee_headline",
+  "invitee_name", "invitee_email", "invitee_linkedin", "invitee_title", "invitee_location", "invitee_headline", "invitee_photo_url",
   "company_name", "company_domain", "company_linkedin", "company_location", "company_industry", "company_size",
-  "company_type", "company_description", "meeting_at", "when_text", "summary", "host", "campaign", "status", "external_id", "raw",
+  "company_type", "company_description", "company_logo_url", "meeting_at", "when_text", "summary", "host", "campaign", "status", "external_id", "raw",
 ]);
 
 function config() {
@@ -92,6 +94,7 @@ function meetingFromRow(row: Row): Meeting {
     inviteeTitle: orNull(row.invitee_title),
     inviteeLocation: orNull(row.invitee_location),
     inviteeHeadline: orNull(row.invitee_headline),
+    inviteePhotoUrl: orNull(row.invitee_photo_url),
     companyName: orNull(row.company_name),
     companyDomain: orNull(row.company_domain),
     companyLinkedin: orNull(row.company_linkedin),
@@ -100,6 +103,7 @@ function meetingFromRow(row: Row): Meeting {
     companySize: orNull(row.company_size),
     companyType: orNull(row.company_type),
     companyDescription: orNull(row.company_description),
+    companyLogoUrl: orNull(row.company_logo_url),
     meetingAt: orNull(row.meeting_at),
     whenText: orNull(row.when_text),
     summary: orNull(row.summary),
@@ -274,6 +278,7 @@ function enrichmentPatch(meetingRow: Row, enrichment: Row): Row {
     invitee_location: locationLabel(enrichment.location),
     invitee_headline: str(enrichment.headline).trim() || null,
     invitee_title: str(enrichment.title).trim() || null,
+    invitee_photo_url: (str(enrichment.profilePhotoUrl) || str(enrichment.profilePhotoSource)).trim() || null,
     company_name: (str(summary.name) || str(company.name)).trim() || null,
     company_domain: domainFromWebsite(link.website),
     company_linkedin: str(link.linkedin).trim() || null,
@@ -282,6 +287,7 @@ function enrichmentPatch(meetingRow: Row, enrichment: Row): Row {
     company_size: companySizeLabel(summary),
     company_type: (str(summary.type) || str(company.type)).trim() || null,
     company_description: str(summary.description).trim() || null,
+    company_logo_url: (str(enrichment.companyPhotoUrl) || str(enrichment.companyPhotoSource) || str(company.logo)).trim() || null,
   };
   const patch: Row = {};
   for (const [column, value] of Object.entries(candidates)) {
@@ -337,6 +343,42 @@ export async function enrichMeeting(meetingId: string): Promise<boolean> {
     method: "PATCH", headers: authHeaders(key), body: JSON.stringify(patch),
   });
   return response.ok;
+}
+
+export type MeetingMessage = { direction: string; body: string; sentAt: string | null };
+
+/**
+ * The conversation we already had with this meeting's invitee, if they are a lead we contacted.
+ *
+ * A booked meeting is almost always someone from a campaign, so their whole thread — what we said, what they
+ * replied — already lives in the database. Match them by their LinkedIn URL within this client's workspace,
+ * then pull the messages of every conversation on that lead, oldest first, so the meeting page can show the
+ * back-and-forth that led to the booking. `found:false` means they are not (yet) a lead of ours.
+ */
+export async function getMeetingConversation(meetingId: string): Promise<{ found: boolean; leadId: string | null; name: string | null; messages: MeetingMessage[] }> {
+  const empty = { found: false, leadId: null as string | null, name: null as string | null, messages: [] as MeetingMessage[] };
+  const { url, key } = config();
+  if (!url || !key || !meetingId) return empty;
+  const meetingRow = (await rows(url, key, `rr_meetings?select=workspace_id,invitee_linkedin&id=eq.${encodeURIComponent(meetingId)}&limit=1`))[0];
+  if (!meetingRow) return empty;
+  const handle = normalizeLinkedin(str(meetingRow.invitee_linkedin));
+  if (!handle) return empty;
+  const workspaceId = str(meetingRow.workspace_id);
+  const lead = (await rows(url, key, `rr_leads?select=id,name&workspace_id=eq.${encodeURIComponent(workspaceId)}&linkedin_profile_url=ilike.*${encodeURIComponent(handle)}*&limit=1`))[0];
+  if (!lead) return empty;
+  const leadId = str(lead.id);
+  const convos = await rows(url, key, `rr_conversations?select=id&lead_id=eq.${encodeURIComponent(leadId)}`);
+  const convIds = convos.map((row) => str(row.id)).filter(Boolean);
+  if (!convIds.length) return { found: true, leadId, name: orNull(lead.name), messages: [] };
+  const msgs = await rows(url, key, `rr_messages?select=direction,body,sent_at&conversation_id=in.(${convIds.map(encodeURIComponent).join(",")})&order=sent_at.asc&limit=200`);
+  return {
+    found: true,
+    leadId,
+    name: orNull(lead.name),
+    messages: msgs
+      .map((row) => ({ direction: str(row.direction), body: str(row.body), sentAt: orNull(row.sent_at) }))
+      .filter((message) => message.body.trim()),
+  };
 }
 
 /** Remove one meeting. */

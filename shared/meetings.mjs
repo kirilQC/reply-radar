@@ -97,7 +97,12 @@ export function normalizeMeeting(payload) {
   const flat = flatten(body);
   const get = (...aliases) => pick(flat, aliases);
 
-  const whenRaw = get("meeting_at", "start_time", "startTime", "scheduled_at", "invitee_start_time", "time", "meeting_time", "when", "event_start_time");
+  const whenRaw = get(
+    "meeting_at", "meeting_date", "meeting_datetime", "meeting_date_time", "meeting_time",
+    "start_time", "startTime", "start", "start_date", "start_datetime",
+    "scheduled_at", "scheduled_time", "invitee_start_time", "event_start_time", "event_date",
+    "datetime", "date_time", "date", "time", "when",
+  );
   const meetingAt = parseWhen(whenRaw);
 
   return {
