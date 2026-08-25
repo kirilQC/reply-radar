@@ -104,7 +104,7 @@ export async function addToDnc(
   clientRef: string,
   companies: string[],
   opts: { reason?: string; addedBy?: string; source?: string } = {},
-): Promise<{ ok: boolean; error?: string; client?: string; results?: DncResult[]; total?: number; link?: string | null }> {
+): Promise<{ ok: boolean; error?: string; client?: string; results?: DncResult[]; total?: number; link?: string | null; notConfigured?: boolean }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const client = await resolveWorkspace(clientRef);
@@ -116,6 +116,9 @@ export async function addToDnc(
   // The client's Clay DNC webhook + brain folder, and what's already on the list (to tell an add from an update).
   const workspaceRow = (await rows(url, key, `rr_workspaces?select=clay_dnc_webhook_url,brain_folder&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0];
   const clayWebhook = str(workspaceRow?.clay_dnc_webhook_url).trim();
+  // Without the Clay integration, a DNC add cannot work end to end (no domain, no sync). Do not half-add it to
+  // the mirror — return "not configured" so the caller tells the user to set Clay up first.
+  if (!clayWebhook) return { ok: true, client: client.name, notConfigured: true };
   const existing = new Set((await rows(url, key, `rr_dnc?select=key&workspace_id=eq.${encodeURIComponent(client.id)}`)).map((row) => str(row.key)));
 
   const results: DncResult[] = [];

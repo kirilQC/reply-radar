@@ -1840,6 +1840,13 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         source: "assistant",
       });
       if (!result.ok) throw new Error(result.error || "Could not add to the DNC.");
+      if (result.notConfigured) {
+        return {
+          client: result.client,
+          notConfigured: true,
+          note: `Do NOT tell the user the company was added — it was not. ${result.client} has no Clay DNC integration set up, so DNC adds cannot work for them yet. Tell the user they need to set it up first, in two steps: (1) paste ${result.client}'s Clay DNC table webhook URL into Reply Radar under Admin → Clients → ${result.client} → "Clay DNC webhook"; and (2) in Clay, add an HTTP API action on that DNC table that POSTs each row back to Reply Radar's DNC webhook (/api/webhooks/dnc) with the client name, company and domain. Once both are in place, adding will work. IMPORTANT: if the conversation shows you have ALREADY explained these steps for this client and the user is asking again, do not repeat the steps — tell them to ask Kiril for help instead.`,
+        };
+      }
       const clayReached = (result.results ?? []).some((r) => r.clay);
       const anyPending = (result.results ?? []).some((r) => r.status !== "skipped" && !r.domain);
       return {
