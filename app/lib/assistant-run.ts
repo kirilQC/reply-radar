@@ -230,6 +230,11 @@ How to answer:
 - Be brief in prose and complete in data. No preamble, no restating the question.
 - You cannot send, pause or tag anything in HeyReach, and you cannot edit Reply Radar's own database. The two things you can write are a proposed edit to the QC Brain and a change to a client's Airtable, both below.
 
+Support and feedback:
+- You cannot fix bugs or change Reply Radar yourself. When the person is clearly stuck, blocked, or unhappy with what you are giving them — a repeated failure, "this is wrong / broken / not what I asked", plain frustration — offer, once and plainly, to open a support ticket that Kiril will look into. Do not offer for an ordinary question you answered fine, and do not badger: offer once, then let it go if they don't take it up.
+- Only file the ticket after they say to (a "yes", "submit it", "log it", "please do"). When they do, call submit_support_ticket with a clear summary of the problem in their own words and kind set to 'bug' (something is broken or wrong), 'idea' (a request or improvement) or 'other'. Then tell them it's logged and that Kiril will look into it. If they decline, drop it — no ticket.
+- Never file a ticket silently or speculatively, and never file more than one for the same issue in a conversation.
+
 The QC Brain:
 - The brain is a GitHub repository every person at QC points their Claude Code at. It holds each client's ICP, personas, tone of voice, engagement plan, pipeline notes and call notes, plus QC's own playbooks and vertical research. Your other tools know what happened; the brain knows what QC intended.
 - Use it whenever a question is about strategy, positioning, who a client sells to, what was decided, or why a campaign reads the way it does. Answering those from the numbers alone gets you a confident answer to a different question.
@@ -349,7 +354,7 @@ async function streamTurn(
   apiKey: string,
   messages: Turn[],
   onEvent: (event: Row) => void,
-  options: { allowTools?: boolean } = {},
+  options: { allowTools?: boolean; system?: string } = {},
 ): Promise<{ content: Block[]; stopReason: string; usage: { input: number; output: number } }> {
   // The tools stay declared even on the final turn — the conversation already contains tool_use and
   // tool_result blocks, and a request that omits the definitions those blocks refer to is rejected.
@@ -369,7 +374,7 @@ async function streamTurn(
     body: JSON.stringify({
       model: MODEL,
       max_tokens: finalTurn ? FINAL_MAX_TOKENS : MAX_TOKENS,
-      system: SYSTEM,
+      system: options.system ?? SYSTEM,
       tools: TOOLS,
       ...(finalTurn ? { tool_choice: { type: "none" } } : {}),
       messages,
@@ -449,10 +454,13 @@ export async function runAgent(opts: {
   messages: Turn[];
   emit?: (event: AgentEvent) => void;
   deadlineMs?: number;
+  /** Appended to the base SYSTEM for this run — who is asking, whether it's a private DM, how to mention Kiril. */
+  systemExtra?: string;
 }): Promise<AgentResult> {
   const { apiKey, messages } = opts;
   const emit = opts.emit ?? (() => {});
   const deadline = opts.deadlineMs ?? TOOL_DEADLINE_MS;
+  const system = opts.systemExtra ? `${SYSTEM}\n\n${opts.systemExtra}` : SYSTEM;
 
   const steps: AgentStep[] = [];
   const startedAt = Date.now();
@@ -468,7 +476,7 @@ export async function runAgent(opts: {
       apiKey,
       messages,
       (event) => emit({ type: "stream", event }),
-      { allowTools: !outOfTime },
+      { allowTools: !outOfTime, system },
     );
     inputTokens += usage.input;
     outputTokens += usage.output;

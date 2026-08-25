@@ -36,13 +36,13 @@ import {
   deleteMessage,
   postMessage,
   removeReaction,
+  resolveUserNames,
   slackConfigured,
   threadPosts,
   updateMessage,
   uploadFile,
 } from "../../../lib/slack";
 import {
-  botParticipated,
   cleanMention,
   progressLabel,
   progressText,
@@ -272,8 +272,19 @@ async function runAndReply(opts: {
       });
     };
 
+    // Tell the agent who it is talking to (so a filed support ticket is attributed) and, in a DM, that this
+    // is a private 1:1 where it is that person's own Reply Radar assistant. If a support owner is configured,
+    // hand it the mention token so "Kiril will look into it" actually pings him.
+    const askerName = askedBy ? (await resolveUserNames([askedBy]).catch(() => new Map<string, string>())).get(askedBy) || "" : "";
+    const supportOwner = (process.env.SUPPORT_OWNER_SLACK_ID || "").trim();
+    const extraParts: string[] = [];
+    extraParts.push(`You are talking to ${askerName || "a QC team member"}${askedBy ? ` (Slack user <@${askedBy}>)` : ""}. If you file a support ticket, record submittedBy as their name.`);
+    if (surface === "dm") extraParts.push("This is a private, one-to-one direct message: you are this person's own Reply Radar assistant, with your full set of tools available. Answer for them alone — there is no channel audience reading along.");
+    if (supportOwner) extraParts.push(`When you tell someone Kiril will look into a support issue, refer to him as <@${supportOwner}> so he is actually notified.`);
+    const systemExtra = extraParts.join("\n");
+
     try {
-      const result = await runAgent({ apiKey, messages, emit });
+      const result = await runAgent({ apiKey, messages, emit, systemExtra });
 
       if (result.maxedTurns) {
         await deliver("I ran out of research steps on that one before I could answer. Try asking something narrower.");
@@ -347,40 +358,53 @@ async function answerMention(event: Row): Promise<void> {
     return;
   }
 
+  // A mention inside a thread hanging under one of our briefs or reports is a correction to that document
+  // ("strike that line", "we already did this"), not a research question — hand it to the dedicated editor
+  // that can actually change the original message. Only the tagging message is taken as the instruction, so
+  // the team's earlier untagged chatter in the thread is never mistaken for an edit. Everything else — a
+  // top-level mention, or a thread that is not one of ours — falls through to the generic agent.
+  if (str(event.thread_ts)) {
+    const credential = supabaseCredentials();
+    if (credential) {
+      const posts = await threadPosts(channel, threadTs);
+      const briefThread = await findBriefThread(credential, channel, posts).catch(() => null);
+      if (briefThread) {
+        await replyToBrief({ channel, threadTs, reactTs: str(event.ts), briefThread, instruction: question });
+        return;
+      }
+    }
+  }
+
   const messages = await conversationTurns(channel, threadTs, question);
   if (!messages.length) return;
   await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "mention" });
 }
 
 /**
- * A reply in the thread under a brief or report QC Bot posted — the correct-the-document path.
+ * A tagged reply in the thread under a brief or report QC Bot posted — the correct-the-document path.
  *
- * This is the reason the feature exists: a teammate under a morning brief or End-of-Week report is almost
- * never asking a research question, they are fixing the document ("we already did this", "take that line
- * out"). The generic agent cannot touch the message it is being asked to change, so this one call returns
- * both the reply to post and, when the reply asked for it, the whole edited body — which is pushed over the
- * original message only after `briefEditIsSafe` clears it, because the one failure this must never have is a
- * reply quietly replacing a page-long brief with a sentence.
+ * This is the reason the feature exists: a teammate under a morning brief or End-of-Week report who @-tags
+ * the bot is almost never asking a research question, they are fixing the document ("we already did this",
+ * "take that line out"). The generic agent cannot touch the message it is being asked to change, so this one
+ * call returns both the reply to post and, when the reply asked for it, the whole edited body — which is
+ * pushed over the original message only after `briefEditIsSafe` clears it, because the one failure this must
+ * never have is a reply quietly replacing a page-long brief with a sentence.
  *
- * Every human post in the thread is passed as context, not just the newest, so a correction that spans two
- * messages, or a thread with several asks, is answered against all of them. The stored body is refreshed
- * best-effort after a safe edit so the next brief reads the struck-through version.
+ * Only the message that tagged the bot is treated as the instruction — the team's other, untagged chatter in
+ * the same thread is deliberately ignored, so casual back-and-forth is never mistaken for an edit. The stored
+ * body is refreshed best-effort after a safe edit so the next brief reads the struck-through version.
  */
 async function replyToBrief(opts: {
   channel: string;
   threadTs: string;
   reactTs: string;
-  identity: { userId: string; botId: string };
-  posts: Array<{ author: string; botId: string; text: string; ts: string }>;
   briefThread: BriefThread;
-  askedBy: string;
+  instruction: string;
 }): Promise<void> {
-  const { channel, threadTs, reactTs, identity, posts, briefThread } = opts;
+  const { channel, threadTs, reactTs, briefThread, instruction } = opts;
 
-  const isOurBot = (post: { author: string; botId: string }) =>
-    Boolean((identity.userId && post.author === identity.userId) || (identity.botId && post.botId === identity.botId));
-  const replies = posts.filter((post) => !isOurBot(post)).map((post) => cleanMention(post.text)).filter(Boolean);
-  // Nothing a person actually said (an attachment-only reply, say) — leave it to the generic path's caller.
+  // Only the message that tagged the bot is the correction — the team's other thread chatter is not.
+  const replies = [cleanMention(instruction)].filter(Boolean);
   if (!replies.length) return;
 
   if (reactTs) await addReaction(channel, reactTs, WORKING_REACTION).catch(() => {});
@@ -413,77 +437,13 @@ async function replyToBrief(opts: {
 }
 
 /**
- * A follow-up reply in a thread the bot is already in — the ongoing-conversation path.
- *
- * A `message` event fires for every message in a channel the bot can see, so most are none of its business.
- * `isThreadReply` has already filtered out its own posts, edits and top-level messages; here two more gates
- * apply, both needing Slack's answer. A reply that @-mentions the bot is left to `answerMention` (Slack
- * delivers it as an `app_mention` too, and answering in both places would double-post), and a thread the
- * bot has never spoken in is somebody else's discussion, so `botParticipated` keeps it out.
- *
- * When the thread hangs under a brief or report we posted, the reply is a correction to that document, not a
- * research question, so it is handled by `replyToBrief`; everything else falls through to the generic agent.
- */
-async function answerThreadReply(event: Row): Promise<void> {
-  const channel = str(event.channel);
-  const threadTs = str(event.thread_ts);
-  if (!channel || !threadTs) return;
-
-  const identity = await botIdentity();
-  // A reply that names the bot is the app_mention path's job; answering here as well would post twice.
-  if (identity.userId && str(event.text).includes(`<@${identity.userId}>`)) return;
-
-  const posts = await threadPosts(channel, threadTs);
-  if (!botParticipated(posts, identity)) return;
-
-  // A thread hanging under one of our briefs or reports is a correction to that document — handle it with the
-  // dedicated editor that can strike or reword the original message. Falls through to the generic agent when
-  // it is not one of ours, or when Supabase is not reachable to look it up.
-  const credential = supabaseCredentials();
-  if (credential) {
-    const briefThread = await findBriefThread(credential, channel, posts).catch(() => null);
-    // One breadcrumb per brief-thread reply, so a reply that lands on the generic agent instead of the
-    // editor is diagnosable from the logs: was the lookup even reached, and did it match a stored brief.
-    console.info("reply_radar_brief_thread_lookup", {
-      channel,
-      posts: posts.length,
-      matched: Boolean(briefThread),
-      automation: briefThread?.automation ?? null,
-    });
-    if (briefThread) {
-      await replyToBrief({ channel, threadTs, reactTs: str(event.ts), identity, posts, briefThread, askedBy: str(event.user) });
-      return;
-    }
-  }
-
-  const messages = threadToTurns(posts, identity) as Turn[];
-  // Only answer when the thread ends on a human's turn — otherwise there is nothing new to respond to.
-  if (!messages.length || messages[messages.length - 1].role !== "user") return;
-  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "thread" });
-}
-
-/**
- * Whether a `message` event is a human's threaded reply worth considering.
- *
- * Message events also carry the bot's own posts, edits and deletes (as subtypes), and top-level messages;
- * none of those are a follow-up question. A reply is a message with no `bot_id`, no subtype, and a
- * `thread_ts` that points at a parent other than itself. The mention and participation checks that decide
- * whether to actually answer need Slack's identity, so they live in `answerThreadReply`, not here.
- */
-function isThreadReply(event: Row): boolean {
-  if (event.bot_id || str(event.subtype)) return false;
-  const threadTs = str(event.thread_ts);
-  return Boolean(threadTs) && threadTs !== str(event.ts);
-}
-
-/**
  * Whether a `message` event is a human writing to the bot in a DM.
  *
  * A direct message arrives as a `message` event with `channel_type: "im"`. In a one-to-one DM there is no
- * one else to talk to, so there is no @-mention to wait for and no participation gate — every human message
- * is for the bot. The same subtype filter as `isThreadReply` keeps out the bot's own posts, edits and the
- * "you were added" system messages. Threaded DM replies are handled by `answerThreadReply` for their
- * history, so this only claims the top-level ones.
+ * one else to talk to, so there is no @-mention to wait for — every human message is for the bot, and it acts
+ * as that person's private Reply Radar assistant. The subtype filter keeps out the bot's own posts, edits and
+ * the "you were added" system messages. Threaded DM replies are folded in as history by `conversationTurns`,
+ * so claiming the top-level message answers the whole exchange.
  */
 function isDirectMessage(event: Row): boolean {
   if (event.bot_id || str(event.subtype)) return false;
@@ -535,18 +495,19 @@ export async function POST(request: Request) {
 
   if (payload.type === "event_callback") {
     const event = asObject(payload.event);
-    // Three ways in: a fresh @-mention in a channel, a follow-up reply in a thread the bot is already part
-    // of, and a direct message to the bot. All are claimed by event id first so a Slack redelivery cannot
-    // answer twice, and all run after the 200 so the three-second deadline is met; the reply is posted when
-    // it is ready. A mention is never a message the bot itself posted (that would loop); the thread-reply
-    // gate is `isThreadReply`; the DM gate is `isDirectMessage`.
+    // Two ways in: an @-mention in a channel (the ONLY channel trigger — the bot stays silent on every
+    // untagged message so the team can talk in a thread without it butting in), and a direct message to the
+    // bot (a private 1:1, where every message is for it and no tag is needed). Both are claimed by event id
+    // first so a Slack redelivery cannot answer twice, and both run after the 200 so the three-second
+    // deadline is met. A mention is never a message the bot itself posted (that would loop); the DM gate is
+    // `isDirectMessage`. Slack delivers a threaded @-mention as an app_mention too, so tagging the bot inside
+    // a thread still reaches `answerMention`.
     const mention = event.type === "app_mention" && !event.bot_id;
     const directMessage = event.type === "message" && isDirectMessage(event);
-    const threadReply = event.type === "message" && !directMessage && isThreadReply(event);
-    if (mention || directMessage || threadReply) {
+    if (mention || directMessage) {
       const claimed = await claimEvent(str(payload.event_id));
       if (claimed && slackConfigured()) {
-        const answer = mention ? answerMention : directMessage ? answerDirectMessage : answerThreadReply;
+        const answer = mention ? answerMention : answerDirectMessage;
         after(() => answer(event));
       }
     }

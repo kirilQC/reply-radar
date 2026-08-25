@@ -64,7 +64,7 @@ import * as heyreach from "./heyreach-api";
 import { BRAIN_URL, brainConfigured, brainCorpus, brainFile, brainFiles, brainTree, forgetBrainTree, proposeBrainEdit } from "./brain";
 import { searchBrain } from "../../shared/brain-search.mjs";
 import { clientLabel, clientOf, clientSkeleton, clientsIn, fileKind, fileTitle, isReadable, parseSkill, skillClient } from "../../shared/brain-structure.mjs";
-import { scanChannel, resolveChannelNames, resolveUserNames, transcript, slackReadable } from "./slack";
+import { scanChannel, resolveChannelNames, resolveUserNames, transcript, slackReadable, postMessage } from "./slack";
 import { normalizeChannelId } from "./slack-channel";
 import { addMeeting, getClientMeetings, listMeetingClients } from "./meetings";
 import { getClientDeals, listDealClients } from "./deals";
@@ -833,6 +833,20 @@ export const TOOLS: ToolDefinition[] = [
     description:
       "A client's onboarding progress and what is still open. Pass a client for their percent complete, status, and the list of not-yet-done steps. Omit the client for a directory of every client's onboarding progress. Use this to answer how far along a new client's setup is, or what is still outstanding before they can go live.",
     input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug. Omit for the all-client directory." } } },
+  },
+  {
+    name: "submit_support_ticket",
+    description:
+      "File a support ticket / feedback item for the QC team to look into — it lands in Reply Radar's Feedback & ideas section where Kiril reviews it. Use this ONLY when a QC team member is clearly stuck, blocked, or unhappy with what Reply Radar is giving them AND they have confirmed they want a ticket opened. Never file one speculatively, without the person's explicit go-ahead, or more than once for the same issue. Set kind to 'bug' when something is broken or wrong, 'idea' for a request or improvement, 'other' otherwise.",
+    input_schema: {
+      type: "object",
+      properties: {
+        summary: { type: "string", description: "A clear one-to-three sentence description of the problem or request, in the person's own words." },
+        kind: { type: "string", enum: ["bug", "idea", "other"], description: "'bug' if something is broken/wrong, 'idea' for a request or improvement, else 'other'." },
+        submittedBy: { type: "string", description: "The name of the person reporting it, if you know it (e.g. from the conversation context). Leave blank if unknown." },
+      },
+      required: ["summary"],
+    },
   },
 ];
 
@@ -1776,6 +1790,35 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const data = await onboardingForAssistant(client.slug);
       if (!data) return { client: client.name, note: "No onboarding checklist has been started for this client yet." };
       return { client: data.name, status: data.status, percent: data.progress.pct, done: data.progress.doneLeaves, total: data.progress.totalLeaves, openSteps: data.openSteps };
+    }
+
+    case "submit_support_ticket": {
+      const summary = text(input.summary).trim();
+      if (!summary) throw new Error("A support ticket needs a short description of the problem.");
+      const kind = ["bug", "idea", "other"].includes(text(input.kind)) ? text(input.kind) : "other";
+      const submittedBy = text(input.submittedBy).trim() || null;
+      const { url, key } = supabase();
+      const response = await fetch(`${url}/rest/v1/rr_feedback`, {
+        method: "POST",
+        headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" },
+        body: JSON.stringify({ kind, message: summary, submitted_by: submittedBy, page: "QC Bot (Slack)", status: "new" }),
+      });
+      if (!response.ok) {
+        const detail = (await response.text().catch(() => "")).slice(0, 200);
+        throw new Error(`Could not file the ticket: ${response.status}${detail ? `: ${detail}` : ""}`);
+      }
+      const saved = await response.json().catch(() => []);
+      const id = Array.isArray(saved) && saved[0] ? text(saved[0].id) : "";
+      // Optionally ping a feedback channel and the support owner so a ticket is seen, not just stored. Both
+      // envs are optional — with neither set, the ticket still lands in the Feedback & ideas section.
+      const channel = normalizeChannelId(process.env.SLACK_FEEDBACK_CHANNEL_ID || "");
+      const owner = (process.env.SUPPORT_OWNER_SLACK_ID || "").trim();
+      if (channel) {
+        const ping = owner ? `<@${owner}> ` : "";
+        const who = submittedBy ? ` from *${submittedBy}*` : "";
+        await postMessage(channel, `${ping}New ${kind} ticket via QC Bot${who}:\n> ${summary.replace(/\n/g, "\n> ")}`).catch(() => {});
+      }
+      return { ok: true, id, kind, note: "Support ticket filed in the Feedback & ideas section. Tell the person it's logged and that Kiril will look into it." };
     }
 
     default:
