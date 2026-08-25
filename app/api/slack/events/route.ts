@@ -452,17 +452,19 @@ function isDirectMessage(event: Row): boolean {
   return !threadTs || threadTs === str(event.ts);
 }
 
-/** A DM to the bot: answered in the DM, with the message itself as the question. */
+/** A DM to the bot: answered straight in the DM, with the message itself as the question. */
 async function answerDirectMessage(event: Row): Promise<void> {
   const channel = str(event.channel);
   if (!channel) return;
   // A DM can still be @-mentioned; strip it if so, otherwise take the whole message as the question.
   const question = cleanMention(str(event.text));
   if (!question) return;
-  const threadTs = str(event.ts);
-  const messages = await conversationTurns(channel, threadTs, question);
+  const messages = await conversationTurns(channel, str(event.ts), question);
   if (!messages.length) return;
-  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "dm" });
+  // Reply straight into the DM, NOT threaded under the message. A DM is a one-to-one conversation, so
+  // hanging the answer in a thread would bury it — threading is a channel-only behaviour, where the bot
+  // keeps its reply tucked under the message it answers. Passing an empty threadTs posts at top level.
+  await runAndReply({ channel, threadTs: "", reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "dm" });
 }
 
 export async function POST(request: Request) {
