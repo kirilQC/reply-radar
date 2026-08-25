@@ -838,7 +838,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "add_to_dnc",
     description:
-      "Add one or more companies to a client's do-not-contact (DNC) list — companies QC must never reach out to for that client. Each company name is resolved to a domain automatically, upserted into the client's DNC (so re-adding just refreshes it), and pushed to the client's Clay DNC table if one is wired up. Use this when a QC member says things like 'add X to the DNC', 'do not contact Y', or a client asks to stop outreach to a company. Always name the client. Returns a per-company breakdown (added / updated / skipped, and whether it reached Clay).",
+      "Add one or more companies to a client's do-not-contact (DNC) list — companies QC must never reach out to for that client. Just pass the company name(s); the domain is resolved in Clay, not here, so do not try to attach a domain yourself. Each company is upserted into the client's DNC (re-adding just refreshes it) and the name is pushed to the client's Clay DNC table if one is wired up. Use this when a QC member says 'add X to the DNC', 'do not contact Y', or a client asks to stop outreach to a company. Always name the client. Returns a per-company breakdown (added / updated / skipped, and whether it reached Clay).",
     input_schema: {
       type: "object",
       properties: {
