@@ -26,6 +26,12 @@ export type DncResult = { company: string; domain: string | null; status: "added
 const str = (value: unknown) => (typeof value === "string" ? value : value == null ? "" : String(value));
 const orNull = (value: unknown) => (str(value).trim() ? str(value) : null);
 
+// How long an add will wait for Clay to enrich a domain and push it back before answering anyway. The reply
+// is worth a few seconds so it can name the domain; a slow Clay just returns without it (filled in later).
+const DNC_CLAY_WAIT_MS = Math.max(0, Number(process.env.DNC_CLAY_WAIT_SECONDS || 40)) * 1000;
+const DNC_POLL_MS = 3_000;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function config() {
   return { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
 }
@@ -148,12 +154,26 @@ export async function addToDnc(
     results.push({ company, domain: null, status: wasThere ? "updated" : "added", clay });
   }
 
-  // Mirror the updated list into the client's brain folder (best effort — never fails the add).
+  // Wait for Clay to enrich the domain(s) and push them back (via /api/webhooks/dnc), so the reply can name the
+  // domain instead of "it'll fill in later". Bounded: once every added company has a domain we stop early, and
+  // if Clay is slow we give up at the deadline and answer with whatever is there. Only worth waiting when Clay
+  // was actually reached; without a webhook the domain would never arrive.
+  const pendingKeys = clayWebhook ? results.filter((r) => r.status !== "skipped").map((r) => dncKey(r.company)) : [];
+  if (pendingKeys.length && DNC_CLAY_WAIT_MS > 0) {
+    const deadline = Date.now() + DNC_CLAY_WAIT_MS;
+    for (;;) {
+      const snap = await rows(url, key, `rr_dnc?select=key,domain&workspace_id=eq.${encodeURIComponent(client.id)}`);
+      const byKey = new Map(snap.map((row) => [str(row.key), orNull(row.domain)]));
+      if (pendingKeys.every((k) => byKey.get(k)) || Date.now() >= deadline) break;
+      await sleep(DNC_POLL_MS);
+    }
+  }
+
+  // Mirror the (now domain-enriched) list into the client's brain folder (best effort — never fails the add).
   if (results.some((r) => r.status !== "skipped")) await syncDncToBrain(client.id, client.name).catch(() => {});
 
-  // Re-read the list once: gives the running total, and the domain each company now has (which for a company
-  // Clay has already synced is populated — we never enrich it ourselves; a brand-new name is null until Clay
-  // pushes its domain back).
+  // Final read: the running total, and the domain each company now has (populated once Clay synced it back — we
+  // never enrich it ourselves).
   const all = await rows(url, key, `rr_dnc?select=key,domain&workspace_id=eq.${encodeURIComponent(client.id)}`);
   const domainByKey = new Map(all.map((row) => [str(row.key), orNull(row.domain)]));
   for (const r of results) r.domain = domainByKey.get(dncKey(r.company)) ?? r.domain;
