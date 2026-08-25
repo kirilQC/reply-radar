@@ -65,11 +65,21 @@ async function writeCache(cfg: SbConfig, rows: { name_key: string; name: string;
 /** One live Clearbit lookup. Returns empty strings on any miss or error — a cacheable "nothing found". */
 async function lookup(name: string): Promise<Resolved> {
   try {
-    const response = await fetch(`${CLEARBIT}?query=${encodeURIComponent(name)}`, { cache: "no-store", signal: AbortSignal.timeout(8000) });
+    const response = await fetch(`${CLEARBIT}?query=${encodeURIComponent(name)}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+      // The autocomplete endpoint is built for browser widgets and returns an empty list to requests
+      // with no User-Agent — which is exactly what a bare server fetch sends, and why every lookup came
+      // back blank. A browser-shaped UA is all it wants.
+      headers: { "user-agent": "Mozilla/5.0 (compatible; ReplyRadar/1.0)", accept: "application/json" },
+    });
     if (!response.ok) return { domain: "", logo: "" };
     const body = (await response.json().catch(() => [])) as Array<Record<string, unknown>>;
     const first = Array.isArray(body) ? body[0] : undefined;
-    return { domain: str(first?.domain), logo: str(first?.logo) };
+    const domain = str(first?.domain);
+    // Autocomplete always returns `logo: null`; the real logo comes from Clearbit's logo endpoint, built
+    // from the domain we just found. So a resolved domain also yields a usable logo.
+    return { domain, logo: domain ? `https://logo.clearbit.com/${domain}` : "" };
   } catch {
     return { domain: "", logo: "" };
   }

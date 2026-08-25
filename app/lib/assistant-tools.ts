@@ -491,6 +491,21 @@ export const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: "search_outreach",
+    description:
+      "Search the qc_outreach table — QC's master record of every person contacted across every client, at the contact level. Each row is one outreach: the lead's name and title, the client it was for, and the campaign (id and name) it came from. Use this for questions about QC's outreach as a whole rather than one client's Reply Radar inbox: 'who have we reached out to at Stripe across all clients', 'which campaign did we contact a person in', 'every VP we have messaged for Cotool', 'how many people did campaign CT049 reach'. Filter by any of client, campaign name, lead name, or lead title; matching is case-insensitive substring. Returns the exact total match count alongside the rows, so a capped list is never mistaken for the whole population. This is a flat outreach log — for a person's full conversation and Reply Radar's read of their replies, use find_person or search_leads instead.",
+    input_schema: {
+      type: "object",
+      properties: {
+        client: { type: "string", description: "Limit to one client, by the name stored in the outreach table (e.g. cotool, hetz)." },
+        campaign: { type: "string", description: "A campaign-name fragment, e.g. Black Hat or CT049." },
+        name: { type: "string", description: "A lead-name fragment." },
+        title: { type: "string", description: "A job-title fragment, e.g. CISO or VP." },
+        limit: { type: "number", description: "Max rows (default 50)." },
+      },
+    },
+  },
+  {
     name: "search_leads",
     description:
       "Search everyone in Reply Radar's own database by job title, company or name. This is the tool for \"list the CISOs in our database\", \"who do we have at Stripe\", \"every VP of Engineering we have replied to\" — any question about a category of person rather than a named one. Matching is case-insensitive substring, so \"security\" finds \"Head of Security\". Give role as a LIST of every spelling of the title, because titles are free text as the person wrote them on LinkedIn: for CISOs pass [\"CISO\", \"Chief Information Security Officer\", \"Chief Security Officer\"], and anyone matching any of them is returned. Searches people, never message text. Returns the exact total match count as well as the rows, so you can always say how many there are even when the list is capped. Each person carries a leadScore, which is how well they fit the client's ideal customer; it is null for anyone who has not been analysed, which is not the same as a low score.",
@@ -943,6 +958,38 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
           profileUrl: text(row.linkedin_profile_url),
           client: clientById.get(text(row.workspace_id)) ?? "",
           conversations: byLead.get(text(row.id)) ?? [],
+        })),
+      };
+    }
+
+    case "search_outreach": {
+      // qc_outreach is QC's master contact-level log across every client — a flat table, not the
+      // workspace-scoped rr_* tables, so it is queried directly with ilike filters and its own count.
+      const conditions = [
+        containsAny("client", input.client),
+        containsAny("campaign_name", input.campaign),
+        containsAny("lead_name", input.name),
+        containsAny("lead_title", input.title),
+      ].filter(Boolean);
+      const where = conditions.length ? `and=(${conditions.join(",")})` : "";
+      const limit = rowLimit(input.limit, 50);
+      const { url, key } = supabase();
+      const select = "id,client,campaign_id,campaign_name,lead_name,lead_title";
+      const [outreachRows, total] = await Promise.all([
+        db(`qc_outreach?select=${select}${where ? `&${where}` : ""}&limit=${limit}`).then(rows),
+        countRows(url, key, `qc_outreach?select=id${where ? `&${where}` : ""}`),
+      ]);
+      const matched = total ?? outreachRows.length;
+      return {
+        matched,
+        showing: outreachRows.length,
+        note: matched > outreachRows.length ? `${matched} rows match; showing the first ${outreachRows.length}. Narrow with client, campaign, name or title.` : undefined,
+        outreach: outreachRows.map((row) => ({
+          client: text(row.client),
+          campaign: text(row.campaign_name),
+          campaignId: text(row.campaign_id),
+          name: text(row.lead_name),
+          title: text(row.lead_title),
         })),
       };
     }
