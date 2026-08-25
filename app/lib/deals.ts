@@ -40,6 +40,8 @@ export type Deal = {
   companyLogo: string | null;
   /** What the matcher computed, before any human override. */
   computedAttribution: string;
+  /** A human's review decision that overrides the matcher: verified confirmed, or dismissed. */
+  override: "confirmed" | "dismissed" | null;
   /** True when a person reviewed this and marked it not-QC; the display attribution is then "none". */
   dismissed: boolean;
   /** The one identifier that tied this deal to QC — the exact matched data point. */
@@ -96,11 +98,14 @@ function dealFromRow(row: Row): Deal {
     companyName: orNull(row.company_name),
     companyDomain: orNull(row.company_domain),
     contactLinkedin: orNull(row.contact_linkedin),
-    // A dismissed deal reads as "none" everywhere the display uses `attribution`, but the matcher's own
-    // verdict is preserved in `computedAttribution` so the decision is reversible and never re-runs on
-    // its own. The counts, the filters and the card colour all follow `attribution`.
-    attribution: str(row.attribution_override) === "dismissed" ? "none" : (str(row.attribution) || "none"),
+    // A human's review wins over the matcher: "confirmed" promotes (a possible they verified), "dismissed"
+    // removes. The matcher's own verdict is kept in `computedAttribution` so any override is reversible
+    // and the display never re-runs on its own. Counts, filters and colour all follow `attribution`.
+    attribution: str(row.attribution_override) === "dismissed" ? "none"
+      : str(row.attribution_override) === "confirmed" ? "confirmed"
+      : (str(row.attribution) || "none"),
     computedAttribution: str(row.attribution) || "none",
+    override: (["confirmed", "dismissed"].includes(str(row.attribution_override)) ? str(row.attribution_override) : null) as "confirmed" | "dismissed" | null,
     dismissed: str(row.attribution_override) === "dismissed",
     attributionReason: orNull(row.attribution_reason),
     attributionMatchedBy: orNull(row.attribution_matched_by),
@@ -394,7 +399,7 @@ export async function listDealClients(): Promise<DealClient[]> {
  * for display, but the verdict itself is left in place so the decision can be undone and so a re-sync
  * never quietly overwrites it — the sync writes `attribution`, never `attribution_override`.
  */
-export async function setDealOverride(dealId: string, override: "dismissed" | null): Promise<{ ok: boolean; error?: string }> {
+export async function setDealOverride(dealId: string, override: "confirmed" | "dismissed" | null): Promise<{ ok: boolean; error?: string }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const response = await fetch(`${url}/rest/v1/rr_deals?id=eq.${encodeURIComponent(dealId)}`, {

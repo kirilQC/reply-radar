@@ -52,8 +52,8 @@ function ClientCard({ client }: { client: Client }) {
         <small>attributed to QC{client.confirmed ? ` · ${client.confirmed} deal${client.confirmed === 1 ? "" : "s"}` : ""}</small>
       </div>
       <div className="deal-card-foot">
-        <span>{client.total} in pipeline · {money(client.totalValue)}</span>
-        {client.possible > 0 && <span>{client.possible} to review</span>}
+        {client.possible > 0 ? <span>{client.possible} to review</span> : <span>&nbsp;</span>}
+        {client.total > 0 && <span className="deal-card-count">{client.total} deals synced</span>}
       </div>
     </Link>
   );
@@ -88,7 +88,26 @@ export default function DealsDirectoryPage() {
             <h1>Deals &amp; attribution</h1>
           </div>
           {!loading && clients.length === 0 && <div className="deal-directory"><div className="deal-empty">No clients yet.</div></div>}
-          {clients.length > 0 && <div className="deal-directory">{clients.map((c) => <ClientCard key={c.id} client={c} />)}</div>}
+          {clients.length > 0 && (() => {
+            const connected = clients.filter((c) => c.crmProvider);
+            const pending = clients.filter((c) => !c.crmProvider);
+            return (
+              <>
+                {connected.length > 0 && (
+                  <section className="deal-group">
+                    <div className="deal-group-head"><span>CRM connected</span><span>{connected.length}</span></div>
+                    <div className="deal-directory">{connected.map((c) => <ClientCard key={c.id} client={c} />)}</div>
+                  </section>
+                )}
+                {pending.length > 0 && (
+                  <section className="deal-group">
+                    <div className="deal-group-head"><span>Not connected yet</span><span>{pending.length}</span></div>
+                    <div className="deal-directory">{pending.map((c) => <ClientCard key={c.id} client={c} />)}</div>
+                  </section>
+                )}
+              </>
+            );
+          })()}
         </main>
       </section>
     </div>

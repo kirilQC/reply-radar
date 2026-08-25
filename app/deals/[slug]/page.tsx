@@ -32,6 +32,7 @@ type Deal = {
   leadId: string | null;
   companyLogo: string | null;
   computedAttribution: string;
+  override: "confirmed" | "dismissed" | null;
   dismissed: boolean;
   matchedValue: string | null;
   trace: { check: string; input: string; matched: boolean; detail: string }[];
@@ -338,9 +339,15 @@ export default function ClientDealsPage() {
           deal={openDeal}
           money={money}
           onClose={() => setOpenDeal(null)}
-          onOverride={(dismissed) => {
-            setDeals((prev) => prev.map((d) => d.id === openDeal.id ? { ...d, dismissed, attribution: dismissed ? "none" : d.computedAttribution } : d));
-            setOpenDeal((prev) => prev ? { ...prev, dismissed, attribution: dismissed ? "none" : prev.computedAttribution } : prev);
+          onOverride={(override) => {
+            const apply = (d: Deal) => ({
+              ...d,
+              override,
+              dismissed: override === "dismissed",
+              attribution: override === "dismissed" ? "none" : override === "confirmed" ? "confirmed" : d.computedAttribution,
+            });
+            setDeals((prev) => prev.map((d) => d.id === openDeal.id ? apply(d) : d));
+            setOpenDeal((prev) => (prev ? apply(prev) : prev));
           }}
         />
       )}
@@ -375,23 +382,23 @@ type Detail = {
  * whole conversation. The conversation is our mirror of HeyReach — the same messages, read from the
  * database rather than fetched live, so opening a deal is instant.
  */
-function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (v: number | null, c: string | null) => string; onClose: () => void; onOverride: (dismissed: boolean) => void }) {
+function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (v: number | null, c: string | null) => string; onClose: () => void; onOverride: (override: "confirmed" | "dismissed" | null) => void }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [translated, setTranslated] = useState<string[] | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
 
-  const review = async (dismissed: boolean) => {
+  const review = async (override: "confirmed" | "dismissed" | null) => {
     if (saving) return;
     setSaving(true);
     try {
       const response = await fetch(`/api/deals/${encodeURIComponent(deal.id)}/override`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ override: dismissed ? "dismissed" : null }),
+        body: JSON.stringify({ override }),
       });
-      if (response.ok) onOverride(dismissed);
+      if (response.ok) onOverride(override);
     } finally { setSaving(false); }
   };
   useEffect(() => {
@@ -448,9 +455,22 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
             )}
             <div className="dd-review">
               {deal.dismissed ? (
-                <button className="dd-review-btn restore" onClick={() => void review(false)} disabled={saving}>Restore QC attribution</button>
+                <button className="dd-review-btn restore" onClick={() => void review(null)} disabled={saving}>Restore QC attribution</button>
+              ) : deal.override === "confirmed" ? (
+                <>
+                  <span className="dd-verified">✓ Verified by you</span>
+                  <button className="dd-review-btn" onClick={() => void review(null)} disabled={saving}>Undo</button>
+                  <button className="dd-review-btn dismiss" onClick={() => void review("dismissed")} disabled={saving}>Not a QC deal</button>
+                </>
+              ) : deal.attribution === "possible" ? (
+                <>
+                  <button className="dd-review-btn verify" onClick={() => void review("confirmed")} disabled={saving}>
+                    {saving ? "Saving…" : "✓ Verify — this is a QC deal"}
+                  </button>
+                  <button className="dd-review-btn dismiss" onClick={() => void review("dismissed")} disabled={saving}>Not a QC deal</button>
+                </>
               ) : (
-                <button className="dd-review-btn dismiss" onClick={() => void review(true)} disabled={saving}>
+                <button className="dd-review-btn dismiss" onClick={() => void review("dismissed")} disabled={saving}>
                   {saving ? "Saving…" : "Not a QC deal — remove attribution"}
                 </button>
               )}

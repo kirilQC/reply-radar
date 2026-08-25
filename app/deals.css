@@ -299,3 +299,16 @@
 .dd-log-steps li.hit .dd-log-step-body b { color: var(--green); }
 .dd-log-step-body code { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--muted-2); margin-top: 1px; word-break: break-word; }
 .dd-log-step-body em { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+
+/* ── Directory grouped by CRM connection ────────────────────────────────────────────────────────── */
+.deal-group + .deal-group { margin-top: 26px; }
+.deal-group-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.deal-group-head span:first-child { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: var(--muted-2); }
+.deal-group-head span:last-child { font-size: 11px; color: var(--muted-2); }
+.deal-card-count { color: var(--muted-2); }
+
+/* ── Verify / undo controls in the drawer ───────────────────────────────────────────────────────── */
+.dd-review { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dd-review-btn.verify { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+.dd-review-btn.verify:hover { background: color-mix(in srgb, var(--green) 12%, transparent); }
+.dd-verified { font-size: 11.5px; font-weight: 700; color: var(--green); }
