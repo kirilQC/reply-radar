@@ -40,6 +40,24 @@ async function get(path: string): Promise<Row[]> {
   return (await response.json()) as Row[];
 }
 
+/**
+ * The same read, but every row — paged with limit/offset until a short page comes back. A single
+ * PostgREST response is capped, so a bare read of a big table quietly returns only the first slice and
+ * drops the rest, which is what let a busy client's newest conversations (and their recent replies) fall
+ * out of the count. The caller must pass an explicit `order` so the offset windows stay stable.
+ */
+async function getAll(path: string, pageSize = 1000): Promise<Row[]> {
+  const all: Row[] = [];
+  const separator = path.includes("?") ? "&" : "?";
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await get(`${path}${separator}limit=${pageSize}&offset=${offset}`);
+    if (page.length === 0) break;
+    all.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return all;
+}
+
 /** The last `days` calendar days, oldest first, as `YYYY-MM-DD`. */
 function dayKeys(days: number) {
   const keys: string[] = [];
@@ -64,7 +82,7 @@ export async function GET(request: Request) {
     const [campaignRows, dailyRows, conversations, runs] = await Promise.all([
       get(`rr_campaign_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=launched_at.desc.nullslast&limit=2000`),
       get(`rr_daily_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=day.asc&limit=2000`),
-      get(`rr_conversations?select=id&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=2000`),
+      getAll(`rr_conversations?select=id&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=id.asc`),
       /*
        * The last few collection passes for this client, which is what the page's progress bar is made
        * of. `/api/analytics/client/refresh` queues a row here and the worker moves it queued → running
@@ -80,9 +98,9 @@ export async function GET(request: Request) {
      */
     const conversationIds = conversations.map((row) => String(row.id)).filter(Boolean);
     const inbound = await queryByIds(conversationIds, 20, async (batch) =>
-      get(
+      getAll(
         `rr_messages?select=conversation_id,sent_at,sentiment:raw_data->reply_radar->>sentiment,campaign:raw_data->reply_radar->campaign->>name` +
-          `&direction=eq.inbound&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&limit=1000`,
+          `&direction=eq.inbound&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc,conversation_id.asc`,
       ),
     );
 
