@@ -226,23 +226,26 @@ ${entries.length} ${entries.length === 1 ? "company" : "companies"}.
 }
 
 /**
- * Mirror a client's DNC into their QC Brain folder, as `dnc/companies.md`.
+ * Mirror a client's DNC into their QC Brain — the `account/dnc.md` file the brain's "Do not contact" card
+ * reads (see CLIENT_DOCS in shared/brain-structure.mjs). Client docs live at `clients/<id>/…`, so the full
+ * path is `clients/<id>/account/dnc.md`.
  *
  * The brain is where a human (or their Claude Code) reads what QC intends for a client, so the DNC belongs
- * there too. Best effort: it needs the brain to be configured and the client to have a `brain_folder`. The file
- * is regenerated from the mirror and only committed when it actually changed, so re-pushing an existing row
- * from Clay does not create an empty commit.
+ * there too. Best effort: it needs the brain configured and the client to have a `brain_folder`. The file is
+ * regenerated from the mirror and only committed when it actually changed, so re-pushing an existing row from
+ * Clay does not create an empty commit.
  */
 export async function syncDncToBrain(workspaceId: string, clientName: string): Promise<void> {
   if (!brainConfigured() || !workspaceId) return;
   const { url, key } = config();
   if (!url || !key) return;
   const wsRow = (await rows(url, key, `rr_workspaces?select=brain_folder&id=eq.${encodeURIComponent(workspaceId)}&limit=1`))[0];
-  const folder = str(wsRow?.brain_folder).trim().replace(/\/+$/, "");
-  if (!folder) return; // no brain folder configured for this client
+  // brain_folder holds the client id (e.g. "emahealth"); tolerate a stored "clients/emahealth" too.
+  const clientId = str(wsRow?.brain_folder).trim().replace(/^clients\//i, "").replace(/\/+$/, "");
+  if (!clientId) return; // no brain folder configured for this client
   const entries = (await rows(url, key, `rr_dnc?select=company,domain&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=company.asc`))
     .map((row) => ({ company: str(row.company), domain: orNull(row.domain) }));
-  const path = `${folder}/dnc/companies.md`;
+  const path = `clients/${clientId}/account/dnc.md`;
   const text = renderDncMarkdown(clientName, entries);
   try {
     const existing = await brainFile(path);
