@@ -68,6 +68,7 @@ import { scanChannel, resolveChannelNames, resolveUserNames, transcript, slackRe
 import { normalizeChannelId } from "./slack-channel";
 import { addMeeting, getClientMeetings, listMeetingClients } from "./meetings";
 import { getClientDeals, listDealClients } from "./deals";
+import { addToDnc, listDnc, removeFromDnc } from "./dnc";
 import { onboardingForAssistant, listOnboardingClients } from "./onboarding";
 
 type Row = Record<string, unknown>;
@@ -833,6 +834,44 @@ export const TOOLS: ToolDefinition[] = [
     description:
       "A client's onboarding progress and what is still open. Pass a client for their percent complete, status, and the list of not-yet-done steps. Omit the client for a directory of every client's onboarding progress. Use this to answer how far along a new client's setup is, or what is still outstanding before they can go live.",
     input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug. Omit for the all-client directory." } } },
+  },
+  {
+    name: "add_to_dnc",
+    description:
+      "Add one or more companies to a client's do-not-contact (DNC) list — companies QC must never reach out to for that client. Each company name is resolved to a domain automatically, upserted into the client's DNC (so re-adding just refreshes it), and pushed to the client's Clay DNC table if one is wired up. Use this when a QC member says things like 'add X to the DNC', 'do not contact Y', or a client asks to stop outreach to a company. Always name the client. Returns a per-company breakdown (added / updated / skipped, and whether it reached Clay).",
+    input_schema: {
+      type: "object",
+      properties: {
+        client: { type: "string", description: "Client name or slug the DNC belongs to, e.g. 'Ema' or 'willow'." },
+        companies: { type: "array", items: { type: "string" }, description: "One or more company names to add, e.g. ['Mira', 'Kegg']." },
+        reason: { type: "string", description: "Optional short reason it's being added (e.g. 'client asked on the Aug call')." },
+        added_by: { type: "string", description: "Who asked for it, if known (the person's name)." },
+      },
+      required: ["client", "companies"],
+    },
+  },
+  {
+    name: "list_dnc",
+    description:
+      "Read a client's do-not-contact (DNC) list: every company on it, with domain, reason and when it was added. Use this to answer 'what's on our DNC', 'is <company> on the DNC', or 'how many companies has <client> blocked'. Always name the client.",
+    input_schema: {
+      type: "object",
+      properties: { client: { type: "string", description: "Client name or slug." } },
+      required: ["client"],
+    },
+  },
+  {
+    name: "remove_from_dnc",
+    description:
+      "Take a company back off a client's do-not-contact (DNC) list, by company name or domain. Removes it from Reply Radar's mirror; a company already pushed to the client's Clay table should be pruned there by the client. Use only when explicitly asked to un-block a company.",
+    input_schema: {
+      type: "object",
+      properties: {
+        client: { type: "string", description: "Client name or slug." },
+        company: { type: "string", description: "The company name or domain to remove." },
+      },
+      required: ["client", "company"],
+    },
   },
   {
     name: "submit_support_ticket",
@@ -1790,6 +1829,39 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const data = await onboardingForAssistant(client.slug);
       if (!data) return { client: client.name, note: "No onboarding checklist has been started for this client yet." };
       return { client: data.name, status: data.status, percent: data.progress.pct, done: data.progress.doneLeaves, total: data.progress.totalLeaves, openSteps: data.openSteps };
+    }
+
+    case "add_to_dnc": {
+      const companies = Array.isArray(input.companies) ? input.companies.map((c) => text(c)).filter(Boolean) : [];
+      if (!companies.length) throw new Error("Give at least one company name to add to the DNC.");
+      const result = await addToDnc(text(input.client), companies, {
+        reason: text(input.reason) || undefined,
+        addedBy: text(input.added_by) || undefined,
+        source: "assistant",
+      });
+      if (!result.ok) throw new Error(result.error || "Could not add to the DNC.");
+      const clayReached = (result.results ?? []).some((r) => r.clay);
+      return {
+        client: result.client,
+        results: result.results,
+        note: `Updated ${result.client}'s DNC.${clayReached ? " Synced to their Clay table." : " Not synced to Clay (no Clay DNC webhook is configured for this client yet)."}`,
+      };
+    }
+
+    case "list_dnc": {
+      const result = await listDnc(text(input.client));
+      if (!result.ok) throw new Error(result.error || "Could not read the DNC.");
+      return {
+        client: result.client,
+        count: result.entries?.length ?? 0,
+        entries: (result.entries ?? []).map((e) => ({ company: e.company, domain: e.domain, reason: e.reason, addedBy: e.addedBy, source: e.source, addedAt: e.createdAt })),
+      };
+    }
+
+    case "remove_from_dnc": {
+      const result = await removeFromDnc(text(input.client), text(input.company));
+      if (!result.ok) throw new Error(result.error || "Could not remove from the DNC.");
+      return { removed: result.removed ?? 0, note: result.removed ? `Removed ${result.removed} entr${result.removed === 1 ? "y" : "ies"} from the DNC mirror.` : "Nothing on the DNC matched that." };
     }
 
     case "submit_support_ticket": {
