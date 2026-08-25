@@ -38,6 +38,30 @@ async function supabase(path: string) {
   return (await response.json()) as Row[];
 }
 
+/**
+ * The same read, but every row of it.
+ *
+ * PostgREST caps a single response at 1000 rows, and a plain `supabase()` call silently takes the first
+ * 1000 and drops the rest. On a table larger than that — which both the conversations and the messages
+ * reads are — the dropped rows are the ones the ordering pushes to the end: newest conversations (no
+ * order → physical/oldest-first, so the recent ones vanish) and newest messages (`sent_at.asc`, so the
+ * latest replies vanish). That is exactly what made the recent days of the reply-momentum chart crater:
+ * recent replies living in newly-created threads were never loaded. So page through with limit/offset
+ * until a short page comes back, and hand back the whole set. The caller must pass an explicit `order`
+ * so the offset windows are stable across pages.
+ */
+async function supabaseAll(path: string, pageSize = 1000): Promise<Row[]> {
+  const all: Row[] = [];
+  const separator = path.includes("?") ? "&" : "?";
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await supabase(`${path}${separator}limit=${pageSize}&offset=${offset}`);
+    if (!page || page.length === 0) break;
+    all.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return all;
+}
+
 async function writeSupabase(path: string, body: unknown) {
   const { url, key } = config();
   if (!url || !key) return;
@@ -151,12 +175,17 @@ export async function GET(request: Request) {
     const ids = selected.map((row) => String(row.id));
     if (!ids.length) return NextResponse.json({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], trendLabels: [], averageDailyReplies: 0, queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });
     const filter = (batch: string[]) => batch.map(encodeURIComponent).join(",");
+    // Every conversation, paged in full — never the first 1000. An explicit order keeps the offset windows
+    // stable across pages; without it the pages could overlap or skip, and a truncated list here is what
+    // dropped the newest threads (and their recent replies) from the whole page.
     const conversations = await queryByIds(ids, 20, async (batch) =>
-      (await supabase(`rr_conversations?select=id,workspace_id,score,tier,last_message_at,created_at&workspace_id=in.(${filter(batch)})&limit=1000`)) ?? [],
+      (await supabaseAll(`rr_conversations?select=id,workspace_id,score,tier,last_message_at,created_at&workspace_id=in.(${filter(batch)})&order=id.asc`)) ?? [],
     );
     const conversationIdList = conversations.map((row) => String(row.id)).filter(Boolean);
+    // Every message of those conversations, paged in full — a large batch used to lose its newest messages
+    // to the 1000-row cap under `sent_at.asc`.
     const messages = await queryByIds(conversationIdList, 20, async (batch) =>
-      (await supabase(`rr_messages?select=conversation_id,direction,sent_at,raw_data&conversation_id=in.(${filter(batch)})&order=sent_at.asc`)) ?? [],
+      (await supabaseAll(`rr_messages?select=conversation_id,direction,sent_at,raw_data&conversation_id=in.(${filter(batch)})&order=sent_at.asc,id.asc`)) ?? [],
     );
     const campaignResponses = await Promise.all(selected.map(async (workspace) => {
       const [rows, list] = await Promise.all([
