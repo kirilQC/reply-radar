@@ -16,7 +16,7 @@
 
 import { resolveWorkspace } from "./meetings";
 import { companyKey } from "./company-domain";
-import { brainConfigured, brainFile, writeBrainFile } from "./brain";
+import { brainConfigured, brainFile, writeBrainFile, BRAIN_URL } from "./brain";
 
 type Row = Record<string, unknown>;
 
@@ -44,6 +44,18 @@ async function rows(url: string, key: string, path: string): Promise<Row[]> {
 /** The dedupe key for a DNC row: a normalized company name (Clay handles domains on its side). */
 function dncKey(company: string): string {
   return companyKey(company);
+}
+
+/** The client-id part of a stored brain_folder ("clients/emahealth" or "emahealth" → "emahealth"). */
+function brainClientId(brainFolder: unknown): string {
+  return str(brainFolder).trim().replace(/^clients\//i, "").replace(/\/+$/, "");
+}
+
+/** A clickable GitHub link to the client's DNC file in the brain, or null when there's no brain folder. */
+function dncBrainLink(brainFolder: unknown): string | null {
+  const clientId = brainClientId(brainFolder);
+  // /blob/HEAD/ resolves to whatever the repo's default branch is, so the link is right regardless of its name.
+  return clientId ? `${BRAIN_URL}/blob/HEAD/clients/${clientId}/account/dnc.md` : null;
 }
 
 function entryFromRow(row: Row): DncEntry {
@@ -86,7 +98,7 @@ export async function addToDnc(
   clientRef: string,
   companies: string[],
   opts: { reason?: string; addedBy?: string; source?: string } = {},
-): Promise<{ ok: boolean; error?: string; client?: string; results?: DncResult[] }> {
+): Promise<{ ok: boolean; error?: string; client?: string; results?: DncResult[]; total?: number; link?: string | null }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const client = await resolveWorkspace(clientRef);
@@ -95,8 +107,8 @@ export async function addToDnc(
   const names = [...new Set(companies.map((c) => str(c).trim()).filter(Boolean))];
   if (!names.length) return { ok: false, error: "No company names to add." };
 
-  // The client's Clay DNC webhook, and what's already on the list (to tell an add from an update).
-  const workspaceRow = (await rows(url, key, `rr_workspaces?select=clay_dnc_webhook_url&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0];
+  // The client's Clay DNC webhook + brain folder, and what's already on the list (to tell an add from an update).
+  const workspaceRow = (await rows(url, key, `rr_workspaces?select=clay_dnc_webhook_url,brain_folder&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0];
   const clayWebhook = str(workspaceRow?.clay_dnc_webhook_url).trim();
   const existing = new Set((await rows(url, key, `rr_dnc?select=key&workspace_id=eq.${encodeURIComponent(client.id)}`)).map((row) => str(row.key)));
 
@@ -139,7 +151,14 @@ export async function addToDnc(
   // Mirror the updated list into the client's brain folder (best effort — never fails the add).
   if (results.some((r) => r.status !== "skipped")) await syncDncToBrain(client.id, client.name).catch(() => {});
 
-  return { ok: true, client: client.name, results };
+  // Re-read the list once: gives the running total, and the domain each company now has (which for a company
+  // Clay has already synced is populated — we never enrich it ourselves; a brand-new name is null until Clay
+  // pushes its domain back).
+  const all = await rows(url, key, `rr_dnc?select=key,domain&workspace_id=eq.${encodeURIComponent(client.id)}`);
+  const domainByKey = new Map(all.map((row) => [str(row.key), orNull(row.domain)]));
+  for (const r of results) r.domain = domainByKey.get(dncKey(r.company)) ?? r.domain;
+
+  return { ok: true, client: client.name, results, total: all.length, link: dncBrainLink(workspaceRow?.brain_folder) };
 }
 
 /** Pick the first non-empty value among aliases from a loose payload, matched case/separator-insensitively. */
@@ -255,17 +274,18 @@ export async function syncDncToBrain(workspaceId: string, clientName: string): P
 }
 
 /** Everything on a client's DNC, newest first. */
-export async function listDnc(clientRef: string): Promise<{ ok: boolean; error?: string; client?: string; entries?: DncEntry[] }> {
+export async function listDnc(clientRef: string): Promise<{ ok: boolean; error?: string; client?: string; entries?: DncEntry[]; total?: number; link?: string | null }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const client = await resolveWorkspace(clientRef);
   if (!client) return { ok: false, error: `No single client matches "${clientRef}".` };
+  const wsRow = (await rows(url, key, `rr_workspaces?select=brain_folder&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0];
   const entries = (await rows(url, key, `rr_dnc?select=*&workspace_id=eq.${encodeURIComponent(client.id)}&order=created_at.desc`)).map(entryFromRow);
-  return { ok: true, client: client.name, entries };
+  return { ok: true, client: client.name, entries, total: entries.length, link: dncBrainLink(wsRow?.brain_folder) };
 }
 
 /** Take a company or domain back off a client's DNC (our mirror only — Clay is left to the client to prune). */
-export async function removeFromDnc(clientRef: string, companyOrDomain: string): Promise<{ ok: boolean; error?: string; removed?: number }> {
+export async function removeFromDnc(clientRef: string, companyOrDomain: string): Promise<{ ok: boolean; error?: string; removed?: number; total?: number; link?: string | null }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const client = await resolveWorkspace(clientRef);
@@ -278,5 +298,10 @@ export async function removeFromDnc(clientRef: string, companyOrDomain: string):
   const response = await fetch(`${url}/rest/v1/rr_dnc?${filter}`, { method: "DELETE", headers: { ...authHeaders(key), Prefer: "return=representation" } });
   if (!response.ok) return { ok: false, error: "Could not remove that entry." };
   const deleted = (await response.json().catch(() => [])) as Row[];
-  return { ok: true, removed: Array.isArray(deleted) ? deleted.length : 0 };
+  const removed = Array.isArray(deleted) ? deleted.length : 0;
+  // A removal changes the list, so refresh the brain file and re-count.
+  if (removed) await syncDncToBrain(client.id, client.name).catch(() => {});
+  const wsRow = (await rows(url, key, `rr_workspaces?select=brain_folder&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0];
+  const total = (await rows(url, key, `rr_dnc?select=id&workspace_id=eq.${encodeURIComponent(client.id)}`)).length;
+  return { ok: true, removed, total, link: dncBrainLink(wsRow?.brain_folder) };
 }

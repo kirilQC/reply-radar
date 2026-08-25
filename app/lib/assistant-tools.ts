@@ -1841,10 +1841,15 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       });
       if (!result.ok) throw new Error(result.error || "Could not add to the DNC.");
       const clayReached = (result.results ?? []).some((r) => r.clay);
+      const anyPending = (result.results ?? []).some((r) => r.status !== "skipped" && !r.domain);
       return {
         client: result.client,
+        // Each has the domain when the mirror already knows it (Clay-synced); null means Clay has not pushed
+        // its domain back yet. Report the domain in parentheses when present, e.g. "QC Growth (qcgrowth.com)".
         results: result.results,
-        note: `Updated ${result.client}'s DNC.${clayReached ? " Synced to their Clay table." : " Not synced to Clay (no Clay DNC webhook is configured for this client yet)."}`,
+        total: result.total,
+        link: result.link,
+        note: `Report back what changed with each company and its domain in parentheses when there is one. Say the running total: ${result.client}'s DNC now has ${result.total} ${result.total === 1 ? "company" : "companies"}. Include the link to the DNC list: ${result.link ?? "(no brain link — this client has no brain folder set)"}.${clayReached ? " Synced to their Clay table." : " Note it did not reach Clay (no Clay DNC webhook configured)."}${anyPending ? " For any company shown without a domain, say its domain will fill in once Clay syncs it back." : ""}`,
       };
     }
 
@@ -1853,15 +1858,24 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       if (!result.ok) throw new Error(result.error || "Could not read the DNC.");
       return {
         client: result.client,
-        count: result.entries?.length ?? 0,
+        total: result.total ?? result.entries?.length ?? 0,
+        link: result.link,
         entries: (result.entries ?? []).map((e) => ({ company: e.company, domain: e.domain, reason: e.reason, addedBy: e.addedBy, source: e.source, addedAt: e.createdAt })),
+        note: `State the total (${result.total ?? 0} ${(result.total ?? 0) === 1 ? "company" : "companies"}) and include the link to the DNC list: ${result.link ?? "(no brain link)"}. Show each company with its domain in parentheses when it has one.`,
       };
     }
 
     case "remove_from_dnc": {
       const result = await removeFromDnc(text(input.client), text(input.company));
       if (!result.ok) throw new Error(result.error || "Could not remove from the DNC.");
-      return { removed: result.removed ?? 0, note: result.removed ? `Removed ${result.removed} entr${result.removed === 1 ? "y" : "ies"} from the DNC mirror.` : "Nothing on the DNC matched that." };
+      return {
+        removed: result.removed ?? 0,
+        total: result.total,
+        link: result.link,
+        note: result.removed
+          ? `Removed ${result.removed} entr${result.removed === 1 ? "y" : "ies"}. State the new total (${result.total} ${result.total === 1 ? "company" : "companies"}) and include the link: ${result.link ?? "(no brain link)"}.`
+          : "Nothing on the DNC matched that.",
+      };
     }
 
     case "submit_support_ticket": {
