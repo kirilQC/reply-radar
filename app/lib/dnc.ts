@@ -137,6 +137,68 @@ export async function addToDnc(
   return { ok: true, client: client.name, results };
 }
 
+/** Pick the first non-empty value among aliases from a loose payload, matched case/separator-insensitively. */
+function flatPick(body: Row, aliases: string[]): string {
+  const map = new Map<string, string>();
+  for (const [k, v] of Object.entries(body)) {
+    if (v == null || typeof v === "object") continue;
+    const nk = k.replace(/[^a-z0-9]/gi, "").toLowerCase();
+    const s = String(v).trim();
+    if (s && !map.has(nk)) map.set(nk, s);
+  }
+  for (const alias of aliases) {
+    const v = map.get(alias.replace(/[^a-z0-9]/gi, "").toLowerCase());
+    if (v) return v;
+  }
+  return "";
+}
+
+const cleanDomain = (value: string) =>
+  value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "");
+
+/**
+ * Ingest one DNC row that Clay pushed to us (Clay's "HTTP API" action, one POST per row).
+ *
+ * This is the read-back path: since Clay exposes no API we can pull from, Clay instead pushes each row here, so
+ * our mirror reflects the real Clay table — the domains Clay enriched, and companies added directly in Clay.
+ * Routed by a `client` field in the payload (like the meetings webhook). Keyed on the normalized company name,
+ * so a company the bot added by name and the same row Clay pushes back (now with a domain) collapse to one row
+ * that simply gains its domain. Company/domain field names are matched flexibly, since Clay column names vary.
+ */
+export async function ingestDncFromClay(payload: unknown): Promise<{ ok: boolean; error?: string; client?: string; company?: string }> {
+  const { url, key } = config();
+  if (!url || !key) return { ok: false, error: "Supabase is not configured." };
+  const body = payload && typeof payload === "object" ? (payload as Row) : {};
+  const clientName = flatPick(body, ["client", "client_name", "workspace", "account_slug"]);
+  if (!clientName) return { ok: false, error: "The payload has no client field to route on. Add a static 'client' field naming the client." };
+  const client = await resolveWorkspace(clientName);
+  if (!client) return { ok: false, error: `No single client matches "${clientName}".` };
+
+  const company = flatPick(body, ["company", "company_name", "name", "account", "organization"]);
+  const domain = cleanDomain(flatPick(body, ["domain", "company_domain", "website", "url"]));
+  if (!company && !domain) return { ok: false, error: "The payload had no company name or domain." };
+
+  const dkey = company ? dncKey(company) : domain;
+  if (!dkey) return { ok: false, error: "Nothing to key the row on." };
+  const reason = flatPick(body, ["reason", "note", "notes"]);
+
+  const response = await fetch(`${url}/rest/v1/rr_dnc?on_conflict=workspace_id,key`, {
+    method: "POST",
+    headers: { ...authHeaders(key, true), Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({
+      workspace_id: client.id,
+      company: company || domain,
+      domain: domain || null,
+      key: dkey,
+      reason: reason || null,
+      source: "clay",
+      clay_synced: true,
+    }),
+  });
+  if (!response.ok) return { ok: false, error: "Could not store the row." };
+  return { ok: true, client: client.name, company: company || domain };
+}
+
 /** Everything on a client's DNC, newest first. */
 export async function listDnc(clientRef: string): Promise<{ ok: boolean; error?: string; client?: string; entries?: DncEntry[] }> {
   const { url, key } = config();
