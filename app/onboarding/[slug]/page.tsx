@@ -390,32 +390,44 @@ export default function OnboardingChecklistPage() {
   );
 }
 
+/** One premade client-facing update. `body` carries a literal `{client}` placeholder, swapped for the name. */
+type ClientTemplate = { id: string; label: string; body: string; sortOrder: number };
+
 /**
  * Premade client-facing onboarding updates, sent to the external (client) Slack channel.
  *
- * A dropdown of starting points, an editable body, one send. The templates are deliberately simple and
- * meant to be edited before sending — a real update, in QC's voice, not an auto-message. Only rendered
- * when an external channel id is on the client.
+ * A dropdown of starting points, an editable body, one send. The templates live in the database
+ * (`rr_client_update_templates`) so the team can rename them, add their own, and delete ones they never
+ * use — right here in the "Manage" view. Only rendered when an external channel id is on the client.
  */
-const CLIENT_TEMPLATES: { label: string; body: (client: string) => string }[] = [
-  { label: "Kickoff — we're live", body: (c) => `Hi team 👋 We've officially kicked off ${c}'s outbound program. Our senders are warming up and the first campaigns go out shortly — we'll keep you posted here as things move.` },
-  { label: "Campaigns launched", body: () => `Quick update — your first campaigns are now live and reaching prospects. Early replies usually start landing within a few days; we'll flag the good ones as they come in.` },
-  { label: "First replies in", body: () => `Good news — the first replies are coming in. We're reviewing and prioritising the warm ones now, and we'll surface anything that looks like a real opportunity.` },
-  { label: "Weekly check-in", body: () => `Weekly update: campaigns are running smoothly and volume is on track. We'll walk through the numbers together on our next call — anything you'd like us to dig into beforehand?` },
-  { label: "Blank message", body: () => "" },
-];
-
 function ClientUpdatePanel({ slug, clientName }: { slug: string; clientName: string }) {
   const [open, setOpen] = useState(false);
-  const [template, setTemplate] = useState(0);
+  const [templates, setTemplates] = useState<ClientTemplate[]>([]);
+  const [selectedId, setSelectedId] = useState("");
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
+  const [managing, setManaging] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const pick = (index: number) => {
-    setTemplate(index);
-    setText(CLIENT_TEMPLATES[index].body(clientName));
+  // Fill {client} on the way to the textarea; the stored body keeps the placeholder so one template fits all.
+  const fill = (body: string) => body.replaceAll("{client}", clientName);
+
+  const load = async () => {
+    try {
+      const response = await fetch("/api/onboarding/templates", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && Array.isArray(payload.templates)) setTemplates(payload.templates);
+    } catch { /* leave the list as-is */ }
+  };
+
+  useEffect(() => { if (open && templates.length === 0) void load(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pick = (id: string) => {
+    setSelectedId(id);
+    const t = templates.find((x) => x.id === id);
+    setText(t ? fill(t.body) : "");
     setSent(false);
   };
 
@@ -434,6 +446,33 @@ function ClientUpdatePanel({ slug, clientName }: { slug: string; clientName: str
     } catch { setError("Could not reach Slack."); setSending(false); }
   };
 
+  // ── Manage-mode edits ────────────────────────────────────────────────────────────────────────────
+  const addTemplate = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const response = await fetch("/api/onboarding/templates", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: "New template", body: "" }) });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.template) setTemplates((list) => [...list, payload.template as ClientTemplate]);
+    } finally { setBusy(false); }
+  };
+
+  // Local edit is immediate; the save is fired on blur so typing stays snappy.
+  const editLocal = (id: string, patch: Partial<ClientTemplate>) => setTemplates((list) => list.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+
+  const saveTemplate = async (t: ClientTemplate) => {
+    await fetch("/api/onboarding/templates", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: t.id, label: t.label, body: t.body }) }).catch(() => {});
+  };
+
+  const removeTemplate = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    setTemplates((list) => list.filter((t) => t.id !== id));
+    if (selectedId === id) { setSelectedId(""); setText(""); }
+    try { await fetch("/api/onboarding/templates", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) }); }
+    finally { setBusy(false); }
+  };
+
   return (
     <div className="onb-client-update">
       <button className="onb-cu-head" onClick={() => setOpen((v) => !v)}>
@@ -443,16 +482,44 @@ function ClientUpdatePanel({ slug, clientName }: { slug: string; clientName: str
       </button>
       {open && (
         <div className="onb-cu-body">
-          <span className="onb-cu-label">Start from a template</span>
-          <select value={template} onChange={(e) => pick(Number(e.target.value))}>
-            {CLIENT_TEMPLATES.map((t, i) => <option key={i} value={i}>{t.label}</option>)}
-          </select>
-          <textarea value={text} placeholder="Write or edit the update to the client…" rows={4} onChange={(e) => { setText(e.target.value); setSent(false); }} />
-          {error && <div className="onb-modal-err">{error}</div>}
-          <div className="onb-cu-actions">
-            {sent && <span className="onb-cu-sent">Sent ✓</span>}
-            <button className="primary-button" onClick={() => void send()} disabled={sending || !text.trim()}>{sending ? "Sending…" : "Send to client channel"}</button>
-          </div>
+          {!managing ? (
+            <>
+              <div className="onb-cu-labelrow">
+                <span className="onb-cu-label">Start from a template</span>
+                <button type="button" className="onb-cu-manage" onClick={() => setManaging(true)}>Manage templates</button>
+              </div>
+              <select value={selectedId} onChange={(e) => pick(e.target.value)}>
+                <option value="" disabled>Choose a template…</option>
+                {templates.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+              <textarea value={text} placeholder="Write or edit the update to the client…" rows={4} onChange={(e) => { setText(e.target.value); setSent(false); }} />
+              {error && <div className="onb-modal-err">{error}</div>}
+              <div className="onb-cu-actions">
+                {sent && <span className="onb-cu-sent">Sent ✓</span>}
+                <button className="primary-button" onClick={() => void send()} disabled={sending || !text.trim()}>{sending ? "Sending…" : "Send to client channel"}</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="onb-cu-labelrow">
+                <span className="onb-cu-label">Manage templates</span>
+                <button type="button" className="onb-cu-manage" onClick={() => setManaging(false)}>Done</button>
+              </div>
+              <p className="onb-cu-hint">Rename a title, edit its message, or add your own. Use <code>{"{client}"}</code> anywhere in a message and it becomes the client&apos;s name when sent.</p>
+              <div className="onb-cu-editlist">
+                {templates.map((t) => (
+                  <div key={t.id} className="onb-cu-edit">
+                    <div className="onb-cu-editrow">
+                      <input className="onb-cu-editlabel" value={t.label} placeholder="Template title" onChange={(e) => editLocal(t.id, { label: e.target.value })} onBlur={() => void saveTemplate(t)} />
+                      <button type="button" className="onb-cu-del" title="Delete this template" disabled={busy} onClick={() => void removeTemplate(t.id)}>Delete</button>
+                    </div>
+                    <textarea className="onb-cu-editbody" value={t.body} placeholder="Message… use {client} for the client's name" rows={3} onChange={(e) => editLocal(t.id, { body: e.target.value })} onBlur={() => void saveTemplate(t)} />
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="onb-cu-add" disabled={busy} onClick={() => void addTemplate()}>+ Add template</button>
+            </>
+          )}
         </div>
       )}
     </div>

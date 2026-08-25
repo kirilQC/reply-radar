@@ -220,6 +220,24 @@
 .onb-cu-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 .onb-cu-sent { font-size: 11.5px; font-weight: 700; color: var(--green); }
 
+/* ── Manage-templates view (add / rename / edit / delete) ────────────────────────────────────────── */
+.onb-cu-labelrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.onb-cu-manage { font: inherit; font-size: 11px; font-weight: 600; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; }
+.onb-cu-manage:hover { text-decoration: underline; }
+.onb-cu-hint { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--muted-2); }
+.onb-cu-hint code { font-size: 11px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
+.onb-cu-editlist { display: flex; flex-direction: column; gap: 12px; }
+.onb-cu-edit { display: flex; flex-direction: column; gap: 7px; padding: 11px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel-2); }
+.onb-cu-editrow { display: flex; align-items: center; gap: 10px; }
+.onb-cu-editlabel { flex: 1; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600; padding: 7px 10px; }
+.onb-cu-editbody { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; padding: 8px 10px; resize: vertical; }
+.onb-cu-del { flex: none; font: inherit; font-size: 10.5px; font-weight: 600; color: var(--muted-2); background: none; border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+.onb-cu-del:hover:not(:disabled) { color: #e5484d; border-color: #e5484d; }
+.onb-cu-del:disabled { opacity: .5; cursor: default; }
+.onb-cu-add { align-self: flex-start; font: inherit; font-size: 12px; font-weight: 600; color: var(--accent); background: none; border: 1px dashed var(--border); border-radius: 9px; padding: 8px 14px; cursor: pointer; }
+.onb-cu-add:hover:not(:disabled) { border-color: var(--accent); }
+.onb-cu-add:disabled { opacity: .5; cursor: default; }
+
 /* ── Inline per-task "Send to Slack" button ─────────────────────────────────────────────────────── */
 .onb-slack-btn {
   margin-left: auto; flex: none;

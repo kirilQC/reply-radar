@@ -62,6 +62,8 @@ function ClientCard({ client }: { client: Client }) {
 export default function DealsDirectoryPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  // The "not connected yet" group is noise most of the time — collapsed until the operator asks for it.
+  const [pendingOpen, setPendingOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -101,8 +103,11 @@ export default function DealsDirectoryPage() {
                 )}
                 {pending.length > 0 && (
                   <section className="deal-group">
-                    <div className="deal-group-head"><span>Not connected yet</span><span>{pending.length}</span></div>
-                    <div className="deal-directory">{pending.map((c) => <ClientCard key={c.id} client={c} />)}</div>
+                    <button type="button" className={`deal-group-head collapsible ${pendingOpen ? "open" : ""}`} onClick={() => setPendingOpen((v) => !v)} aria-expanded={pendingOpen}>
+                      <span className="deal-group-caret" aria-hidden>▸</span>
+                      <span>Not connected yet</span><span>{pending.length}</span>
+                    </button>
+                    {pendingOpen && <div className="deal-directory">{pending.map((c) => <ClientCard key={c.id} client={c} />)}</div>}
                   </section>
                 )}
               </>

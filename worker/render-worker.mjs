@@ -362,12 +362,17 @@ const radarOf = (rawData) => {
   return raw.reply_radar && typeof raw.reply_radar === "object" ? raw.reply_radar : {};
 };
 
-async function appPost(path, body) {
+async function appPost(path, body, { timeoutMs = 90_000, cron = false } = {}) {
+  const headers = { "content-type": "application/json" };
+  // The deals sync routes sit behind the login gate; the worker authorises the same way Vercel cron
+  // does — a CRON_SECRET bearer the middleware recognises (see isCron in middleware.ts).
+  const secret = process.env.CRON_SECRET?.trim();
+  if (cron && secret) headers.authorization = `Bearer ${secret}`;
   const response = await fetch(`${appBaseUrl}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`${path} ${response.status}: ${String(payload.error || "").slice(0, 200)}`);
@@ -865,6 +870,24 @@ async function reconcileWorkspace(workspace, deadline) {
     records_written: ingested,
     error_text: errorText || (failed > 0 ? `${failed} conversations failed to ingest` : null),
   });
+}
+
+// A connected CRM is re-pulled and re-attributed once a day. The schedule lives in the workspace's own
+// `crm_last_synced_at` column — which `syncDeals` stamps on every run — so it survives worker restarts
+// and needs no separate timer.
+const DEALS_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// Give a single CRM pull real room — HubSpot/Attio plus per-contact reads. The route itself caps at 300s.
+const DEALS_SYNC_BUDGET_MS = 4 * 60 * 1000;
+
+async function syncDueDealsWorkspace() {
+  if (!appBaseUrl) return;
+  const due = new Date(Date.now() - DEALS_SYNC_INTERVAL_MS).toISOString();
+  // One connected client per cycle: whichever has a CRM but no sync in the last day, oldest first. The
+  // whole connected roster is worked off one per cycle, the same drain reconcile and analytics use.
+  const workspaces = await supabase(`rr_workspaces?select=slug&crm_provider=not.is.null&or=(crm_last_synced_at.is.null,crm_last_synced_at.lt.${encodeURIComponent(due)})&order=crm_last_synced_at.asc.nullsfirst&limit=1`);
+  const workspace = (workspaces || [])[0];
+  if (!workspace || !workspace.slug) return;
+  await appPost("/api/deals/sync", { client: workspace.slug }, { timeoutMs: DEALS_SYNC_BUDGET_MS, cron: true });
 }
 
 async function reconcileDueWorkspace() {
@@ -1520,6 +1543,10 @@ async function runOnce() {
    * of them together from stretching a cycle indefinitely.
    */
   try { await reconcileDueWorkspace(); } catch (error) { console.error("reply_radar_reconcile_cycle_failed", error); }
+
+  // One connected CRM re-pulled per cycle, once its last sync is over a day old. Same one-per-cycle
+  // drain: the whole connected roster refreshes within half an hour of falling due.
+  try { await syncDueDealsWorkspace(); } catch (error) { console.error("reply_radar_deals_sync_cycle_failed", error); }
 
   /*
    * One client's analytics per cycle: whoever asked for a refresh first, else the client whose stored

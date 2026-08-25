@@ -8,10 +8,6 @@
     {
       "path": "/api/messaging/sync",
       "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/deals/sync-all",
-      "schedule": "0 6 * * *"
     }
   ]
 }

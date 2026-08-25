@@ -305,6 +305,12 @@
 .deal-group-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .deal-group-head span:first-child { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: var(--muted-2); }
 .deal-group-head span:last-child { font-size: 11px; color: var(--muted-2); }
+/* Collapsible group header (e.g. "Not connected yet") — a button that toggles its card list. */
+.deal-group-head.collapsible { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--border); cursor: pointer; text-align: left; font: inherit; }
+.deal-group-head.collapsible:hover .deal-group-caret { color: var(--muted); }
+.deal-group-head.collapsible span:nth-child(2) { flex: 1; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: var(--muted-2); }
+.deal-group-caret { font-size: 10px; color: var(--muted-2); transition: transform .15s ease; }
+.deal-group-head.collapsible.open .deal-group-caret { transform: rotate(90deg); }
 .deal-card-count { color: var(--muted-2); }
 
 /* ── Verify / undo controls in the drawer ───────────────────────────────────────────────────────── */

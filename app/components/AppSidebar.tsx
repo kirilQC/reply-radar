@@ -251,11 +251,16 @@ export default function AppSidebar() {
         on a same-pathname transition those effects would not re-run.
       */}
       <nav>
-        {items.map(([href, label, icon]) => (
+        {items.map(([href, label, icon]) => {
+          // A tab stays lit on its nested routes too — /deals/[slug], /onboarding/[slug],
+          // /qc-brain/[client], /meetings/[slug] — not just an exact match. Dashboard ("/") is
+          // exact-only, since every path starts with "/".
+          const active = href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/");
+          return (
           <Link
             key={href}
             href={href}
-            className={`nav-item ${pathname === href ? "active" : ""}`}
+            className={`nav-item ${active ? "active" : ""}`}
             onClick={() => setNavOpen(false)}
           >
             <span className="sidebar-icon">
@@ -263,7 +268,8 @@ export default function AppSidebar() {
             </span>
             <span>{label}</span>
           </Link>
-        ))}
+          );
+        })}
       </nav>
       <div className="nav-label clients-label">Clients</div>
       <div className="client-list">
