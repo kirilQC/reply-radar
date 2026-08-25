@@ -52,6 +52,8 @@ type ClientWorkspace = {
   granolaExtraTitleMatches?: string[];
   /** The Airtable base a person chose. Empty means nothing is written to Airtable for this client. */
   airtableBaseId?: string;
+  /** The client's Clay DNC table webhook URL. Empty means DNC adds only land in Reply Radar's own mirror. */
+  clayDncWebhookUrl?: string;
   anthropicModel?: string;
   systemPrompt?: string;
   webhookUrl?: string;
@@ -151,8 +153,8 @@ export default function AdminPage() {
     name: string; slug: string; brief: string; timezone: string; website: string; messagingDocUrl: string;
     anthropicModel: string; systemPrompt: string; apiKey: string; brainFolder: string;
     slackInternal: string; slackExternal: string; granolaTitleMatch: string;
-    slackExtra: string[]; granolaExtra: string[]; airtableBaseId: string;
-  }>({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", granolaTitleMatch: "", slackExtra: [], granolaExtra: [], airtableBaseId: "" });
+    slackExtra: string[]; granolaExtra: string[]; airtableBaseId: string; clayDncWebhookUrl: string;
+  }>({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", granolaTitleMatch: "", slackExtra: [], granolaExtra: [], airtableBaseId: "", clayDncWebhookUrl: "" });
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -178,6 +180,7 @@ export default function AdminPage() {
             slackInternalChannelId: String(item.slack_internal_channel_id ?? ""), slackExternalChannelId: String(item.slack_external_channel_id ?? ""), granolaTitleMatch: String(item.granola_title_match ?? ""),
             slackExtraChannelIds: asTextList(item.slack_extra_channel_ids), granolaExtraTitleMatches: asTextList(item.granola_extra_title_matches),
             airtableBaseId: String(item.airtable_base_id ?? ""),
+            clayDncWebhookUrl: String(item.clay_dnc_webhook_url ?? ""),
             guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {},
           }));
           setWorkspaceClients(hydratedClients);
@@ -202,7 +205,7 @@ export default function AdminPage() {
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", granolaTitleMatch: client.granolaTitleMatch ?? "", slackExtra: client.slackExtraChannelIds ?? [], granolaExtra: client.granolaExtraTitleMatches ?? [], airtableBaseId: client.airtableBaseId ?? "" });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", granolaTitleMatch: client.granolaTitleMatch ?? "", slackExtra: client.slackExtraChannelIds ?? [], granolaExtra: client.granolaExtraTitleMatches ?? [], airtableBaseId: client.airtableBaseId ?? "", clayDncWebhookUrl: client.clayDncWebhookUrl ?? "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -221,7 +224,7 @@ export default function AdminPage() {
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
     const mutationIdentity = isNewWorkspace ? { create: true } : { id: client.id, previousSlug: client.slug };
     const nextGuardrails = { ...(client.guardrails ?? {}), messaging_doc_url: workspaceDraft.messagingDocUrl.trim() };
-    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, granolaTitleMatch: workspaceDraft.granolaTitleMatch, slackExtraChannelIds: workspaceDraft.slackExtra, granolaExtraTitleMatches: workspaceDraft.granolaExtra, airtableBaseId: workspaceDraft.airtableBaseId, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
+    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, granolaTitleMatch: workspaceDraft.granolaTitleMatch, slackExtraChannelIds: workspaceDraft.slackExtra, granolaExtraTitleMatches: workspaceDraft.granolaExtra, airtableBaseId: workspaceDraft.airtableBaseId, clayDncWebhookUrl: workspaceDraft.clayDncWebhookUrl, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
     if (!response?.ok) {
       const detail = await response?.json().catch(() => ({}));
       setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
@@ -232,7 +235,7 @@ export default function AdminPage() {
     const payload = await response.json().catch(() => ({}));
     const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] : null;
     const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaTitleMatch: String(savedRow?.granola_title_match ?? workspaceDraft.granolaTitleMatch), slackExtraChannelIds: asTextList(savedRow?.slack_extra_channel_ids ?? workspaceDraft.slackExtra), granolaExtraTitleMatches: asTextList(savedRow?.granola_extra_title_matches ?? workspaceDraft.granolaExtra), airtableBaseId: String(savedRow?.airtable_base_id ?? workspaceDraft.airtableBaseId), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
+    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaTitleMatch: String(savedRow?.granola_title_match ?? workspaceDraft.granolaTitleMatch), slackExtraChannelIds: asTextList(savedRow?.slack_extra_channel_ids ?? workspaceDraft.slackExtra), granolaExtraTitleMatches: asTextList(savedRow?.granola_extra_title_matches ?? workspaceDraft.granolaExtra), airtableBaseId: String(savedRow?.airtable_base_id ?? workspaceDraft.airtableBaseId), clayDncWebhookUrl: String(savedRow?.clay_dnc_webhook_url ?? workspaceDraft.clayDncWebhookUrl), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
     setWorkspaceClients(next);
     setWorkspaceDraft((draft) => ({ ...draft, apiKey: "" }));
     window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
@@ -805,6 +808,14 @@ export default function AdminPage() {
                         </button>
                       )}
                       {buildNote && <p className="slack-channel-note">{buildNote}</p>}
+                    </section>
+                    <section className="admin-panel client-config-section" id="client-clay">
+                      <div className="panel-heading"><div><h2>Clay DNC webhook</h2><p>Where the QC bot pushes do-not-contact companies for this client.</p></div><span className="saved-dot">● Auto-saved</span></div>
+                      <label className="field-label">
+                        CLAY DNC WEBHOOK URL
+                        <input value={workspaceDraft.clayDncWebhookUrl} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, clayDncWebhookUrl: event.target.value }))} placeholder="https://api.clay.com/v3/sources/webhook/…" type="url" />
+                      </label>
+                      <p className="slack-channel-note">In this client&apos;s Clay DNC table, add an &ldquo;Import from Webhook&rdquo; source, set it to dedupe on the domain column, and paste its URL here. Leave blank and DNC adds still land in Reply Radar&apos;s own list — they just won&apos;t reach Clay.</p>
                     </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
