@@ -169,7 +169,7 @@ const cleanDomain = (value: string) =>
  * so a company the bot added by name and the same row Clay pushes back (now with a domain) collapse to one row
  * that simply gains its domain. Company/domain field names are matched flexibly, since Clay column names vary.
  */
-export async function ingestDncFromClay(payload: unknown): Promise<{ ok: boolean; error?: string; client?: string; company?: string; workspaceId?: string }> {
+export async function ingestDncFromClay(payload: unknown): Promise<{ ok: boolean; error?: string; client?: string; company?: string; workspaceId?: string; brainFolder?: string }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const body = payload && typeof payload === "object" ? (payload as Row) : {};
@@ -200,7 +200,10 @@ export async function ingestDncFromClay(payload: unknown): Promise<{ ok: boolean
     }),
   });
   if (!response.ok) return { ok: false, error: "Could not store the row." };
-  return { ok: true, client: client.name, company: company || domain, workspaceId: client.id };
+  // Report back whether this client has a brain folder — the gate on the DNC→brain write — so a missing one
+  // is visible in Clay's response rather than a silent no-op.
+  const wsRow = (await rows(url, key, `rr_workspaces?select=brain_folder&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0];
+  return { ok: true, client: client.name, company: company || domain, workspaceId: client.id, brainFolder: str(wsRow?.brain_folder).trim() };
 }
 
 /** The DNC file as it should read in the brain: a simple company + domain table, generated from the mirror. */

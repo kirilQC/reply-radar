@@ -39,10 +39,14 @@ export async function POST(request: Request) {
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 422 });
   // Refresh the client's brain DNC file after the 200, so Clay's per-row POSTs stay fast. The file is only
   // re-committed when its contents actually changed, so a re-sent row does not create an empty commit.
-  if (result.workspaceId && result.client) {
+  if (result.workspaceId && result.client && result.brainFolder) {
     const wid = result.workspaceId;
     const name = result.client;
     after(() => syncDncToBrain(wid, name).catch(() => {}));
   }
-  return NextResponse.json({ ok: true, client: result.client, company: result.company });
+  // A missing brain folder is the one reason the DNC would not reach the brain — say so plainly in the reply.
+  const note = result.brainFolder
+    ? `Stored, and syncing to ${result.client}'s brain folder (${result.brainFolder}).`
+    : `Stored in Reply Radar, but ${result.client} has no brain folder set, so it was NOT written to the brain. Set it in Admin → Clients → ${result.client} → Brain folder.`;
+  return NextResponse.json({ ok: true, client: result.client, company: result.company, brainFolder: result.brainFolder || null, note });
 }
