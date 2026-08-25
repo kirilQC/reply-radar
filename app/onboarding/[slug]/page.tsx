@@ -270,7 +270,7 @@ export default function OnboardingChecklistPage() {
   const sendTaskUpdate = async (task: Task) => {
     if (slackBusy) return;
     setSlackBusy(task.id);
-    const text = `*${client?.name ?? "Client"} Onboarding Update:*\n\n${task.title} is complete ✅\n\n*Progress: ${progress.doneLeaves}/${progress.totalLeaves} (${progress.pct}%)*`;
+    const text = `*${client?.name ?? "Client"} Onboarding Update:*\n\n${task.title} is complete :ballot_box_with_check:\n\n_Progress: ${progress.doneLeaves}/${progress.totalLeaves} (${progress.pct}%)_`;
     try {
       const response = await fetch("/api/onboarding/notify", {
         method: "POST", headers: { "content-type": "application/json" },
@@ -347,7 +347,7 @@ export default function OnboardingChecklistPage() {
                             />
                             <span className="onb-step-title">{group.title}</span>
                             {group.section && <span className="onb-section-tag">{group.section}</span>}
-                            {slack.slackInternal && (
+                            {slack.slackInternal && rowDone && (
                               <button className={`onb-slack-btn ${slackSent === group.id ? "sent" : ""}`} onClick={() => void sendTaskUpdate(group)} disabled={slackBusy === group.id} title="Post this update to the internal Slack channel">
                                 {slackSent === group.id ? "Sent ✓" : slackBusy === group.id ? "Sending…" : "Send to Slack"}
                               </button>
@@ -363,7 +363,7 @@ export default function OnboardingChecklistPage() {
                                 aria-label={child.title}
                               />
                               <span className="onb-step-title">{child.title}</span>
-                              {slack.slackInternal && (
+                              {slack.slackInternal && child.isDone && (
                                 <button className={`onb-slack-btn ${slackSent === child.id ? "sent" : ""}`} onClick={() => void sendTaskUpdate(child)} disabled={slackBusy === child.id} title="Post this update to the internal Slack channel">
                                   {slackSent === child.id ? "Sent ✓" : slackBusy === child.id ? "Sending…" : "Send to Slack"}
                                 </button>
