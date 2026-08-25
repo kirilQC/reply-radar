@@ -132,7 +132,10 @@ export async function resolveWorkspace(nameOrSlug: string): Promise<Workspace | 
   }));
   const exact = all.filter((w) => w.slug.toLowerCase() === wanted || w.name.toLowerCase() === wanted);
   if (exact.length === 1) return exact[0];
-  const partial = all.filter((w) => w.name.toLowerCase().includes(wanted) || w.slug.toLowerCase().includes(wanted));
+  // Match either way: what was sent may be shorter than the stored name ("ema" → "Ema Health") OR longer
+  // ("Ema Health" → a workspace named "Ema"). Ambiguity (more than one) still returns null rather than guess.
+  const contains = (a: string, b: string) => a.includes(b) || b.includes(a);
+  const partial = all.filter((w) => contains(w.name.toLowerCase(), wanted) || contains(w.slug.toLowerCase(), wanted));
   return partial.length === 1 ? partial[0] : null;
 }
 
