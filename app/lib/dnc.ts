@@ -108,6 +108,7 @@ export async function addToDnc(
 
     const rowBody = {
       workspace_id: client.id,
+      client: client.name,
       company,
       domain: null,
       key: dkey,
@@ -191,6 +192,7 @@ export async function ingestDncFromClay(payload: unknown): Promise<{ ok: boolean
     headers: { ...authHeaders(key, true), Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
       workspace_id: client.id,
+      client: client.name,
       company: company || domain,
       domain: domain || null,
       key: dkey,

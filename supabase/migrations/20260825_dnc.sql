@@ -8,6 +8,8 @@
 create table if not exists rr_dnc (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references rr_workspaces(id) on delete cascade,
+  -- The client's name, denormalized so the table is readable at a glance without joining on workspace_id.
+  client text,
   company text not null,
   domain text,
   key text not null,
