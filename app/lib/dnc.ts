@@ -16,6 +16,7 @@
 
 import { resolveWorkspace } from "./meetings";
 import { companyKey } from "./company-domain";
+import { brainConfigured, brainFile, writeBrainFile } from "./brain";
 
 type Row = Record<string, unknown>;
 
@@ -134,6 +135,9 @@ export async function addToDnc(
     results.push({ company, domain: null, status: wasThere ? "updated" : "added", clay });
   }
 
+  // Mirror the updated list into the client's brain folder (best effort — never fails the add).
+  if (results.some((r) => r.status !== "skipped")) await syncDncToBrain(client.id, client.name).catch(() => {});
+
   return { ok: true, client: client.name, results };
 }
 
@@ -165,7 +169,7 @@ const cleanDomain = (value: string) =>
  * so a company the bot added by name and the same row Clay pushes back (now with a domain) collapse to one row
  * that simply gains its domain. Company/domain field names are matched flexibly, since Clay column names vary.
  */
-export async function ingestDncFromClay(payload: unknown): Promise<{ ok: boolean; error?: string; client?: string; company?: string }> {
+export async function ingestDncFromClay(payload: unknown): Promise<{ ok: boolean; error?: string; client?: string; company?: string; workspaceId?: string }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const body = payload && typeof payload === "object" ? (payload as Row) : {};
@@ -196,7 +200,50 @@ export async function ingestDncFromClay(payload: unknown): Promise<{ ok: boolean
     }),
   });
   if (!response.ok) return { ok: false, error: "Could not store the row." };
-  return { ok: true, client: client.name, company: company || domain };
+  return { ok: true, client: client.name, company: company || domain, workspaceId: client.id };
+}
+
+/** The DNC file as it should read in the brain: a simple company + domain table, generated from the mirror. */
+function renderDncMarkdown(clientName: string, entries: { company: string; domain: string | null }[]): string {
+  const rows = entries
+    .map((e) => `| ${e.company.replace(/\|/g, "\\|")} | ${(e.domain || "").replace(/\|/g, "\\|")} |`)
+    .join("\n");
+  return `# ${clientName} — Do Not Contact
+
+Companies QC must never reach out to for ${clientName}. Maintained automatically by Reply Radar; the working source of truth is this client's Clay DNC table. Do not edit by hand — changes here are overwritten on the next sync.
+
+| Company | Domain |
+| --- | --- |
+${rows || "| _(none yet)_ | |"}
+
+${entries.length} ${entries.length === 1 ? "company" : "companies"}.
+`;
+}
+
+/**
+ * Mirror a client's DNC into their QC Brain folder, as `dnc/companies.md`.
+ *
+ * The brain is where a human (or their Claude Code) reads what QC intends for a client, so the DNC belongs
+ * there too. Best effort: it needs the brain to be configured and the client to have a `brain_folder`. The file
+ * is regenerated from the mirror and only committed when it actually changed, so re-pushing an existing row
+ * from Clay does not create an empty commit.
+ */
+export async function syncDncToBrain(workspaceId: string, clientName: string): Promise<void> {
+  if (!brainConfigured() || !workspaceId) return;
+  const { url, key } = config();
+  if (!url || !key) return;
+  const wsRow = (await rows(url, key, `rr_workspaces?select=brain_folder&id=eq.${encodeURIComponent(workspaceId)}&limit=1`))[0];
+  const folder = str(wsRow?.brain_folder).trim().replace(/\/+$/, "");
+  if (!folder) return; // no brain folder configured for this client
+  const entries = (await rows(url, key, `rr_dnc?select=company,domain&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=company.asc`))
+    .map((row) => ({ company: str(row.company), domain: orNull(row.domain) }));
+  const path = `${folder}/dnc/companies.md`;
+  const text = renderDncMarkdown(clientName, entries);
+  try {
+    const existing = await brainFile(path);
+    if (existing.text.trim() === text.trim()) return; // nothing changed — skip the commit
+  } catch { /* file doesn't exist yet — create it */ }
+  await writeBrainFile({ path, text, summary: `Update ${clientName} DNC (${entries.length})`, author: "Reply Radar" }).catch(() => {});
 }
 
 /** Everything on a client's DNC, newest first. */

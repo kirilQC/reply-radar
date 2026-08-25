@@ -13,8 +13,8 @@
  * `?secret=` or an `x-webhook-secret` header); if not, the post is accepted as-is so it works the moment the
  * URL is pasted into Clay. This route sits under /api/webhooks, which the auth gate leaves open for machines.
  */
-import { NextResponse } from "next/server";
-import { ingestDncFromClay } from "../../../lib/dnc";
+import { NextResponse, after } from "next/server";
+import { ingestDncFromClay, syncDncToBrain } from "../../../lib/dnc";
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -37,5 +37,12 @@ export async function POST(request: Request) {
   }
   const result = await ingestDncFromClay(payload);
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 422 });
+  // Refresh the client's brain DNC file after the 200, so Clay's per-row POSTs stay fast. The file is only
+  // re-committed when its contents actually changed, so a re-sent row does not create an empty commit.
+  if (result.workspaceId && result.client) {
+    const wid = result.workspaceId;
+    const name = result.client;
+    after(() => syncDncToBrain(wid, name).catch(() => {}));
+  }
   return NextResponse.json({ ok: true, client: result.client, company: result.company });
 }
