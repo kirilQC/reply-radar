@@ -511,6 +511,36 @@ export async function threadPosts(channelId: string, threadTs: string): Promise<
 }
 
 /**
+ * A DM's recent history, QC Bot's own messages included, oldest first.
+ *
+ * This is what makes a direct message a running conversation rather than a cold start on every line: the
+ * bot's past answers and the person's earlier questions are read back and handed to the model as memory. A
+ * DM is not threaded, so its back-and-forth lives in the channel's own history (`conversations.history`),
+ * not under a `thread_ts`. Same shape and same filtering as `threadPosts`, so `threadToTurns` turns it into
+ * alternating turns identically. Newest-first from Slack, reversed here because a conversation reads forward.
+ */
+export async function dmHistory(channelId: string, limit = 40): Promise<ThreadPost[]> {
+  if (!channelId) return [];
+  const query = new URLSearchParams({ channel: channelId, limit: String(Math.min(200, Math.max(1, limit))) });
+  try {
+    const body = await call(`conversations.history?${query.toString()}`, { method: "GET" });
+    const all = Array.isArray(body.messages) ? (body.messages as RawMessage[]) : [];
+    return all
+      .slice()
+      .reverse()
+      .filter((message) => typeof message.text === "string" && String(message.text).trim().length > 0 && !String(message.subtype ?? "").startsWith("channel_"))
+      .map((message) => ({
+        author: String(message.user ?? ""),
+        botId: String(message.bot_id ?? ""),
+        text: String(message.text ?? ""),
+        ts: String(message.ts ?? ""),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Adds and removes an emoji reaction, which is how the assistant signals "I'm on it".
  *
  * The bot puts :eyes: on the message that asked the moment it starts, and takes it off when the answer is

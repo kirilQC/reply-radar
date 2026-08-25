@@ -34,6 +34,7 @@ import {
   addReaction,
   botIdentity,
   deleteMessage,
+  dmHistory,
   postMessage,
   removeReaction,
   resolveUserNames,
@@ -452,15 +453,20 @@ function isDirectMessage(event: Row): boolean {
   return !threadTs || threadTs === str(event.ts);
 }
 
-/** A DM to the bot: answered straight in the DM, with the message itself as the question. */
+/** A DM to the bot: answered straight in the DM, with the whole recent conversation as memory. */
 async function answerDirectMessage(event: Row): Promise<void> {
   const channel = str(event.channel);
   if (!channel) return;
   // A DM can still be @-mentioned; strip it if so, otherwise take the whole message as the question.
   const question = cleanMention(str(event.text));
   if (!question) return;
-  const messages = await conversationTurns(channel, str(event.ts), question);
-  if (!messages.length) return;
+  // A DM remembers: read the DM's recent history so the bot carries what was said earlier, not just this
+  // one line. A DM is not threaded, so its memory lives in the channel history rather than a thread — the
+  // just-sent message is already in it, so the turns end on the human. If the read comes back empty (Slack
+  // briefly unreachable, or the scope missing), the bare question still stands so the bot answers.
+  const identity = await botIdentity();
+  const history = threadToTurns(await dmHistory(channel), identity) as Turn[];
+  const messages = history.length && history[history.length - 1].role === "user" ? history : [{ role: "user" as const, content: question }];
   // Reply straight into the DM, NOT threaded under the message. A DM is a one-to-one conversation, so
   // hanging the answer in a thread would bury it — threading is a channel-only behaviour, where the bot
   // keeps its reply tucked under the message it answers. Passing an empty threadTs posts at top level.

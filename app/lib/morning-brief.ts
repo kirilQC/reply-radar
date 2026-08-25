@@ -159,10 +159,10 @@ Numbered, one campaign each, and never more than two sub-bullets under a campaig
 
 **The senders are whoever the Figures name, and nobody else.** Senders are the client's LinkedIn accounts. They are not our team, and the people talking in the two Slack channels are our team, so a name from a channel is never a sender's name. If the Figures give you names, use them. If the Figures say the names are not recorded, write the bare count and stop: *3 senders*, with nothing after it. Do not fill the gap from the channels, from the call, from the client brief, or from a previous brief. Naming the wrong person as a sender is the worst mistake this brief can make, because it is stated as fact about somebody's work and it is not true.
 
-Then, and only if the total runway is under two days or nothing is active at all, one standalone line after the numbered list, not inside it:
+Then, and only if the client is about to stop sending altogether, one standalone line after the numbered list, not inside it:
 :warning: New leads or a new campaign must be in motion today! Less than N days of sending remaining! :warning:
 
-That line is the entire urgency mechanism of this brief. There is no separate urgent section, because a separate urgent section means writing the same finding twice, once at the top and once where it belongs.
+"About to stop sending altogether" is about the **whole account's** runway, never a single campaign's. The Figures give you one "Total days of sending left across all active campaigns" number: write this line only if that total is under two days, or if nothing is active at all. A single campaign running dry while another still has two or more days of sending is normal and needs no warning: the account is not going dark, so leave this line out no matter how little runway one campaign has. When the Figures say the total cannot be worked out, do not write this line either. That line is the entire urgency mechanism of this brief. There is no separate urgent section, because a separate urgent section means writing the same finding twice, once at the top and once where it belongs.
 
 ### :male-technologist: _Things to work on_ :male-technologist:
 
@@ -231,9 +231,6 @@ A worked example of the shape and the spacing, with the content stripped out. Ma
 2. *BV009: Ortho Offices*
     • 340 pending leads (~5 days of sending left)
         • 3 senders
-
-
-:warning: New leads or a new campaign must be in motion today! Less than 2 days of sending remaining! :warning:
 
 
 *:male-technologist: _Things to work on_ :male-technologist:*
@@ -544,9 +541,13 @@ export function composeSignals(
       daysLeft: runwayDaysLeft,
       pending: runwayPending,
       senders: runwaySenders,
-      // Only claimed when there are campaign records to judge: a client whose HeyReach has never synced
-      // has an unknown runway, and "start building campaigns" on the strength of no data is the kind of
-      // wrong instruction that gets the whole brief ignored.
+      // Fires on the OVERALL runway pooled across every active campaign, not on any single one — one
+      // campaign running dry while another has a week left is normal and must not raise the alarm (the pooled
+      // maths already handles that: two campaigns' leads over their shared senders is a runway well over two
+      // days, so a single short campaign never trips it). A null runway — no senders recorded on the active
+      // campaigns — is a real "nothing is actually sending" state and does flag, since a campaign with no
+      // senders is not sending at all. Only claimed when there are campaign records to judge: "build new
+      // campaigns" on the strength of no data is the wrong instruction that gets the whole brief ignored.
       needsCampaigns: facts.length > 0 && (runwayDaysLeft === null || runwayDaysLeft < RUNWAY_ALARM_DAYS),
     },
     sending: {
@@ -630,7 +631,7 @@ export function signalsAsText(signals: BriefSignals): string {
           // Counted in the runway and named here, but kept out of the brief's campaign list: a campaign
           // with nothing left to send is finished whatever its status says, and everybody reading knows it.
           // Stated as an instruction rather than left to the prompt so both layers cannot disagree.
-          ? " It has no leads left to contact, so it is finished in practice. Leave it out of the campaign list entirely."
+          ? " It has no leads left to contact, so it is depleted and finished, end of story. Leave it out of the campaign list entirely, and do NOT raise reloading, refilling or topping it up as an action item: a depleted campaign is done, not a task."
           : ` Days of sending left: ${campaign.daysLeft}, at ${DAILY_CONNECTIONS_PER_SENDER} connection requests per sender per day.`;
     lines.push(`- "${campaign.name}" (${campaign.status}${campaign.isActive ? ", active" : ""}): ${campaign.sent} sent, ${campaign.accepted} accepted${accepted === null ? "" : ` (${accepted}%)`}, ${campaign.replies} replies, ${campaign.pending} leads not yet contacted. ${senders}${left}`);
   }

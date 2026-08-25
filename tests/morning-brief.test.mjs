@@ -421,9 +421,11 @@ test("an active campaign with no leads left says it is done sending", async () =
     WORKSPACE,
   );
   assert.equal(signals.campaigns.names[0].daysLeft, 0);
-  assert.match(signalsAsText(signals), /no leads left to contact, so it is finished in practice/);
+  assert.match(signalsAsText(signals), /no leads left to contact, so it is depleted and finished/);
   // Counted in the runway arithmetic, but kept off the brief: "its implied those campaigns are finished".
   assert.match(signalsAsText(signals), /Leave it out of the campaign list entirely/);
+  // Depleted is the end of it: never a "top it up" / reload action item.
+  assert.match(signalsAsText(signals), /do NOT raise reloading, refilling or topping it up/);
 });
 
 test("a campaign with no senders reports an unknown runway rather than a finished one", async () => {
