@@ -691,3 +691,19 @@ create unique index if not exists rr_deals_external_idx on rr_deals(workspace_id
 drop trigger if exists rr_deals_updated_at on rr_deals;
 create trigger rr_deals_updated_at before update on rr_deals for each row execute function rr_set_updated_at();
 alter table rr_deals enable row level security;
+
+-- ── Company name → domain cache ─────────────────────────────────────────────────────────────────
+--
+-- CRM deals routinely arrive with a company name but no domain, which is what stops domain-level QC
+-- attribution from firing. Resolving the domain from the name (Clearbit's free name-to-domain endpoint)
+-- is cheap but should happen once per company, not on every sync — so the answer is cached here, keyed
+-- by the normalised name, and shared across every client. `logo` comes back from the same lookup, which
+-- doubles as the company logo when the CRM has none. `domain` empty means "looked up, nothing found",
+-- so a fruitless name is not retried forever.
+create table if not exists rr_company_domains (
+  name_key    text primary key,
+  name        text,
+  domain      text not null default '',
+  logo        text not null default '',
+  resolved_at timestamptz not null default now()
+);

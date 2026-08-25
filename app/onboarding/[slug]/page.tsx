@@ -201,8 +201,9 @@ export default function OnboardingChecklistPage() {
   const [notFound, setNotFound] = useState(false);
   const [marking, setMarking] = useState(false);
   const [slack, setSlack] = useState({ slackInternal: "", slackExternal: "" });
-  /** A task just ticked, offered up for a quick Slack note — dismissed or sent. */
-  const [prompt, setPrompt] = useState<Task | null>(null);
+  /** Per-task Slack send feedback: which task is sending, and which just sent. */
+  const [slackBusy, setSlackBusy] = useState<string | null>(null);
+  const [slackSent, setSlackSent] = useState<string | null>(null);
 
   const reload = async () => {
     try {
@@ -257,12 +258,26 @@ export default function OnboardingChecklistPage() {
     try {
       const response = await fetch("/api/onboarding/tasks", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: task.id, isDone: next }) });
       if (!response.ok) { setTasks(before); return; }
-      // Ticking a box (not un-ticking) offers a one-line Slack update — but only when there is an
-      // internal channel to send it to. No channel, no prompt.
-      if (next && slack.slackInternal) setPrompt(task);
     } catch {
       setTasks(before);
     }
+  };
+
+  /**
+   * Post one onboarding update to the internal channel, in the client's own format: a bold header, the
+   * task line, and the progress in italics — one message, never two.
+   */
+  const sendTaskUpdate = async (task: Task) => {
+    if (slackBusy) return;
+    setSlackBusy(task.id);
+    const text = `*${client?.name ?? "Client"} Onboarding Update:*\n\n${task.title} is complete ✅\n\n*Progress: ${progress.doneLeaves}/${progress.totalLeaves} (${progress.pct}%)*`;
+    try {
+      const response = await fetch("/api/onboarding/notify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, target: "internal", text }),
+      });
+      if (response.ok) { setSlackSent(task.id); setTimeout(() => setSlackSent((id) => (id === task.id ? null : id)), 2500); }
+    } finally { setSlackBusy(null); }
   };
 
   const done = progress.complete;
@@ -332,6 +347,11 @@ export default function OnboardingChecklistPage() {
                             />
                             <span className="onb-step-title">{group.title}</span>
                             {group.section && <span className="onb-section-tag">{group.section}</span>}
+                            {slack.slackInternal && (
+                              <button className={`onb-slack-btn ${slackSent === group.id ? "sent" : ""}`} onClick={() => void sendTaskUpdate(group)} disabled={slackBusy === group.id} title="Post this update to the internal Slack channel">
+                                {slackSent === group.id ? "Sent ✓" : slackBusy === group.id ? "Sending…" : "Send to Slack"}
+                              </button>
+                            )}
                           </div>
                           {group.children.map((child) => (
                             <div key={child.id} className={`onb-step onb-sub ${child.isDone ? "done" : ""}`}>
@@ -343,6 +363,11 @@ export default function OnboardingChecklistPage() {
                                 aria-label={child.title}
                               />
                               <span className="onb-step-title">{child.title}</span>
+                              {slack.slackInternal && (
+                                <button className={`onb-slack-btn ${slackSent === child.id ? "sent" : ""}`} onClick={() => void sendTaskUpdate(child)} disabled={slackBusy === child.id} title="Post this update to the internal Slack channel">
+                                  {slackSent === child.id ? "Sent ✓" : slackBusy === child.id ? "Sending…" : "Send to Slack"}
+                                </button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -351,10 +376,6 @@ export default function OnboardingChecklistPage() {
                   </div>
                 </div>
               ))}
-
-              {prompt && (
-                <SlackTaskPrompt task={prompt} clientName={client.name} slug={slug} onClose={() => setPrompt(null)} />
-              )}
 
               {!done && (
                 <div className="onb-markdone">
@@ -365,48 +386,6 @@ export default function OnboardingChecklistPage() {
           )}
         </main>
       </section>
-    </div>
-  );
-}
-
-/**
- * The check-off prompt: a small dialog after a task is ticked, offering a quick note to the internal
- * Slack channel. Pre-filled with a sensible line the operator can edit, and entirely optional — dismiss
- * and nothing is sent. It only ever appears when an internal channel id is on the client.
- */
-function SlackTaskPrompt({ task, clientName, slug, onClose }: { task: Task; clientName: string; slug: string; onClose: () => void }) {
-  const [text, setText] = useState(`✅ ${clientName} onboarding — ${task.title} is done.`);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState("");
-
-  const send = async () => {
-    if (sending || !text.trim()) return;
-    setSending(true);
-    setError("");
-    try {
-      const response = await fetch("/api/onboarding/notify", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ slug, target: "internal", text }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) { setError(typeof payload.error === "string" ? payload.error : "Slack rejected it."); setSending(false); return; }
-      onClose();
-    } catch { setError("Could not reach Slack."); setSending(false); }
-  };
-
-  return (
-    <div className="onb-modal-back">
-      <button className="onb-modal-scrim" aria-label="Dismiss" onClick={onClose} />
-      <div className="onb-modal" role="dialog" aria-label="Send a Slack update">
-        <h3>Send an update to Slack?</h3>
-        <p>Post a quick note to {clientName}&apos;s internal channel that this task is done.</p>
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} />
-        {error && <div className="onb-modal-err">{error}</div>}
-        <div className="onb-modal-actions">
-          <button className="secondary-button" onClick={onClose}>No, skip</button>
-          <button className="primary-button" onClick={() => void send()} disabled={sending || !text.trim()}>{sending ? "Sending…" : "Send to Slack"}</button>
-        </div>
-      </div>
     </div>
   );
 }

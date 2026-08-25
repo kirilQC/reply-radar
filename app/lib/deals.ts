@@ -14,6 +14,7 @@
 
 import { fetchDeals, fetchPipeline, type CrmProvider, type Pipeline } from "./crm";
 import { campaignsForLead } from "./heyreach-api";
+import { resolveCompanyDomains } from "./company-domain";
 import { resolveWorkspace } from "./meetings";
 import { buildQcIdentity, attributeDeal } from "../../shared/deal-attribution.mjs";
 
@@ -246,6 +247,20 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
       stages: seen.map((title) => ({ title, kind: /won/i.test(title) ? "won" : /lost|dead/i.test(title) ? "lost" : "open", color: null })),
       discoveredAt: new Date().toISOString(),
     };
+  }
+
+  // Fill the domain (and logo) for any deal that has a company name but no domain — the gap that keeps
+  // domain-level attribution from firing. Resolved once per company and cached, so a re-sync is free.
+  const needDomain = deals.filter((d) => d.companyName && !d.companyDomain).map((d) => d.companyName);
+  if (needDomain.length) {
+    const resolved = await resolveCompanyDomains({ url, key }, needDomain).catch(() => new Map());
+    for (const deal of deals) {
+      if (deal.companyName && !deal.companyDomain) {
+        const hit = resolved.get(deal.companyName);
+        if (hit?.domain) deal.companyDomain = hit.domain;
+        if (hit?.logo && !deal.companyLogo) deal.companyLogo = hit.logo;
+      }
+    }
   }
 
   const qc = await gatherQcIdentity(url, key, client.id);

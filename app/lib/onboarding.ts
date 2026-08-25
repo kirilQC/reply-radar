@@ -19,7 +19,6 @@ import { normalizeChannelId } from "./slack-channel";
 import {
   slugify,
   computeProgress,
-  checkoffMessage,
   completionMessage,
 } from "../../shared/onboarding.mjs";
 
@@ -504,22 +503,11 @@ export async function setTaskDone(input: { taskId: string; isDone: boolean; done
     await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(workspaceId)}`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify({ onboarding_status: "in_progress", onboarding_completed_at: null }) }).catch(() => {});
   }
 
-  // Slack, only on completing something, only when there is a channel to post to.
-  if (isDone && channelId && slackConfigured()) {
-    const parent = updated.parent_id ? tasks.find((t) => t.id === str(updated.parent_id)) : undefined;
-    const line = checkoffMessage({
-      clientName,
-      taskTitle: str(updated.title),
-      parentTitle: parent?.title,
-      doneBy,
-      doneLeaves: progress.doneLeaves,
-      totalLeaves: progress.totalLeaves,
-      pct: progress.pct,
-    });
-    await postMessage(channelId, line).catch(() => {});
-    if (progress.complete && !wasComplete) {
-      await postMessage(channelId, completionMessage({ clientName, totalLeaves: progress.totalLeaves, doneBy })).catch(() => {});
-    }
+  // No automatic Slack post on a single task any more — the checklist offers a per-task "Send to Slack"
+  // button so the operator chooses what to announce and when. The one exception is reaching 100%, which
+  // is a genuine milestone worth a celebratory line without being asked.
+  if (isDone && progress.complete && !wasComplete && channelId && slackConfigured()) {
+    await postMessage(channelId, completionMessage({ clientName, totalLeaves: progress.totalLeaves, doneBy })).catch(() => {});
   }
 
   return { ok: true, progress };
