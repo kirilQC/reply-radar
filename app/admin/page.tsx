@@ -1172,7 +1172,7 @@ const readScreenshot = (file: File) =>
 
 type GranolaKeyRow = { id: string; label: string; masked: string; lastCheckedAt: string | null; lastStatus: string; lastError: string };
 /** What one Test found: the meetings this key can see, and the window they were looked for in. */
-type GranolaSighting = { windowDays: number; meetings: Array<{ title: string; startedAt: string }> };
+type GranolaSighting = { windowDays: number; meetings: Array<{ title: string; startedAt: string }>; olderMeetings: Array<{ title: string; startedAt: string }>; totalInYear: number };
 
 /**
  * One Granola key per teammate.
@@ -1239,6 +1239,8 @@ function GranolaKeysView() {
       [id]: {
         windowDays: Number(payload?.windowDays ?? 0),
         meetings: Array.isArray(payload?.meetings) ? (payload.meetings as GranolaSighting["meetings"]) : [],
+        olderMeetings: Array.isArray(payload?.olderMeetings) ? (payload.olderMeetings as GranolaSighting["meetings"]) : [],
+        totalInYear: Number(payload?.totalInYear ?? 0),
       },
     }));
     setBusyId("");
@@ -1290,13 +1292,28 @@ function GranolaKeysView() {
               {sightings[key.id] && (
                 <div className="granola-key-meetings">
                   {sightings[key.id].meetings.length === 0 ? (
-                    <p className="granola-key-meetings-empty">No meetings in the last {sightings[key.id].windowDays || 14} days.</p>
+                    <p className="granola-key-meetings-empty">
+                      No meetings in the last {sightings[key.id].windowDays || 14} days.
+                      {sightings[key.id].olderMeetings.length > 0
+                        ? ` But this key does see ${sightings[key.id].olderMeetings.length} older meeting${sightings[key.id].olderMeetings.length === 1 ? "" : "s"} — it's just been quiet lately, not empty.`
+                        : ` And none in the last year either — this key's Granola account has no recordings (likely the wrong login).`}
+                    </p>
                   ) : (
                     <ul>
                       {sightings[key.id].meetings.map((meeting, index) => (
                         <li key={`${meeting.startedAt}-${index}`}>
                           <span>{meeting.title}</span>
                           <small>{new Date(meeting.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {sightings[key.id].meetings.length === 0 && sightings[key.id].olderMeetings.length > 0 && (
+                    <ul className="granola-key-older">
+                      {sightings[key.id].olderMeetings.slice(0, 8).map((meeting, index) => (
+                        <li key={`old-${meeting.startedAt}-${index}`}>
+                          <span>{meeting.title}</span>
+                          <small>{new Date(meeting.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</small>
                         </li>
                       ))}
                     </ul>

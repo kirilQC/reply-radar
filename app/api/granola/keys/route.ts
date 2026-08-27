@@ -104,20 +104,31 @@ export async function POST(request: Request) {
        * and no diagnostic needs it. Never fatal, because a working key that could not be listed is still
        * a working key and the check above already said so.
        */
-      const meetings = result.ok
-        ? await inspectNotes([{ id, label: String(stored.label ?? ""), apiKey }], [], CALL_WINDOW_DAYS)
+      /*
+       * A full year in one probe, then split at the 14-day line. The brief only ever uses the last 14 days,
+       * but "no meetings in 14 days" and "no meetings at all" are different diagnoses — the first is a quiet
+       * fortnight, the second is a key pointed at a Granola account with no recordings (the wrong login, most
+       * often). Showing what lies beyond the window is what tells those two apart.
+       */
+      const PROBE_DAYS = 365;
+      const cutoff = Date.now() - CALL_WINDOW_DAYS * 86_400_000;
+      const all = result.ok
+        ? await inspectNotes([{ id, label: String(stored.label ?? ""), apiKey }], [], PROBE_DAYS)
           .then((sightings) => sightings[0]?.notes ?? [])
           .catch(() => [])
         : [];
+      const shape = (note: { title: string; startedAt: number }) => ({ title: note.title, startedAt: new Date(note.startedAt).toISOString() });
+      const sorted = all.slice().sort((left, right) => right.startedAt - left.startedAt);
       return NextResponse.json({
         ok: result.ok,
         error: result.error,
         windowDays: CALL_WINDOW_DAYS,
+        probeDays: PROBE_DAYS,
         // Newest first, which is the order somebody reads a list of meetings in.
-        meetings: meetings
-          .slice()
-          .sort((left, right) => right.startedAt - left.startedAt)
-          .map((note) => ({ title: note.title, startedAt: new Date(note.startedAt).toISOString() })),
+        meetings: sorted.filter((note) => note.startedAt >= cutoff).map(shape),
+        // Everything older than the brief's window but within the last year — proof the key can see notes.
+        olderMeetings: sorted.filter((note) => note.startedAt < cutoff).map(shape),
+        totalInYear: all.length,
       });
     }
 
