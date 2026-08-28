@@ -2,6 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse, after } from "next/server";
+import { resolveModel } from "../../../../shared/anthropic-model.mjs";
 import { isAiArkEnrichmentEnabled } from "../../../lib/lead-identity";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { isOurWebhookUrl, publicBaseUrl, webhookUrlFor } from "../../../lib/public-url";
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const payload = await request.json();
   const existingGuardrails = payload.guardrails && typeof payload.guardrails === "object" && !Array.isArray(payload.guardrails) ? payload.guardrails : {};
-  const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, brain_folder: payload.brainFolder || null, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ?? null, custom_system_prompt: payload.systemPrompt ?? null, logo_url: payload.logoUrl ?? null, accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null, webhook_url: webhookUrlFor(payload.slug, request), guardrails: existingGuardrails };
+  const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, brain_folder: payload.brainFolder || null, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ? resolveModel(String(payload.anthropicModel)) : null, custom_system_prompt: payload.systemPrompt ?? null, logo_url: payload.logoUrl ?? null, accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null, webhook_url: webhookUrlFor(payload.slug, request), guardrails: existingGuardrails };
   // Absent means "leave alone", not "clear". Every other field here is sent by the one form that owns
   // it, but the theme panel auto-saves a partial payload of its own, and a channel id silently emptied
   // by a logo upload would not be noticed until a Monday brief went nowhere. Normalised on the way in

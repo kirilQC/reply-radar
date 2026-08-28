@@ -845,10 +845,12 @@ export default function AdminPage() {
                     </div>
                     <label className="field-label">
                       MODEL
-                      <select defaultValue="">
-                        <option value="">Select model</option>
-                        <option>claude-opus-4-1-20250805</option>
-                        <option>claude-opus-4-6</option>
+                      {/* Only models confirmed active are offered — a retired one (e.g. Opus 4.1) fails every
+                          request with not_found_error. Bound so the choice actually saves; blank = the default. */}
+                      <select value={workspaceDraft.anthropicModel} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, anthropicModel: event.target.value }))}>
+                        <option value="">Default (claude-sonnet-4-6)</option>
+                        <option>claude-opus-5</option>
+                        <option>claude-sonnet-5</option>
                         <option>claude-sonnet-4-6</option>
                         <option>claude-haiku-4-5-20251001</option>
                       </select>

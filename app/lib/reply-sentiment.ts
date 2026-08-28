@@ -3,6 +3,7 @@
 
 import { writeAuditEvent } from "./audit-log";
 import { briefedSystemPrompt } from "./client-context";
+import { resolveModel } from "../../shared/anthropic-model.mjs";
 import { mergeMessageRadar } from "./message-radar";
 
 type SupabaseConfig = { url: string; key: string };
@@ -150,10 +151,8 @@ export async function classifyLatestReply(
   if (!meta?.force && ["positive", "neutral", "negative"].includes(String(latestRadar.sentiment).toLowerCase())) { console.log(`[sentiment] Already classified as ${latestRadar.sentiment} for ${conversationId}`); return; }
 
   const systemPrompt = await getConfiguredPrompt(workspaceId);
-  const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
-  const DEPRECATED = new Set(["claude-3-5-haiku-latest", "claude-3-5-haiku-20241022", "claude-3-haiku-20240307"]);
-  const configuredModel = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
-  const model = DEPRECATED.has(configuredModel) ? DEFAULT_MODEL : configuredModel;
+  // resolveModel swaps any retired id (old haiku, Opus 4.1, …) for its live replacement before the API call.
+  const model = resolveModel(process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001");
   const userContent = rows.map((row) => `${row.direction}: ${String(row.body ?? "")}`).join("\n");
   const startTime = Date.now();
 

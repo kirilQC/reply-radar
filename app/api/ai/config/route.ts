@@ -2,6 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
+import { resolveModel } from "../../../../shared/anthropic-model.mjs";
 import { DEFAULT_SENTIMENT_PROMPT } from "../../../lib/reply-sentiment";
 import { DEFAULT_ICP_DOC_PROMPT, ICP_DOC_PROMPT_KEY } from "../../../lib/brain-icp";
 import { DEFAULT_MORNING_BRIEF_PROMPT, MORNING_BRIEF_PROMPT_PREFIX, morningBriefPromptKey } from "../../../lib/morning-brief";
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
 
     // Anthropic API status
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    const anthropicModel = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001";
+    const anthropicModel = resolveModel(process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001");
     const maskedKey = anthropicKey ? `sk-ant-...${anthropicKey.slice(-4)}` : null;
 
     // Get workspace-specific AI context if requested
@@ -163,7 +164,7 @@ export async function POST(request: Request) {
         headers: { Prefer: "return=minimal" },
         body: JSON.stringify({
           client_brief: brief ?? ws.client_brief,
-          anthropic_model: model ?? ws.anthropic_model,
+          anthropic_model: (model ?? ws.anthropic_model) ? resolveModel(String(model ?? ws.anthropic_model)) : null,
           guardrails: {
             ...guardrails,
             icp_prompt: icpPrompt ?? guardrails.icp_prompt ?? "",

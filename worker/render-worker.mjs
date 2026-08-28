@@ -4,6 +4,7 @@
 import { classifyConversationOrigin } from "../shared/conversation-origin.mjs";
 import { directionFor, extractMessageRows, messageKey, syntheticMessageId } from "../shared/message-identity.mjs";
 import { ourCampaigns } from "../shared/campaign-code.mjs";
+import { resolveModel } from "../shared/anthropic-model.mjs";
 import { sequenceCopy } from "../shared/campaign-sequence.mjs";
 
 /**
@@ -506,7 +507,7 @@ async function runAiForConversation(workspace, item, leadName) {
       ...shared,
       mode: "analyze",
       conversationId: item.conv.id,
-      model: String(workspace.anthropic_model || "") || undefined,
+      model: workspace.anthropic_model ? resolveModel(String(workspace.anthropic_model)) : undefined,
       system: String(workspace.custom_system_prompt || "") || undefined,
       instruction: workspace.client_brief ? `Client context: ${workspace.client_brief}` : "",
       campaignName,

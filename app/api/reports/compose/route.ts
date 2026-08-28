@@ -14,6 +14,7 @@
  * words. Digesting here also means what the model sees is defined in one place.
  */
 import { NextResponse } from "next/server";
+import { resolveModel } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import {
   COMPOSE_SYSTEM_PROMPT,
@@ -417,7 +418,7 @@ ${writtenBlock}
 Report data (JSON — these are the only numbers you may use):
 ${JSON.stringify(digests.length === 1 ? digests[0] : digests, null, 2)}`;
 
-  const requestedModel = text(body.model) || process.env.ANTHROPIC_MODEL || FALLBACK_MODEL;
+  const requestedModel = resolveModel(text(body.model) || process.env.ANTHROPIC_MODEL || FALLBACK_MODEL);
   let model = requestedModel;
 
   // 1200 is comfortably above the ~350 words of JSON this can return. The narrative and message are

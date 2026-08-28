@@ -24,6 +24,7 @@
  * pasted in as text, so none reaches it in that case either.
  */
 import { NextResponse } from "next/server";
+import { resolveModel } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
 
 type Json = Record<string, unknown>;
@@ -121,7 +122,7 @@ ${call ? "Transcript of the sync call with the client:" : "Transcript of what th
 ${transcript}
 """`;
 
-  const requestedModel = text(body.model) || process.env.ANTHROPIC_MODEL || FALLBACK_MODEL;
+  const requestedModel = resolveModel(text(body.model) || process.env.ANTHROPIC_MODEL || FALLBACK_MODEL);
   let model = requestedModel;
   // A minute of speech is a few hundred words, and the reply is that text redistributed, so the
   // ceiling is there to stop a runaway rather than to shape anything.
