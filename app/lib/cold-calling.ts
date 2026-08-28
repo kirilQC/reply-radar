@@ -40,6 +40,11 @@ async function rows(url: string, key: string, path: string): Promise<Row[]> {
   const body = await response.json().catch(() => []);
   return Array.isArray(body) ? (body as Row[]) : [];
 }
+/** Whether a column exists — used to fail an enrich job loudly if the migration's generated columns are absent. */
+async function columnExists(url: string, key: string, table: string, column: string): Promise<boolean> {
+  const response = await fetch(`${url}/rest/v1/${table}?select=${column}&limit=1`, { headers: headers(key), cache: "no-store" }).catch(() => null);
+  return Boolean(response && response.ok);
+}
 
 /** The HeyReach key + identity for a client, or null. */
 async function workspaceFor(slug: string): Promise<{ id: string; name: string; slug: string; apiKey: string; brief: string } | null> {
@@ -126,7 +131,7 @@ export async function getCallList(slug: string): Promise<{ ok: boolean; error?: 
 
 // ── Campaigns + fetch jobs ───────────────────────────────────────────────────────────────────────
 
-export type CampaignSummary = { id: string; name: string; status: string; listSize: number; fetched: number; enriched: number; job: { status: string; leadsFetched: number; leadsEnriched: number; total: number } | null };
+export type CampaignSummary = { id: string; name: string; status: string; listSize: number; fetched: number; enriched: number; job: { status: string; leadsFetched: number; leadsEnriched: number; total: number; error: string | null } | null };
 
 /** Every campaign for a client, with how many of its leads we've already fetched/enriched and any live job. */
 export async function listCampaigns(slug: string): Promise<{ ok: boolean; error?: string; client?: string; campaigns?: CampaignSummary[] }> {
@@ -138,7 +143,7 @@ export async function listCampaigns(slug: string): Promise<{ ok: boolean; error?
 
   const [page, jobs, leads] = await Promise.all([
     heyreachCampaigns(ws.apiKey, 300).catch(() => ({ items: [], total: 0 })),
-    rows(url, key, `rr_cold_call_jobs?select=campaign_id,status,leads_fetched,leads_enriched,total_leads&workspace_id=eq.${encodeURIComponent(ws.id)}&status=in.(queued,fetching,enriching)`),
+    rows(url, key, `rr_cold_call_jobs?select=campaign_id,status,leads_fetched,leads_enriched,total_leads,error&workspace_id=eq.${encodeURIComponent(ws.id)}&order=created_at.desc`),
     rows(url, key, `rr_leads?select=phone,cold_campaign,cold_enriched&workspace_id=eq.${encodeURIComponent(ws.id)}&cold_campaign=not.is.null&limit=8000`),
   ]);
   const fetchedByCampaign = new Map<string, { fetched: number; enriched: number }>();
@@ -150,14 +155,16 @@ export async function listCampaigns(slug: string): Promise<{ ok: boolean; error?
     if (orNull(lead.phone) || lead.cold_enriched === true) entry.enriched += 1;
     fetchedByCampaign.set(cid, entry);
   }
-  const jobByCampaign = new Map(jobs.map((j) => [str(j.campaign_id), j]));
+  // Newest job per campaign (jobs come newest-first), so an errored or finished run still surfaces.
+  const jobByCampaign = new Map<string, Row>();
+  for (const j of jobs) { const cid = str(j.campaign_id); if (!jobByCampaign.has(cid)) jobByCampaign.set(cid, j); }
   const campaignsOut = page.items.map((c) => {
     const counts = fetchedByCampaign.get(c.id) ?? { fetched: 0, enriched: 0 };
     const job = jobByCampaign.get(c.id);
     return {
       id: c.id, name: c.name, status: c.status, listSize: c.listSize,
       fetched: counts.fetched, enriched: counts.enriched,
-      job: job ? { status: str(job.status), leadsFetched: num(job.leads_fetched), leadsEnriched: num(job.leads_enriched), total: num(job.total_leads) } : null,
+      job: job ? { status: str(job.status), leadsFetched: num(job.leads_fetched), leadsEnriched: num(job.leads_enriched), total: num(job.total_leads), error: orNull(job.error) } : null,
     };
   });
   return { ok: true, client: ws.name, campaigns: campaignsOut };
@@ -283,6 +290,12 @@ export async function processColdCallJobs(origin: string, deadlineMs: number): P
   const apiKey = str(ws?.heyreach_api_key_ciphertext);
   const workspace = { id: str(job.workspace_id), name: str(ws?.name) };
   if (!apiKey) { await patchJob({ status: "error", error: "No HeyReach key for this client." }); return { processed: true, status: "error" }; }
+  // The enrich phase filters on these generated columns; without them it would silently match nothing (0
+  // enriched). Fail the job with an actionable message instead.
+  if (!(await columnExists(url, key, "rr_leads", "cold_campaign"))) {
+    await patchJob({ status: "error", error: "rr_leads is missing the cold_campaign / cold_enriched columns — run the two new ALTERs in the cold-calling migration, then click Fetch & enrich again." });
+    return { processed: true, status: "error" };
+  }
 
   try {
     let status = str(job.status);
