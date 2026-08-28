@@ -312,6 +312,15 @@ export async function leadsInList(apiKey: string, listId: string, max = 100): Pr
 }
 
 /**
+ * One page of a list's people, at an explicit offset. For a resumable crawl of a whole campaign list, where
+ * the caller keeps the offset across requests (a background job that cannot hold the whole list in one call).
+ */
+export async function leadsInListPage(apiKey: string, listId: string, offset: number, limit = 100): Promise<Page<Row>> {
+  const payload = object(await call(apiKey, "list/GetLeadsFromList", { listId, offset, limit }));
+  return { items: list(payload.items).map(object), total: num(payload.totalCount) };
+}
+
+/**
  * The companies on a list.
  *
  * Only valid for a `COMPANY_LIST`. Given a `USER_LIST` id HeyReach answers 400, which is correct

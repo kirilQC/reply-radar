@@ -17,6 +17,7 @@ const items = [
   // deal becomes a client to get live. Analytics and reporting sit after all of it because they are
   // what you read once it has happened.
   ["/meetings", "Meetings", "calendar"],
+  ["/cold-calling", "Cold calling", "phone"],
   ["/deals", "Deals", "deals"],
   ["/onboarding", "Onboarding", "onboarding"],
   ["/analytics", "Analytics", "analytics"],
@@ -46,6 +47,8 @@ const iconPaths: Record<string, string> = {
   // A funnel, because a deal is a stage in one. Not a currency symbol: the tab is about where each
   // conversation has got to, and the amount is one column of that rather than the point of it.
   deals: "M4 5h16l-6 7v6l-4-2v-4z",
+  // A handset. The tab is a call list, and a phone is the one glyph that reads as "make calls" instantly.
+  phone: "M5 4h4l2 5-3 2a11 11 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z",
   // Ascending steps — a sequence to walk a client through. Three 6-unit steps rather than four 4-unit
   // ones: at the 16px this renders at, 4 units is under 3px and the whole thing collapsed into what
   // looked like a plain diagonal line. Still distinct from the analytics bars beside it because it is

@@ -1348,6 +1348,27 @@ async function sendDueBrief() {
   }
 }
 
+const COLDCALL_LOOP_MS = 60 * 1000;
+let lastColdCallRun = 0;
+
+/**
+ * Advance the cold-calling fetch/enrich pipeline. The route does ~80s of work per poke (fetching a campaign's
+ * leads, then enriching them with profile + phone + ICP score) and returns; while a job is still running we
+ * poke again on the next cycle rather than waiting out the throttle.
+ */
+async function processDueColdCallJobs() {
+  if (!appBaseUrl) return;
+  if (Date.now() - lastColdCallRun < COLDCALL_LOOP_MS) return;
+  lastColdCallRun = Date.now();
+  try {
+    const result = await appPost("/api/cold-calling/process", {}, { timeoutMs: 120_000, cron: true });
+    // A job that is still going: clear the throttle so the next cycle continues it immediately.
+    if (result?.processed && result?.status !== "done" && result?.status !== "error") lastColdCallRun = 0;
+  } catch (error) {
+    console.error("reply_radar_coldcall_cycle_failed", String(error));
+  }
+}
+
 const PERSONAL_LOOP_MS = 60 * 1000;
 let lastPersonalRun = 0;
 
@@ -1616,6 +1637,9 @@ async function runOnce() {
 
   // One person's personal focus DM per cycle, same drain-itself pattern as the brief.
   try { await sendDuePersonalBrief(); } catch (error) { console.error("reply_radar_personal_brief_cycle_failed", error); }
+
+  // Advance any running cold-call fetch/enrich job (fetch campaign leads → enrich profile/phone/ICP).
+  try { await processDueColdCallJobs(); } catch (error) { console.error("reply_radar_coldcall_cycle_failed", error); }
 
   // At most one client's EOW report per cycle, on its own Friday-afternoon schedule. Same one-per-cycle
   // drain as the brief; the route does the schedule and readiness maths and this only dispatches.

@@ -7,6 +7,9 @@ export type JsonObject = Record<string, unknown>;
 type SupabaseConfig = { url: string; key: string };
 
 const ENDPOINT = "https://api.ai-ark.com/api/developer-portal/v1/people";
+// Phone numbers are NOT part of People Search — AI Ark reveals a mobile through a separate finder endpoint,
+// billed 5 credits only when a number is found. Takes a LinkedIn URL; the number is at data.data[0][0].
+const PHONE_ENDPOINT = "https://api.ai-ark.com/api/developer-portal/v2/people/mobile-phone-finder";
 const BUCKET = "reply-radar-enrichment";
 const object = (value: unknown): JsonObject =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -42,6 +45,37 @@ const personLinkedIn = (value: unknown) => {
     text(person.linkedin)
   );
 };
+
+/**
+ * Find a person's mobile phone from their LinkedIn URL, via AI Ark's Mobile Phone Finder.
+ *
+ * Separate from People Search and billed per hit (5 credits when found, 0 otherwise), so it is only called
+ * where a number is actually wanted — the cold-calling fetch. Returns the number (e.g. "+13152468945") or
+ * null. Best effort: no key, no match, or an error all return null rather than throwing.
+ */
+export async function findMobilePhone(profileUrl: string): Promise<string | null> {
+  const apiKey = text(process.env.AI_ARK_API_KEY);
+  const linkedin = text(profileUrl);
+  if (!apiKey || !linkedin) return null;
+  try {
+    const response = await fetch(PHONE_ENDPOINT, {
+      method: "POST",
+      headers: { "X-TOKEN": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ linkedin }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) return null;
+    const body = object(await response.json().catch(() => ({})));
+    const data = object(body.data);
+    // Numbers arrive nested: data.data is an array of arrays, e.g. [["+1315..."]].
+    const groups = list(data.data);
+    const first = list(groups[0]);
+    const phone = text(first[0]);
+    return phone || null;
+  } catch {
+    return null;
+  }
+}
 
 export function selectAiArkPerson(
   responseValue: unknown,
