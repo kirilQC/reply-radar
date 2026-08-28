@@ -35,7 +35,7 @@ export default function ColdCallingDirectory() {
           <Crumb trail={[{ label: "Cold calling" }]} />
           <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
-        <main className="cc-shell">
+        <main className="cc-shell cc-directory-shell">
           <div className="cc-heading">
             <h1>Cold calling</h1>
             <p>Pick a client, work down their call list, and log every result.</p>

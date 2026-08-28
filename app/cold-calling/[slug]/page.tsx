@@ -4,7 +4,7 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import AppSidebar from "../../components/AppSidebar";
@@ -20,8 +20,9 @@ type CallLead = {
 type Campaign = { id: string; name: string; status: string; listSize: number; fetched: number; enriched: number; job: { status: string; leadsFetched: number; leadsEnriched: number; total: number } | null };
 
 const RESULTS = ["Connected", "Voicemail", "No answer", "Interested", "Callback", "Not interested", "Bad number", "Do not call"];
-
-const scoreClass = (score: number | null) => (score == null ? "none" : score >= 70 ? "hot" : score >= 40 ? "warm" : "cool");
+const scoreClass = (s: number | null) => (s == null ? "none" : s >= 70 ? "hot" : s >= 40 ? "warm" : "cool");
+const telHref = (p: string) => `tel:${p.replace(/[^\d+]/g, "")}`;
+const pct = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : 0);
 
 export default function ClientCallList() {
   const params = useParams<{ slug: string }>();
@@ -32,10 +33,11 @@ export default function ClientCallList() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [caller, setCaller] = useState("");
-  const [campaignsOpen, setCampaignsOpen] = useState(true);
+  const [campaignsOpen, setCampaignsOpen] = useState(false);
   const [phoneOnly, setPhoneOnly] = useState(false);
-  const [logOpen, setLogOpen] = useState<string | null>(null);
-  const [busy, setBusy] = useState("");
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = async () => {
@@ -55,30 +57,48 @@ export default function ClientCallList() {
   useEffect(() => { if (slug) void load(); }, [slug]);
   useEffect(() => { try { setCaller(localStorage.getItem("cc-caller") || ""); } catch { /* ignore */ } }, []);
 
-  // While a fetch/enrich job is running, refresh so its progress and new leads appear.
   const anyJobActive = campaigns.some((c) => c.job && c.job.status !== "done" && c.job.status !== "error");
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
-    if (anyJobActive) pollRef.current = setInterval(() => void load(), 9000);
+    if (anyJobActive) { setCampaignsOpen(true); pollRef.current = setInterval(() => void load(), 6000); }
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyJobActive, slug]);
 
-  const setCallerName = (value: string) => { setCaller(value); try { localStorage.setItem("cc-caller", value); } catch { /* ignore */ } };
+  const queue = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return leads.filter((l) => (!phoneOnly || l.phone) && (!q || `${l.name} ${l.company ?? ""} ${l.title ?? ""}`.toLowerCase().includes(q)));
+  }, [leads, phoneOnly, query]);
+
+  // Keep a valid selection: default to the top of the queue.
+  useEffect(() => {
+    if (queue.length === 0) { setSelectedId(null); return; }
+    if (!selectedId || !queue.some((l) => l.id === selectedId)) setSelectedId(queue[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue]);
+
+  const current = queue.find((l) => l.id === selectedId) ?? null;
+  const setCallerName = (v: string) => { setCaller(v); try { localStorage.setItem("cc-caller", v); } catch { /* ignore */ } };
+
+  const advance = () => {
+    const idx = queue.findIndex((l) => l.id === selectedId);
+    const next = queue[idx + 1];
+    setSelectedId(next ? next.id : selectedId);
+  };
 
   const fetchCampaign = async (c: Campaign) => {
-    setBusy(c.id);
+    setBusy(true);
     await fetch("/api/cold-calling/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug, campaignId: c.id, campaignName: c.name }) }).catch(() => {});
-    setBusy(""); await load();
+    setBusy(false); await load();
   };
 
-  const saveLog = async (leadId: string, result: string, notes: string) => {
-    setBusy(leadId);
+  const saveAndNext = async (leadId: string, result: string, notes: string, goNext: boolean) => {
+    setBusy(true);
     await fetch("/api/cold-calling/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId, caller, result, notes }) }).catch(() => {});
-    setBusy(""); setLogOpen(null); await load();
+    if (goNext) advance();
+    setBusy(false);
+    await load();
   };
-
-  const shown = phoneOnly ? leads.filter((l) => l.phone) : leads;
 
   return (
     <div className="app-shell">
@@ -88,14 +108,14 @@ export default function ClientCallList() {
           <Crumb trail={[{ label: "Cold calling", href: "/cold-calling" }, { label: client?.name || "Client" }]} />
           <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
-        <main className="cc-shell cc-shell-wide">
+        <main className="cc-shell cc-cockpit">
           {loading && <p className="cc-muted">Loading call list…</p>}
           {notFound && !loading && <div className="cc-empty">That client was not found. <Link href="/cold-calling" style={{ color: "var(--accent)" }}>Back</Link>.</div>}
 
           {client && (
             <>
               <div className="cc-client-head">
-                <div>
+                <div className="cc-client-titles">
                   <Link href="/cold-calling" className="cc-back">← All clients</Link>
                   <h1>{client.name}</h1>
                 </div>
@@ -105,74 +125,73 @@ export default function ClientCallList() {
                 </div>
               </div>
 
-              {/* Campaigns — fetch & enrich the non-repliers, one campaign at a time */}
+              {/* Campaigns — pull the non-repliers, with a live progress bar */}
               <div className="cc-campaigns">
                 <button type="button" className={`cc-campaigns-head ${campaignsOpen ? "open" : ""}`} onClick={() => setCampaignsOpen((v) => !v)}>
                   <span className="cc-caret" aria-hidden>▸</span>
                   <span>Pull leads from a campaign</span>
-                  <span className="cc-muted">{campaigns.length} campaigns</span>
+                  <span className="cc-muted">{anyJobActive ? "working…" : `${campaigns.length} campaigns`}</span>
                 </button>
                 {campaignsOpen && (
                   <div className="cc-campaign-list">
                     {campaigns.length === 0 && <p className="cc-muted" style={{ padding: "6px 2px" }}>No campaigns found for this client.</p>}
                     {campaigns.map((c) => {
                       const running = c.job && c.job.status !== "done" && c.job.status !== "error";
+                      const phase = c.job?.status === "enriching" ? "enrich" : c.job?.status === "fetching" ? "fetch" : "queue";
+                      const barPct = phase === "enrich" ? pct(c.job!.leadsEnriched, c.job!.leadsFetched || c.listSize) : phase === "fetch" ? pct(c.job!.leadsFetched, c.job!.total || c.listSize) : 4;
                       return (
-                        <div className="cc-campaign" key={c.id}>
+                        <div className={`cc-campaign ${running ? "running" : ""}`} key={c.id}>
                           <div className="cc-campaign-main">
                             <strong>{c.name}</strong>
                             <span className="cc-muted">{c.listSize} leads · {c.fetched} fetched · {c.enriched} enriched{c.status ? ` · ${c.status.toLowerCase()}` : ""}</span>
+                            {running && (
+                              <div className="cc-progress">
+                                <span className="cc-progress-bar"><i style={{ width: `${barPct}%` }} className={phase} /></span>
+                                <span className="cc-progress-label">{phase === "queue" ? "Queued…" : phase === "fetch" ? `Fetching ${c.job!.leadsFetched}/${c.job!.total || c.listSize}` : `Enriching ${c.job!.leadsEnriched}/${c.job!.leadsFetched}`}</span>
+                              </div>
+                            )}
                           </div>
-                          {running ? (
-                            <span className="cc-job">{
-                              c.job?.status === "queued" ? "Queued…"
-                                : c.job?.status === "fetching" ? `Fetching ${c.job.leadsFetched}/${c.job.total || c.listSize}…`
-                                : `Enriching ${c.job?.leadsEnriched}/${c.job?.leadsFetched}…`
-                            }</span>
-                          ) : (
-                            <button type="button" className="cc-fetch" disabled={busy === c.id} onClick={() => void fetchCampaign(c)}>{c.fetched > 0 ? "Refresh & enrich" : "Fetch & enrich"}</button>
-                          )}
+                          {!running && <button type="button" className="cc-fetch" disabled={busy} onClick={() => void fetchCampaign(c)}>{c.fetched > 0 ? "Refresh & enrich" : "Fetch & enrich"}</button>}
                         </div>
                       );
                     })}
-                    <p className="cc-note">Fetching pulls everyone in the campaign and reveals a mobile number for each (uses AI Ark credits). It runs in the background — leads appear here as they finish.</p>
+                    <p className="cc-note">Fetching pulls everyone in the campaign and reveals a mobile number for each (uses AI Ark credits). It runs in the background — leads appear as they finish.</p>
                   </div>
                 )}
               </div>
 
-              {/* The call list */}
-              <div className="cc-list-head">
-                <span>{shown.length} leads · sorted by ICP score</span>
-                <label className="cc-toggle"><input type="checkbox" checked={phoneOnly} onChange={(e) => setPhoneOnly(e.target.checked)} /> With a number only</label>
-              </div>
-
-              <div className="cc-list">
-                {shown.length === 0 && <div className="cc-empty">No leads yet. Pull a campaign above to build the list.</div>}
-                {shown.map((lead) => (
-                  <div className="cc-lead" key={lead.id}>
-                    <div className="cc-lead-main">
-                      <span className={`cc-score ${scoreClass(lead.icpScore)}`} title={lead.icpReason || undefined}>{lead.icpScore ?? "—"}</span>
-                      <div className="cc-lead-who">
-                        <strong>{lead.name}{lead.linkedin && <a className="cc-li" href={lead.linkedin} target="_blank" rel="noreferrer">in</a>}</strong>
-                        <span className="cc-lead-sub">{[lead.title, lead.company].filter(Boolean).join(" · ") || "—"}</span>
-                        <div className="cc-lead-meta">
-                          <span className={`cc-activity ${lead.replied ? "replied" : ""}`}>{lead.activity}</span>
-                          {lead.campaign && <span className="cc-chip">{lead.campaign}</span>}
-                          {lead.callCount > 0 && <span className="cc-chip done">{lead.callCount} logged</span>}
-                        </div>
-                      </div>
-                      <div className="cc-lead-right">
-                        {lead.phone ? <a className="cc-phone" href={`tel:${lead.phone.replace(/[^\d+]/g, "")}`}>{lead.phone}</a> : <span className="cc-nophone">No number</span>}
-                        <button type="button" className="cc-logbtn" onClick={() => setLogOpen(logOpen === lead.id ? null : lead.id)}>{logOpen === lead.id ? "Cancel" : "Log call"}</button>
-                      </div>
-                    </div>
-                    {lead.lastCall && logOpen !== lead.id && (
-                      <div className="cc-lastcall">Last: <b>{lead.lastCall.result || "logged"}</b>{lead.lastCall.caller ? ` by ${lead.lastCall.caller}` : ""}{lead.lastCall.notes ? ` — ${lead.lastCall.notes}` : ""}</div>
+              {leads.length === 0 ? (
+                <div className="cc-empty">No leads yet. Open “Pull leads from a campaign” above to build your list.</div>
+              ) : (
+                <div className="cc-cockpit-grid">
+                  {/* The current lead — the one you are calling */}
+                  <section className="cc-current">
+                    {current ? (
+                      <CurrentLead lead={current} caller={caller} busy={busy} onSave={(r, n, next) => void saveAndNext(current.id, r, n, next)} onSkip={advance} />
+                    ) : (
+                      <div className="cc-empty">No leads match your filter.</div>
                     )}
-                    {logOpen === lead.id && <LogForm busy={busy === lead.id} onSave={(result, notes) => void saveLog(lead.id, result, notes)} />}
-                  </div>
-                ))}
-              </div>
+                  </section>
+
+                  {/* The queue */}
+                  <aside className="cc-queue">
+                    <div className="cc-queue-head">
+                      <input className="cc-search" value={query} placeholder="Search name or company…" onChange={(e) => setQuery(e.target.value)} />
+                      <label className="cc-toggle"><input type="checkbox" checked={phoneOnly} onChange={(e) => setPhoneOnly(e.target.checked)} /> With a number</label>
+                    </div>
+                    <div className="cc-queue-count">{queue.length} in queue · by ICP score</div>
+                    <div className="cc-queue-list">
+                      {queue.map((l) => (
+                        <button type="button" key={l.id} className={`cc-queue-item ${l.id === selectedId ? "is-current" : ""} ${l.callCount > 0 ? "is-done" : ""}`} onClick={() => setSelectedId(l.id)}>
+                          <span className={`cc-qscore ${scoreClass(l.icpScore)}`}>{l.icpScore ?? "—"}</span>
+                          <span className="cc-qwho"><b>{l.name}</b><em>{[l.title, l.company].filter(Boolean).join(" · ") || "—"}</em></span>
+                          {l.callCount > 0 ? <span className="cc-qtick">✓</span> : l.phone ? <span className="cc-qphone">☎</span> : null}
+                        </button>
+                      ))}
+                    </div>
+                  </aside>
+                </div>
+              )}
             </>
           )}
         </main>
@@ -181,19 +200,52 @@ export default function ClientCallList() {
   );
 }
 
-function LogForm({ onSave, busy }: { onSave: (result: string, notes: string) => void; busy: boolean }) {
+function CurrentLead({ lead, caller, busy, onSave, onSkip }: { lead: CallLead; caller: string; busy: boolean; onSave: (result: string, notes: string, next: boolean) => void; onSkip: () => void }) {
   const [result, setResult] = useState("");
   const [notes, setNotes] = useState("");
+  // Reset the form whenever the lead changes.
+  useEffect(() => { setResult(""); setNotes(""); }, [lead.id]);
+
   return (
-    <div className="cc-logform">
-      <div className="cc-results">
-        {RESULTS.map((r) => (
-          <button type="button" key={r} className={`cc-result ${result === r ? "is-on" : ""}`} onClick={() => setResult(r)}>{r}</button>
-        ))}
+    <div className="cc-current-inner">
+      <div className="cc-current-top">
+        <span className={`cc-score-lg ${scoreClass(lead.icpScore)}`}>{lead.icpScore ?? "—"}</span>
+        <div className="cc-current-id">
+          <h2>{lead.name}{lead.linkedin && <a className="cc-li" href={lead.linkedin} target="_blank" rel="noreferrer">in</a>}</h2>
+          <p>{[lead.title, lead.company].filter(Boolean).join(" · ") || "Role and company not recorded"}</p>
+          <div className="cc-current-meta">
+            <span className={`cc-activity ${lead.replied ? "replied" : ""}`}>{lead.activity}</span>
+            {lead.campaign && <span className="cc-chip">{lead.campaign}</span>}
+            {lead.callCount > 0 && <span className="cc-chip done">{lead.callCount} call{lead.callCount === 1 ? "" : "s"} logged</span>}
+          </div>
+        </div>
       </div>
-      <textarea value={notes} placeholder="What happened on the call…" rows={2} onChange={(e) => setNotes(e.target.value)} />
-      <div className="cc-logform-actions">
-        <button type="button" className="cc-save" disabled={busy || (!result && !notes.trim())} onClick={() => onSave(result, notes)}>{busy ? "Saving…" : "Save call"}</button>
+
+      <div className="cc-phone-row">
+        {lead.phone ? (
+          <a className="cc-phone-lg" href={telHref(lead.phone)}>☎ {lead.phone}</a>
+        ) : (
+          <span className="cc-nophone-lg">No phone number for this lead</span>
+        )}
+      </div>
+
+      {lead.icpReason && <p className="cc-reason"><b>Why this score:</b> {lead.icpReason}</p>}
+      {lead.lastCall && (
+        <div className="cc-lastcall">Last call: <b>{lead.lastCall.result || "logged"}</b>{lead.lastCall.caller ? ` by ${lead.lastCall.caller}` : ""}{lead.lastCall.notes ? ` — “${lead.lastCall.notes}”` : ""}</div>
+      )}
+
+      <div className="cc-logblock">
+        <div className="cc-log-label">Log the result{caller ? ` · as ${caller}` : ""}</div>
+        <div className="cc-results">
+          {RESULTS.map((r) => (
+            <button type="button" key={r} className={`cc-result ${result === r ? "is-on" : ""}`} onClick={() => setResult((cur) => (cur === r ? "" : r))}>{r}</button>
+          ))}
+        </div>
+        <textarea value={notes} placeholder="What happened on the call…" rows={3} onChange={(e) => setNotes(e.target.value)} />
+        <div className="cc-log-actions">
+          <button type="button" className="cc-skip" onClick={onSkip}>Skip →</button>
+          <button type="button" className="cc-savenext" disabled={busy || (!result && !notes.trim())} onClick={() => onSave(result, notes, true)}>{busy ? "Saving…" : "Save & next →"}</button>
+        </div>
       </div>
     </div>
   );
