@@ -124,7 +124,11 @@ export default function ClientCallList() {
                             <span className="cc-muted">{c.listSize} leads · {c.fetched} fetched · {c.enriched} enriched{c.status ? ` · ${c.status.toLowerCase()}` : ""}</span>
                           </div>
                           {running ? (
-                            <span className="cc-job">{c.job?.status === "fetching" ? `Fetching ${c.job.leadsFetched}/${c.job.total || c.listSize}…` : `Enriching ${c.job?.leadsEnriched}/${c.job?.leadsFetched}…`}</span>
+                            <span className="cc-job">{
+                              c.job?.status === "queued" ? "Queued…"
+                                : c.job?.status === "fetching" ? `Fetching ${c.job.leadsFetched}/${c.job.total || c.listSize}…`
+                                : `Enriching ${c.job?.leadsEnriched}/${c.job?.leadsFetched}…`
+                            }</span>
                           ) : (
                             <button type="button" className="cc-fetch" disabled={busy === c.id} onClick={() => void fetchCampaign(c)}>{c.fetched > 0 ? "Refresh & enrich" : "Fetch & enrich"}</button>
                           )}
