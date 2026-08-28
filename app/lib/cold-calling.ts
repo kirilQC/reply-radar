@@ -144,15 +144,16 @@ export async function listCampaigns(slug: string): Promise<{ ok: boolean; error?
   const [page, jobs, leads] = await Promise.all([
     heyreachCampaigns(ws.apiKey, 300).catch(() => ({ items: [], total: 0 })),
     rows(url, key, `rr_cold_call_jobs?select=campaign_id,status,leads_fetched,leads_enriched,total_leads,error&workspace_id=eq.${encodeURIComponent(ws.id)}&order=created_at.desc`),
-    rows(url, key, `rr_leads?select=phone,cold_campaign,cold_enriched&workspace_id=eq.${encodeURIComponent(ws.id)}&cold_campaign=not.is.null&limit=8000`),
+    rows(url, key, `rr_leads?select=phone,cold_campaign,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&cold_campaign=not.is.null&limit=8000`),
   ]);
   const fetchedByCampaign = new Map<string, { fetched: number; enriched: number }>();
   for (const lead of leads) {
     const cid = str(lead.cold_campaign);
     if (!cid) continue;
+    const enrichedFlag = obj(obj(obj(lead.raw_data).reply_radar).cold_call).enriched === true;
     const entry = fetchedByCampaign.get(cid) ?? { fetched: 0, enriched: 0 };
     entry.fetched += 1;
-    if (orNull(lead.phone) || lead.cold_enriched === true) entry.enriched += 1;
+    if (orNull(lead.phone) || enrichedFlag) entry.enriched += 1;
     fetchedByCampaign.set(cid, entry);
   }
   // Newest job per campaign (jobs come newest-first), so an errored or finished run still surfaces.
@@ -324,25 +325,15 @@ export async function processColdCallJobs(origin: string, deadlineMs: number): P
       }
     }
 
-    // ── Enrich phase: profile + phone + ICP for each fetched lead that has not been done yet. ──
+    // ── Enrich phase: profile + phone + ICP for every tagged lead, walked by POSITION. ──
+    // Paging by offset (not by an "is this enriched" filter) is bulletproof: the tagged set is stable during
+    // enrichment, so `offset = leads_enriched` is always the next lead to do, and a lead that yields no phone
+    // is still counted so it is never retried. This sidesteps the generated boolean column entirely.
     if (status === "enriching") {
       let enriched = num(job.leads_enriched);
-      let firstPass = true;
       while (Date.now() < deadlineMs) {
-        const batch = await rows(url, key, `rr_leads?select=id,name,company,linkedin_profile_url,icp_score,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}&cold_enriched=is.null&limit=${ENRICH_BATCH}`);
-        if (!batch.length) {
-          // Nothing to enrich on the very first pass with nothing done yet is unexpected — say why, so a
-          // column/marker mismatch is visible in the UI instead of a silent "0 enriched".
-          if (firstPass && enriched === 0) {
-            const tagged = await rows(url, key, `rr_leads?select=id&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}&limit=200`);
-            const anyCold = await rows(url, key, `rr_leads?select=id&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=not.is.null&limit=200`);
-            await patchJob({ status: "done", error: `Nothing to enrich. Leads tagged for THIS campaign: ${tagged.length}; cold-tagged leads in this client: ${anyCold.length}; job campaign_id="${str(job.campaign_id)}". ${tagged.length === 0 && anyCold.length === 0 ? "→ cold_campaign is empty for every lead (generated column not populating from raw_data)." : tagged.length === 0 ? "→ leads carry a DIFFERENT campaign id than the job — refetch this campaign." : "→ all tagged leads already marked enriched."}` });
-            return { processed: true, status: "done" };
-          }
-          await patchJob({ status: "done" });
-          return { processed: true, status: "done" };
-        }
-        firstPass = false;
+        const batch = await rows(url, key, `rr_leads?select=id,name,company,linkedin_profile_url,icp_score,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}&order=created_at.asc,id.asc&offset=${enriched}&limit=${ENRICH_BATCH}`);
+        if (!batch.length) { await patchJob({ status: "done", error: null }); return { processed: true, status: "done" }; }
         await Promise.all(batch.map((lead) => enrichColdLead(url, key, origin, workspace, lead)));
         enriched += batch.length;
         await patchJob({ leads_enriched: enriched });
