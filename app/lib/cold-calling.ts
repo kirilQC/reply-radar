@@ -139,16 +139,15 @@ export async function listCampaigns(slug: string): Promise<{ ok: boolean; error?
   const [page, jobs, leads] = await Promise.all([
     heyreachCampaigns(ws.apiKey, 300).catch(() => ({ items: [], total: 0 })),
     rows(url, key, `rr_cold_call_jobs?select=campaign_id,status,leads_fetched,leads_enriched,total_leads&workspace_id=eq.${encodeURIComponent(ws.id)}&status=in.(queued,fetching,enriching)`),
-    rows(url, key, `rr_leads?select=phone,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&raw_data->reply_radar->cold_call->>campaignId=not.is.null&limit=5000`),
+    rows(url, key, `rr_leads?select=phone,cold_campaign,cold_enriched&workspace_id=eq.${encodeURIComponent(ws.id)}&cold_campaign=not.is.null&limit=8000`),
   ]);
   const fetchedByCampaign = new Map<string, { fetched: number; enriched: number }>();
   for (const lead of leads) {
-    const cold = obj(obj(obj(lead.raw_data).reply_radar).cold_call);
-    const cid = str(cold.campaignId);
+    const cid = str(lead.cold_campaign);
     if (!cid) continue;
     const entry = fetchedByCampaign.get(cid) ?? { fetched: 0, enriched: 0 };
     entry.fetched += 1;
-    if (orNull(lead.phone) || cold.enriched) entry.enriched += 1;
+    if (orNull(lead.phone) || lead.cold_enriched === true) entry.enriched += 1;
     fetchedByCampaign.set(cid, entry);
   }
   const jobByCampaign = new Map(jobs.map((j) => [str(j.campaign_id), j]));
@@ -316,7 +315,7 @@ export async function processColdCallJobs(origin: string, deadlineMs: number): P
     if (status === "enriching") {
       let enriched = num(job.leads_enriched);
       while (Date.now() < deadlineMs) {
-        const batch = await rows(url, key, `rr_leads?select=id,name,company,linkedin_profile_url,icp_score,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&raw_data->reply_radar->cold_call->>campaignId=eq.${encodeURIComponent(str(job.campaign_id))}&raw_data->reply_radar->cold_call->>enriched=is.null&limit=${ENRICH_BATCH}`);
+        const batch = await rows(url, key, `rr_leads?select=id,name,company,linkedin_profile_url,icp_score,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}&cold_enriched=is.null&limit=${ENRICH_BATCH}`);
         if (!batch.length) { await patchJob({ status: "done" }); return { processed: true, status: "done" }; }
         await Promise.all(batch.map((lead) => enrichColdLead(url, key, origin, workspace, lead)));
         enriched += batch.length;

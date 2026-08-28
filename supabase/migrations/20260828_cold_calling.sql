@@ -8,6 +8,13 @@
 -- The mobile number AI Ark returned for a lead, projected out of raw_data for easy querying.
 alter table rr_leads add column if not exists phone text generated always as (raw_data->'reply_radar'->>'phone') stored;
 
+-- The cold-call campaign a lead was pulled in for, and whether it has been enriched, projected out of raw_data
+-- as real columns. Filtering the enrichment pipeline on a deeply-nested JSON path is unreliable in PostgREST;
+-- these generated columns make "this campaign's not-yet-enriched leads" a plain, indexable query.
+alter table rr_leads add column if not exists cold_campaign text generated always as (raw_data->'reply_radar'->'cold_call'->>'campaignId') stored;
+alter table rr_leads add column if not exists cold_enriched boolean generated always as ((raw_data->'reply_radar'->'cold_call'->>'enriched')::boolean) stored;
+create index if not exists rr_leads_cold_campaign_idx on rr_leads(cold_campaign);
+
 -- One row per logged call: who called, the outcome, and their notes.
 create table if not exists rr_call_logs (
   id uuid primary key default gen_random_uuid(),
