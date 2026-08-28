@@ -150,7 +150,7 @@ export default function ClientCallList() {
                                 <span className="cc-progress-label">{phase === "queue" ? "Queued…" : phase === "fetch" ? `Fetching ${c.job!.leadsFetched}/${c.job!.total || c.listSize}` : `Enriching ${c.job!.leadsEnriched}/${c.job!.leadsFetched}`}</span>
                               </div>
                             )}
-                            {c.job?.status === "error" && c.job.error && <div className="cc-campaign-error">⚠ {c.job.error}</div>}
+                            {!running && c.job?.error && <div className="cc-campaign-error">⚠ {c.job.error}</div>}
                           </div>
                           {!running && <button type="button" className="cc-fetch" disabled={busy} onClick={() => void fetchCampaign(c)}>{c.fetched > 0 ? "Refresh & enrich" : "Fetch & enrich"}</button>}
                         </div>
