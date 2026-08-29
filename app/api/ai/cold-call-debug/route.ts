@@ -7,8 +7,9 @@
 import { NextResponse } from "next/server";
 import { findMobilePhone } from "../../../lib/ai-ark-enrichment";
 import { isAiArkEnrichmentEnabled } from "../../../lib/lead-identity";
+import { startCampaignFetch, processColdCallJobs } from "../../../lib/cold-calling";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
@@ -45,6 +46,29 @@ export async function GET(request: Request) {
   const workspace = Array.isArray(ws.json) ? (ws.json as Record<string, unknown>[])[0] : null;
   if (!workspace) return NextResponse.json({ ok: false, step: "resolve workspace", ws, env });
   const workspaceId = String(workspace.id);
+
+  const action = (params.get("action") ?? "").trim();
+  const jobFilter = `workspace_id=eq.${encodeURIComponent(workspaceId)}${campaignId ? `&campaign_id=eq.${encodeURIComponent(campaignId)}` : ""}`;
+
+  // ?action=jobs → dump the recent job rows so their status/error/counts are visible.
+  if (action === "jobs") {
+    const jobs = await q(`rr_cold_call_jobs?select=*&${jobFilter}&order=created_at.desc&limit=10`);
+    return NextResponse.json({ ok: true, env, workspaceId, jobs: jobs.json });
+  }
+
+  // ?action=run → run the REAL job pipeline synchronously and report each step + the final job row.
+  if (action === "run") {
+    const started = await startCampaignFetch(slug, campaignId, "debug run");
+    const origin = new URL(request.url).origin;
+    const steps: unknown[] = [];
+    for (let i = 0; i < 30; i++) {
+      const r = await processColdCallJobs(origin, Date.now() + 45_000);
+      steps.push(r);
+      if (!r.processed || r.status === "done" || r.status === "error") break;
+    }
+    const jobs = await q(`rr_cold_call_jobs?select=id,status,error,leads_fetched,leads_enriched,total_leads,created_at&${jobFilter}&order=created_at.desc&limit=3`);
+    return NextResponse.json({ ok: true, env, started, steps, jobs: jobs.json });
+  }
 
   // How many leads are tagged for this campaign (the exact filter the enricher uses).
   const tagFilter = campaignId ? `&cold_campaign=eq.${encodeURIComponent(campaignId)}` : "&cold_campaign=not.is.null";
