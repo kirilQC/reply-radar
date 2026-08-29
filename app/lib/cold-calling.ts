@@ -337,24 +337,27 @@ export async function processColdCallJobs(origin: string, deadlineMs: number): P
     // enrichment, so `offset = leads_enriched` is always the next lead to do, and a lead that yields no phone
     // is still counted so it is never retried. This sidesteps the generated boolean column entirely.
     if (status === "enriching") {
+      // Walk the tagged leads by an id cursor (id is immutable, so paging stays stable across the writes we
+      // make). Single-column order + `id=gt.` — no offset, no multi-column order (that combination came back
+      // empty). Already-enriched leads are skipped in code, so a resume from the start costs no credits.
       let enriched = num(job.leads_enriched);
+      let cursor = "";
+      let scanned = 0;
       while (Date.now() < deadlineMs) {
-        const batch = await rows(url, key, `rr_leads?select=id,name,company,linkedin_profile_url,icp_score,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}&order=created_at.asc,id.asc&offset=${enriched}&limit=${ENRICH_BATCH}`);
-        if (!batch.length) {
-          if (enriched === 0) {
-            const tagged = await rows(url, key, `rr_leads?select=id&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}&limit=1`);
-            await patchJob({ status: "done", error: tagged.length ? `Enrich returned nothing at offset 0 though leads are tagged — ordering/offset problem.` : `No leads tagged for campaign ${str(job.campaign_id)}.` });
-            return { processed: true, status: "done" };
-          }
-          await patchJob({ status: "done", error: null });
-          return { processed: true, status: "done" };
+        const after = cursor ? `&id=gt.${encodeURIComponent(cursor)}` : "";
+        const batch = await rows(url, key, `rr_leads?select=id,name,company,linkedin_profile_url,icp_score,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}${after}&order=id.asc&limit=${ENRICH_BATCH}`);
+        if (!batch.length) { await patchJob({ status: "done", error: null }); return { processed: true, status: "done" }; }
+        cursor = str(batch[batch.length - 1].id);
+        scanned += batch.length;
+        const todo = batch.filter((lead) => obj(obj(obj(lead.raw_data).reply_radar).cold_call).enriched !== true);
+        if (todo.length) {
+          const outcomes = await Promise.all(todo.map((lead) => enrichColdLead(url, key, origin, workspace, lead).then(() => "").catch((e) => (e instanceof Error ? e.message : String(e)))));
+          const firstErr = outcomes.find(Boolean);
+          if (firstErr && enriched === 0) { await patchJob({ status: "error", error: `Enrichment failed: ${firstErr}`.slice(0, 400) }); return { processed: true, status: "error" }; }
+          enriched += todo.filter((_, i) => !outcomes[i]).length;
+          await patchJob({ leads_enriched: enriched });
         }
-        // Surface the first real enrichment failure instead of finishing silently at 0.
-        const outcomes = await Promise.all(batch.map((lead) => enrichColdLead(url, key, origin, workspace, lead).then(() => "").catch((e) => (e instanceof Error ? e.message : String(e)))));
-        const firstErr = outcomes.find(Boolean);
-        if (firstErr && enriched === 0) { await patchJob({ status: "error", error: `Enrichment failed: ${firstErr}`.slice(0, 400) }); return { processed: true, status: "error" }; }
-        enriched += batch.length;
-        await patchJob({ leads_enriched: enriched });
+        void scanned;
       }
     }
     return { processed: true, status };
