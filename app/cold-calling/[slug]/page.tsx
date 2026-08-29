@@ -14,20 +14,37 @@ import "../../cold-calling.css";
 
 type CallLead = {
   id: string; name: string; title: string | null; company: string | null; linkedin: string | null;
-  phone: string | null; icpScore: number | null; icpReason: string | null; replied: boolean;
+  phone: string | null; photoUrl: string | null; companyLogoUrl: string | null;
+  icpScore: number | null; icpReason: string | null; replied: boolean;
   campaign: string | null; activity: string; lastCall: { caller: string | null; result: string | null; notes: string | null; at: string } | null; callCount: number;
 };
+type Client = { name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Campaign = { id: string; name: string; status: string; listSize: number; fetched: number; enriched: number; job: { status: string; leadsFetched: number; leadsEnriched: number; total: number; error: string | null } | null };
 
 const RESULTS = ["Connected", "Voicemail", "No answer", "Interested", "Callback", "Not interested", "Bad number", "Do not call"];
 const scoreClass = (s: number | null) => (s == null ? "none" : s >= 70 ? "hot" : s >= 40 ? "warm" : "cool");
 const telHref = (p: string) => `tel:${p.replace(/[^\d+]/g, "")}`;
 const pct = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : 0);
+const initials = (s: string) => (s.trim()[0] || "?").toUpperCase();
+
+/** A lead's photo (or a monogram fallback), with the company logo tucked into the corner. */
+function LeadAvatar({ lead, size }: { lead: CallLead; size: "lg" | "sm" }) {
+  return (
+    <span className={`cc-avatar cc-avatar-${size}`}>
+      {lead.photoUrl
+        ? <img className="cc-avatar-photo" src={lead.photoUrl} alt="" loading="lazy" />
+        : <span className="cc-avatar-mono">{initials(lead.name)}</span>}
+      {lead.companyLogoUrl
+        ? <img className="cc-avatar-co" src={lead.companyLogoUrl} alt="" loading="lazy" />
+        : lead.company ? <span className="cc-avatar-co cc-avatar-co-mono">{initials(lead.company)}</span> : null}
+    </span>
+  );
+}
 
 export default function ClientCallList() {
   const params = useParams<{ slug: string }>();
   const slug = String(params?.slug ?? "");
-  const [client, setClient] = useState<{ name: string; slug: string } | null>(null);
+  const [client, setClient] = useState<Client | null>(null);
   const [leads, setLeads] = useState<CallLead[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,7 +134,12 @@ export default function ClientCallList() {
               <div className="cc-client-head">
                 <div className="cc-client-titles">
                   <Link href="/cold-calling" className="cc-back">← All clients</Link>
-                  <h1>{client.name}</h1>
+                  <div className="cc-client-name-row">
+                    <span className="cc-client-logo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>
+                      {client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}
+                    </span>
+                    <h1>{client.name}</h1>
+                  </div>
                 </div>
                 <div className="cc-head-actions">
                   <label className="cc-caller">Calling as<input value={caller} placeholder="Your name" onChange={(e) => setCallerName(e.target.value)} /></label>
@@ -184,9 +206,9 @@ export default function ClientCallList() {
                     <div className="cc-queue-list">
                       {queue.map((l) => (
                         <button type="button" key={l.id} className={`cc-queue-item ${l.id === selectedId ? "is-current" : ""} ${l.callCount > 0 ? "is-done" : ""}`} onClick={() => setSelectedId(l.id)}>
-                          <span className={`cc-qscore ${scoreClass(l.icpScore)}`}>{l.icpScore ?? "—"}</span>
-                          <span className="cc-qwho"><b>{l.name}</b><em>{[l.title, l.company].filter(Boolean).join(" · ") || "—"}</em></span>
-                          {l.callCount > 0 ? <span className="cc-qtick">✓</span> : l.phone ? <span className="cc-qphone">☎</span> : null}
+                          <LeadAvatar lead={l} size="sm" />
+                          <span className="cc-qwho"><b>{l.name}</b><em>{l.company || l.title || "—"}</em></span>
+                          {l.callCount > 0 ? <span className="cc-qtick">✓</span> : <span className={`cc-qscore ${scoreClass(l.icpScore)}`}>{l.icpScore ?? "—"}</span>}
                         </button>
                       ))}
                     </div>
@@ -210,10 +232,20 @@ function CurrentLead({ lead, caller, busy, onSave, onSkip }: { lead: CallLead; c
   return (
     <div className="cc-current-inner">
       <div className="cc-current-top">
-        <span className={`cc-score-lg ${scoreClass(lead.icpScore)}`}>{lead.icpScore ?? "—"}</span>
+        <span className={`cc-hero-avatar ring-${scoreClass(lead.icpScore)}`}>
+          {lead.photoUrl
+            ? <img className="cc-hero-photo" src={lead.photoUrl} alt="" />
+            : <span className="cc-hero-mono">{initials(lead.name)}</span>}
+          <span className={`cc-hero-icp ${scoreClass(lead.icpScore)}`}>{lead.icpScore ?? "—"}</span>
+        </span>
         <div className="cc-current-id">
           <h2>{lead.name}{lead.linkedin && <a className="cc-li" href={lead.linkedin} target="_blank" rel="noreferrer">in</a>}</h2>
-          <p>{[lead.title, lead.company].filter(Boolean).join(" · ") || "Role and company not recorded"}</p>
+          <p className="cc-current-role">
+            {lead.companyLogoUrl
+              ? <img className="cc-role-logo" src={lead.companyLogoUrl} alt="" />
+              : lead.company ? <span className="cc-role-logo cc-role-logo-mono">{initials(lead.company)}</span> : null}
+            <span>{[lead.title, lead.company].filter(Boolean).join(" · ") || "Role and company not recorded"}</span>
+          </p>
           <div className="cc-current-meta">
             <span className={`cc-activity ${lead.replied ? "replied" : ""}`}>{lead.activity}</span>
             {lead.campaign && <span className="cc-chip">{lead.campaign}</span>}

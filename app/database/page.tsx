@@ -1001,6 +1001,11 @@ function LeadOverview({
             href={companyLinkedIn}
             text="Open company on LinkedIn ↗"
           />
+          <PhoneField
+            leadId={String(detail.lead.id ?? "")}
+            initialPhone={text(metadata.phone)}
+            hasProfile={Boolean(profileUrl)}
+          />
         </div>
         {Array.isArray(raw.tags) && raw.tags.length > 0 && (
           <ReadableTags title="HeyReach tags" items={raw.tags.map(String)} />
@@ -1116,6 +1121,46 @@ function LeadOverview({
           )}
         </section>
       )}
+    </div>
+  );
+}
+
+/**
+ * The phone number field + its own enrich button. Reveals a single lead's mobile from AI Ark (5 credits,
+ * only when a number is found) and stores it in the same place every surface reads — raw_data.reply_radar.phone.
+ * Shows the stored number when we already have one, and never re-charges for it.
+ */
+function PhoneField({ leadId, initialPhone, hasProfile }: { leadId: string; initialPhone: string; hasProfile: boolean }) {
+  const [phone, setPhone] = useState(initialPhone);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  useEffect(() => { setPhone(initialPhone); setNote(""); }, [leadId, initialPhone]);
+
+  const enrich = async () => {
+    if (busy || !leadId) return;
+    setBusy(true); setNote("");
+    const response = await fetch("/api/ai/phone-enrich", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId }) }).catch(() => null);
+    const payload = await response?.json().catch(() => ({}));
+    setBusy(false);
+    if (response?.ok && payload?.phone) { setPhone(String(payload.phone)); setNote(payload.cached ? "Already on file" : "Found"); setTimeout(() => setNote(""), 4000); }
+    else if (response?.ok) { setNote(String(payload?.message ?? "No number found")); }
+    else { setNote(String(payload?.error ?? "Lookup failed")); }
+  };
+
+  return (
+    <div>
+      <strong className="database-field-label">Phone number</strong>
+      <div className="database-phone-field">
+        {phone
+          ? <a className="database-phone-value" href={`tel:${phone.replace(/[^\d+]/g, "")}`}>{phone}</a>
+          : <span className="database-field-value">{busy ? "Looking up…" : "—"}</span>}
+        {!phone && (
+          <button type="button" className="database-phone-enrich" onClick={enrich} disabled={busy || !hasProfile} title={hasProfile ? "Find this lead's mobile via AI Ark (5 credits)" : "Needs a LinkedIn profile URL"}>
+            {busy ? "Enriching…" : "Enrich"}
+          </button>
+        )}
+        {note && <span className="database-phone-note">{note}</span>}
+      </div>
     </div>
   );
 }

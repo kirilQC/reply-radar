@@ -56,12 +56,12 @@ async function columnExists(url: string, key: string, table: string, column: str
 }
 
 /** The HeyReach key + identity for a client, or null. */
-async function workspaceFor(slug: string): Promise<{ id: string; name: string; slug: string; apiKey: string; brief: string } | null> {
+async function workspaceFor(slug: string): Promise<{ id: string; name: string; slug: string; apiKey: string; brief: string; logoUrl: string | null; accentColor: string | null } | null> {
   const { url, key } = config();
   if (!url || !key) return null;
-  const w = (await rows(url, key, `rr_workspaces?select=id,name,slug,client_brief,heyreach_api_key_ciphertext&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
+  const w = (await rows(url, key, `rr_workspaces?select=id,name,slug,client_brief,logo_url,accent_color,heyreach_api_key_ciphertext&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
   if (!w) return null;
-  return { id: str(w.id), name: str(w.name), slug: str(w.slug), apiKey: str(w.heyreach_api_key_ciphertext), brief: str(w.client_brief) };
+  return { id: str(w.id), name: str(w.name), slug: str(w.slug), apiKey: str(w.heyreach_api_key_ciphertext), brief: str(w.client_brief), logoUrl: orNull(w.logo_url), accentColor: orNull(w.accent_color) };
 }
 
 // ── Directory ──────────────────────────────────────────────────────────────────────────────────────
@@ -106,7 +106,8 @@ function isCallable(lead: Row): boolean {
 
 export type CallLead = {
   id: string; name: string; title: string | null; company: string | null; linkedin: string | null;
-  phone: string | null; icpScore: number | null; icpReason: string | null; replied: boolean;
+  phone: string | null; photoUrl: string | null; companyLogoUrl: string | null;
+  icpScore: number | null; icpReason: string | null; replied: boolean;
   campaign: string | null; activity: string; lastCall: { caller: string | null; result: string | null; notes: string | null; at: string } | null; callCount: number;
 };
 
@@ -125,6 +126,9 @@ function callLeadFromRow(lead: Row, logs: Row[]): CallLead {
     company: orNull(lead.company),
     linkedin: orNull(lead.linkedin_profile_url),
     phone: orNull(lead.phone),
+    // The AI Ark enrichment persists both of these; fall back to null so the UI shows a monogram instead.
+    photoUrl: orNull(enrichment.profilePhotoUrl),
+    companyLogoUrl: orNull(enrichment.companyPhotoUrl),
     // Read the score straight from raw_data — the icp_score/icp_reason generated columns don't exist on
     // every database, and selecting a missing column 400s the whole query.
     icpScore: rr.icp_score === null || rr.icp_score === undefined ? null : num(rr.icp_score),
@@ -138,7 +142,7 @@ function callLeadFromRow(lead: Row, logs: Row[]): CallLead {
 }
 
 /** A client's callable leads, sorted by ICP score (highest first), with call history attached. */
-export async function getCallList(slug: string): Promise<{ ok: boolean; error?: string; client?: { name: string; slug: string }; leads?: CallLead[] }> {
+export async function getCallList(slug: string): Promise<{ ok: boolean; error?: string; client?: { name: string; slug: string; logoUrl: string | null; accentColor: string | null }; leads?: CallLead[] }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const ws = await workspaceFor(slug);
@@ -148,7 +152,7 @@ export async function getCallList(slug: string): Promise<{ ok: boolean; error?: 
   // Sort by ICP score (highest first, unscored last) in code — the icp_score column isn't guaranteed to exist.
   const callable = leads.filter(isCallable).map((lead) => callLeadFromRow(lead, logs))
     .sort((a, b) => (b.icpScore ?? -1) - (a.icpScore ?? -1));
-  return { ok: true, client: { name: ws.name, slug: ws.slug }, leads: callable };
+  return { ok: true, client: { name: ws.name, slug: ws.slug, logoUrl: ws.logoUrl, accentColor: ws.accentColor }, leads: callable };
 }
 
 // ── Campaigns + fetch jobs ───────────────────────────────────────────────────────────────────────
@@ -280,7 +284,10 @@ async function enrichColdLead(url: string, key: string, origin: string, workspac
   if (Object.keys(enrichment).length === 0 && profileUrl && isAiArkEnrichmentEnabled()) {
     enrichment = (await enrichLeadWithAiArk({ url, key }, workspace.id, profileUrl, str(lead.company)).catch(() => null)) as Row ?? {};
   }
-  const phone = profileUrl ? await findMobilePhone(profileUrl) : null;
+  // Credit-saver: if this lead already has a phone (found on any earlier enrichment, cold-calling or the
+  // lead database button), keep it and DON'T call the phone finder again — that call costs AI Ark credits.
+  const existingPhone = orNull(rr.phone);
+  const phone = existingPhone ?? (profileUrl ? await findMobilePhone(profileUrl) : null);
 
   const nextRr: Row = { ...rr, cold_call: { ...obj(rr.cold_call), enriched: true } };
   if (Object.keys(enrichment).length > 0) { nextRr.ai_ark = enrichment; nextRr.enrichment_status = "enriched"; }
@@ -371,7 +378,12 @@ export async function processColdCallJobs(origin: string, deadlineMs: number): P
         if (!batch.length) { await patchJob({ status: "done", error: null }); return { processed: true, status: "done" }; }
         cursor = str(batch[batch.length - 1].id);
         scanned += batch.length;
-        const todo = batch.filter((lead) => obj(obj(obj(lead.raw_data).reply_radar).cold_call).enriched !== true);
+        // Skip leads already handled: marked enriched, or already carrying a phone from any prior enrichment.
+        // Keeps AI Ark credit spend to genuinely new leads.
+        const todo = batch.filter((lead) => {
+          const leadRr = obj(obj(lead.raw_data).reply_radar);
+          return obj(leadRr.cold_call).enriched !== true && !orNull(leadRr.phone);
+        });
         if (todo.length) {
           const outcomes = await Promise.all(todo.map((lead) => enrichColdLead(url, key, origin, workspace, lead).then(() => "").catch((e) => (e instanceof Error ? e.message : String(e)))));
           const firstErr = outcomes.find(Boolean);
