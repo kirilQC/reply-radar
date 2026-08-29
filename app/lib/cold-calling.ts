@@ -40,6 +40,15 @@ async function rows(url: string, key: string, path: string): Promise<Row[]> {
   const body = await response.json().catch(() => []);
   return Array.isArray(body) ? (body as Row[]) : [];
 }
+/** A cheap exact row count via PostgREST's Content-Range header — no rows transferred. */
+async function count(url: string, key: string, path: string): Promise<number> {
+  const response = await fetch(`${url}/rest/v1/${path}`, {
+    headers: { ...headers(key), Prefer: "count=exact", Range: "0-0", "Range-Unit": "items" }, cache: "no-store",
+  }).catch(() => null);
+  if (!response) return 0;
+  const total = (response.headers.get("content-range") || "").split("/")[1];
+  return total && total !== "*" ? Number(total) || 0 : 0;
+}
 /** Whether a column exists — used to fail an enrich job loudly if the migration's generated columns are absent. */
 async function columnExists(url: string, key: string, table: string, column: string): Promise<boolean> {
   const response = await fetch(`${url}/rest/v1/${table}?select=${column}&limit=1`, { headers: headers(key), cache: "no-store" }).catch(() => null);
@@ -65,16 +74,20 @@ export async function listColdCallClients(): Promise<ColdCallClient[]> {
   if (!url || !key) return [];
   const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,heyreach_api_key_ciphertext&order=name.asc`))
     .filter((w) => str(w.name).trim() && str(w.heyreach_api_key_ciphertext).trim());
-  const out: ColdCallClient[] = [];
-  for (const w of workspaces) {
+  // Count with cheap header-only queries — pulling every lead's raw_data across all clients times out.
+  // "Callable" ≈ has a phone or was pulled in for cold calling (cold_campaign is set); both are real columns.
+  const out = await Promise.all(workspaces.map(async (w) => {
     const id = str(w.id);
-    const leads = await rows(url, key, `rr_leads?select=phone,raw_data&workspace_id=eq.${encodeURIComponent(id)}&limit=5000`);
-    const callable = leads.filter((l) => isCallable(l));
-    out.push({
+    const base = `rr_leads?workspace_id=eq.${encodeURIComponent(id)}`;
+    const [callable, withPhone] = await Promise.all([
+      count(url, key, `${base}&or=(phone.not.is.null,cold_campaign.not.is.null)`),
+      count(url, key, `${base}&phone=not.is.null`),
+    ]);
+    return {
       id, name: str(w.name), slug: str(w.slug), logoUrl: orNull(w.logo_url), accentColor: orNull(w.accent_color),
-      callable: callable.length, withPhone: callable.filter((l) => orNull(l.phone)).length,
-    });
-  }
+      callable, withPhone,
+    };
+  }));
   return out;
 }
 
