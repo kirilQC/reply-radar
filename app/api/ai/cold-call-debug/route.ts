@@ -75,11 +75,19 @@ export async function GET(request: Request) {
   const tagCount = await q(`rr_leads?select=id&workspace_id=eq.${encodeURIComponent(workspaceId)}${tagFilter}&limit=200`);
   const tagged = Array.isArray(tagCount.json) ? tagCount.json.length : 0;
 
+  // Compare the exact enricher SELECT against a minimal one — a 400 on one column is the whole bug.
+  const base = `workspace_id=eq.${encodeURIComponent(workspaceId)}${tagFilter}&order=id.asc&limit=4`;
+  const selectTests: Record<string, unknown> = {};
+  for (const sel of ["id", "id,name,company,linkedin_profile_url,icp_score,raw_data", "id,company", "id,icp_score", "id,linkedin_profile_url,raw_data"]) {
+    const r = await q(`rr_leads?select=${encodeURIComponent(sel)}&${base}`);
+    selectTests[sel] = { status: r.status, ok: r.ok, count: Array.isArray(r.json) ? r.json.length : 0, err: r.ok ? undefined : r.json };
+  }
+
   // The exact enrich batch query (id-cursor form).
   const batch = await q(`rr_leads?select=id,name,linkedin_profile_url,phone,raw_data&workspace_id=eq.${encodeURIComponent(workspaceId)}${tagFilter}&order=id.asc&limit=1`);
   const lead = Array.isArray(batch.json) ? (batch.json as Record<string, unknown>[])[0] : null;
 
-  const result: Record<string, unknown> = { ok: true, env, workspaceId, taggedForCampaign: tagged, tagQueryStatus: tagCount.status, batchQueryStatus: batch.status, batchReturned: lead ? 1 : 0 };
+  const result: Record<string, unknown> = { ok: true, env, workspaceId, taggedForCampaign: tagged, selectTests, tagQueryStatus: tagCount.status, batchQueryStatus: batch.status, batchReturned: lead ? 1 : 0 };
   if (!batch.ok) result.batchQueryError = batch.json;
   if (!tagCount.ok) result.tagQueryError = tagCount.json;
   if (!lead) { result.note = "batch query returned no lead — this is where enrichment gets nothing"; return NextResponse.json(result); }
