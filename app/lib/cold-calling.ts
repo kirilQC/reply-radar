@@ -107,8 +107,10 @@ function callLeadFromRow(lead: Row, logs: Row[]): CallLead {
     company: orNull(lead.company),
     linkedin: orNull(lead.linkedin_profile_url),
     phone: orNull(lead.phone),
-    icpScore: lead.icp_score === null || lead.icp_score === undefined ? null : num(lead.icp_score),
-    icpReason: orNull(lead.icp_reason),
+    // Read the score straight from raw_data — the icp_score/icp_reason generated columns don't exist on
+    // every database, and selecting a missing column 400s the whole query.
+    icpScore: rr.icp_score === null || rr.icp_score === undefined ? null : num(rr.icp_score),
+    icpReason: orNull(rr.icp_reason),
     replied,
     campaign,
     activity: replied ? "Replied" : Object.keys(cold).length ? "In campaign, no reply" : "No reply",
@@ -123,9 +125,11 @@ export async function getCallList(slug: string): Promise<{ ok: boolean; error?: 
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const ws = await workspaceFor(slug);
   if (!ws) return { ok: false, error: `No client matches "${slug}".` };
-  const leads = await rows(url, key, `rr_leads?select=id,name,role,company,linkedin_profile_url,phone,icp_score,icp_reason,conversation_count,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&order=icp_score.desc.nullslast&limit=2000`);
+  const leads = await rows(url, key, `rr_leads?select=id,name,role,company,linkedin_profile_url,phone,conversation_count,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&limit=2000`);
   const logs = await rows(url, key, `rr_call_logs?select=lead_id,caller,result,notes,called_at&workspace_id=eq.${encodeURIComponent(ws.id)}&order=called_at.desc`);
-  const callable = leads.filter(isCallable).map((lead) => callLeadFromRow(lead, logs));
+  // Sort by ICP score (highest first, unscored last) in code — the icp_score column isn't guaranteed to exist.
+  const callable = leads.filter(isCallable).map((lead) => callLeadFromRow(lead, logs))
+    .sort((a, b) => (b.icpScore ?? -1) - (a.icpScore ?? -1));
   return { ok: true, client: { name: ws.name, slug: ws.slug }, leads: callable };
 }
 
@@ -345,7 +349,7 @@ export async function processColdCallJobs(origin: string, deadlineMs: number): P
       let scanned = 0;
       while (Date.now() < deadlineMs) {
         const after = cursor ? `&id=gt.${encodeURIComponent(cursor)}` : "";
-        const batch = await rows(url, key, `rr_leads?select=id,name,company,linkedin_profile_url,icp_score,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}${after}&order=id.asc&limit=${ENRICH_BATCH}`);
+        const batch = await rows(url, key, `rr_leads?select=id,name,company,linkedin_profile_url,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}${after}&order=id.asc&limit=${ENRICH_BATCH}`);
         if (!batch.length) { await patchJob({ status: "done", error: null }); return { processed: true, status: "done" }; }
         cursor = str(batch[batch.length - 1].id);
         scanned += batch.length;
