@@ -14,7 +14,6 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const slug = (params.get("slug") ?? "").trim();
   const campaignId = (params.get("campaignId") ?? "").trim();
-  if (!slug) return NextResponse.json({ ok: false, error: "Add ?slug=<client>&campaignId=<id>" }, { status: 400 });
 
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -31,6 +30,15 @@ export async function GET(request: Request) {
     aiArkKeyPresent: Boolean((process.env.AI_ARK_API_KEY ?? "").trim()),
     aiArkEnabled: isAiArkEnrichmentEnabled(),
   };
+
+  // No slug → list clients + the distinct cold-tagged campaigns, so the caller can pick one.
+  if (!slug) {
+    const clients = await q(`rr_workspaces?select=slug,name&order=name.asc&limit=200`);
+    const tagged = await q(`rr_leads?select=cold_campaign&cold_campaign=not.is.null&limit=8000`);
+    const counts: Record<string, number> = {};
+    if (Array.isArray(tagged.json)) for (const row of tagged.json as Record<string, unknown>[]) { const c = String(row.cold_campaign ?? ""); if (c) counts[c] = (counts[c] ?? 0) + 1; }
+    return NextResponse.json({ ok: true, env, clients: clients.json, coldCampaignCounts: counts });
+  }
 
   // Resolve the workspace.
   const ws = await q(`rr_workspaces?select=id,name&slug=eq.${encodeURIComponent(slug)}&limit=1`);
