@@ -68,7 +68,7 @@ export async function listColdCallClients(): Promise<ColdCallClient[]> {
   const out: ColdCallClient[] = [];
   for (const w of workspaces) {
     const id = str(w.id);
-    const leads = await rows(url, key, `rr_leads?select=phone,conversation_count,raw_data&workspace_id=eq.${encodeURIComponent(id)}&limit=5000`);
+    const leads = await rows(url, key, `rr_leads?select=phone,raw_data&workspace_id=eq.${encodeURIComponent(id)}&limit=5000`);
     const callable = leads.filter((l) => isCallable(l));
     out.push({
       id, name: str(w.name), slug: str(w.slug), logoUrl: orNull(w.logo_url), accentColor: orNull(w.accent_color),
@@ -79,9 +79,14 @@ export async function listColdCallClients(): Promise<ColdCallClient[]> {
 }
 
 /** A lead worth showing in a call list: has a phone, replied, or was pulled in for cold calling. */
+function convoCount(rr: Row): number {
+  // conversation_count is a generated column that isn't present on every DB, so read it from raw_data.
+  return num(obj(rr.rollup).conversation_count);
+}
+
 function isCallable(lead: Row): boolean {
   const rr = obj(obj(lead.raw_data).reply_radar);
-  return Boolean(orNull(lead.phone) || num(lead.conversation_count) > 0 || Object.keys(obj(rr.cold_call)).length > 0);
+  return Boolean(orNull(lead.phone) || convoCount(rr) > 0 || Object.keys(obj(rr.cold_call)).length > 0);
 }
 
 // ── The call list ──────────────────────────────────────────────────────────────────────────────────
@@ -96,7 +101,7 @@ function callLeadFromRow(lead: Row, logs: Row[]): CallLead {
   const rr = obj(obj(lead.raw_data).reply_radar);
   const enrichment = obj(rr.ai_ark);
   const cold = obj(rr.cold_call);
-  const replied = num(lead.conversation_count) > 0;
+  const replied = convoCount(rr) > 0;
   const campaign = orNull(obj(rr.campaign).name) || orNull(cold.campaignName);
   const mine = logs.filter((log) => str(log.lead_id) === str(lead.id));
   const last = mine[0];
@@ -125,7 +130,7 @@ export async function getCallList(slug: string): Promise<{ ok: boolean; error?: 
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const ws = await workspaceFor(slug);
   if (!ws) return { ok: false, error: `No client matches "${slug}".` };
-  const leads = await rows(url, key, `rr_leads?select=id,name,role,company,linkedin_profile_url,phone,conversation_count,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&limit=2000`);
+  const leads = await rows(url, key, `rr_leads?select=id,name,role,company,linkedin_profile_url,phone,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&limit=2000`);
   const logs = await rows(url, key, `rr_call_logs?select=lead_id,caller,result,notes,called_at&workspace_id=eq.${encodeURIComponent(ws.id)}&order=called_at.desc`);
   // Sort by ICP score (highest first, unscored last) in code — the icp_score column isn't guaranteed to exist.
   const callable = leads.filter(isCallable).map((lead) => callLeadFromRow(lead, logs))
