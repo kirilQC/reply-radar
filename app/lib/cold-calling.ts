@@ -104,19 +104,28 @@ function isCallable(lead: Row): boolean {
 
 // ── The call list ──────────────────────────────────────────────────────────────────────────────────
 
+// What we can reliably tell from stored data: whether they replied. The connection-accept split
+// ("didn't accept" vs "not contacted") isn't in our DB — it lives in HeyReach — so it's not modelled here.
+export type CallStatus = "replied" | "no_reply";
 export type CallLead = {
   id: string; name: string; title: string | null; company: string | null; linkedin: string | null;
   phone: string | null; photoUrl: string | null; companyLogoUrl: string | null;
-  icpScore: number | null; icpReason: string | null; replied: boolean;
-  campaign: string | null; activity: string; lastCall: { caller: string | null; result: string | null; notes: string | null; at: string } | null; callCount: number;
+  icpScore: number | null; icpReason: string | null; replied: boolean; status: CallStatus;
+  campaign: string | null; campaigns: string[]; senders: string[]; lastReplyAt: string | null;
+  activity: string; lastCall: { caller: string | null; result: string | null; notes: string | null; at: string } | null; callCount: number;
 };
 
-function callLeadFromRow(lead: Row, logs: Row[]): CallLead {
+function callLeadFromRow(lead: Row, logs: Row[], replyAt: Map<string, string>): CallLead {
   const rr = obj(obj(lead.raw_data).reply_radar);
+  const rollup = obj(rr.rollup);
   const enrichment = obj(rr.ai_ark);
   const cold = obj(rr.cold_call);
-  const replied = convoCount(rr) > 0;
+  const lastReplyAt = replyAt.get(str(lead.id)) ?? null;
+  const replied = convoCount(rr) > 0 || Boolean(lastReplyAt);
   const campaign = orNull(obj(rr.campaign).name) || orNull(cold.campaignName);
+  const campaigns = (Array.isArray(rollup.campaigns) ? rollup.campaigns.map(String) : []).filter(Boolean);
+  if (!campaigns.length && campaign) campaigns.push(campaign);
+  const senders = (Array.isArray(rollup.senders) ? rollup.senders.map(String) : []).filter(Boolean);
   const mine = logs.filter((log) => str(log.lead_id) === str(lead.id));
   const last = mine[0];
   return {
@@ -134,7 +143,11 @@ function callLeadFromRow(lead: Row, logs: Row[]): CallLead {
     icpScore: rr.icp_score === null || rr.icp_score === undefined ? null : num(rr.icp_score),
     icpReason: orNull(rr.icp_reason),
     replied,
+    status: replied ? "replied" : "no_reply",
     campaign,
+    campaigns,
+    senders,
+    lastReplyAt,
     activity: replied ? "Replied" : Object.keys(cold).length ? "In campaign, no reply" : "No reply",
     lastCall: last ? { caller: orNull(last.caller), result: orNull(last.result), notes: orNull(last.notes), at: str(last.called_at) } : null,
     callCount: mine.length,
@@ -149,8 +162,12 @@ export async function getCallList(slug: string): Promise<{ ok: boolean; error?: 
   if (!ws) return { ok: false, error: `No client matches "${slug}".` };
   const leads = await rows(url, key, `rr_leads?select=id,name,role,company,linkedin_profile_url,phone,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&limit=2000`);
   const logs = await rows(url, key, `rr_call_logs?select=lead_id,caller,result,notes,called_at&workspace_id=eq.${encodeURIComponent(ws.id)}&order=called_at.desc`);
+  // Latest reply time per lead, for the "newest/oldest reply" sorts and the replied status.
+  const convos = await rows(url, key, `rr_conversations?select=lead_id,last_message_at&workspace_id=eq.${encodeURIComponent(ws.id)}&order=last_message_at.desc`);
+  const replyAt = new Map<string, string>();
+  for (const c of convos) { const id = str(c.lead_id); const at = str(c.last_message_at); if (id && at && !replyAt.has(id)) replyAt.set(id, at); }
   // Sort by ICP score (highest first, unscored last) in code — the icp_score column isn't guaranteed to exist.
-  const callable = leads.filter(isCallable).map((lead) => callLeadFromRow(lead, logs))
+  const callable = leads.filter(isCallable).map((lead) => callLeadFromRow(lead, logs, replyAt))
     .sort((a, b) => (b.icpScore ?? -1) - (a.icpScore ?? -1));
   return { ok: true, client: { name: ws.name, slug: ws.slug, logoUrl: ws.logoUrl, accentColor: ws.accentColor }, leads: callable };
 }

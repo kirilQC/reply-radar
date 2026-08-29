@@ -15,12 +15,15 @@ import "../../cold-calling.css";
 type CallLead = {
   id: string; name: string; title: string | null; company: string | null; linkedin: string | null;
   phone: string | null; photoUrl: string | null; companyLogoUrl: string | null;
-  icpScore: number | null; icpReason: string | null; replied: boolean;
-  campaign: string | null; activity: string; lastCall: { caller: string | null; result: string | null; notes: string | null; at: string } | null; callCount: number;
+  icpScore: number | null; icpReason: string | null; replied: boolean; status: "replied" | "no_reply";
+  campaign: string | null; campaigns: string[]; senders: string[]; lastReplyAt: string | null;
+  activity: string; lastCall: { caller: string | null; result: string | null; notes: string | null; at: string } | null; callCount: number;
 };
+type Msg = { direction?: string; body?: string; sent_at?: string; conversation_id?: string };
 type Client = { name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Campaign = { id: string; name: string; status: string; listSize: number; fetched: number; enriched: number; job: { status: string; leadsFetched: number; leadsEnriched: number; total: number; error: string | null } | null };
-type Detail = { lead: Record<string, unknown>; conversations?: unknown[]; messages?: unknown[]; workspaces?: unknown[] };
+type Detail = { lead: Record<string, unknown>; conversations?: Record<string, unknown>[]; messages?: Msg[]; workspaces?: unknown[] };
+type SortBy = "icp" | "newest" | "oldest";
 
 const RESULTS = ["Connected", "Voicemail", "No answer", "Interested", "Callback", "Not interested", "Bad number", "Do not call"];
 const scoreClass = (s: number | null) => (s == null ? "none" : s >= 70 ? "hot" : s >= 40 ? "warm" : "cool");
@@ -80,6 +83,10 @@ export default function ClientCallList() {
   const [notFound, setNotFound] = useState(false);
   const [campaignsOpen, setCampaignsOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortBy>("icp");
+  const [fCampaign, setFCampaign] = useState("");
+  const [fSender, setFSender] = useState("");
+  const [fStatus, setFStatus] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -110,11 +117,25 @@ export default function ClientCallList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyJobActive, slug]);
 
+  const campaignOptions = useMemo(() => Array.from(new Set(leads.flatMap((l) => l.campaigns))).sort(), [leads]);
+  const senderOptions = useMemo(() => Array.from(new Set(leads.flatMap((l) => l.senders))).sort(), [leads]);
+
   // The call list only shows people we can actually dial — a number is implied.
   const queue = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return leads.filter((l) => l.phone && (!q || `${l.name} ${l.company ?? ""} ${l.title ?? ""}`.toLowerCase().includes(q)));
-  }, [leads, query]);
+    const filtered = leads.filter((l) =>
+      l.phone
+      && (!q || `${l.name} ${l.company ?? ""} ${l.title ?? ""}`.toLowerCase().includes(q))
+      && (!fCampaign || l.campaigns.includes(fCampaign))
+      && (!fSender || l.senders.includes(fSender))
+      && (!fStatus || l.status === fStatus));
+    const time = (l: CallLead) => (l.lastReplyAt ? new Date(l.lastReplyAt).getTime() : 0);
+    const sorted = [...filtered];
+    if (sortBy === "newest") sorted.sort((a, b) => time(b) - time(a));
+    else if (sortBy === "oldest") sorted.sort((a, b) => (time(a) || Infinity) - (time(b) || Infinity));
+    else sorted.sort((a, b) => (b.icpScore ?? -1) - (a.icpScore ?? -1));
+    return sorted;
+  }, [leads, query, fCampaign, fSender, fStatus, sortBy]);
 
   useEffect(() => {
     if (queue.length === 0) { setSelectedId(null); return; }
@@ -182,7 +203,6 @@ export default function ClientCallList() {
                   </span>
                   <div className="cc-client-titles">
                     <h1>{client.name}</h1>
-                    <p>{queue.length} to call · sorted by ICP score</p>
                   </div>
                 </div>
                 <a className="cc-export" href={`/api/cold-calling/export?slug=${encodeURIComponent(slug)}`}>Export CSV</a>
@@ -224,8 +244,33 @@ export default function ClientCallList() {
                 )}
               </div>
 
+              {leads.some((l) => l.phone) && (
+                <div className="cc-filters">
+                  <input className="cc-search cc-filter-search" value={query} placeholder="Search name or company…" onChange={(e) => setQuery(e.target.value)} />
+                  <select className="cc-select" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+                    <option value="">All statuses</option>
+                    <option value="replied">Replied</option>
+                    <option value="no_reply">No reply yet</option>
+                  </select>
+                  <select className="cc-select" value={fCampaign} onChange={(e) => setFCampaign(e.target.value)}>
+                    <option value="">All campaigns</option>
+                    {campaignOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select className="cc-select" value={fSender} onChange={(e) => setFSender(e.target.value)}>
+                    <option value="">All senders</option>
+                    {senderOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <select className="cc-select" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)}>
+                    <option value="icp">Sort · ICP score</option>
+                    <option value="newest">Sort · Newest reply</option>
+                    <option value="oldest">Sort · Oldest reply</option>
+                  </select>
+                  <span className="cc-filter-count">{queue.length} lead{queue.length === 1 ? "" : "s"}</span>
+                </div>
+              )}
+
               {queue.length === 0 ? (
-                <div className="cc-empty">No leads with a number yet. Open “Pull leads from a campaign” above to build your list.</div>
+                <div className="cc-empty">No leads match. {leads.some((l) => l.phone) ? "Try clearing the filters." : "Open “Pull leads from a campaign” above to build your list."}</div>
               ) : (
                 <div className="cc-cockpit-grid">
                   <section className="cc-current">
@@ -235,15 +280,15 @@ export default function ClientCallList() {
                   </section>
 
                   <aside className="cc-queue">
-                    <div className="cc-queue-head">
-                      <input className="cc-search" value={query} placeholder="Search name or company…" onChange={(e) => setQuery(e.target.value)} />
-                    </div>
-                    <div className="cc-queue-count">{queue.length} in queue · by ICP score</div>
+                    <div className="cc-queue-count">{queue.length} in queue</div>
                     <div className="cc-queue-list">
                       {queue.map((l) => (
                         <button type="button" key={l.id} className={`cc-queue-item ${l.id === selectedId ? "is-current" : ""} ${l.callCount > 0 ? "is-done" : ""}`} onClick={() => setSelectedId(l.id)}>
                           <QueueAvatar lead={l} />
-                          <span className="cc-qwho"><b>{l.name}</b><em>{l.company || l.title || "—"}</em></span>
+                          <span className="cc-qwho">
+                            <b>{l.name}</b>
+                            <em>{l.replied && <span className="cc-qdot" title="Replied" />}{l.company || l.title || "—"}</em>
+                          </span>
                           {l.callCount > 0 ? <span className="cc-qtick">✓</span> : <span className={`cc-qscore ${scoreClass(l.icpScore)}`}>{l.icpScore ?? "—"}</span>}
                         </button>
                       ))}
@@ -264,6 +309,14 @@ function CurrentLead({ lead, detail, detailLoading, busy, onSave, onSkip }: { le
   const [notes, setNotes] = useState("");
   useEffect(() => { setResult(""); setNotes(""); }, [lead.id]);
 
+  const messages = detail?.messages ?? [];
+  const hasInbound = messages.some((m) => (m.direction || "").toLowerCase() === "inbound");
+  const hasConvo = (detail?.conversations?.length ?? 0) > 0 || messages.length > 0;
+  const status = hasInbound || lead.replied
+    ? { label: "Accepted · replied", cls: "ok" }
+    : hasConvo ? { label: "Messaged · no reply", cls: "warn" }
+    : { label: "No reply yet", cls: "muted" };
+
   return (
     <div className="cc-current-inner">
       {/* Hero — who you're calling */}
@@ -275,13 +328,14 @@ function CurrentLead({ lead, detail, detailLoading, busy, onSave, onSkip }: { le
         <div className="cc-current-id">
           <h2>{lead.name}{lead.linkedin && <a className="cc-li" href={lead.linkedin} target="_blank" rel="noreferrer">in</a>}</h2>
           <p className="cc-current-role">
-            {lead.companyLogoUrl
-              ? <SmartImg src={lead.companyLogoUrl} className="cc-role-logo" fallback={lead.company ? <span className="cc-role-logo cc-role-logo-mono">{initials(lead.company)}</span> : <></>} />
-              : lead.company ? <span className="cc-role-logo cc-role-logo-mono">{initials(lead.company)}</span> : null}
+            <span className="cc-cologo-lg">
+              <SmartImg src={lead.companyLogoUrl} className="cc-cologo-lg-img" fallback={<span className="cc-cologo-lg-mono">{lead.company ? initials(lead.company) : "?"}</span>} />
+            </span>
             <span>{[lead.title, lead.company].filter(Boolean).join(" · ") || "Role and company not recorded"}</span>
           </p>
           <div className="cc-current-meta">
-            <span className={`cc-activity ${lead.replied ? "replied" : ""}`}>{lead.activity}</span>
+            <span className={`cc-status cc-status-${status.cls}`}>{status.label}</span>
+            {lead.senders.length > 0 && <span className="cc-chip subtle">via {lead.senders.join(", ")}</span>}
             {lead.campaign && <span className="cc-chip">{lead.campaign}</span>}
             {lead.callCount > 0 && <span className="cc-chip done">{lead.callCount} call{lead.callCount === 1 ? "" : "s"} logged</span>}
           </div>
@@ -312,9 +366,43 @@ function CurrentLead({ lead, detail, detailLoading, busy, onSave, onSkip }: { le
         <div className="cc-lastcall">Last call: <b>{lead.lastCall.result || "logged"}</b>{lead.lastCall.caller ? ` by ${lead.lastCall.caller}` : ""}{lead.lastCall.notes ? ` — “${lead.lastCall.notes}”` : ""}</div>
       )}
 
+      {/* Conversation with this lead */}
+      {detailLoading && !detail
+        ? <div className="cc-record"><div className="cc-record-loading">Loading conversation…</div></div>
+        : messages.length > 0
+          ? <Conversation messages={messages} />
+          : <section className="cc-rsection cc-rspan"><h4>Conversation</h4><p className="cc-thread-empty">No LinkedIn messages on record — this lead hasn’t replied.</p></section>}
+
       {/* Full lead record */}
       <LeadRecord lead={lead} detail={detail} loading={detailLoading} />
     </div>
+  );
+}
+
+function msgTime(v: unknown): string {
+  const s = str(v); if (!s) return "";
+  const d = new Date(s); if (Number.isNaN(+d)) return "";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) + " · " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/** The full LinkedIn thread with this lead — inbound left, our sends right. */
+function Conversation({ messages }: { messages: Msg[] }) {
+  const sorted = [...messages].sort((a, b) => new Date(str(a.sent_at) || 0).getTime() - new Date(str(b.sent_at) || 0).getTime());
+  return (
+    <section className="cc-rsection cc-rspan cc-thread-section">
+      <h4>Conversation · {sorted.length} message{sorted.length === 1 ? "" : "s"}</h4>
+      <div className="cc-thread">
+        {sorted.map((m, i) => {
+          const inbound = (m.direction || "").toLowerCase() === "inbound";
+          return (
+            <div className={`cc-msg ${inbound ? "in" : "out"}`} key={i}>
+              <div className="cc-bubble">{str(m.body) || "—"}</div>
+              <time>{msgTime(m.sent_at)}</time>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

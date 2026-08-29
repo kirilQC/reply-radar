@@ -189,3 +189,40 @@
   .cc-client-logo { width: 54px; height: 54px; font-size: 24px; }
   .cc-record, .cc-field-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Bigger company logo in the hero ── */
+.cc-current-role { display: flex; align-items: center; gap: 11px; }
+.cc-cologo-lg { flex: none; width: 46px; height: 46px; border-radius: 11px; overflow: hidden; display: grid; place-items: center; background: var(--panel-2, #151821); border: 1px solid var(--border); }
+.cc-cologo-lg-img { width: 100%; height: 100%; object-fit: cover; }
+.cc-cologo-lg-mono { font-size: 18px; font-weight: 800; color: var(--text); }
+.cc-current-role > span:last-child { font-size: 14px; color: var(--muted); line-height: 1.35; }
+
+/* ── Status badges ── */
+.cc-status { font-size: 10px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; }
+.cc-status-ok { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); border: 1px solid color-mix(in srgb, var(--green) 34%, transparent); }
+.cc-status-warn { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent); }
+.cc-status-muted { color: var(--muted); background: var(--panel-2, #151821); border: 1px solid var(--border); }
+.cc-chip.subtle { color: var(--muted-2); background: transparent; border: 1px solid var(--border); }
+
+/* ── Filter / sort bar ── */
+.cc-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-bottom: 16px; }
+.cc-filter-search { flex: 1 1 220px; min-width: 180px; }
+.cc-select { height: 36px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2, #151821); color: var(--text); font: inherit; font-size: 12.5px; padding: 0 30px 0 12px; cursor: pointer; appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%238a90a0' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>"); background-repeat: no-repeat; background-position: right 10px center; max-width: 230px; }
+.cc-select:focus { border-color: var(--accent); outline: none; }
+.cc-filter-count { margin-left: auto; font-size: 11.5px; color: var(--muted-2); font-weight: 650; font-variant-numeric: tabular-nums; }
+
+/* ── Queue replied dot ── */
+.cc-qdot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); margin-right: 6px; vertical-align: middle; }
+
+/* ── Conversation thread ── */
+.cc-thread-section h4 { margin-bottom: 13px; }
+.cc-thread { display: flex; flex-direction: column; gap: 10px; max-height: 380px; overflow-y: auto; padding-right: 4px; }
+.cc-msg { display: flex; flex-direction: column; gap: 3px; max-width: 78%; }
+.cc-msg.in { align-self: flex-start; align-items: flex-start; }
+.cc-msg.out { align-self: flex-end; align-items: flex-end; }
+.cc-bubble { padding: 9px 13px; border-radius: 13px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cc-msg.in .cc-bubble { background: var(--panel-2, #151821); border: 1px solid var(--border); border-bottom-left-radius: 4px; color: var(--text); }
+.cc-msg.out .cc-bubble { background: color-mix(in srgb, var(--accent) 18%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-bottom-right-radius: 4px; color: color-mix(in srgb, var(--text) 92%, var(--accent)); }
+.cc-msg time { font-size: 10px; color: var(--muted-2); }
+.cc-thread-empty { margin: 0; font-size: 12.5px; color: var(--muted-2); }
