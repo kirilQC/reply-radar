@@ -131,6 +131,26 @@ export default function ClientCallList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyJobActive, slug]);
 
+  // Keep draining active jobs from the browser (single-flight) so they finish even without the cron worker —
+  // the background function hits Vercel's execution limit on large campaigns and would otherwise stall. Each
+  // poke resumes the oldest active job; already-enriched leads (with a phone) are skipped, so no re-charge.
+  const drainingRef = useRef(false);
+  useEffect(() => {
+    if (!anyJobActive) return;
+    let stopped = false;
+    const drain = async () => {
+      if (stopped || drainingRef.current) return;
+      drainingRef.current = true;
+      try { await fetch("/api/cold-calling/process", { method: "POST" }); } catch { /* ignore */ }
+      drainingRef.current = false;
+      if (!stopped) await load();
+    };
+    void drain();
+    const id = setInterval(() => void drain(), 8000);
+    return () => { stopped = true; clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyJobActive, slug]);
+
   const campaignOptions = useMemo(() => Array.from(new Set(leads.flatMap((l) => l.campaigns))).sort(), [leads]);
   const senderOptions = useMemo(() => Array.from(new Set(leads.flatMap((l) => l.senders))).sort(), [leads]);
   const repliedCount = useMemo(() => leads.filter((l) => l.phone && l.replied).length, [leads]);
