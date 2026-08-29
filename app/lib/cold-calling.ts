@@ -263,7 +263,14 @@ async function enrichColdLead(url: string, key: string, origin: string, workspac
   const nextRr: Row = { ...rr, cold_call: { ...obj(rr.cold_call), enriched: true } };
   if (Object.keys(enrichment).length > 0) { nextRr.ai_ark = enrichment; nextRr.enrichment_status = "enriched"; }
   if (phone) nextRr.phone = phone;
-  await fetch(`${url}/rest/v1/rr_leads?id=eq.${encodeURIComponent(leadId)}`, { method: "PATCH", headers: headers(key), body: JSON.stringify({ raw_data: { ...raw, reply_radar: nextRr } }) }).catch(() => {});
+  // This write is the whole point — it marks the lead enriched and stores the phone. Surface its failure
+  // (a bad generated-column cast, an oversized row, RLS) instead of swallowing it, so a broken write does not
+  // read as "0 enriched" with no cause.
+  const patchRes = await fetch(`${url}/rest/v1/rr_leads?id=eq.${encodeURIComponent(leadId)}`, { method: "PATCH", headers: headers(key), body: JSON.stringify({ raw_data: { ...raw, reply_radar: nextRr } }) }).catch(() => null);
+  if (!patchRes || !patchRes.ok) {
+    const detail = patchRes ? await patchRes.text().catch(() => "") : "network error";
+    throw new Error(`lead write ${patchRes?.status ?? ""}: ${detail.slice(0, 180)}`);
+  }
 
   // ICP score from the profile we just saved. The route is a machine path (open), scores from the lead's
   // enrichment, and caches — so it is safe to call once per lead.
@@ -333,8 +340,19 @@ export async function processColdCallJobs(origin: string, deadlineMs: number): P
       let enriched = num(job.leads_enriched);
       while (Date.now() < deadlineMs) {
         const batch = await rows(url, key, `rr_leads?select=id,name,company,linkedin_profile_url,icp_score,raw_data&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}&order=created_at.asc,id.asc&offset=${enriched}&limit=${ENRICH_BATCH}`);
-        if (!batch.length) { await patchJob({ status: "done", error: null }); return { processed: true, status: "done" }; }
-        await Promise.all(batch.map((lead) => enrichColdLead(url, key, origin, workspace, lead)));
+        if (!batch.length) {
+          if (enriched === 0) {
+            const tagged = await rows(url, key, `rr_leads?select=id&workspace_id=eq.${encodeURIComponent(workspace.id)}&cold_campaign=eq.${encodeURIComponent(str(job.campaign_id))}&limit=1`);
+            await patchJob({ status: "done", error: tagged.length ? `Enrich returned nothing at offset 0 though leads are tagged — ordering/offset problem.` : `No leads tagged for campaign ${str(job.campaign_id)}.` });
+            return { processed: true, status: "done" };
+          }
+          await patchJob({ status: "done", error: null });
+          return { processed: true, status: "done" };
+        }
+        // Surface the first real enrichment failure instead of finishing silently at 0.
+        const outcomes = await Promise.all(batch.map((lead) => enrichColdLead(url, key, origin, workspace, lead).then(() => "").catch((e) => (e instanceof Error ? e.message : String(e)))));
+        const firstErr = outcomes.find(Boolean);
+        if (firstErr && enriched === 0) { await patchJob({ status: "error", error: `Enrichment failed: ${firstErr}`.slice(0, 400) }); return { processed: true, status: "error" }; }
         enriched += batch.length;
         await patchJob({ leads_enriched: enriched });
       }
