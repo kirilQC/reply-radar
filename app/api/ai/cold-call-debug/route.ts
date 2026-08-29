@@ -11,7 +11,7 @@ export async function GET() {
 
   // Steadywell workspace
   const ws = "8ec56523-7157-4968-8ed7-e50bfa618f3f";
-  const leads = await q(`rr_leads?select=id,name,conversation_count,linkedin_profile_url,raw_data&workspace_id=eq.${ws}&cold_campaign=not.is.null&limit=400`);
+  const leads = await q(`rr_leads?select=id,name,linkedin_profile_url,raw_data&workspace_id=eq.${ws}&cold_campaign=not.is.null&limit=400`);
   const arr = Array.isArray(leads) ? leads : [];
   // pick one replied, one not
   const replied = arr.find((l: Record<string, unknown>) => Number((((l.raw_data as Record<string,unknown>)?.reply_radar as Record<string,unknown>)?.rollup as Record<string,unknown>)?.conversation_count ?? 0) > 0);
