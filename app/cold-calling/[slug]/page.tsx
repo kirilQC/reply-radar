@@ -117,6 +117,7 @@ export default function ClientCallList() {
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailNonce, setDetailNonce] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(30);
@@ -216,7 +217,15 @@ export default function ClientCallList() {
       if (!cancelled) setDetailLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [selectedId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, detailNonce]);
+
+  const refreshLead = async () => {
+    if (!selectedId) return;
+    await fetch("/api/cold-calling/refresh-lead", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug, leadId: selectedId }) }).catch(() => {});
+    setDetailNonce((n) => n + 1);
+    void load();
+  };
 
   const advance = () => {
     const idx = queue.findIndex((l) => l.id === selectedId);
@@ -339,7 +348,7 @@ export default function ClientCallList() {
 
                   <div className="cc-convo">
                     {current
-                      ? <ConversationColumn lead={current} detail={detail} detailLoading={detailLoading} busy={busy} onSave={(r, n) => void saveAndNext(current.id, r, n)} onSkip={advance} />
+                      ? <ConversationColumn lead={current} detail={detail} detailLoading={detailLoading} busy={busy} onSave={(r, n) => void saveAndNext(current.id, r, n)} onSkip={advance} onRefresh={refreshLead} />
                       : <div className="cc-empty" style={{ margin: 24 }}>Pick a lead from the list.</div>}
                   </div>
 
@@ -523,11 +532,13 @@ function AddLeadsModal({ slug, campaigns, busy, anyJobActive, onClose, onFetch, 
   );
 }
 
-function ConversationColumn({ lead, detail, detailLoading, busy, onSave, onSkip }: { lead: CallLead; detail: Detail | null; detailLoading: boolean; busy: boolean; onSave: (result: string, notes: string) => void; onSkip: () => void }) {
+function ConversationColumn({ lead, detail, detailLoading, busy, onSave, onSkip, onRefresh }: { lead: CallLead; detail: Detail | null; detailLoading: boolean; busy: boolean; onSave: (result: string, notes: string) => void; onSkip: () => void; onRefresh: () => Promise<void> }) {
   const [result, setResult] = useState("");
   const [notes, setNotes] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { setResult(""); setNotes(""); }, [lead.id]);
+  const doRefresh = async () => { if (refreshing) return; setRefreshing(true); await onRefresh(); setRefreshing(false); };
 
   const messages = detail?.messages ?? null;
   const status = statusOf(lead, messages);
@@ -545,6 +556,9 @@ function ConversationColumn({ lead, detail, detailLoading, busy, onSave, onSkip 
           <div className="cc-lp-name">{lead.name}{lead.linkedin && <a className="cc-li" href={lead.linkedin} target="_blank" rel="noreferrer">in</a>}<span className={`cc-pill ${status.cls}`}><span className="cc-pill-dot" />{status.label}</span></div>
           <div className="cc-lp-role">{[lead.title, lead.company].filter(Boolean).join(" · ") || "Role and company not recorded"}{lead.senders.length > 0 && <span className="cc-lp-via"> · via {lead.senders.join(", ")}</span>}</div>
         </div>
+        <button type="button" className={`cc-refresh ${refreshing ? "spinning" : ""}`} title="Pull fresh conversation from HeyReach" onClick={() => void doRefresh()} disabled={refreshing}>
+          <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" /></svg>
+        </button>
         {lead.phone
           ? <a className="cc-callbtn" href={telHref(lead.phone)}><svg className="cc-phone-ic" viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2 5.2 2 2 0 0 1 4 3h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 12a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7A2 2 0 0 1 22 17z"/></svg>{lead.phone}</a>
           : <span className="cc-nophone">No number</span>}

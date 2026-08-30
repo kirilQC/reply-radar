@@ -121,9 +121,14 @@ export default function AppSidebar() {
   // are already working in the page and the nav is out of the way. Each context remembers its
   // own toggle, so choosing otherwise on a working page does not reopen it on every page.
   const home = pathname === "/";
+  // Cold calling gets its own collapse key so it stays collapsed by default (it needs the width) instead of
+  // inheriting whatever the shared "page" key was left on elsewhere.
+  const coldCalling = pathname.startsWith("/cold-calling");
   const collapseKey = home
     ? "reply-radar-sidebar:home"
-    : "reply-radar-sidebar:page";
+    : coldCalling
+      ? "reply-radar-sidebar:cold-calling"
+      : "reply-radar-sidebar:page";
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === "undefined") return !home;
     const stored = window.localStorage.getItem(collapseKey);

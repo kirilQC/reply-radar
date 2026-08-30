@@ -15,7 +15,7 @@
  * or anyone pulled in for cold calling — sorted by ICP score, each with their recent activity and call history.
  */
 
-import { campaigns as heyreachCampaigns, campaignById, leadsInListPage } from "./heyreach-api";
+import { campaigns as heyreachCampaigns, campaignById, leadsInListPage, conversations as heyreachConversations } from "./heyreach-api";
 import { enrichLeadWithAiArk, findMobilePhone } from "./ai-ark-enrichment";
 import { isAiArkEnrichmentEnabled } from "./lead-identity";
 
@@ -211,6 +211,46 @@ export async function importCsvLeads(slug: string, records: Array<Record<string,
     imported++;
   }
   return { ok: true, imported };
+}
+
+/** Pull this lead's current LinkedIn conversation from HeyReach and upsert it into our tables. */
+export async function refreshLeadConversation(slug: string, leadId: string): Promise<{ ok: boolean; error?: string; newMessages?: number }> {
+  const { url, key } = config();
+  if (!url || !key) return { ok: false, error: "Supabase is not configured." };
+  const ws = await workspaceFor(slug);
+  if (!ws) return { ok: false, error: `No client matches "${slug}".` };
+  if (!ws.apiKey) return { ok: false, error: `${ws.name} has no HeyReach key connected.` };
+  const lead = (await rows(url, key, `rr_leads?select=id,linkedin_profile_url&id=eq.${encodeURIComponent(leadId)}&limit=1`))[0];
+  const profileUrl = str(lead?.linkedin_profile_url);
+  if (!profileUrl) return { ok: false, error: "This lead has no LinkedIn profile URL to look up." };
+
+  let convos;
+  try { convos = (await heyreachConversations(ws.apiKey, { leadProfileUrl: profileUrl }, 10)).items; }
+  catch (e) { return { ok: false, error: e instanceof Error ? e.message : "HeyReach lookup failed." }; }
+
+  let added = 0;
+  for (const c of convos) {
+    if (!c.id) continue;
+    // Upsert the conversation on its natural key, returning our row id.
+    const convRes = await fetch(`${url}/rest/v1/rr_conversations?on_conflict=workspace_id,heyreach_conversation_id`, {
+      method: "POST", headers: { ...headers(key), Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify({ workspace_id: ws.id, lead_id: leadId, heyreach_conversation_id: c.id, account_id: c.senderId || null, last_message_at: c.lastMessageAt || null, last_message_direction: c.lastMessageFrom === "lead" ? "inbound" : "outbound", last_refreshed_at: new Date().toISOString() }),
+    }).catch(() => null);
+    const convRow = convRes && convRes.ok ? ((await convRes.json().catch(() => []))[0] as Row) : null;
+    const convId = str(convRow?.id);
+    if (!convId) continue;
+    // Dedupe against what we already have (no message id from this endpoint, so match on body+timestamp).
+    const existing = await rows(url, key, `rr_messages?select=body,sent_at&conversation_id=eq.${encodeURIComponent(convId)}`);
+    const seen = new Set(existing.map((m) => `${str(m.body).trim()}|${new Date(str(m.sent_at)).getTime()}`));
+    const toInsert = c.messages
+      .filter((m) => m.body && m.sentAt && !seen.has(`${str(m.body).trim()}|${new Date(str(m.sentAt)).getTime()}`))
+      .map((m) => ({ conversation_id: convId, direction: m.from === "lead" ? "inbound" : "outbound", body: str(m.body), sent_at: m.sentAt }));
+    if (toInsert.length) {
+      const ins = await fetch(`${url}/rest/v1/rr_messages`, { method: "POST", headers: { ...headers(key), Prefer: "return=minimal" }, body: JSON.stringify(toInsert) }).catch(() => null);
+      if (ins && ins.ok) added += toInsert.length;
+    }
+  }
+  return { ok: true, newMessages: added };
 }
 
 export async function getCallList(slug: string): Promise<{ ok: boolean; error?: string; client?: { name: string; slug: string; logoUrl: string | null; accentColor: string | null; script: string }; leads?: CallLead[] }> {
