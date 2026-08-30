@@ -72,8 +72,10 @@ export type ColdCallClient = { id: string; name: string; slug: string; logoUrl: 
 export async function listColdCallClients(): Promise<ColdCallClient[]> {
   const { url, key } = config();
   if (!url || !key) return [];
+  // Include clients with a HeyReach connection, plus the "Misc" workspace (a home for imported/custom lists,
+  // which has no HeyReach key on purpose).
   const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,heyreach_api_key_ciphertext&order=name.asc`))
-    .filter((w) => str(w.name).trim() && str(w.heyreach_api_key_ciphertext).trim());
+    .filter((w) => str(w.name).trim() && (str(w.heyreach_api_key_ciphertext).trim() || str(w.slug) === "misc"));
   // Count with cheap header-only queries — pulling every lead's raw_data across all clients times out.
   // "Callable" ≈ has a phone or was pulled in for cold calling (cold_campaign is set); both are real columns.
   const out = await Promise.all(workspaces.map(async (w) => {
@@ -176,20 +178,22 @@ export async function saveCallScript(slug: string, script: string): Promise<{ ok
   return res.ok ? { ok: true } : { ok: false, error: "Could not save the script." };
 }
 
-/** Import a list of contacts + phone numbers from a CSV into this client's call list. */
-export async function importCsvLeads(slug: string, records: Array<Record<string, string>>): Promise<{ ok: boolean; imported: number; error?: string }> {
+/** Import a list of contacts + phone numbers from a CSV into this client's call list, under a named list. */
+export async function importCsvLeads(slug: string, records: Array<Record<string, string>>, listName = ""): Promise<{ ok: boolean; imported: number; error?: string }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, imported: 0, error: "Supabase is not configured." };
   const ws = await workspaceFor(slug);
   if (!ws) return { ok: false, imported: 0, error: `No client matches "${slug}".` };
   let imported = 0;
   const fetchedAt = new Date().toISOString();
+  const listTitle = listName.trim() || "CSV import";
+  const listId = `csv:${listTitle.toLowerCase().replace(/\s+/g, "-").slice(0, 60)}`;
   for (const r of records.slice(0, 2000)) {
     const name = str(r.name).trim();
     const phone = str(r.phone).replace(/[^\d+]/g, "").trim();
     if (!name && !phone) continue;
     const profileUrl = str(r.linkedin).trim();
-    const cold = { campaignId: "csv", campaignName: "CSV import", fetchedAt, enriched: true, source: "csv" };
+    const cold = { campaignId: listId, campaignName: listTitle, fetchedAt, enriched: true, source: "csv" };
     const existing = profileUrl
       ? (await rows(url, key, `rr_leads?select=id,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&linkedin_profile_url=eq.${encodeURIComponent(profileUrl)}&limit=1`))[0]
       : undefined;

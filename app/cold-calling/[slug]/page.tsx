@@ -87,17 +87,60 @@ function splitCsvLine(line: string): string[] {
   }
   out.push(cur); return out;
 }
-function parseCsv(text: string): Array<Record<string, string>> {
+type CsvMapping = { name: number; first: number; last: number; phone: number; linkedin: number; company: number; title: number };
+type CsvParsed = { rows: Array<Record<string, string>>; mapping: Record<string, string>; headers: string[]; total: number };
+
+/** Score each header for a field and pick the best column — tolerant of wildly different CSV headers. */
+function detectColumns(headers: string[]): CsvMapping {
+  const norm = headers.map((h) => h.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim());
+  const has = (h: string, ...kw: string[]) => kw.some((k) => h.includes(k));
+  const best = (score: (h: string) => number) => {
+    let bi = -1, bs = 0;
+    norm.forEach((h, i) => { const s = score(h); if (s > bs) { bs = s; bi = i; } });
+    return bi;
+  };
+  // Lead's PERSONAL phone — reward mobile/cell/direct/lead, penalize company/office/work/fax/hq.
+  const phone = best((h) => {
+    if (!has(h, "phone", "mobile", "cell", "tel", "number", "direct", "dial", "msisdn")) return 0;
+    let s = 1;
+    if (has(h, "mobile", "cell", "personal", "direct", "dial")) s += 5;
+    if (has(h, "lead", "contact", "prospect", "person")) s += 3;
+    if (has(h, "phone", "tel")) s += 1;
+    if (has(h, "company", "office", "work", "hq", "main", "corporate", "business", "employer", "org", "fax", "switchboard")) s -= 6;
+    return s;
+  });
+  const linkedin = best((h) => {
+    let s = 0;
+    if (has(h, "linkedin")) s += 5;
+    if (has(h, "profile") && has(h, "url", "link")) s += 4;
+    if (has(h, "lead") && has(h, "profile")) s += 3;
+    if (has(h, "profile url", "profile link")) s += 3;
+    if (has(h, "company", "org", "organization")) s -= 6;
+    return s;
+  });
+  const name = best((h) => (has(h, "full name", "contact name", "lead name", "prospect name") ? 6 : (h === "name" || h === "contact" || h === "lead" || h === "prospect") ? 5 : has(h, "name") && !has(h, "first", "last", "company", "user", "file", "screen") ? 3 : 0));
+  const first = best((h) => (has(h, "first name", "firstname", "given") ? 5 : 0));
+  const last = best((h) => (has(h, "last name", "lastname", "surname", "family name") ? 5 : 0));
+  const company = best((h) => (has(h, "company name", "organization", "organisation", "employer", "account name") ? 5 : has(h, "company", "org") ? 3 : 0));
+  const title = best((h) => (has(h, "job title", "title", "role", "position", "headline", "occupation") ? 4 : 0));
+  return { name, first, last, phone, linkedin, company, title };
+}
+
+function parseCsv(text: string): CsvParsed {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length);
-  if (lines.length < 2) return [];
-  const headers = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
-  const find = (...keys: string[]) => headers.findIndex((h) => keys.some((k) => h.includes(k)));
-  const iName = find("name", "contact", "full"), iPhone = find("phone", "mobile", "cell", "number"), iCompany = find("company", "organization", "org"), iTitle = find("title", "role", "position", "headline"), iLinkedin = find("linkedin", "profile url", "profile_url");
+  if (lines.length < 2) return { rows: [], mapping: {}, headers: [], total: 0 };
+  const headers = splitCsvLine(lines[0]).map((h) => h.trim());
+  const m = detectColumns(headers);
   const pick = (cols: string[], i: number) => (i >= 0 && i < cols.length ? cols[i].trim() : "");
-  return lines.slice(1).map((line) => {
+  const rows = lines.slice(1).map((line) => {
     const cols = splitCsvLine(line);
-    return { name: pick(cols, iName), phone: pick(cols, iPhone), company: pick(cols, iCompany), title: pick(cols, iTitle), linkedin: pick(cols, iLinkedin) };
+    let name = pick(cols, m.name);
+    if (!name) name = [pick(cols, m.first), pick(cols, m.last)].filter(Boolean).join(" ");
+    return { name, phone: pick(cols, m.phone), linkedin: pick(cols, m.linkedin), company: pick(cols, m.company), title: pick(cols, m.title) };
   }).filter((r) => r.name || r.phone);
+  const label = (i: number) => (i >= 0 ? headers[i] : "—");
+  const mapping = { Name: m.name >= 0 ? label(m.name) : [label(m.first), label(m.last)].filter((x) => x !== "—").join(" + ") || "—", Phone: label(m.phone), LinkedIn: label(m.linkedin), Company: label(m.company), Title: label(m.title) };
+  return { rows, mapping, headers, total: rows.length };
 }
 
 export default function ClientCallList() {
@@ -365,7 +408,7 @@ export default function ClientCallList() {
       {client && <CallScriptDrawer slug={slug} initial={client.script} />}
 
       {addOpen && client && (
-        <AddLeadsModal slug={slug} campaigns={campaigns} busy={busy} anyJobActive={anyJobActive}
+        <AddLeadsModal slug={slug} clientName={client.name} campaigns={campaigns} busy={busy} anyJobActive={anyJobActive}
           onClose={() => setAddOpen(false)} onFetch={fetchCampaign} onImported={() => void load()} />
       )}
     </div>
@@ -437,13 +480,16 @@ function CallScriptDrawer({ slug, initial }: { slug: string; initial: string }) 
 }
 
 // ── Add-leads modal ──
-function AddLeadsModal({ slug, campaigns, busy, anyJobActive, onClose, onFetch, onImported }: {
-  slug: string; campaigns: Campaign[]; busy: boolean; anyJobActive: boolean;
+function AddLeadsModal({ slug, clientName, campaigns, busy, anyJobActive, onClose, onFetch, onImported }: {
+  slug: string; clientName: string; campaigns: Campaign[]; busy: boolean; anyJobActive: boolean;
   onClose: () => void; onFetch: (c: Campaign) => void; onImported: () => void;
 }) {
-  const [tab, setTab] = useState<"campaign" | "csv">("campaign");
+  const hasCampaigns = campaigns.length > 0;
+  const [tab, setTab] = useState<"campaign" | "csv">(hasCampaigns ? "campaign" : "csv");
   const [rows, setRows] = useState<Array<Record<string, string>>>([]);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
   const [fileName, setFileName] = useState("");
+  const [listName, setListName] = useState("");
   const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState("");
   const [search, setSearch] = useState("");
@@ -452,16 +498,17 @@ function AddLeadsModal({ slug, campaigns, busy, anyJobActive, onClose, onFetch, 
     if (!file) return;
     setFileName(file.name); setMsg("");
     const parsed = parseCsv(await file.text());
-    setRows(parsed);
-    setMsg(parsed.length ? `${parsed.length} contacts ready — ${parsed.filter((r) => r.phone).length} with a phone number.` : "Couldn't read any rows. Need a header row with a name and phone column.");
+    setRows(parsed.rows); setMapping(parsed.mapping);
+    if (!listName) setListName(file.name.replace(/\.csv$/i, ""));
+    setMsg(parsed.rows.length ? `${parsed.rows.length} contacts read — ${parsed.rows.filter((r) => r.phone).length} with a phone number.` : "Couldn't read any rows. The file needs a header row with at least a name or phone column.");
   };
   const doImport = async () => {
     if (!rows.length || importing) return;
     setImporting(true); setMsg("Importing…");
-    const r = await fetch("/api/cold-calling/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug, rows }) }).catch(() => null);
+    const r = await fetch("/api/cold-calling/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug, rows, listName: listName.trim() }) }).catch(() => null);
     const p = await r?.json().catch(() => ({}));
     setImporting(false);
-    if (r?.ok) { setMsg(`Imported ${p.imported} contacts.`); setRows([]); setFileName(""); onImported(); }
+    if (r?.ok) { setMsg(`Imported ${p.imported} contacts${listName.trim() ? ` into “${listName.trim()}”` : ""}.`); setRows([]); setFileName(""); onImported(); }
     else setMsg(String(p?.error ?? "Import failed."));
   };
 
@@ -471,11 +518,11 @@ function AddLeadsModal({ slug, campaigns, busy, anyJobActive, onClose, onFetch, 
     <div className="cc-modal-backdrop" onClick={onClose}>
       <div className="cc-modal" onClick={(e) => e.stopPropagation()}>
         <div className="cc-modal-head">
-          <h2>Add leads</h2>
+          <h2>Add leads{clientName ? ` · ${clientName}` : ""}</h2>
           <button type="button" className="cc-modal-x" onClick={onClose}>✕</button>
         </div>
         <div className="cc-modal-tabs">
-          <button type="button" className={tab === "campaign" ? "on" : ""} onClick={() => setTab("campaign")}>From a campaign</button>
+          {hasCampaigns && <button type="button" className={tab === "campaign" ? "on" : ""} onClick={() => setTab("campaign")}>From a campaign</button>}
           <button type="button" className={tab === "csv" ? "on" : ""} onClick={() => setTab("csv")}>Upload a CSV</button>
         </div>
 
@@ -510,15 +557,27 @@ function AddLeadsModal({ slug, campaigns, busy, anyJobActive, onClose, onFetch, 
           </div>
         ) : (
           <div className="cc-modal-body">
+            <label className="cc-list-field">
+              <span>List name <em>· so your team knows whose list this is</em></span>
+              <input value={listName} placeholder="e.g. Kiril — Q3 health-system targets" onChange={(e) => setListName(e.target.value)} />
+            </label>
             <label className="cc-csv-drop">
               <input type="file" accept=".csv,text/csv" onChange={(e) => void onFile(e.target.files?.[0])} />
               <span className="cc-csv-icon">⬆</span>
               <span>{fileName || "Choose a CSV file"}</span>
-              <small>Columns: name, phone (required) · optional company, title, linkedin</small>
+              <small>Any columns work — the name, phone (personal/mobile), LinkedIn, company and title are detected automatically.</small>
             </label>
             {msg && <p className={`cc-csv-msg ${msg.startsWith("Imported") ? "ok" : ""}`}>{msg}</p>}
             {rows.length > 0 && (
               <>
+                <div className="cc-csv-map">
+                  <div className="cc-csv-map-title">Detected columns — check these look right:</div>
+                  {Object.entries(mapping).map(([field, col]) => (
+                    <div className={`cc-csv-maprow ${col === "—" && field === "Phone" ? "warn" : ""}`} key={field}>
+                      <b>{field}</b><span>→</span><em>{col}</em>
+                    </div>
+                  ))}
+                </div>
                 <div className="cc-csv-preview">
                   {rows.slice(0, 5).map((r, i) => (
                     <div key={i} className="cc-csv-prow"><b>{r.name || "—"}</b><span>{r.phone || "no phone"}</span><em>{r.company}</em></div>

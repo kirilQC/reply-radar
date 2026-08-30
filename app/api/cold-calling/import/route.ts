@@ -12,8 +12,9 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const slug = String(body.slug ?? "");
   const rows = Array.isArray(body.rows) ? body.rows : [];
+  const listName = String(body.listName ?? "");
   if (!slug) return NextResponse.json({ ok: false, error: "slug required" }, { status: 400 });
   if (!rows.length) return NextResponse.json({ ok: false, error: "No rows to import." }, { status: 400 });
-  const result = await importCsvLeads(slug, rows);
+  const result = await importCsvLeads(slug, rows, listName);
   return NextResponse.json(result, { status: result.ok ? 200 : 502 });
 }
