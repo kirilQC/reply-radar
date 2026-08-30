@@ -307,8 +307,6 @@ export default function ClientCallList() {
                 </div>
               </div>
 
-              <CallScript slug={slug} initial={client.script} />
-
               {!leads.some((l) => l.phone) ? (
                 <div className="cc-empty">No leads with a number yet. Click <b>+ Add leads</b> to pull a campaign or upload a CSV.</div>
               ) : (
@@ -364,6 +362,8 @@ export default function ClientCallList() {
         </main>
       </section>
 
+      {client && <CallScriptDrawer slug={slug} initial={client.script} />}
+
       {addOpen && client && (
         <AddLeadsModal slug={slug} campaigns={campaigns} busy={busy} anyJobActive={anyJobActive}
           onClose={() => setAddOpen(false)} onFetch={fetchCampaign} onImported={() => void load()} />
@@ -399,14 +399,14 @@ function InboxSkeleton() {
   );
 }
 
-// ── Call script (auto-saving) ──
-function CallScript({ slug, initial }: { slug: string; initial: string }) {
+// ── Call script — slide-out drawer on the right edge (auto-saving) ──
+function CallScriptDrawer({ slug, initial }: { slug: string; initial: string }) {
   const [text, setText] = useState(initial);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { setText(initial); }, [initial]);
-  useEffect(() => { try { setOpen(localStorage.getItem("cc-script-open") !== "0"); } catch { /* ignore */ } }, []);
+  useEffect(() => { try { setOpen(localStorage.getItem("cc-script-open") === "1"); } catch { /* ignore */ } }, []);
 
   const onChange = (v: string) => {
     setText(v); setState("saving");
@@ -420,15 +420,18 @@ function CallScript({ slug, initial }: { slug: string; initial: string }) {
   const toggle = () => { setOpen((v) => { const n = !v; try { localStorage.setItem("cc-script-open", n ? "1" : "0"); } catch { /* ignore */ } return n; }); };
 
   return (
-    <div className="cc-script">
-      <button type="button" className={`cc-script-head ${open ? "open" : ""}`} onClick={toggle}>
-        <span className="cc-caret" aria-hidden>▸</span>
-        <span>Call script</span>
-        <span className="cc-script-state">{state === "saving" ? "Saving…" : state === "saved" ? "Saved ✓" : ""}</span>
+    <div className={`cc-scriptdrawer ${open ? "open" : ""}`}>
+      <button type="button" className="cc-scripttab" onClick={toggle} aria-label="Toggle call script">
+        <span>CALL SCRIPT</span>
+        <b aria-hidden>{open ? "›" : "‹"}</b>
       </button>
-      {open && (
-        <textarea className="cc-script-box" value={text} onChange={(e) => onChange(e.target.value)} />
-      )}
+      <div className="cc-scriptpanel">
+        <div className="cc-scriptpanel-head">
+          <span>Call script</span>
+          <span className="cc-script-state">{state === "saving" ? "Saving…" : state === "saved" ? "Saved ✓" : ""}</span>
+        </div>
+        <textarea className="cc-scriptpanel-box" value={text} onChange={(e) => onChange(e.target.value)} placeholder="" />
+      </div>
     </div>
   );
 }

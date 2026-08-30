@@ -475,3 +475,16 @@
 .cc-refresh svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .cc-refresh.spinning svg { animation: cc-spin .8s infinite linear; }
 .cc-refresh:disabled { cursor: default; }
+
+/* ═══ Call script — right-edge slide-out drawer (design B) ═══ */
+.cc-scriptdrawer { position: fixed; top: 64px; right: 0; bottom: 0; width: 350px; z-index: 80; transform: translateX(100%); transition: transform .26s cubic-bezier(.4,0,.2,1); }
+.cc-scriptdrawer.open { transform: translateX(0); }
+.cc-scripttab { position: absolute; left: -38px; top: 46%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; writing-mode: vertical-rl; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 750; letter-spacing: .12em; padding: 16px 9px; border-radius: 10px 0 0 10px; box-shadow: -6px 0 18px rgba(0,0,0,.35); cursor: pointer; }
+.cc-scripttab b { writing-mode: horizontal-tb; font-size: 13px; }
+.cc-scripttab:hover { filter: brightness(1.08); }
+.cc-scriptpanel { height: 100%; background: var(--panel); border-left: 1px solid var(--border); box-shadow: -20px 0 60px rgba(0,0,0,.5); display: flex; flex-direction: column; }
+.cc-scriptpanel-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--border-soft, var(--border)); }
+.cc-scriptpanel-head > span:first-child { font-size: 14px; font-weight: 750; letter-spacing: -.01em; }
+.cc-scriptpanel-box { flex: 1; width: 100%; resize: none; border: 0; background: var(--panel-2, #151821); color: var(--text); padding: 18px; font: inherit; font-size: 14px; line-height: 1.65; }
+.cc-scriptpanel-box:focus { outline: none; }
+@media (max-width: 700px) { .cc-scriptdrawer { width: 86vw; } }
