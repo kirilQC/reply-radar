@@ -118,6 +118,8 @@ export default function ClientCallList() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(30);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = async () => {
@@ -187,6 +189,11 @@ export default function ClientCallList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queue]);
 
+  // Reset pagination whenever the filters change.
+  useEffect(() => { setVisibleCount(30); }, [query, seg, fCampaign, fSender, sortBy]);
+
+  const activeFilters = (fCampaign ? 1 : 0) + (fSender ? 1 : 0) + (sortBy !== "icp" ? 1 : 0);
+
   const current = queue.find((l) => l.id === selectedId) ?? null;
 
   useEffect(() => {
@@ -246,19 +253,39 @@ export default function ClientCallList() {
                   <div className="cc-client-titles"><h1>{client.name}</h1></div>
                 </div>
                 <div className="cc-head-tools">
-                  <select className="cc-select" value={fCampaign} onChange={(e) => setFCampaign(e.target.value)}>
-                    <option value="">All campaigns</option>
-                    {campaignOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <select className="cc-select" value={fSender} onChange={(e) => setFSender(e.target.value)}>
-                    <option value="">All senders</option>
-                    {senderOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <select className="cc-select" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)}>
-                    <option value="icp">Sort · ICP</option>
-                    <option value="newest">Sort · Newest reply</option>
-                    <option value="oldest">Sort · Oldest reply</option>
-                  </select>
+                  <div className="cc-filter-wrap">
+                    <button type="button" className={`cc-filterbtn ${filtersOpen || activeFilters ? "on" : ""}`} onClick={() => setFiltersOpen((v) => !v)}>
+                      <svg viewBox="0 0 24 24" className="cc-filter-ic"><path d="M4 5h16M7 12h10M10 19h4" /></svg>
+                      Filters{activeFilters > 0 ? ` · ${activeFilters}` : ""}
+                    </button>
+                    {filtersOpen && (
+                      <>
+                        <div className="cc-pop-scrim" onClick={() => setFiltersOpen(false)} />
+                        <div className="cc-filter-pop">
+                          <label className="cc-filter-field"><span>Campaign</span>
+                            <select className="cc-select" value={fCampaign} onChange={(e) => setFCampaign(e.target.value)}>
+                              <option value="">All campaigns</option>
+                              {campaignOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                          </label>
+                          <label className="cc-filter-field"><span>Sender</span>
+                            <select className="cc-select" value={fSender} onChange={(e) => setFSender(e.target.value)}>
+                              <option value="">All senders</option>
+                              {senderOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </label>
+                          <label className="cc-filter-field"><span>Sort by</span>
+                            <select className="cc-select" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)}>
+                              <option value="icp">ICP score</option>
+                              <option value="newest">Newest reply</option>
+                              <option value="oldest">Oldest reply</option>
+                            </select>
+                          </label>
+                          {activeFilters > 0 && <button type="button" className="cc-filter-clear" onClick={() => { setFCampaign(""); setFSender(""); setSortBy("icp"); }}>Clear filters</button>}
+                        </div>
+                      </>
+                    )}
+                  </div>
                   <button type="button" className="cc-addbtn" onClick={() => setAddOpen(true)}>+ Add leads</button>
                   <a className="cc-export" href={`/api/cold-calling/export?slug=${encodeURIComponent(slug)}`}>Export</a>
                 </div>
@@ -281,7 +308,7 @@ export default function ClientCallList() {
                     </div>
                     <div className="cc-list-rows">
                       {queue.length === 0 && <p className="cc-muted" style={{ padding: "18px 16px" }}>No leads match.</p>}
-                      {queue.map((l) => (
+                      {queue.slice(0, visibleCount).map((l) => (
                         <button type="button" key={l.id} className={`cc-lrow ${l.id === selectedId ? "on" : ""}`} onClick={() => setSelectedId(l.id)}>
                           <Avatar lead={l} size={42} />
                           <span className="cc-lrow-body">
@@ -295,13 +322,24 @@ export default function ClientCallList() {
                           </span>
                         </button>
                       ))}
+                      {queue.length > visibleCount && (
+                        <button type="button" className="cc-seemore" onClick={() => setVisibleCount((v) => v + 30)}>
+                          See {Math.min(30, queue.length - visibleCount)} more · {queue.length - visibleCount} left
+                        </button>
+                      )}
                     </div>
                   </div>
 
                   <div className="cc-convo">
                     {current
-                      ? <LeadPane lead={current} detail={detail} detailLoading={detailLoading} busy={busy} onSave={(r, n) => void saveAndNext(current.id, r, n)} onSkip={advance} />
+                      ? <ConversationColumn lead={current} detail={detail} detailLoading={detailLoading} busy={busy} onSave={(r, n) => void saveAndNext(current.id, r, n)} onSkip={advance} />
                       : <div className="cc-empty" style={{ margin: 24 }}>Pick a lead from the list.</div>}
+                  </div>
+
+                  <div className="cc-recordcol">
+                    {current
+                      ? <LeadRecord lead={current} detail={detail} loading={detailLoading} />
+                      : null}
                   </div>
                 </div>
               )}
@@ -346,7 +384,7 @@ function CallScript({ slug, initial }: { slug: string; initial: string }) {
         <span className="cc-script-state">{state === "saving" ? "Saving…" : state === "saved" ? "Saved ✓" : ""}</span>
       </button>
       {open && (
-        <textarea className="cc-script-box" value={text} placeholder="Type your call script here — it saves as you type. Opening line, discovery questions, objection handling…" onChange={(e) => onChange(e.target.value)} />
+        <textarea className="cc-script-box" value={text} onChange={(e) => onChange(e.target.value)} />
       )}
     </div>
   );
@@ -451,7 +489,7 @@ function AddLeadsModal({ slug, campaigns, busy, anyJobActive, onClose, onFetch, 
   );
 }
 
-function LeadPane({ lead, detail, detailLoading, busy, onSave, onSkip }: { lead: CallLead; detail: Detail | null; detailLoading: boolean; busy: boolean; onSave: (result: string, notes: string) => void; onSkip: () => void }) {
+function ConversationColumn({ lead, detail, detailLoading, busy, onSave, onSkip }: { lead: CallLead; detail: Detail | null; detailLoading: boolean; busy: boolean; onSave: (result: string, notes: string) => void; onSkip: () => void }) {
   const [result, setResult] = useState("");
   const [notes, setNotes] = useState("");
   const threadRef = useRef<HTMLDivElement | null>(null);
@@ -478,16 +516,12 @@ function LeadPane({ lead, detail, detailLoading, busy, onSave, onSkip }: { lead:
           : <span className="cc-nophone">No number</span>}
       </div>
 
-      <div className="cc-lp-scroll">
-        <div className="cc-thread-box" ref={threadRef}>
-          {detailLoading && !detail
-            ? <p className="cc-muted" style={{ padding: "24px 22px" }}>Loading conversation…</p>
-            : messages && messages.length > 0
-              ? <Conversation messages={messages} />
-              : <div className="cc-thread-empty-wrap"><p className="cc-thread-empty">No LinkedIn messages on record — this lead hasn’t replied. Give them a call.</p></div>}
-        </div>
-
-        <LeadRecord lead={lead} detail={detail} loading={detailLoading} />
+      <div className="cc-thread-scroll" ref={threadRef}>
+        {detailLoading && !detail
+          ? <p className="cc-muted" style={{ padding: "24px 22px" }}>Loading conversation…</p>
+          : messages && messages.length > 0
+            ? <Conversation messages={messages} />
+            : <div className="cc-thread-empty-wrap"><p className="cc-thread-empty">No LinkedIn messages on record — this lead hasn’t replied. Give them a call.</p></div>}
       </div>
 
       <div className="cc-lp-log">
