@@ -32,7 +32,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Reply Radar — Follow-up intelligence",
+  title: "Reply Radar",
   description: "The operating system for every conversation after the first reply.",
   /**
    * The one part of the authorship stamp that survives a build.

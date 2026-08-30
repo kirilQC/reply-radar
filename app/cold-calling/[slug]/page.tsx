@@ -130,18 +130,25 @@ export default function ClientCallList() {
       if (payload.ok) {
         setClient(payload.client);
         setLeads(Array.isArray(payload.leads) ? payload.leads : []);
-        setCampaigns(Array.isArray(payload.campaigns) ? payload.campaigns : []);
       }
     } catch { /* keep previous */ }
     setLoading(false);
   };
+  // Campaigns hit the HeyReach API — load them in the background so leads paint first.
+  const loadCampaigns = async () => {
+    try {
+      const r = await fetch(`/api/cold-calling/${encodeURIComponent(slug)}/campaigns`, { cache: "no-store" });
+      const p = await r.json().catch(() => ({}));
+      if (Array.isArray(p.campaigns)) setCampaigns(p.campaigns);
+    } catch { /* keep previous */ }
+  };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (slug) void load(); }, [slug]);
+  useEffect(() => { if (slug) { void load(); void loadCampaigns(); } }, [slug]);
 
   const anyJobActive = campaigns.some((c) => c.job && c.job.status !== "done" && c.job.status !== "error");
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
-    if (anyJobActive) { setAddOpen(true); pollRef.current = setInterval(() => void load(), 6000); }
+    if (anyJobActive) { setAddOpen(true); pollRef.current = setInterval(() => { void load(); void loadCampaigns(); }, 6000); }
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyJobActive, slug]);
@@ -155,7 +162,7 @@ export default function ClientCallList() {
       drainingRef.current = true;
       try { await fetch("/api/cold-calling/process", { method: "POST" }); } catch { /* ignore */ }
       drainingRef.current = false;
-      if (!stopped) await load();
+      if (!stopped) { await load(); await loadCampaigns(); }
     };
     void drain();
     const id = setInterval(() => void drain(), 8000);
@@ -219,7 +226,7 @@ export default function ClientCallList() {
   const fetchCampaign = async (c: Campaign) => {
     setBusy(true);
     await fetch("/api/cold-calling/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug, campaignId: c.id, campaignName: c.name }) }).catch(() => {});
-    setBusy(false); await load();
+    setBusy(false); await Promise.all([load(), loadCampaigns()]);
   };
   const saveAndNext = async (leadId: string, result: string, notes: string) => {
     setBusy(true);
@@ -240,7 +247,7 @@ export default function ClientCallList() {
           <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="cc-shell cc-inbox-shell">
-          {loading && <p className="cc-muted">Loading call list…</p>}
+          {loading && !client && <InboxSkeleton />}
           {notFound && !loading && <div className="cc-empty">That client was not found. <Link href="/cold-calling" style={{ color: "var(--accent)" }}>Back</Link>.</div>}
 
           {client && (
@@ -352,6 +359,33 @@ export default function ClientCallList() {
         <AddLeadsModal slug={slug} campaigns={campaigns} busy={busy} anyJobActive={anyJobActive}
           onClose={() => setAddOpen(false)} onFetch={fetchCampaign} onImported={() => void load()} />
       )}
+    </div>
+  );
+}
+
+// ── Loading skeleton ──
+function InboxSkeleton() {
+  return (
+    <div className="cc-skel">
+      <div className="cc-skel-head">
+        <div className="cc-skel-logo sk" />
+        <div className="cc-skel-title sk" />
+      </div>
+      <div className="cc-inbox cc-skel-inbox">
+        <div className="cc-list">
+          <div className="cc-list-top"><div className="cc-skel-search sk" /></div>
+          <div className="cc-list-rows">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <div className="cc-skel-row" key={i}>
+                <div className="cc-skel-av sk" />
+                <div className="cc-skel-lines"><div className="sk" style={{ width: "70%" }} /><div className="sk" style={{ width: "50%" }} /><div className="sk" style={{ width: "40%" }} /></div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="cc-convo cc-skel-mid"><div className="cc-skel-spinner" /><p className="cc-muted">Loading call list…</p></div>
+        <div className="cc-recordcol" />
+      </div>
     </div>
   );
 }

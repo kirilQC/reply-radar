@@ -445,3 +445,23 @@
 .cc-directory { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
 .cc-card { min-height: 132px; padding: 18px; border-radius: 16px; }
 .cc-card-name { margin-top: 14px; font-size: 15px; }
+
+/* ═══ Scroll fix: grid/flex children need min-height:0 to scroll internally instead of clipping ═══ */
+.cc-list, .cc-convo, .cc-recordcol { min-height: 0; }
+.cc-list-rows { min-height: 0; }
+
+/* ═══ Loading skeleton ═══ */
+@keyframes cc-shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.sk { background: linear-gradient(90deg, var(--panel-2, #151821) 25%, color-mix(in srgb, var(--panel-2, #151821) 60%, var(--border)) 50%, var(--panel-2, #151821) 75%); background-size: 800px 100%; animation: cc-shimmer 1.3s infinite linear; border-radius: 7px; }
+.cc-skel-head { display: flex; align-items: center; gap: 18px; margin-bottom: 22px; padding-bottom: 22px; border-bottom: 1px solid var(--border-soft, var(--border)); }
+.cc-skel-logo { width: 68px; height: 68px; border-radius: 18px; }
+.cc-skel-title { width: 260px; height: 40px; border-radius: 10px; }
+.cc-skel-inbox { }
+.cc-skel-search { width: 100%; height: 44px; }
+.cc-skel-row { display: flex; gap: 11px; align-items: flex-start; padding: 10px; }
+.cc-skel-av { width: 42px; height: 42px; border-radius: 50%; flex: none; }
+.cc-skel-lines { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.cc-skel-lines .sk { height: 10px; }
+.cc-skel-mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+.cc-skel-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--accent); animation: cc-spin .8s infinite linear; }
+@keyframes cc-spin { to { transform: rotate(360deg); } }
