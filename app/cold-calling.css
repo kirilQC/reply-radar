@@ -426,3 +426,22 @@
 .cc-filter-field > span { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-2); font-weight: 750; }
 .cc-filter-field .cc-select { max-width: none; width: 100%; }
 .cc-filter-clear { font: inherit; font-size: 12px; font-weight: 650; color: var(--coral, #e5738a); background: none; border: 0; cursor: pointer; text-align: left; padding: 2px; }
+
+/* ═══ Fixes: search width, viewport-bounded panes (pinned log), directory cards ═══ */
+
+/* Search — high specificity beats the five stale .cc-search rules; comfortable + full width */
+.cc-list-top .cc-search { flex: none; width: 100%; box-sizing: border-box; height: 44px; font-size: 14px; padding: 0 16px; margin: 0; }
+.cc-modal .cc-search { flex: none; width: 100%; box-sizing: border-box; height: 40px; }
+.cc-list-top { padding: 16px 14px 14px; gap: 14px; }
+
+/* Bound the whole view to the viewport so the conversation's log bar is always pinned & visible */
+.cc-inbox-shell { height: calc(100vh - 64px); overflow: hidden; padding: 22px 40px 16px; }
+.cc-inbox { flex: 1; min-height: 0; height: auto; }
+.cc-lp { height: 100%; }
+
+/* Directory — wider section, logo + name only, slightly smaller cards */
+.cc-directory-shell { max-width: 1480px; }
+.cc-heading h1 { margin: 0 0 22px; }
+.cc-directory { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.cc-card { min-height: 132px; padding: 18px; border-radius: 16px; }
+.cc-card-name { margin-top: 14px; font-size: 15px; }

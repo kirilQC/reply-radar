@@ -38,7 +38,6 @@ export default function ColdCallingDirectory() {
         <main className="cc-shell cc-directory-shell">
           <div className="cc-heading">
             <h1>Cold calling</h1>
-            <p>Pick a client, work down their call list, and log every result.</p>
           </div>
           {loading && <p className="cc-muted">Loading…</p>}
           {!loading && clients.length === 0 && <div className="cc-empty">No clients with a HeyReach connection yet.</div>}
@@ -49,7 +48,6 @@ export default function ColdCallingDirectory() {
                   {c.logoUrl ? <img src={c.logoUrl} alt="" /> : (c.name[0] || "?").toUpperCase()}
                 </span>
                 <span className="cc-card-name">{c.name}</span>
-                <span className="cc-card-count"><b>{c.callable}</b> to call{c.withPhone ? <em>{c.withPhone} with a number</em> : null}</span>
               </Link>
             ))}
           </div>

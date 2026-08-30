@@ -616,6 +616,18 @@ function LeadRecord({ lead, detail, loading }: { lead: CallLead; detail: Detail 
         </div>
       </section>
 
+      <section className="cc-rsection">
+        <h3>Company</h3>
+        <div className="cc-field-grid">
+          <Field label="Company" value={companyName} />
+          <Field label="Industry" value={companyIndustry} />
+          <Field label="Size" value={companySize} />
+          <Field label="Headquarters" value={companyLocation} />
+          <Field label="Company LinkedIn" value={<ExtLink href={externalUrl(links.linkedin)} text="Open on LinkedIn ↗" />} />
+          <Field label="Last enriched" value={whenDate(e.enrichedAt)} />
+        </div>
+      </section>
+
       {hasEnrichment && (
         <section className="cc-rsection">
           <h3>Professional profile</h3>
@@ -635,18 +647,6 @@ function LeadRecord({ lead, detail, loading }: { lead: CallLead; detail: Detail 
           <p className="cc-about" style={{ margin: 0 }}>{lead.icpReason}</p>
         </section>
       )}
-
-      <section className="cc-rsection">
-        <h3>Company</h3>
-        <div className="cc-field-grid">
-          <Field label="Company" value={companyName} />
-          <Field label="Industry" value={companyIndustry} />
-          <Field label="Size" value={companySize} />
-          <Field label="Headquarters" value={companyLocation} />
-          <Field label="Company LinkedIn" value={<ExtLink href={externalUrl(links.linkedin)} text="Open on LinkedIn ↗" />} />
-          <Field label="Last enriched" value={whenDate(e.enrichedAt)} />
-        </div>
-      </section>
     </div>
   );
 }
