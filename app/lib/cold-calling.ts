@@ -155,7 +155,65 @@ function callLeadFromRow(lead: Row, logs: Row[], replyAt: Map<string, string>): 
 }
 
 /** A client's callable leads, sorted by ICP score (highest first), with call history attached. */
-export async function getCallList(slug: string): Promise<{ ok: boolean; error?: string; client?: { name: string; slug: string; logoUrl: string | null; accentColor: string | null }; leads?: CallLead[] }> {
+const scriptKey = (workspaceId: string) => `cold_call_script:${workspaceId}`;
+
+/** The per-client call script (typed in the cockpit, shared across the team). Stored in rr_app_config. */
+export async function getCallScript(workspaceId: string): Promise<string> {
+  const { url, key } = config();
+  if (!url || !key) return "";
+  const row = (await rows(url, key, `rr_app_config?select=value&key=eq.${encodeURIComponent(scriptKey(workspaceId))}&limit=1`))[0];
+  return str(obj(row?.value).script);
+}
+export async function saveCallScript(slug: string, script: string): Promise<{ ok: boolean; error?: string }> {
+  const { url, key } = config();
+  if (!url || !key) return { ok: false, error: "Supabase is not configured." };
+  const ws = await workspaceFor(slug);
+  if (!ws) return { ok: false, error: `No client matches "${slug}".` };
+  const res = await fetch(`${url}/rest/v1/rr_app_config`, {
+    method: "POST", headers: { ...headers(key), Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({ key: scriptKey(ws.id), value: { script: String(script).slice(0, 20000) }, updated_at: new Date().toISOString() }),
+  });
+  return res.ok ? { ok: true } : { ok: false, error: "Could not save the script." };
+}
+
+/** Import a list of contacts + phone numbers from a CSV into this client's call list. */
+export async function importCsvLeads(slug: string, records: Array<Record<string, string>>): Promise<{ ok: boolean; imported: number; error?: string }> {
+  const { url, key } = config();
+  if (!url || !key) return { ok: false, imported: 0, error: "Supabase is not configured." };
+  const ws = await workspaceFor(slug);
+  if (!ws) return { ok: false, imported: 0, error: `No client matches "${slug}".` };
+  let imported = 0;
+  const fetchedAt = new Date().toISOString();
+  for (const r of records.slice(0, 2000)) {
+    const name = str(r.name).trim();
+    const phone = str(r.phone).replace(/[^\d+]/g, "").trim();
+    if (!name && !phone) continue;
+    const profileUrl = str(r.linkedin).trim();
+    const cold = { campaignId: "csv", campaignName: "CSV import", fetchedAt, enriched: true, source: "csv" };
+    const existing = profileUrl
+      ? (await rows(url, key, `rr_leads?select=id,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&linkedin_profile_url=eq.${encodeURIComponent(profileUrl)}&limit=1`))[0]
+      : undefined;
+    if (existing) {
+      const existingRaw = obj(existing.raw_data);
+      const rr = obj(existingRaw.reply_radar);
+      const nextRr = { ...rr, cold_call: { ...obj(rr.cold_call), ...cold }, ...(phone ? { phone } : {}) };
+      await fetch(`${url}/rest/v1/rr_leads?id=eq.${encodeURIComponent(str(existing.id))}`, { method: "PATCH", headers: headers(key), body: JSON.stringify({ raw_data: { ...existingRaw, reply_radar: nextRr } }) }).catch(() => {});
+    } else {
+      await fetch(`${url}/rest/v1/rr_leads`, {
+        method: "POST", headers: headers(key),
+        body: JSON.stringify({
+          workspace_id: ws.id, linkedin_profile_url: profileUrl || null, name: name || null,
+          role: str(r.title).trim() || null, company: str(r.company).trim() || null,
+          raw_data: { reply_radar: { cold_call: cold, ...(phone ? { phone } : {}) } },
+        }),
+      }).catch(() => {});
+    }
+    imported++;
+  }
+  return { ok: true, imported };
+}
+
+export async function getCallList(slug: string): Promise<{ ok: boolean; error?: string; client?: { name: string; slug: string; logoUrl: string | null; accentColor: string | null; script: string }; leads?: CallLead[] }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const ws = await workspaceFor(slug);
@@ -169,7 +227,8 @@ export async function getCallList(slug: string): Promise<{ ok: boolean; error?: 
   // Sort by ICP score (highest first, unscored last) in code — the icp_score column isn't guaranteed to exist.
   const callable = leads.filter(isCallable).map((lead) => callLeadFromRow(lead, logs, replyAt))
     .sort((a, b) => (b.icpScore ?? -1) - (a.icpScore ?? -1));
-  return { ok: true, client: { name: ws.name, slug: ws.slug, logoUrl: ws.logoUrl, accentColor: ws.accentColor }, leads: callable };
+  const script = await getCallScript(ws.id);
+  return { ok: true, client: { name: ws.name, slug: ws.slug, logoUrl: ws.logoUrl, accentColor: ws.accentColor, script }, leads: callable };
 }
 
 // ── Campaigns + fetch jobs ───────────────────────────────────────────────────────────────────────

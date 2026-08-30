@@ -20,7 +20,7 @@ type CallLead = {
   activity: string; lastCall: { caller: string | null; result: string | null; notes: string | null; at: string } | null; callCount: number;
 };
 type Msg = { direction?: string; body?: string; sent_at?: string; conversation_id?: string };
-type Client = { name: string; slug: string; logoUrl: string | null; accentColor: string | null };
+type Client = { name: string; slug: string; logoUrl: string | null; accentColor: string | null; script: string };
 type Campaign = { id: string; name: string; status: string; listSize: number; fetched: number; enriched: number; job: { status: string; leadsFetched: number; leadsEnriched: number; total: number; error: string | null } | null };
 type Detail = { lead: Record<string, unknown>; conversations?: Record<string, unknown>[]; messages?: Msg[]; workspaces?: unknown[] };
 type SortBy = "icp" | "newest" | "oldest";
@@ -31,13 +31,8 @@ const scoreClass = (s: number | null) => (s == null ? "none" : s >= 70 ? "hot" :
 const telHref = (p: string) => `tel:${p.replace(/[^\d+]/g, "")}`;
 const pct = (n: number, d: number) => (d > 0 ? Math.min(100, Math.round((n / d) * 100)) : 0);
 const initials = (s: string) => (s.trim()[0] || "?").toUpperCase();
-const relTime = (v: string | null) => {
-  if (!v) return "";
-  const d = new Date(v); if (Number.isNaN(+d)) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-};
+const relTime = (v: string | null) => { if (!v) return ""; const d = new Date(v); return Number.isNaN(+d) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
 
-// ── helpers for reading the stored lead record ──
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const str = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -55,20 +50,14 @@ const externalUrl = (v: unknown): string => {
   if (!s || s === "null") return "";
   return s.startsWith("http") ? s : `https://${s}`;
 };
-const whenDate = (v: unknown): string => {
-  const s = str(v); if (!s) return "";
-  const d = new Date(s); return Number.isNaN(+d) ? s : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-};
+const whenDate = (v: unknown): string => { const s = str(v); if (!s) return ""; const d = new Date(s); return Number.isNaN(+d) ? s : d.toLocaleString(); };
 
-/** An image that falls back to `fallback` if the src is missing or fails (broken/expired photos). */
 function SmartImg({ src, className, fallback }: { src: string | null; className: string; fallback: React.ReactNode }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => { setFailed(false); }, [src]);
   if (!src || failed) return <>{fallback}</>;
   return <img className={className} src={src} alt="" loading="lazy" onError={() => setFailed(true)} />;
 }
-
-/** Round photo with the company logo tucked into the corner. */
 function Avatar({ lead, size }: { lead: CallLead; size: number }) {
   return (
     <span className="cc-av" style={{ width: size, height: size }}>
@@ -79,13 +68,37 @@ function Avatar({ lead, size }: { lead: CallLead; size: number }) {
     </span>
   );
 }
-
 const statusOf = (lead: CallLead, messages: Msg[] | null): { label: string; cls: string } => {
   const hasInbound = (messages ?? []).some((m) => (m.direction || "").toLowerCase() === "inbound");
   if (hasInbound || lead.replied) return { label: "Replied", cls: "rep" };
   if ((messages ?? []).length > 0) return { label: "Messaged · no reply", cls: "wait" };
   return { label: "No reply yet", cls: "no" };
 };
+
+// ── CSV parsing (client-side) ──
+function splitCsvLine(line: string): string[] {
+  const out: string[] = []; let cur = ""; let q = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) { if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { out.push(cur); cur = ""; }
+    else cur += c;
+  }
+  out.push(cur); return out;
+}
+function parseCsv(text: string): Array<Record<string, string>> {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length);
+  if (lines.length < 2) return [];
+  const headers = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const find = (...keys: string[]) => headers.findIndex((h) => keys.some((k) => h.includes(k)));
+  const iName = find("name", "contact", "full"), iPhone = find("phone", "mobile", "cell", "number"), iCompany = find("company", "organization", "org"), iTitle = find("title", "role", "position", "headline"), iLinkedin = find("linkedin", "profile url", "profile_url");
+  const pick = (cols: string[], i: number) => (i >= 0 && i < cols.length ? cols[i].trim() : "");
+  return lines.slice(1).map((line) => {
+    const cols = splitCsvLine(line);
+    return { name: pick(cols, iName), phone: pick(cols, iPhone), company: pick(cols, iCompany), title: pick(cols, iTitle), linkedin: pick(cols, iLinkedin) };
+  }).filter((r) => r.name || r.phone);
+}
 
 export default function ClientCallList() {
   const params = useParams<{ slug: string }>();
@@ -95,7 +108,6 @@ export default function ClientCallList() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [campaignsOpen, setCampaignsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [seg, setSeg] = useState<Seg>("all");
   const [sortBy, setSortBy] = useState<SortBy>("icp");
@@ -105,6 +117,7 @@ export default function ClientCallList() {
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = async () => {
@@ -126,14 +139,11 @@ export default function ClientCallList() {
   const anyJobActive = campaigns.some((c) => c.job && c.job.status !== "done" && c.job.status !== "error");
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
-    if (anyJobActive) { setCampaignsOpen(true); pollRef.current = setInterval(() => void load(), 6000); }
+    if (anyJobActive) { setAddOpen(true); pollRef.current = setInterval(() => void load(), 6000); }
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyJobActive, slug]);
 
-  // Keep draining active jobs from the browser (single-flight) so they finish even without the cron worker —
-  // the background function hits Vercel's execution limit on large campaigns and would otherwise stall. Each
-  // poke resumes the oldest active job; already-enriched leads (with a phone) are skipped, so no re-charge.
   const drainingRef = useRef(false);
   useEffect(() => {
     if (!anyJobActive) return;
@@ -249,50 +259,17 @@ export default function ClientCallList() {
                     <option value="newest">Sort · Newest reply</option>
                     <option value="oldest">Sort · Oldest reply</option>
                   </select>
+                  <button type="button" className="cc-addbtn" onClick={() => setAddOpen(true)}>+ Add leads</button>
                   <a className="cc-export" href={`/api/cold-calling/export?slug=${encodeURIComponent(slug)}`}>Export</a>
                 </div>
               </div>
 
-              <div className="cc-campaigns">
-                <button type="button" className={`cc-campaigns-head ${campaignsOpen ? "open" : ""}`} onClick={() => setCampaignsOpen((v) => !v)}>
-                  <span className="cc-caret" aria-hidden>▸</span>
-                  <span>Pull leads from a campaign</span>
-                  <span className="cc-muted">{anyJobActive ? "working…" : `${campaigns.length} campaigns`}</span>
-                </button>
-                {campaignsOpen && (
-                  <div className="cc-campaign-list">
-                    {campaigns.length === 0 && <p className="cc-muted" style={{ padding: "6px 2px" }}>No campaigns found for this client.</p>}
-                    {campaigns.map((c) => {
-                      const running = c.job && c.job.status !== "done" && c.job.status !== "error";
-                      const phase = c.job?.status === "enriching" ? "enrich" : c.job?.status === "fetching" ? "fetch" : "queue";
-                      const barPct = phase === "enrich" ? pct(c.job!.leadsEnriched, c.job!.leadsFetched || c.listSize) : phase === "fetch" ? pct(c.job!.leadsFetched, c.job!.total || c.listSize) : 4;
-                      return (
-                        <div className={`cc-campaign ${running ? "running" : ""}`} key={c.id}>
-                          <div className="cc-campaign-main">
-                            <strong>{c.name}</strong>
-                            <span className="cc-muted">{c.listSize} leads · {c.fetched} fetched · {c.enriched} enriched{c.status ? ` · ${c.status.toLowerCase()}` : ""}</span>
-                            {running && (
-                              <div className="cc-progress">
-                                <span className="cc-progress-bar"><i style={{ width: `${barPct}%` }} className={phase} /></span>
-                                <span className="cc-progress-label">{phase === "queue" ? "Queued…" : phase === "fetch" ? `Fetching ${c.job!.leadsFetched}/${c.job!.total || c.listSize}` : `Enriching ${c.job!.leadsEnriched}/${c.job!.leadsFetched}`}</span>
-                              </div>
-                            )}
-                            {!running && c.job?.error && <div className="cc-campaign-error">⚠ {c.job.error}</div>}
-                          </div>
-                          {!running && <button type="button" className="cc-fetch" disabled={busy} onClick={() => void fetchCampaign(c)}>{c.fetched > 0 ? "Refresh & enrich" : "Fetch & enrich"}</button>}
-                        </div>
-                      );
-                    })}
-                    <p className="cc-note">Fetching pulls everyone in the campaign and reveals a mobile number for each (uses AI Ark credits). It runs in the background — leads appear as they finish.</p>
-                  </div>
-                )}
-              </div>
+              <CallScript slug={slug} initial={client.script} />
 
               {!leads.some((l) => l.phone) ? (
-                <div className="cc-empty">No leads with a number yet. Open “Pull leads from a campaign” above to build your list.</div>
+                <div className="cc-empty">No leads with a number yet. Click <b>+ Add leads</b> to pull a campaign or upload a CSV.</div>
               ) : (
                 <div className="cc-inbox">
-                  {/* Left — the list */}
                   <div className="cc-list">
                     <div className="cc-list-top">
                       <input className="cc-search" value={query} placeholder="Search name or company…" onChange={(e) => setQuery(e.target.value)} />
@@ -321,7 +298,6 @@ export default function ClientCallList() {
                     </div>
                   </div>
 
-                  {/* Right — the conversation + record + call */}
                   <div className="cc-convo">
                     {current
                       ? <LeadPane lead={current} detail={detail} detailLoading={detailLoading} busy={busy} onSave={(r, n) => void saveAndNext(current.id, r, n)} onSkip={advance} />
@@ -333,6 +309,144 @@ export default function ClientCallList() {
           )}
         </main>
       </section>
+
+      {addOpen && client && (
+        <AddLeadsModal slug={slug} campaigns={campaigns} busy={busy} anyJobActive={anyJobActive}
+          onClose={() => setAddOpen(false)} onFetch={fetchCampaign} onImported={() => void load()} />
+      )}
+    </div>
+  );
+}
+
+// ── Call script (auto-saving) ──
+function CallScript({ slug, initial }: { slug: string; initial: string }) {
+  const [text, setText] = useState(initial);
+  const [open, setOpen] = useState(true);
+  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { setText(initial); }, [initial]);
+  useEffect(() => { try { setOpen(localStorage.getItem("cc-script-open") !== "0"); } catch { /* ignore */ } }, []);
+
+  const onChange = (v: string) => {
+    setText(v); setState("saving");
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      await fetch("/api/cold-calling/script", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug, script: v }) }).catch(() => {});
+      setState("saved");
+      setTimeout(() => setState("idle"), 1500);
+    }, 600);
+  };
+  const toggle = () => { setOpen((v) => { const n = !v; try { localStorage.setItem("cc-script-open", n ? "1" : "0"); } catch { /* ignore */ } return n; }); };
+
+  return (
+    <div className="cc-script">
+      <button type="button" className={`cc-script-head ${open ? "open" : ""}`} onClick={toggle}>
+        <span className="cc-caret" aria-hidden>▸</span>
+        <span>Call script</span>
+        <span className="cc-script-state">{state === "saving" ? "Saving…" : state === "saved" ? "Saved ✓" : ""}</span>
+      </button>
+      {open && (
+        <textarea className="cc-script-box" value={text} placeholder="Type your call script here — it saves as you type. Opening line, discovery questions, objection handling…" onChange={(e) => onChange(e.target.value)} />
+      )}
+    </div>
+  );
+}
+
+// ── Add-leads modal ──
+function AddLeadsModal({ slug, campaigns, busy, anyJobActive, onClose, onFetch, onImported }: {
+  slug: string; campaigns: Campaign[]; busy: boolean; anyJobActive: boolean;
+  onClose: () => void; onFetch: (c: Campaign) => void; onImported: () => void;
+}) {
+  const [tab, setTab] = useState<"campaign" | "csv">("campaign");
+  const [rows, setRows] = useState<Array<Record<string, string>>>([]);
+  const [fileName, setFileName] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [search, setSearch] = useState("");
+
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    setFileName(file.name); setMsg("");
+    const parsed = parseCsv(await file.text());
+    setRows(parsed);
+    setMsg(parsed.length ? `${parsed.length} contacts ready — ${parsed.filter((r) => r.phone).length} with a phone number.` : "Couldn't read any rows. Need a header row with a name and phone column.");
+  };
+  const doImport = async () => {
+    if (!rows.length || importing) return;
+    setImporting(true); setMsg("Importing…");
+    const r = await fetch("/api/cold-calling/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug, rows }) }).catch(() => null);
+    const p = await r?.json().catch(() => ({}));
+    setImporting(false);
+    if (r?.ok) { setMsg(`Imported ${p.imported} contacts.`); setRows([]); setFileName(""); onImported(); }
+    else setMsg(String(p?.error ?? "Import failed."));
+  };
+
+  const shown = campaigns.filter((c) => !search.trim() || c.name.toLowerCase().includes(search.trim().toLowerCase()));
+
+  return (
+    <div className="cc-modal-backdrop" onClick={onClose}>
+      <div className="cc-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cc-modal-head">
+          <h2>Add leads</h2>
+          <button type="button" className="cc-modal-x" onClick={onClose}>✕</button>
+        </div>
+        <div className="cc-modal-tabs">
+          <button type="button" className={tab === "campaign" ? "on" : ""} onClick={() => setTab("campaign")}>From a campaign</button>
+          <button type="button" className={tab === "csv" ? "on" : ""} onClick={() => setTab("csv")}>Upload a CSV</button>
+        </div>
+
+        {tab === "campaign" ? (
+          <div className="cc-modal-body">
+            <input className="cc-search" style={{ marginBottom: 12 }} value={search} placeholder="Search campaigns…" onChange={(e) => setSearch(e.target.value)} />
+            <div className="cc-modal-camps">
+              {shown.length === 0 && <p className="cc-muted" style={{ padding: 8 }}>No campaigns found.</p>}
+              {shown.map((c) => {
+                const running = c.job && c.job.status !== "done" && c.job.status !== "error";
+                const phase = c.job?.status === "enriching" ? "enrich" : c.job?.status === "fetching" ? "fetch" : "queue";
+                const barPct = phase === "enrich" ? pct(c.job!.leadsEnriched, c.job!.leadsFetched || c.listSize) : phase === "fetch" ? pct(c.job!.leadsFetched, c.job!.total || c.listSize) : 4;
+                return (
+                  <div className={`cc-campaign ${running ? "running" : ""}`} key={c.id}>
+                    <div className="cc-campaign-main">
+                      <strong>{c.name}</strong>
+                      <span className="cc-muted">{c.listSize} leads · {c.fetched} fetched · {c.enriched} enriched</span>
+                      {running && (
+                        <div className="cc-progress">
+                          <span className="cc-progress-bar"><i style={{ width: `${barPct}%` }} className={phase} /></span>
+                          <span className="cc-progress-label">{phase === "queue" ? "Queued…" : phase === "fetch" ? `Fetching ${c.job!.leadsFetched}/${c.job!.total || c.listSize}` : `Enriching ${c.job!.leadsEnriched}/${c.job!.leadsFetched}`}</span>
+                        </div>
+                      )}
+                      {!running && c.job?.error && <div className="cc-campaign-error">⚠ {c.job.error}</div>}
+                    </div>
+                    {!running && <button type="button" className="cc-fetch" disabled={busy} onClick={() => onFetch(c)}>{c.fetched > 0 ? "Refresh" : "Fetch & enrich"}</button>}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="cc-note">Fetching pulls everyone in the campaign and reveals a mobile number for each (AI Ark credits). Runs in the background{anyJobActive ? " — a job is running now." : "."}</p>
+          </div>
+        ) : (
+          <div className="cc-modal-body">
+            <label className="cc-csv-drop">
+              <input type="file" accept=".csv,text/csv" onChange={(e) => void onFile(e.target.files?.[0])} />
+              <span className="cc-csv-icon">⬆</span>
+              <span>{fileName || "Choose a CSV file"}</span>
+              <small>Columns: name, phone (required) · optional company, title, linkedin</small>
+            </label>
+            {msg && <p className={`cc-csv-msg ${msg.startsWith("Imported") ? "ok" : ""}`}>{msg}</p>}
+            {rows.length > 0 && (
+              <>
+                <div className="cc-csv-preview">
+                  {rows.slice(0, 5).map((r, i) => (
+                    <div key={i} className="cc-csv-prow"><b>{r.name || "—"}</b><span>{r.phone || "no phone"}</span><em>{r.company}</em></div>
+                  ))}
+                  {rows.length > 5 && <div className="cc-csv-prow more">+ {rows.length - 5} more</div>}
+                </div>
+                <button type="button" className="cc-savenext" style={{ marginTop: 12 }} disabled={importing} onClick={() => void doImport()}>{importing ? "Importing…" : `Import ${rows.length} contacts`}</button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -340,15 +454,19 @@ export default function ClientCallList() {
 function LeadPane({ lead, detail, detailLoading, busy, onSave, onSkip }: { lead: CallLead; detail: Detail | null; detailLoading: boolean; busy: boolean; onSave: (result: string, notes: string) => void; onSkip: () => void }) {
   const [result, setResult] = useState("");
   const [notes, setNotes] = useState("");
-  const [showRecord, setShowRecord] = useState(false);
-  useEffect(() => { setResult(""); setNotes(""); setShowRecord(false); }, [lead.id]);
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { setResult(""); setNotes(""); }, [lead.id]);
 
   const messages = detail?.messages ?? null;
   const status = statusOf(lead, messages);
 
+  // Start at the newest message.
+  useEffect(() => {
+    if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
+  }, [detail, lead.id]);
+
   return (
     <div className="cc-lp">
-      {/* Header */}
       <div className="cc-lp-head">
         <Avatar lead={lead} size={52} />
         <div className="cc-lp-id">
@@ -360,26 +478,18 @@ function LeadPane({ lead, detail, detailLoading, busy, onSave, onSkip }: { lead:
           : <span className="cc-nophone">No number</span>}
       </div>
 
-      {/* Scroll: conversation + record */}
       <div className="cc-lp-scroll">
-        {detailLoading && !detail
-          ? <p className="cc-muted" style={{ padding: "24px 22px" }}>Loading conversation…</p>
-          : messages && messages.length > 0
-            ? <Conversation messages={messages} />
-            : <div className="cc-thread-empty-wrap"><p className="cc-thread-empty">No LinkedIn messages on record — this lead hasn’t replied. Give them a call.</p></div>}
+        <div className="cc-thread-box" ref={threadRef}>
+          {detailLoading && !detail
+            ? <p className="cc-muted" style={{ padding: "24px 22px" }}>Loading conversation…</p>
+            : messages && messages.length > 0
+              ? <Conversation messages={messages} />
+              : <div className="cc-thread-empty-wrap"><p className="cc-thread-empty">No LinkedIn messages on record — this lead hasn’t replied. Give them a call.</p></div>}
+        </div>
 
-        {lead.icpReason && (
-          <div className="cc-why"><span className="cc-why-label">Why ICP {lead.icpScore ?? ""}</span>{lead.icpReason}</div>
-        )}
-
-        <button type="button" className="cc-record-toggle" onClick={() => setShowRecord((v) => !v)}>
-          <span className="cc-caret" style={{ transform: showRecord ? "rotate(90deg)" : undefined }} aria-hidden>▸</span>
-          {showRecord ? "Hide full lead record" : "Show full lead record"}
-        </button>
-        {showRecord && <LeadRecord lead={lead} detail={detail} loading={detailLoading} />}
+        <LeadRecord lead={lead} detail={detail} loading={detailLoading} />
       </div>
 
-      {/* Log bar */}
       <div className="cc-lp-log">
         {lead.lastCall && <div className="cc-lastcall">Last: <b>{lead.lastCall.result || "logged"}</b>{lead.lastCall.notes ? ` — “${lead.lastCall.notes}”` : ""}</div>}
         <div className="cc-results">
@@ -402,7 +512,6 @@ function msgTime(v: unknown): string {
   const d = new Date(s); if (Number.isNaN(+d)) return "";
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " · " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
-
 function Conversation({ messages }: { messages: Msg[] }) {
   const sorted = [...messages].sort((a, b) => new Date(str(a.sent_at) || 0).getTime() - new Date(str(b.sent_at) || 0).getTime());
   return (
@@ -427,7 +536,6 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 function ExtLink({ href, text }: { href: string; text: string }) {
   return href ? <a href={href} target="_blank" rel="noreferrer">{text}</a> : <span className="is-empty">—</span>;
 }
-
 function LeadRecord({ lead, detail, loading }: { lead: CallLead; detail: Detail | null; loading: boolean }) {
   const raw = obj(detail?.lead?.raw_data);
   const rr = nested(raw, "reply_radar");
@@ -448,41 +556,61 @@ function LeadRecord({ lead, detail, loading }: { lead: CallLead; detail: Detail 
   const companyIndustry = str(summary.industry || company.industry || e.industry);
   const companySize = range.start || range.end ? `${str(range.start || "?")}–${str(range.end || "?")} employees` : staff.total ? `${Number(staff.total).toLocaleString()} employees` : "";
   const companyLocation = locationText(obj(company.location).headquarter);
+  const clients = (Array.isArray(rollup.clients) ? rollup.clients.map(String) : []).filter(Boolean);
+  const about = str(e.summary || e.about);
   const hasEnrichment = Object.keys(e).length > 0;
 
-  if (loading && !detail) return <div className="cc-record"><div className="cc-record-loading">Loading full record…</div></div>;
+  if (loading && !detail) return <div className="cc-record"><section className="cc-rsection"><div className="cc-record-loading">Loading full record…</div></section></div>;
 
   return (
     <div className="cc-record">
       <section className="cc-rsection">
-        <h4>Contact</h4>
+        <h3>Contact information</h3>
         <div className="cc-field-grid">
-          <Field label="Phone" value={lead.phone ? <a href={telHref(lead.phone)}>{lead.phone}</a> : "—"} />
+          <Field label="Full name" value={lead.name} />
+          <Field label="Current role" value={lead.title || str(e.title)} />
+          <Field label="Company" value={companyName} />
+          <Field label="Phone number" value={lead.phone ? <a href={telHref(lead.phone)}>{lead.phone}</a> : "—"} />
           <Field label="Email" value={email} />
           <Field label="Location" value={location} />
-          <Field label="LinkedIn" value={<ExtLink href={externalUrl(lead.linkedin || raw.linkedin_profile_url)} text="Open profile ↗" />} />
+          <Field label="Industry" value={companyIndustry} />
+          <Field label="Clients" value={clients.join(", ")} />
+          <Field label="Campaigns" value={lead.campaigns.join(", ")} />
+          <Field label="Senders" value={lead.senders.join(", ")} />
+          <Field label="LinkedIn profile" value={<ExtLink href={externalUrl(lead.linkedin || raw.linkedin_profile_url)} text="Open LinkedIn ↗" />} />
+          <Field label="Company website" value={<ExtLink href={externalUrl(links.website || raw.company_url)} text="Open website ↗" />} />
         </div>
       </section>
+
       {hasEnrichment && (
         <section className="cc-rsection">
-          <h4>Professional</h4>
+          <h3>Professional profile</h3>
           <div className="cc-field-grid">
-            <Field label="Current role" value={lead.title || str(e.title)} />
-            <Field label="Seniority & department" value={departmentLabels.join(" · ")} />
+            <Field label="Headline" value={str(e.headline || raw.summary)} />
+            <Field label="Seniority and department" value={departmentLabels.join(" · ")} />
             <Field label="Network" value={network} />
-            <Field label="Education" value={education.slice(0, 2).join(" · ")} />
+            <Field label="Education" value={education.slice(0, 3).join(" · ")} />
           </div>
+          {about && (<><div className="cc-about-label">About</div><p className="cc-about">{about}</p></>)}
         </section>
       )}
+
+      {lead.icpReason && (
+        <section className="cc-rsection">
+          <h3>Why this ICP score {lead.icpScore != null ? `· ${lead.icpScore}` : ""}</h3>
+          <p className="cc-about" style={{ margin: 0 }}>{lead.icpReason}</p>
+        </section>
+      )}
+
       <section className="cc-rsection">
-        <h4>Company</h4>
+        <h3>Company</h3>
         <div className="cc-field-grid">
           <Field label="Company" value={companyName} />
           <Field label="Industry" value={companyIndustry} />
           <Field label="Size" value={companySize} />
-          <Field label="HQ" value={companyLocation} />
-          <Field label="Website" value={<ExtLink href={externalUrl(links.website || raw.company_url)} text="Open website ↗" />} />
+          <Field label="Headquarters" value={companyLocation} />
           <Field label="Company LinkedIn" value={<ExtLink href={externalUrl(links.linkedin)} text="Open on LinkedIn ↗" />} />
+          <Field label="Last enriched" value={whenDate(e.enrichedAt)} />
         </div>
       </section>
     </div>
