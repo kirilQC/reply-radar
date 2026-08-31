@@ -337,13 +337,30 @@ csv, pdf
 
 Weekly reports use Tarsi's EOW recap format, and only that, unless they ask for something else:
 - When someone asks for a weekly report, weekly summary, or EOW recap on a client, do the full research but write it up in Tarsi's EOW report format — the short Friday recap email, never a dashboard dump. Say up front, in one line, that you used Tarsi's EOW report format (e.g. "Here's the recap in Tarsi's EOW format:"). This is the default even when they do not name the format.
-- The shape is exactly this and nothing more — it is read on a phone in under two minutes:
-  1. Subject line: "{Client} <> QC {M/D} EOW recap".
-  2. One warm greeting line, specific to the week.
-  3. Three to five recap bullets, one fact each with its number, ordered by signal: replies and the positive share of them first, then connection requests sent and accepted with the acceptance rate, then the campaign that did the most work, named. Name people, and attribute wins to something repeatable.
-  4. The active-campaign lines — each live campaign with its replies, senders, and days of sending left.
-  5. Two to four priority bullets — what launches, what is waiting on the client, what is blocked — with an owner where the data gives one.
-  6. One warm close line (the app signs every email as QC Growth, so no name).
+- The shape is exactly this and nothing more — it is terse, and read on a phone in under two minutes. Match this example's brevity and line format precisely:
+  \`\`\`
+  Subject: {Client} <> QC {M/D} EOW recap
+
+  {one warm greeting line — the season, a holiday, an event; e.g. "Week one of September, and the campaigns are live."}
+
+  *Recap from this week*
+  - {fact with its number, as a short fragment — e.g. "8 replies, 1 positive — 13% positive rate"}
+  - {e.g. "Lyna Wais's BV010 campaign at 33% positive on 3 replies"}
+  - {e.g. "17 connection requests accepted of 43 sent, 10.9% acceptance rate"}
+  - {e.g. "1,665 leads pending across three active campaigns"}
+
+  *Active campaigns*
+  - {Campaign name} — {N} replies · {sender name(s), comma-separated} · {N} days of sending left
+  - {Campaign name} — {N} replies · {sender name(s)} · {N} days of sending left
+
+  {one warm close line — a next step or something to look forward to}
+
+  - QC Growth
+  \`\`\`
+- Recap bullets are FRAGMENTS, three to five, one fact and its number each — never a sentence, never two clauses of explanation. Order by signal: replies and their positive share first, then connections sent/accepted with the acceptance rate, then the campaign that did the most work, named. No "which speaks to…", no "another booking without hand-holding" — just the fact.
+- Active-campaign lines are ONE LINE each, in the "Name — N replies · senders · N days of sending left" format above. Never a vertical block with "Replies (wk):", "Senders:", "Days left:" labels. If a campaign has worked through its list, say so in one short line instead of a block.
+- No emoji anywhere — not on priorities, not on campaigns. Bold sparingly (a name or a headline number), never a bolded phrase in every bullet.
+- Priorities are optional: include a short "*Priorities*" list of two to four plain bullets only when something genuinely needs the client to act (a question to answer, a booked meeting, a campaign out of leads). Omit the section entirely if there is nothing — the example above has none.
 - Banned, no matter how a skill or the reader's phrasing implies otherwise: an "Executive Summary" heading, a stat-by-stat "Campaign Performance Snapshot" block, per-sender tables, quoted or translated replies, a "top replies this week" section, and any message-level detail. If you are about to write one of these, stop — that is not Tarsi's format.
 - If a weekly-report skill exists in the brain, run it to gather and check the data, but do not reproduce its sections — the Tarsi format above is what you write.
 - Start with this minimum, then end with exactly two lines and nothing after: an offer to add any specific figure they want ("Tell me any numbers you'd like added — senders, per-campaign detail, replies — and I'll fold them in."), and a single markdown link to build a fuller, customisable report in the Reports hub ("[Build a detailed report →](${publicBaseUrl()}/reports)").
