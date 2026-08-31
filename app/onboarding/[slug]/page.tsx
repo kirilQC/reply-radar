@@ -85,7 +85,7 @@ function ClientLogoCard({ slug, name, logoUrl, accentColor, onSaved }: { slug: s
   );
 }
 
-function ReplyRadarSetup({ slug, onConfig }: { slug: string; onConfig?: (c: { slackInternal: string; slackExternal: string }) => void }) {
+function ReplyRadarSetup({ slug, onConfig, client, onLogoSaved }: { slug: string; onConfig?: (c: { slackInternal: string; slackExternal: string }) => void; client?: Client | null; onLogoSaved?: (url: string) => void }) {
   const [cfg, setCfg] = useState<RRConfig | null>(null);
   const [bases, setBases] = useState<Array<{ id: string; name: string }>>([]);
   const [form, setForm] = useState({ website: "", messagingDoc: "", slackInternal: "", slackExternal: "", airtableBaseId: "", heyreachApiKey: "", crmProvider: "", crmApiKey: "" });
@@ -170,6 +170,10 @@ function ReplyRadarSetup({ slug, onConfig }: { slug: string; onConfig?: (c: { sl
       </button>
       {!collapsed && (
         <div className="rr-setup-body">
+          {client && (
+            <ClientLogoCard slug={slug} name={client.name} logoUrl={client.logoUrl} accentColor={client.accentColor}
+              onSaved={(u) => onLogoSaved?.(u)} />
+          )}
           <div className="rr-grid">
             {field("HeyReach API key", <input type="password" value={form.heyreachApiKey} placeholder={cfg?.keyConfigured ? `Saved ${cfg.keyMasked} — leave blank to keep` : "Paste the client's HeyReach key"} onChange={(e) => setForm((f) => ({ ...f, heyreachApiKey: e.target.value }))} />)}
             {field("Airtable base", (
@@ -366,10 +370,8 @@ export default function OnboardingChecklistPage() {
                 </div>
               </div>
 
-              <ClientLogoCard slug={slug} name={client.name} logoUrl={client.logoUrl} accentColor={client.accentColor}
-                onSaved={(u) => setClient((prev) => (prev ? { ...prev, logoUrl: u } : prev))} />
-
-              <ReplyRadarSetup slug={slug} onConfig={setSlack} />
+              <ReplyRadarSetup slug={slug} onConfig={setSlack} client={client}
+                onLogoSaved={(u) => setClient((prev) => (prev ? { ...prev, logoUrl: u } : prev))} />
 
               {slack.slackExternal && <ClientUpdatePanel slug={slug} clientName={client.name} />}
 
