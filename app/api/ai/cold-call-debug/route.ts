@@ -2,18 +2,15 @@ import { NextResponse } from "next/server";
 export const maxDuration = 60;
 export async function GET() {
   const key = process.env.ANTHROPIC_API_KEY!;
-  const call = async (label: string, extra: Record<string, unknown>) => {
-    const started = Date.now();
+  const test = async (model: string) => {
     const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST",
       headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: "claude-opus-5", max_tokens: 500, messages: [{ role: "user", content: "Return ONLY JSON with fields draft, reason, sentiment. Conversation:\noutbound: hi\ninbound: not interested" }], ...extra }) });
+      body: JSON.stringify({ model, max_tokens: 20, temperature: 0, messages: [{ role: "user", content: "hi" }] }) });
     const b = await r.json().catch(() => ({}));
-    return { label, status: r.status, ms: Date.now() - started, ok: r.ok, errType: (b as any)?.error?.type ?? null, errMsg: ((b as any)?.error?.message ?? "").slice(0,200) };
+    return { status: r.status, tempRejected: !r.ok && ((b as any)?.error?.message || "").toLowerCase().includes("temperature") };
   };
-  return NextResponse.json({
-    temp0: await call("temp0", { temperature: 0 }),
-    temp1: await call("temp1", { temperature: 1 }),
-    withSystem: await call("withSystem", { temperature: 0, system: "You are a helpful sales assistant." }),
-    noTemp: await call("noTemp", {}),
-  });
+  const models = ["claude-haiku-4-5-20251001", "claude-sonnet-4-5", "claude-sonnet-4-6", "claude-opus-4-8", "claude-opus-5", "claude-sonnet-5", "claude-fable-5"];
+  const out: Record<string, unknown> = {};
+  for (const m of models) out[m] = await test(m);
+  return NextResponse.json(out);
 }
