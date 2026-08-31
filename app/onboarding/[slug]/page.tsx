@@ -4,7 +4,7 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import AppSidebar from "../../components/AppSidebar";
@@ -38,6 +38,52 @@ type RRConfig = {
   crmProvider: string | null;
   crmConfigured: boolean;
 };
+
+function ClientLogoCard({ slug, name, logoUrl, accentColor, onSaved }: { slug: string; name: string; logoUrl: string | null; accentColor: string | null; onSaved: (url: string) => void }) {
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const uploadFile = async (file?: File) => {
+    if (!file || busy) return;
+    setBusy(true); setMsg("Uploading…");
+    const fd = new FormData(); fd.append("slug", slug); fd.append("file", file);
+    const r = await fetch("/api/onboarding/logo", { method: "POST", body: fd }).catch(() => null);
+    const p = await r?.json().catch(() => ({}));
+    setBusy(false);
+    if (r?.ok) { onSaved(String(p.logoUrl)); setMsg("Saved ✓"); setTimeout(() => setMsg(""), 2500); }
+    else setMsg(String(p?.error ?? "Upload failed."));
+  };
+  const saveUrl = async () => {
+    if (!url.trim() || busy) return;
+    setBusy(true); setMsg("Saving…");
+    const r = await fetch("/api/onboarding/logo", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug, logoUrl: url.trim() }) }).catch(() => null);
+    const p = await r?.json().catch(() => ({}));
+    setBusy(false);
+    if (r?.ok) { onSaved(String(p.logoUrl)); setUrl(""); setMsg("Saved ✓"); setTimeout(() => setMsg(""), 2500); }
+    else setMsg(String(p?.error ?? "Save failed."));
+  };
+
+  return (
+    <div className="onb-logo-card">
+      <span className="onb-logo-preview" style={logoUrl ? undefined : { background: accentColor || "var(--accent)" }}>
+        {logoUrl ? <img src={logoUrl} alt="" /> : (name[0] || "?").toUpperCase()}
+      </span>
+      <div className="onb-logo-body">
+        <h3>Client logo</h3>
+        <p>Upload an image or paste a URL — it shows on every {name} badge across the app.</p>
+        <div className="onb-logo-actions">
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => void uploadFile(e.target.files?.[0] ?? undefined)} />
+          <button type="button" className="onb-logo-upload" disabled={busy} onClick={() => fileRef.current?.click()}>Upload image</button>
+          <input className="onb-logo-url" value={url} placeholder="or paste an image URL" onChange={(e) => setUrl(e.target.value)} />
+          <button type="button" className="onb-logo-save" disabled={busy || !url.trim()} onClick={() => void saveUrl()}>Save</button>
+          {msg && <span className="onb-logo-msg">{msg}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ReplyRadarSetup({ slug, onConfig }: { slug: string; onConfig?: (c: { slackInternal: string; slackExternal: string }) => void }) {
   const [cfg, setCfg] = useState<RRConfig | null>(null);
@@ -319,6 +365,9 @@ export default function OnboardingChecklistPage() {
                   <div className="onb-bigbar"><span style={fillStyle} /></div>
                 </div>
               </div>
+
+              <ClientLogoCard slug={slug} name={client.name} logoUrl={client.logoUrl} accentColor={client.accentColor}
+                onSaved={(u) => setClient((prev) => (prev ? { ...prev, logoUrl: u } : prev))} />
 
               <ReplyRadarSetup slug={slug} onConfig={setSlack} />
 

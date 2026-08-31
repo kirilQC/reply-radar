@@ -250,3 +250,19 @@
 .onb-step:hover .onb-slack-btn, .onb-slack-btn:disabled, .onb-slack-btn.sent { opacity: 1; }
 .onb-slack-btn:hover { color: var(--text); border-color: var(--accent); }
 .onb-slack-btn.sent { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+
+/* Client logo setup card */
+.onb-logo-card { display: flex; gap: 18px; align-items: center; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); padding: 18px 20px; margin-bottom: 16px; }
+.onb-logo-preview { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 15px; color: #fff; font-weight: 800; font-size: 26px; overflow: hidden; flex: none; }
+.onb-logo-preview img { width: 100%; height: 100%; object-fit: cover; }
+.onb-logo-body { min-width: 0; flex: 1; }
+.onb-logo-body h3 { margin: 0 0 3px; font-size: 15px; letter-spacing: -.01em; }
+.onb-logo-body p { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
+.onb-logo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.onb-logo-upload { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+.onb-logo-upload:disabled, .onb-logo-save:disabled { opacity: .5; cursor: default; }
+.onb-logo-url { flex: 1; min-width: 180px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); padding: 0 11px; font: inherit; font-size: 12.5px; }
+.onb-logo-url:focus { border-color: var(--accent); outline: none; }
+.onb-logo-save { font: inherit; font-size: 12px; font-weight: 650; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+.onb-logo-msg { font-size: 12px; color: var(--green); font-weight: 600; }
+@media (max-width: 640px) { .onb-logo-card { flex-direction: column; align-items: flex-start; } }
