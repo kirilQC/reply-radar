@@ -136,3 +136,30 @@
 .pm-save { font: inherit; font-size: 12.5px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 9px; padding: 9px 20px; cursor: pointer; }
 
 @media (max-width: 1100px) { .pm-kb { grid-template-columns: repeat(2, 1fr); } .pm-tl { grid-template-columns: repeat(3, 1fr); } }
+
+/* View dropdown */
+.pm-viewdd { display: flex; align-items: center; gap: 8px; }
+.pm-viewdd > span { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-2); font-weight: 700; }
+.pm-viewdd select { height: 36px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2, #151821); color: var(--text); font: inherit; font-size: 13px; font-weight: 600; padding: 0 32px 0 13px; cursor: pointer; appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%238a90a0' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>"); background-repeat: no-repeat; background-position: right 11px center; }
+.pm-viewdd select:focus { border-color: var(--accent); outline: none; }
+
+/* card link/notes indicator */
+.pm-clip { font-size: 10px; color: var(--muted-2); }
+
+/* editor: larger + textarea + links */
+.pm-modal-lg { width: min(560px, 100%); }
+.pm-f textarea { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); padding: 10px 11px; font: inherit; font-size: 13px; line-height: 1.5; resize: vertical; }
+.pm-f textarea:focus { border-color: var(--accent); outline: none; }
+.pm-links { display: flex; flex-direction: column; gap: 6px; }
+.pm-link { display: flex; align-items: center; gap: 8px; background: var(--panel-2, #151821); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
+.pm-link a { flex: 1; color: var(--accent); font-size: 12.5px; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-link a:hover { text-decoration: underline; }
+.pm-link button { font: inherit; font-size: 11px; color: var(--muted-2); background: none; border: 0; cursor: pointer; }
+.pm-link button:hover { color: var(--coral, #e5738a); }
+.pm-link-add { display: flex; gap: 8px; }
+.pm-link-add input { flex: 1; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); padding: 0 11px; font: inherit; font-size: 12.5px; }
+.pm-link-add input:focus { border-color: var(--accent); outline: none; }
+.pm-link-add button { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 0 15px; cursor: pointer; }
+.pm-meta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
+.pm-ts { font-size: 11px; color: var(--muted-2); margin-left: auto; }

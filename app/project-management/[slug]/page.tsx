@@ -12,7 +12,7 @@ import Crumb from "../../components/Crumb";
 import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import "../project-management.css";
 
-type Task = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; source: string; position: number };
+type Task = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: string[]; source: string; position: number; created_at?: string; updated_at?: string };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type View = "kanban" | "swimlanes" | "list" | "timeline" | "pipeline";
 
@@ -70,7 +70,17 @@ export default function ClientProjects() {
     else { setErr(String(p.error || "Could not add task.")); void loadTasks(); }
   };
   const patchTask = async (id: string, fields: Record<string, unknown>) => {
-    setTasks((prev) => prev.map((x) => (x.id === id ? { ...x, ...(fields.stage ? { stage: String(fields.stage) } : {}), ...(("dueDate" in fields) ? { due_date: (fields.dueDate as string) || null } : {}), ...(("owner" in fields) ? { owner: (fields.owner as string) || null } : {}), ...(fields.title ? { title: String(fields.title) } : {}) } : x)));
+    setTasks((prev) => prev.map((x) => {
+      if (x.id !== id) return x;
+      const next: Task = { ...x };
+      if (fields.stage) next.stage = String(fields.stage);
+      if (fields.title) next.title = String(fields.title);
+      if ("dueDate" in fields) next.due_date = (fields.dueDate as string) || null;
+      if ("owner" in fields) next.owner = (fields.owner as string) || null;
+      if ("context" in fields) next.context = (fields.context as string) || null;
+      if ("links" in fields) next.links = Array.isArray(fields.links) ? (fields.links as string[]) : [];
+      return next;
+    }));
     await fetch("/api/project-management/tasks", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...fields }) }).catch(() => {});
   };
   const removeTask = async (id: string) => {
@@ -102,9 +112,12 @@ export default function ClientProjects() {
               </span>
               <h1>{client?.name || "Client"}</h1>
             </div>
-            <div className="pm-viewswitch">
-              {views.map(([v, label]) => <button key={v} type="button" className={view === v ? "on" : ""} onClick={() => pickView(v)}>{label}</button>)}
-            </div>
+            <label className="pm-viewdd">
+              <span>View</span>
+              <select value={view} onChange={(e) => pickView(e.target.value as View)}>
+                {views.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
+            </label>
           </div>
 
           {err && <div className="pm-err">⚠ {err}</div>}
@@ -134,7 +147,8 @@ function Card({ t, onDrag, onOpen, compact }: { t: Task; onDrag: (id: string | n
         <div className="pm-c-meta">
           {t.owner ? <span className="pm-av" style={{ background: `hsl(${hue(t.owner)} 55% 45%)` }}>{initials(t.owner)}</span> : <span className="pm-av pm-av-none">?</span>}
           {t.due_date && <span className="pm-due">{new Date(t.due_date + "T00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
-          {t.source !== "manual" && <span className="pm-src">{sourceLabel(t.source)}</span>}
+          {Array.isArray(t.links) && t.links.length > 0 && <span className="pm-clip" title={`${t.links.length} link${t.links.length === 1 ? "" : "s"}`}>🔗 {t.links.length}</span>}
+          {t.context && <span className="pm-clip" title="Has notes">≡</span>}
         </div>
       )}
     </div>
@@ -264,29 +278,55 @@ function PipelineView({ tasks, onSetStage, onOpen, onAdd }: { tasks: Task[]; onS
 }
 
 /* ── task editor ── */
+function fmtDateTime(v?: string) { if (!v) return "—"; const d = new Date(v); return Number.isNaN(+d) ? "—" : d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) + ", " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); }
+function linkLabel(u: string) { try { return new URL(u).hostname.replace(/^www\./, "") + new URL(u).pathname.replace(/\/$/, ""); } catch { return u; } }
+
 function TaskEditor({ task, onClose, onSave, onDelete }: { task: Task; onClose: () => void; onSave: (f: Record<string, unknown>) => void; onDelete: () => void }) {
   const [title, setTitle] = useState(task.title);
   const [owner, setOwner] = useState(task.owner || "");
   const [due, setDue] = useState(task.due_date || "");
   const [stage, setStage] = useState(task.stage);
+  const [context, setContext] = useState(task.context || "");
+  const [links, setLinks] = useState<string[]>(Array.isArray(task.links) ? task.links : []);
+  const [newLink, setNewLink] = useState("");
+  const addLink = () => { const u = newLink.trim(); if (!u) return; const url = /^https?:\/\//i.test(u) ? u : `https://${u}`; setLinks((prev) => [...prev, url]); setNewLink(""); };
   return (
     <div className="pm-modal-back" onClick={onClose}>
-      <div className="pm-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="pm-modal-head"><h2>Edit task</h2><button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
+      <div className="pm-modal pm-modal-lg" onClick={(e) => e.stopPropagation()}>
+        <div className="pm-modal-head"><h2>Task details</h2><button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
         <div className="pm-modal-body">
           <label className="pm-f"><span>Title</span><input value={title} onChange={(e) => setTitle(e.target.value)} /></label>
           <div className="pm-f-row">
-            <label className="pm-f"><span>Owner</span><input value={owner} placeholder="Name" onChange={(e) => setOwner(e.target.value)} /></label>
+            <label className="pm-f"><span>Assignee</span><input value={owner} placeholder="Name" onChange={(e) => setOwner(e.target.value)} /></label>
             <label className="pm-f"><span>Due date</span><input type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>
+            <label className="pm-f"><span>Stage</span>
+              <select value={stage} onChange={(e) => setStage(e.target.value)}>{STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
+            </label>
           </div>
-          <label className="pm-f"><span>Stage</span>
-            <select value={stage} onChange={(e) => setStage(e.target.value)}>{STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
-          </label>
-          {task.source !== "manual" && <p className="pm-src-note">✦ Auto-added {sourceLabel(task.source).toLowerCase()}.</p>}
+          <label className="pm-f"><span>Context / notes</span><textarea rows={3} value={context} placeholder="What is this, why it matters, what's needed…" onChange={(e) => setContext(e.target.value)} /></label>
+          <div className="pm-f">
+            <span>Links &amp; files</span>
+            <div className="pm-links">
+              {links.map((u, i) => (
+                <div className="pm-link" key={i}>
+                  <a href={u} target="_blank" rel="noreferrer">{linkLabel(u)}</a>
+                  <button type="button" onClick={() => setLinks((prev) => prev.filter((_, j) => j !== i))}>✕</button>
+                </div>
+              ))}
+              <div className="pm-link-add">
+                <input value={newLink} placeholder="Paste a URL (Google Doc, Figma, Drive…)" onChange={(e) => setNewLink(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLink(); } }} />
+                <button type="button" onClick={addLink}>Add</button>
+              </div>
+            </div>
+          </div>
+          <div className="pm-meta-row">
+            {task.source !== "manual" && <span className="pm-src-note">✦ Auto-added {sourceLabel(task.source).toLowerCase()}</span>}
+            <span className="pm-ts">Created {fmtDateTime(task.created_at)} · Updated {fmtDateTime(task.updated_at)}</span>
+          </div>
         </div>
         <div className="pm-modal-foot">
           <button type="button" className="pm-del" onClick={onDelete}>Delete</button>
-          <button type="button" className="pm-save" onClick={() => onSave({ title, owner, dueDate: due, stage })}>Save</button>
+          <button type="button" className="pm-save" onClick={() => onSave({ title, owner, dueDate: due, stage, context, links })}>Save</button>
         </div>
       </div>
     </div>
