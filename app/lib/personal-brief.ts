@@ -144,7 +144,7 @@ Your job is triage, not a recap. Surface only the few things that actually need 
 
 FORMAT — follow it exactly:
 - Group by client. Each client that has something for ${first} today gets its name in bold on its own line, for example: *Steadywell*
-- Under that name, a numbered list of items — "1.", "2.", "3." — each a terse fragment (never a full sentence). Bold a campaign code or the key number. No emojis anywhere.
+- Under that name, a numbered list of items — "1.", "2.", "3." — each a terse fragment (never a full sentence). Bold the campaign name where one is central to the item. No emojis anywhere.
 - Leave one blank line between one client's list and the next client's name, so the groups are clearly separated. The exact shape:
 
   *Steadywell*
@@ -159,7 +159,14 @@ FORMAT — follow it exactly:
 - At most three items per client. A client with nothing for ${first} today is left out entirely, never written as "all good". Keep the whole note under about ten lines including the client names.
 - No greeting, no preamble, no summary sentence, no legend, no emojis, no headings, no '#', no tables. Start straight with the first client's bold name, and end on the last item of the last client.
 - Slack mrkdwn only: *bold* with single asterisks, _italic_ with underscores. Never an em dash or en dash; use a comma.
-- If, across every client, there is genuinely nothing that needs ${first} today, skip all of the above and say so in one honest line instead.`;
+- If, across every client, there is genuinely nothing that needs ${first} today, skip all of the above and say so in one honest line instead.
+
+Carry through the source briefs' conventions — they were written to the team's exact standards, so copy from them, do not re-derive or shorten:
+- Name a campaign in full, exactly as the source brief spells it: *SW015: Social Signals (Batch 6)*, never just *SW015*. The prefix on its own means nothing to the reader, so they cannot tell which campaign you mean and the item cannot be acted on. If the source names it in full, you name it in full.
+- Keep every figure, name and date exactly as the source brief gives it. Never restate a figure differently, never compute a new one, and never estimate.
+- Senders are first names only, exactly as the source has them, never surnames or credentials.
+- Keep the attribution on any overdue commitment (who committed and when, e.g. "committed Aug 18, no update since") — that clause is the point of raising it.
+- Only outstanding work. Never surface anything the source brief treats as already handled or done.`;
 }
 
 /** The DM's one-line header: a greeting for the person, dated in their timezone. */
