@@ -24,7 +24,7 @@
  * pasted in as text, so none reaches it in that case either.
  */
 import { NextResponse } from "next/server";
-import { resolveModel } from "../../../../shared/anthropic-model.mjs";
+import { resolveModel, temperatureField } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
 
 type Json = Record<string, unknown>;
@@ -132,7 +132,7 @@ ${transcript}
       // The sections are short either way — six boxes of a few lines each. A call gets a little more
       // room only because it can legitimately fill more of them at once.
       max_tokens: call ? 3000 : 2000,
-      temperature: 0,
+      ...temperatureField(m, 0),
       system: call ? CALL_PROMPT : SYSTEM_PROMPT,
       messages: [{ role: "user", content: userContent }],
     });

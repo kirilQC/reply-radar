@@ -14,7 +14,7 @@
  * words. Digesting here also means what the model sees is defined in one place.
  */
 import { NextResponse } from "next/server";
-import { resolveModel } from "../../../../shared/anthropic-model.mjs";
+import { resolveModel, temperatureField } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import {
   COMPOSE_SYSTEM_PROMPT,
@@ -427,7 +427,7 @@ ${JSON.stringify(digests.length === 1 ? digests[0] : digests, null, 2)}`;
     JSON.stringify({
       model: m,
       max_tokens: 1200,
-      temperature: 0,
+      ...temperatureField(m, 0),
       system: COMPOSE_SYSTEM_PROMPT,
       messages: [{ role: "user", content: userContent }],
     });

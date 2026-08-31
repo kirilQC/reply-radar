@@ -2,7 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
-import { resolveModel } from "../../../../shared/anthropic-model.mjs";
+import { resolveModel, temperatureField } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { clientContext, withClientContext } from "../../../lib/client-context";
 import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
@@ -228,7 +228,8 @@ export async function POST(request: Request) {
   const requestBody = (m: string) => JSON.stringify({
     model: m,
     max_tokens: body.maxTokens ?? 500,
-    temperature: body.temperature ?? (regenerate ? 1 : 0),
+    // The Claude 5 family / Opus 4.8 reject `temperature` — omit it for those, keep it for older models.
+    ...temperatureField(m, body.temperature ?? (regenerate ? 1 : 0)),
     ...(systemPrompt ? { system: systemPrompt } : {}),
     messages: [{ role: "user", content: userContent }],
   });
@@ -288,7 +289,9 @@ export async function POST(request: Request) {
       campaignName: campaignName ?? "",
       leadTitle,
       leadCompany,
-      summary: response.ok ? `Anthropic generated a reply draft with ${model} using ${pastReplies.length} past replies as tone reference.` : `Anthropic could not generate a reply draft with ${model}.` } });
+      httpStatus: response.status,
+      providerError: response.ok ? undefined : (typeof payload?.error?.message === "string" ? payload.error.message.slice(0, 300) : `HTTP ${response.status}`),
+      summary: response.ok ? `Anthropic generated a reply draft with ${model} using ${pastReplies.length} past replies as tone reference.` : `Anthropic could not generate a reply draft with ${model} (HTTP ${response.status}${typeof payload?.error?.message === "string" ? `: ${payload.error.message.slice(0, 160)}` : ""}).` } });
     const providerMessage = typeof payload?.error?.message === "string" ? payload.error.message : "Anthropic rejected the draft request.";
     return NextResponse.json({ ok: response.ok, ...(response.ok ? {} : { error: providerMessage }), draft: mode === "analyze" ? String(analysis.draft ?? "") : text, reason: mode === "analyze" ? String(analysis.reason ?? "") : undefined, sentiment: mode === "analyze" ? String(analysis.sentiment ?? "") : undefined, usage: payload?.usage ?? null }, { status: response.ok ? 200 : response.status });
   } catch {

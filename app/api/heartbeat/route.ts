@@ -322,6 +322,20 @@ export async function GET() {
         ? `Live API request returned ${anthropicResult.status || "an error"}.`
         : "API key is missing.";
     services[1].latencyMs = anthropicResult.durationMs;
+    // A live ping can pass while every real call (drafts, scoring, sentiment) fails — so also read the last
+    // 24h of Anthropic call outcomes from the audit log and flag the service down when most are failing.
+    const anthropicAudit = await request(`rr_audit_log?select=details&actor_type=eq.anthropic&created_at=gte.${encodeURIComponent(since)}&limit=3000`).catch(() => ({ body: [] as Row[] }));
+    const anthropicRows = Array.isArray(anthropicAudit.body) ? (anthropicAudit.body as Row[]) : [];
+    const outcomeOf = (r: Row) => String(((r.details as Row) || {}).status || "");
+    const anthropicFailed24h = anthropicRows.filter((r) => outcomeOf(r) === "failed").length;
+    const anthropicSucceeded24h = anthropicRows.filter((r) => outcomeOf(r) === "success").length;
+    const anthropicCalls24h = anthropicFailed24h + anthropicSucceeded24h;
+    if (services[1].status === "healthy" && anthropicFailed24h > 5 && anthropicFailed24h >= anthropicSucceeded24h) {
+      services[1].status = "down";
+      services[1].detail = `Connected, but ${anthropicFailed24h} of ${anthropicCalls24h} Anthropic calls failed in the last 24h (reply drafts, scoring, sentiment). Check the model configured for the affected client.`;
+    } else if (services[1].status === "healthy" && anthropicFailed24h > 0) {
+      services[1].detail = `Live API request succeeded — ${anthropicSucceeded24h} of ${anthropicCalls24h} calls succeeded in the last 24h.`;
+    }
     services[2].status = services[2].configured ? "healthy" : "down";
     services[2].detail = services[2].configured
       ? "A fresh worker heartbeat is stored."

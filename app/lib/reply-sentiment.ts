@@ -3,7 +3,7 @@
 
 import { writeAuditEvent } from "./audit-log";
 import { briefedSystemPrompt } from "./client-context";
-import { resolveModel } from "../../shared/anthropic-model.mjs";
+import { resolveModel, temperatureField } from "../../shared/anthropic-model.mjs";
 import { mergeMessageRadar } from "./message-radar";
 
 type SupabaseConfig = { url: string; key: string };
@@ -166,7 +166,7 @@ export async function classifyLatestReply(
     body: JSON.stringify({
       model,
       max_tokens: 10,
-      temperature: 0,
+      ...temperatureField(model, 0),
       system: systemPrompt,
       messages: [{ role: "user", content: userContent }],
     }),

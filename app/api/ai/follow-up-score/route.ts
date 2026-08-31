@@ -2,7 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
-import { resolveModel } from "../../../../shared/anthropic-model.mjs";
+import { resolveModel, temperatureField } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { briefedSystemPrompt } from "../../../lib/client-context";
 import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
   const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: 100, temperature: 0, system: systemPrompt, messages: [{ role: "user", content: threadText }] }),
+    body: JSON.stringify({ model, max_tokens: 100, ...temperatureField(model, 0), system: systemPrompt, messages: [{ role: "user", content: threadText }] }),
     signal: AbortSignal.timeout(10_000),
   }).catch(() => null);
 

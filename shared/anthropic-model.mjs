@@ -44,3 +44,22 @@ export function resolveModel(requested) {
   if (!model) return DEFAULT_MODEL;
   return RETIRED_TO_ACTIVE[model] || model;
 }
+
+/**
+ * Whether a model still accepts the `temperature` parameter.
+ *
+ * The Claude 5 family (opus-5, sonnet-5, fable-5) and Opus 4.8 deprecated it: sending `temperature` — even
+ * `temperature: 0` — is rejected with a 400 "`temperature` is deprecated for this model." Older models
+ * (Haiku 4.5, Sonnet 4.5/4.6) still take it. Callers use this to omit the field for the models that refuse it.
+ */
+export function supportsTemperature(requested) {
+  const model = typeof requested === "string" ? requested : "";
+  if (/\b(?:opus|sonnet|haiku|fable)-5\b/.test(model)) return false;
+  if (model.includes("opus-4-8")) return false;
+  return true;
+}
+
+/** The temperature fragment to spread into a request body — `{ temperature }` for models that accept it, else `{}`. */
+export function temperatureField(model, temperature) {
+  return supportsTemperature(model) ? { temperature } : {};
+}
