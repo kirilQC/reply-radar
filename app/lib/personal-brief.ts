@@ -149,15 +149,15 @@ Your job is triage, not a recap. Surface only the few things that actually need 
 
 FORMAT — follow it exactly:
 - Give each client that has something for ${first} its name on its own line, prefixed with two hash marks and a space, exactly like this: ## Steadywell — nothing else on that line, do not bold it.
-- Under each client, list its items as bullet lines, one per line, each starting with a bullet and a space: • . Terse fragments, never full sentences, and never numbers. At most three per client.
+- Under each client, list its items as a numbered list, one per line: 1., 2., 3. Terse fragments, never full sentences. At most three per client.
 - The exact shape:
 
   ## Steadywell
-  • *SW015: Social Signals (Batch 6)* ~2 days of leads left, queue the next batch
-  • Advisory-council re-engagement overdue, agreed Aug 20
+  1. *SW015: Social Signals (Batch 6)* ~2 days of leads left, queue the next batch
+  2. Advisory-council re-engagement overdue, agreed Aug 20
 
   ## Bluevia
-  • *BV011: Mid-Size Health Systems (Active on Linkedin)* ~2 days left, load leads and launch Batch 3
+  1. *BV011: Mid-Size Health Systems (Active on Linkedin)* ~2 days left, load leads and launch Batch 3
 
 - Order items within a client by urgency, most pressing first (a campaign about to run dry or a decision needed on our side, then overdue commitments of ours). Order the clients so the one with the most urgent item comes first.
 - A client with nothing for ${first} today is left out entirely, never written as "all good".
@@ -193,7 +193,7 @@ function framePersonalNote(body: string): string {
   if (!blocks.length) return fix(body).trim();
   const rendered = blocks.map((b) => {
     const head = `${BRIEF_DIVIDER}\n\n${centreIndent(b.heading)}${b.heading}\n\n${BRIEF_DIVIDER}`;
-    const items = b.items.map((it) => `• ${it}`).join("\n");
+    const items = b.items.map((it, i) => `${i + 1}. ${it}`).join("\n");
     return items ? `${head}\n\n${items}` : head;
   });
   return [loose.join("\n").trim(), ...rendered].filter(Boolean).join("\n\n\n");
