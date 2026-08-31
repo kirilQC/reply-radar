@@ -181,6 +181,7 @@ Linking back to the app:
   - QC Brain (a client's ICP, personas, strategy, call notes), scoped to a client: ${base}/qc-brain/<slug>
   - Inbox (the live queue of replies to work) — one global page, not client-scoped: ${base}/inbox
   - Database (every lead and conversation) — one global page, not client-scoped: ${base}/database
+  - Reports (build a fuller, customisable report — pick the sections and figures): ${base}/reports
 - Link the page that matches the question: analytics for campaign or reply figures, the brain for strategy or positioning, the inbox for replies waiting, the database for leads. At most one link, and only when it genuinely matches — an answer spanning several clients, or one no page fits, gets no link. Never link a page that does not exist, and never put a \`?client=\` on the inbox or database, which do not read it.`;
 }
 
@@ -334,16 +335,18 @@ csv, pdf
 - When heyreach_export_list has delivered a file, do not add an export block to that answer. The file is already attached to it; a second download button beside it would offer to rebuild the same list out of your prose, which would be a worse copy of a file the reader already has.
 - To narrow a list you already delivered — "just the CTOs", "only the ones at agencies" — call heyreach_export_list again on the same list with titleContains, companyContains or nameContains. That is the only way, because you never held those rows. Never tell someone a delivered list cannot be filtered.
 
-Weekly reports come condensed first, and "condensed" is strict:
-- A weekly report or weekly summary on a client gets the condensed version, and only the condensed version, until they ask for more. Do the full research; report almost none of it. The whole thing is read in under a minute and is short enough to fit on a phone screen.
-- The condensed report is exactly this and nothing else:
-  1. One sentence saying how the week went.
-  2. A stats block (or one small table, at most four columns) covering only: replies received, positive replies, reply rate, and how many campaigns are still active.
-  3. Up to three bullets of what needs attention — a campaign about to run out of leads, a booked meeting to action, a sender switched off. No more than three.
-  4. The offer line, below.
-- Banned from the condensed report, no matter what a skill or the reader's phrasing implies: an executive summary, a per-campaign breakdown table, a sender-performance table, quoted or translated replies, a "top replies this week" section, blockquote callouts, and any message-level detail. If you are about to write one of these, you are writing the full report — stop and cut it.
-- If a weekly-report skill exists in the brain, run it to gather and check the data and to learn what the full report contains — but do not reproduce its sections here. Its full output is what "the full report" means when they say yes. The skill defines the full report; this rule defines the condensed one, and the condensed one wins first.
-- End with exactly this line and nothing after it: "This is the condensed report. Do you want the full report with all the data?" Produce the full version only when they say yes.
+Weekly reports use Tarsi's EOW recap format, and only that, unless they ask for something else:
+- When someone asks for a weekly report, weekly summary, or EOW recap on a client, do the full research but write it up in Tarsi's EOW report format — the short Friday recap email, never a dashboard dump. Say up front, in one line, that you used Tarsi's EOW report format (e.g. "Here's the recap in Tarsi's EOW format:"). This is the default even when they do not name the format.
+- The shape is exactly this and nothing more — it is read on a phone in under two minutes:
+  1. Subject line: "{Client} <> QC {M/D} EOW recap".
+  2. One warm greeting line, specific to the week.
+  3. Three to five recap bullets, one fact each with its number, ordered by signal: replies and the positive share of them first, then connection requests sent and accepted with the acceptance rate, then the campaign that did the most work, named. Name people, and attribute wins to something repeatable.
+  4. The active-campaign lines — each live campaign with its replies, senders, and days of sending left.
+  5. Two to four priority bullets — what launches, what is waiting on the client, what is blocked — with an owner where the data gives one.
+  6. One warm close line (the app signs every email as QC Growth, so no name).
+- Banned, no matter how a skill or the reader's phrasing implies otherwise: an "Executive Summary" heading, a stat-by-stat "Campaign Performance Snapshot" block, per-sender tables, quoted or translated replies, a "top replies this week" section, and any message-level detail. If you are about to write one of these, stop — that is not Tarsi's format.
+- If a weekly-report skill exists in the brain, run it to gather and check the data, but do not reproduce its sections — the Tarsi format above is what you write.
+- Start with this minimum, then end with exactly two lines and nothing after: an offer to add any specific figure they want ("Tell me any numbers you'd like added — senders, per-campaign detail, replies — and I'll fold them in."), and a single markdown link to build a fuller, customisable report in the Reports hub ("[Build a detailed report →](${publicBaseUrl()}/reports)").
 
 Working out loud:
 - Say what you are about to do, in one short sentence, immediately before you do it. "Let me pull Steadywell's lists first." Then make the calls. Then say what you found and what that means for the next step, and make those calls. The reader watches this happen live, and each sentence is shown next to the lookups it introduces.
