@@ -1776,7 +1776,7 @@ type AiConfig = {
 type PastReplyRef = { body: string; senderName: string; leadName: string; campaignName: string };
 type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; workspaceLogoUrl: string | null; leadName: string | null; leadPhotoUrl: string | null; conversationId?: string | null; draft?: string | null; reason?: string | null; inboundMessage?: string | null; campaignName?: string | null; leadTitle?: string | null; leadCompany?: string | null; pastReplies?: string[]; pastReplyContext?: PastReplyRef[] };
 type AiAuditData = { ok?: boolean; events: AiAuditEvent[]; drafts?: AiAuditEvent[]; summary: { totalCalls: number; successful: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
-type SlackLogEvent = { id: string; timestamp: string; action: string; surface: string; channel: string | null; askedBy: string | null; question: string | null; outcome: string; durationMs: number | null; toolCount: number; inputTokens: number; outputTokens: number; model: string | null; error: string | null; workspaceLogoUrl: string | null };
+type SlackLogEvent = { id: string; timestamp: string; action: string; surface: string; channel: string | null; askedBy: string | null; askedByName: string | null; question: string | null; outcome: string; durationMs: number | null; toolCount: number; inputTokens: number; outputTokens: number; model: string | null; error: string | null; workspaceLogoUrl: string | null };
 type SlackLogData = { ok?: boolean; events: SlackLogEvent[]; summary: { total: number; succeeded: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
 
 /**
@@ -2282,7 +2282,7 @@ function AiHubView() {
             return <div className="ai-audit-row" key={event.id}>
               <time>{when}</time>
               <span><strong>{surfaceLabel[event.surface] ?? event.surface}</strong></span>
-              <span className="ai-audit-lead-cell">{event.workspaceLogoUrl ? <img className="ai-audit-logo" src={event.workspaceLogoUrl} alt="" /> : null}{event.askedBy || "—"}</span>
+              <span className="ai-audit-lead-cell" title={event.askedBy ?? ""}>{event.workspaceLogoUrl ? <img className="ai-audit-logo" src={event.workspaceLogoUrl} alt="" /> : null}{event.askedByName || event.askedBy || "—"}</span>
               <span className="slack-log-question" title={event.question ?? ""}>{event.question || "—"}</span>
               <span>{event.toolCount || "—"}</span>
               <span>{event.inputTokens || event.outputTokens ? `${event.inputTokens} in · ${event.outputTokens} out` : "—"}</span>

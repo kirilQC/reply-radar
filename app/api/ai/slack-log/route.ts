@@ -11,6 +11,7 @@
  * a lead — so the only join is the optional workspace logo, kept so a run tied to a client can show it.
  */
 import { NextResponse } from "next/server";
+import { resolveUserNames } from "../../../lib/slack";
 
 type Row = Record<string, unknown>;
 const text = (v: unknown) => (typeof v === "string" ? v : "");
@@ -48,6 +49,7 @@ export async function GET(request: Request) {
         surface: text(details.surface) || "mention",
         channel: text(details.channel) || null,
         askedBy: text(details.askedBy) || text(row.actor_id) || null,
+        askedByName: text(details.askedByName) || null,
         question: text(details.question) || null,
         outcome: text(details.outcome) || "unknown",
         durationMs: typeof details.durationMs === "number" ? details.durationMs : null,
@@ -59,6 +61,14 @@ export async function GET(request: Request) {
         workspaceLogoUrl: wsLogoById.get(wsId) || null,
       };
     });
+
+    // Fill in names for any rows that don't already carry one (older rows, before names were logged), by
+    // resolving the Slack user ids in one batch.
+    const needIds = Array.from(new Set(events.filter((e) => !e.askedByName && e.askedBy && /^[UW][A-Z0-9]+$/.test(e.askedBy)).map((e) => e.askedBy as string)));
+    if (needIds.length) {
+      const names = await resolveUserNames(needIds).catch(() => new Map<string, string>());
+      for (const e of events) if (!e.askedByName && e.askedBy) e.askedByName = names.get(e.askedBy) || null;
+    }
 
     const total = events.length;
     const succeeded = events.filter((e) => e.outcome === "success").length;

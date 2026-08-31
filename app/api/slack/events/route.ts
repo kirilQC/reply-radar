@@ -159,8 +159,11 @@ async function runAndReply(opts: {
   messages: Turn[];
   askedBy: string;
   surface: "mention" | "dm" | "thread";
+  question?: string;
 }): Promise<void> {
-  const { channel, threadTs, reactTs, messages, askedBy, surface } = opts;
+  const { channel, threadTs, reactTs, messages, askedBy, surface, question } = opts;
+  // Resolve the asker's name once, up front — used both to brief the agent and to label the Slack bot log.
+  const askerName = askedBy ? (await resolveUserNames([askedBy]).catch(() => new Map<string, string>())).get(askedBy) || "" : "";
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -261,7 +264,8 @@ async function runAndReply(opts: {
           surface,
           channel,
           askedBy,
-          question: lastUserText(messages).slice(0, 2000),
+          askedByName: askerName,
+          question: (question || lastUserText(messages)).slice(0, 2000),
           outcome,
           durationMs: Date.now() - startedAt,
           toolCount: result ? result.steps.length : steps.length,
@@ -276,7 +280,6 @@ async function runAndReply(opts: {
     // Tell the agent who it is talking to (so a filed support ticket is attributed) and, in a DM, that this
     // is a private 1:1 where it is that person's own Reply Radar assistant. If a support owner is configured,
     // hand it the mention token so "Kiril will look into it" actually pings him.
-    const askerName = askedBy ? (await resolveUserNames([askedBy]).catch(() => new Map<string, string>())).get(askedBy) || "" : "";
     const supportOwner = (process.env.SUPPORT_OWNER_SLACK_ID || "").trim();
     const extraParts: string[] = [];
     extraParts.push(`You are talking to ${askerName || "a QC team member"}${askedBy ? ` (Slack user <@${askedBy}>)` : ""}. If you file a support ticket, record submittedBy as their name.`);
@@ -378,7 +381,7 @@ async function answerMention(event: Row): Promise<void> {
 
   const messages = await conversationTurns(channel, threadTs, question);
   if (!messages.length) return;
-  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "mention" });
+  await runAndReply({ channel, threadTs, reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "mention", question });
 }
 
 /**
@@ -470,7 +473,7 @@ async function answerDirectMessage(event: Row): Promise<void> {
   // Reply straight into the DM, NOT threaded under the message. A DM is a one-to-one conversation, so
   // hanging the answer in a thread would bury it — threading is a channel-only behaviour, where the bot
   // keeps its reply tucked under the message it answers. Passing an empty threadTs posts at top level.
-  await runAndReply({ channel, threadTs: "", reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "dm" });
+  await runAndReply({ channel, threadTs: "", reactTs: str(event.ts), messages, askedBy: str(event.user), surface: "dm", question });
 }
 
 export async function POST(request: Request) {
