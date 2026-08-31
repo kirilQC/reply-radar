@@ -19,6 +19,8 @@
 import {
   gatherSignals,
   briefUserContent,
+  BRIEF_DIVIDER,
+  centreIndent,
   type BriefWorkspace,
 } from "./morning-brief";
 import {
@@ -134,39 +136,67 @@ async function briefBodyForClient(read: (path: string) => Promise<unknown>, slug
 
 const firstNameOf = (name: string) => str(name).trim().split(/\s+/)[0] || "there";
 
-function personalSystemPrompt(personName: string): string {
+function personalSystemPrompt(personName: string, slackUserId: string): string {
   const first = firstNameOf(personName);
+  const idClause = slackUserId.trim() ? ` ${first}'s own Slack mention code is <@${slackUserId.trim()}>; an item that names it is ${first}'s.` : "";
   return `You are ${first}'s personal delivery assistant at QC, a B2B outbound growth agency. Every morning you DM ${first} one short, scannable note pulling together the clients they own, so they open Slack and in five seconds know where to put their attention today.
 
 You are given today's morning brief for each of ${first}'s clients, one after another, each headed by the client's name. Those briefs are the facts. Never invent anything not in them, and never restate a figure differently from how it is given.
 
-Your job is triage, not a recap. Surface only the few things that actually need ${first} today, grouped by client, in priority order. Most of what is in the briefs does not need ${first} personally.
+THIS NOTE IS FOR ${first.toUpperCase()} ALONE. It is not the team brief. Include an item only when ${first} is the person who has to take the next step: they own it, they made the commitment, or they must decide, do, chase, or unblock it.${idClause} If the source attributes the work or the open commitment to a different named teammate and the next move is theirs, leave it out entirely, it is on their brief and not this one. Do not include an item merely because it is about a client ${first} works on. When in doubt about whose it is, leave it out.
+
+Your job is triage, not a recap. Surface only the few things that actually need ${first} today, grouped by client, in priority order.
 
 FORMAT — follow it exactly:
-- Group by client. Each client that has something for ${first} today gets its name in bold on its own line, for example: *Steadywell*
-- Under that name, a numbered list of items — "1.", "2.", "3." — each a terse fragment (never a full sentence). Bold the campaign name where one is central to the item. No emojis anywhere.
-- Leave one blank line between one client's list and the next client's name, so the groups are clearly separated. The exact shape:
+- Give each client that has something for ${first} its name on its own line, prefixed with two hash marks and a space, exactly like this: ## Steadywell — nothing else on that line, do not bold it.
+- Under each client, list its items as bullet lines, one per line, each starting with a bullet and a space: • . Terse fragments, never full sentences, and never numbers. At most three per client.
+- The exact shape:
 
-  *Steadywell*
-  1. SW015 ~2 days of leads left, queue the next batch
-  2. Advisory-council re-engagement overdue
+  ## Steadywell
+  • *SW015: Social Signals (Batch 6)* ~2 days of leads left, queue the next batch
+  • Advisory-council re-engagement overdue, agreed Aug 20
 
-  *Bluevia*
-  1. BV011 ~2 days left, load leads and launch Batch 3
-  2. Lyna owes the union names and the conference decision
+  ## Bluevia
+  • *BV011: Mid-Size Health Systems (Active on Linkedin)* ~2 days left, load leads and launch Batch 3
 
-- Order items within a client by urgency, most pressing first (a campaign about to run dry or a decision needed on our side, then overdue commitments of ours, then things a client owes us). Order the clients so the one with the most urgent item comes first.
-- At most three items per client. A client with nothing for ${first} today is left out entirely, never written as "all good". Keep the whole note under about ten lines including the client names.
-- No greeting, no preamble, no summary sentence, no legend, no emojis, no headings, no '#', no tables. Start straight with the first client's bold name, and end on the last item of the last client.
-- Slack mrkdwn only: *bold* with single asterisks, _italic_ with underscores. Never an em dash or en dash; use a comma.
+- Order items within a client by urgency, most pressing first (a campaign about to run dry or a decision needed on our side, then overdue commitments of ours). Order the clients so the one with the most urgent item comes first.
+- A client with nothing for ${first} today is left out entirely, never written as "all good".
+- No greeting, no preamble, no summary sentence, no legend, no emojis, no tables. Start straight with the first client's "## " line, and end on the last item of the last client.
+- Bold uses a SINGLE asterisk: *like this*. Never double asterisks (**like this**) — Slack does not render those, they show up as literal characters. Italics use single underscores: _like this_. Never an em dash or en dash; use a comma.
 - If, across every client, there is genuinely nothing that needs ${first} today, skip all of the above and say so in one honest line instead.
 
 Carry through the source briefs' conventions — they were written to the team's exact standards, so copy from them, do not re-derive or shorten:
-- Name a campaign in full, exactly as the source brief spells it: *SW015: Social Signals (Batch 6)*, never just *SW015*. The prefix on its own means nothing to the reader, so they cannot tell which campaign you mean and the item cannot be acted on. If the source names it in full, you name it in full.
-- Keep every figure, name and date exactly as the source brief gives it. Never restate a figure differently, never compute a new one, and never estimate.
+- Name a campaign in full, exactly as the source brief spells it: *SW015: Social Signals (Batch 6)*, never just *SW015*. The prefix on its own means nothing to the reader.
+- Keep every figure, name and date exactly as the source brief gives it. Never restate a figure differently, never compute a new one, never estimate.
 - Senders are first names only, exactly as the source has them, never surnames or credentials.
-- Keep the attribution on any overdue commitment (who committed and when, e.g. "committed Aug 18, no update since") — that clause is the point of raising it.
+- Keep the attribution on any overdue commitment (who committed and when, e.g. "committed Aug 18, no update since").
 - Only outstanding work. Never surface anything the source brief treats as already handled or done.`;
+}
+
+/**
+ * Frame the personal note for Slack the same way the morning brief is framed: each "## Client" line becomes
+ * a client name centred between equals-sign rules, items become bullets, and blocks get generous spacing.
+ * Also repairs double-asterisk bold (**x**), which Slack shows literally, down to single-asterisk (*x*).
+ */
+function framePersonalNote(body: string): string {
+  const fix = (s: string) => s.replace(/\*\*(.+?)\*\*/g, "*$1*");
+  const blocks: { heading: string; items: string[] }[] = [];
+  const loose: string[] = [];
+  for (const raw of fix(body).replace(/\r\n/g, "\n").split("\n")) {
+    const h = /^\s*##\s+(.+?)\s*$/.exec(raw);
+    if (h) { blocks.push({ heading: h[1].trim(), items: [] }); continue; }
+    if (!raw.trim()) continue;
+    const target = blocks.length ? blocks[blocks.length - 1].items : loose;
+    const m = /^\s*(?:[•\-*]|\d+\.)\s+(.*)$/.exec(raw);
+    target.push(m ? m[1].trim() : raw.trim());
+  }
+  if (!blocks.length) return fix(body).trim();
+  const rendered = blocks.map((b) => {
+    const head = `${BRIEF_DIVIDER}\n\n${centreIndent(b.heading)}${b.heading}\n\n${BRIEF_DIVIDER}`;
+    const items = b.items.map((it) => `• ${it}`).join("\n");
+    return items ? `${head}\n\n${items}` : head;
+  });
+  return [loose.join("\n").trim(), ...rendered].filter(Boolean).join("\n\n\n");
 }
 
 /** The DM's one-line header: a greeting for the person, dated in their timezone. */
@@ -194,8 +224,8 @@ export async function composePersonalBrief(person: PersonalAssistant): Promise<{
 
   const sections = withBody.map((c) => `## ${c.client}\n\n${c.body}`).join("\n\n---\n\n");
   const userContent = `${person.personName} owns the clients below. Here is today's morning brief for each. Write ${firstNameOf(person.personName)}'s personal focus note across all of them.\n\n---\n\n${sections}`;
-  const digest = await writeBrief(personalSystemPrompt(person.personName), userContent);
-  return { ok: true, digest: str(digest), clients: withBody.map((c) => c.client) };
+  const digest = await writeBrief(personalSystemPrompt(person.personName, person.slackUserId), userContent);
+  return { ok: true, digest: framePersonalNote(str(digest)), clients: withBody.map((c) => c.client) };
 }
 
 /** Compose and DM the person their focus note, stamping last_sent_at on success. */

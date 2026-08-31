@@ -819,7 +819,7 @@ export function briefWeekdayNote(timezone: string, at: Date = new Date()): strin
 }
 
 /** The divider, shared so the prompt, the headings and the footer cannot drift to different widths. */
-const BRIEF_DIVIDER = "=".repeat(37);
+export const BRIEF_DIVIDER = "=".repeat(37);
 
 /**
  * How wide things render in Slack, measured in spaces, because a space is the only unit of indent we have.
@@ -843,7 +843,7 @@ const WIDTH_EMOJI = 4.6;
  * would wrap onto a second line at the same indent. Long lines fall out at zero, which is correct, since a
  * line as wide as the rule is already centred.
  */
-const centreIndent = (line: string): string => {
+export const centreIndent = (line: string): string => {
   const text = line.replace(/[*_]/g, "").trim();
   let width = 0;
   for (const token of text.match(/:[a-z0-9_+-]+:|./gi) ?? []) {
