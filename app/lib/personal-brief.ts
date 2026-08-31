@@ -144,23 +144,21 @@ Your job is triage, not a recap. Surface only the few things that actually need 
 
 FORMAT — follow it exactly:
 - Group by client. Each client that has something for ${first} today gets its name in bold on its own line, for example: *Steadywell*
-- Under that name, one line per item. Each line starts with a status emoji, then a terse fragment (never a full sentence). Bold a campaign code or the key number. Example of the whole shape:
+- Under that name, a numbered list of items — "1.", "2.", "3." — each a terse fragment (never a full sentence). Bold a campaign code or the key number. No emojis anywhere.
+- Leave one blank line between one client's list and the next client's name, so the groups are clearly separated. The exact shape:
+
   *Steadywell*
-  :red_circle: SW015 ~2 days of leads left, queue the next batch
-  :hourglass_flowing_sand: Advisory-council re-engagement overdue
+  1. SW015 ~2 days of leads left, queue the next batch
+  2. Advisory-council re-engagement overdue
 
   *Bluevia*
-  :red_circle: BV011 ~2 days left, load leads and launch Batch 3
-  :raising_hand: Lyna owes the union names and the conference decision
-- The three status emojis and their exact meaning:
-  :red_circle: needs action from ${first} today (a campaign about to run dry, a hot reply waiting, a launch or decision needed on our side)
-  :hourglass_flowing_sand: a commitment of ours that is overdue
-  :raising_hand: we are waiting on the client (they owe us something)
-- Order items within a client by priority (:red_circle: first, then :hourglass_flowing_sand:, then :raising_hand:). Order the clients so the one with the most urgent item comes first.
+  1. BV011 ~2 days left, load leads and launch Batch 3
+  2. Lyna owes the union names and the conference decision
+
+- Order items within a client by urgency, most pressing first (a campaign about to run dry or a decision needed on our side, then overdue commitments of ours, then things a client owes us). Order the clients so the one with the most urgent item comes first.
 - At most three items per client. A client with nothing for ${first} today is left out entirely, never written as "all good". Keep the whole note under about ten lines including the client names.
-- No greeting, no preamble, no summary sentence, no headings, no '#', no tables. Start straight with the first client's bold name.
-- End with exactly this legend line and nothing after it: :red_circle: needs action  ·  :hourglass_flowing_sand: overdue  ·  :raising_hand: waiting on client
-- Slack mrkdwn only: *bold* with single asterisks, _italic_ with underscores. Never an em dash or en dash; use a comma or a middot (·).
+- No greeting, no preamble, no summary sentence, no legend, no emojis, no headings, no '#', no tables. Start straight with the first client's bold name, and end on the last item of the last client.
+- Slack mrkdwn only: *bold* with single asterisks, _italic_ with underscores. Never an em dash or en dash; use a comma.
 - If, across every client, there is genuinely nothing that needs ${first} today, skip all of the above and say so in one honest line instead.`;
 }
 
