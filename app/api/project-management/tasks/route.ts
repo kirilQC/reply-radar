@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   if (!wsId) return NextResponse.json({ ok: false, error: "No client matches that slug." }, { status: 404 });
   const stage = STAGES.includes(String(b.stage)) ? String(b.stage) : "todo";
   const links = Array.isArray(b.links) ? b.links.slice(0, 30) : [];
-  const rec: Row = { workspace_id: wsId, title: title.slice(0, 300), stage, owner: b.owner ? String(b.owner).slice(0, 80) : null, due_date: b.dueDate || null, context: b.context ? String(b.context).slice(0, 5000) : null, links, priority: b.priority ? String(b.priority).slice(0, 20) : null, week: b.week || null, source: b.source ? String(b.source) : "manual", position: typeof b.position === "number" ? b.position : Date.now() };
+  const rec: Row = { workspace_id: wsId, title: title.slice(0, 300), stage, owner: b.owner ? String(b.owner).slice(0, 400) : null, due_date: b.dueDate || null, context: b.context ? String(b.context).slice(0, 5000) : null, links, priority: b.priority ? String(b.priority).slice(0, 20) : null, week: b.week || null, source: b.source ? String(b.source) : "manual", position: typeof b.position === "number" ? b.position : Date.now() };
   const r = await fetch(`${c.url}/rest/v1/rr_projects`, { method: "POST", headers: { ...c.headers, Prefer: "return=representation" }, body: JSON.stringify(rec) });
   if (!r.ok) return NextResponse.json({ ok: false, error: r.status === 404 ? TABLE_MISSING : `Could not create (${r.status}).` }, { status: 502 });
   const [task] = await r.json().catch(() => []);
@@ -64,7 +64,7 @@ export async function PATCH(request: Request) {
   const patch: Row = { updated_at: new Date().toISOString() };
   if (typeof b.title === "string") patch.title = b.title.slice(0, 300);
   if (STAGES.includes(String(b.stage))) patch.stage = b.stage;
-  if ("owner" in b) patch.owner = b.owner ? String(b.owner).slice(0, 80) : null;
+  if ("owner" in b) patch.owner = b.owner ? String(b.owner).slice(0, 400) : null;
   if ("dueDate" in b) patch.due_date = b.dueDate || null;
   if ("context" in b) patch.context = b.context ? String(b.context).slice(0, 5000) : null;
   if ("links" in b) patch.links = Array.isArray(b.links) ? b.links.slice(0, 30) : [];
