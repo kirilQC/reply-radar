@@ -128,7 +128,7 @@ export async function listOnboardingClients(): Promise<OnboardingClient[]> {
   const workspaces = await rows(
     url,
     key,
-    `rr_workspaces?select=id,name,slug,logo_url,accent_color,onboarding_status,onboarding_started_at,onboarding_completed_at&order=name.asc`,
+    `rr_workspaces?select=id,name,slug,logo_url,accent_color,onboarding_status,onboarding_started_at,onboarding_completed_at&slug=neq.misc&order=name.asc`,
   );
   const named = workspaces.filter((w) => str(w.name).trim());
   if (!named.length) return [];

@@ -123,7 +123,7 @@ export async function resolveWorkspace(nameOrSlug: string): Promise<Workspace | 
   if (!url || !key) return null;
   const wanted = str(nameOrSlug).trim().toLowerCase();
   if (!wanted) return null;
-  const all = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&order=name.asc`)).map((row) => ({
+  const all = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=neq.misc&order=name.asc`)).map((row) => ({
     id: str(row.id),
     name: str(row.name),
     slug: str(row.slug),
@@ -143,7 +143,7 @@ export async function resolveWorkspace(nameOrSlug: string): Promise<Workspace | 
 export async function listMeetingClients(): Promise<MeetingClient[]> {
   const { url, key } = config();
   if (!url || !key) return [];
-  const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&order=name.asc`)).filter((w) => str(w.name).trim());
+  const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=neq.misc&order=name.asc`)).filter((w) => str(w.name).trim());
   if (!workspaces.length) return [];
   const meetings = await rows(url, key, `rr_meetings?select=workspace_id,meeting_at,status`);
   const now = Date.now();

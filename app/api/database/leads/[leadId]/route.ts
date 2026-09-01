@@ -65,7 +65,7 @@ export async function GET(
       ? await get(
           url,
           key,
-          `rr_workspaces?select=id,name,slug,logo_url,accent_color&id=in.(${workspaceIds.join(",")})&order=name.asc`,
+          `rr_workspaces?select=id,name,slug,logo_url,accent_color&id=in.(${workspaceIds.join(",")})&slug=neq.misc&order=name.asc`,
         )
       : [];
     const workspace =

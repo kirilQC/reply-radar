@@ -105,8 +105,8 @@ export async function GET() {
   const read = reader(url, key);
   try {
     const [workspaceRows, briefRows, keys] = await Promise.all([
-      read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match,call_analysis_enabled&order=name.asc")
-        .catch(() => read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match&order=name.asc")),
+      read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match,call_analysis_enabled&slug=neq.misc&order=name.asc")
+        .catch(() => read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match&slug=neq.misc&order=name.asc")),
       read(`rr_slack_briefs?select=signals,status&automation=eq.call_analysis&order=created_at.desc&limit=500`).catch(() => []),
       granolaKeys(read),
     ]);

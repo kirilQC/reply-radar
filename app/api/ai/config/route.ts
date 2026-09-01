@@ -76,7 +76,7 @@ export async function GET(request: Request) {
     }
 
     // Get all workspaces for the sub-tab list
-    const allWsResponse = await supabase(url, key, "rr_workspaces?select=id,name,slug,logo_url,accent_color,client_brief&order=name.asc");
+    const allWsResponse = await supabase(url, key, "rr_workspaces?select=id,name,slug,logo_url,accent_color,client_brief&slug=neq.misc&order=name.asc");
     const allWorkspaces = allWsResponse.ok ? ((await allWsResponse.json()) as Row[]).map((ws) => ({
       id: ws.id, name: ws.name, slug: ws.slug, logoUrl: ws.logo_url, accentColor: ws.accent_color, hasBrief: Boolean(ws.client_brief),
     })) : [];

@@ -170,7 +170,7 @@ export async function GET(request: Request) {
   if (!url || !key) return NextResponse.json({ ok: false, status: "not_configured" }, { status: 503 });
   const requested = new URL(request.url).searchParams.get("workspaces")?.split(",").filter(Boolean) ?? [];
   try {
-    const workspaces = await supabase("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,logo_url,accent_color&order=name.asc") ?? [];
+    const workspaces = await supabase("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,logo_url,accent_color&slug=neq.misc&order=name.asc") ?? [];
     const selected = requested.length ? workspaces.filter((row) => requested.includes(String(row.slug))) : workspaces;
     const ids = selected.map((row) => String(row.id));
     if (!ids.length) return NextResponse.json({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], trendLabels: [], averageDailyReplies: 0, queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });

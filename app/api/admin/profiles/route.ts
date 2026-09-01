@@ -29,7 +29,7 @@ export async function GET() {
   const profilesIncludePhoto = profilesResponse.ok && attempt < 2;
   const [linksResponse, workspacesResponse] = await Promise.all([
     fetch(`${url}/rest/v1/rr_profile_workspaces?select=profile_id,workspace_id`, { headers: h, cache: "no-store" }),
-    fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&order=name.asc`, { headers: h, cache: "no-store" }),
+    fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&slug=neq.misc&order=name.asc`, { headers: h, cache: "no-store" }),
   ]);
   const profiles = await profilesResponse.json(); const links = await linksResponse.json(); const workspaces = await workspacesResponse.json();
   if (!profilesResponse.ok) return NextResponse.json({ ok: false, error: JSON.stringify(profiles) }, { status: profilesResponse.status });
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
   const profileId = savedProfile?.id ?? id;
   if (profileId) {
     await fetch(`${url}/rest/v1/rr_profile_workspaces?profile_id=eq.${encodeURIComponent(profileId)}`, { method: "DELETE", headers: { ...headers(key), Prefer: "return=minimal" } });
-    const workspaceRows = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&order=name.asc`, { headers: headers(key), cache: "no-store" }).then((r) => r.json()).catch(() => []);
+    const workspaceRows = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&slug=neq.misc&order=name.asc`, { headers: headers(key), cache: "no-store" }).then((r) => r.json()).catch(() => []);
     const wanted = new Set(Array.isArray(payload.clients) ? payload.clients : []);
     const links = (Array.isArray(workspaceRows) ? workspaceRows : []).filter((item: { name: string; slug: string }) => wanted.has(item.name) || wanted.has(item.slug)).map((item: { id: string }) => ({ profile_id: profileId, workspace_id: item.id }));
     if (links.length) {

@@ -153,7 +153,7 @@ export async function GET(request: Request) {
     const workspaces = await query(
       url,
       key,
-      "rr_workspaces?select=id,name,slug,accent_color,logo_url&order=name.asc",
+      "rr_workspaces?select=id,name,slug,accent_color,logo_url&slug=neq.misc&order=name.asc",
     );
     const selected = requested.length
       ? workspaces.filter((workspace) =>

@@ -374,7 +374,7 @@ export async function syncAllConnectedDeals(): Promise<{ ok: boolean; results: A
 export async function listDealClients(): Promise<DealClient[]> {
   const { url, key } = config();
   if (!url || !key) return [];
-  const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,crm_provider,crm_last_synced_at&order=name.asc`)).filter((w) => str(w.name).trim());
+  const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,crm_provider,crm_last_synced_at&slug=neq.misc&order=name.asc`)).filter((w) => str(w.name).trim());
   if (!workspaces.length) return [];
   const ids = workspaces.map((w) => str(w.id)).filter(Boolean);
   const dealRows = ids.length ? await rows(url, key, `rr_deals?select=workspace_id,amount,attribution&workspace_id=in.(${ids.map(encodeURIComponent).join(",")})`) : [];

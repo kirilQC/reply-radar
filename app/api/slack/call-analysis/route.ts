@@ -122,8 +122,8 @@ export async function GET() {
 
   try {
     const [workspaceRows, runRows, granolaRows, automationRows] = await Promise.all([
-      read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match,call_analysis_enabled&order=name.asc")
-        .catch(() => read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match&order=name.asc")),
+      read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match,call_analysis_enabled&slug=neq.misc&order=name.asc")
+        .catch(() => read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match&slug=neq.misc&order=name.asc")),
       read(`rr_slack_briefs?select=workspace_id,created_at,status,destination,slack_channel_id&automation=eq.${AUTOMATION}&order=created_at.desc&limit=200`).catch(() => []),
       read("rr_granola_keys?select=id").catch(() => []),
       read(`rr_slack_automations?select=automation,enabled,send_days,send_hour,send_minute,timezone,destination&automation=eq.${AUTOMATION}&limit=1`).catch(() => []),

@@ -121,7 +121,7 @@ export async function GET() {
 
   try {
     const [workspaceRows, keyedRows, reportRows, automationRows] = await Promise.all([
-      read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,slack_internal_channel_id,slack_external_channel_id,eow_report_enabled,last_successful_poll_at&order=name.asc"),
+      read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,slack_internal_channel_id,slack_external_channel_id,eow_report_enabled,last_successful_poll_at&slug=neq.misc&order=name.asc"),
       read("rr_workspaces?select=id&heyreach_api_key_ciphertext=not.is.null"),
       read(`rr_slack_briefs?select=workspace_id,created_at,status,destination,slack_channel_id&automation=eq.${AUTOMATION}&order=created_at.desc&limit=200`).catch(() => []),
       read(`rr_slack_automations?select=automation,enabled,send_days,send_hour,send_minute,timezone,destination&automation=eq.${AUTOMATION}&limit=1`).catch(() => []),

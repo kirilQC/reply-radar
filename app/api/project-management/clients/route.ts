@@ -9,7 +9,7 @@ export async function GET() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ ok: false, clients: [] }, { status: 503 });
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  const r = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,logo_url,accent_color&order=name.asc`, { headers, cache: "no-store" });
+  const r = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=neq.misc&order=name.asc`, { headers, cache: "no-store" });
   const rows = r.ok ? await r.json().catch(() => []) : [];
   const clients = (Array.isArray(rows) ? rows : [])
     .filter((w: Record<string, unknown>) => String(w.name ?? "").trim())

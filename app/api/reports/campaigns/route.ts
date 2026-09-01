@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 
   try {
     const response = await fetch(
-      `${url}/rest/v1/rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext${slug === "all" ? "" : `&slug=eq.${encodeURIComponent(slug)}`}&order=name.asc`,
+      `${url}/rest/v1/rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext${slug === "all" ? "" : `&slug=eq.${encodeURIComponent(slug)}`}&slug=neq.misc&order=name.asc`,
       { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" },
     );
     if (!response.ok) throw new Error(`Supabase ${response.status}`);

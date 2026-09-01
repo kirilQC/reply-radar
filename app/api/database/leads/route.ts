@@ -175,7 +175,7 @@ export async function GET(request: Request) {
     const workspaces = await get(
       url,
       key,
-      "rr_workspaces?select=id,name,slug,logo_url,accent_color&order=name.asc",
+      "rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=neq.misc&order=name.asc",
     );
     const selectedWorkspace = workspaceSlug
       ? workspaces.find((workspace) => workspace.slug === workspaceSlug)
