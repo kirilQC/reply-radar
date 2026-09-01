@@ -311,41 +311,96 @@ function enrichmentPatch(meetingRow: Row, enrichment: Row): Row {
  * Non-destructive: only empty columns are filled, so anything the Zap already mapped is left alone. Best
  * effort — a miss (no LinkedIn, no match, service down) leaves the meeting exactly as it was and never throws.
  */
+/**
+ * Find the rr_leads row this meeting's invitee is, within the meeting's client. LinkedIn URL is the strongest
+ * signal (the Zap sends it), then name + company. Returns the lead row (with raw_data and campaign_names) or null.
+ */
+async function findLeadForMeeting(url: string, key: string, workspaceId: string, ids: { linkedin: string; email: string; name: string; company: string }): Promise<Row | null> {
+  const sel = "id,name,company,linkedin_profile_url,campaign_names,raw_data";
+  const ws = `workspace_id=eq.${encodeURIComponent(workspaceId)}`;
+  const handle = normalizeLinkedin(ids.linkedin);
+  if (handle) {
+    const r = await rows(url, key, `rr_leads?select=${sel}&${ws}&linkedin_profile_url=ilike.*${encodeURIComponent(handle)}*&limit=1`);
+    if (r[0]) return r[0];
+  }
+  const name = ids.name.trim(), company = ids.company.trim();
+  if (name && company) {
+    const safe = (s: string) => encodeURIComponent(s.replace(/[*%,()]/g, " ").trim());
+    const r = await rows(url, key, `rr_leads?select=${sel}&${ws}&name=ilike.*${safe(name)}*&company=ilike.*${safe(company)}*&limit=1`);
+    if (r[0]) return r[0];
+  }
+  return null;
+}
+
+/** The QC campaign(s) a lead was contacted in, as one readable string, or null. Handles array or CSV storage. */
+function campaignFromLead(lead: Row): string | null {
+  const raw = lead.campaign_names;
+  const list = Array.isArray(raw) ? raw.map((c) => str(c)) : str(raw).split(/[;,]/);
+  const cleaned = [...new Set(list.map((c) => c.trim()).filter(Boolean))];
+  return cleaned.length ? cleaned.join(", ") : null;
+}
+
 export async function enrichMeeting(meetingId: string): Promise<boolean> {
   const { url, key } = config();
   if (!url || !key || !meetingId) return false;
   const meetingRow = (await rows(url, key, `rr_meetings?select=*&id=eq.${encodeURIComponent(meetingId)}&limit=1`))[0];
   if (!meetingRow) return false;
   const linkedin = str(meetingRow.invitee_linkedin).trim();
-  if (!linkedin) return false; // no LinkedIn URL to look up on
-  const handle = normalizeLinkedin(linkedin);
+  const workspaceId = str(meetingRow.workspace_id);
 
-  // 1. The common path: the person is already a lead we contacted, with a full enrichment on their row.
+  // 1. The common path: the person is already a lead we contacted — matched by LinkedIn, else name + company.
+  // That row carries both a full AI Ark enrichment AND the campaign(s) they were contacted in — the whole point.
   let enrichment: Row | null = null;
-  if (handle) {
-    const leadRows = await rows(url, key, `rr_leads?select=raw_data&linkedin_profile_url=ilike.*${encodeURIComponent(handle)}*&limit=10`);
-    for (const lead of leadRows) {
-      const aiArk = obj(obj(obj(lead.raw_data).reply_radar).ai_ark);
-      if (Object.keys(aiArk).length > 0) { enrichment = aiArk; break; }
-    }
+  let campaign: string | null = null;
+  const lead = await findLeadForMeeting(url, key, workspaceId, { linkedin, email: str(meetingRow.invitee_email).trim(), name: str(meetingRow.invitee_name).trim(), company: str(meetingRow.company_name).trim() });
+  if (lead) {
+    const aiArk = obj(obj(obj(lead.raw_data).reply_radar).ai_ark);
+    if (Object.keys(aiArk).length > 0) enrichment = aiArk;
+    campaign = campaignFromLead(lead);
   }
 
-  // 2. The rare path: not in our database yet, so enrich them fresh from AI Ark — only if it is turned on.
-  if (!enrichment && isAiArkEnrichmentEnabled()) {
+  // 2. The rare path: not in our database yet, so enrich them fresh from AI Ark — only if it is turned on. No
+  // campaign in this case, because a person we never contacted is not attributable to one of our campaigns.
+  if (!enrichment && linkedin && isAiArkEnrichmentEnabled()) {
     try {
-      enrichment = (await enrichLeadWithAiArk({ url, key }, str(meetingRow.workspace_id), linkedin, str(meetingRow.company_name))) as Row;
+      enrichment = (await enrichLeadWithAiArk({ url, key }, workspaceId, linkedin, str(meetingRow.company_name))) as Row;
     } catch {
       enrichment = null; // no match, or the service was unavailable — leave the meeting untouched
     }
   }
-  if (!enrichment) return false;
 
-  const patch = enrichmentPatch(meetingRow, enrichment);
+  const patch = enrichment ? enrichmentPatch(meetingRow, enrichment) : {};
+  // Set the campaign only if the meeting does not already carry one (never overwrite what the Zap mapped).
+  if (campaign && !orNull(meetingRow.campaign)) patch.campaign = campaign;
   if (Object.keys(patch).length === 0) return false;
   const response = await fetch(`${url}/rest/v1/rr_meetings?id=eq.${encodeURIComponent(meetingId)}`, {
     method: "PATCH", headers: authHeaders(key), body: JSON.stringify(patch),
   });
   return response.ok;
+}
+
+/**
+ * The latest booked meeting for a client (by name/slug, fuzzily matched), fully enriched with its campaign.
+ *
+ * This is what the GET side of the webhook returns: Zapier posts a meeting, then a few seconds later asks for
+ * "the latest meeting for this client" and gets the enriched person plus the campaign they came from. If the
+ * newest meeting has not been attributed a campaign yet (the async enrichment after the POST has not landed),
+ * this runs the attribution synchronously so the answer is never missing the campaign.
+ */
+export async function latestMeetingForClient(nameOrSlug: string): Promise<{ ok: boolean; error?: string; client?: string; slug?: string; meeting?: Meeting; campaign?: string | null }> {
+  const { url, key } = config();
+  if (!url || !key) return { ok: false, error: "Supabase is not configured." };
+  const client = await resolveWorkspace(nameOrSlug);
+  if (!client) return { ok: false, error: `No single Reply Radar client matches "${nameOrSlug}".` };
+  let row = (await rows(url, key, `rr_meetings?select=*&workspace_id=eq.${encodeURIComponent(client.id)}&order=created_at.desc&limit=1`))[0];
+  if (!row) return { ok: true, client: client.name, slug: client.slug, meeting: undefined, campaign: null };
+  // Make sure the campaign is attributed before we answer — the GET is expected to carry it.
+  if (!orNull(row.campaign)) {
+    await enrichMeeting(str(row.id)).catch(() => {});
+    row = (await rows(url, key, `rr_meetings?select=*&id=eq.${encodeURIComponent(str(row.id))}&limit=1`))[0] ?? row;
+  }
+  const meeting = meetingFromRow(row);
+  return { ok: true, client: client.name, slug: client.slug, meeting, campaign: meeting.campaign };
 }
 
 export type MeetingMessage = { direction: string; body: string; sentAt: string | null };
