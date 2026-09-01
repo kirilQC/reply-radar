@@ -178,21 +178,32 @@ const stageOpts: Opt[] = STAGES.map((s) => ({ value: s.key, label: s.label, colo
 const prioOpts: Opt[] = [{ value: "", label: "None" }, ...PRIORITIES.map((p) => ({ value: p.key, label: p.label, color: p.color }))];
 
 function PriorityDot({ p }: { p?: string | null }) { const pr = prioOf(p); return pr ? <span className="pm-prio" style={{ background: pr.color }} title={`${pr.label} priority`} /> : null; }
-function LinkChips({ links }: { links?: (string | LinkItem)[] }) { const items = linkItems(links); if (!items.length) return null; return <span className="pm-clip">🔗 {items.length}</span>; }
 function ClientChip({ t, clients }: { t: BoardTask; clients: BoardClient[] }) {
   const c = clients.find((x) => x.slug === t.clientSlug); if (!c) return null;
   return <span className="pm-cchip">{c.logoUrl ? <img src={c.logoUrl} alt="" /> : <span className="pm-cchip-mono" style={{ background: c.accentColor || "var(--accent)" }}>{initials(c.name)}</span>}{c.name}</span>;
 }
 function Card({ t, h }: { t: BoardTask; h: Handlers }) {
+  const s = stageOf(t.stage);
+  const pr = prioOf(t.priority);
+  const client = h.clients.find((c) => c.slug === t.clientSlug);
+  const owners = ownerList(t.owner);
+  const blocked = t.blocker && t.blocker.text && !t.blocker.resolved;
   return (
-    <div className="pm-card2" draggable onDragStart={(e) => { e.dataTransfer.setData("id", t.id); h.onDrag(t.id); }} onDragEnd={() => h.onDrag(null)} onClick={() => h.onOpen(t)}>
-      <div className="pm-c-title"><PriorityDot p={t.priority} />{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}</div>
-      <div className="pm-c-meta">
-        {h.multi && <ClientChip t={t} clients={h.clients} />}
-        {t.blocker && t.blocker.text && !t.blocker.resolved && <span className="pm-blocked" title={`Blocked${t.blocker.owner ? ` — waiting on ${t.blocker.owner}` : ""}: ${t.blocker.text}`}>⛔ Blocked</span>}
-        <Owners owner={t.owner} map={h.map} />
-        {t.due_date && <span className="pm-due">{shortDate(t.due_date)}</span>}
-        <LinkChips links={t.links} />
+    <div className="pm-bcard" draggable onDragStart={(e) => { e.dataTransfer.setData("id", t.id); h.onDrag(t.id); }} onDragEnd={() => h.onDrag(null)} onClick={() => h.onOpen(t)}>
+      <span className="pm-bcard-stripe" style={{ background: pr ? pr.color : "var(--border-soft, var(--border))" }} />
+      <div className={`pm-bcard-band ${s.cls}`}>
+        <span>{s.label}</span>
+        {pr && <span className="pm-bcard-prio" style={{ color: pr.color }}>● {pr.label}</span>}
+      </div>
+      <div className="pm-bcard-body">
+        <div className="pm-bcard-title">{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}</div>
+        {t.context && <div className="pm-bcard-ctx">{t.context}</div>}
+        {blocked && <div className="pm-bcard-block" title={t.blocker!.text || ""}>⛔ Waiting on {t.blocker!.owner || "someone"}{t.blocker!.text ? ` — ${t.blocker!.text}` : ""}</div>}
+        <div className="pm-bcard-foot">
+          {client && <span className="pm-bcard-client"><span className="pm-bcard-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span>{client.name}</span>}
+          {owners.length > 0 && <span className="pm-bcard-owner"><Avatar name={owners[0]} map={h.map} />{owners.length === 1 ? owners[0] : `${owners.length} people`}</span>}
+          {t.due_date && <span className="pm-bcard-due">{t.due_date}</span>}
+        </div>
       </div>
     </div>
   );
