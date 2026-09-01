@@ -25,6 +25,7 @@ export default function GroupView() {
   const [tasks, setTasks] = useState<BoardTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [weekBadge, setWeekBadge] = useState<string | null>(null);
 
   const load = async () => {
     const [vw, cl] = await Promise.all([
@@ -57,7 +58,7 @@ export default function GroupView() {
   };
   const onUpdate = async (id: string, fields: Record<string, unknown>) => {
     const newClient = fields.moveToSlug ? members.find((m) => m.slug === String(fields.moveToSlug)) : undefined;
-    setTasks((p) => p.map((t) => t.id === id ? { ...t, ...(fields.stage ? { stage: String(fields.stage) } : {}), ...(fields.title ? { title: String(fields.title) } : {}), ...("dueDate" in fields ? { due_date: (fields.dueDate as string) || null } : {}), ...("owner" in fields ? { owner: (fields.owner as string) || null } : {}), ...("context" in fields ? { context: (fields.context as string) || null } : {}), ...("priority" in fields ? { priority: (fields.priority as string) || null } : {}), ...("week" in fields ? { week: (fields.week as string) || null } : {}), ...("links" in fields ? { links: Array.isArray(fields.links) ? fields.links as string[] : [] } : {}), ...(newClient ? { clientSlug: newClient.slug, clientName: newClient.name } : {}) } : t));
+    setTasks((p) => p.map((t) => t.id === id ? { ...t, ...(fields.stage ? { stage: String(fields.stage) } : {}), ...(fields.title ? { title: String(fields.title) } : {}), ...("dueDate" in fields ? { due_date: (fields.dueDate as string) || null } : {}), ...("owner" in fields ? { owner: (fields.owner as string) || null } : {}), ...("context" in fields ? { context: (fields.context as string) || null } : {}), ...("priority" in fields ? { priority: (fields.priority as string) || null } : {}), ...("week" in fields ? { week: (fields.week as string) || null } : {}), ...("links" in fields ? { links: Array.isArray(fields.links) ? fields.links as BoardTask["links"] : [] } : {}), ...(newClient ? { clientSlug: newClient.slug, clientName: newClient.name } : {}) } : t));
     await fetch("/api/project-management/tasks", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...fields }) }).catch(() => {});
   };
   const onDelete = async (id: string) => { setTasks((p) => p.filter((t) => t.id !== id)); await fetch(`/api/project-management/tasks?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {}); };
@@ -88,10 +89,11 @@ export default function GroupView() {
                     ))}
                   </div>
                 </div>
+                {weekBadge && <span className="pm-weekbadge">{weekBadge}</span>}
               </div>
               {err && <div className="pm-err">⚠ {err}</div>}
               {loading ? <p className="pm-muted">Loading…</p> : (
-                <ProjectBoard tasks={tasks} clients={members} defaultView="table" onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} />
+                <ProjectBoard tasks={tasks} clients={members} defaultView="table" onWeekChange={setWeekBadge} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} />
               )}
             </>
           )}

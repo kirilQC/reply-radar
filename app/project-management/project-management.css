@@ -305,3 +305,52 @@
 .pm-logo-upload { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border-radius: 8px; padding: 8px 13px; cursor: pointer; }
 .pm-logo-urlin { flex: 1; min-width: 160px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); padding: 0 11px; font: inherit; font-size: 12.5px; }
 .pm-logo-urlin:focus { border-color: var(--accent); outline: none; }
+
+/* ═══ Avatars (with photos), inline owners ═══ */
+.pm-av { overflow: hidden; }
+.pm-av img { width: 100%; height: 100%; object-fit: cover; }
+.pm-av-lg { width: 36px; height: 36px; border-radius: 50%; font-size: 14px; }
+.pm-own-inline { display: inline-flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.pm-own-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
+
+/* ═══ Assignee dropdown: per-person photo upload ═══ */
+.pm-dd-photo { flex: none; width: 26px; display: grid; place-items: center; color: var(--muted-2); cursor: pointer; border-radius: 6px; }
+.pm-dd-photo:hover { color: var(--accent); background: var(--panel-2, #151821); }
+
+/* ═══ Bigger client selector menu ═══ */
+.pm-dd-menu-lg .pm-opt-logo { width: 28px; height: 28px; border-radius: 8px; }
+.pm-dd-menu-lg .pm-opt-logo.mono { font-size: 12px; }
+.pm-dd-menu-lg .pm-dd-opt { font-size: 14.5px; font-weight: 600; padding: 10px 12px; gap: 10px; }
+
+/* ═══ View dropdown reorder ═══ */
+.pm-vgrip { padding: 0 4px 0 8px; color: var(--muted-2); cursor: grab; font-size: 11px; letter-spacing: 1px; }
+.pm-dd-opt.dragging { opacity: .45; }
+
+/* ═══ Week badge (group header, top-right) ═══ */
+.pm-weekbadge { margin-left: auto; align-self: center; font-size: 14px; font-weight: 750; letter-spacing: -.01em; color: var(--text); background: color-mix(in srgb, var(--accent) 13%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border)); border-radius: 999px; padding: 9px 17px; white-space: nowrap; }
+
+/* ═══ Table: wider rows, growing context, priority row colouring ═══ */
+.pm-table-edit td { padding: 7px 11px; }
+.pm-cellarea { resize: none; overflow: hidden; line-height: 1.45; min-height: 32px; padding-top: 7px; padding-bottom: 7px; font-family: inherit; white-space: pre-wrap; }
+.pm-table-edit tr.rp { background: color-mix(in srgb, var(--rc) 7%, transparent); }
+.pm-table-edit tr.rp td:first-child { box-shadow: inset 3px 0 0 var(--rc); }
+
+/* ═══ Links cell (table) ═══ */
+.pm-linkscell { width: 100%; }
+.pm-linkpills { display: inline-flex; gap: 4px; overflow: hidden; }
+.pm-linkpill { font-size: 11px; background: var(--panel-2, #20242e); border-radius: 5px; padding: 2px 6px; white-space: nowrap; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+.pm-linkpill.more { color: var(--muted-2); }
+.pm-linkmenu { padding: 8px; }
+.pm-linkrow { display: flex; align-items: center; gap: 8px; padding: 6px 4px; }
+.pm-linkrow a { flex: 1; color: var(--accent); font-size: 12.5px; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-linkrow a:hover { text-decoration: underline; }
+.pm-linkrow button { border: 0; background: none; color: var(--muted-2); cursor: pointer; font-size: 11px; }
+.pm-linkrow button:hover { color: var(--coral, #e5738a); }
+.pm-linkadd { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border-soft, var(--border)); margin-top: 6px; padding-top: 8px; }
+.pm-linkadd input { height: 32px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2, #151821); color: var(--text); font: inherit; font-size: 12.5px; padding: 0 9px; }
+.pm-linkadd input:focus { border-color: var(--accent); outline: none; }
+.pm-linkadd-row { display: flex; gap: 6px; }
+.pm-linkadd-row input { flex: 1; }
+.pm-linkadd-row button { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border: 0; border-radius: 7px; padding: 0 13px; cursor: pointer; }
+.pm-link-add2 { flex-wrap: wrap; }
+.pm-link-add2 > input { flex: 1 1 130px; }
