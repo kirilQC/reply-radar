@@ -460,3 +460,16 @@
 .pm-blk-remove { font: inherit; font-size: 12px; color: var(--coral, #e5738a); background: none; border: 1px solid color-mix(in srgb, var(--coral, #e5738a) 30%, transparent); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
 .pm-blk-resolve { font: inherit; font-size: 12px; font-weight: 650; color: var(--green); background: none; border: 1px solid color-mix(in srgb, var(--green) 40%, transparent); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
 .pm-blk-save { font: inherit; font-size: 12px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+
+/* ═══ Center every table column (content sits centred as the row grows) ═══ */
+.pm-table-edit th, .pm-table-edit td { text-align: center; }
+.pm-table-edit td:last-child { width: 62px; }
+.pm-table-edit .pm-cellin, .pm-table-edit .pm-cellarea { text-align: center; }
+.pm-table-edit .pm-dd { width: auto; max-width: 100%; margin: 0 auto; }
+.pm-table-edit .pm-dd-btn { justify-content: center; gap: 6px; }
+.pm-table-edit .pm-rowacts { justify-content: center; }
+.pm-table-edit .pm-blocker-row { justify-content: center; }
+.pm-table-edit .pm-blocker-body { flex: 0 1 auto; }
+.pm-table-edit .pm-own-inline.stack { align-items: center; }
+.pm-table-edit .pm-links-cellrow, .pm-table-edit .pm-linkpills { justify-content: center; }
+.pm-linkpill { max-width: 76px; }

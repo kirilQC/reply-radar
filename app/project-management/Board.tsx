@@ -354,7 +354,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
     <div className="pm-table-wrap">
       <div className="pm-table-scroll">
         <table className="pm-table pm-table-edit">
-          <colgroup><col style={{ width: "10%" }} /><col style={{ width: "15%" }} /><col style={{ width: "11%" }} /><col style={{ width: 84 }} /><col style={{ width: 108 }} /><col style={{ width: "14%" }} /><col /><col style={{ width: "12%" }} /><col style={{ width: 92 }} /><col style={{ width: 66 }} /></colgroup>
+          <colgroup><col style={{ width: "9%" }} /><col style={{ width: "14%" }} /><col style={{ width: "11%" }} /><col style={{ width: 80 }} /><col style={{ width: 104 }} /><col style={{ width: "13%" }} /><col /><col style={{ width: 92 }} /><col style={{ width: 90 }} /><col style={{ width: 62 }} /></colgroup>
           <thead><tr><th>Client</th><th>Task name</th><th>Assigned to</th><th>Priority</th><th>Status</th><th>Blockers</th><th>Context</th><th>Links</th><th>Due date</th><th /></tr></thead>
           <tbody>
             {tasks.map((t) => { const pc = prioOf(t.priority)?.color; return (
