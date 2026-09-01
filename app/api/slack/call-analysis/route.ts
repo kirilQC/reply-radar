@@ -29,6 +29,7 @@ import { gatherCalls, gatherChannels, writeBrief } from "../../../lib/morning-br
 import { brainContext } from "../../../lib/brain-context";
 import { callAnalysisHeaderText, callAnalysisUserContent, type CallAnalysisDestination, type CallAnalysisInputs } from "../../../lib/call-analysis";
 import { callAnalysisPrompt, fileWeeklyCall, fileWeeklyCallToBrain, type WeeklyCallFileResult } from "../../../lib/call-analysis-run";
+import { autosyncProjects } from "../../../lib/project-autosync";
 import {
   alreadySentToday,
   callReadinessOf,
@@ -382,6 +383,13 @@ export async function POST(request: Request) {
       : [{ filed: null, note: "" }, { filed: null, note: "" }];
     const filingNotes = [filing.note, brainFiling.note].filter(Boolean);
 
+    // Promises made on the call flow into the client's internal Project management board — created when new,
+    // matched to an existing task when the same work is already tracked. After posting and non-fatal: a
+    // failure here is a note in the trace, never a failed recap. Only on a real posted recap with a call.
+    const pm = call.call && analysisTs
+      ? await autosyncProjects(workspace.slug, body_, { people, source: "call_analysis" })
+      : { attempted: false, created: 0, updated: 0, completed: 0, error: "" };
+
     await insertRun(url, key, {
       workspace_id: workspace.id,
       automation: AUTOMATION,
@@ -393,6 +401,7 @@ export async function POST(request: Request) {
         sources,
         weeklyCall: { filed: filing.filed, note: filing.note || null },
         weeklyCallBrain: { filed: brainFiling.filed, note: brainFiling.note || null },
+        projectBoard: pm,
       },
       status: sendError ? "error" : "success",
       error_text: sendError || null,

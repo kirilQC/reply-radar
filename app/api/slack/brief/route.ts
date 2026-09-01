@@ -42,6 +42,7 @@ import { isAirtableConfigured } from "../../../lib/airtable";
 import { extractTrackerItems } from "../../../lib/tracker-extract";
 import { openItems } from "../../../lib/tracker-sync";
 import { readTrackers, syncTrackers } from "../../../lib/tracker-sync-run";
+import { openProjectItems, syncProjectsFromItems, autosyncProjects } from "../../../lib/project-autosync";
 import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
 
 /*
@@ -421,6 +422,10 @@ export async function POST(request: Request) {
      * base either way, so there is no test copy of it to write to instead.
      */
     const tracker: Row = { attempted: false, reason: "", items: 0, result: null };
+    // The extraction (one model call) is shared: the Airtable tracker uses it, and the internal Project
+    // management board is reconciled from the same items so the two can never disagree.
+    let extracted: Awaited<ReturnType<typeof extractTrackerItems>> | null = null;
+    const projOpen = await openProjectItems(workspace.slug).catch(() => []);
     const baseId = String((workspace as Row).airtable_base_id ?? "").trim();
     const remaining = startedAt + maxDuration * 1_000 - Date.now();
     if (!baseId) tracker.reason = `${workspace.name} has no Airtable base mapped, so there is no tracker to update.`;
@@ -439,10 +444,11 @@ export async function POST(request: Request) {
       const board = await readTrackers(baseId);
       // The same roster the brief was told to mention people from. It has to come back the other way or
       // the tracker's Owner column fills up with the `<@U…>` codes the brief is written in.
-      const extracted = await extractTrackerItems(body_, signals, {
+      extracted = await extractTrackerItems(body_, signals, {
         timeoutMs: Math.min(TRACKER_MODEL_MS, remaining - 10_000),
         people: [...(channels.internal.people ?? []), ...(channels.external.people ?? [])],
-        open: openItems(board.board?.projectRows ?? []),
+        // Both boards' keys, so an item already on either comes back under its existing key — no second copy.
+        open: [...openItems(board.board?.projectRows ?? []), ...projOpen],
       });
       tracker.items = extracted.items.length;
       if (extracted.error) tracker.reason = extracted.error;
@@ -453,6 +459,29 @@ export async function POST(request: Request) {
        * client's project tracker, and the campaign half — which needs no model — still runs either way.
        */
       tracker.result = await syncTrackers(baseId, board, signals.campaigns.names, extracted.error ? null : extracted.items, today);
+    }
+
+    /*
+     * The internal Project management board (rr_projects). Same intent as the Airtable tracker, but this
+     * is QC's own board and runs for every client, Airtable or not. Only on a real send (not a preview),
+     * so checking a brief never mutates the board. Reuses the extraction above when it ran; otherwise runs
+     * its own so a client with no Airtable base still gets a live board.
+     */
+    const pm: Row = { attempted: false, reason: "", created: 0, updated: 0, completed: 0 };
+    const pmRemaining = startedAt + maxDuration * 1_000 - Date.now();
+    if (!posted) pm.reason = "Preview — the internal board is only updated on a real send.";
+    else if (pmRemaining < TRACKER_BUDGET_MS) pm.reason = "The brief used the time budget, so the board sync was left for the next run.";
+    else if (extracted && !extracted.error) {
+      Object.assign(pm, await syncProjectsFromItems(workspace.slug, extracted.items, "morning_brief"));
+    } else if (extracted && extracted.error) {
+      pm.reason = extracted.error;
+    } else {
+      Object.assign(pm, await autosyncProjects(workspace.slug, body_, {
+        campaignNames: signals.campaigns.names.map((campaign) => campaign.name),
+        people: [...(channels.internal.people ?? []), ...(channels.external.people ?? [])],
+        source: "morning_brief",
+        timeoutMs: Math.min(TRACKER_MODEL_MS, Math.max(8_000, pmRemaining - 10_000)),
+      }));
     }
 
     // `sources` rides along in the same column as the figures because it is the same kind of fact: what
@@ -470,6 +499,8 @@ export async function POST(request: Request) {
       // Stored, not just returned: "why did BV003 get marked finished on the 18th" is a question about
       // a write we made into somebody else's base, and it has to be answerable later.
       tracker,
+      // The internal Project management board sync — what the brief created, updated, or closed there.
+      pm,
     };
 
     // Returned, not stored. The trace quotes the transcript and both channels verbatim, and a row that
