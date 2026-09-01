@@ -14,7 +14,7 @@ import ProjectBoard, { type BoardTask, type BoardClient, type NewFields } from "
 import "../../project-management.css";
 
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
-type ViewDef = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; memberSlugs: string[] };
+type ViewDef = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; slackChannelId?: string; memberSlugs: string[] };
 const initials = (s: string) => (s.trim()[0] || "?").toUpperCase();
 
 export default function GroupView() {
@@ -93,7 +93,7 @@ export default function GroupView() {
               </div>
               {err && <div className="pm-err">⚠ {err}</div>}
               {loading ? <p className="pm-muted">Loading…</p> : (
-                <ProjectBoard tasks={tasks} clients={members} defaultView="table" onWeekChange={setWeekBadge} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} />
+                <ProjectBoard tasks={tasks} clients={members} defaultView="table" notifyChannel={view?.slackChannelId || ""} onWeekChange={setWeekBadge} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} />
               )}
             </>
           )}

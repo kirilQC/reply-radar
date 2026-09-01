@@ -381,3 +381,33 @@
 .pm-slack-err { color: var(--coral, #e5738a); font-weight: 800; }
 .pm-slack-load { color: var(--muted-2); font-weight: 800; }
 .pm-card-slackline { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 11px; color: var(--muted-2); }
+
+/* ═══ Round 5 fixes ═══ */
+/* Slack icon: monochrome white like the rest of the UI */
+.pm-slackbtn { color: var(--text); opacity: .8; }
+.pm-slackbtn:hover:not(:disabled) { opacity: 1; }
+
+/* Table rows vertically centred even as context grows / assignees stack */
+.pm-table-edit td { vertical-align: middle; }
+
+/* Bigger assignee avatars + names */
+.pm-own-chip { font-size: 13px; gap: 6px; }
+.pm-own-inline .pm-av, .pm-av-row .pm-av, .pm-own-chip .pm-av { width: 24px; height: 24px; font-size: 10px; }
+.pm-av-names { font-size: 13px; }
+
+/* Assignee menu: selected chips with a clear ✕ to take someone off THIS task */
+.pm-sel-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 6px 9px; border-bottom: 1px solid var(--border-soft, var(--border)); margin-bottom: 5px; }
+.pm-sel-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; background: var(--panel-2, #20242e); border-radius: 999px; padding: 3px 8px 3px 4px; }
+.pm-sel-chip button { border: 0; background: none; color: var(--muted-2); cursor: pointer; font-size: 11px; padding: 0 1px; }
+.pm-sel-chip button:hover { color: var(--coral, #e5738a); }
+.pm-dd-rm { font-size: 12px; }
+
+/* Client directory: neutral card (no accent outline, no Slack line) */
+.pm-editcard { position: relative; padding: 0; }
+.pm-editcard .pm-card-link { display: flex; flex-direction: column; align-items: flex-start; padding: 18px; color: var(--text); text-decoration: none; width: 100%; }
+
+/* Filters panel: three sections side by side */
+.pm-filters { display: flex; gap: 2px; align-items: stretch; padding: 8px; }
+.pm-filters .pm-filt-sec { flex: 1; min-width: 150px; padding: 2px 6px; }
+.pm-filters .pm-filt-sec + .pm-filt-sec { border-top: 0; border-left: 1px solid var(--border-soft, var(--border)); margin-top: 0; padding-top: 2px; padding-left: 10px; }
+.pm-filters .pm-dd-opt, .pm-filters .pm-dd-optmain { padding: 7px 9px; }

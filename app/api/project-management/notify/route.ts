@@ -24,8 +24,10 @@ export async function POST(request: Request) {
 
   const wr = await fetch(`${c.url}/rest/v1/rr_workspaces?select=name,slack_internal_channel_id&id=eq.${encodeURIComponent(String((task as Row).workspace_id))}&limit=1`, { headers: c.headers, cache: "no-store" });
   const [ws] = wr.ok ? await wr.json().catch(() => []) : [];
-  const channel = String((ws as Row)?.slack_internal_channel_id ?? "").trim();
   const clientName = String((ws as Row)?.name ?? "the client");
+  // A view/board can override where its updates post (e.g. a Healthtech team channel); otherwise the client's own internal channel.
+  const override = String(b.channel ?? "").trim();
+  const channel = override || String((ws as Row)?.slack_internal_channel_id ?? "").trim();
   if (!channel) return NextResponse.json({ ok: false, error: `No internal Slack channel is set for ${clientName}. Add it from the Project management directory.` }, { status: 400 });
 
   const t = task as Row;

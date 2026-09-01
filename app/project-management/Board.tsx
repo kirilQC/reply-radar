@@ -102,11 +102,12 @@ function MultiPeople({ value, people, map, onChange, addPerson, removePerson, up
       {m.open && m.pos && <>
         <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
         <div className="pm-dd-menu" style={{ top: m.pos.top, left: m.pos.left, minWidth: m.pos.width }} onClick={(e) => e.stopPropagation()}>
+          {sel.length > 0 && <div className="pm-sel-chips">{sel.map((n) => <span className="pm-sel-chip" key={n}><Avatar name={n} map={map} />{n}<button type="button" title="Remove from this task" onClick={() => toggle(n)}>✕</button></span>)}</div>}
           {roster.map((p) => (
             <div className={`pm-dd-opt multi ${sel.includes(p) ? "on" : ""}`} key={p}>
               <button type="button" className="pm-dd-optmain" onClick={() => toggle(p)}><span className={`pm-check ${sel.includes(p) ? "on" : ""}`}>{sel.includes(p) ? "✓" : ""}</span><Avatar name={p} map={map} /><span className="pm-dd-opt-l">{p}</span></button>
               <label className="pm-dd-photo" title="Upload photo"><svg viewBox="0 0 20 20" width="13" height="13"><path fill="currentColor" d="M4 5h3l1-2h4l1 2h3a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm6 3a3 3 0 100 6 3 3 0 000-6z" /></svg><input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAvatar(p, f); }} /></label>
-              <button type="button" className="pm-dd-rm" title="Remove from roster" onClick={() => removePerson(p)}>✕</button>
+              <button type="button" className="pm-dd-rm" title="Delete from the whole roster" onClick={() => removePerson(p)}>🗑</button>
             </div>
           ))}
           <div className="pm-dd-add"><input value={draft} placeholder="Add a person…" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} /><button type="button" onClick={add}>Add</button></div>
@@ -119,7 +120,7 @@ function FiltersPanel({ view, views, onPickView, onReorderViews, sort, onSort, m
   view: View; views: [View, string][]; onPickView: (v: View) => void; onReorderViews: (keys: View[]) => void;
   sort: SortKey; onSort: (s: SortKey) => void; multi: boolean; week: string; weeks: string[]; onPickWeek: (w: string) => void; onAddWeek: (label: string) => void; onRemoveWeek: (label: string) => void;
 }) {
-  const m = useMenu(260); const [drag, setDrag] = useState<View | null>(null); const [draft, setDraft] = useState("");
+  const m = useMenu(multi ? 540 : 380); const [drag, setDrag] = useState<View | null>(null); const [draft, setDraft] = useState("");
   const drop = (target: View) => { if (!drag || drag === target) return; const keys = views.map(([v]) => v); const from = keys.indexOf(drag), to = keys.indexOf(target); keys.splice(to, 0, keys.splice(from, 1)[0]); onReorderViews(keys); setDrag(null); };
   const add = () => { const n = draft.trim(); if (!n) return; onAddWeek(n); setDraft(""); };
   const curView = views.find(([v]) => v === view);
@@ -131,7 +132,7 @@ function FiltersPanel({ view, views, onPickView, onReorderViews, sort, onSort, m
       </button>
       {m.open && m.pos && <>
         <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
-        <div className="pm-dd-menu pm-filters" style={{ top: m.pos.top, left: m.pos.left, minWidth: Math.max(m.pos.width, 260) }} onClick={(e) => e.stopPropagation()}>
+        <div className="pm-dd-menu pm-filters" style={{ top: m.pos.top, left: m.pos.left, width: m.pos.width }} onClick={(e) => e.stopPropagation()}>
           <div className="pm-filt-sec">
             <div className="pm-filt-h">View <em>· drag to reorder</em></div>
             {views.map(([v, label]) => (
@@ -167,7 +168,7 @@ function FiltersPanel({ view, views, onPickView, onReorderViews, sort, onSort, m
 type EditorState = { mode: "new"; stage: string; clientSlug?: string; assignee?: string } | { mode: "edit"; task: BoardTask } | null;
 type Handlers = {
   clients: BoardClient[]; multi: boolean; people: Person[]; map: Record<string, string>; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void;
-  openNew: (stage: string, clientSlug?: string, assignee?: string) => void; onOpen: (t: BoardTask) => void;
+  openNew: (stage: string, clientSlug?: string, assignee?: string) => void; onOpen: (t: BoardTask) => void; onDelete: (id: string) => void; notifyChannel?: string;
   onDrag: (id: string | null) => void; dragId: string | null; onMove: (id: string, stage: string) => void; onSetDay: (id: string, date: string) => void;
 };
 function clientLogo(c: BoardClient) { return c.logoUrl ? <img className="pm-opt-logo" src={c.logoUrl} alt="" /> : <span className="pm-opt-logo mono" style={{ background: c.accentColor || "var(--accent)" }}>{initials(c.name)}</span>; }
@@ -273,16 +274,16 @@ function LinksCell({ links, onChange }: { links: LinkItem[]; onChange: (l: LinkI
 }
 
 const slackIcon = (
-  <svg width="14" height="14" viewBox="0 0 127 127" aria-hidden><path d="M27.2 80c0 7.3-5.9 13.2-13.2 13.2C6.7 93.2.8 87.3.8 80c0-7.3 5.9-13.2 13.2-13.2h13.2V80z" fill="#E01E5A" /><path d="M33.8 80c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2v33c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V80z" fill="#E01E5A" /><path d="M47 27c-7.3 0-13.2-5.9-13.2-13.2C33.8 6.5 39.7.6 47 .6c7.3 0 13.2 5.9 13.2 13.2V27H47z" fill="#36C5F0" /><path d="M47 33.6c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H14C6.7 60 .8 54.1.8 46.8c0-7.3 5.9-13.2 13.2-13.2h33z" fill="#36C5F0" /><path d="M99.8 46.8c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H99.8V46.8z" fill="#2EB67D" /><path d="M93.2 46.8c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2v-33C66.8 6.5 72.7.6 80 .6c7.3 0 13.2 5.9 13.2 13.2v33z" fill="#2EB67D" /><path d="M80 99.6c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V99.6H80z" fill="#ECB22E" /><path d="M80 93c-7.3 0-13.2-5.9-13.2-13.2 0-7.3 5.9-13.2 13.2-13.2h33c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H80z" fill="#ECB22E" /></svg>
+  <svg width="14" height="14" viewBox="0 0 127 127" fill="currentColor" aria-hidden><path d="M27.2 80c0 7.3-5.9 13.2-13.2 13.2C6.7 93.2.8 87.3.8 80c0-7.3 5.9-13.2 13.2-13.2h13.2V80z" /><path d="M33.8 80c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2v33c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V80z" /><path d="M47 27c-7.3 0-13.2-5.9-13.2-13.2C33.8 6.5 39.7.6 47 .6c7.3 0 13.2 5.9 13.2 13.2V27H47z" /><path d="M47 33.6c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H14C6.7 60 .8 54.1.8 46.8c0-7.3 5.9-13.2 13.2-13.2h33z" /><path d="M99.8 46.8c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H99.8V46.8z" /><path d="M93.2 46.8c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2v-33C66.8 6.5 72.7.6 80 .6c7.3 0 13.2 5.9 13.2 13.2v33z" /><path d="M80 99.6c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V99.6H80z" /><path d="M80 93c-7.3 0-13.2-5.9-13.2-13.2 0-7.3 5.9-13.2 13.2-13.2h33c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H80z" /></svg>
 );
-function SlackButton({ id }: { id: string }) {
+function SlackButton({ id, channel }: { id: string; channel?: string }) {
   const [st, setSt] = useState<"idle" | "sending" | "sent" | "err">("idle");
   const [msg, setMsg] = useState("");
   const disabled = id.startsWith("tmp");
   const send = async () => {
     if (disabled || st === "sending") return;
     setSt("sending");
-    const r = await fetch("/api/project-management/notify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) }).then((x) => x.json()).catch(() => ({ ok: false, error: "Network error" }));
+    const r = await fetch("/api/project-management/notify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...(channel ? { channel } : {}) }) }).then((x) => x.json()).catch(() => ({ ok: false, error: "Network error" }));
     if (r.ok) { setSt("sent"); setTimeout(() => setSt("idle"), 2500); } else { setSt("err"); setMsg(String(r.error || "Failed to send")); setTimeout(() => setSt("idle"), 5000); }
   };
   return <button type="button" className={`pm-slackbtn ${st}`} disabled={disabled} title={disabled ? "Save the task first" : st === "err" ? msg : st === "sent" ? "Sent to Slack" : "Send this status to the client's internal Slack channel"} onClick={send}>{st === "sent" ? <span className="pm-slack-ok">✓</span> : st === "err" ? <span className="pm-slack-err">!</span> : st === "sending" ? <span className="pm-slack-load">·</span> : slackIcon}</button>;
@@ -312,8 +313,8 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
                 <td><Select value={t.stage} options={stageOpts} tone={stageOf(t.stage).color} onChange={(v) => onUpdate(t.id, { stage: v })} /></td>
                 <td><AutoTextarea defaultValue={t.context || ""} onCommit={(v) => { if ((v || null) !== (t.context || null)) onUpdate(t.id, { context: v }); }} /></td>
                 <td><LinksCell links={linkItems(t.links)} onChange={(l) => onUpdate(t.id, { links: l })} /></td>
-                <td><input className="pm-cellin" defaultValue={t.due_date || ""} placeholder="e.g. Thu 9/4" onBlur={(e) => { if ((e.target.value || null) !== (t.due_date || null)) onUpdate(t.id, { dueDate: e.target.value }); }} /></td>
-                <td><div className="pm-rowacts"><SlackButton id={t.id} /><button type="button" className="pm-rowdel" title="Open" onClick={() => h.onOpen(t)}>⋯</button></div></td>
+                <td><input className="pm-cellin" defaultValue={t.due_date || ""} onBlur={(e) => { if ((e.target.value || null) !== (t.due_date || null)) onUpdate(t.id, { dueDate: e.target.value }); }} /></td>
+                <td><div className="pm-rowacts"><SlackButton id={t.id} channel={h.notifyChannel} /><button type="button" className="pm-rowdel" title="Delete task" onClick={() => { if (window.confirm("Delete this task?")) h.onDelete(t.id); }}>🗑</button></div></td>
               </tr>
             ); })}
             {drafts.map((d) => { const pc = prioOf(d.priority)?.color; return (
@@ -325,7 +326,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
                 <td><Select value={d.stage} options={stageOpts} tone={stageOf(d.stage).color} onChange={(v) => setDraft(d.key, { stage: v })} /></td>
                 <td><AutoTextarea defaultValue={d.context} onCommit={(v) => setDraft(d.key, { context: v })} /></td>
                 <td><LinksCell links={d.links} onChange={(l) => setDraft(d.key, { links: l })} /></td>
-                <td><input className="pm-cellin" value={d.due} placeholder="e.g. Thu 9/4" onChange={(e) => setDraft(d.key, { due: e.target.value })} /></td>
+                <td><input className="pm-cellin" value={d.due} onChange={(e) => setDraft(d.key, { due: e.target.value })} /></td>
                 <td><button type="button" className="pm-rowdel" title="Remove row" onClick={() => setDrafts((p) => p.filter((x) => x.key !== d.key))}>✕</button></td>
               </tr>
             ); })}
@@ -436,8 +437,8 @@ function TaskEditor({ state, clients, people, map, multi, addPerson, removePerso
 }
 
 const SORTS: [SortKey, string][] = [["manual", "Manual order"], ["priority", "Priority"], ["due", "Due date"], ["status", "Status"], ["title", "Task name"], ["assignee", "Assignee"]];
-export default function ProjectBoard({ tasks, clients, defaultView, onCreate, onUpdate, onDelete, onMove, onSetDay, onWeekChange }: {
-  tasks: BoardTask[]; clients: BoardClient[]; defaultView?: View;
+export default function ProjectBoard({ tasks, clients, defaultView, notifyChannel, onCreate, onUpdate, onDelete, onMove, onSetDay, onWeekChange }: {
+  tasks: BoardTask[]; clients: BoardClient[]; defaultView?: View; notifyChannel?: string;
   onCreate: (clientSlug: string, fields: NewFields) => void; onUpdate: (id: string, fields: Record<string, unknown>) => void; onDelete: (id: string) => void; onMove: (id: string, stage: string) => void; onSetDay: (id: string, date: string) => void; onWeekChange?: (label: string | null) => void;
 }) {
   const multi = clients.length > 1;
@@ -471,7 +472,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, onCreate, on
   const allWeeks = useMemo(() => { const set = new Set<string>(weeks); for (const t of tasks) if (t.week) set.add(t.week); return Array.from(set); }, [weeks, tasks]);
   const visible = useMemo(() => { const base = multi && week ? tasks.filter((t) => t.week === week) : tasks; return sortTasks(base, sort); }, [tasks, multi, week, sort]);
   const create = (slug: string, f: NewFields) => onCreate(slug, { ...f, week: multi && week ? week : undefined });
-  const h: Handlers = { clients, multi, people, map, addPerson, removePerson, uploadAvatar, openNew: (stage, clientSlug, assignee) => setEditor({ mode: "new", stage, clientSlug, assignee }), onOpen: (t) => setEditor({ mode: "edit", task: t }), onDrag: setDragId, dragId, onMove, onSetDay };
+  const h: Handlers = { clients, multi, people, map, addPerson, removePerson, uploadAvatar, openNew: (stage, clientSlug, assignee) => setEditor({ mode: "new", stage, clientSlug, assignee }), onOpen: (t) => setEditor({ mode: "edit", task: t }), onDelete, notifyChannel, onDrag: setDragId, dragId, onMove, onSetDay };
   const byStage = useMemo(() => { const m: Record<string, BoardTask[]> = {}; for (const s of STAGES) m[s.key] = []; for (const t of visible) (m[t.stage] || m.todo).push(t); return m; }, [visible]);
   const views: [View, string][] = order.filter((v) => v !== "byclient" || multi).map((v) => ALL_VIEWS.find(([k]) => k === v)!);
 

@@ -8,7 +8,7 @@ import { listViews, createView, updateView, deleteView } from "../../../lib/proj
 export async function GET() { return NextResponse.json({ ok: true, views: await listViews() }); }
 export async function POST(request: Request) {
   const b = await request.json().catch(() => ({}));
-  const r = await createView({ name: String(b.name ?? ""), memberSlugs: Array.isArray(b.memberSlugs) ? b.memberSlugs : [], logoUrl: b.logoUrl, accentColor: b.accentColor });
+  const r = await createView({ name: String(b.name ?? ""), memberSlugs: Array.isArray(b.memberSlugs) ? b.memberSlugs : [], logoUrl: b.logoUrl, accentColor: b.accentColor, slackChannelId: b.slackChannelId });
   return NextResponse.json(r, { status: r.ok ? 200 : 400 });
 }
 export async function PATCH(request: Request) {
