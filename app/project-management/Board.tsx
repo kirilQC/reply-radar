@@ -120,7 +120,7 @@ function FiltersPanel({ view, views, onPickView, onReorderViews, sort, onSort, m
   view: View; views: [View, string][]; onPickView: (v: View) => void; onReorderViews: (keys: View[]) => void;
   sort: SortKey; onSort: (s: SortKey) => void; multi: boolean; week: string; weeks: string[]; onPickWeek: (w: string) => void; onAddWeek: (label: string) => void; onRemoveWeek: (label: string) => void;
 }) {
-  const m = useMenu(multi ? 540 : 380); const [drag, setDrag] = useState<View | null>(null); const [draft, setDraft] = useState("");
+  const m = useMenu(multi ? 660 : 420); const [drag, setDrag] = useState<View | null>(null); const [draft, setDraft] = useState("");
   const drop = (target: View) => { if (!drag || drag === target) return; const keys = views.map(([v]) => v); const from = keys.indexOf(drag), to = keys.indexOf(target); keys.splice(to, 0, keys.splice(from, 1)[0]); onReorderViews(keys); setDrag(null); };
   const add = () => { const n = draft.trim(); if (!n) return; onAddWeek(n); setDraft(""); };
   const curView = views.find(([v]) => v === view);
@@ -244,11 +244,11 @@ function IndividualsView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
 }
 
 /* ── Auto-growing textarea for the Context cell ── */
-function AutoTextarea({ defaultValue, placeholder, onCommit }: { defaultValue: string; placeholder?: string; onCommit: (v: string) => void }) {
+function AutoTextarea({ defaultValue, placeholder, onCommit, className = "" }: { defaultValue: string; placeholder?: string; onCommit: (v: string) => void; className?: string }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fit = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
   useEffect(() => { if (ref.current) fit(ref.current); }, []);
-  return <textarea ref={ref} className="pm-cellin pm-cellarea" rows={1} defaultValue={defaultValue} placeholder={placeholder} onInput={(e) => fit(e.currentTarget)} onBlur={(e) => onCommit(e.currentTarget.value)} />;
+  return <textarea ref={ref} className={`pm-cellin pm-cellarea ${className}`} rows={1} defaultValue={defaultValue} placeholder={placeholder} onInput={(e) => fit(e.currentTarget)} onBlur={(e) => onCommit(e.currentTarget.value)} />;
 }
 /* ── Links cell (table) — titled links in a popover ── */
 function LinksCell({ links, onChange }: { links: LinkItem[]; onChange: (l: LinkItem[]) => void }) {
@@ -256,9 +256,16 @@ function LinksCell({ links, onChange }: { links: LinkItem[]; onChange: (l: LinkI
   const add = () => { const u = url.trim(); if (!u) return; onChange([...links, { url: normUrl(u), title: title.trim() || undefined }]); setUrl(""); setTitle(""); };
   return (
     <div className="pm-dd pm-linkscell">
-      <button ref={m.btnRef} type="button" className="pm-dd-btn pm-links-btn" onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
-        <span className="pm-dd-val">{links.length ? <span className="pm-linkpills">{links.slice(0, 2).map((l, i) => <span className="pm-linkpill" key={i}>{linkLabel(l)}</span>)}{links.length > 2 && <span className="pm-linkpill more">+{links.length - 2}</span>}</span> : <span className="pm-dd-ph">Add link…</span>}</span><Chevron />
-      </button>
+      {links.length ? (
+        <div className="pm-links-cellrow">
+          <span className="pm-linkpills">{links.slice(0, 2).map((l, i) => <a className="pm-linkpill link" key={i} href={l.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{linkLabel(l)}</a>)}{links.length > 2 && <span className="pm-linkpill more">+{links.length - 2}</span>}</span>
+          <button ref={m.btnRef} type="button" className="pm-links-edit" title="Edit links" onClick={(e) => { e.stopPropagation(); m.toggle(); }}><Chevron /></button>
+        </div>
+      ) : (
+        <button ref={m.btnRef} type="button" className="pm-dd-btn pm-links-btn" onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
+          <span className="pm-dd-val"><span className="pm-dd-ph">Add link…</span></span><Chevron />
+        </button>
+      )}
       {m.open && m.pos && <>
         <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
         <div className="pm-dd-menu pm-linkmenu" style={{ top: m.pos.top, left: m.pos.left, minWidth: Math.max(m.pos.width, 280) }} onClick={(e) => e.stopPropagation()}>
@@ -307,7 +314,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
             {tasks.map((t) => { const pc = prioOf(t.priority)?.color; return (
               <tr key={t.id} className={pc ? "rp" : ""} style={pc ? ({ ["--rc" as string]: pc } as React.CSSProperties) : undefined}>
                 <td><Select value={t.clientSlug ?? ""} options={clientOpts} size="lg" onChange={(v) => onUpdate(t.id, { moveToSlug: v })} /></td>
-                <td><AutoTextarea defaultValue={t.title} onCommit={(v) => { if (v !== t.title && v.trim()) onUpdate(t.id, { title: v }); }} /></td>
+                <td><AutoTextarea className="pm-cell-title" defaultValue={t.title} onCommit={(v) => { if (v !== t.title && v.trim()) onUpdate(t.id, { title: v }); }} /></td>
                 <td><MultiPeople value={t.owner || ""} people={h.people} map={h.map} stack onChange={(v) => onUpdate(t.id, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
                 <td><Select value={t.priority || ""} options={prioOpts} placeholder="None" tone={prioOf(t.priority)?.color} onChange={(v) => onUpdate(t.id, { priority: v })} /></td>
                 <td><Select value={t.stage} options={stageOpts} tone={stageOf(t.stage).color} onChange={(v) => onUpdate(t.id, { stage: v })} /></td>
@@ -320,7 +327,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
             {drafts.map((d) => { const pc = prioOf(d.priority)?.color; return (
               <tr key={d.key} className={`pm-draftrow ${pc ? "rp" : ""}`} style={pc ? ({ ["--rc" as string]: pc } as React.CSSProperties) : undefined}>
                 <td><Select value={d.clientSlug} options={clientOpts} size="lg" onChange={(v) => setDraft(d.key, { clientSlug: v })} /></td>
-                <td><input className="pm-cellin" autoFocus value={d.title} placeholder="New task…" onChange={(e) => setDraft(d.key, { title: e.target.value })} onBlur={() => commit(d.key)} onKeyDown={(e) => { if (e.key === "Enter") commit(d.key); }} /></td>
+                <td><input className="pm-cellin pm-cell-title" autoFocus value={d.title} placeholder="New task…" onChange={(e) => setDraft(d.key, { title: e.target.value })} onBlur={() => commit(d.key)} onKeyDown={(e) => { if (e.key === "Enter") commit(d.key); }} /></td>
                 <td><MultiPeople value={d.owner} people={h.people} map={h.map} stack onChange={(v) => setDraft(d.key, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
                 <td><Select value={d.priority} options={prioOpts} placeholder="None" tone={prioOf(d.priority)?.color} onChange={(v) => setDraft(d.key, { priority: v })} /></td>
                 <td><Select value={d.stage} options={stageOpts} tone={stageOf(d.stage).color} onChange={(v) => setDraft(d.key, { stage: v })} /></td>

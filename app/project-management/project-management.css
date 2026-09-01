@@ -417,3 +417,21 @@
 .pm-filters .pm-dd-add { flex-direction: column; align-items: stretch; gap: 6px; }
 .pm-filters .pm-dd-add input { min-width: 0; width: 100%; }
 .pm-filters .pm-dd-add button { width: 100%; padding: 7px 0; }
+
+/* ═══ Round 6: bigger task name + assignee, clickable table links, wider week input ═══ */
+.pm-cell-title { font-size: 15px; font-weight: 600; line-height: 1.4; }
+.pm-table-edit .pm-own-chip { font-size: 15px; gap: 8px; }
+.pm-table-edit .pm-own-chip .pm-av { width: 30px; height: 30px; font-size: 12px; }
+.pm-table-edit .pm-av-names { font-size: 14px; }
+.pm-table-edit .pm-dd-val.stack { font-size: 14px; }
+
+/* Links cell: click the link right from the table; small caret opens the editor */
+.pm-links-cellrow { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 4px 4px 8px; }
+.pm-linkpills { display: inline-flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+.pm-linkpill.link { color: var(--accent); text-decoration: none; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pm-linkpill.link:hover { text-decoration: underline; }
+.pm-links-edit { flex: none; width: 22px; height: 26px; border: 0; background: none; color: var(--muted-2); cursor: pointer; border-radius: 6px; display: grid; place-items: center; }
+.pm-links-edit:hover { background: var(--panel-2, #151821); color: var(--text); }
+
+/* Week add input a touch taller for breathing room */
+.pm-filters .pm-dd-add input { height: 34px; }
