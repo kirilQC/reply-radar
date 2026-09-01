@@ -67,9 +67,13 @@ import { clientLabel, clientOf, clientSkeleton, clientsIn, fileKind, fileTitle, 
 import { scanChannel, resolveChannelNames, resolveUserNames, transcript, slackReadable, postMessage } from "./slack";
 import { normalizeChannelId } from "./slack-channel";
 import { addMeeting, getClientMeetings, listMeetingClients } from "./meetings";
+import { listProjectsFor, createProjectFor, updateProject, deleteProject, STAGE_LABEL } from "./project-tasks";
+import { gatherCalls } from "./morning-brief-run";
+import type { BriefWorkspace } from "./morning-brief";
+import type { ClientCall } from "./granola";
 import { getClientDeals, listDealClients } from "./deals";
 import { addToDnc, listDnc, removeFromDnc } from "./dnc";
-import { onboardingForAssistant, listOnboardingClients } from "./onboarding";
+import { onboardingForAssistant, listOnboardingClients, setTaskDone, addTemplateStep } from "./onboarding";
 
 type Row = Record<string, unknown>;
 
@@ -834,6 +838,48 @@ export const TOOLS: ToolDefinition[] = [
     description:
       "A client's onboarding progress and what is still open. Pass a client for their percent complete, status, and the list of not-yet-done steps. Omit the client for a directory of every client's onboarding progress. Use this to answer how far along a new client's setup is, or what is still outstanding before they can go live.",
     input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug. Omit for the all-client directory." } } },
+  },
+  {
+    name: "onboarding_check_step",
+    description:
+      "Mark one of a client's onboarding steps done (or not done). Call onboarding_status for the client first to get the step id, then pass it here. Use this when someone says a setup step is finished, e.g. 'mark the HeyReach key step done for Willow'.",
+    input_schema: { type: "object", properties: { step_id: { type: "string", description: "The onboarding step id from onboarding_status." }, done: { type: "boolean", description: "true to mark done, false to reopen. Default true." }, done_by: { type: "string", description: "Optional: who completed it." } }, required: ["step_id"] },
+  },
+  {
+    name: "onboarding_add_template_step",
+    description:
+      "Add a new step to QC's master onboarding template — this is the checklist every future client's onboarding is built from, so it affects the template, not one client. Give the step title; optionally a section/urgency group, a description, and a parentId to nest it under another step. Use this when someone asks to add a step to the onboarding process/template.",
+    input_schema: { type: "object", properties: { title: { type: "string" }, section: { type: "string", description: "Optional urgency section/group heading." }, description: { type: "string" }, parent_id: { type: "string", description: "Optional: id of a step to nest this under." } }, required: ["title"] },
+  },
+  {
+    name: "list_projects",
+    description:
+      "A client's internal projects on the Project management board, grouped by stage (To do, In progress, Paused, Completed, Launched). Returns each project's id, title, stage, assignee, due date, context and links. Use this to answer 'what are we working on for X this week', to check a project's status, or to get the id you need before updating or deleting one. Pass the client.",
+    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug." } }, required: ["client"] },
+  },
+  {
+    name: "create_project",
+    description:
+      "Add a new project/task to a client's Project management board. Give the client and a title; optionally a stage (todo | in_progress | paused | completed | launched, default todo), an assignee (a teammate's name), a due date (YYYY-MM-DD), context/notes, and links (an array of URLs). Use this when someone asks to add a project or task for a client.",
+    input_schema: { type: "object", properties: { client: { type: "string" }, title: { type: "string" }, stage: { type: "string", description: "todo | in_progress | paused | completed | launched" }, assignee: { type: "string" }, due_date: { type: "string", description: "YYYY-MM-DD" }, context: { type: "string" }, links: { type: "array", items: { type: "string" } } }, required: ["client", "title"] },
+  },
+  {
+    name: "update_project",
+    description:
+      "Update a project on the board — move its stage, reassign it, set a due date, edit the title, context or links. Pass the project id (get it from list_projects first). Only the fields you pass are changed. Use this to mark something in progress / paused / completed / launched, or to change any property.",
+    input_schema: { type: "object", properties: { id: { type: "string", description: "Project id from list_projects." }, title: { type: "string" }, stage: { type: "string", description: "todo | in_progress | paused | completed | launched" }, assignee: { type: "string" }, due_date: { type: "string", description: "YYYY-MM-DD, or empty string to clear" }, context: { type: "string" }, links: { type: "array", items: { type: "string" } } }, required: ["id"] },
+  },
+  {
+    name: "delete_project",
+    description:
+      "Remove a project from a client's board permanently. Pass the project id (from list_projects). Confirm with the person first, since it cannot be undone.",
+    input_schema: { type: "object", properties: { id: { type: "string", description: "Project id from list_projects." } }, required: ["id"] },
+  },
+  {
+    name: "granola_calls",
+    description:
+      "Read a client's recent Granola call recordings — the most relevant recent call plus other recent ones, with attendees, when it happened, and the transcript. Use this to answer what was said or agreed on a client's call, or to pull context from a recent meeting. Pass the client.",
+    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug." } }, required: ["client"] },
   },
   {
     name: "add_to_dnc",
@@ -1829,6 +1875,55 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const data = await onboardingForAssistant(client.slug);
       if (!data) return { client: client.name, note: "No onboarding checklist has been started for this client yet." };
       return { client: data.name, status: data.status, percent: data.progress.pct, done: data.progress.doneLeaves, total: data.progress.totalLeaves, openSteps: data.openSteps };
+    }
+
+    case "onboarding_check_step": {
+      const r = await setTaskDone({ taskId: text(input.step_id), isDone: input.done === undefined ? true : Boolean(input.done), doneBy: text(input.done_by) || undefined });
+      return r.ok ? { ok: true, percent: r.progress?.pct } : { ok: false, error: r.error };
+    }
+    case "onboarding_add_template_step": {
+      const r = await addTemplateStep({ title: text(input.title), section: text(input.section) || undefined, description: text(input.description) || undefined, parentId: text(input.parent_id) || undefined });
+      return r.ok ? { ok: true, step: r.step } : { ok: false, error: r.error };
+    }
+    case "list_projects": {
+      const client = await resolveClient(input.client);
+      const r = await listProjectsFor(client.slug);
+      if (!r.ok) return { client: client.name, error: r.error };
+      const byStage: Record<string, unknown[]> = {};
+      for (const key of Object.keys(STAGE_LABEL)) byStage[STAGE_LABEL[key]] = [];
+      for (const p of r.projects ?? []) (byStage[STAGE_LABEL[p.stage] ?? "To do"]).push({ id: p.id, title: p.title, assignee: p.assignee, dueDate: p.dueDate, context: p.context, links: p.links, autoAdded: p.source !== "manual" });
+      return { client: client.name, total: r.projects?.length ?? 0, byStage };
+    }
+    case "create_project": {
+      const client = await resolveClient(input.client);
+      const r = await createProjectFor(client.slug, { title: text(input.title), stage: text(input.stage), assignee: text(input.assignee), dueDate: text(input.due_date), context: text(input.context), links: Array.isArray(input.links) ? (input.links as string[]) : [] });
+      if (!r.ok) return { ok: false, error: r.error };
+      return { ok: true, client: client.name, created: r.project ? { id: r.project.id, title: r.project.title, stage: STAGE_LABEL[r.project.stage] } : null };
+    }
+    case "update_project": {
+      const fields: Record<string, unknown> = {};
+      if (input.title !== undefined) fields.title = text(input.title);
+      if (input.stage !== undefined) fields.stage = text(input.stage);
+      if (input.assignee !== undefined) fields.assignee = text(input.assignee);
+      if (input.due_date !== undefined) fields.dueDate = text(input.due_date);
+      if (input.context !== undefined) fields.context = text(input.context);
+      if (input.links !== undefined) fields.links = Array.isArray(input.links) ? (input.links as string[]) : [];
+      const r = await updateProject(text(input.id), fields);
+      return r.ok ? { ok: true } : { ok: false, error: r.error };
+    }
+    case "delete_project": {
+      const r = await deleteProject(text(input.id));
+      return r.ok ? { ok: true } : { ok: false, error: r.error };
+    }
+    case "granola_calls": {
+      const client = await resolveClient(input.client);
+      const rows = (await db(`rr_workspaces?select=name,slug,granola_title_match,granola_extra_title_matches&slug=eq.${encodeURIComponent(client.slug)}&limit=1`)) as Row[];
+      const ws = rows[0];
+      if (!ws) return { client: client.name, error: "Client not found." };
+      const found = await gatherCalls(db, ws as unknown as BriefWorkspace);
+      const fmt = (c: ClientCall) => ({ title: c.title, when: c.startedAt ? new Date(c.startedAt).toISOString() : null, ageDays: c.ageDays, attendees: c.attendees, transcript: c.transcript, truncated: c.truncated });
+      if (!found.call && !found.extras.length) return { client: client.name, note: found.callReason || "No recent Granola call found for this client." };
+      return { client: client.name, call: found.call ? fmt(found.call) : null, otherRecentCalls: found.extras.map((c) => ({ title: c.title, when: c.startedAt ? new Date(c.startedAt).toISOString() : null })), callReason: found.callReason };
     }
 
     case "add_to_dnc": {
