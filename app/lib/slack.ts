@@ -425,12 +425,14 @@ export async function openDm(userId: string): Promise<string> {
   }
 }
 
-export async function postMessage(channelId: string, text: string, threadTs = ""): Promise<string> {
+export async function postMessage(channelId: string, text: string, threadTs = "", blocks?: unknown[]): Promise<string> {
   const body = await call("chat.postMessage", {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },
     // `unfurl_links: false` because a brief that quotes a campaign URL should not paste a preview card
     // under itself, and `mrkdwn` because the brief is written in Slack's own flavour of markdown.
+    // `blocks` (optional) let a caller lay the message out richly — e.g. a section with an image accessory
+    // off to the side; `text` is kept as the notification fallback.
     body: JSON.stringify({
       channel: channelId,
       text,
@@ -438,6 +440,7 @@ export async function postMessage(channelId: string, text: string, threadTs = ""
       unfurl_links: false,
       unfurl_media: false,
       ...(threadTs ? { thread_ts: threadTs } : {}),
+      ...(blocks && blocks.length ? { blocks } : {}),
     }),
   }, "write");
   return String(body.ts ?? "");

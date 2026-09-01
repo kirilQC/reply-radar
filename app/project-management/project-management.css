@@ -411,3 +411,9 @@
 .pm-filters .pm-filt-sec { flex: 1; min-width: 150px; padding: 2px 6px; }
 .pm-filters .pm-filt-sec + .pm-filt-sec { border-top: 0; border-left: 1px solid var(--border-soft, var(--border)); margin-top: 0; padding-top: 2px; padding-left: 10px; }
 .pm-filters .pm-dd-opt, .pm-filters .pm-dd-optmain { padding: 7px 9px; }
+
+/* Keep each Filters column self-contained; stack the week add input + button so it never spills over */
+.pm-filters .pm-filt-sec { min-width: 0; overflow: hidden; }
+.pm-filters .pm-dd-add { flex-direction: column; align-items: stretch; gap: 6px; }
+.pm-filters .pm-dd-add input { min-width: 0; width: 100%; }
+.pm-filters .pm-dd-add button { width: 100%; padding: 7px 0; }
