@@ -37,14 +37,14 @@ export default function ClientProjects() {
   useEffect(() => { if (slug) { void loadClient(); void loadTasks(); } }, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onCreate = async (clientSlug: string, fields: NewFields) => {
-    const tmp: BoardTask = { id: `tmp-${Date.now()}`, title: fields.title, stage: fields.stage, owner: fields.assignee || null, due_date: fields.dueDate || null, context: fields.context || null, links: fields.links || [], source: "manual", clientSlug, clientName: client?.name };
+    const tmp: BoardTask = { id: `tmp-${Date.now()}`, title: fields.title, stage: fields.stage, owner: fields.assignee || null, due_date: fields.dueDate || null, context: fields.context || null, links: fields.links || [], priority: fields.priority || null, week: fields.week || null, source: "manual", clientSlug, clientName: client?.name };
     setTasks((p) => [...p, tmp]);
-    const r = await fetch("/api/project-management/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: clientSlug, title: fields.title, stage: fields.stage, assignee: fields.assignee, dueDate: fields.dueDate, context: fields.context, links: fields.links }) }).then((x) => x.json()).catch(() => ({}));
+    const r = await fetch("/api/project-management/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: clientSlug, title: fields.title, stage: fields.stage, assignee: fields.assignee, dueDate: fields.dueDate, context: fields.context, links: fields.links, priority: fields.priority, week: fields.week }) }).then((x) => x.json()).catch(() => ({}));
     if (r.ok && r.task) setTasks((p) => p.map((t) => (t.id === tmp.id ? { ...r.task, clientSlug, clientName: client?.name } : t)));
     else void loadTasks();
   };
   const onUpdate = async (id: string, fields: Record<string, unknown>) => {
-    setTasks((p) => p.map((t) => t.id === id ? { ...t, ...(fields.stage ? { stage: String(fields.stage) } : {}), ...(fields.title ? { title: String(fields.title) } : {}), ...("dueDate" in fields ? { due_date: (fields.dueDate as string) || null } : {}), ...("owner" in fields ? { owner: (fields.owner as string) || null } : {}), ...("context" in fields ? { context: (fields.context as string) || null } : {}), ...("links" in fields ? { links: Array.isArray(fields.links) ? fields.links as string[] : [] } : {}) } : t));
+    setTasks((p) => p.map((t) => t.id === id ? { ...t, ...(fields.stage ? { stage: String(fields.stage) } : {}), ...(fields.title ? { title: String(fields.title) } : {}), ...("dueDate" in fields ? { due_date: (fields.dueDate as string) || null } : {}), ...("owner" in fields ? { owner: (fields.owner as string) || null } : {}), ...("context" in fields ? { context: (fields.context as string) || null } : {}), ...("priority" in fields ? { priority: (fields.priority as string) || null } : {}), ...("week" in fields ? { week: (fields.week as string) || null } : {}), ...("links" in fields ? { links: Array.isArray(fields.links) ? fields.links as string[] : [] } : {}) } : t));
     await fetch("/api/project-management/tasks", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...fields }) }).catch(() => {});
   };
   const onDelete = async (id: string) => { setTasks((p) => p.filter((t) => t.id !== id)); await fetch(`/api/project-management/tasks?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {}); };

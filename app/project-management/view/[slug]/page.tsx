@@ -49,14 +49,15 @@ export default function GroupView() {
 
   const onCreate = async (clientSlug: string, fields: NewFields) => {
     const c = members.find((m) => m.slug === clientSlug);
-    const tmp: BoardTask = { id: `tmp-${Date.now()}`, title: fields.title, stage: fields.stage, owner: fields.assignee || null, due_date: fields.dueDate || null, context: fields.context || null, links: fields.links || [], source: "manual", clientSlug, clientName: c?.name };
+    const tmp: BoardTask = { id: `tmp-${Date.now()}`, title: fields.title, stage: fields.stage, owner: fields.assignee || null, due_date: fields.dueDate || null, context: fields.context || null, links: fields.links || [], priority: fields.priority || null, week: fields.week || null, source: "manual", clientSlug, clientName: c?.name };
     setTasks((p) => [...p, tmp]);
-    const r = await fetch("/api/project-management/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: clientSlug, title: fields.title, stage: fields.stage, assignee: fields.assignee, dueDate: fields.dueDate, context: fields.context, links: fields.links }) }).then((x) => x.json()).catch(() => ({}));
+    const r = await fetch("/api/project-management/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: clientSlug, title: fields.title, stage: fields.stage, assignee: fields.assignee, dueDate: fields.dueDate, context: fields.context, links: fields.links, priority: fields.priority, week: fields.week }) }).then((x) => x.json()).catch(() => ({}));
     if (r.ok && r.task) setTasks((p) => p.map((t) => (t.id === tmp.id ? { ...r.task, clientSlug, clientName: c?.name } : t)));
     else if (view) void loadTasks(view.memberSlugs);
   };
   const onUpdate = async (id: string, fields: Record<string, unknown>) => {
-    setTasks((p) => p.map((t) => t.id === id ? { ...t, ...(fields.stage ? { stage: String(fields.stage) } : {}), ...(fields.title ? { title: String(fields.title) } : {}), ...("dueDate" in fields ? { due_date: (fields.dueDate as string) || null } : {}), ...("owner" in fields ? { owner: (fields.owner as string) || null } : {}), ...("context" in fields ? { context: (fields.context as string) || null } : {}), ...("links" in fields ? { links: Array.isArray(fields.links) ? fields.links as string[] : [] } : {}) } : t));
+    const newClient = fields.moveToSlug ? members.find((m) => m.slug === String(fields.moveToSlug)) : undefined;
+    setTasks((p) => p.map((t) => t.id === id ? { ...t, ...(fields.stage ? { stage: String(fields.stage) } : {}), ...(fields.title ? { title: String(fields.title) } : {}), ...("dueDate" in fields ? { due_date: (fields.dueDate as string) || null } : {}), ...("owner" in fields ? { owner: (fields.owner as string) || null } : {}), ...("context" in fields ? { context: (fields.context as string) || null } : {}), ...("priority" in fields ? { priority: (fields.priority as string) || null } : {}), ...("week" in fields ? { week: (fields.week as string) || null } : {}), ...("links" in fields ? { links: Array.isArray(fields.links) ? fields.links as string[] : [] } : {}), ...(newClient ? { clientSlug: newClient.slug, clientName: newClient.name } : {}) } : t));
     await fetch("/api/project-management/tasks", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...fields }) }).catch(() => {});
   };
   const onDelete = async (id: string) => { setTasks((p) => p.filter((t) => t.id !== id)); await fetch(`/api/project-management/tasks?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {}); };
@@ -81,16 +82,16 @@ export default function GroupView() {
                   <h1>{view?.name || "View"}</h1>
                   <div className="pm-member-bubbles">
                     {members.map((m) => (
-                      <span className="pm-bubble" key={m.slug} title={m.name}>
+                      <Link className="pm-bubble" key={m.slug} title={`${m.name} → project board`} href={`/project-management/${encodeURIComponent(m.slug)}`}>
                         {m.logoUrl ? <img src={m.logoUrl} alt={m.name} /> : <span className="pm-bubble-mono" style={{ background: m.accentColor || "var(--accent)" }}>{initials(m.name)}</span>}
-                      </span>
+                      </Link>
                     ))}
                   </div>
                 </div>
               </div>
               {err && <div className="pm-err">⚠ {err}</div>}
               {loading ? <p className="pm-muted">Loading…</p> : (
-                <ProjectBoard tasks={tasks} clients={members} tableTitle={`QC Growth Internal ${view?.name || ""} Sync`} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} />
+                <ProjectBoard tasks={tasks} clients={members} defaultView="table" onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} />
               )}
             </>
           )}

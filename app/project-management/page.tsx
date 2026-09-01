@@ -47,7 +47,7 @@ export default function ProjectManagementDirectory() {
           {views.length > 0 && (
             <>
               <div className="pm-dir-label">Views</div>
-              <div className="pm-directory">
+              <div className="pm-directory pm-directory-views">
                 {views.map((v) => (
                   <div className="pm-card pm-viewcard" key={v.id}>
                     <Link href={`/project-management/view/${encodeURIComponent(v.slug)}`} className="pm-card-link">
@@ -55,7 +55,12 @@ export default function ProjectManagementDirectory() {
                         {v.logoUrl ? <img src={v.logoUrl} alt="" /> : initials(v.name)}
                       </span>
                       <span className="pm-card-name">{v.name}</span>
-                      <span className="pm-card-sub">{v.memberSlugs.length} client{v.memberSlugs.length === 1 ? "" : "s"}</span>
+                      <span className="pm-card-members">
+                        {v.memberSlugs.slice(0, 6).map((s) => { const c = clients.find((x) => x.slug === s); if (!c) return null; return (
+                          <span className="pm-vbubble" key={s} title={c.name}>{c.logoUrl ? <img src={c.logoUrl} alt="" /> : <span className="pm-vbubble-mono" style={{ background: c.accentColor || "var(--accent)" }}>{initials(c.name)}</span>}</span>
+                        ); })}
+                        {v.memberSlugs.length > 6 && <span className="pm-vbubble pm-vbubble-more">+{v.memberSlugs.length - 6}</span>}
+                      </span>
                     </Link>
                     <button type="button" className="pm-card-edit" title="Edit view" onClick={() => setEditing(v)}>⋯</button>
                   </div>
