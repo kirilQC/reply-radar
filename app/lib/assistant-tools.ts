@@ -73,7 +73,7 @@ import type { BriefWorkspace } from "./morning-brief";
 import type { ClientCall } from "./granola";
 import { getClientDeals, listDealClients } from "./deals";
 import { addToDnc, listDnc, removeFromDnc } from "./dnc";
-import { onboardingForAssistant, listOnboardingClients, setTaskDone, addTemplateStep } from "./onboarding";
+import { onboardingForAssistant, listOnboardingClients, setTaskDone, addTemplateStep, listTemplate } from "./onboarding";
 
 type Row = Record<string, unknown>;
 
@@ -846,10 +846,16 @@ export const TOOLS: ToolDefinition[] = [
     input_schema: { type: "object", properties: { step_id: { type: "string", description: "The onboarding step id from onboarding_status." }, done: { type: "boolean", description: "true to mark done, false to reopen. Default true." }, done_by: { type: "string", description: "Optional: who completed it." } }, required: ["step_id"] },
   },
   {
+    name: "list_onboarding_template",
+    description:
+      "Read QC's master onboarding template — the Reply Radar onboarding checklist every new client is built from (the Onboarding tab in the app). Returns every step with its section, urgency group, and id. Call this before adding a step, to see the existing sections/groups and avoid duplicates. This is the Reply Radar template, NOT the Airtable base.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
     name: "onboarding_add_template_step",
     description:
-      "Add a new step to QC's master onboarding template — this is the checklist every future client's onboarding is built from, so it affects the template, not one client. Give the step title; optionally a section/urgency group, a description, and a parentId to nest it under another step. Use this when someone asks to add a step to the onboarding process/template.",
-    input_schema: { type: "object", properties: { title: { type: "string" }, section: { type: "string", description: "Optional urgency section/group heading." }, description: { type: "string" }, parent_id: { type: "string", description: "Optional: id of a step to nest this under." } }, required: ["title"] },
+      "Add a step to QC's master onboarding template — the Reply Radar onboarding checklist (the Onboarding tab in the app), the one people mean by 'the ReplyRadar onboarding task list' or 'the onboarding template'. This is NOT the Airtable base; never use the Airtable tools for this. It affects the template every future client inherits, not one client. Give the title, and place it with a `group` (the urgency band: 'Immediate', 'First week', or 'Least Urgent') and/or a `section` (the category: 'Communication', 'Data & tooling', 'Client access & integrations', 'Reply Radar setup', 'Contract & kickoff'). Call list_onboarding_template first to confirm exact section/group names and that it is not already there.",
+    input_schema: { type: "object", properties: { title: { type: "string" }, group: { type: "string", description: "Urgency band: Immediate | First week | Least Urgent" }, section: { type: "string", description: "Category, e.g. Communication, Data & tooling, Client access & integrations, Reply Radar setup, Contract & kickoff" }, description: { type: "string" }, parent_id: { type: "string", description: "Optional: id of a step to nest this under." } }, required: ["title"] },
   },
   {
     name: "list_projects",
@@ -1881,8 +1887,16 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const r = await setTaskDone({ taskId: text(input.step_id), isDone: input.done === undefined ? true : Boolean(input.done), doneBy: text(input.done_by) || undefined });
       return r.ok ? { ok: true, percent: r.progress?.pct } : { ok: false, error: r.error };
     }
+    case "list_onboarding_template": {
+      const steps = await listTemplate();
+      return {
+        sections: Array.from(new Set(steps.map((s) => s.section).filter(Boolean))),
+        groups: Array.from(new Set(steps.map((s) => s.group).filter(Boolean))),
+        steps: steps.map((s) => ({ id: s.id, title: s.title, section: s.section, group: s.group })),
+      };
+    }
     case "onboarding_add_template_step": {
-      const r = await addTemplateStep({ title: text(input.title), section: text(input.section) || undefined, description: text(input.description) || undefined, parentId: text(input.parent_id) || undefined });
+      const r = await addTemplateStep({ title: text(input.title), section: text(input.section) || undefined, group: text(input.group) || undefined, description: text(input.description) || undefined, parentId: text(input.parent_id) || undefined });
       return r.ok ? { ok: true, step: r.step } : { ok: false, error: r.error };
     }
     case "list_projects": {
