@@ -8,7 +8,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 export type LinkItem = { url: string; title?: string };
 export type Blocker = { owner?: string; text?: string; resolved?: boolean; resolvedAt?: string };
-export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | null; source: string; clientSlug?: string; clientName?: string };
+export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; clientSlug?: string; clientName?: string };
+const blockerList = (b?: Blocker | Blocker[] | null): Blocker[] => (Array.isArray(b) ? b : b ? [b] : []).filter((x) => x && (x.text || x.owner));
 export type BoardClient = { slug: string; name: string; logoUrl?: string | null; accentColor?: string | null };
 export type Person = { name: string; avatarUrl?: string | null };
 type View = "kanban" | "byclient" | "individuals" | "table" | "swimlanes" | "list" | "timeline" | "pipeline";
@@ -187,7 +188,7 @@ function Card({ t, h }: { t: BoardTask; h: Handlers }) {
   const pr = prioOf(t.priority);
   const client = h.clients.find((c) => c.slug === t.clientSlug);
   const owners = ownerList(t.owner);
-  const blocked = t.blocker && t.blocker.text && !t.blocker.resolved;
+  const openBlockers = blockerList(t.blocker).filter((b) => !b.resolved);
   return (
     <div className="pm-bcard" draggable onDragStart={(e) => { e.dataTransfer.setData("id", t.id); h.onDrag(t.id); }} onDragEnd={() => h.onDrag(null)} onClick={() => h.onOpen(t)}>
       <span className="pm-bcard-stripe" style={{ background: pr ? pr.color : "var(--border-soft, var(--border))" }} />
@@ -198,7 +199,7 @@ function Card({ t, h }: { t: BoardTask; h: Handlers }) {
       <div className="pm-bcard-body">
         <div className="pm-bcard-title">{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}</div>
         {t.context && <div className="pm-bcard-ctx">{t.context}</div>}
-        {blocked && <div className="pm-bcard-block" title={t.blocker!.text || ""}>⛔ Waiting on {t.blocker!.owner || "someone"}{t.blocker!.text ? ` — ${t.blocker!.text}` : ""}</div>}
+        {openBlockers.length > 0 && <div className="pm-bcard-block" title={openBlockers.map((b) => `${b.owner || "someone"}: ${b.text}`).join("\n")}>⛔ Waiting on {openBlockers[0].owner || "someone"}{openBlockers.length > 1 ? ` +${openBlockers.length - 1} more` : ""}{openBlockers[0].text ? ` — ${openBlockers[0].text}` : ""}</div>}
         <div className="pm-bcard-foot">
           {client && <span className="pm-bcard-client"><span className="pm-bcard-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span>{client.name}</span>}
           {owners.length > 0 && <span className="pm-bcard-owner"><Avatar name={owners[0]} map={h.map} />{owners.length === 1 ? owners[0] : `${owners.length} people`}</span>}
@@ -310,42 +311,48 @@ function SlackButton({ id, channel }: { id: string; channel?: string }) {
 }
 
 function nowIso() { return new Date().toISOString(); }
-function BlockerCell({ blocker, people, map, onChange, addPerson }: { blocker?: Blocker | null; people: Person[]; map: Record<string, string>; onChange: (b: Blocker | null) => void; addPerson: (n: string) => void }) {
+function BlockerCell({ blockers, people, map, onChange, addPerson }: { blockers?: Blocker | Blocker[] | null; people: Person[]; map: Record<string, string>; onChange: (b: Blocker[]) => void; addPerson: (n: string) => void }) {
   const m = useMenu(300);
-  const b = blocker || {};
-  const has = !!((b.text && b.text.trim()) || b.owner);
-  const resolved = !!b.resolved;
-  const [owner, setOwner] = useState(b.owner || "");
-  const [txt, setTxt] = useState(b.text || "");
+  const list = blockerList(blockers);
+  const [editing, setEditing] = useState<number | "new" | null>(null);
+  const [owner, setOwner] = useState("");
+  const [txt, setTxt] = useState("");
   const [draftName, setDraftName] = useState("");
-  useEffect(() => { if (m.open) { setOwner(b.owner || ""); setTxt(b.text || ""); setDraftName(""); } }, [m.open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const save = () => { const t = txt.trim(); if (!t && !owner) onChange(null); else onChange({ owner: owner || "", text: t, resolved: b.resolved || false, ...(b.resolvedAt ? { resolvedAt: b.resolvedAt } : {}) }); m.close(); };
-  const clearToggle = () => onChange({ owner: b.owner || "", text: b.text || "", resolved: !resolved, ...(!resolved ? { resolvedAt: nowIso() } : {}) });
+  const openEditor = (target: number | "new") => { const b = target === "new" ? {} : (list[target] || {}); setOwner(b.owner || ""); setTxt(b.text || ""); setDraftName(""); setEditing(target); if (!m.pos) m.toggle(); };
+  const closeEditor = () => { setEditing(null); m.close(); };
+  const commit = () => {
+    const t = txt.trim();
+    if (!t && !owner) { if (typeof editing === "number") onChange(list.filter((_, j) => j !== editing)); closeEditor(); return; }
+    const prev = typeof editing === "number" ? list[editing] : undefined;
+    const blk: Blocker = { owner: owner || "", text: t, resolved: prev?.resolved || false, ...(prev?.resolvedAt ? { resolvedAt: prev.resolvedAt } : {}) };
+    onChange(editing === "new" ? [...list, blk] : list.map((b, j) => (j === editing ? blk : b)));
+    closeEditor();
+  };
+  const toggleAt = (i: number) => { const b = list[i]; onChange(list.map((x, j) => (j === i ? { ...b, resolved: !b.resolved, ...(!b.resolved ? { resolvedAt: nowIso() } : {}) } : x))); };
+  const addInline = () => { const n = draftName.trim(); if (n) { addPerson(n); setOwner(n); setDraftName(""); } };
   const roster: Opt[] = [{ value: "", label: "Anyone" }, ...people.map((p) => ({ value: p.name, label: p.name, logo: <Avatar name={p.name} map={map} /> }))];
   return (
     <div className="pm-dd pm-blockercell">
-      {has ? (
-        <div className={`pm-blocker-row ${resolved ? "done" : ""}`}>
-          <button type="button" className={`pm-blocker-check ${resolved ? "on" : ""}`} title={resolved ? `Cleared${b.owner ? ` by ${b.owner}` : ""} — click to reopen` : "Mark this blocker cleared"} onClick={(e) => { e.stopPropagation(); clearToggle(); }}>{resolved ? "✓" : ""}</button>
-          <button ref={m.btnRef} type="button" className="pm-blocker-body" onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
-            {b.owner ? <Avatar name={b.owner} map={map} /> : null}
-            <span className="pm-blocker-text">{b.text || "(blocker)"}</span>
-          </button>
-        </div>
-      ) : (
-        <button ref={m.btnRef} type="button" className="pm-dd-btn pm-blocker-add" onClick={(e) => { e.stopPropagation(); m.toggle(); }}><span className="pm-dd-ph">＋ Blocker</span></button>
-      )}
-      {m.open && m.pos && <>
-        <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
+      <div className="pm-blocker-list">
+        {list.map((b, i) => (
+          <div className={`pm-blocker-row ${b.resolved ? "done" : ""}`} key={i}>
+            <button type="button" className={`pm-blocker-check ${b.resolved ? "on" : ""}`} title={b.resolved ? `Cleared${b.owner ? ` — ${b.owner}` : ""} · click to reopen` : "Mark this blocker cleared"} onClick={(e) => { e.stopPropagation(); toggleAt(i); }}>{b.resolved ? "✓" : ""}</button>
+            <button type="button" className="pm-blocker-body" onClick={(e) => { e.stopPropagation(); openEditor(i); }}>{b.owner ? <Avatar name={b.owner} map={map} /> : null}<span className="pm-blocker-text">{b.text || "(blocker)"}</span></button>
+          </div>
+        ))}
+        <button ref={m.btnRef} type="button" className="pm-blocker-addbtn" onClick={(e) => { e.stopPropagation(); openEditor("new"); }}>{list.length ? "＋ Add blocker" : "＋ Blocker"}</button>
+      </div>
+      {m.open && m.pos && editing !== null && <>
+        <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); closeEditor(); }} />
         <div className="pm-dd-menu pm-blockermenu" style={{ top: m.pos.top, left: m.pos.left, minWidth: Math.max(m.pos.width, 300) }} onClick={(e) => e.stopPropagation()}>
           <div className="pm-blk-label">Waiting on</div>
           <Select value={owner} options={roster} placeholder="Anyone" onChange={setOwner} minWidth={260} />
-          <div className="pm-dd-add pm-blk-add"><input value={draftName} placeholder="…or add a new person" onChange={(e) => setDraftName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const n = draftName.trim(); if (n) { addPerson(n); setOwner(n); setDraftName(""); } } }} /><button type="button" onClick={() => { const n = draftName.trim(); if (n) { addPerson(n); setOwner(n); setDraftName(""); } }}>Add</button></div>
+          <div className="pm-dd-add pm-blk-add"><input value={draftName} placeholder="…or add a new person" onChange={(e) => setDraftName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addInline(); } }} /><button type="button" onClick={addInline}>Add</button></div>
           <div className="pm-blk-label">What needs to happen</div>
           <textarea className="pm-blk-text" rows={3} value={txt} placeholder="e.g. Need the surgeon-office list reviewed before I can send" onChange={(e) => setTxt(e.target.value)} />
           <div className="pm-blk-foot">
-            {has ? <button type="button" className="pm-blk-remove" onClick={() => { onChange(null); m.close(); }}>Remove</button> : <span />}
-            <div className="pm-blk-foot-r">{has && <button type="button" className="pm-blk-resolve" onClick={() => { clearToggle(); m.close(); }}>{resolved ? "Reopen" : "Mark cleared"}</button>}<button type="button" className="pm-blk-save" onClick={save}>Save</button></div>
+            {typeof editing === "number" ? <button type="button" className="pm-blk-remove" onClick={() => { onChange(list.filter((_, j) => j !== editing)); closeEditor(); }}>Remove</button> : <span />}
+            <div className="pm-blk-foot-r">{typeof editing === "number" && <button type="button" className="pm-blk-resolve" onClick={() => { toggleAt(editing); closeEditor(); }}>{list[editing]?.resolved ? "Reopen" : "Mark cleared"}</button>}<button type="button" className="pm-blk-save" onClick={commit}>Save</button></div>
           </div>
         </div>
       </>}
@@ -375,7 +382,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
                 <td><MultiPeople value={t.owner || ""} people={h.people} map={h.map} stack onChange={(v) => onUpdate(t.id, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
                 <td><Select value={t.priority || ""} options={prioOpts} placeholder="None" tone={prioOf(t.priority)?.color} onChange={(v) => onUpdate(t.id, { priority: v })} /></td>
                 <td><Select value={t.stage} options={stageOpts} tone={stageOf(t.stage).color} onChange={(v) => onUpdate(t.id, { stage: v })} /></td>
-                <td><BlockerCell blocker={t.blocker} people={h.people} map={h.map} addPerson={h.addPerson} onChange={(blk) => onUpdate(t.id, { blocker: blk })} /></td>
+                <td><BlockerCell blockers={t.blocker} people={h.people} map={h.map} addPerson={h.addPerson} onChange={(blk) => onUpdate(t.id, { blocker: blk })} /></td>
                 <td><AutoTextarea defaultValue={t.context || ""} onCommit={(v) => { if ((v || null) !== (t.context || null)) onUpdate(t.id, { context: v }); }} /></td>
                 <td><LinksCell links={linkItems(t.links)} onChange={(l) => onUpdate(t.id, { links: l })} /></td>
                 <td><input className="pm-cellin" defaultValue={t.due_date || ""} onBlur={(e) => { if ((e.target.value || null) !== (t.due_date || null)) onUpdate(t.id, { dueDate: e.target.value }); }} /></td>
