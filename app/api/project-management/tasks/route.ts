@@ -70,6 +70,7 @@ export async function PATCH(request: Request) {
   if ("links" in b) patch.links = Array.isArray(b.links) ? b.links.slice(0, 30) : [];
   if ("priority" in b) patch.priority = b.priority ? String(b.priority).slice(0, 20) : null;
   if ("week" in b) patch.week = b.week || null;
+  if ("blocker" in b) patch.blocker = b.blocker && (b.blocker.text || b.blocker.owner) ? b.blocker : null;
   if (b.moveToSlug) { const wsId = await workspaceIdFor(String(b.moveToSlug), c); if (wsId) patch.workspace_id = wsId; }
   if (typeof b.position === "number") patch.position = b.position;
   const r = await fetch(`${c.url}/rest/v1/rr_projects?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: { ...c.headers, Prefer: "return=minimal" }, body: JSON.stringify(patch) });

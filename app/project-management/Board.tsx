@@ -7,7 +7,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 export type LinkItem = { url: string; title?: string };
-export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; source: string; clientSlug?: string; clientName?: string };
+export type Blocker = { owner?: string; text?: string; resolved?: boolean; resolvedAt?: string };
+export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | null; source: string; clientSlug?: string; clientName?: string };
 export type BoardClient = { slug: string; name: string; logoUrl?: string | null; accentColor?: string | null };
 export type Person = { name: string; avatarUrl?: string | null };
 type View = "kanban" | "byclient" | "individuals" | "table" | "swimlanes" | "list" | "timeline" | "pipeline";
@@ -188,6 +189,7 @@ function Card({ t, h }: { t: BoardTask; h: Handlers }) {
       <div className="pm-c-title"><PriorityDot p={t.priority} />{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}</div>
       <div className="pm-c-meta">
         {h.multi && <ClientChip t={t} clients={h.clients} />}
+        {t.blocker && t.blocker.text && !t.blocker.resolved && <span className="pm-blocked" title={`Blocked${t.blocker.owner ? ` — waiting on ${t.blocker.owner}` : ""}: ${t.blocker.text}`}>⛔ Blocked</span>}
         <Owners owner={t.owner} map={h.map} />
         {t.due_date && <span className="pm-due">{shortDate(t.due_date)}</span>}
         <LinkChips links={t.links} />
@@ -296,6 +298,50 @@ function SlackButton({ id, channel }: { id: string; channel?: string }) {
   return <button type="button" className={`pm-slackbtn ${st}`} disabled={disabled} title={disabled ? "Save the task first" : st === "err" ? msg : st === "sent" ? "Sent to Slack" : "Send this status to the client's internal Slack channel"} onClick={send}>{st === "sent" ? <span className="pm-slack-ok">✓</span> : st === "err" ? <span className="pm-slack-err">!</span> : st === "sending" ? <span className="pm-slack-load">·</span> : slackIcon}</button>;
 }
 
+function nowIso() { return new Date().toISOString(); }
+function BlockerCell({ blocker, people, map, onChange, addPerson }: { blocker?: Blocker | null; people: Person[]; map: Record<string, string>; onChange: (b: Blocker | null) => void; addPerson: (n: string) => void }) {
+  const m = useMenu(300);
+  const b = blocker || {};
+  const has = !!((b.text && b.text.trim()) || b.owner);
+  const resolved = !!b.resolved;
+  const [owner, setOwner] = useState(b.owner || "");
+  const [txt, setTxt] = useState(b.text || "");
+  const [draftName, setDraftName] = useState("");
+  useEffect(() => { if (m.open) { setOwner(b.owner || ""); setTxt(b.text || ""); setDraftName(""); } }, [m.open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = () => { const t = txt.trim(); if (!t && !owner) onChange(null); else onChange({ owner: owner || "", text: t, resolved: b.resolved || false, ...(b.resolvedAt ? { resolvedAt: b.resolvedAt } : {}) }); m.close(); };
+  const clearToggle = () => onChange({ owner: b.owner || "", text: b.text || "", resolved: !resolved, ...(!resolved ? { resolvedAt: nowIso() } : {}) });
+  const roster: Opt[] = [{ value: "", label: "Anyone" }, ...people.map((p) => ({ value: p.name, label: p.name, logo: <Avatar name={p.name} map={map} /> }))];
+  return (
+    <div className="pm-dd pm-blockercell">
+      {has ? (
+        <div className={`pm-blocker-row ${resolved ? "done" : ""}`}>
+          <button type="button" className={`pm-blocker-check ${resolved ? "on" : ""}`} title={resolved ? `Cleared${b.owner ? ` by ${b.owner}` : ""} — click to reopen` : "Mark this blocker cleared"} onClick={(e) => { e.stopPropagation(); clearToggle(); }}>{resolved ? "✓" : ""}</button>
+          <button ref={m.btnRef} type="button" className="pm-blocker-body" onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
+            {b.owner ? <Avatar name={b.owner} map={map} /> : null}
+            <span className="pm-blocker-text">{b.text || "(blocker)"}</span>
+          </button>
+        </div>
+      ) : (
+        <button ref={m.btnRef} type="button" className="pm-dd-btn pm-blocker-add" onClick={(e) => { e.stopPropagation(); m.toggle(); }}><span className="pm-dd-ph">＋ Blocker</span></button>
+      )}
+      {m.open && m.pos && <>
+        <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
+        <div className="pm-dd-menu pm-blockermenu" style={{ top: m.pos.top, left: m.pos.left, minWidth: Math.max(m.pos.width, 300) }} onClick={(e) => e.stopPropagation()}>
+          <div className="pm-blk-label">Waiting on</div>
+          <Select value={owner} options={roster} placeholder="Anyone" onChange={setOwner} minWidth={260} />
+          <div className="pm-dd-add pm-blk-add"><input value={draftName} placeholder="…or add a new person" onChange={(e) => setDraftName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const n = draftName.trim(); if (n) { addPerson(n); setOwner(n); setDraftName(""); } } }} /><button type="button" onClick={() => { const n = draftName.trim(); if (n) { addPerson(n); setOwner(n); setDraftName(""); } }}>Add</button></div>
+          <div className="pm-blk-label">What needs to happen</div>
+          <textarea className="pm-blk-text" rows={3} value={txt} placeholder="e.g. Need the surgeon-office list reviewed before I can send" onChange={(e) => setTxt(e.target.value)} />
+          <div className="pm-blk-foot">
+            {has ? <button type="button" className="pm-blk-remove" onClick={() => { onChange(null); m.close(); }}>Remove</button> : <span />}
+            <div className="pm-blk-foot-r">{has && <button type="button" className="pm-blk-resolve" onClick={() => { clearToggle(); m.close(); }}>{resolved ? "Reopen" : "Mark cleared"}</button>}<button type="button" className="pm-blk-save" onClick={save}>Save</button></div>
+          </div>
+        </div>
+      </>}
+    </div>
+  );
+}
+
 type Draft = { key: string; clientSlug: string; title: string; owner: string; stage: string; context: string; due: string; priority: string; links: LinkItem[] };
 function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[]; h: Handlers; onUpdate: (id: string, f: Record<string, unknown>) => void; onCreate: (slug: string, f: NewFields) => void; week?: string }) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -308,8 +354,8 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
     <div className="pm-table-wrap">
       <div className="pm-table-scroll">
         <table className="pm-table pm-table-edit">
-          <colgroup><col style={{ width: "11%" }} /><col style={{ width: "18%" }} /><col style={{ width: "13%" }} /><col style={{ width: 92 }} /><col style={{ width: 116 }} /><col /><col style={{ width: "14%" }} /><col style={{ width: 96 }} /><col style={{ width: 66 }} /></colgroup>
-          <thead><tr><th>Client</th><th>Task name</th><th>Assigned to</th><th>Priority</th><th>Status</th><th>Context</th><th>Links</th><th>Due date</th><th /></tr></thead>
+          <colgroup><col style={{ width: "10%" }} /><col style={{ width: "15%" }} /><col style={{ width: "11%" }} /><col style={{ width: 84 }} /><col style={{ width: 108 }} /><col style={{ width: "14%" }} /><col /><col style={{ width: "12%" }} /><col style={{ width: 92 }} /><col style={{ width: 66 }} /></colgroup>
+          <thead><tr><th>Client</th><th>Task name</th><th>Assigned to</th><th>Priority</th><th>Status</th><th>Blockers</th><th>Context</th><th>Links</th><th>Due date</th><th /></tr></thead>
           <tbody>
             {tasks.map((t) => { const pc = prioOf(t.priority)?.color; return (
               <tr key={t.id} className={pc ? "rp" : ""} style={pc ? ({ ["--rc" as string]: pc } as React.CSSProperties) : undefined}>
@@ -318,6 +364,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
                 <td><MultiPeople value={t.owner || ""} people={h.people} map={h.map} stack onChange={(v) => onUpdate(t.id, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
                 <td><Select value={t.priority || ""} options={prioOpts} placeholder="None" tone={prioOf(t.priority)?.color} onChange={(v) => onUpdate(t.id, { priority: v })} /></td>
                 <td><Select value={t.stage} options={stageOpts} tone={stageOf(t.stage).color} onChange={(v) => onUpdate(t.id, { stage: v })} /></td>
+                <td><BlockerCell blocker={t.blocker} people={h.people} map={h.map} addPerson={h.addPerson} onChange={(blk) => onUpdate(t.id, { blocker: blk })} /></td>
                 <td><AutoTextarea defaultValue={t.context || ""} onCommit={(v) => { if ((v || null) !== (t.context || null)) onUpdate(t.id, { context: v }); }} /></td>
                 <td><LinksCell links={linkItems(t.links)} onChange={(l) => onUpdate(t.id, { links: l })} /></td>
                 <td><input className="pm-cellin" defaultValue={t.due_date || ""} onBlur={(e) => { if ((e.target.value || null) !== (t.due_date || null)) onUpdate(t.id, { dueDate: e.target.value }); }} /></td>
@@ -331,13 +378,14 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
                 <td><MultiPeople value={d.owner} people={h.people} map={h.map} stack onChange={(v) => setDraft(d.key, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
                 <td><Select value={d.priority} options={prioOpts} placeholder="None" tone={prioOf(d.priority)?.color} onChange={(v) => setDraft(d.key, { priority: v })} /></td>
                 <td><Select value={d.stage} options={stageOpts} tone={stageOf(d.stage).color} onChange={(v) => setDraft(d.key, { stage: v })} /></td>
+                <td><span className="pm-blk-later">—</span></td>
                 <td><AutoTextarea defaultValue={d.context} onCommit={(v) => setDraft(d.key, { context: v })} /></td>
                 <td><LinksCell links={d.links} onChange={(l) => setDraft(d.key, { links: l })} /></td>
                 <td><input className="pm-cellin" value={d.due} onChange={(e) => setDraft(d.key, { due: e.target.value })} /></td>
                 <td><button type="button" className="pm-rowdel" title="Remove row" onClick={() => setDrafts((p) => p.filter((x) => x.key !== d.key))}>✕</button></td>
               </tr>
             ); })}
-            {tasks.length === 0 && drafts.length === 0 && <tr><td colSpan={9} className="pm-td-empty">No tasks yet.</td></tr>}
+            {tasks.length === 0 && drafts.length === 0 && <tr><td colSpan={10} className="pm-td-empty">No tasks yet.</td></tr>}
           </tbody>
         </table>
       </div>

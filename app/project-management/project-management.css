@@ -435,3 +435,28 @@
 
 /* Week add input a touch taller for breathing room */
 .pm-filters .pm-dd-add input { height: 34px; }
+
+/* ═══ Blockers column ═══ */
+.pm-blockercell { width: 100%; }
+.pm-blocker-add { min-height: 32px; }
+.pm-blocker-row { display: flex; align-items: center; gap: 7px; width: 100%; padding: 4px 4px 4px 6px; }
+.pm-blocker-check { flex: none; width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid color-mix(in srgb, var(--coral, #e5738a) 55%, var(--border)); background: color-mix(in srgb, var(--coral, #e5738a) 10%, transparent); color: var(--green); font-size: 13px; font-weight: 800; cursor: pointer; display: grid; place-items: center; line-height: 1; }
+.pm-blocker-check:hover { border-color: var(--green); }
+.pm-blocker-check.on { border-color: color-mix(in srgb, var(--green) 60%, var(--border)); background: color-mix(in srgb, var(--green) 16%, transparent); }
+.pm-blocker-body { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; padding: 3px 4px; border-radius: 6px; }
+.pm-blocker-body:hover { background: var(--panel-2, #151821); }
+.pm-blocker-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-blocker-row.done .pm-blocker-text { text-decoration: line-through; color: var(--muted-2); }
+.pm-blk-later { color: var(--muted-2); padding-left: 8px; }
+.pm-blocked { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 750; color: var(--coral, #e5738a); background: color-mix(in srgb, var(--coral, #e5738a) 14%, transparent); border-radius: 5px; padding: 1px 6px; }
+/* blocker editor popover */
+.pm-blockermenu { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.pm-blk-label { font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted-2); font-weight: 750; }
+.pm-blk-add { border-top: 0; margin-top: 0; padding: 0; }
+.pm-blk-text { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); font: inherit; font-size: 13px; padding: 9px 10px; line-height: 1.45; resize: vertical; }
+.pm-blk-text:focus { border-color: var(--accent); outline: none; }
+.pm-blk-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 2px; }
+.pm-blk-foot-r { display: flex; gap: 8px; }
+.pm-blk-remove { font: inherit; font-size: 12px; color: var(--coral, #e5738a); background: none; border: 1px solid color-mix(in srgb, var(--coral, #e5738a) 30%, transparent); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+.pm-blk-resolve { font: inherit; font-size: 12px; font-weight: 650; color: var(--green); background: none; border: 1px solid color-mix(in srgb, var(--green) 40%, transparent); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+.pm-blk-save { font: inherit; font-size: 12px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer; }
