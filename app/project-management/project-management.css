@@ -522,3 +522,11 @@
 .pm-ed-blockers .pm-blocker-row { background: var(--panel-2, #151821); border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; }
 .pm-ed-blockers .pm-blocker-addbtn { align-self: stretch; text-align: center; }
 @media (max-width: 720px) { .pm-ed-body { grid-template-columns: 1fr; } .pm-ed-main { border-right: 0; border-bottom: 1px solid var(--border); } }
+
+/* bigger detail modal + prominent client */
+.pm-modal-a { width: min(940px, 100%); }
+.pm-ed-client { display: flex; align-items: center; gap: 12px; margin: 4px 0 12px; }
+.pm-ed-clogo { width: 44px; height: 44px; border-radius: 12px; overflow: hidden; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 19px; flex: none; }
+.pm-ed-clogo img { width: 100%; height: 100%; object-fit: cover; }
+.pm-ed-cname { font-size: 22px; font-weight: 750; letter-spacing: -.02em; }
+.pm-ed-main textarea { min-height: 200px; }

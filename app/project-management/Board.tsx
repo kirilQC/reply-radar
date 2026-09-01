@@ -12,7 +12,7 @@ export type BoardTask = { id: string; title: string; stage: string; owner: strin
 const blockerList = (b?: Blocker | Blocker[] | null): Blocker[] => (Array.isArray(b) ? b : b ? [b] : []).filter((x) => x && (x.text || x.owner));
 export type BoardClient = { slug: string; name: string; logoUrl?: string | null; accentColor?: string | null };
 export type Person = { name: string; avatarUrl?: string | null };
-type View = "kanban" | "byclient" | "individuals" | "table" | "swimlanes" | "list" | "timeline" | "pipeline";
+type View = "kanban" | "byclient" | "individuals" | "table" | "swimlanes";
 type SortKey = "manual" | "priority" | "due" | "status" | "title" | "assignee";
 export type NewFields = { title: string; stage: string; assignee?: string; dueDate?: string; context?: string; links?: LinkItem[]; priority?: string; week?: string };
 
@@ -24,7 +24,7 @@ const STAGES = [
   { key: "launched", label: "Launched", cls: "launch", color: "#7c6cf0" },
 ];
 const PRIORITIES = [{ key: "high", label: "High", color: "#e5484d" }, { key: "medium", label: "Medium", color: "#f2913d" }, { key: "low", label: "Low", color: "#e6c229" }];
-const ALL_VIEWS: [View, string][] = [["kanban", "Kanban"], ["byclient", "By client"], ["individuals", "Individuals"], ["table", "Table"], ["swimlanes", "Swimlanes"], ["list", "List"], ["timeline", "Week"], ["pipeline", "Pipeline"]];
+const ALL_VIEWS: [View, string][] = [["kanban", "Kanban"], ["byclient", "By client"], ["individuals", "Individuals"], ["table", "Table"], ["swimlanes", "Swimlanes"]];
 const stageOf = (k: string) => STAGES.find((x) => x.key === k) ?? STAGES[0];
 const prioOf = (k?: string | null) => PRIORITIES.find((x) => x.key === k) ?? null;
 const prioRank = (k?: string | null) => { const i = PRIORITIES.findIndex((p) => p.key === k); return i < 0 ? 9 : i; };
@@ -34,11 +34,8 @@ const ownerList = (o?: string | null) => (o ? o.split(",").map((s) => s.trim()).
 const linkItems = (links?: (string | LinkItem)[]): LinkItem[] => (Array.isArray(links) ? links.map((l) => (typeof l === "string" ? { url: l } : l)).filter((l) => l && l.url) : []);
 const normUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : `https://${u}`);
 const linkLabel = (l: LinkItem) => { if (l.title && l.title.trim()) return l.title.trim(); try { const x = new URL(l.url); return x.hostname.replace(/^www\./, "") + x.pathname.replace(/\/$/, ""); } catch { return l.url; } };
-const shortDate = (v?: string | null) => { if (!v) return ""; const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + "T00:00" : v); return Number.isNaN(+d) ? v : d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
 const dueMs = (v?: string | null) => { if (!v) return Infinity; const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + "T00:00" : v); return Number.isNaN(+d) ? Infinity : +d; };
 export const weekDisplay = (w?: string | null) => (!w ? "" : /^week of/i.test(w) ? w : `Week of ${w}`);
-function iso(d: Date) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
-function weekdays() { const now = new Date(); const mon = new Date(now); mon.setDate(now.getDate() - ((now.getDay() + 6) % 7)); const t = iso(now); return ["Mon", "Tue", "Wed", "Thu", "Fri"].map((label, i) => { const d = new Date(mon); d.setDate(mon.getDate() + i); return { label, date: iso(d), today: iso(d) === t }; }); }
 function sortTasks(list: BoardTask[], key: SortKey): BoardTask[] {
   if (key === "manual") return list;
   const arr = [...list];
@@ -178,11 +175,6 @@ const clientOptsOf = (clients: BoardClient[]): Opt[] => clients.map((c) => ({ va
 const stageOpts: Opt[] = STAGES.map((s) => ({ value: s.key, label: s.label, color: s.color }));
 const prioOpts: Opt[] = [{ value: "", label: "None" }, ...PRIORITIES.map((p) => ({ value: p.key, label: p.label, color: p.color }))];
 
-function PriorityDot({ p }: { p?: string | null }) { const pr = prioOf(p); return pr ? <span className="pm-prio" style={{ background: pr.color }} title={`${pr.label} priority`} /> : null; }
-function ClientChip({ t, clients }: { t: BoardTask; clients: BoardClient[] }) {
-  const c = clients.find((x) => x.slug === t.clientSlug); if (!c) return null;
-  return <span className="pm-cchip">{c.logoUrl ? <img src={c.logoUrl} alt="" /> : <span className="pm-cchip-mono" style={{ background: c.accentColor || "var(--accent)" }}>{initials(c.name)}</span>}{c.name}</span>;
-}
 function Card({ t, h }: { t: BoardTask; h: Handlers }) {
   const s = stageOf(t.stage);
   const pr = prioOf(t.priority);
@@ -227,12 +219,7 @@ function ColumnList({ label, logo, tasks, onAdd, h }: { label: React.ReactNode; 
   return (
     <div className="pm-col">
       <div className="pm-colh pm-colh-big">{logo}<b>{label}</b></div>
-      {tasks.map((t) => (
-        <div className="pm-card2" key={t.id} onClick={() => h.onOpen(t)} draggable onDragStart={(e) => { e.dataTransfer.setData("id", t.id); h.onDrag(t.id); }} onDragEnd={() => h.onDrag(null)}>
-          <div className="pm-c-title"><PriorityDot p={t.priority} />{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}</div>
-          <div className="pm-c-meta"><span className={`pm-stg ${stageOf(t.stage).cls}`}><span className="d" />{stageOf(t.stage).label}</span><Owners owner={t.owner} map={h.map} />{t.due_date && <span className="pm-due">{shortDate(t.due_date)}</span>}</div>
-        </div>
-      ))}
+      {tasks.map((t) => <Card key={t.id} t={t} h={h} />)}
       <button type="button" className="pm-add" onClick={onAdd}>+ Add</button>
     </div>
   );
@@ -430,48 +417,6 @@ function SwimlanesView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
     </div>
   );
 }
-function ListView({ byStage, h }: { byStage: Record<string, BoardTask[]>; h: Handlers }) {
-  return (
-    <div className="pm-list">
-      {STAGES.map((s) => (
-        <div className="pm-lgrp" key={s.key} onDragOver={(e) => e.preventDefault()} onDrop={() => h.dragId && h.onMove(h.dragId, s.key)}>
-          <div className="pm-lgh"><span className={`pm-stg ${s.cls}`}><span className="d" />{s.label}</span>{s.key === "todo" && <span className="pm-lgh-add"><button type="button" className="pm-add" onClick={() => h.openNew("todo")}>+ Add</button></span>}</div>
-          {byStage[s.key].map((t) => (
-            <div className="pm-lrow" key={t.id} draggable onDragStart={(e) => { e.dataTransfer.setData("id", t.id); h.onDrag(t.id); }} onDragEnd={() => h.onDrag(null)} onClick={() => h.onOpen(t)}>
-              <span className="pm-grip">⠿</span><PriorityDot p={t.priority} />
-              {ownerList(t.owner).length ? <Owners owner={t.owner} map={h.map} /> : <span className="pm-av pm-av-none">?</span>}
-              <span className="pm-lt">{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}</span>{h.multi && <ClientChip t={t} clients={h.clients} />}{t.due_date && <span className="pm-due">{shortDate(t.due_date)}</span>}
-            </div>
-          ))}
-          {byStage[s.key].length === 0 && <div className="pm-lempty">Drop a task here</div>}
-        </div>
-      ))}
-    </div>
-  );
-}
-function TimelineView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
-  const days = weekdays(); const unsched = tasks.filter((t) => !t.due_date || !days.some((d) => d.date === t.due_date));
-  return (
-    <div className="pm-tl">
-      <div className="pm-day pm-unsched" onDragOver={(e) => e.preventDefault()} onDrop={() => h.dragId && h.onSetDay(h.dragId, "")}><div className="pm-dayh">Unscheduled</div>{unsched.map((t) => <Card key={t.id} t={t} h={h} />)}<button type="button" className="pm-add" onClick={() => h.openNew("todo", h.multi ? undefined : h.clients[0]?.slug)}>+ Add</button></div>
-      {days.map((d) => { const dt = tasks.filter((t) => t.due_date === d.date); return <div className={`pm-day ${d.today ? "today" : ""}`} key={d.date} onDragOver={(e) => e.preventDefault()} onDrop={() => h.dragId && h.onSetDay(h.dragId, d.date)}><div className="pm-dayh">{d.label}{d.today ? " · today" : ""}</div>{dt.map((t) => <Card key={t.id} t={t} h={h} />)}</div>; })}
-    </div>
-  );
-}
-function PipelineView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
-  return (
-    <div className="pm-pipe">
-      {tasks.map((t) => { const idx = STAGES.findIndex((s) => s.key === t.stage); return (
-        <div className="pm-prow" key={t.id}>
-          <span className="pm-pt" onClick={() => h.onOpen(t)}><PriorityDot p={t.priority} />{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}{h.multi && <ClientChip t={t} clients={h.clients} />}</span>
-          <div className="pm-track">{STAGES.map((s, i) => <button type="button" key={s.key} className={`pm-seg ${i <= idx ? `on ${s.cls}` : ""}`} onClick={() => h.onMove(t.id, s.key)}>{s.label}</button>)}</div>
-          <Owners owner={t.owner} map={h.map} />
-        </div>); })}
-      <div className="pm-prow pm-prow-add"><button type="button" className="pm-add" onClick={() => h.openNew("todo", h.multi ? undefined : h.clients[0]?.slug)}>+ Add a project</button></div>
-    </div>
-  );
-}
-
 function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPerson, removePerson, uploadAvatar, onClose, onCreate, onUpdate, onDelete }: { state: Exclude<EditorState, null>; clients: BoardClient[]; people: Person[]; map: Record<string, string>; multi: boolean; notifyChannel?: string; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void; onClose: () => void; onCreate: (clientSlug: string, f: NewFields) => void; onUpdate: (id: string, f: Record<string, unknown>) => void; onDelete: (id: string) => void }) {
   const isNew = state.mode === "new"; const task = isNew ? null : state.task;
   const [title, setTitle] = useState(task?.title ?? "");
@@ -495,9 +440,9 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
         <div className="pm-ed-head">
           <div className="pm-ed-htop">
             <span className={`pm-stg ${s.cls}`}><span className="d" />{s.label}</span>
-            {multi && client && <span className="pm-cchip">{client.logoUrl ? <img src={client.logoUrl} alt="" /> : <span className="pm-cchip-mono" style={{ background: client.accentColor || "var(--accent)" }}>{initials(client.name)}</span>}{client.name}</span>}
             <div className="pm-ed-hactions">{!isNew && <SlackButton id={task!.id} channel={notifyChannel} />}<button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
           </div>
+          {multi && client && <div className="pm-ed-client"><span className="pm-ed-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span><span className="pm-ed-cname">{client.name}</span></div>}
           <input className="pm-ed-title" autoFocus value={title} placeholder="What needs doing?" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save(); }} />
         </div>
         <div className="pm-ed-body">
@@ -542,7 +487,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
   const map = useMemo(() => { const m: Record<string, string> = {}; for (const p of people) if (p.avatarUrl) m[p.name] = p.avatarUrl; return m; }, [people]);
 
   useEffect(() => {
-    try { const v = localStorage.getItem("pm-view") as View | null; const ok = (v && v !== "byclient") || (v === "byclient" && multi); if (v && ok) setView(v); else if (defaultView) setView(defaultView); } catch { /* ignore */ }
+    try { const v = localStorage.getItem("pm-view") as View | null; const ok = v && ALL_VIEWS.some(([k]) => k === v) && (v !== "byclient" || multi); if (v && ok) setView(v); else if (defaultView) setView(defaultView); } catch { /* ignore */ }
     try { const o = JSON.parse(localStorage.getItem("pm-view-order") || "[]") as View[]; if (Array.isArray(o) && o.length) setOrder([...o.filter((v) => ALL_VIEWS.some(([k]) => k === v)), ...ALL_VIEWS.map(([k]) => k).filter((k) => !o.includes(k))]); } catch { /* ignore */ }
   }, [defaultView, multi]);
   useEffect(() => { void fetch("/api/project-management/people", { cache: "no-store" }).then((r) => r.json()).then((p) => setPeople(Array.isArray(p.people) ? p.people : [])).catch(() => {}); }, []);
@@ -575,9 +520,6 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
       {view === "individuals" && <IndividualsView tasks={visible} h={h} />}
       {view === "table" && <TableView tasks={visible} h={h} onUpdate={onUpdate} onCreate={create} week={multi && week ? week : undefined} />}
       {view === "swimlanes" && <SwimlanesView tasks={visible} h={h} />}
-      {view === "list" && <ListView byStage={byStage} h={h} />}
-      {view === "timeline" && <TimelineView tasks={visible} h={h} />}
-      {view === "pipeline" && <PipelineView tasks={visible} h={h} />}
       {editor && <TaskEditor state={editor} clients={clients} people={people} map={map} multi={multi} notifyChannel={notifyChannel} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} onClose={() => setEditor(null)} onCreate={create} onUpdate={onUpdate} onDelete={onDelete} />}
     </>
   );
