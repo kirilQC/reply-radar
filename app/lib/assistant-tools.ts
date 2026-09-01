@@ -68,6 +68,7 @@ import { scanChannel, resolveChannelNames, resolveUserNames, transcript, slackRe
 import { normalizeChannelId } from "./slack-channel";
 import { addMeeting, getClientMeetings, listMeetingClients } from "./meetings";
 import { listProjectsFor, createProjectFor, updateProject, deleteProject, STAGE_LABEL, type ProjectLink } from "./project-tasks";
+import { listViews } from "./project-views";
 import { gatherCalls } from "./morning-brief-run";
 import type { BriefWorkspace } from "./morning-brief";
 import type { ClientCall } from "./granola";
@@ -860,8 +861,14 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "list_projects",
     description:
-      "A client's internal projects on the Project management board, grouped by stage (To do, In progress, Paused, Completed, Launched). Returns each project's id, title, stage, assignee(s), priority, week, due date, context and links. Use this to answer 'what are we working on for X', to check a project's status, or to get the id you need before updating or deleting one. Pass the client. Optionally pass a week label (e.g. 'Sept 3') to see only that week's tasks.",
-    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug." }, week: { type: "string", description: "Optional week label to filter by, e.g. 'Sept 3'." } }, required: ["client"] },
+      "Projects on QC's internal Project management board (the Project management tab in Reply Radar — NOT Airtable), grouped by stage (To do, In progress, Paused, Completed, Launched). Returns each project's id, title, stage, assignee(s), priority, week, due date, blockers, context and links. Use this to answer 'what are we working on for X', to check a project's status, or to get the id before updating/deleting. Pass a CLIENT name/slug, OR a custom VIEW name (a group of clients, e.g. 'Healthtech') — a view returns every member client's projects, each tagged with its client. If the name is not a client, it is probably a view: call list_project_views to see the groups. Optionally pass a week label (e.g. 'Sept 3') to see only that week's tasks.",
+    input_schema: { type: "object", properties: { client: { type: "string", description: "A client name/slug, or a custom view (group) name like 'Healthtech'." }, week: { type: "string", description: "Optional week label to filter by, e.g. 'Sept 3'." } }, required: ["client"] },
+  },
+  {
+    name: "list_project_views",
+    description:
+      "The custom Project management VIEWS — named groups that combine several clients into one board (e.g. 'Healthtech' = Bluevia + Steadywell + Vitalic + …). Returns each view's name and its member clients. Call this when someone refers to a project board/group that is not one of the client names, then call list_projects with the view name to see all of its projects.",
+    input_schema: { type: "object", properties: {} },
   },
   {
     name: "create_project",
@@ -1899,13 +1906,32 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const r = await addTemplateStep({ title: text(input.title), section: text(input.section) || undefined, group: text(input.group) || undefined, description: text(input.description) || undefined, parentId: text(input.parent_id) || undefined });
       return r.ok ? { ok: true, step: r.step } : { ok: false, error: r.error };
     }
+    case "list_project_views": {
+      const views = await listViews();
+      return { views: views.map((v) => ({ name: v.name, slug: v.slug, clients: v.memberSlugs })) };
+    }
     case "list_projects": {
-      const client = await resolveClient(input.client);
-      const r = await listProjectsFor(client.slug, input.week ? { week: text(input.week) } : undefined);
-      if (!r.ok) return { client: client.name, error: r.error };
+      const q = text(input.client);
+      const weekOpt = input.week ? { week: text(input.week) } : undefined;
       const byStage: Record<string, unknown[]> = {};
       for (const key of Object.keys(STAGE_LABEL)) byStage[STAGE_LABEL[key]] = [];
-      for (const p of r.projects ?? []) (byStage[STAGE_LABEL[p.stage] ?? "To do"]).push({ id: p.id, title: p.title, assignees: p.assignee, priority: p.priority, week: p.week, dueDate: p.dueDate, context: p.context, links: p.links, autoAdded: p.source !== "manual" });
+      // Is the name a custom view (a group of clients) rather than a single client?
+      const views = await listViews();
+      const view = views.find((v) => v.slug.toLowerCase() === q.toLowerCase() || v.name.toLowerCase() === q.toLowerCase());
+      if (view) {
+        let total = 0;
+        for (const slug of view.memberSlugs) {
+          const c = await resolveClient(slug).catch(() => null);
+          if (!c) continue;
+          const r = await listProjectsFor(c.slug, weekOpt);
+          for (const p of r.projects ?? []) { total++; (byStage[STAGE_LABEL[p.stage] ?? "To do"]).push({ id: p.id, client: c.name, title: p.title, assignees: p.assignee, priority: p.priority, week: p.week, dueDate: p.dueDate, blockers: p.blockers, context: p.context, links: p.links, autoAdded: p.source !== "manual" }); }
+        }
+        return { view: view.name, clients: view.memberSlugs.length, total, week: input.week ? text(input.week) : "all", byStage };
+      }
+      const client = await resolveClient(input.client);
+      const r = await listProjectsFor(client.slug, weekOpt);
+      if (!r.ok) return { client: client.name, error: r.error };
+      for (const p of r.projects ?? []) (byStage[STAGE_LABEL[p.stage] ?? "To do"]).push({ id: p.id, title: p.title, assignees: p.assignee, priority: p.priority, week: p.week, dueDate: p.dueDate, blockers: p.blockers, context: p.context, links: p.links, autoAdded: p.source !== "manual" });
       return { client: client.name, total: r.projects?.length ?? 0, week: input.week ? text(input.week) : "all", byStage };
     }
     case "create_project": {
