@@ -10,7 +10,7 @@ import { useParams } from "next/navigation";
 import AppSidebar from "../../../components/AppSidebar";
 import Crumb from "../../../components/Crumb";
 import GlobalAppearanceControl from "../../../components/GlobalAppearanceControl";
-import ProjectBoard, { type BoardTask, type BoardClient } from "../../Board";
+import ProjectBoard, { type BoardTask, type BoardClient, type NewFields } from "../../Board";
 import "../../project-management.css";
 
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
@@ -47,11 +47,11 @@ export default function GroupView() {
   };
   useEffect(() => { if (slug) void load(); }, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onCreate = async (clientSlug: string, fields: { title: string; stage: string }) => {
+  const onCreate = async (clientSlug: string, fields: NewFields) => {
     const c = members.find((m) => m.slug === clientSlug);
-    const tmp: BoardTask = { id: `tmp-${Date.now()}`, title: fields.title, stage: fields.stage, owner: null, due_date: null, source: "manual", clientSlug, clientName: c?.name };
+    const tmp: BoardTask = { id: `tmp-${Date.now()}`, title: fields.title, stage: fields.stage, owner: fields.assignee || null, due_date: fields.dueDate || null, context: fields.context || null, links: fields.links || [], source: "manual", clientSlug, clientName: c?.name };
     setTasks((p) => [...p, tmp]);
-    const r = await fetch("/api/project-management/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: clientSlug, title: fields.title, stage: fields.stage }) }).then((x) => x.json()).catch(() => ({}));
+    const r = await fetch("/api/project-management/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: clientSlug, title: fields.title, stage: fields.stage, assignee: fields.assignee, dueDate: fields.dueDate, context: fields.context, links: fields.links }) }).then((x) => x.json()).catch(() => ({}));
     if (r.ok && r.task) setTasks((p) => p.map((t) => (t.id === tmp.id ? { ...r.task, clientSlug, clientName: c?.name } : t)));
     else if (view) void loadTasks(view.memberSlugs);
   };
@@ -79,12 +79,18 @@ export default function GroupView() {
                 </span>
                 <div>
                   <h1>{view?.name || "View"}</h1>
-                  <p className="pm-members">{members.map((m) => m.name).join(" · ")}</p>
+                  <div className="pm-member-bubbles">
+                    {members.map((m) => (
+                      <span className="pm-bubble" key={m.slug} title={m.name}>
+                        {m.logoUrl ? <img src={m.logoUrl} alt={m.name} /> : <span className="pm-bubble-mono" style={{ background: m.accentColor || "var(--accent)" }}>{initials(m.name)}</span>}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
               {err && <div className="pm-err">⚠ {err}</div>}
               {loading ? <p className="pm-muted">Loading…</p> : (
-                <ProjectBoard tasks={tasks} clients={members} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} />
+                <ProjectBoard tasks={tasks} clients={members} tableTitle={`QC Growth Internal ${view?.name || ""} Sync`} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} />
               )}
             </>
           )}

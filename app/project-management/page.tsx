@@ -89,8 +89,17 @@ function ViewEditor({ view, clients, onClose, onSaved }: { view: ViewDef | null;
   const [logoUrl, setLogoUrl] = useState(view?.logoUrl ?? "");
   const [members, setMembers] = useState<string[]>(view?.memberSlugs ?? []);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState("");
   const toggle = (slug: string) => setMembers((p) => p.includes(slug) ? p.filter((s) => s !== slug) : [...p, slug]);
+  const uploadLogo = async (file?: File) => {
+    if (!file) return;
+    setUploading(true);
+    const fd = new FormData(); fd.append("file", file);
+    const r = await fetch("/api/project-management/upload-logo", { method: "POST", body: fd }).then((x) => x.json()).catch(() => ({}));
+    setUploading(false);
+    if (r.ok && r.logoUrl) setLogoUrl(r.logoUrl); else setErr(String(r.error || "Upload failed."));
+  };
 
   const save = async () => {
     if (!name.trim()) { setErr("Give the view a name."); return; }
@@ -114,7 +123,13 @@ function ViewEditor({ view, clients, onClose, onSaved }: { view: ViewDef | null;
         <div className="pm-modal-head"><h2>{view ? "Edit view" : "New view"}</h2><button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
         <div className="pm-modal-body">
           <label className="pm-f"><span>Name</span><input value={name} placeholder="e.g. Healthtech" onChange={(e) => setName(e.target.value)} /></label>
-          <label className="pm-f"><span>Logo URL <em style={{ fontWeight: 400, color: "var(--muted-2)" }}>· optional</em></span><input value={logoUrl} placeholder="Paste an image URL" onChange={(e) => setLogoUrl(e.target.value)} /></label>
+          <div className="pm-f"><span>Logo <em style={{ fontWeight: 400, color: "var(--muted-2)" }}>· optional</em></span>
+            <div className="pm-logo-row">
+              <span className="pm-logo-prev" style={logoUrl ? undefined : { background: "var(--accent)" }}>{logoUrl ? <img src={logoUrl} alt="" /> : initials(name || "?")}</span>
+              <label className="pm-logo-upload">{uploading ? "Uploading…" : "Upload image"}<input type="file" accept="image/*" hidden onChange={(e) => void uploadLogo(e.target.files?.[0] ?? undefined)} /></label>
+              <input className="pm-logo-urlin" value={logoUrl} placeholder="or paste an image URL" onChange={(e) => setLogoUrl(e.target.value)} />
+            </div>
+          </div>
           <div className="pm-f"><span>Clients in this view</span>
             <div className="pm-member-grid">
               {clients.map((c) => (

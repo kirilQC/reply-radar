@@ -10,7 +10,7 @@ import { useParams } from "next/navigation";
 import AppSidebar from "../../components/AppSidebar";
 import Crumb from "../../components/Crumb";
 import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
-import ProjectBoard, { type BoardTask } from "../Board";
+import ProjectBoard, { type BoardTask, type NewFields } from "../Board";
 import "../project-management.css";
 
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
@@ -36,10 +36,10 @@ export default function ClientProjects() {
   };
   useEffect(() => { if (slug) { void loadClient(); void loadTasks(); } }, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onCreate = async (clientSlug: string, fields: { title: string; stage: string }) => {
-    const tmp: BoardTask = { id: `tmp-${Date.now()}`, title: fields.title, stage: fields.stage, owner: null, due_date: null, source: "manual", clientSlug, clientName: client?.name };
+  const onCreate = async (clientSlug: string, fields: NewFields) => {
+    const tmp: BoardTask = { id: `tmp-${Date.now()}`, title: fields.title, stage: fields.stage, owner: fields.assignee || null, due_date: fields.dueDate || null, context: fields.context || null, links: fields.links || [], source: "manual", clientSlug, clientName: client?.name };
     setTasks((p) => [...p, tmp]);
-    const r = await fetch("/api/project-management/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: clientSlug, title: fields.title, stage: fields.stage }) }).then((x) => x.json()).catch(() => ({}));
+    const r = await fetch("/api/project-management/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: clientSlug, title: fields.title, stage: fields.stage, assignee: fields.assignee, dueDate: fields.dueDate, context: fields.context, links: fields.links }) }).then((x) => x.json()).catch(() => ({}));
     if (r.ok && r.task) setTasks((p) => p.map((t) => (t.id === tmp.id ? { ...r.task, clientSlug, clientName: client?.name } : t)));
     else void loadTasks();
   };

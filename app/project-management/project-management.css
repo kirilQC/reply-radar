@@ -197,3 +197,43 @@
 .pm-add-actions { display: flex; gap: 6px; }
 .pm-add-go { flex: 1; font: inherit; font-size: 12px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 7px; cursor: pointer; }
 .pm-add-x { font: inherit; font-size: 12px; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+
+/* ═══ Header client bubbles (group view) ═══ */
+.pm-member-bubbles { display: flex; align-items: center; margin-top: 8px; }
+.pm-bubble { width: 30px; height: 30px; border-radius: 8px; overflow: hidden; margin-left: -6px; border: 2px solid var(--bg); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+.pm-bubble:first-child { margin-left: 0; }
+.pm-bubble img { width: 100%; height: 100%; object-fit: cover; }
+.pm-bubble-mono { width: 100%; height: 100%; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 12px; }
+
+/* ═══ By-client view (a column per client) ═══ */
+.pm-byclient { display: grid; gap: 12px; align-items: start; overflow-x: auto; padding-bottom: 8px; }
+.pm-colh-client { gap: 8px; }
+.pm-colh-client .pm-member-logo { width: 22px; height: 22px; border-radius: 6px; font-size: 10px; }
+.pm-colh-client b { font-size: 12.5px; }
+.pm-colh-client .pm-n { margin-left: auto; }
+
+/* ═══ Table view (Google-Docs style) ═══ */
+.pm-table-wrap { max-width: 1200px; }
+.pm-table-title { text-align: center; margin: 6px 0 22px; }
+.pm-table-title h2 { margin: 0; font-size: 20px; font-weight: 750; letter-spacing: -.01em; }
+.pm-table-title p { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.pm-table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
+.pm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pm-table thead th { text-align: left; background: var(--panel-2, #151821); color: var(--text); font-weight: 750; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; padding: 12px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.pm-table tbody tr { border-bottom: 1px solid var(--border-soft, var(--border)); cursor: pointer; }
+.pm-table tbody tr:hover { background: var(--panel-2, #151821); }
+.pm-table td { padding: 11px 14px; vertical-align: top; }
+.pm-td-title { font-weight: 600; }
+.pm-td-assignee { display: inline-flex; align-items: center; gap: 7px; }
+.pm-td-context { color: var(--muted); max-width: 320px; }
+.pm-td-empty { text-align: center; color: var(--muted-2); padding: 24px; }
+.pm-muted { color: var(--muted-2); }
+.pm-table-add { max-width: 200px; margin-top: 12px; }
+
+/* ═══ View editor logo upload ═══ */
+.pm-logo-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pm-logo-prev { width: 44px; height: 44px; border-radius: 11px; overflow: hidden; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 18px; flex: none; }
+.pm-logo-prev img { width: 100%; height: 100%; object-fit: cover; }
+.pm-logo-upload { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border-radius: 8px; padding: 8px 13px; cursor: pointer; }
+.pm-logo-urlin { flex: 1; min-width: 160px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); padding: 0 11px; font: inherit; font-size: 12.5px; }
+.pm-logo-urlin:focus { border-color: var(--accent); outline: none; }
