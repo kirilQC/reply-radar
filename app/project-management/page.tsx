@@ -11,15 +11,19 @@ import Crumb from "../components/Crumb";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import "./project-management.css";
 
-type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
+type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; slackChannelId?: string };
 type ViewDef = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; memberSlugs: string[] };
 const initials = (s: string) => (s.trim()[0] || "?").toUpperCase();
+const slackIcon = (
+  <svg width="12" height="12" viewBox="0 0 127 127" aria-hidden style={{ flex: "none" }}><path d="M27.2 80c0 7.3-5.9 13.2-13.2 13.2C6.7 93.2.8 87.3.8 80c0-7.3 5.9-13.2 13.2-13.2h13.2V80z" fill="#E01E5A" /><path d="M33.8 80c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2v33c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V80z" fill="#E01E5A" /><path d="M47 27c-7.3 0-13.2-5.9-13.2-13.2C33.8 6.5 39.7.6 47 .6c7.3 0 13.2 5.9 13.2 13.2V27H47z" fill="#36C5F0" /><path d="M47 33.6c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H14C6.7 60 .8 54.1.8 46.8c0-7.3 5.9-13.2 13.2-13.2h33z" fill="#36C5F0" /><path d="M99.8 46.8c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H99.8V46.8z" fill="#2EB67D" /><path d="M93.2 46.8c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2v-33C66.8 6.5 72.7.6 80 .6c7.3 0 13.2 5.9 13.2 13.2v33z" fill="#2EB67D" /><path d="M80 99.6c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V99.6H80z" fill="#ECB22E" /><path d="M80 93c-7.3 0-13.2-5.9-13.2-13.2 0-7.3 5.9-13.2 13.2-13.2h33c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H80z" fill="#ECB22E" /></svg>
+);
 
 export default function ProjectManagementDirectory() {
   const [clients, setClients] = useState<Client[]>([]);
   const [views, setViews] = useState<ViewDef[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<ViewDef | "new" | null>(null);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
 
   const load = async () => {
     const [cl, vw] = await Promise.all([
@@ -73,18 +77,48 @@ export default function ProjectManagementDirectory() {
           {clients.length > 0 && <div className="pm-dir-label">Clients</div>}
           <div className="pm-directory">
             {clients.map((c) => (
-              <Link href={`/project-management/${encodeURIComponent(c.slug)}`} className="pm-card" key={c.id}>
-                <span className="pm-logo" style={c.logoUrl ? undefined : { background: c.accentColor || "var(--accent)" }}>
-                  {c.logoUrl ? <img src={c.logoUrl} alt="" /> : initials(c.name)}
-                </span>
-                <span className="pm-card-name">{c.name}</span>
-              </Link>
+              <div className="pm-card pm-viewcard" key={c.id}>
+                <Link href={`/project-management/${encodeURIComponent(c.slug)}`} className="pm-card-link">
+                  <span className="pm-logo" style={c.logoUrl ? undefined : { background: c.accentColor || "var(--accent)" }}>
+                    {c.logoUrl ? <img src={c.logoUrl} alt="" /> : initials(c.name)}
+                  </span>
+                  <span className="pm-card-name">{c.name}</span>
+                  <span className="pm-card-slackline">{slackIcon}{c.slackChannelId ? "Slack channel set" : "No Slack channel"}</span>
+                </Link>
+                <button type="button" className="pm-card-edit" title="Set internal Slack channel" onClick={() => setEditingClient(c)}>⋯</button>
+              </div>
             ))}
           </div>
         </main>
       </section>
 
       {editing && <ViewEditor view={editing === "new" ? null : editing} clients={clients} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); }} />}
+      {editingClient && <ClientEditor client={editingClient} onClose={() => setEditingClient(null)} onSaved={() => { setEditingClient(null); void load(); }} />}
+    </div>
+  );
+}
+
+function ClientEditor({ client, onClose, onSaved }: { client: Client; onClose: () => void; onSaved: () => void }) {
+  const [channel, setChannel] = useState(client.slackChannelId ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const save = async () => {
+    setBusy(true); setErr("");
+    const r = await fetch("/api/project-management/clients", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: client.slug, slackChannelId: channel.trim() }) }).then((x) => x.json()).catch(() => ({}));
+    setBusy(false);
+    if (r.ok) onSaved(); else setErr(String(r.error || "Could not save."));
+  };
+  return (
+    <div className="pm-modal-back" onClick={onClose}>
+      <div className="pm-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="pm-modal-head"><h2>{client.name} · Slack</h2><button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
+        <div className="pm-modal-body">
+          <label className="pm-f"><span>Internal Slack channel ID</span><input value={channel} placeholder="e.g. C0123ABCD" onChange={(e) => setChannel(e.target.value)} /></label>
+          <p className="pm-muted" style={{ margin: 0, lineHeight: 1.6 }}>This is where the per-task <b>Send to Slack</b> button posts a project&apos;s status. Most clients are already filled in from Reply Radar. To find an ID: open the channel in Slack → channel name → About → the ID is at the bottom (starts with C).</p>
+          {err && <p className="pm-err" style={{ margin: 0 }}>{err}</p>}
+        </div>
+        <div className="pm-modal-foot"><span /><button type="button" className="pm-save" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save"}</button></div>
+      </div>
     </div>
   );
 }

@@ -369,3 +369,15 @@
 .pm-filt-sec + .pm-filt-sec { border-top: 1px solid var(--border-soft, var(--border)); margin-top: 3px; padding-top: 8px; }
 .pm-filt-h { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-2); font-weight: 750; padding: 3px 10px 6px; display: flex; gap: 7px; align-items: baseline; }
 .pm-filt-h em { font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 10.5px; color: var(--muted-2); }
+
+/* ═══ Per-row Slack send button + client Slack line ═══ */
+.pm-rowacts { display: flex; align-items: center; gap: 3px; justify-content: flex-end; }
+.pm-slackbtn { width: 28px; height: 28px; border-radius: 7px; border: 1px solid transparent; background: none; display: grid; place-items: center; cursor: pointer; }
+.pm-slackbtn:hover:not(:disabled) { border-color: var(--border); background: var(--panel-2, #151821); }
+.pm-slackbtn:disabled { opacity: .3; cursor: default; }
+.pm-slackbtn.sent { border-color: color-mix(in srgb, var(--green) 45%, transparent); background: color-mix(in srgb, var(--green) 10%, transparent); }
+.pm-slackbtn.err { border-color: color-mix(in srgb, var(--coral, #e5738a) 45%, transparent); background: color-mix(in srgb, var(--coral, #e5738a) 10%, transparent); }
+.pm-slack-ok { color: var(--green); font-weight: 800; font-size: 13px; }
+.pm-slack-err { color: var(--coral, #e5738a); font-weight: 800; }
+.pm-slack-load { color: var(--muted-2); font-weight: 800; }
+.pm-card-slackline { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 11px; color: var(--muted-2); }

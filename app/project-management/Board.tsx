@@ -272,6 +272,22 @@ function LinksCell({ links, onChange }: { links: LinkItem[]; onChange: (l: LinkI
   );
 }
 
+const slackIcon = (
+  <svg width="14" height="14" viewBox="0 0 127 127" aria-hidden><path d="M27.2 80c0 7.3-5.9 13.2-13.2 13.2C6.7 93.2.8 87.3.8 80c0-7.3 5.9-13.2 13.2-13.2h13.2V80z" fill="#E01E5A" /><path d="M33.8 80c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2v33c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V80z" fill="#E01E5A" /><path d="M47 27c-7.3 0-13.2-5.9-13.2-13.2C33.8 6.5 39.7.6 47 .6c7.3 0 13.2 5.9 13.2 13.2V27H47z" fill="#36C5F0" /><path d="M47 33.6c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H14C6.7 60 .8 54.1.8 46.8c0-7.3 5.9-13.2 13.2-13.2h33z" fill="#36C5F0" /><path d="M99.8 46.8c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H99.8V46.8z" fill="#2EB67D" /><path d="M93.2 46.8c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2v-33C66.8 6.5 72.7.6 80 .6c7.3 0 13.2 5.9 13.2 13.2v33z" fill="#2EB67D" /><path d="M80 99.6c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V99.6H80z" fill="#ECB22E" /><path d="M80 93c-7.3 0-13.2-5.9-13.2-13.2 0-7.3 5.9-13.2 13.2-13.2h33c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H80z" fill="#ECB22E" /></svg>
+);
+function SlackButton({ id }: { id: string }) {
+  const [st, setSt] = useState<"idle" | "sending" | "sent" | "err">("idle");
+  const [msg, setMsg] = useState("");
+  const disabled = id.startsWith("tmp");
+  const send = async () => {
+    if (disabled || st === "sending") return;
+    setSt("sending");
+    const r = await fetch("/api/project-management/notify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) }).then((x) => x.json()).catch(() => ({ ok: false, error: "Network error" }));
+    if (r.ok) { setSt("sent"); setTimeout(() => setSt("idle"), 2500); } else { setSt("err"); setMsg(String(r.error || "Failed to send")); setTimeout(() => setSt("idle"), 5000); }
+  };
+  return <button type="button" className={`pm-slackbtn ${st}`} disabled={disabled} title={disabled ? "Save the task first" : st === "err" ? msg : st === "sent" ? "Sent to Slack" : "Send this status to the client's internal Slack channel"} onClick={send}>{st === "sent" ? <span className="pm-slack-ok">✓</span> : st === "err" ? <span className="pm-slack-err">!</span> : st === "sending" ? <span className="pm-slack-load">·</span> : slackIcon}</button>;
+}
+
 type Draft = { key: string; clientSlug: string; title: string; owner: string; stage: string; context: string; due: string; priority: string; links: LinkItem[] };
 function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[]; h: Handlers; onUpdate: (id: string, f: Record<string, unknown>) => void; onCreate: (slug: string, f: NewFields) => void; week?: string }) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -284,7 +300,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
     <div className="pm-table-wrap">
       <div className="pm-table-scroll">
         <table className="pm-table pm-table-edit">
-          <colgroup><col style={{ width: "11%" }} /><col style={{ width: "18%" }} /><col style={{ width: "13%" }} /><col style={{ width: 92 }} /><col style={{ width: 116 }} /><col /><col style={{ width: "14%" }} /><col style={{ width: 96 }} /><col style={{ width: 34 }} /></colgroup>
+          <colgroup><col style={{ width: "11%" }} /><col style={{ width: "18%" }} /><col style={{ width: "13%" }} /><col style={{ width: 92 }} /><col style={{ width: 116 }} /><col /><col style={{ width: "14%" }} /><col style={{ width: 96 }} /><col style={{ width: 66 }} /></colgroup>
           <thead><tr><th>Client</th><th>Task name</th><th>Assigned to</th><th>Priority</th><th>Status</th><th>Context</th><th>Links</th><th>Due date</th><th /></tr></thead>
           <tbody>
             {tasks.map((t) => { const pc = prioOf(t.priority)?.color; return (
@@ -297,7 +313,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
                 <td><AutoTextarea defaultValue={t.context || ""} onCommit={(v) => { if ((v || null) !== (t.context || null)) onUpdate(t.id, { context: v }); }} /></td>
                 <td><LinksCell links={linkItems(t.links)} onChange={(l) => onUpdate(t.id, { links: l })} /></td>
                 <td><input className="pm-cellin" defaultValue={t.due_date || ""} placeholder="e.g. Thu 9/4" onBlur={(e) => { if ((e.target.value || null) !== (t.due_date || null)) onUpdate(t.id, { dueDate: e.target.value }); }} /></td>
-                <td><button type="button" className="pm-rowdel" title="Open" onClick={() => h.onOpen(t)}>⋯</button></td>
+                <td><div className="pm-rowacts"><SlackButton id={t.id} /><button type="button" className="pm-rowdel" title="Open" onClick={() => h.onOpen(t)}>⋯</button></div></td>
               </tr>
             ); })}
             {drafts.map((d) => { const pc = prioOf(d.priority)?.color; return (
