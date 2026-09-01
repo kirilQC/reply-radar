@@ -22,13 +22,21 @@ const TABLE_MISSING = "The rr_projects table doesn't exist yet — run the Proje
 
 export async function GET(request: Request) {
   const c = creds(); if (!c) return NextResponse.json({ ok: false, error: "Supabase not configured" }, { status: 503 });
-  const slug = new URL(request.url).searchParams.get("slug") || "";
-  const wsId = await workspaceIdFor(slug, c);
-  if (!wsId) return NextResponse.json({ ok: false, error: "No client matches that slug." }, { status: 404 });
-  const r = await fetch(`${c.url}/rest/v1/rr_projects?select=*&workspace_id=eq.${encodeURIComponent(wsId)}&order=position.asc,created_at.asc`, { headers: c.headers, cache: "no-store" });
+  const params = new URL(request.url).searchParams;
+  // A single client (slug=) or a group of clients (slugs=a,b,c) — the group tags each task with its client.
+  const slugList = (params.get("slugs") || params.get("slug") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!slugList.length) return NextResponse.json({ ok: false, error: "No client given." }, { status: 400 });
+  const resolved = await Promise.all(slugList.map(async (slug) => ({ slug, id: await workspaceIdFor(slug, c) })));
+  const nameRows = await fetch(`${c.url}/rest/v1/rr_workspaces?select=id,name,slug&id=in.(${resolved.filter((r) => r.id).map((r) => r.id).join(",") || "00000000-0000-0000-0000-000000000000"})`, { headers: c.headers, cache: "no-store" }).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  const nameById = new Map((Array.isArray(nameRows) ? nameRows : []).map((w: Record<string, unknown>) => [String(w.id), String(w.name)]));
+  const ids = resolved.filter((r) => r.id);
+  if (!ids.length) return NextResponse.json({ ok: false, error: "No client matches that slug." }, { status: 404 });
+  const slugById = new Map(ids.map((r) => [r.id, r.slug]));
+  const r = await fetch(`${c.url}/rest/v1/rr_projects?select=*&workspace_id=in.(${ids.map((r) => r.id).join(",")})&order=position.asc,created_at.asc`, { headers: c.headers, cache: "no-store" });
   if (!r.ok) return NextResponse.json({ ok: false, error: r.status === 404 ? TABLE_MISSING : `Load failed (${r.status}).`, tasks: [] });
-  const tasks = await r.json().catch(() => []);
-  return NextResponse.json({ ok: true, tasks: Array.isArray(tasks) ? tasks : [] });
+  const rows = await r.json().catch(() => []);
+  const tasks = (Array.isArray(rows) ? rows : []).map((t: Record<string, unknown>) => ({ ...t, clientSlug: slugById.get(String(t.workspace_id)) ?? "", clientName: nameById.get(String(t.workspace_id)) ?? "" }));
+  return NextResponse.json({ ok: true, tasks });
 }
 
 export async function POST(request: Request) {

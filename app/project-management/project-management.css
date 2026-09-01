@@ -163,3 +163,37 @@
 .pm-link-add button { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 0 15px; cursor: pointer; }
 .pm-meta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
 .pm-ts { font-size: 11px; color: var(--muted-2); margin-left: auto; }
+
+/* ═══ Custom views + directory ═══ */
+.pm-dir-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+.pm-dir-head h1 { font-size: 28px; letter-spacing: -.05em; margin: 0; }
+.pm-newview { font: inherit; font-size: 12.5px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 9px; padding: 9px 15px; cursor: pointer; }
+.pm-newview:hover { filter: brightness(1.07); }
+.pm-dir-label { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted-2); font-weight: 750; margin: 6px 0 12px; }
+.pm-card-sub { margin-top: 4px; font-size: 11.5px; color: var(--muted-2); }
+.pm-viewcard { position: relative; padding: 0; }
+.pm-viewcard .pm-card-link { display: flex; flex-direction: column; align-items: flex-start; padding: 18px; color: var(--text); text-decoration: none; width: 100%; }
+.pm-viewcard { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.pm-card-edit { position: absolute; top: 10px; right: 10px; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel-2, #151821); color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.pm-card-edit:hover { color: var(--text); border-color: var(--accent); }
+.pm-members { margin: 6px 0 0; font-size: 12.5px; color: var(--muted); }
+
+/* member picker */
+.pm-member-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 320px; overflow-y: auto; }
+.pm-member { display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, #151821); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; }
+.pm-member.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pm-member-logo { width: 26px; height: 26px; border-radius: 7px; overflow: hidden; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 11px; flex: none; }
+.pm-member-logo img { width: 100%; height: 100%; object-fit: cover; }
+.pm-member > span:nth-child(2) { flex: 1; }
+.pm-member-check { color: var(--accent); font-weight: 800; }
+
+/* board bar + client chip + add box */
+.pm-boardbar { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+.pm-cchip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 650; color: var(--muted); background: var(--panel-2, #151821); border: 1px solid var(--border-soft, var(--border)); border-radius: 999px; padding: 2px 8px 2px 4px; }
+.pm-cchip img { width: 15px; height: 15px; border-radius: 4px; object-fit: cover; }
+.pm-cchip-mono { width: 15px; height: 15px; border-radius: 4px; display: grid; place-items: center; color: #fff; font-size: 8px; font-weight: 800; }
+.pm-addbox { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
+.pm-add-client { height: 32px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); font: inherit; font-size: 12px; padding: 0 9px; }
+.pm-add-actions { display: flex; gap: 6px; }
+.pm-add-go { flex: 1; font: inherit; font-size: 12px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 7px; cursor: pointer; }
+.pm-add-x { font: inherit; font-size: 12px; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
