@@ -501,3 +501,24 @@
 .pm-blocker-list { display: flex; flex-direction: column; gap: 4px; width: 100%; }
 .pm-blocker-addbtn { align-self: center; font: inherit; font-size: 11.5px; font-weight: 600; color: var(--muted-2); background: none; border: 1px dashed var(--border); border-radius: 7px; padding: 5px 10px; cursor: pointer; margin-top: 2px; }
 .pm-blocker-addbtn:hover { color: var(--text); border-color: var(--accent); }
+
+/* ═══ Task detail modal — sidebar layout (Option A) ═══ */
+.pm-modal-a { width: min(780px, 100%); }
+.pm-ed-head { padding: 16px 20px 15px; border-bottom: 1px solid var(--border); }
+.pm-ed-htop { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; }
+.pm-ed-hactions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.pm-ed-hactions .pm-slackbtn { display: inline-flex; align-items: center; width: auto; height: auto; padding: 7px 12px; gap: 7px; border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 12.5px; font-weight: 650; }
+.pm-ed-hactions .pm-slackbtn::after { content: "Slack"; }
+.pm-ed-hactions .pm-slackbtn.sent::after { content: "Sent"; }
+.pm-ed-hactions .pm-slackbtn.sending::after { content: "Sending…"; }
+.pm-ed-title { width: 100%; border: 0; background: none; color: var(--text); font: inherit; font-size: 20px; font-weight: 700; letter-spacing: -.02em; padding: 2px 0; }
+.pm-ed-title:focus { outline: none; }
+.pm-ed-title::placeholder { color: var(--muted-2); }
+.pm-ed-body { display: grid; grid-template-columns: 1.5fr 1fr; }
+.pm-ed-main { padding: 18px 20px; display: flex; flex-direction: column; gap: 16px; border-right: 1px solid var(--border); }
+.pm-ed-side { padding: 18px 20px; display: flex; flex-direction: column; gap: 15px; background: color-mix(in srgb, var(--panel-2, #171a22) 45%, var(--panel)); }
+.pm-ed-main textarea { min-height: 150px; }
+.pm-ed-blockers .pm-blocker-list { gap: 6px; }
+.pm-ed-blockers .pm-blocker-row { background: var(--panel-2, #151821); border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; }
+.pm-ed-blockers .pm-blocker-addbtn { align-self: stretch; text-align: center; }
+@media (max-width: 720px) { .pm-ed-body { grid-template-columns: 1fr; } .pm-ed-main { border-right: 0; border-bottom: 1px solid var(--border); } }

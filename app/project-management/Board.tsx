@@ -472,36 +472,52 @@ function PipelineView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
   );
 }
 
-function TaskEditor({ state, clients, people, map, multi, addPerson, removePerson, uploadAvatar, onClose, onCreate, onUpdate, onDelete }: { state: Exclude<EditorState, null>; clients: BoardClient[]; people: Person[]; map: Record<string, string>; multi: boolean; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void; onClose: () => void; onCreate: (clientSlug: string, f: NewFields) => void; onUpdate: (id: string, f: Record<string, unknown>) => void; onDelete: (id: string) => void }) {
+function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPerson, removePerson, uploadAvatar, onClose, onCreate, onUpdate, onDelete }: { state: Exclude<EditorState, null>; clients: BoardClient[]; people: Person[]; map: Record<string, string>; multi: boolean; notifyChannel?: string; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void; onClose: () => void; onCreate: (clientSlug: string, f: NewFields) => void; onUpdate: (id: string, f: Record<string, unknown>) => void; onDelete: (id: string) => void }) {
   const isNew = state.mode === "new"; const task = isNew ? null : state.task;
   const [title, setTitle] = useState(task?.title ?? "");
   const [slug, setSlug] = useState((isNew ? state.clientSlug : task?.clientSlug) ?? clients[0]?.slug ?? "");
   const [owner, setOwner] = useState((isNew ? state.assignee : task?.owner) ?? "");
   const [due, setDue] = useState(task?.due_date ?? "");
+  const [week, setWeek] = useState(task?.week ?? "");
   const [priority, setPriority] = useState(task?.priority ?? "");
   const [context, setContext] = useState(task?.context ?? "");
   const [links, setLinks] = useState<LinkItem[]>(linkItems(task?.links));
+  const [blockers, setBlockers] = useState<Blocker[]>(blockerList(task?.blocker));
   const [nUrl, setNUrl] = useState(""); const [nTitle, setNTitle] = useState("");
   const addLink = () => { const u = nUrl.trim(); if (!u) return; setLinks((p) => [...p, { url: normUrl(u), title: nTitle.trim() || undefined }]); setNUrl(""); setNTitle(""); };
-  const clientName = clients.find((c) => c.slug === slug)?.name;
-  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage: state.stage, assignee: owner, dueDate: due, context, links, priority }); } else onUpdate(task!.id, { title, owner, dueDate: due, context, links, priority }); onClose(); };
+  const stage = isNew ? state.stage : (task?.stage ?? "todo");
+  const s = stageOf(stage);
+  const client = clients.find((c) => c.slug === slug);
+  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(multi && week ? { week } : {}) }); } else onUpdate(task!.id, { title, owner, dueDate: due, context, links, priority, blocker: blockers, ...(multi ? { week } : {}) }); onClose(); };
   return (
     <div className="pm-modal-back" onClick={onClose}>
-      <div className="pm-modal pm-modal-lg" onClick={(e) => e.stopPropagation()}>
-        <div className="pm-modal-head"><h2>{isNew ? "New task" : "Task details"}{clientName && multi ? ` · ${clientName}` : ""}</h2><button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
-        <div className="pm-modal-body">
-          {isNew && multi && <div className="pm-f"><span>Client</span><Select value={slug} options={clientOptsOf(clients)} size="lg" onChange={setSlug} /></div>}
-          <label className="pm-f"><span>Title</span><input autoFocus value={title} placeholder="What needs doing?" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save(); }} /></label>
-          <div className="pm-f-row">
+      <div className="pm-modal pm-modal-a" onClick={(e) => e.stopPropagation()}>
+        <div className="pm-ed-head">
+          <div className="pm-ed-htop">
+            <span className={`pm-stg ${s.cls}`}><span className="d" />{s.label}</span>
+            {multi && client && <span className="pm-cchip">{client.logoUrl ? <img src={client.logoUrl} alt="" /> : <span className="pm-cchip-mono" style={{ background: client.accentColor || "var(--accent)" }}>{initials(client.name)}</span>}{client.name}</span>}
+            <div className="pm-ed-hactions">{!isNew && <SlackButton id={task!.id} channel={notifyChannel} />}<button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
+          </div>
+          <input className="pm-ed-title" autoFocus value={title} placeholder="What needs doing?" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save(); }} />
+        </div>
+        <div className="pm-ed-body">
+          <div className="pm-ed-main">
+            <div className="pm-f"><span>Context / notes</span><textarea rows={8} value={context} placeholder="Everything about this task…" onChange={(e) => setContext(e.target.value)} /></div>
+            <div className="pm-f"><span>Links &amp; files</span><div className="pm-links">
+              {links.map((l, i) => <div className="pm-link" key={i}><a href={l.url} target="_blank" rel="noreferrer">{linkLabel(l)}</a><button type="button" onClick={() => setLinks((p) => p.filter((_, j) => j !== i))}>✕</button></div>)}
+              <div className="pm-link-add pm-link-add2"><input value={nTitle} placeholder="Title (optional)" onChange={(e) => setNTitle(e.target.value)} /><input value={nUrl} placeholder="Paste a URL…" onChange={(e) => setNUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLink(); } }} /><button type="button" onClick={addLink}>Add</button></div>
+            </div></div>
+          </div>
+          <div className="pm-ed-side">
+            {isNew && multi && <div className="pm-f"><span>Client</span><Select value={slug} options={clientOptsOf(clients)} size="lg" onChange={setSlug} /></div>}
             <div className="pm-f"><span>Assignees</span><MultiPeople value={owner} people={people} map={map} onChange={setOwner} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} /></div>
             <div className="pm-f"><span>Priority</span><Select value={priority} options={prioOpts} placeholder="None" tone={prioOf(priority)?.color} onChange={setPriority} /></div>
+            <div className="pm-f-row">
+              <label className="pm-f"><span>Due date</span><input value={due} placeholder="e.g. Thu 9/4" onChange={(e) => setDue(e.target.value)} /></label>
+              {multi && <label className="pm-f"><span>Week</span><input value={week} placeholder="e.g. Sept 3" onChange={(e) => setWeek(e.target.value)} /></label>}
+            </div>
+            <div className="pm-f"><span>Blockers</span><div className="pm-ed-blockers"><BlockerCell blockers={blockers} people={people} map={map} addPerson={addPerson} onChange={setBlockers} /></div></div>
           </div>
-          <label className="pm-f"><span>Due date</span><input value={due} placeholder="e.g. Thu 9/4 or 2026-09-04" onChange={(e) => setDue(e.target.value)} /></label>
-          <label className="pm-f"><span>Context / notes</span><textarea rows={3} value={context} onChange={(e) => setContext(e.target.value)} /></label>
-          <div className="pm-f"><span>Links &amp; files</span><div className="pm-links">
-            {links.map((l, i) => <div className="pm-link" key={i}><a href={l.url} target="_blank" rel="noreferrer">{linkLabel(l)}</a><button type="button" onClick={() => setLinks((p) => p.filter((_, j) => j !== i))}>✕</button></div>)}
-            <div className="pm-link-add pm-link-add2"><input value={nTitle} placeholder="Title (optional)" onChange={(e) => setNTitle(e.target.value)} /><input value={nUrl} placeholder="Paste a URL…" onChange={(e) => setNUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLink(); } }} /><button type="button" onClick={addLink}>Add</button></div>
-          </div></div>
         </div>
         <div className="pm-modal-foot">{!isNew ? <button type="button" className="pm-del" onClick={() => { onDelete(task!.id); onClose(); }}>Delete</button> : <span />}<button type="button" className="pm-save" onClick={save}>{isNew ? "Create task" : "Save"}</button></div>
       </div>
@@ -562,7 +578,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
       {view === "list" && <ListView byStage={byStage} h={h} />}
       {view === "timeline" && <TimelineView tasks={visible} h={h} />}
       {view === "pipeline" && <PipelineView tasks={visible} h={h} />}
-      {editor && <TaskEditor state={editor} clients={clients} people={people} map={map} multi={multi} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} onClose={() => setEditor(null)} onCreate={create} onUpdate={onUpdate} onDelete={onDelete} />}
+      {editor && <TaskEditor state={editor} clients={clients} people={people} map={map} multi={multi} notifyChannel={notifyChannel} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} onClose={() => setEditor(null)} onCreate={create} onUpdate={onUpdate} onDelete={onDelete} />}
     </>
   );
 }
