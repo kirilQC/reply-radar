@@ -67,7 +67,7 @@ import { clientLabel, clientOf, clientSkeleton, clientsIn, fileKind, fileTitle, 
 import { scanChannel, resolveChannelNames, resolveUserNames, transcript, slackReadable, postMessage } from "./slack";
 import { normalizeChannelId } from "./slack-channel";
 import { addMeeting, getClientMeetings, listMeetingClients } from "./meetings";
-import { listProjectsFor, createProjectFor, updateProject, deleteProject, STAGE_LABEL } from "./project-tasks";
+import { listProjectsFor, createProjectFor, updateProject, deleteProject, STAGE_LABEL, type ProjectLink } from "./project-tasks";
 import { gatherCalls } from "./morning-brief-run";
 import type { BriefWorkspace } from "./morning-brief";
 import type { ClientCall } from "./granola";
@@ -860,20 +860,20 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "list_projects",
     description:
-      "A client's internal projects on the Project management board, grouped by stage (To do, In progress, Paused, Completed, Launched). Returns each project's id, title, stage, assignee, due date, context and links. Use this to answer 'what are we working on for X this week', to check a project's status, or to get the id you need before updating or deleting one. Pass the client.",
-    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug." } }, required: ["client"] },
+      "A client's internal projects on the Project management board, grouped by stage (To do, In progress, Paused, Completed, Launched). Returns each project's id, title, stage, assignee(s), priority, week, due date, context and links. Use this to answer 'what are we working on for X', to check a project's status, or to get the id you need before updating or deleting one. Pass the client. Optionally pass a week label (e.g. 'Sept 3') to see only that week's tasks.",
+    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug." }, week: { type: "string", description: "Optional week label to filter by, e.g. 'Sept 3'." } }, required: ["client"] },
   },
   {
     name: "create_project",
     description:
-      "Add a new project/task to a client's Project management board. Give the client and a title; optionally a stage (todo | in_progress | paused | completed | launched, default todo), an assignee (a teammate's name), a due date (YYYY-MM-DD), context/notes, and links (an array of URLs). Use this when someone asks to add a project or task for a client.",
-    input_schema: { type: "object", properties: { client: { type: "string" }, title: { type: "string" }, stage: { type: "string", description: "todo | in_progress | paused | completed | launched" }, assignee: { type: "string" }, due_date: { type: "string", description: "YYYY-MM-DD" }, context: { type: "string" }, links: { type: "array", items: { type: "string" } } }, required: ["client", "title"] },
+      "Add a new project/task to a client's Project management board. Give the client and a title; optionally a stage (todo | in_progress | paused | completed | launched, default todo), one or more assignees (comma-separate several teammate names in the assignee string), a priority (high | medium | low), a week label (e.g. 'Sept 3'), a due date, context/notes, and links (each with a url and optional title). Use this when someone asks to add a project or task for a client.",
+    input_schema: { type: "object", properties: { client: { type: "string" }, title: { type: "string" }, stage: { type: "string", description: "todo | in_progress | paused | completed | launched" }, assignee: { type: "string", description: "One name, or several comma-separated." }, priority: { type: "string", description: "high | medium | low" }, week: { type: "string", description: "Week label, e.g. 'Sept 3'." }, due_date: { type: "string", description: "A due date — any text, e.g. 'Thu 9/4' or 2026-09-04." }, context: { type: "string" }, links: { type: "array", items: { type: "object", properties: { url: { type: "string" }, title: { type: "string" } }, required: ["url"] } } }, required: ["client", "title"] },
   },
   {
     name: "update_project",
     description:
-      "Update a project on the board — move its stage, reassign it, set a due date, edit the title, context or links. Pass the project id (get it from list_projects first). Only the fields you pass are changed. Use this to mark something in progress / paused / completed / launched, or to change any property.",
-    input_schema: { type: "object", properties: { id: { type: "string", description: "Project id from list_projects." }, title: { type: "string" }, stage: { type: "string", description: "todo | in_progress | paused | completed | launched" }, assignee: { type: "string" }, due_date: { type: "string", description: "YYYY-MM-DD, or empty string to clear" }, context: { type: "string" }, links: { type: "array", items: { type: "string" } } }, required: ["id"] },
+      "Update a project on the board — move its stage/status, change assignees, set priority, move it to a different week, set a due date, edit the title, context or links, or reassign it to a different client. Pass the project id (get it from list_projects first). Only the fields you pass are changed. Use this to mark something in progress / paused / completed / launched, or to change any property.",
+    input_schema: { type: "object", properties: { id: { type: "string", description: "Project id from list_projects." }, title: { type: "string" }, stage: { type: "string", description: "todo | in_progress | paused | completed | launched" }, assignee: { type: "string", description: "One name, or several comma-separated. Empty string to clear." }, priority: { type: "string", description: "high | medium | low, or empty string to clear" }, week: { type: "string", description: "Week label, or empty string to clear" }, due_date: { type: "string", description: "A due date, or empty string to clear" }, context: { type: "string" }, links: { type: "array", items: { type: "object", properties: { url: { type: "string" }, title: { type: "string" } }, required: ["url"] } }, reassign_client: { type: "string", description: "Move this task to another client — that client's name or slug." } }, required: ["id"] },
   },
   {
     name: "delete_project",
@@ -1901,16 +1901,16 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     }
     case "list_projects": {
       const client = await resolveClient(input.client);
-      const r = await listProjectsFor(client.slug);
+      const r = await listProjectsFor(client.slug, input.week ? { week: text(input.week) } : undefined);
       if (!r.ok) return { client: client.name, error: r.error };
       const byStage: Record<string, unknown[]> = {};
       for (const key of Object.keys(STAGE_LABEL)) byStage[STAGE_LABEL[key]] = [];
-      for (const p of r.projects ?? []) (byStage[STAGE_LABEL[p.stage] ?? "To do"]).push({ id: p.id, title: p.title, assignee: p.assignee, dueDate: p.dueDate, context: p.context, links: p.links, autoAdded: p.source !== "manual" });
-      return { client: client.name, total: r.projects?.length ?? 0, byStage };
+      for (const p of r.projects ?? []) (byStage[STAGE_LABEL[p.stage] ?? "To do"]).push({ id: p.id, title: p.title, assignees: p.assignee, priority: p.priority, week: p.week, dueDate: p.dueDate, context: p.context, links: p.links, autoAdded: p.source !== "manual" });
+      return { client: client.name, total: r.projects?.length ?? 0, week: input.week ? text(input.week) : "all", byStage };
     }
     case "create_project": {
       const client = await resolveClient(input.client);
-      const r = await createProjectFor(client.slug, { title: text(input.title), stage: text(input.stage), assignee: text(input.assignee), dueDate: text(input.due_date), context: text(input.context), links: Array.isArray(input.links) ? (input.links as string[]) : [] });
+      const r = await createProjectFor(client.slug, { title: text(input.title), stage: text(input.stage), assignee: text(input.assignee), priority: text(input.priority), week: text(input.week), dueDate: text(input.due_date), context: text(input.context), links: Array.isArray(input.links) ? (input.links as ProjectLink[]) : [] });
       if (!r.ok) return { ok: false, error: r.error };
       return { ok: true, client: client.name, created: r.project ? { id: r.project.id, title: r.project.title, stage: STAGE_LABEL[r.project.stage] } : null };
     }
@@ -1919,9 +1919,12 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       if (input.title !== undefined) fields.title = text(input.title);
       if (input.stage !== undefined) fields.stage = text(input.stage);
       if (input.assignee !== undefined) fields.assignee = text(input.assignee);
+      if (input.priority !== undefined) fields.priority = text(input.priority);
+      if (input.week !== undefined) fields.week = text(input.week);
       if (input.due_date !== undefined) fields.dueDate = text(input.due_date);
       if (input.context !== undefined) fields.context = text(input.context);
-      if (input.links !== undefined) fields.links = Array.isArray(input.links) ? (input.links as string[]) : [];
+      if (input.links !== undefined) fields.links = Array.isArray(input.links) ? (input.links as ProjectLink[]) : [];
+      if (input.reassign_client !== undefined) { const dest = await resolveClient(input.reassign_client); fields.reassignSlug = dest.slug; }
       const r = await updateProject(text(input.id), fields);
       return r.ok ? { ok: true } : { ok: false, error: r.error };
     }

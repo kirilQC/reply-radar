@@ -354,3 +354,18 @@
 .pm-linkadd-row button { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border: 0; border-radius: 7px; padding: 0 13px; cursor: pointer; }
 .pm-link-add2 { flex-wrap: wrap; }
 .pm-link-add2 > input { flex: 1 1 130px; }
+
+/* ═══ Stacked assignees + bigger client cell + Filters panel ═══ */
+.pm-dd-val.stack { white-space: normal; overflow: visible; }
+.pm-own-inline.stack { flex-direction: column; align-items: flex-start; gap: 3px; }
+.pm-dd-lg .pm-opt-logo { width: 26px; height: 26px; border-radius: 7px; }
+.pm-dd-lg .pm-opt-logo.mono { font-size: 11px; }
+.pm-table-edit td { vertical-align: top; padding: 9px 11px; }
+.pm-table-edit .pm-dd-lg .pm-dd-btn { font-size: 14.5px; font-weight: 650; }
+.pm-filt-btn { gap: 8px; color: var(--text); }
+.pm-filt-btn svg { color: var(--muted-2); flex: none; }
+.pm-filters { padding: 6px; max-height: 74vh; }
+.pm-filt-sec { padding: 5px 2px; }
+.pm-filt-sec + .pm-filt-sec { border-top: 1px solid var(--border-soft, var(--border)); margin-top: 3px; padding-top: 8px; }
+.pm-filt-h { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-2); font-weight: 750; padding: 3px 10px 6px; display: flex; gap: 7px; align-items: baseline; }
+.pm-filt-h em { font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 10.5px; color: var(--muted-2); }

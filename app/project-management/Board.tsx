@@ -67,7 +67,7 @@ function Select({ value, options, onChange, placeholder, minWidth, tone, size }:
   const m = useMenu(minWidth ?? 150);
   const cur = options.find((o) => o.value === value);
   return (
-    <div className="pm-dd">
+    <div className={`pm-dd ${size === "lg" ? "pm-dd-lg" : ""}`}>
       <button ref={m.btnRef} type="button" className="pm-dd-btn" style={tone ? { color: tone } : undefined} onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
         <span className="pm-dd-val">{cur ? <>{cur.logo}{cur.color && <i className="pm-dd-dot" style={{ background: cur.color }} />}{cur.label}</> : <span className="pm-dd-ph">{placeholder ?? "—"}</span>}</span><Chevron />
       </button>
@@ -84,12 +84,12 @@ function Avatar({ name, map, cls }: { name: string; map: Record<string, string>;
   const url = map[name];
   return <span className={`pm-av ${cls || ""}`} style={url ? undefined : { background: `hsl(${hue(name)} 55% 45%)` }}>{url ? <img src={url} alt="" /> : initials(name)}</span>;
 }
-function Owners({ owner, map }: { owner?: string | null; map: Record<string, string> }) {
+function Owners({ owner, map, stack }: { owner?: string | null; map: Record<string, string>; stack?: boolean }) {
   const list = ownerList(owner); if (!list.length) return null;
-  if (list.length <= 2) return <span className="pm-own-inline">{list.map((n) => <span className="pm-own-chip" key={n}><Avatar name={n} map={map} />{n}</span>)}</span>;
+  if (list.length <= 2) return <span className={`pm-own-inline ${stack ? "stack" : ""}`}>{list.map((n) => <span className="pm-own-chip" key={n}><Avatar name={n} map={map} />{n}</span>)}</span>;
   return <span className="pm-av-row">{list.slice(0, 3).map((n) => <Avatar key={n} name={n} map={map} />)}<span className="pm-av-names">{list.length} people</span></span>;
 }
-function MultiPeople({ value, people, map, onChange, addPerson, removePerson, uploadAvatar, placeholder = "Unassigned" }: { value: string; people: Person[]; map: Record<string, string>; onChange: (v: string) => void; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void; placeholder?: string }) {
+function MultiPeople({ value, people, map, onChange, addPerson, removePerson, uploadAvatar, placeholder = "Unassigned", stack }: { value: string; people: Person[]; map: Record<string, string>; onChange: (v: string) => void; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void; placeholder?: string; stack?: boolean }) {
   const m = useMenu(230); const sel = ownerList(value); const [draft, setDraft] = useState("");
   const toggle = (name: string) => { const next = sel.includes(name) ? sel.filter((x) => x !== name) : [...sel, name]; onChange(next.join(", ")); };
   const add = () => { const n = draft.trim(); if (!n) return; addPerson(n); if (!sel.includes(n)) onChange([...sel, n].join(", ")); setDraft(""); };
@@ -97,7 +97,7 @@ function MultiPeople({ value, people, map, onChange, addPerson, removePerson, up
   return (
     <div className="pm-dd">
       <button ref={m.btnRef} type="button" className="pm-dd-btn" onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
-        <span className="pm-dd-val">{sel.length ? <Owners owner={value} map={map} /> : <span className="pm-dd-ph">{placeholder}</span>}</span><Chevron />
+        <span className={`pm-dd-val ${stack ? "stack" : ""}`}>{sel.length ? <Owners owner={value} map={map} stack={stack} /> : <span className="pm-dd-ph">{placeholder}</span>}</span><Chevron />
       </button>
       {m.open && m.pos && <>
         <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
@@ -115,48 +115,49 @@ function MultiPeople({ value, people, map, onChange, addPerson, removePerson, up
     </div>
   );
 }
-function WhenDropdown({ week, weeks, onPick, onAddWeek, onRemoveWeek }: { week: string; weeks: string[]; onPick: (w: string) => void; onAddWeek: (label: string) => void; onRemoveWeek: (label: string) => void }) {
-  const m = useMenu(190); const [draft, setDraft] = useState("");
-  const add = () => { const n = draft.trim(); if (!n) return; onAddWeek(n); setDraft(""); m.close(); };
+function FiltersPanel({ view, views, onPickView, onReorderViews, sort, onSort, multi, week, weeks, onPickWeek, onAddWeek, onRemoveWeek }: {
+  view: View; views: [View, string][]; onPickView: (v: View) => void; onReorderViews: (keys: View[]) => void;
+  sort: SortKey; onSort: (s: SortKey) => void; multi: boolean; week: string; weeks: string[]; onPickWeek: (w: string) => void; onAddWeek: (label: string) => void; onRemoveWeek: (label: string) => void;
+}) {
+  const m = useMenu(260); const [drag, setDrag] = useState<View | null>(null); const [draft, setDraft] = useState("");
+  const drop = (target: View) => { if (!drag || drag === target) return; const keys = views.map(([v]) => v); const from = keys.indexOf(drag), to = keys.indexOf(target); keys.splice(to, 0, keys.splice(from, 1)[0]); onReorderViews(keys); setDrag(null); };
+  const add = () => { const n = draft.trim(); if (!n) return; onAddWeek(n); setDraft(""); };
+  const curView = views.find(([v]) => v === view);
   return (
     <div className="pm-dd">
-      <button ref={m.btnRef} type="button" className="pm-dd-btn" onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
-        <span className="pm-dd-val">{week ? weekDisplay(week) : <span className="pm-dd-ph">All time</span>}</span><Chevron />
+      <button ref={m.btnRef} type="button" className="pm-dd-btn pm-filt-btn" onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden><path fill="currentColor" d="M1 3h14l-5.4 6.3V15L6.4 13V9.3z" /></svg>
+        <span className="pm-dd-val">{curView ? curView[1] : "Filters"}{multi && week ? ` · ${weekDisplay(week)}` : ""}</span><Chevron />
       </button>
       {m.open && m.pos && <>
         <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
-        <div className="pm-dd-menu" style={{ top: m.pos.top, left: m.pos.left, minWidth: m.pos.width }} onClick={(e) => e.stopPropagation()}>
-          <button type="button" className={`pm-dd-opt ${!week ? "on" : ""}`} onClick={() => { onPick(""); m.close(); }}><span className="pm-dd-opt-l">All time</span>{!week && <span className="pm-dd-ck">✓</span>}</button>
-          {weeks.map((w) => (
-            <div className={`pm-dd-opt multi ${w === week ? "on" : ""}`} key={w}>
-              <button type="button" className="pm-dd-optmain" onClick={() => { onPick(w); m.close(); }}><span className="pm-dd-opt-l">{weekDisplay(w)}</span>{w === week && <span className="pm-dd-ck">✓</span>}</button>
-              <button type="button" className="pm-dd-rm" title="Remove week" onClick={() => onRemoveWeek(w)}>✕</button>
+        <div className="pm-dd-menu pm-filters" style={{ top: m.pos.top, left: m.pos.left, minWidth: Math.max(m.pos.width, 260) }} onClick={(e) => e.stopPropagation()}>
+          <div className="pm-filt-sec">
+            <div className="pm-filt-h">View <em>· drag to reorder</em></div>
+            {views.map(([v, label]) => (
+              <div key={v} className={`pm-dd-opt multi ${v === view ? "on" : ""} ${drag === v ? "dragging" : ""}`} draggable onDragStart={() => setDrag(v)} onDragEnd={() => setDrag(null)} onDragOver={(e) => e.preventDefault()} onDrop={() => drop(v)}>
+                <span className="pm-vgrip" title="Drag to reorder">⠿</span>
+                <button type="button" className="pm-dd-optmain" onClick={() => onPickView(v)}><span className="pm-dd-opt-l">{label}</span>{v === view && <span className="pm-dd-ck">✓</span>}</button>
+              </div>
+            ))}
+          </div>
+          {multi && (
+            <div className="pm-filt-sec">
+              <div className="pm-filt-h">Week</div>
+              <button type="button" className={`pm-dd-opt ${!week ? "on" : ""}`} onClick={() => onPickWeek("")}><span className="pm-dd-opt-l">All time</span>{!week && <span className="pm-dd-ck">✓</span>}</button>
+              {weeks.map((w) => (
+                <div className={`pm-dd-opt multi ${w === week ? "on" : ""}`} key={w}>
+                  <button type="button" className="pm-dd-optmain" onClick={() => onPickWeek(w)}><span className="pm-dd-opt-l">{weekDisplay(w)}</span>{w === week && <span className="pm-dd-ck">✓</span>}</button>
+                  <button type="button" className="pm-dd-rm" title="Remove week" onClick={() => onRemoveWeek(w)}>✕</button>
+                </div>
+              ))}
+              <div className="pm-dd-add"><input value={draft} placeholder="New week, e.g. Sept 3" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} /><button type="button" onClick={add}>Add</button></div>
             </div>
-          ))}
-          <div className="pm-dd-add"><input value={draft} placeholder="New week, e.g. Sept 3" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} /><button type="button" onClick={add}>Add</button></div>
-        </div>
-      </>}
-    </div>
-  );
-}
-function ViewDropdown({ value, options, onPick, onReorder }: { value: View; options: [View, string][]; onPick: (v: View) => void; onReorder: (keys: View[]) => void }) {
-  const m = useMenu(170); const [drag, setDrag] = useState<View | null>(null);
-  const cur = options.find(([v]) => v === value);
-  const drop = (target: View) => { if (!drag || drag === target) return; const keys = options.map(([v]) => v); const from = keys.indexOf(drag), to = keys.indexOf(target); keys.splice(to, 0, keys.splice(from, 1)[0]); onReorder(keys); setDrag(null); };
-  return (
-    <div className="pm-dd">
-      <button ref={m.btnRef} type="button" className="pm-dd-btn" onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
-        <span className="pm-dd-val">{cur ? cur[1] : "View"}</span><Chevron />
-      </button>
-      {m.open && m.pos && <>
-        <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
-        <div className="pm-dd-menu" style={{ top: m.pos.top, left: m.pos.left, minWidth: m.pos.width }} onClick={(e) => e.stopPropagation()}>
-          {options.map(([v, label]) => (
-            <div key={v} className={`pm-dd-opt multi ${v === value ? "on" : ""} ${drag === v ? "dragging" : ""}`} draggable onDragStart={() => setDrag(v)} onDragEnd={() => setDrag(null)} onDragOver={(e) => e.preventDefault()} onDrop={() => drop(v)}>
-              <span className="pm-vgrip" title="Drag to reorder">⠿</span>
-              <button type="button" className="pm-dd-optmain" onClick={() => { onPick(v); m.close(); }}><span className="pm-dd-opt-l">{label}</span>{v === value && <span className="pm-dd-ck">✓</span>}</button>
-            </div>
-          ))}
+          )}
+          <div className="pm-filt-sec">
+            <div className="pm-filt-h">Sort by</div>
+            {SORTS.map(([v, l]) => <button key={v} type="button" className={`pm-dd-opt ${v === sort ? "on" : ""}`} onClick={() => onSort(v)}><span className="pm-dd-opt-l">{l}</span>{v === sort && <span className="pm-dd-ck">✓</span>}</button>)}
+          </div>
         </div>
       </>}
     </div>
@@ -289,8 +290,8 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
             {tasks.map((t) => { const pc = prioOf(t.priority)?.color; return (
               <tr key={t.id} className={pc ? "rp" : ""} style={pc ? ({ ["--rc" as string]: pc } as React.CSSProperties) : undefined}>
                 <td><Select value={t.clientSlug ?? ""} options={clientOpts} size="lg" onChange={(v) => onUpdate(t.id, { moveToSlug: v })} /></td>
-                <td><input className="pm-cellin" defaultValue={t.title} onBlur={(e) => { if (e.target.value !== t.title) onUpdate(t.id, { title: e.target.value }); }} /></td>
-                <td><MultiPeople value={t.owner || ""} people={h.people} map={h.map} onChange={(v) => onUpdate(t.id, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
+                <td><AutoTextarea defaultValue={t.title} onCommit={(v) => { if (v !== t.title && v.trim()) onUpdate(t.id, { title: v }); }} /></td>
+                <td><MultiPeople value={t.owner || ""} people={h.people} map={h.map} stack onChange={(v) => onUpdate(t.id, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
                 <td><Select value={t.priority || ""} options={prioOpts} placeholder="None" tone={prioOf(t.priority)?.color} onChange={(v) => onUpdate(t.id, { priority: v })} /></td>
                 <td><Select value={t.stage} options={stageOpts} tone={stageOf(t.stage).color} onChange={(v) => onUpdate(t.id, { stage: v })} /></td>
                 <td><AutoTextarea defaultValue={t.context || ""} onCommit={(v) => { if ((v || null) !== (t.context || null)) onUpdate(t.id, { context: v }); }} /></td>
@@ -303,7 +304,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
               <tr key={d.key} className={`pm-draftrow ${pc ? "rp" : ""}`} style={pc ? ({ ["--rc" as string]: pc } as React.CSSProperties) : undefined}>
                 <td><Select value={d.clientSlug} options={clientOpts} size="lg" onChange={(v) => setDraft(d.key, { clientSlug: v })} /></td>
                 <td><input className="pm-cellin" autoFocus value={d.title} placeholder="New task…" onChange={(e) => setDraft(d.key, { title: e.target.value })} onBlur={() => commit(d.key)} onKeyDown={(e) => { if (e.key === "Enter") commit(d.key); }} /></td>
-                <td><MultiPeople value={d.owner} people={h.people} map={h.map} onChange={(v) => setDraft(d.key, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
+                <td><MultiPeople value={d.owner} people={h.people} map={h.map} stack onChange={(v) => setDraft(d.key, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
                 <td><Select value={d.priority} options={prioOpts} placeholder="None" tone={prioOf(d.priority)?.color} onChange={(v) => setDraft(d.key, { priority: v })} /></td>
                 <td><Select value={d.stage} options={stageOpts} tone={stageOf(d.stage).color} onChange={(v) => setDraft(d.key, { stage: v })} /></td>
                 <td><AutoTextarea defaultValue={d.context} onCommit={(v) => setDraft(d.key, { context: v })} /></td>
@@ -461,9 +462,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, onCreate, on
   return (
     <>
       <div className="pm-boardbar">
-        <div className="pm-viewdd"><span>Sort</span><Select value={sort} options={SORTS.map(([v, l]) => ({ value: v, label: l }))} onChange={(v) => setSort(v as SortKey)} minWidth={150} /></div>
-        {multi && <div className="pm-viewdd"><span>When</span><WhenDropdown week={week} weeks={allWeeks} onPick={setWeek} onAddWeek={addWeek} onRemoveWeek={removeWeek} /></div>}
-        <div className="pm-viewdd"><span>View</span><ViewDropdown value={view} options={views} onPick={pickView} onReorder={reorderViews} /></div>
+        <FiltersPanel view={view} views={views} onPickView={pickView} onReorderViews={reorderViews} sort={sort} onSort={setSort} multi={multi} week={week} weeks={allWeeks} onPickWeek={setWeek} onAddWeek={addWeek} onRemoveWeek={removeWeek} />
       </div>
       {view === "kanban" && <KanbanView byStage={byStage} h={h} />}
       {view === "byclient" && multi && <ByClientView tasks={visible} h={h} />}
