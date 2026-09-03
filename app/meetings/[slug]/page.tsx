@@ -237,6 +237,8 @@ export default function ClientMeetingsPage() {
   const [history, setHistory] = useState<Record<string, History>>({});
   const [error, setError] = useState("");
   const autoEnriched = useRef<Set<string>>(new Set());
+  // Meetings with an auto-enrich request in flight right now — the only time the "Enriching…" chip shows.
+  const [autoEnrichingIds, setAutoEnrichingIds] = useState<Set<string>>(new Set());
   // Captured once so the "upcoming" count is computed from a stable clock rather than reading the wall clock
   // during render (which the compiler rejects as impure); a minute's drift never matters for a count.
   const [now] = useState(() => Date.now());
@@ -260,15 +262,22 @@ export default function ClientMeetingsPage() {
   // enrichment has not landed yet) is enriched the moment it is on screen, once. The ref guards against
   // re-firing for the same meeting when state updates.
   useEffect(() => {
-    const pending = meetings.filter((m) => m.inviteeLinkedin && !isEnriched(m) && !autoEnriched.current.has(m.id));
+    // Any un-enriched meeting is enriched once, whether or not it has a LinkedIn URL — `enrichMeeting`
+    // matches by name + company / email against a lead we already contacted, so a booked meeting with
+    // only an email (e.g. a manual backfill) still gets that lead's enrichment and campaign.
+    const pending = meetings.filter((m) => !isEnriched(m) && !autoEnriched.current.has(m.id));
     if (!pending.length) return;
     pending.forEach((m) => autoEnriched.current.add(m.id));
+    setAutoEnrichingIds((was) => { const next = new Set(was); pending.forEach((m) => next.add(m.id)); return next; });
     void Promise.all(pending.map(async (m) => {
       try {
         const response = await fetch(`/api/meetings/enrich`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: m.id }) });
         const payload = await response.json().catch(() => ({}));
         if (response.ok && payload.meeting) setMeetings((list) => list.map((x) => (x.id === m.id ? payload.meeting : x)));
       } catch { /* leave the meeting as-is */ }
+      // Whatever the outcome, the attempt is done — clear the chip so a meeting that has no lead to match
+      // (no enrichment possible) stops reading as "Enriching…" forever.
+      finally { setAutoEnrichingIds((was) => { const next = new Set(was); next.delete(m.id); return next; }); }
     }));
   }, [meetings]);
 
@@ -406,7 +415,7 @@ export default function ClientMeetingsPage() {
                           <div className="mtg-meta">
                             {meeting.campaign && <span className="mtg-chip">{meeting.campaign}</span>}
                             {meeting.host && <span>with {meeting.host}</span>}
-                            {!enriched && <span className="mtg-chip-warn">Enriching…</span>}
+                            {!enriched && autoEnrichingIds.has(meeting.id) && <span className="mtg-chip-warn">Enriching…</span>}
                           </div>
                         </div>
                         <div className="mtg-right">
