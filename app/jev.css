@@ -318,3 +318,8 @@
 .jev-keep label { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted-2); font-weight: 700; }
 .jev-keep .jev-input { flex: 1; min-width: 220px; }
 .jev-keep-hit { color: var(--green) !important; }
+
+.jev-review-brief { margin: 12px 0 0; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
+.jev-review-brief summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.jev-review-brief textarea { width: 100%; margin-top: 8px; box-sizing: border-box; }
+.jev-review-brief button { margin-top: 8px; }

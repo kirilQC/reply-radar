@@ -64,7 +64,7 @@ type Kind = "must" | "exclude" | "signal" | "key";
 type Question = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: Kind; neutral?: string[] };
 const KIND_LABEL: Record<Kind, string> = { must: "Must-have", key: "Key", exclude: "Exclusion", signal: "Signal" };
 const kindOf = (q: Question): Kind => q.kind ?? (q.type === "noul" && q.pass === false ? "exclude" : "must");
-type QuestionSet = { questions: Question[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; keepTerms?: string[]; icp?: Icp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
+type QuestionSet = { questions: Question[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; keepTerms?: string[]; icp?: Icp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string; reviewBrief?: string };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Person = { name: string; title: string; company: string; linkedin: string };
 type PlanColumn = { header: string; idx: number; role: string; why?: string; index?: number; field?: string; overridden?: boolean; filled: number };
@@ -251,6 +251,18 @@ function KeepTermsField({ value, disabled, onSave }: { value: string[]; disabled
       <input id="jev-keep-terms" className="jev-input" value={text} onChange={(e) => setText(e.target.value)} disabled={disabled} placeholder='e.g. MA, Medicare Advantage, MA-PD' />
       {changed && <button className="secondary-button" onClick={() => onSave(text.split(",").map((t) => t.trim()).filter(Boolean))} disabled={disabled}>Save</button>}
     </div>
+  );
+}
+
+/** What Claude's review judges by, on top of the saved criteria — written after seeing a run's results. */
+function ReviewBriefField({ value, disabled, onSave }: { value: string; disabled: boolean; onSave: (text: string) => void }) {
+  const [text, setText] = useState(value);
+  return (
+    <details className="jev-review-brief" open={!value}>
+      <summary>Claude review instructions{value ? " · saved" : ""}</summary>
+      <textarea className="jev-input jev-describe-text" rows={8} value={text} onChange={(e) => setText(e.target.value)} disabled={disabled} placeholder="e.g. Sales and business development roles are not a fit, even on Medicare products." />
+      {text.trim() !== value.trim() && <button className="secondary-button" onClick={() => onSave(text.trim())} disabled={disabled}>Save</button>}
+    </details>
   );
 }
 
@@ -587,7 +599,8 @@ export default function JevClientPage() {
     // cap and the 60s ceiling; the server still halves a batch whose answer comes back cut off.
     for (let k = 0; k < rows.length; k += 8) batches.push(rows.slice(k, k + 8));
     let next = 0;
-    await Promise.all(Array.from({ length: Math.min(3, batches.length) }, async () => {
+    // Six at a time: a 5,000-contact review at three took close to an hour; 429s are held and retried below.
+    await Promise.all(Array.from({ length: Math.min(6, batches.length) }, async () => {
       while (next < batches.length) {
         const batch = batches[next++];
         for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -654,6 +667,20 @@ export default function JevClientPage() {
     finally { setBusy(""); }
   };
 
+  /** Review instructions change only what Claude is told, so the run's results stay. */
+  const saveReviewBrief = async (reviewBrief: string) => {
+    if (!set) return;
+    setBusy("saving");
+    try {
+      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, set: { ...set, reviewBrief } }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
+      setSet(payload.set);
+      setNotice({ kind: "ok", text: reviewBrief ? "Review instructions saved — Claude's next review follows them." : "Review instructions cleared." });
+    } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
+    finally { setBusy(""); }
+  };
+
   /** Switch how answers become a verdict. Verdicts are computed at run time, so the current run is cleared. */
   const setScoring = async (scoring: "gates" | "weighted") => {
     if (!set || set.scoring === scoring || (scoring === "gates" && !set.scoring)) return;
@@ -698,8 +725,10 @@ export default function JevClientPage() {
             const i = Number(o.i); const prev = results.current.get(i);
             if (!prev) continue;
             // The team's always-keep rule outranks Claude: a matched row Claude would drop stays a Maybe, with
-            // Claude's view recorded beside it.
-            const protectedRow = Boolean(prev.keep) && o.decision === "drop";
+            // Claude's view recorded beside it. Review instructions are the exception — written after seeing the
+            // results ("sales roles are out"), they are the newer rule, and a Medicare sales director's headline
+            // says "Medicare Advantage", so protection would keep exactly the rows they exist to remove.
+            const protectedRow = Boolean(prev.keep) && o.decision === "drop" && !set?.reviewBrief;
             if (o.decision === "keep") kept += 1; else if (!protectedRow) dropped += 1;
             results.current.set(i, { ...prev, status: o.decision === "keep" ? "good" : protectedRow ? "borderline" : "bad", review: { kind: o.decision, confidence: o.confidence, reason: protectedRow ? `${o.reason} (kept anyway: always-keep match)` : o.reason, jevLabel: which === "good" ? "Good fit" : "Maybe" } });
           }
@@ -1157,6 +1186,7 @@ export default function JevClientPage() {
                   </div>
                   <StageCards stats={stats.current} mode={file.mode} running={running} rows={file.rows.length} llmModel={enrichCfg?.structureModel ?? "openai/gpt-6-luna"} enrichMode={enrichMode} />
                   {runError && <div className="jev-banner is-error">{runError}</div>}
+                  {finished && file.mode === "contacts" && set && <ReviewBriefField key={`rb-${set.updatedAt ?? ""}`} value={set.reviewBrief ?? ""} disabled={Boolean(review) || Boolean(busy)} onSave={(t) => void saveReviewBrief(t)} />}
                   {finished && file.mode === "contacts" && (
                     <div className="jev-downloads">
                       <button className="primary-button" onClick={exportOriginal}>Cleaned list, original columns ({cleanedCount.toLocaleString()})</button>

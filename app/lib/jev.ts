@@ -27,7 +27,7 @@ import { CONTACT_REVIEW_SCHEMA, REVIEW_SCHEMA, contactReviewItem, parseContactRe
 type Row = Record<string, unknown>;
 export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: "must" | "exclude" | "signal" | "key"; neutral?: string[] };
 export type JevIcp = { titles: string[]; responsibilities: string; sizeMin: number | null; sizeMax: number | null; exclusions: string };
-export type JevQuestionSet = { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; keepTerms?: string[]; icp?: JevIcp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
+export type JevQuestionSet = { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; keepTerms?: string[]; icp?: JevIcp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string; reviewBrief?: string };
 export type JevTag = { key: string; label: string; description: string };
 export type JevTagSet = { instructions: string; tags: JevTag[]; minConfidence: number; source?: string; updatedAt?: string; brief?: string };
 export type JevAnswer = { type: string; noul?: number; choice?: string; probabilities?: Record<string, number>; confidence?: number };
@@ -120,6 +120,7 @@ export async function loadQuestionSet(slug: string): Promise<JevQuestionSet | nu
     brainFolder: text(meta.brainFolder) || undefined,
     brainDocuments: Array.isArray(meta.brainDocuments) ? (meta.brainDocuments as unknown[]).map(String) : undefined,
     brief: text(meta.brief) || undefined,
+    reviewBrief: text(meta.reviewBrief) || undefined,
   };
 }
 
@@ -155,6 +156,7 @@ export async function saveQuestionSet(slug: string, input: unknown, source = "ma
     ...(text(meta.brainFolder) ? { brainFolder: text(meta.brainFolder) } : {}),
     ...(Array.isArray(meta.brainDocuments) ? { brainDocuments: (meta.brainDocuments as unknown[]).map(String) } : {}),
     ...(text(meta.brief) ? { brief: text(meta.brief).slice(0, MAX_BRIEF_CHARS) } : {}),
+    ...(text(meta.reviewBrief) ? { reviewBrief: text(meta.reviewBrief).slice(0, MAX_PROMPT_BRIEF_CHARS) } : {}),
   };
   await writeConfig(questionSetKey(slug), set);
   return { set, problems };
@@ -325,7 +327,7 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
   if (!questions.length) return { ok: false, error: "The build came back without a usable question. Try again.", problems: parsed.problems };
   // A rebuild keeps the team's scoring choice; it is a setting about the client, not about one prompt.
   const previous = await loadQuestionSet(slug).catch(() => null);
-  const { set, problems } = await saveQuestionSet(slug, { ...parsed, questions, icp, brief, scoring: previous?.scoring ?? "gates", keepTerms: previous?.keepTerms, brainFolder: brain.folder, brainDocuments: brain.documents }, "description");
+  const { set, problems } = await saveQuestionSet(slug, { ...parsed, questions, icp, brief, scoring: previous?.scoring ?? "gates", keepTerms: previous?.keepTerms, reviewBrief: previous?.reviewBrief, brainFolder: brain.folder, brainDocuments: brain.documents }, "description");
   return { ok: true, set, problems: [...parsed.problems, ...problems] };
 }
 
@@ -614,6 +616,9 @@ export async function reviewContacts(slug: string, items: Array<{ i: number; pro
   const criteria = [
     set.brief ? `THE CLIENT'S CRITERIA, AS THE TEAM WROTE THEM:\n${set.brief.slice(0, MAX_PROMPT_BRIEF_CHARS)}` : "",
     `THE QUESTIONS JEV WAS ASKED:\n${set.questions.map((q) => `- ${q.kind === "key" ? "[key] " : q.kind === "must" ? "[must-have] " : ""}${q.label}: ${q.instructions}`).join("\n")}`,
+    // Written after a run, from what the team saw in its results ("sales roles are not a fit"), so it is the
+    // most current word on the criteria and wins wherever it disagrees with the brief the questions came from.
+    set.reviewBrief ? `REVIEW INSTRUCTIONS FROM THE TEAM — these override everything above wherever they disagree:\n${set.reviewBrief}` : "",
   ].filter(Boolean).join("\n\n");
   const contacts = batch.map((it) => JSON.stringify(contactReviewItem(it.i, it.profile, set.questions, it.scores ?? {}, it.keep))).join("\n");
   try {
