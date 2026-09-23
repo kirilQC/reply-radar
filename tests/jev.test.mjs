@@ -617,3 +617,21 @@ test("a 'no' answer is never counted as can't-tell, even when the writer lists i
   const { questions } = normalizeQuestionSet({ questions: [{ label: "Current role", type: "choice", instructions: "?", criteria: { yes: "y", no: "n", unclear: "?" }, pass: ["yes"], neutral: ["no", "unclear"] }] });
   assert.deepEqual(questions[0].neutral, ["unclear"]);
 });
+
+test("AI Ark history: every past role, the 'Bottom' oldest job (not doubled), and publication titles reach Jev", () => {
+  const cols = ["Full Name", "Title", "1st Experience Title", "1st Experience Company", "1st Experience is Current"];
+  for (let n = 2; n <= 12; n += 1) cols.push(`${n}th Experience Title`, `${n}th Experience Company`, `${n}th Experience is Current`);
+  cols.push("Bottom Experience Title", "Bottom Experience Company", "Bottom Experience is Current", "1st Publication Title");
+  const cells = ["Ada", "Director", "Director", "Acme", "true"];
+  for (let n = 2; n <= 12; n += 1) cells.push(`Role ${n}`, "Co", "false");
+  cells.push("Medicaid Eligibility Specialist", "AHCCCS", "false", "Reducing D-SNP disenrollment");
+  const plan = planColumns(cols, [cells]);
+  const p = buildProfile(cells, plan);
+  assert.equal(p.past_roles.length, 12);
+  assert.equal(p.past_roles.at(-1).title, "Medicaid Eligibility Specialist");
+  assert.equal(p.other["1st Publication Title"], "Reducing D-SNP disenrollment");
+  // On a short career "Bottom" repeats the last numbered job; it is sent once.
+  const short = ["Ada", "Director", "Director", "Acme", "true", "Analyst", "Humana", "false", "Analyst", "Humana", "false"];
+  const shortCols = ["Full Name", "Title", "1st Experience Title", "1st Experience Company", "1st Experience is Current", "2nd Experience Title", "2nd Experience Company", "2nd Experience is Current", "Bottom Experience Title", "Bottom Experience Company", "Bottom Experience is Current"];
+  assert.equal(buildProfile(short, planColumns(shortCols, [short])).past_roles.length, 1);
+});

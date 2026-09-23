@@ -182,7 +182,9 @@ export const COLUMN_ROLES = {
 const IDENTITY_ROLES = new Set(["name", "first_name", "last_name", "linkedin", "website", "company_linkedin"]);
 
 const MAX_CURRENT_ROLES = 4;
-const MAX_PAST_ROLES = 8;
+// Every job AI Ark exports (15 numbered + the oldest). Eight dropped the older half of long careers, and a
+// generic current "Director" is found through exactly that history — a risk-adjustment role ten years back.
+const MAX_PAST_ROLES = 16;
 const ROLE_ABOUT = 1_200;
 const MAX_OTHER_COLUMNS = 8;
 const OTHER_BUDGET = 1_500;
@@ -222,7 +224,12 @@ function experienceField(rest) {
 /** The role a header implies on its words alone, or "" when the words do not say. */
 function roleFromHeader(header) {
   const w = words(header);
-  if (has(w, /\sbottom\s/)) return { role: "ignore", why: "oldest job" };
+  // AI Ark's "Bottom Experience" is the oldest job. It repeats the last numbered one on short careers (the
+  // grouping drops that copy) but is the only record of it on careers longer than fifteen jobs.
+  const bottom = has(w, /\sbottom\s/) ? words(header.replace(/bottom/i, "999th")).match(EXPERIENCE_RE) : null;
+  if (bottom) { const field = experienceField(bottom[4]); return field ? { role: "experience", index: 999, field } : { role: "ignore", why: "job-history detail" }; }
+  // Publication titles are the person's own words about their work ("Improving Stars ratings in MA plans").
+  if (has(w, /\spublication(s)?\s(title|name|summary|description)\s/)) return { role: "other" };
   const exp = w.match(EXPERIENCE_RE);
   if (exp && (exp[1] || exp[3])) {
     const field = experienceField(exp[4]);
@@ -369,13 +376,20 @@ function historyGroups(cells, plan) {
     if (v && !g[c.field]) g[c.field] = v;
     groups.set(c.index, g);
   }
-  return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([, g]) => g).filter((g) => g.title || g.company);
+  const seen = new Set();
+  return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([, g]) => g).filter((g) => {
+    if (!g.title && !g.company) return false;
+    const key = `${g.title ?? ""}|${g.company ?? ""}|${g.start ?? ""}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**
  * The most recent jobs a person has LEFT, with what they did there. A generic current title ("Director") says
  * little, and the connection a client cares about is often in the jobs before it — eight years at a Medicare
- * Advantage plan, a risk-adjustment role two jobs ago. Capped at four, most recent first.
+ * Advantage plan, a risk-adjustment role two jobs ago. Every one is kept, most recent first.
  */
 function pastRoles(cells, plan) {
   const ordered = historyGroups(cells, plan);
