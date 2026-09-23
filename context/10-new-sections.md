@@ -112,6 +112,20 @@ endpoint — it does not serve Jev.
   questions as a cached block; each maybe comes back keep/drop with confidence and a cited reason and the row
   moves to Good/Bad with a CLAUDE badge. Downloads add "Good + maybe". Live on 113 AI Ark contacts with the Vitalic
   Medicare prompt: 4 maybes → 3 kept (senior-living employer, past elder-care role), 1 dropped, 20s, $0.03.
+- **Nothing trimmed on the way to Jev.** Field caps raised so a real AI Ark row arrives whole: About 3,000 chars,
+  every role description 1,200, up to 8 past roles, skills 600 (the old 600/280/240/4 caps cut a Medicare
+  Advantage mention out of an About section). AI Ark lookups now carry current- and past-role descriptions too.
+  A typical row is ~1,060 Jev tokens.
+- **Always-keep terms** (`keepTerms` on the question set; field under the scoring switch): checked in code over
+  every raw column of the row (`findKeepTerm`), not by Jev. Short all-caps terms match only as whole case-sensitive
+  words; location/address/education/name/URL/id columns are skipped; ", MA" before a zip/punctuation/end and
+  "MA in/from" are read as a state or degree. A match turns Bad into Maybe (`applyKeepTerm`) and Claude's review
+  cannot drop it.
+- **In weighted mode a `must` question is still a hard line** (e.g. "current title is director or above"); every
+  other question is an equal vote.
+- **Export carries every decision:** per question the answer Jev gave (yes-probability, or chosen option +
+  runner-up), the fit %, Jev's confidence; plus the always-keep match, Claude's review, and the exact profile JSON Jev
+  saw. Company exports add Jev's top 5 tags.
 - **Contact lists up to 30,000 rows.** A 20k-row, 250-column AI Ark export (125MB) loads in 2s at ~280MB heap and
   runs at ~300 rows/s against a stub (real Jev ~80–120/s).
 - **Structured contact ICP** (`icp` on the question set; `app/jev/[slug]/icp.tsx`): a pool of target titles

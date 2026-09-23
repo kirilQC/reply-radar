@@ -166,9 +166,9 @@ function trimAiArkPerson(person: Record<string, unknown>): Record<string, unknow
     location: p.location,
     link: p.link,
     department: p.department,
-    position_groups: (p.position_groups ?? []).slice(0, 12).map((g) => ({
+    position_groups: (p.position_groups ?? []).slice(0, 15).map((g) => ({
       company: { name: (g.company as { name?: string } | undefined)?.name },
-      profile_positions: ((g.profile_positions as Array<Record<string, unknown>> | undefined) ?? []).map((pos) => ({ company: pos.company, title: pos.title, employment_type: pos.employment_type, date: pos.date })),
+      profile_positions: ((g.profile_positions as Array<Record<string, unknown>> | undefined) ?? []).map((pos) => ({ company: pos.company, title: pos.title, employment_type: pos.employment_type, date: pos.date, description: pos.description })),
     })),
     company: { summary: { name: summary.name, description: summary.description, industry: summary.industry, staff: summary.staff, type: summary.type }, keywords: p.company?.keywords },
   };

@@ -20,6 +20,9 @@ import {
   tagVerdict,
   toTagWire,
   addTags,
+  applyKeepTerm,
+  compactAnswers,
+  findKeepTerm,
   contactReviewItem,
   parseContactReview,
   mergeProposals,
@@ -446,7 +449,7 @@ test("Claude review: placements are held to the tag set, new tags are merged acr
 
 test("weighted scoring: every question counts the same, one fail never eliminates, the middle is maybe", () => {
   const { questions, scoring } = normalizeQuestionSet({ scoring: "weighted", questions: [
-    { label: "Any Medicare connection", type: "noul", instructions: "?", kind: "must" },
+    { label: "Any Medicare connection", type: "noul", instructions: "?", kind: "signal" },
     { label: "Employer runs Medicare business", type: "noul", instructions: "?", kind: "signal" },
     { label: "Own role handles it", type: "noul", instructions: "?", kind: "signal" },
     { label: "Outside healthcare", type: "noul", instructions: "?", kind: "exclude", pass: false },
@@ -481,4 +484,39 @@ test("contact review: each maybe gets keep or drop with a reason, nothing guesse
   assert.deepEqual(item, { id: 3, profile: { listed_title: "Director" }, jev_scores: { "Any Medicare connection": "52%" } });
   const out = parseContactReview({ results: [{ id: 3, decision: "keep", confidence: "high", reason: "Six years at Humana in risk adjustment" }, { id: 4, decision: "maybe", confidence: "low", reason: "?" }, { id: 9, decision: "drop" }] }, [3, 4]);
   assert.deepEqual([...out.entries()], [[3, { decision: "keep", confidence: "high", reason: "Six years at Humana in risk adjustment" }]]);
+});
+
+test("weighted: a question marked must-have is still a hard line (director and up)", () => {
+  const { questions } = normalizeQuestionSet({ scoring: "weighted", questions: [
+    { label: "Director or above", type: "noul", instructions: "?", kind: "must" },
+    { label: "Medicare connection", type: "noul", instructions: "?", kind: "signal" },
+  ] });
+  const t = { keep: 0.6, drop: 0.35 };
+  assert.equal(verdictFor(questions, { director_or_above: { noul: 0.1 }, medicare_connection: { noul: 0.99 } }, t, { scoring: "weighted" }).reason, "Failed: Director or above");
+  assert.equal(verdictFor(questions, { director_or_above: { noul: 0.5 }, medicare_connection: { noul: 0.9 } }, t, { scoring: "weighted" }).verdict, "good");
+});
+
+test("always-keep terms: 'MA' only as a real word, never in locations, degrees or inside other words", () => {
+  const headers = ["Headline", "Summary", "Location", "1st Education Degree", "Company Product and Services", "Full Name", "Skills"];
+  const find = (row) => findKeepTerm(row, headers, null, "MA, Medicare Advantage, MA-PD");
+  assert.equal(find(["Manufacturer of devices", "Email me · Management consulting", "Boston, MA 02110", "MA in Psychology", "", "Jane Doe, MA", "Massage"]), null);
+  assert.equal(find(["", "Lives in Boston, MA. Earned my MA in counseling.", "", "", "", "", ""]), null);
+  assert.equal(find(["Jane Doe, MA, LPC", "", "", "", "", "", ""]), null);
+  assert.deepEqual(find(["Director, MA Operations", "", "", "", "", "", ""]), { term: "MA", column: "Headline", snippet: "Director, MA Operations" });
+  assert.equal(find(["", "Led our MA plan growth", "", "", "", "", ""]).column, "Summary");
+  assert.equal(find(["", "", "", "", "Stars ratings for medicare advantage plans", "", ""]).term, "Medicare Advantage");
+  assert.deepEqual(applyKeepTerm("bad", "Failed: Director or above", { term: "MA", column: "Summary" }), { verdict: "borderline", reason: 'Kept: mentions "MA" in Summary (Jev: Failed: Director or above)' });
+  assert.equal(applyKeepTerm("good", "", { term: "MA", column: "Summary" }).verdict, "good");
+  assert.deepEqual(applyKeepTerm("bad", "x", null), { verdict: "bad", reason: "x" });
+});
+
+test("compactAnswers keeps what Jev said for every question", () => {
+  const { questions } = normalizeQuestionSet({ questions: [
+    { label: "Director", type: "noul", instructions: "?" },
+    { label: "Level", type: "choice", instructions: "?", criteria: { exec: "x", director: "y", ic: "z" }, pass: ["exec", "director"] },
+  ] });
+  assert.deepEqual(compactAnswers(questions, { director: { noul: 0.83 }, level: { choice: "director", probabilities: { exec: 0.3, director: 0.65, ic: 0.05 }, confidence: 0.6 } }), {
+    director: { yes: 0.83 },
+    level: { choice: "director", p: 0.65, second: "exec 30%", confidence: 0.6 },
+  });
 });

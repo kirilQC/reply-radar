@@ -182,10 +182,16 @@ export const COLUMN_ROLES = {
 const IDENTITY_ROLES = new Set(["name", "first_name", "last_name", "linkedin", "website", "company_linkedin"]);
 
 const MAX_CURRENT_ROLES = 4;
-const MAX_PAST_ROLES = 4;
+const MAX_PAST_ROLES = 8;
+const ROLE_ABOUT = 1_200;
 const MAX_OTHER_COLUMNS = 8;
 const OTHER_BUDGET = 1_500;
-const CLIP = { title: 160, headline: 220, about: 600, seniority: 40, department: 80, location: 100, skills: 200, company: 120, company_industry: 100, company_employees: 30, company_description: 500, company_products: 250, company_funding: 40, company_revenue: 40, company_location: 100, company_type: 40, company_locations: 20, other: 300 };
+/*
+ * Per-field caps on what Jev is sent. Sized so a real AI Ark row reaches Jev whole: an About section runs to
+ * ~2,300 characters and a single job description past 1,000, and the earlier caps (600 and 240) cut a Medicare
+ * Advantage mention two-thirds of the way through someone's About clean out of the profile.
+ */
+const CLIP = { title: 160, headline: 300, about: 3_000, seniority: 40, department: 80, location: 100, skills: 600, company: 120, company_industry: 100, company_employees: 30, company_description: 500, company_products: 250, company_funding: 40, company_revenue: 40, company_location: 100, company_type: 40, company_locations: 20, other: 300 };
 /** A company list has nothing else to go on, so its descriptive fields get more room than a contact's do. */
 const COMPANY_CLIP = { ...CLIP, company_description: 900, company_products: 400, company_industry: 160 };
 
@@ -338,7 +344,7 @@ function rolesFromJson(text) {
     since: clip(pick(o, ["start", "start_date", "startDate", "starts_at", "from"]), 10),
     end: pick(o, ["end", "end_date", "endDate", "ends_at", "to"]),
     current: o.is_current ?? o.isCurrent ?? o.current,
-    about: clip(pick(o, ["description", "summary", "about"]), 280),
+    about: clip(pick(o, ["description", "summary", "about"]), ROLE_ABOUT),
   })).filter((j) => j.title || j.company);
   const flagged = jobs.some((j) => j.current !== undefined);
   const current = jobs.filter((j) => (flagged ? truthy(j.current) || j.current === true : !j.end || truthy(j.end)));
@@ -374,7 +380,7 @@ function pastRoles(cells, plan) {
   if (plan.experienceHasCurrent) past = ordered.filter((g) => !truthy(g.current));
   else if (plan.experienceHasEnd) past = ordered.filter((g) => String(g.end ?? "").trim() && !truthy(g.end));
   else past = ordered.slice(1);
-  return past.slice(0, MAX_PAST_ROLES).map((g) => prune({ title: clip(g.title, 140), company: clip(g.company, 120), from: clip(g.start, 10), to: clip(g.end, 10), about: clip(g.about, 240) }) ?? {});
+  return past.slice(0, MAX_PAST_ROLES).map((g) => prune({ title: clip(g.title, 140), company: clip(g.company, 120), from: clip(g.start, 10), to: clip(g.end, 10), about: clip(g.about, ROLE_ABOUT) }) ?? {});
 }
 
 function currentRoles(cells, plan) {
@@ -391,7 +397,7 @@ function currentRoles(cells, plan) {
   if (plan.experienceHasCurrent) current = ordered.filter((g) => truthy(g.current));
   else if (plan.experienceHasEnd) current = ordered.filter((g) => !String(g.end ?? "").trim() || truthy(g.end));
   else current = ordered.slice(0, 1);
-  const roles = current.slice(0, MAX_CURRENT_ROLES).map((g) => prune({ title: clip(g.title, 140), company: clip(g.company, 120), since: clip(g.start, 10), about: clip(g.about, 280) }) ?? {});
+  const roles = current.slice(0, MAX_CURRENT_ROLES).map((g) => prune({ title: clip(g.title, 140), company: clip(g.company, 120), since: clip(g.start, 10), about: clip(g.about, ROLE_ABOUT) }) ?? {});
   for (const c of plan.columns) if (c.role === "experience_json" && !roles.length) roles.push(...rolesFromJson(cell(cells, c)));
   return roles;
 }
@@ -638,7 +644,8 @@ export function normalizeQuestionSet(input) {
   if (thresholds.drop >= thresholds.keep) { thresholds.keep = DEFAULT_THRESHOLDS.keep; thresholds.drop = DEFAULT_THRESHOLDS.drop; problems.push("Thresholds reset: the drop line must sit below the keep line"); }
   const icp = normalizeIcp(input?.icp);
   const scoring = SCORING_MODES.includes(input?.scoring) ? input.scoring : "gates";
-  return { questions, thresholds, problems, scoring, ...(icp ? { icp } : {}) };
+  const keepTerms = normalizeKeepTerms(input?.keepTerms);
+  return { questions, thresholds, problems, scoring, ...(keepTerms.length ? { keepTerms } : {}), ...(icp ? { icp } : {}) };
 }
 
 /**
@@ -655,7 +662,8 @@ export const QUESTION_KINDS = ["must", "exclude", "signal"];
  * - `gates`: must-haves and exclusions can drop a contact on their own; signals rank.
  * - `weighted`: every question counts the same and none can drop anyone alone — the average decides, and the
  *   middle band is "maybe", kept for a thinking model or a person to look at. Asked for on a 20k-contact Vitalic
- *   list where a generic title failing one question must not throw the contact away.
+ *   list where a generic title failing one question must not throw the contact away. The single exception is a
+ *   question explicitly marked `must` (e.g. "current title is director or above"), which still drops on a clear fail.
  */
 export const SCORING_MODES = ["gates", "weighted"];
 const kindOf = (q, pass) => (QUESTION_KINDS.includes(q?.kind) ? q.kind : pass === false ? "exclude" : "must");
@@ -1013,6 +1021,100 @@ export function mergeProposals(outcomes) {
   return [...byKey.values()].sort((a, b) => b.rows.length - a.rows.length);
 }
 
+/* ═══ Always-keep terms ═══ */
+
+/**
+ * Terms that keep a row on the list whenever they appear anywhere in it — checked in code across every column,
+ * not by Jev, because Jev reads a trimmed profile and cannot be trusted to notice two letters.
+ *
+ * ── Why acronyms are matched so strictly ─────────────────────────────────────────────────────────
+ * "MA" is the point of the Vitalic run and a trap: it is inside "Manufacturer", "email", "Management"; it is a
+ * state ("Boston, MA 02110"); it is a degree ("MA in Psychology") and a credential ("Jane Doe, MA, LPC"). So a
+ * short all-caps term matches only as a whole, case-sensitive word; location, address, education, name, URL and
+ * id columns are never searched; and ", MA" followed by a zip, punctuation or the end, or "MA in/from", is read as
+ * a state or a degree. Longer terms ("Medicare Advantage") match case-insensitively as whole words.
+ */
+export function normalizeKeepTerms(raw) {
+  const list = Array.isArray(raw) ? raw : String(raw ?? "").split(/[,\n]/);
+  return [...new Set(list.map((t) => String(t).trim()).filter((t) => t && t.length <= 60))].slice(0, 40);
+}
+
+const SKIP_COLUMN = /location|address|street|city|state|country|zip|postal|education|school|degree|grade|university|college|field of study|email|phone|mobile|url|website|domain|linkedin|twitter|facebook|instagram|picture|photo|logo|\bid\b|first name|last name|full name|^name$|birth|followers/i;
+const SKIP_ROLES = new Set(["name", "first_name", "last_name", "linkedin", "website", "company_linkedin", "location", "company_location"]);
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** One compiled matcher per term, with the acronym rules above. Returns the match index in a text, or -1. */
+function termMatcher(term) {
+  const acronym = /^[A-Z0-9][A-Z0-9-]{1,5}$/.test(term);
+  const re = new RegExp(`(?<![A-Za-z0-9])${escapeRe(term)}(?![A-Za-z0-9])`, acronym ? "g" : "gi");
+  return (text) => {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      if (acronym) {
+        const before = text.slice(Math.max(0, m.index - 2), m.index);
+        const after = text.slice(m.index + term.length, m.index + term.length + 8);
+        // ", MA" as a state or credential: followed by a zip, punctuation, a slash or the end.
+        if (/,\s?$/.test(before) && /^(\s*\d{5}|\s*[,.;)|/·]|\s*$)/.test(after)) continue;
+        // "MA in Psychology", "MA from Tufts" — a degree.
+        if (/^\s+(in|from)\b/i.test(after)) continue;
+      }
+      return m.index;
+    }
+    return -1;
+  };
+}
+
+/**
+ * The first always-keep term found anywhere in a row, with the column and a snippet around it, or null. Runs over
+ * the raw cells — every column the export has, including the ones Jev never sees.
+ */
+export function findKeepTerm(cells, headers, plan, terms) {
+  const list = normalizeKeepTerms(terms);
+  if (!list.length) return null;
+  const matchers = list.map((t) => [t, termMatcher(t)]);
+  const roleOf = new Map((plan?.columns ?? []).map((c) => [c.idx, c.role]));
+  for (let idx = 0; idx < headers.length; idx += 1) {
+    const header = headers[idx];
+    if (SKIP_COLUMN.test(header) || SKIP_ROLES.has(roleOf.get(idx))) continue;
+    const text = String((Array.isArray(cells) ? cells[idx] : cells?.[header]) ?? "");
+    if (!text) continue;
+    for (const [term, match] of matchers) {
+      const at = match(text);
+      if (at >= 0) {
+        const start = Math.max(0, at - 50);
+        return { term, column: header, snippet: `${start ? "…" : ""}${text.slice(start, at + term.length + 50).replace(/\s+/g, " ").trim()}${at + term.length + 50 < text.length ? "…" : ""}` };
+      }
+    }
+  }
+  return null;
+}
+
+/** A row that mentions an always-keep term is never dropped: a Bad verdict becomes Maybe, and says why. */
+export function applyKeepTerm(verdict, reason, match) {
+  if (!match) return { verdict, reason };
+  const why = `Kept: mentions "${match.term}" in ${match.column}`;
+  if (verdict === "bad") return { verdict: "borderline", reason: `${why} (Jev: ${reason})` };
+  return { verdict, reason: reason ? `${reason} · ${why}` : why };
+}
+
+/**
+ * Everything Jev answered for one row, compact enough to stream and to export: for a yes/no question the
+ * probability of "yes"; for a choice the option it picked, that option's probability, the runner-up, and Jev's
+ * confidence in the whole distribution.
+ */
+export function compactAnswers(questions, answers) {
+  const out = {};
+  for (const q of Array.isArray(questions) ? questions : []) {
+    const a = answers?.[q.key];
+    if (!a) continue;
+    if (q.type === "noul") { const p = Number(a.noul ?? a.probability); if (Number.isFinite(p)) out[q.key] = { yes: p }; continue; }
+    const ranked = Object.entries(a.probabilities ?? {}).map(([k, v]) => [k, Number(v) || 0]).sort((x, y) => y[1] - x[1]);
+    out[q.key] = prune({ choice: ranked[0]?.[0] ?? a.choice, p: ranked[0]?.[1], second: ranked[1] && ranked[1][1] > 0.01 ? `${ranked[1][0]} ${Math.round(ranked[1][1] * 100)}%` : undefined, confidence: Number.isFinite(Number(a.confidence)) ? Number(a.confidence) : undefined }) ?? {};
+  }
+  return out;
+}
+
 /* ═══ Claude review of maybe contacts ═══ */
 
 /** Strict schema for Claude's call on each maybe contact: keep or drop, how sure, and why. */
@@ -1029,14 +1131,14 @@ export const CONTACT_REVIEW_SCHEMA = {
   },
 };
 
-/** One maybe contact as Claude sees it: the profile Jev read, plus Jev's score on each question. */
-export function contactReviewItem(id, profile, questions, scores) {
+/** One maybe contact as Claude sees it: the profile Jev read, Jev's score on each question, and any always-keep hit. */
+export function contactReviewItem(id, profile, questions, scores, keep) {
   const jev = {};
   for (const q of Array.isArray(questions) ? questions : []) {
     const p = scores?.[q.key];
     if (typeof p === "number") jev[q.label] = `${Math.round(p * 100)}%`;
   }
-  return { id, profile: profile ?? {}, jev_scores: jev };
+  return { id, profile: profile ?? {}, jev_scores: jev, ...(keep ? { always_keep_match: `"${keep.term}" in ${keep.column}: ${keep.snippet}` } : {}) };
 }
 
 /** Claude's decisions, one per contact asked about; anything missing or malformed is left undecided, never guessed. */
@@ -1094,14 +1196,18 @@ function weightedVerdict(questions, answers, thresholds, context) {
   const counted = [];
   const unclear = [];
   let missing = null;
+  let failedMust = null;
   for (const q of questions) {
     const answer = answers?.[q.key];
     const p = passProbability(q, answer);
     scores[q.key] = p;
     if (p === null) { missing ??= q; continue; }
     if (neutralShare(q, answer) >= 0.5) { unclear.push(q); continue; }
+    // A must-have is the one hard line even in weighted mode ("director and up only"); everything else is a vote.
+    if (q.kind === "must" && p < thresholds.drop && (!failedMust || p < failedMust.p)) failedMust = { label: q.label, p };
     counted.push({ label: q.label, p });
   }
+  if (failedMust) return { verdict: "bad", reason: `Failed: ${failedMust.label}`, scores, score: counted.reduce((n, c) => n + c.p, 0) / counted.length };
   const size = sizeCheck(context.icp, context.profile);
   if (size) counted.push({ label: "Company size", p: size === "inside" ? 1 : 0 });
   const note = unclear.length ? ` · can't tell: ${unclear.map((q) => q.label).join(", ")}` : "";

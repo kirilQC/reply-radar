@@ -18,7 +18,7 @@
  * what a run decides is always what Supabase holds — never an unsaved edit sitting in a browser tab.
  */
 import { evaluateOne, loadQuestionSet, loadTagSet } from "../../../lib/jev";
-import { tagVerdict, toTagWire, verdictFor } from "../../../../shared/jev.mjs";
+import { compactAnswers, tagVerdict, toTagWire, verdictFor } from "../../../../shared/jev.mjs";
 
 export const maxDuration = 60;
 
@@ -54,7 +54,8 @@ export async function POST(request: Request) {
         const result = await evaluateOne(state, questions);
         if (!result.ok) return { ok: false, error: result.error, status: result.status ?? 0 };
         // The profile goes in too: the company-size range is checked in code against it.
-        return { ok: true, ...verdictFor(questions, result.answers, thresholds, { icp, profile: state, scoring }), tokens: result.tokens ?? 0, cost: result.cost ?? null };
+        // What Jev answered goes back too, so the export can carry every decision, not just the verdict.
+        return { ok: true, ...verdictFor(questions, result.answers, thresholds, { icp, profile: state, scoring }), answers: compactAnswers(questions, result.answers), tokens: result.tokens ?? 0, cost: result.cost ?? null };
       };
     }
   } catch (error) {

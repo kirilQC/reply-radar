@@ -246,12 +246,12 @@ export function mergeStructured(mode, profile, structured) {
     if (Object.keys(fw).length) out.from_website = fw;
     return { profile: out, filled };
   }
-  for (const [k, max] of [["headline", 220], ["about", 600], ["location", 100]]) {
+  for (const [k, max] of [["headline", 300], ["about", 3_000], ["location", 100]]) {
     const v = val(s[k], max);
     if (v && !has(out[k])) { out[k] = v; filled.push(k); }
   }
   const roles = (Array.isArray(s.current_roles) ? s.current_roles : [])
-    .map((r) => ({ title: val(r?.title, 140), company: val(r?.company, 120), since: val(r?.since, 20), employment_type: val(r?.employment_type, 40) }))
+    .map((r) => ({ title: val(r?.title, 140), company: val(r?.company, 120), since: val(r?.since, 20), employment_type: val(r?.employment_type, 40), about: val(r?.about, 1_200) }))
     .filter((r) => r.title || r.company)
     .map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v)));
   if (!roles.length && (val(s.current_title, 140) || val(s.current_company, 120))) {
@@ -294,7 +294,7 @@ export function aiArkFacts(personValue) {
   for (const group of Array.isArray(person.position_groups) ? person.position_groups : []) {
     for (const pos of Array.isArray(group?.profile_positions) ? group.profile_positions : []) {
       if (pos?.date?.end) continue;
-      const role = { title: str(pos?.title, 140), company: str(pos?.company || group?.company?.name, 120), since: str(pos?.date?.start, 10), employment_type: str(pos?.employment_type, 40) };
+      const role = { title: str(pos?.title, 140), company: str(pos?.company || group?.company?.name, 120), since: str(pos?.date?.start, 10), employment_type: str(pos?.employment_type, 40), about: str(pos?.description, 1_200) };
       if (role.title || role.company) roles.push(role);
     }
   }
@@ -302,7 +302,7 @@ export function aiArkFacts(personValue) {
   for (const group of Array.isArray(person.position_groups) ? person.position_groups : []) {
     for (const pos of Array.isArray(group?.profile_positions) ? group.profile_positions : []) {
       if (!pos?.date?.end) continue;
-      const role = { title: str(pos?.title, 140), company: str(pos?.company || group?.company?.name, 120), from: str(pos?.date?.start, 10), to: str(pos?.date?.end, 10), about: str(pos?.description, 240) };
+      const role = { title: str(pos?.title, 140), company: str(pos?.company || group?.company?.name, 120), from: str(pos?.date?.start, 10), to: str(pos?.date?.end, 10), about: str(pos?.description, 1_200) };
       if (role.title || role.company) past.push(role);
     }
   }
@@ -311,12 +311,12 @@ export function aiArkFacts(personValue) {
   const keywords = Array.isArray(person.company?.keywords) ? person.company.keywords.slice(0, 12).join(", ") : "";
   const dept = person.department ?? {};
   return {
-    headline: str(profile.headline, 220),
-    about: str(profile.summary, 600),
+    headline: str(profile.headline, 300),
+    about: str(profile.summary, 3_000),
     current_title: str(profile.title, 140),
     current_company: str(co.name, 120) ?? roles[0]?.company ?? null,
     current_roles: roles.slice(0, 4),
-    past_roles: past.slice(0, 4),
+    past_roles: past.slice(0, 8),
     location: str(person.location?.default ?? person.location?.short, 100),
     seniority: str(dept.seniority, 40),
     department: Array.isArray(dept.departments) && dept.departments.length ? clip(dept.departments.join(", "), 80) : null,

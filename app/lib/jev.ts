@@ -27,7 +27,7 @@ import { CONTACT_REVIEW_SCHEMA, REVIEW_SCHEMA, contactReviewItem, parseContactRe
 type Row = Record<string, unknown>;
 export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: "must" | "exclude" | "signal"; neutral?: string[] };
 export type JevIcp = { titles: string[]; responsibilities: string; sizeMin: number | null; sizeMax: number | null; exclusions: string };
-export type JevQuestionSet = { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; icp?: JevIcp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
+export type JevQuestionSet = { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; keepTerms?: string[]; icp?: JevIcp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
 export type JevTag = { key: string; label: string; description: string };
 export type JevTagSet = { instructions: string; tags: JevTag[]; minConfidence: number; source?: string; updatedAt?: string; brief?: string };
 export type JevAnswer = { type: string; noul?: number; choice?: string; probabilities?: Record<string, number>; confidence?: number };
@@ -107,12 +107,13 @@ export async function loadQuestionSet(slug: string): Promise<JevQuestionSet | nu
   const raw = await readConfig(questionSetKey(slug));
   const value = typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw;
   if (!value || typeof value !== "object") return null;
-  const { questions, thresholds, icp, scoring } = normalizeQuestionSet(value) as { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; icp?: JevIcp; scoring: "gates" | "weighted" };
+  const { questions, thresholds, icp, scoring, keepTerms } = normalizeQuestionSet(value) as { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; icp?: JevIcp; scoring: "gates" | "weighted"; keepTerms?: string[] };
   const meta = value as Row;
   return {
     questions,
     thresholds,
     scoring,
+    ...(keepTerms?.length ? { keepTerms } : {}),
     ...(icp ? { icp } : {}),
     source: text(meta.source) || undefined,
     updatedAt: text(meta.updatedAt) || undefined,
@@ -141,12 +142,13 @@ export async function saveTagSet(slug: string, input: unknown, source = "manual"
 }
 
 export async function saveQuestionSet(slug: string, input: unknown, source = "manual"): Promise<{ set: JevQuestionSet; problems: string[] }> {
-  const { questions, thresholds, problems, icp, scoring } = normalizeQuestionSet(input) as { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; problems: string[]; icp?: JevIcp; scoring: "gates" | "weighted" };
+  const { questions, thresholds, problems, icp, scoring, keepTerms } = normalizeQuestionSet(input) as { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; problems: string[]; icp?: JevIcp; scoring: "gates" | "weighted"; keepTerms?: string[] };
   const meta = (input && typeof input === "object" ? input : {}) as Row;
   const set: JevQuestionSet = {
     questions,
     thresholds,
     scoring,
+    ...(keepTerms?.length ? { keepTerms } : {}),
     ...(icp ? { icp } : {}),
     source,
     updatedAt: new Date().toISOString(),
@@ -320,7 +322,7 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
   if (!questions.length) return { ok: false, error: "The build came back without a usable question. Try again.", problems: parsed.problems };
   // A rebuild keeps the team's scoring choice; it is a setting about the client, not about one prompt.
   const previous = await loadQuestionSet(slug).catch(() => null);
-  const { set, problems } = await saveQuestionSet(slug, { ...parsed, questions, icp, brief, scoring: previous?.scoring ?? "gates", brainFolder: brain.folder, brainDocuments: brain.documents }, "description");
+  const { set, problems } = await saveQuestionSet(slug, { ...parsed, questions, icp, brief, scoring: previous?.scoring ?? "gates", keepTerms: previous?.keepTerms, brainFolder: brain.folder, brainDocuments: brain.documents }, "description");
   return { ok: true, set, problems: [...parsed.problems, ...problems] };
 }
 
@@ -577,9 +579,10 @@ const CONTACT_REVIEW_PROMPT = `You are the second opinion on an outbound contact
 - Read the whole profile: headline, About, current roles, PAST roles and what they did there, and the employer's description. Connect the dots — a generic title at an employer whose business clearly matches, or a past role that shows the relevant background, counts.
 - Follow the client's criteria as written below. When they say to be inclusive, lean to "keep" whenever there is a real, plausible connection; drop only when the profile gives a clear reason the contact does not fit.
 - Jev's per-question scores are shown for context; overrule them when the profile says otherwise.
+- "always_keep_match", when present, is text found in the contact's full record (which can include fields not in the profile shown) matching a term the team always keeps. Treat it as real evidence of the connection.
 - "reason": one sentence citing the specific fact that decided it. "confidence": high, medium or low.`;
 
-export async function reviewContacts(slug: string, items: Array<{ i: number; profile: unknown; scores?: Record<string, number | null> }>): Promise<{ ok: boolean; error?: string; results?: Array<Record<string, unknown>>; cost?: number | null; rateLimited?: boolean }> {
+export async function reviewContacts(slug: string, items: Array<{ i: number; profile: unknown; scores?: Record<string, number | null>; keep?: { term: string; column: string; snippet: string } | null }>): Promise<{ ok: boolean; error?: string; results?: Array<Record<string, unknown>>; cost?: number | null; rateLimited?: boolean }> {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { ok: false, error: "OPENROUTER_API_KEY is not set." };
   const set = await loadQuestionSet(slug);
@@ -590,7 +593,7 @@ export async function reviewContacts(slug: string, items: Array<{ i: number; pro
     set.brief ? `THE CLIENT'S CRITERIA, AS THE TEAM WROTE THEM:\n${set.brief.slice(0, MAX_PROMPT_BRIEF_CHARS)}` : "",
     `THE QUESTIONS JEV WAS ASKED:\n${set.questions.map((q) => `- ${q.label}: ${q.instructions}`).join("\n")}`,
   ].filter(Boolean).join("\n\n");
-  const contacts = batch.map((it) => JSON.stringify(contactReviewItem(it.i, it.profile, set.questions, it.scores ?? {}))).join("\n");
+  const contacts = batch.map((it) => JSON.stringify(contactReviewItem(it.i, it.profile, set.questions, it.scores ?? {}, it.keep))).join("\n");
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",

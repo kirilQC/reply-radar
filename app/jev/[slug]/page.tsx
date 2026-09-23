@@ -34,6 +34,8 @@ import {
   MAX_COMPANY_ROWS,
   MAX_ROWS,
   addTags,
+  applyKeepTerm,
+  findKeepTerm,
   mergeProposals,
   buildCompanyProfile,
   buildProfile,
@@ -61,7 +63,7 @@ type Kind = "must" | "exclude" | "signal";
 type Question = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: Kind; neutral?: string[] };
 const KIND_LABEL: Record<Kind, string> = { must: "Must-have", exclude: "Exclusion", signal: "Signal" };
 const kindOf = (q: Question): Kind => q.kind ?? (q.type === "noul" && q.pass === false ? "exclude" : "must");
-type QuestionSet = { questions: Question[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; icp?: Icp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
+type QuestionSet = { questions: Question[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; keepTerms?: string[]; icp?: Icp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Person = { name: string; title: string; company: string; linkedin: string };
 type PlanColumn = { header: string; idx: number; role: string; why?: string; index?: number; field?: string; overridden?: boolean; filled: number };
@@ -82,7 +84,9 @@ type Mode = "contacts" | "companies";
 type Status = "good" | "borderline" | "bad" | "tagged" | "review" | "error" | "duplicate";
 type Ranked = { tag: string; label: string; p: number };
 type Review = { kind: "existing" | "new" | "unplaced" | "keep" | "drop"; confidence: string; reason: string; jevLabel?: string };
-type Result = { review?: Review; score?: number | null; status: Status; reason: string; scores?: Record<string, number | null>; tag?: string; label?: string; confidence?: number; runnerUp?: Ranked | null; top?: Ranked[]; tokens?: number; cost?: number | null; note?: string; enriched?: boolean; firstStatus?: string };
+type KeepMatch = { term: string; column: string; snippet: string };
+type Answer = { yes?: number; choice?: string; p?: number; second?: string; confidence?: number };
+type Result = { review?: Review; score?: number | null; keep?: KeepMatch | null; answers?: Record<string, Answer>; status: Status; reason: string; scores?: Record<string, number | null>; tag?: string; label?: string; confidence?: number; runnerUp?: Ranked | null; top?: Ranked[]; tokens?: number; cost?: number | null; note?: string; enriched?: boolean; firstStatus?: string };
 /** "all", a status, or "tag:<key>" for one company tag. */
 type Filter = string;
 type Notice = { kind: "ok" | "error" | "info"; text: string } | null;
@@ -96,7 +100,7 @@ const STAGE_LABEL: Record<Stage, string> = { first: "First pass…", scrape: "Sc
 const toResult = (mode: Mode, r: Record<string, unknown> | null | undefined): Result => {
   if (!r || !r.ok) return { status: "error", reason: String(r?.error || "Jev did not answer.") };
   if (mode === "companies") return { status: r.status as Status, reason: String(r.reason ?? ""), tag: r.tag as string, label: r.label as string, confidence: r.confidence as number, runnerUp: r.runnerUp as Ranked | null, top: r.top as Ranked[], tokens: r.tokens as number, cost: r.cost as number | null };
-  return { status: r.verdict as Status, reason: String(r.reason ?? ""), scores: r.scores as Record<string, number | null>, score: typeof r.score === "number" ? r.score : null, tokens: r.tokens as number, cost: r.cost as number | null };
+  return { status: r.verdict as Status, reason: String(r.reason ?? ""), scores: r.scores as Record<string, number | null>, answers: r.answers as Record<string, Answer> | undefined, score: typeof r.score === "number" ? r.score : null, tokens: r.tokens as number, cost: r.cost as number | null };
 };
 /** How many rows the live table draws. The counts and downloads always cover every row. */
 const VISIBLE_ROWS = 300;
@@ -232,6 +236,20 @@ function QuestionList({ set, missing }: { set: QuestionSet; missing: Record<stri
         </li>
       ))}
     </ol>
+  );
+}
+
+/* ══ Always-keep terms ══ */
+
+function KeepTermsField({ value, disabled, onSave }: { value: string[]; disabled: boolean; onSave: (terms: string[]) => void }) {
+  const [text, setText] = useState(value.join(", "));
+  const changed = text.split(",").map((t) => t.trim()).filter(Boolean).join(",") !== value.join(",");
+  return (
+    <div className="jev-keep">
+      <label htmlFor="jev-keep-terms">Always keep if the row mentions</label>
+      <input id="jev-keep-terms" className="jev-input" value={text} onChange={(e) => setText(e.target.value)} disabled={disabled} placeholder='e.g. MA, Medicare Advantage, MA-PD' />
+      {changed && <button className="secondary-button" onClick={() => onSave(text.split(",").map((t) => t.trim()).filter(Boolean))} disabled={disabled}>Save</button>}
+    </div>
   );
 }
 
@@ -621,6 +639,20 @@ export default function JevClientPage() {
     finally { setBusy(""); }
   };
 
+  /** Save the always-keep terms. They apply in the browser at settle time, so the next run picks them up. */
+  const saveKeepTerms = async (keepTerms: string[]) => {
+    if (!set) return;
+    setBusy("saving");
+    try {
+      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, set: { ...set, keepTerms } }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
+      setSet(payload.set);
+      setNotice({ kind: "ok", text: keepTerms.length ? `Rows mentioning ${keepTerms.map((t) => `"${t}"`).join(", ")} anywhere will never be dropped. Run again to apply.` : "Always-keep terms cleared." });
+    } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
+    finally { setBusy(""); }
+  };
+
   /** Switch how answers become a verdict. Verdicts are computed at run time, so the current run is cleared. */
   const setScoring = async (scoring: "gates" | "weighted") => {
     if (!set || set.scoring === scoring || (scoring === "gates" && !set.scoring)) return;
@@ -650,7 +682,7 @@ export default function JevClientPage() {
       while (next < batches.length) {
         const batch = batches[next++];
         for (let attempt = 0; attempt < 6; attempt += 1) {
-          const items = batch.map((i) => ({ i, profile: enrichedRef.current.get(i)?.profile ?? file.profiles[i], scores: results.current.get(i)?.scores }));
+          const items = batch.map((i) => ({ i, profile: enrichedRef.current.get(i)?.profile ?? file.profiles[i], scores: results.current.get(i)?.scores, keep: results.current.get(i)?.keep ?? null }));
           const response = await fetch("/api/jev/review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, items }) }).catch(() => null);
           const payload = response ? await response.json().catch(() => ({})) : {};
           if (response?.status === 429 && attempt < 5) { pushLog("warn", `OpenRouter rate limit — holding ${batch.length} contacts for 20s`); await new Promise((r) => setTimeout(r, 20_000)); continue; }
@@ -659,8 +691,11 @@ export default function JevClientPage() {
           for (const o of payload.results ?? []) {
             const i = Number(o.i); const prev = results.current.get(i);
             if (!prev) continue;
-            if (o.decision === "keep") kept += 1; else dropped += 1;
-            results.current.set(i, { ...prev, status: o.decision === "keep" ? "good" : "bad", review: { kind: o.decision, confidence: o.confidence, reason: o.reason, jevLabel: "Maybe" } });
+            // The team's always-keep rule outranks Claude: a matched row Claude would drop stays a Maybe, with
+            // Claude's view recorded beside it.
+            const protectedRow = Boolean(prev.keep) && o.decision === "drop";
+            if (o.decision === "keep") kept += 1; else if (!protectedRow) dropped += 1;
+            results.current.set(i, { ...prev, status: o.decision === "keep" ? "good" : protectedRow ? "borderline" : "bad", review: { kind: o.decision, confidence: o.confidence, reason: protectedRow ? `${o.reason} (kept anyway: always-keep match)` : o.reason, jevLabel: "Maybe" } });
           }
           pushLog("ok", `Claude decided ${payload.results?.length ?? 0} of ${batch.length} maybes`);
           break;
@@ -732,6 +767,7 @@ export default function JevClientPage() {
     setCollapsed(true);
     setTimeout(() => progressRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
     const fm = file.mode;
+    const keepTerms = set?.keepTerms ?? [];
     const { fatal } = await runPipeline({
       client: slug,
       mode: fm,
@@ -749,7 +785,12 @@ export default function JevClientPage() {
       onEnriched: () => {},
       onSettle: (o: Outcome) => {
         const first = o.first ? toResult(fm, o.first) : null;
-        results.current.set(o.i, { ...toResult(fm, o.result), note: o.note, enriched: o.enriched, firstStatus: first && o.enriched ? (first.label ?? STATUS_LABEL[first.status]) : undefined });
+        const res = toResult(fm, o.result);
+        // Always-keep terms are checked in code over every raw column of the row, so a mention Jev never saw
+        // (or read past) still keeps the contact: Bad becomes Maybe, with the matching text.
+        const keep = fm === "contacts" && keepTerms.length && res.status !== "error" ? (findKeepTerm(file.rows[o.i], file.headers, file.plan, keepTerms) as KeepMatch | null) : null;
+        if (keep) { const k = applyKeepTerm(res.status, res.reason, keep) as { verdict: Status; reason: string }; res.status = k.verdict; res.reason = k.reason; res.keep = keep; }
+        results.current.set(o.i, { ...res, note: o.note, enriched: o.enriched, firstStatus: first && o.enriched ? (first.label ?? STATUS_LABEL[first.status]) : undefined });
         order.current.push(o.i);
         flush();
       },
@@ -849,26 +890,36 @@ export default function JevClientPage() {
 
   const exportCompanies = (keep: (r: Result | undefined) => boolean, label: string) => {
     if (!file) return;
-    const headers = ["Jev tag", "Jev confidence", "Jev runner-up", "Jev needs review", "Jev note", "Claude review", "Claude new tag", ...ENRICH_COLUMNS.companies.map(([, h]) => h), ...file.headers];
+    const headers = ["Jev tag", "Jev confidence", "Jev runner-up", "Jev top 5 tags", "Jev needs review", "Jev note", "Claude review", "Claude new tag", ...ENRICH_COLUMNS.companies.map(([, h]) => h), "Jev input (what Jev saw)", ...file.headers];
     const rows = file.rows.flatMap((cells, i) => {
       const r = all.get(i);
       if (!keep(r)) return [];
       const tagged = r && (r.status === "tagged" || r.status === "review");
       const lead = [tagged ? r.label ?? "" : r ? STATUS_LABEL[r.status] : "Not checked", tagged && !r?.review ? pct(r.confidence) : r?.review ? r.review.confidence : "", r?.runnerUp ? `${r.runnerUp.label} (${pct(r.runnerUp.p)})` : "", r?.status === "review" ? "Yes" : "", r?.note ?? "",
         r?.review ? `${r.review.reason}${r.review.jevLabel ? ` (Jev said ${r.review.jevLabel})` : ""}` : "", r?.review?.kind === "new" && !tags?.tags.some((t) => t.key === r.tag) ? "Yes" : ""];
-      return [[...lead, ...enrichCells("companies", i), ...cells]];
+      lead.splice(3, 0, (r?.top ?? []).filter((t) => t.p > 0).map((t) => `${t.label} ${pct(t.p)}`).join(" · "));
+      return [[...lead, ...enrichCells("companies", i), JSON.stringify(enrichedRef.current.get(i)?.profile ?? file.profiles[i]), ...cells]];
     });
     download(`${slug}-jev-${label}-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(headers, rows));
   };
 
   const exportRows = (keep: (r: Result | undefined) => boolean, label: string) => {
     if (!file || !set) return;
-    const headers = ["Jev verdict", "Jev fit score", "Jev reason", "Jev note", "Claude review", ...set.questions.map((q) => `Jev: ${q.label}`), ...ENRICH_COLUMNS.contacts.map(([, h]) => h), ...file.headers];
+    // Every decision Jev made, per question: what it answered, the probability that answer is a fit, and its
+    // confidence — then the keep-term match, Claude's review, enrichment, and the exact profile Jev read.
+    const qCols = set.questions.flatMap((q) => [`Jev: ${q.label} — answer`, `Jev: ${q.label} — fit %`, `Jev: ${q.label} — confidence`]);
+    const headers = ["Jev verdict", "Jev fit score", "Jev reason", "Jev note", "Always-keep match", "Claude review", ...qCols, ...ENRICH_COLUMNS.contacts.map(([, h]) => h), "Jev input (what Jev saw)", ...file.headers];
     const rows = file.rows.flatMap((cells, i) => {
       const r = all.get(i);
       if (!keep(r)) return [];
-      const verdict = [r ? STATUS_LABEL[r.status] : "Not checked", typeof r?.score === "number" ? pct(r.score) : "", r?.reason ?? "", r?.note ?? "", r?.review ? `${r.review.kind === "keep" ? "Keep" : r.review.kind === "drop" ? "Drop" : r.review.kind} (${r.review.confidence}): ${r.review.reason}` : "", ...set.questions.map((q) => (r?.scores ? pct(r.scores[q.key]) : ""))];
-      return [[...verdict, ...enrichCells("contacts", i), ...cells]];
+      const perQuestion = set.questions.flatMap((q) => {
+        const a = r?.answers?.[q.key];
+        const answer = !a ? "" : typeof a.yes === "number" ? `${a.yes >= 0.5 ? "Yes" : "No"} (${pct(a.yes)} yes)` : `${a.choice ?? ""}${typeof a.p === "number" ? ` ${pct(a.p)}` : ""}${a.second ? ` · then ${a.second}` : ""}`;
+        return [answer, r?.scores ? pct(r.scores[q.key]) : "", typeof a?.confidence === "number" ? pct(a.confidence) : ""];
+      });
+      const verdict = [r ? STATUS_LABEL[r.status] : "Not checked", typeof r?.score === "number" ? pct(r.score) : "", r?.reason ?? "", r?.note ?? "", r?.keep ? `"${r.keep.term}" in ${r.keep.column}: ${r.keep.snippet}` : "", r?.review ? `${r.review.kind === "keep" ? "Keep" : r.review.kind === "drop" ? "Drop" : r.review.kind} (${r.review.confidence}): ${r.review.reason}` : "", ...perQuestion];
+      const seen = JSON.stringify(enrichedRef.current.get(i)?.profile ?? file.profiles[i]);
+      return [[...verdict, ...enrichCells("contacts", i), seen, ...cells]];
     });
     const stamp = new Date().toISOString().slice(0, 10);
     download(`${slug}-jev-${label}-${stamp}.csv`, toCsv(headers, rows));
@@ -968,6 +1019,7 @@ export default function JevClientPage() {
                             : <span>Good fit: every must-have ≥ {Math.round(set.thresholds.keep * 100)}% · Dropped: a must-have &lt; {Math.round(set.thresholds.drop * 100)}%, an exclusion ≥ 80% sure{set.icp && (set.icp.sizeMin || set.icp.sizeMax) ? `, or outside ${set.icp.sizeMin ?? 0}–${set.icp.sizeMax ?? "any"} employees` : ""}</span>}
                           <span>{" · "}can&apos;t-tell answers don&apos;t count{set.updatedAt ? ` · saved ${new Date(set.updatedAt).toLocaleString()}` : ""}</span>
                         </div>
+                        <KeepTermsField key={`keep-${set.updatedAt ?? ""}`} value={set.keepTerms ?? []} disabled={running || Boolean(busy)} onSave={(t) => void saveKeepTerms(t)} />
                       </>
                     ) : null}
                   </section>
@@ -1158,6 +1210,7 @@ export default function JevClientPage() {
                               {/* A row Claude placed shows Claude's confidence, not the Jev score it overruled. */}
                               {r?.review && r.review.kind !== "unplaced" ? <>{r.review.confidence} confidence{r.review.jevLabel && r.review.jevLabel !== r.label ? <span className="jev-runner"> · Jev said {r.review.jevLabel}</span> : null}</>
                                 : tagged ? <>{pct(r?.confidence)}{r?.runnerUp ? <span className="jev-runner"> · or {r.runnerUp.label} {pct(r.runnerUp.p)}</span> : null}{status === "review" ? <span className="jev-review"> · needs review</span> : null}</> : r?.reason}
+                              {r?.keep && <span className="jev-note jev-keep-hit">Mentions &ldquo;{r.keep.term}&rdquo; in {r.keep.column}: {r.keep.snippet}</span>}
                               {r?.review && <span className="jev-note">Claude ({r.review.confidence}): {r.review.reason}</span>}
                               {r?.note && <span className="jev-note">{r.note}</span>}
                             </span>
