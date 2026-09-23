@@ -60,9 +60,9 @@ import { ActivityLog, EnrichControl, StageCards, type Detection, type LogLine } 
 import { missingData, scrapeTarget } from "../../../shared/enrich.mjs";
 import "../../jev.css";
 
-type Kind = "must" | "exclude" | "signal";
+type Kind = "must" | "exclude" | "signal" | "key";
 type Question = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: Kind; neutral?: string[] };
-const KIND_LABEL: Record<Kind, string> = { must: "Must-have", exclude: "Exclusion", signal: "Signal" };
+const KIND_LABEL: Record<Kind, string> = { must: "Must-have", key: "Key", exclude: "Exclusion", signal: "Signal" };
 const kindOf = (q: Question): Kind => q.kind ?? (q.type === "noul" && q.pass === false ? "exclude" : "must");
 type QuestionSet = { questions: Question[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; keepTerms?: string[]; icp?: Icp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
@@ -145,8 +145,8 @@ function QuestionEditor({ value, onChange }: { value: QuestionSet; onChange: (v:
                 <button type="button" className={q.type === "noul" ? "on" : ""} onClick={() => setQ(idx, { type: "noul", criteria: { true: "", false: "" }, pass: true })}>Yes / No</button>
                 <button type="button" className={q.type === "choice" ? "on" : ""} onClick={() => setQ(idx, { type: "choice", criteria: { fits: "", does_not_fit: "", unclear: "The profile does not say" }, pass: ["fits"], neutral: ["unclear"] })}>Choice</button>
               </div>
-              <div className="jev-seg" title="What this question does to the verdict">
-                {(["must", "exclude", "signal"] as Kind[]).map((k) => (
+              <div className="jev-seg" title="Must-have: fail it and you're out · Key: needed for Good fit, never removes anyone · Exclusion: removes when clearly true · Signal: a vote">
+                {(["must", "key", "exclude", "signal"] as Kind[]).map((k) => (
                   <button key={k} type="button" className={kindOf(q) === k ? "on" : ""} onClick={() => setQ(idx, { kind: k })}>{KIND_LABEL[k]}</button>
                 ))}
               </div>
@@ -670,9 +670,14 @@ export default function JevClientPage() {
   };
 
   /** Claude's keep-or-drop on every maybe contact, 8 a request, three at a time; rows update as answers land. */
-  const reviewMaybes = async () => {
+  /*
+   * The same review runs on good fits: a second opinion that catches Jev's false positives and gives every kept
+   * contact a sentence saying why. Keep leaves a good fit good; drop removes it unless always-keep protects it.
+   */
+  const reviewMaybes = async (which: "borderline" | "good" = "borderline") => {
     if (!file || running || review) return;
-    const rows = [...results.current.entries()].filter(([, r]) => r.status === "borderline" && !r.review).map(([i]) => i);
+    const noun = which === "good" ? "good fits" : "maybes";
+    const rows = [...results.current.entries()].filter(([, r]) => r.status === which && !r.review).map(([i]) => i);
     if (!rows.length) return;
     let done = 0; let cost = 0; let failed = 0; let kept = 0; let dropped = 0; let lastError = "";
     setReview({ done: 0, total: rows.length, cost: 0 });
@@ -684,7 +689,7 @@ export default function JevClientPage() {
         const batch = batches[next++];
         for (let attempt = 0; attempt < 6; attempt += 1) {
           const items = batch.map((i) => ({ i, profile: enrichedRef.current.get(i)?.profile ?? file.profiles[i], scores: results.current.get(i)?.scores, keep: results.current.get(i)?.keep ?? null }));
-          const response = await fetch("/api/jev/review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, items }) }).catch(() => null);
+          const response = await fetch("/api/jev/review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, items, stage: which }) }).catch(() => null);
           const payload = response ? await response.json().catch(() => ({})) : {};
           if (response?.status === 429 && attempt < 5) { pushLog("warn", `OpenRouter rate limit — holding ${batch.length} contacts for 20s`); await new Promise((r) => setTimeout(r, 20_000)); continue; }
           if (!response?.ok || !payload.ok) { failed += batch.length; lastError = String(payload?.error ?? `HTTP ${response?.status ?? "no response"}`); pushLog("error", `Claude review failed for ${batch.length} contacts: ${lastError}`); break; }
@@ -696,9 +701,9 @@ export default function JevClientPage() {
             // Claude's view recorded beside it.
             const protectedRow = Boolean(prev.keep) && o.decision === "drop";
             if (o.decision === "keep") kept += 1; else if (!protectedRow) dropped += 1;
-            results.current.set(i, { ...prev, status: o.decision === "keep" ? "good" : protectedRow ? "borderline" : "bad", review: { kind: o.decision, confidence: o.confidence, reason: protectedRow ? `${o.reason} (kept anyway: always-keep match)` : o.reason, jevLabel: "Maybe" } });
+            results.current.set(i, { ...prev, status: o.decision === "keep" ? "good" : protectedRow ? "borderline" : "bad", review: { kind: o.decision, confidence: o.confidence, reason: protectedRow ? `${o.reason} (kept anyway: always-keep match)` : o.reason, jevLabel: which === "good" ? "Good fit" : "Maybe" } });
           }
-          pushLog("ok", `Claude decided ${payload.results?.length ?? 0} of ${batch.length} maybes`);
+          pushLog("ok", `Claude decided ${payload.results?.length ?? 0} of ${batch.length} ${noun}`);
           break;
         }
         done += batch.length;
@@ -707,7 +712,7 @@ export default function JevClientPage() {
       }
     }));
     setReview(null);
-    setNotice({ kind: failed ? "info" : "ok", text: `Claude reviewed ${rows.length.toLocaleString()} maybes — kept ${kept.toLocaleString()}, dropped ${dropped.toLocaleString()}${failed ? `; ${failed} could not be reviewed (${lastError}) — click again to retry` : ""} · ${money(cost)}` });
+    setNotice({ kind: failed ? "info" : "ok", text: `Claude reviewed ${rows.length.toLocaleString()} ${noun} — kept ${kept.toLocaleString()}, dropped ${dropped.toLocaleString()}${failed ? `; ${failed} could not be reviewed (${lastError}) — click again to retry` : ""} · ${money(cost)}` });
   };
 
   const saveTags = async () => {
@@ -1032,7 +1037,7 @@ export default function JevClientPage() {
                             <button type="button" className={set.scoring !== "weighted" ? "on" : ""} onClick={() => void setScoring("gates")} disabled={running || Boolean(busy)}>Must-pass</button>
                           </div>
                           {set.scoring === "weighted"
-                            ? <span>Must-haves are gates, never votes · every other question counts equally · Good fit: average ≥ {Math.round(set.thresholds.keep * 100)}% · Maybe: {Math.round(set.thresholds.drop * 100)}–{Math.round(set.thresholds.keep * 100)}% (kept) · Out: below {Math.round(set.thresholds.drop * 100)}%</span>
+                            ? <span>Must-haves are gates, never votes · Key questions must pass for Good fit · every other question counts equally · Good fit: average ≥ {Math.round(set.thresholds.keep * 100)}% · Maybe: {Math.round(set.thresholds.drop * 100)}–{Math.round(set.thresholds.keep * 100)}% (kept) · Out: below {Math.round(set.thresholds.drop * 100)}%</span>
                             : <span>Good fit: every must-have ≥ {Math.round(set.thresholds.keep * 100)}% · Dropped: a must-have &lt; {Math.round(set.thresholds.drop * 100)}%, an exclusion ≥ 80% sure{set.icp && (set.icp.sizeMin || set.icp.sizeMax) ? `, or outside ${set.icp.sizeMin ?? 0}–${set.icp.sizeMax ?? "any"} employees` : ""}</span>}
                           <span>{" · "}Good fit needs most questions answered, not can&apos;t-tell{set.updatedAt ? ` · saved ${new Date(set.updatedAt).toLocaleString()}` : ""}</span>
                         </div>
@@ -1159,7 +1164,14 @@ export default function JevClientPage() {
                       <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "good" || r?.status === "borderline", "good-and-maybe")} disabled={!counts.good && !counts.borderline}>Good + maybe ({(counts.good + counts.borderline).toLocaleString()})</button>
                       <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "borderline", "maybe")} disabled={!counts.borderline}>Maybe ({counts.borderline.toLocaleString()})</button>
                       {review ? <button className="secondary-button" disabled>Claude reviewing… {review.done}/{review.total}</button>
-                        : (() => { const n = [...all.values()].filter((r) => r.status === "borderline" && !r.review).length; return n > 0 ? <button className="primary-button" onClick={() => void reviewMaybes()}>Review {n.toLocaleString()} maybes with Claude</button> : null; })()}
+                        : (() => {
+                          const maybes = [...all.values()].filter((r) => r.status === "borderline" && !r.review).length;
+                          const goods = [...all.values()].filter((r) => r.status === "good" && !r.review).length;
+                          return <>
+                            {maybes > 0 && <button className="primary-button" onClick={() => void reviewMaybes("borderline")}>Review {maybes.toLocaleString()} maybes with Claude</button>}
+                            {goods > 0 && <button className="secondary-button" onClick={() => void reviewMaybes("good")}>Check {goods.toLocaleString()} good fits with Claude</button>}
+                          </>;
+                        })()}
                       <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "bad" || r?.status === "duplicate", "removed")} disabled={!counts.bad && !counts.duplicate}>Removed ({(counts.bad + counts.duplicate).toLocaleString()})</button>
                       <button className="secondary-button" onClick={() => exportRows(() => true, "all")}>Everything, with verdicts</button>
                     </div>

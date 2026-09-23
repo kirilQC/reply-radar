@@ -657,7 +657,9 @@ export function normalizeQuestionSet(input) {
       if (pass.length === entries.length) { problems.push(`${label}: every option is marked as a fit, so it can never fail anyone`); continue; }
       // "Can't tell" options: named explicitly, or recognised by their key. Never also a fit.
       const named = Array.isArray(q?.neutral) ? q.neutral.map(slugKey) : [];
-      const neutral = Object.keys(criteria).filter((k) => !pass.includes(k) && (named.includes(k) || (!Array.isArray(q?.neutral) && NEUTRAL_KEY.test(k))));
+      // A real "no" is never can't-tell, whatever the writer listed: a Vitalic build marked `no` neutral, and
+      // "Director, IT Infrastructure" — a clear no — sat out every question and became a maybe instead of out.
+      const neutral = Object.keys(criteria).filter((k) => !pass.includes(k) && !(NEGATIVE_KEY.test(k) && !NEUTRAL_KEY.test(k)) && (named.includes(k) || (!Array.isArray(q?.neutral) && NEUTRAL_KEY.test(k))));
       questions.push({ key, label, type, instructions, criteria, pass, ...(neutral.length ? { neutral } : {}), kind: kindOf(q, true) });
     }
     keys.add(key);
@@ -684,7 +686,12 @@ export function normalizeQuestionSet(input) {
  * Sets saved before kinds existed get `exclude` for a noul whose fit answer is "no" — those were always written
  * as disqualifiers — and `must` for everything else.
  */
-export const QUESTION_KINDS = ["must", "exclude", "signal"];
+/*
+ * `key`: required for a good fit, but failing it never drops anyone on its own — it counts as a signal otherwise.
+ * Added for Vitalic, where "current role works on MA" is what the list is for: past roles and headline alone
+ * were carrying contacts Jev could not place in a current MA role to good fit.
+ */
+export const QUESTION_KINDS = ["must", "exclude", "signal", "key"];
 /**
  * How the answers become a verdict.
  * - `gates`: must-haves and exclusions can drop a contact on their own; signals rank.
@@ -696,6 +703,7 @@ export const QUESTION_KINDS = ["must", "exclude", "signal"];
 export const SCORING_MODES = ["gates", "weighted"];
 const kindOf = (q, pass) => (QUESTION_KINDS.includes(q?.kind) ? q.kind : pass === false ? "exclude" : "must");
 const NEUTRAL_KEY = /^(unclear|unknown|not_stated|not_sure|cannot_tell|can_t_tell|no_data|insufficient|none_stated|not_enough_info)$/;
+const NEGATIVE_KEY = /^(no|false|not?_.*|does_not.*|doesn_t.*|none|neither|other|unrelated|general.*)$/;
 
 /**
  * The structured half of a client's contact ICP: the pool of target titles, what those people are responsible
@@ -1262,12 +1270,30 @@ function weightedVerdict(questions, answers, thresholds, context) {
    */
   const signals = questions.filter((q) => q.kind !== "must").length;
   const answered = signals - unclear.filter((q) => q.kind !== "must").length;
-  const checkedEnough = answered * 2 > signals;
+  // A confirmed key question is the check that matters, so it stands in for the majority: "Director, Medi-Cal
+  // Program" with no headline or past roles on file is a fit on its current role alone.
+  const keysConfirmed = questions.some((q) => q.kind === "key") && questions.filter((q) => q.kind === "key").every((q) => !unclear.includes(q) && typeof scores[q.key] === "number" && scores[q.key] >= thresholds.keep);
+  const checkedEnough = keysConfirmed || answered * 2 > signals;
   const weakMust = questions.filter((q) => q.kind === "must" && typeof scores[q.key] === "number" && !unclear.includes(q)).reduce((w, q) => (!w || scores[q.key] < scores[w.key] ? q : w), null);
-  if (score >= thresholds.keep && !missing && checkedEnough && (!weakMust || scores[weakMust.key] >= thresholds.keep)) return { verdict: "good", reason: note ? note.slice(3) : "", scores, score };
+  const keyShort = questions.find((q) => q.kind === "key" && (unclear.includes(q) || typeof scores[q.key] !== "number" || scores[q.key] < thresholds.keep));
+  if (score >= thresholds.keep && !missing && checkedEnough && !keyShort && (!weakMust || scores[weakMust.key] >= thresholds.keep)) return { verdict: "good", reason: fitReason(questions, scores, unclear, thresholds) + note, scores, score };
   if (score >= thresholds.keep && weakMust && scores[weakMust.key] < thresholds.keep) return { verdict: "borderline", reason: `Maybe — unsure: ${weakMust.label} (${pctOf(scores[weakMust.key])})${note}`, scores, score };
+  if (keyShort) {
+    const others = unclear.filter((q) => q !== keyShort);
+    const why = unclear.includes(keyShort) ? `can't tell: ${[keyShort, ...others].map((q) => q.label).join(", ")}` : `not shown: ${keyShort.label} (${pctOf(scores[keyShort.key] ?? 0)})${others.length ? ` · can't tell: ${others.map((q) => q.label).join(", ")}` : ""}`;
+    return { verdict: "borderline", reason: `Maybe — ${why}`, scores, score };
+  }
   if (score >= thresholds.keep) return { verdict: "borderline", reason: missing ? `Maybe — no answer: ${missing.label}${note}` : `Maybe — ${note.slice(3)}`, scores, score };
   return { verdict: "borderline", reason: `Maybe — score ${pctOf(score)}, weakest: ${weakest.label}${note}`, scores, score };
+}
+
+/**
+ * Why a good fit is one, from Jev's own answers: every question it answered in the contact's favour, strongest
+ * first. Jev gives probabilities, not prose, so this is the honest summary; Claude's check adds the sentence.
+ */
+function fitReason(questions, scores, unclear, thresholds) {
+  const yes = questions.filter((q) => q.kind !== "must" && q.kind !== "exclude" && !unclear.includes(q) && typeof scores[q.key] === "number" && scores[q.key] >= thresholds.keep).sort((a, b) => scores[b.key] - scores[a.key]);
+  return yes.length ? `Yes: ${yes.map((q) => `${q.label} (${Math.round(scores[q.key] * 100)}%)`).join(" · ")}` : "";
 }
 
 /** How much of a choice answer landed on "can't tell" options. */
@@ -1313,6 +1339,7 @@ export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS, 
     if (kind === "must" && p < thresholds.drop && (!failed || p < failed.p)) failed = { q, p };
     counted.push({ q, p, kind });
   }
+  const keyShort = questions.find((q) => q.kind === "key" && (unclear.includes(q) || typeof scores[q.key] !== "number" || scores[q.key] < thresholds.keep));
   const size = sizeCheck(context.icp, context.profile);
   if (size === "outside") return { verdict: "bad", reason: `Company size outside ${context.icp.sizeMin ?? 0}–${context.icp.sizeMax ?? "any"} employees`, scores, score: null };
   if (excluded) return { verdict: "bad", reason: `Excluded: ${excluded.q.label}`, scores, score: null };
@@ -1330,11 +1357,13 @@ export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS, 
   if (musts.length) {
     const weakMust = musts.reduce((w, c) => (c.p < w.p ? c : w));
     // Same rule as weighted scoring: a can't-tell answer means Jev did not check it, so the row cannot be a good fit.
-    if (weakMust.p >= thresholds.keep && !missing && !unclear.length) return { verdict: "good", reason: "", scores, score };
+    if (weakMust.p >= thresholds.keep && !missing && !unclear.length && !keyShort) return { verdict: "good", reason: fitReason(questions, scores, unclear, thresholds), scores, score };
+    if (weakMust.p >= thresholds.keep && keyShort) return { verdict: "borderline", reason: `Not shown: ${keyShort.label}${note}`, scores, score };
     return { verdict: "borderline", reason: missing ? `No answer: ${missing.label}${note}` : weakMust.p >= thresholds.keep ? note.slice(3) : `Unsure: ${weakMust.q.label} (${Math.round(weakMust.p * 100)}%)${note}`, scores, score };
   }
   const weakest = counted.reduce((w, c) => (c.p < w.p ? c : w));
-  if (score >= thresholds.keep && !missing && !unclear.length) return { verdict: "good", reason: "", scores, score };
+  if (score >= thresholds.keep && !missing && !unclear.length && !keyShort) return { verdict: "good", reason: fitReason(questions, scores, unclear, thresholds), scores, score };
+  if (score >= thresholds.keep && keyShort) return { verdict: "borderline", reason: `Not shown: ${keyShort.label}${note}`, scores, score };
   if (score >= thresholds.keep && !missing) return { verdict: "borderline", reason: note.slice(3), scores, score };
   return { verdict: "borderline", reason: `Score ${Math.round(score * 100)}% — weakest: ${weakest.q.label}${note}`, scores, score };
 }

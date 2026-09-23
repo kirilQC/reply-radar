@@ -592,3 +592,28 @@ test("weighted: good needs most signals answered — one confident yes among can
   assert.equal(verdictFor(questions, { director: { noul: 0.99 }, current: yes, past: unsure, headline: yes }, t, { scoring: "weighted" }).verdict, "good");
   assert.equal(verdictFor(questions, { director: { noul: 0.99 }, current: unsure, past: yes, headline: unsure }, t, { scoring: "weighted" }).verdict, "borderline");
 });
+
+test("key question: required for a good fit, never drops anyone alone; good fits say why", () => {
+  const c = (label, kind = "signal") => ({ label, type: "choice", instructions: "?", kind, criteria: { yes: "y", no: "n", unclear: "?" }, pass: ["yes"] });
+  const { questions } = normalizeQuestionSet({ scoring: "weighted", questions: [{ label: "Director", type: "noul", instructions: "?", kind: "must" }, c("Current role works on MA", "key"), c("Past roles"), c("Headline")] });
+  assert.equal(questions[1].kind, "key");
+  const t = { keep: 0.6, drop: 0.35 };
+  const yes = { probabilities: { yes: 0.95, no: 0.03, unclear: 0.02 } };
+  const no = { probabilities: { yes: 0.02, no: 0.95, unclear: 0.03 } };
+  const unsure = { probabilities: { yes: 0.05, no: 0.05, unclear: 0.9 } };
+  const ctx = { scoring: "weighted" };
+  // "Associate Director of Operations" with an MA past and headline: the current role is unproven, so a maybe.
+  const linda = verdictFor(questions, { director: { noul: 0.9 }, current_role_works_on_ma: unsure, past_roles: yes, headline: yes }, t, ctx);
+  assert.equal(linda.verdict, "borderline");
+  assert.equal(linda.reason, "Maybe — can't tell: Current role works on MA");
+  assert.equal(verdictFor(questions, { director: { noul: 0.9 }, current_role_works_on_ma: no, past_roles: yes, headline: yes }, t, ctx).verdict, "borderline");
+  const dawn = verdictFor(questions, { director: { noul: 0.99 }, current_role_works_on_ma: yes, past_roles: unsure, headline: yes }, t, ctx);
+  assert.equal(dawn.verdict, "good");
+  assert.equal(dawn.reason, "Yes: Current role works on MA (95%) · Headline (95%) · can't tell: Past roles");
+  assert.equal(verdictFor(questions, { director: { noul: 0.99 }, current_role_works_on_ma: unsure, past_roles: yes, headline: yes }, t, {}).verdict, "borderline");
+});
+
+test("a 'no' answer is never counted as can't-tell, even when the writer lists it", () => {
+  const { questions } = normalizeQuestionSet({ questions: [{ label: "Current role", type: "choice", instructions: "?", criteria: { yes: "y", no: "n", unclear: "?" }, pass: ["yes"], neutral: ["no", "unclear"] }] });
+  assert.deepEqual(questions[0].neutral, ["unclear"]);
+});

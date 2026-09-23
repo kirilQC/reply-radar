@@ -4,14 +4,16 @@
 import { NextResponse } from "next/server";
 import { reviewContacts } from "../../../lib/jev";
 
-// One Claude call for up to 10 maybe contacts against the client's criteria.
+// One Claude call for up to 10 contacts against the client's criteria.
 export const maxDuration = 60;
 
-// Second opinion on contacts Jev scored as "maybe": keep or drop, with a reason. Suggests only; the page applies it.
+// Second opinion on contacts Jev scored as "maybe", or an audit of its good fits: keep or drop, with a reason.
+// Suggests only; the page applies it.
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const slug = typeof body?.client === "string" ? body.client.trim().toLowerCase() : "";
   if (!slug) return NextResponse.json({ ok: false, error: "client is required." }, { status: 400 });
-  const result = await reviewContacts(slug, Array.isArray(body?.items) ? body.items : []);
+  const stage = body?.stage === "good" ? "good" : "borderline";
+  const result = await reviewContacts(slug, Array.isArray(body?.items) ? body.items : [], stage);
   return NextResponse.json(result, { status: result.ok ? 200 : result.rateLimited ? 429 : 502 });
 }

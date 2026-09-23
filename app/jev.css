@@ -286,6 +286,7 @@
 .jev-q-kind.must { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .jev-q-kind.exclude { color: var(--coral); border-color: color-mix(in srgb, var(--coral) 40%, var(--border)); }
 .jev-q-kind.signal { color: var(--muted); }
+.jev-q-kind.key { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, var(--border)); }
 .jev-q-opts span.is-neutral { opacity: .55; border-style: dashed; }
 .jev-edit-top { flex-wrap: wrap; }
 @media (max-width: 900px) { .jev-icp-grid { grid-template-columns: 1fr; } }

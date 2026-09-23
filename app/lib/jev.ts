@@ -25,7 +25,7 @@ import { readConfig, writeConfig } from "./app-config";
 import { CONTACT_REVIEW_SCHEMA, REVIEW_SCHEMA, contactReviewItem, parseContactReview, mergeNamedTags, normalizeIcp, parseReview, reviewItem, parseTagEntries, otherSample, parseSuggestions, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
 
 type Row = Record<string, unknown>;
-export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: "must" | "exclude" | "signal"; neutral?: string[] };
+export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: "must" | "exclude" | "signal" | "key"; neutral?: string[] };
 export type JevIcp = { titles: string[]; responsibilities: string; sizeMin: number | null; sizeMax: number | null; exclusions: string };
 export type JevQuestionSet = { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; keepTerms?: string[]; icp?: JevIcp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
 export type JevTag = { key: string; label: string; description: string };
@@ -189,9 +189,10 @@ Rules, from TypeSafe's own guidance on how Jev fails:
 - Give every question a "kind":
   - "must": a real requirement — the contact is dropped only if they clearly fail it. Use for at most 2–3 questions. A must-have is a gate only: passing it never makes someone a fit, so seniority, "is this their main job" and similar entry conditions belong here, never as signals.
   - "exclude": a disqualifier (competitor, vendor, a specialty or segment the client does not serve). Phrase it so "yes" means the disqualifier is true and set "pass": false. The contact is dropped only when Jev is clearly sure.
+  - "key": the thing the list is actually for (e.g. "their current role works on X") — required for a good fit, but failing it never drops anyone on its own. Use for the one question that, if unproven, should leave the contact for review rather than call them a fit. At most one or two.
   - "signal": evidence that makes a contact more or less attractive (owns a budget, the right sub-specialty). It only moves a score and never drops anyone. Prefer this for anything that is "nice to have".
 - Be generous. These lists are already targeted; the job is to remove the clear mistakes, not to find a perfect few. A question that a genuine target could fail for lack of data, or for an unusual but legitimate title, must not be a "must".
-- For a choice, list the can't-tell options in "neutral" (e.g. ["unclear"]). A neutral answer counts for nothing either way — thin data is not evidence of a bad fit.
+- For a choice, list ONLY the can't-tell options in "neutral" (e.g. ["unclear"]) — never a "no" or "does not" answer, which is real evidence against. A neutral answer counts for nothing either way — thin data is not evidence of a bad fit.
 - If a TARGET TITLES pool is given below, do NOT write a title or seniority question: one is built from the pool automatically. Use the stated responsibilities for a "signal" or "must" question about what the person owns, and the exclusions for "exclude" questions. Company size is checked in code; do not write a size question.
 - 3 to 6 questions. Usually one checks that the listed company is the person's main current job (kind "must").
 
@@ -584,15 +585,25 @@ async function reviewOnce(tags: JevTagSet, batch: Array<{ i: number; profile: un
 
 /* ── Claude review of maybe contacts ── */
 
-const CONTACT_REVIEW_PROMPT = `You are the second opinion on an outbound contact list for QC Growth, a B2B outbound agency. A fast classifier (Jev) scored these contacts against the client's criteria and could not decide: they are "maybes". Jev reads profiles literally; you can reason. Decide for each contact whether it should stay on the list.
+const CONTACT_REVIEW_PROMPT = `You are the second opinion on an outbound contact list for QC Growth, a B2B outbound agency. A fast classifier (Jev) scored these contacts against the client's criteria. Jev reads profiles literally; you can reason. Decide for each contact whether it should stay on the list.
 
 - Read the whole profile: headline, About, current roles, PAST roles and what they did there, and the employer's description. Connect the dots — a generic title at an employer whose business clearly matches, or a past role that shows the relevant background, counts.
 - Follow the client's criteria as written below. When they say to be inclusive, lean to "keep" whenever there is a real, plausible connection; drop only when the profile gives a clear reason the contact does not fit.
 - Jev's per-question scores are shown for context; overrule them when the profile says otherwise.
 - "always_keep_match", when present, is text found in the contact's full record (which can include fields not in the profile shown) matching a term the team always keeps. Treat it as real evidence of the connection.
+- A question marked [key] is what the list is for: keep only when the profile gives real evidence it holds. A [must-have] is an entry condition; passing it is never a reason to keep on its own.
 - "reason": one sentence citing the specific fact that decided it. "confidence": high, medium or low.`;
 
-export async function reviewContacts(slug: string, items: Array<{ i: number; profile: unknown; scores?: Record<string, number | null>; keep?: { term: string; column: string; snippet: string } | null }>): Promise<{ ok: boolean; error?: string; results?: Array<Record<string, unknown>>; cost?: number | null; rateLimited?: boolean }> {
+/*
+ * Which pile the batch came from changes the question. Maybes need a decision; good fits need an audit — Jev
+ * marked them fits, and the team wants no false positives, so Claude is asked to look for the reason not to.
+ */
+const REVIEW_STAGE: Record<string, string> = {
+  borderline: 'These contacts are "maybes": Jev could not decide.',
+  good: "Jev marked these contacts GOOD FITS. You are auditing them for false positives: keep only when the profile shows the fit (cite the fact); drop when the fit rests on the employer, seniority or a guess rather than what this person's own work shows.",
+};
+
+export async function reviewContacts(slug: string, items: Array<{ i: number; profile: unknown; scores?: Record<string, number | null>; keep?: { term: string; column: string; snippet: string } | null }>, stage = "borderline"): Promise<{ ok: boolean; error?: string; results?: Array<Record<string, unknown>>; cost?: number | null; rateLimited?: boolean }> {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { ok: false, error: "OPENROUTER_API_KEY is not set." };
   const set = await loadQuestionSet(slug);
@@ -601,7 +612,7 @@ export async function reviewContacts(slug: string, items: Array<{ i: number; pro
   if (!batch.length) return { ok: true, results: [] };
   const criteria = [
     set.brief ? `THE CLIENT'S CRITERIA, AS THE TEAM WROTE THEM:\n${set.brief.slice(0, MAX_PROMPT_BRIEF_CHARS)}` : "",
-    `THE QUESTIONS JEV WAS ASKED:\n${set.questions.map((q) => `- ${q.label}: ${q.instructions}`).join("\n")}`,
+    `THE QUESTIONS JEV WAS ASKED:\n${set.questions.map((q) => `- ${q.kind === "key" ? "[key] " : q.kind === "must" ? "[must-have] " : ""}${q.label}: ${q.instructions}`).join("\n")}`,
   ].filter(Boolean).join("\n\n");
   const contacts = batch.map((it) => JSON.stringify(contactReviewItem(it.i, it.profile, set.questions, it.scores ?? {}, it.keep))).join("\n");
   try {
@@ -616,7 +627,7 @@ export async function reviewContacts(slug: string, items: Array<{ i: number; pro
         messages: [
           // The criteria are identical on every batch, so they are cached after the first.
           { role: "system", content: [{ type: "text", text: CONTACT_REVIEW_PROMPT }, { type: "text", text: criteria, cache_control: { type: "ephemeral" } }] },
-          { role: "user", content: `CONTACTS TO DECIDE (${batch.length}):\n${contacts}` },
+          { role: "user", content: `${REVIEW_STAGE[stage] ?? REVIEW_STAGE.borderline}\n\nCONTACTS TO DECIDE (${batch.length}):\n${contacts}` },
         ],
       }),
       signal: AbortSignal.timeout(50_000),
