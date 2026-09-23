@@ -596,8 +596,13 @@ export const estimateTokens = (value) => Math.ceil(JSON.stringify(value ?? "").l
  * Decided in code, because it is exact and Jev charges for every row it sees.
  */
 export function duplicateIndexes(people) {
-  const seen = new Set();
-  const dupes = new Set();
+  return new Set(duplicateOf(people).keys());
+}
+
+/** Each duplicate row's index → the index of its first appearance, whose verdict it shares. */
+export function duplicateOf(people) {
+  const first = new Map();
+  const dupes = new Map();
   people.forEach((p, i) => {
     const url = String(p.linkedin || "").toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/[?#].*$/, "").replace(/\/+$/, "");
     // Name + company only counts with both present: "(no name)|Anthem" once collapsed 17,023 different contacts.
@@ -605,7 +610,7 @@ export function duplicateIndexes(people) {
     const company = String(p.company ?? "").trim().toLowerCase();
     const key = url || (name && name !== "(no name)" && company ? `${name}|${company}` : "");
     if (!key) return;
-    if (seen.has(key)) dupes.add(i); else seen.add(key);
+    if (first.has(key)) dupes.set(i, first.get(key)); else first.set(key, i);
   });
   return dupes;
 }

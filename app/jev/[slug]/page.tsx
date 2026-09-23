@@ -40,6 +40,7 @@ import {
   buildCompanyProfile,
   buildProfile,
   duplicateIndexes,
+  duplicateOf,
   estimateTokens,
   identifyCompany,
   identifyWith,
@@ -114,8 +115,8 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
 const fmtDuration = (ms: number) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
 const blankQuestion = (n: number): Question => ({ key: `q${n}`, label: "New question", type: "noul", instructions: "", criteria: { true: "", false: "" }, pass: true });
 
-function download(filename: string, csv: string) {
-  const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+function download(filename: string, csv: string, bom = true) {
+  const url = URL.createObjectURL(new Blob([bom ? `\uFEFF${csv}` : csv], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a");
   a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2_000);
@@ -925,10 +926,26 @@ export default function JevClientPage() {
     download(`${slug}-jev-${label}-${stamp}.csv`, toCsv(headers, rows));
   };
 
+  /**
+   * The upload handed back as it came in — same headers, same order, same cell values, nothing added — minus the
+   * bad fits, so it drops straight into whatever the list came from. Every column is kept however it was set
+   * above (LinkedIn "not sent" included): the roles only decide what Jev reads, never what is exported.
+   * A duplicate row follows its first copy's verdict, since only that copy was checked.
+   */
+  const exportOriginal = () => {
+    if (!file) return;
+    const firstOf = duplicateOf(file.people) as Map<number, number>;
+    const rows = file.rows.filter((_, i) => all.get(firstOf.get(i) ?? i)?.status !== "bad");
+    // No byte-order mark: it would glue itself to the first header name in tools that re-import the file.
+    download(`${file.name.replace(/\.csv$/i, "")} - jev cleaned.csv`, toCsv(file.headers, rows), false);
+  };
+
   const configured = mode === "companies" ? Boolean(tags?.tags.length) : Boolean(set?.questions.length);
   const ready = Boolean(!stale && jev?.configured && configured && file && file.mode === mode && !editing && !editingTags);
   const tagLabel = (key: string) => tags?.tags.find((t) => t.key === key)?.label ?? newTagLabels.current.get(key) ?? key;
   const finished = Boolean(file && timing?.end && !running);
+  // Counted only once the run is over — a 17k-row pass on every repaint would stall the live table.
+  const cleanedCount = file && finished ? (() => { const firstOf = duplicateOf(file.people) as Map<number, number>; return file.rows.reduce((n, _, i) => n + (all.get(firstOf.get(i) ?? i)?.status === "bad" ? 0 : 1), 0); })() : 0;
 
   /* ── Render ── */
 
@@ -1137,7 +1154,8 @@ export default function JevClientPage() {
                   {runError && <div className="jev-banner is-error">{runError}</div>}
                   {finished && file.mode === "contacts" && (
                     <div className="jev-downloads">
-                      <button className="primary-button" onClick={() => exportRows((r) => r?.status === "good", "good-fits")} disabled={!counts.good}>Download {counts.good.toLocaleString()} good fits</button>
+                      <button className="primary-button" onClick={exportOriginal}>Cleaned list, original columns ({cleanedCount.toLocaleString()})</button>
+                      <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "good", "good-fits")} disabled={!counts.good}>Good fits ({counts.good.toLocaleString()})</button>
                       <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "good" || r?.status === "borderline", "good-and-maybe")} disabled={!counts.good && !counts.borderline}>Good + maybe ({(counts.good + counts.borderline).toLocaleString()})</button>
                       <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "borderline", "maybe")} disabled={!counts.borderline}>Maybe ({counts.borderline.toLocaleString()})</button>
                       {review ? <button className="secondary-button" disabled>Claude reviewing… {review.done}/{review.total}</button>

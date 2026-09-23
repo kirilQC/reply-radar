@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   buildProfile,
   duplicateIndexes,
+  duplicateOf,
   identify,
   identifyWith,
   buildCompanyProfile,
@@ -556,4 +557,11 @@ test("compactAnswers keeps what Jev said for every question", () => {
     director: { yes: 0.83 },
     level: { choice: "director", p: 0.65, second: "exec 30%", confidence: 0.6 },
   });
+});
+
+test("cleaned export: original headers and cells survive a round trip, and a duplicate points at its first copy", () => {
+  const src = `First Name,LinkedIn,Summary\r\nAda,https://www.linkedin.com/in/ada,"Runs Medicare, Medicaid ""MA"" plans\nat Humana"\r\nGrace,https://www.linkedin.com/in/grace,\r\nAda,https://linkedin.com/in/ada/,dup`;
+  const a = parseCsv(src, { asArrays: true });
+  assert.deepEqual(parseCsv(toCsv(a.headers, a.rows), { asArrays: true }), a);
+  assert.deepEqual([...duplicateOf(a.rows.map((r) => ({ name: r[0], linkedin: r[1] })))], [[2, 0]]);
 });
