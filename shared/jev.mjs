@@ -711,15 +711,25 @@ export function toWireQuestions(questions) {
  */
 export const DEFAULT_MIN_CONFIDENCE = 0.6;
 
+/**
+ * An instruction that leaked into a tag's name — "tag each company as one of the following: Health System" — left
+ * as just the tag. Happened when a typed description was split on "|" with its lead-in still attached to the first
+ * tag; a set saved that way is repaired on load by this, and the key is re-derived so it reads cleanly.
+ */
+const INSTRUCTION_PREFIX = /^\s*(?:please\s+)?(?:tag|classify|categori[sz]e|label|sort|bucket|assign|group)\b[^:]{0,120}:\s*/i;
+export const stripInstruction = (label) => String(label ?? "").replace(INSTRUCTION_PREFIX, "").trim();
+
 export function normalizeTagSet(input) {
   const raw = Array.isArray(input?.tags) ? input.tags : [];
   const problems = [];
   const tags = [];
   const keys = new Set();
   for (const t of raw) {
-    const label = clip(typeof t === "string" ? t : t?.label, 80);
+    const rawLabel = typeof t === "string" ? t : t?.label;
+    const label = clip(stripInstruction(rawLabel), 80);
     if (!label) continue;
-    let key = slugKey(typeof t === "object" && t?.key ? t.key : label) || `tag_${tags.length + 1}`;
+    const repaired = label !== clip(rawLabel, 80);
+    let key = slugKey(typeof t === "object" && t?.key && !repaired ? t.key : label) || `tag_${tags.length + 1}`;
     if (keys.has(key)) { problems.push(`"${label}" appears twice; kept the first`); continue; }
     keys.add(key);
     tags.push({ key, label, description: clip(typeof t === "object" ? t?.description : "", 500) });
@@ -741,7 +751,8 @@ export function normalizeTagSet(input) {
 
 /** Tags typed or pasted as "A | B | C", one per line, or comma-separated. */
 export function parseTagList(text) {
-  const s = String(text ?? "");
+  // "Tag each company as one of the following: A | B | C" — the lead-in is an instruction, not the first tag.
+  const s = String(text ?? "").replace(/^[^|\n]*?:\s*(?=[^|\n]*\|)/, "");
   const parts = s.includes("|") ? s.split("|") : s.includes("\n") ? s.split(/\r?\n/) : s.split(",");
   return parts.map((p) => p.replace(/^[\s•*-]+/, "").trim()).filter(Boolean);
 }
@@ -791,6 +802,64 @@ export function mergeNamedTags(generated, named) {
   const other = (generated?.tags ?? []).find((t) => t.key === "other" || /^other\b/i.test(t.label));
   if (other && !tags.some((t) => /^other\b/i.test(t.label))) tags.push({ label: other.label, description: other.description });
   return normalizeTagSet({ ...generated, tags });
+}
+
+/* ═══ Suggesting tags from "Other" ═══ */
+
+/**
+ * What the tag suggester is shown for each company that landed in Other: who it is and what it does, from the
+ * list and from its own website when that was scraped. Capped, because a few hundred companies is plenty to see
+ * the clusters and the call has to finish inside the function ceiling.
+ */
+export function otherSample(items, max = 250) {
+  return (Array.isArray(items) ? items : []).slice(0, max).map((it, n) => {
+    const p = it?.profile ?? {};
+    const fw = p.from_website ?? {};
+    return prune({
+      n: n + 1,
+      name: clip(p.name ?? it?.name, 100),
+      industry: clip(p.industry, 100),
+      what_they_do: clip(fw.what_they_do ?? p.description, 320),
+      organization_type: clip(fw.organization_type ?? p.type, 80),
+      customers: clip(fw.customers, 160),
+      runner_up: clip(it?.runnerUp, 80),
+    }) ?? {};
+  });
+}
+
+/**
+ * The suggester's answer, held to what can be added safely: new labels only (nothing that duplicates an existing
+ * tag), each with a description, the example companies it would catch, and at most 20 of them.
+ */
+export function parseSuggestions(text, existingLabels = []) {
+  const body = String(text ?? "").replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  let parsed;
+  try { parsed = JSON.parse(body.slice(body.indexOf("{"), body.lastIndexOf("}") + 1)); } catch { return { suggestions: [], outOfScope: [] }; }
+  const norm = (x) => String(x ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const taken = new Set(existingLabels.map(norm));
+  const suggestions = [];
+  for (const sug of Array.isArray(parsed?.suggestions) ? parsed.suggestions : []) {
+    const label = clip(stripInstruction(sug?.label), 80);
+    if (!label || taken.has(norm(label)) || /^other\b/i.test(label)) continue;
+    taken.add(norm(label));
+    suggestions.push({
+      label,
+      description: clip(sug?.description, 500),
+      examples: (Array.isArray(sug?.examples) ? sug.examples : []).map((e) => clip(e, 100)).filter(Boolean).slice(0, 8),
+      count: Math.max(0, Math.round(Number(sug?.count) || 0)),
+    });
+    if (suggestions.length >= 20) break;
+  }
+  const outOfScope = (Array.isArray(parsed?.out_of_scope) ? parsed.out_of_scope : []).map((e) => clip(e, 100)).filter(Boolean).slice(0, 50);
+  return { suggestions, outOfScope };
+}
+
+/** New tags slotted in before Other, so Other stays the last resort in the list Jev reads. */
+export function addTags(tagSet, newTags) {
+  const tags = Array.isArray(tagSet?.tags) ? tagSet.tags : [];
+  const other = tags.filter((t) => t.key === "other" || /^other\b/i.test(t.label));
+  const rest = tags.filter((t) => !other.includes(t));
+  return normalizeTagSet({ ...tagSet, tags: [...rest, ...newTags.map((t) => ({ label: t.label, description: t.description ?? "" })), ...other] });
 }
 
 /** A tag set out of a model's reply. */

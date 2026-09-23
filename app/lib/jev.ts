@@ -22,7 +22,7 @@
 import { clientContext } from "./client-context";
 import { brainContext } from "./brain-context";
 import { readConfig, writeConfig } from "./app-config";
-import { mergeNamedTags, normalizeIcp, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
+import { mergeNamedTags, normalizeIcp, otherSample, parseSuggestions, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
 
 type Row = Record<string, unknown>;
 export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: "must" | "exclude" | "signal"; neutral?: string[] };
@@ -363,4 +363,54 @@ export async function evaluateOne(state: unknown, questions: JevQuestion[] | { w
     }
   }
   return { ok: false, error: lastError || "Jev did not answer.", status: lastStatus };
+}
+
+/* ── Suggesting new tags from "Other" ── */
+
+/** Strong enough to design a taxonomy; reached through OpenRouter like the rest of the pipeline. */
+const SUGGEST_MODEL = () => process.env.JEV_SUGGEST_MODEL || "anthropic/claude-sonnet-5";
+
+const SUGGEST_PROMPT = `You extend the category set a fast classifier (TypeSafe's Jev) uses to tag a company list for QC Growth, a B2B outbound agency. After a run, these companies landed in "Other" — none of the current tags fit. Propose NEW tags that would catch them.
+
+Rules:
+- Only propose a tag that genuinely groups several of these companies (at least 2, unless one is clearly an important segment for the client). Name it the way someone in the client's market would.
+- Do not duplicate or reword an existing tag. If a company really belongs in an existing tag, it does not need a new one — leave it out.
+- Each tag gets a plain-language description (one sentence, at most 30 words) saying what belongs in it and how it differs from the nearest existing tag.
+- "examples": up to 5 company names from the list that the tag would catch, exactly as written. "count": how many of the listed companies it would catch.
+- Companies that are simply outside the market the client sells into (a chess club, a conference, an investor, a staffing agency) stay in Other: list their names in "out_of_scope" rather than inventing a tag for them.
+- At most 15 suggestions, largest first.
+
+Reply with JSON only, in exactly this shape:
+{"suggestions":[{"label":"…","description":"…","examples":["…"],"count":0}],"out_of_scope":["…"]}`;
+
+export async function suggestTags(slug: string, items: unknown[]): Promise<{ ok: boolean; error?: string; suggestions?: Array<{ label: string; description: string; examples: string[]; count: number }>; outOfScope?: string[]; cost?: number | null }> {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) return { ok: false, error: "OPENROUTER_API_KEY is not set." };
+  const tags = await loadTagSet(slug);
+  if (!tags?.tags.length) return { ok: false, error: "This client has no saved tag set." };
+  const sample = otherSample(items) as unknown[];
+  if (sample.length < 2) return { ok: false, error: "Not enough companies in Other to find a pattern." };
+  const brief = await clientContext(slug);
+  const content = [
+    brief,
+    `CURRENT TAGS:\n${tags.tags.map((t) => `- ${t.label}${t.description ? `: ${t.description}` : ""}`).join("\n")}`,
+    `COMPANIES THAT LANDED IN "OTHER" (${sample.length}):\n${sample.map((c) => JSON.stringify(c)).join("\n")}`,
+    "Propose the new tags now.",
+  ].filter(Boolean).join("\n\n");
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: SUGGEST_MODEL(), temperature: 0, max_tokens: 4_000, messages: [{ role: "system", content: SUGGEST_PROMPT }, { role: "user", content }] }),
+      signal: AbortSignal.timeout(55_000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, error: `${SUGGEST_MODEL()} ${response.status}: ${payload?.error?.message ?? "no answer"}` };
+    const { suggestions, outOfScope } = parseSuggestions(payload?.choices?.[0]?.message?.content, tags.tags.map((t) => t.label)) as { suggestions: Array<{ label: string; description: string; examples: string[]; count: number }>; outOfScope: string[] };
+    const cost = Number(payload?.usage?.cost);
+    if (!suggestions.length) return { ok: true, suggestions: [], outOfScope, cost: Number.isFinite(cost) ? cost : null };
+    return { ok: true, suggestions, outOfScope, cost: Number.isFinite(cost) ? cost : null };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "The suggestion call failed." };
+  }
 }

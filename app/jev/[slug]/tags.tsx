@@ -80,3 +80,46 @@ export function TagEditor({ value, onChange }: { value: TagSet; onChange: (v: Ta
     </div>
   );
 }
+
+export type Suggestion = { label: string; description: string; examples: string[]; count: number };
+
+/**
+ * New tags proposed from a run's "Other" pile: tick the ones to keep, rename if needed, add. Nothing is saved
+ * until "Add" — a suggestion is a proposal about the client's market, and the team owns that call.
+ */
+export function SuggestPanel({ suggestions, outOfScope, busy, onAdd, onDismiss }: {
+  suggestions: Suggestion[]; outOfScope: string[]; busy: boolean;
+  onAdd: (chosen: Suggestion[]) => void; onDismiss: () => void;
+}) {
+  const [picked, setPicked] = useState(() => suggestions.map(() => true));
+  const [labels, setLabels] = useState(() => suggestions.map((s) => s.label));
+  const chosen = suggestions.map((s, k) => ({ ...s, label: labels[k].trim() })).filter((s, k) => picked[k] && s.label);
+  return (
+    <div className="jev-suggest">
+      <div className="jev-suggest-head">
+        <strong>Suggested tags <b>{suggestions.length}</b></strong>
+        <div className="jev-actions">
+          <button className="secondary-button" onClick={onDismiss} disabled={busy}>Dismiss</button>
+          <button className="primary-button" onClick={() => onAdd(chosen)} disabled={busy || !chosen.length}>{busy ? "Adding…" : `Add ${chosen.length} tag${chosen.length === 1 ? "" : "s"}`}</button>
+        </div>
+      </div>
+      {suggestions.length === 0 && <div className="jev-empty small">No new tag would group these — they look genuinely outside the market.</div>}
+      <ol className="jev-suggest-list">
+        {suggestions.map((s, k) => (
+          <li key={k} className={picked[k] ? "on" : ""}>
+            <input className="jev-suggest-pick" type="checkbox" aria-label={`Add ${labels[k] || "this tag"}`} checked={picked[k]} onChange={(e) => setPicked((p) => p.map((v, j) => (j === k ? e.target.checked : v)))} />
+            <div className="jev-suggest-body">
+              <div className="jev-suggest-top">
+                <input className="jev-input jev-tag-label" value={labels[k]} onChange={(e) => setLabels((l) => l.map((v, j) => (j === k ? e.target.value : v)))} aria-label="Tag name" />
+                {s.count > 0 && <span className="jev-suggest-count">~{s.count}</span>}
+              </div>
+              {s.description && <p>{s.description}</p>}
+              {s.examples.length > 0 && <div className="jev-suggest-ex">{s.examples.join(" · ")}</div>}
+            </div>
+          </li>
+        ))}
+      </ol>
+      {outOfScope.length > 0 && <div className="jev-suggest-out">Staying in Other ({outOfScope.length}): {outOfScope.slice(0, 12).join(" · ")}{outOfScope.length > 12 ? " …" : ""}</div>}
+    </div>
+  );
+}

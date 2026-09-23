@@ -33,6 +33,7 @@ import {
   COLUMN_ROLES,
   MAX_COMPANY_ROWS,
   MAX_ROWS,
+  addTags,
   buildCompanyProfile,
   buildProfile,
   duplicateIndexes,
@@ -48,7 +49,7 @@ import {
   toTagWire,
   toWireQuestions,
 } from "../../../shared/jev.mjs";
-import { DescribeBox, TagEditor, TagList, type TagSet } from "./tags";
+import { DescribeBox, SuggestPanel, TagEditor, TagList, type Suggestion, type TagSet } from "./tags";
 import { IcpBox, type Icp } from "./icp";
 import { freshStats, runPipeline, type EnrichMode, type Enriched, type Outcome, type Stage } from "./pipeline";
 import { ActivityLog, EnrichControl, StageCards, type Detection, type LogLine } from "./pipeline-view";
@@ -283,6 +284,9 @@ export default function JevClientPage() {
   const [set, setSet] = useState<QuestionSet | null>(null);
   const [tags, setTags] = useState<TagSet | null>(null);
   const [editingTags, setEditingTags] = useState<TagSet | null>(null);
+  // Tags proposed from a run's "Other" pile, and — once some are added — the rows worth re-tagging with them.
+  const [suggestion, setSuggestion] = useState<{ suggestions: Suggestion[]; outOfScope: string[] } | null>(null);
+  const [retag, setRetag] = useState<number[]>([]);
   const [mode, setModeState] = useState<Mode>("contacts");
   const [jev, setJev] = useState<{ configured: boolean; model: string } | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -305,6 +309,9 @@ export default function JevClientPage() {
   // scrape a row twice. Cleared whenever the rows themselves change.
   const enrichedRef = useRef(new Map<number, Enriched>());
   const [enrichMode, setEnrichMode] = useState<EnrichMode>("auto");
+  // True when the server has been redeployed since this tab loaded: the page's pipeline code may no longer match
+  // the routes it calls, so runs are blocked until a reload.
+  const [stale, setStale] = useState(false);
   const [enrichCfg, setEnrichCfg] = useState<{ aiArk: boolean; jina: boolean; structureModel: string; structureRpm: number; llm: boolean } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const rafRef = useRef(0);
@@ -325,6 +332,7 @@ export default function JevClientPage() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) { setLoadError(payload.error || `Could not load this client (${response.status}).`); return; }
       setClient(payload.client); setSet(payload.set); setTags(payload.tags ?? null); setJev(payload.jev); setEnrichCfg(payload.enrich ?? null);
+      if (payload.build && process.env.NEXT_PUBLIC_BUILD_ID && payload.build !== process.env.NEXT_PUBLIC_BUILD_ID) setStale(true);
     } catch { setLoadError("Could not reach the server."); }
   }, [slug]);
   useEffect(() => { void load(); }, [load]);
@@ -463,6 +471,41 @@ export default function JevClientPage() {
     finally { setBusy(""); }
   };
 
+  /** Rows the last run put in Other or left for review — the ones new tags could change. */
+  const otherRows = () => [...results.current.entries()].filter(([, r]) => (r.status === "tagged" || r.status === "review") && (r.tag === "other" || r.status === "review")).map(([i]) => i);
+
+  const suggestFromOther = async () => {
+    if (!file) return;
+    const rows = [...results.current.entries()].filter(([, r]) => r.tag === "other" && (r.status === "tagged" || r.status === "review")).map(([i]) => i);
+    setBusy("building"); setSuggestion(null); setNotice({ kind: "info", text: `Looking for patterns in the ${rows.length} companies in Other…` });
+    try {
+      const items = rows.slice(0, 250).map((i) => ({ profile: enrichedRef.current.get(i)?.profile ?? file.profiles[i], runnerUp: results.current.get(i)?.runnerUp?.label }));
+      const response = await fetch("/api/jev/tags/suggest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, items }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Suggestion failed (${response.status}).` }); return; }
+      setSuggestion({ suggestions: payload.suggestions ?? [], outOfScope: payload.outOfScope ?? [] });
+      setNotice(null); setCollapsed(false);
+    } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
+    finally { setBusy(""); }
+  };
+
+  /** Save the chosen suggestions into the tag set without clearing the run, so only the affected rows re-run. */
+  const addSuggested = async (chosen: Suggestion[]) => {
+    if (!tags || !chosen.length) return;
+    setBusy("saving");
+    try {
+      const next = addTags(tags, chosen.map((c) => ({ label: c.label, description: c.description })));
+      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, kind: "tags", set: { ...tags, ...next } }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
+      setTags(payload.set); setSuggestion(null);
+      const rows = otherRows();
+      setRetag(rows);
+      setNotice({ kind: "ok", text: `Added ${chosen.length} tag${chosen.length === 1 ? "" : "s"}. Re-tag the ${rows.length} companies in Other and Needs review to use them.` });
+    } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
+    finally { setBusy(""); }
+  };
+
   const saveTags = async () => {
     if (!editingTags) return;
     setBusy("saving");
@@ -506,6 +549,11 @@ export default function JevClientPage() {
   const requiredFields = useMemo(() => (mode === "contacts" && set?.questions.length ? [...new Set(set.questions.flatMap((q) => questionFieldRefs(q) as string[]))] : []), [mode, set]);
 
   const run = async (only?: number[]) => {
+    // Re-check the build before spending anything: a tab open across a deploy is exactly when this bites.
+    try {
+      const probe = await fetch(`/api/jev/questions?client=${encodeURIComponent(slug)}`, { cache: "no-store" }).then((r) => r.json());
+      if (probe?.build && process.env.NEXT_PUBLIC_BUILD_ID && probe.build !== process.env.NEXT_PUBLIC_BUILD_ID) { setStale(true); return; }
+    } catch { /* offline checks fall through to the run's own errors */ }
     if (!file || running || !(file.mode === "companies" ? tags?.tags.length : set?.questions.length)) return;
     const targets = only ?? file.rows.map((_, i) => i).filter((i) => !file.duplicates.has(i));
     if (!only) resetResults(file);
@@ -658,7 +706,7 @@ export default function JevClientPage() {
   };
 
   const configured = mode === "companies" ? Boolean(tags?.tags.length) : Boolean(set?.questions.length);
-  const ready = Boolean(jev?.configured && configured && file && file.mode === mode && !editing && !editingTags);
+  const ready = Boolean(!stale && jev?.configured && configured && file && file.mode === mode && !editing && !editingTags);
   const tagLabel = (key: string) => tags?.tags.find((t) => t.key === key)?.label ?? key;
   const finished = Boolean(file && timing?.end && !running);
 
@@ -693,6 +741,9 @@ export default function JevClientPage() {
                 </div>
               </div>
 
+              {stale && (
+                <div className="jev-banner is-error">Reply Radar was updated since this page opened. <button className="secondary-button" onClick={() => window.location.reload()}>Reload</button></div>
+              )}
               {jev && !jev.configured && (
                 <div className="jev-banner is-error">OPENROUTER_API_KEY is not set on this deployment. Add it in Vercel → Settings → Environment Variables, then redeploy.</div>
               )}
@@ -751,6 +802,8 @@ export default function JevClientPage() {
                     <div className="jev-panel-head">
                       <h2>Company tags {tags?.tags.length ? <span className="jev-badge">{tags.tags.length}</span> : null}</h2>
                       <div className="jev-actions">
+                        {!editingTags && !running && retag.length > 0 && <button className="primary-button" onClick={() => { const rows = retag; setRetag([]); void run(rows); }}>Re-tag {retag.length.toLocaleString()}</button>}
+                        {!editingTags && !running && !suggestion && (tagCounts.other ?? 0) >= 3 && file?.mode === "companies" && <button className="secondary-button" onClick={() => void suggestFromOther()} disabled={Boolean(busy)}>{busy === "building" ? "Suggesting…" : `Suggest tags from Other (${(tagCounts.other ?? 0).toLocaleString()})`}</button>}
                         {!editingTags && Boolean(tags?.tags.length) && <button className="secondary-button" onClick={() => setCollapsed((c) => !c)}>{collapsed ? "Show" : "Hide"}</button>}
                         {!editingTags && <button className="secondary-button" onClick={() => { setCollapsed(false); setEditingTags(tags ? structuredClone(tags) : { instructions: "Which category best describes what this organization primarily is?", tags: [{ key: "", label: "", description: "" }], minConfidence: 0.6 }); }} disabled={Boolean(busy) || running}>{tags?.tags.length ? "Edit" : "Write by hand"}</button>}
                         {editingTags && <button className="secondary-button" onClick={() => setEditingTags(null)} disabled={busy === "saving"}>Cancel</button>}
@@ -769,6 +822,7 @@ export default function JevClientPage() {
                       />
                     )}
                     {notice && <div className={`jev-banner is-${notice.kind}`}>{notice.text}</div>}
+                    {suggestion && !editingTags && <SuggestPanel suggestions={suggestion.suggestions} outOfScope={suggestion.outOfScope} busy={busy === "saving"} onAdd={(c) => void addSuggested(c)} onDismiss={() => setSuggestion(null)} />}
                     {editingTags ? <TagEditor value={editingTags} onChange={setEditingTags} /> : tags?.tags.length ? <TagList set={tags} collapsed={collapsed} counts={tagCounts} /> : null}
                   </section>
                 )}

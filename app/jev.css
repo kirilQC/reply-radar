@@ -289,3 +289,20 @@
 .jev-q-opts span.is-neutral { opacity: .55; border-style: dashed; }
 .jev-edit-top { flex-wrap: wrap; }
 @media (max-width: 900px) { .jev-icp-grid { grid-template-columns: 1fr; } }
+
+/* ── Tag suggestions from "Other" ── */
+.jev-suggest { border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border-soft)); border-radius: 11px; padding: 12px; margin-bottom: 14px; background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.jev-suggest-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.jev-suggest-head strong { font-size: 13px; }
+.jev-suggest-head strong b { color: var(--accent); margin-left: 4px; }
+.jev-suggest-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+.jev-suggest-list li { display: flex; gap: 8px; border: 1px solid var(--border-soft); border-radius: 9px; padding: 9px 10px; background: var(--panel-2); opacity: .55; }
+.jev-suggest-list li.on { opacity: 1; border-color: color-mix(in srgb, var(--accent) 35%, var(--border-soft)); }
+.jev-suggest-pick { margin-top: 9px; flex: none; }
+.jev-suggest-body { flex: 1; min-width: 0; }
+.jev-suggest-top { display: flex; align-items: center; gap: 8px; }
+.jev-suggest-top .jev-input { flex: 1; }
+.jev-suggest-count { font-size: 11px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.jev-suggest-body p { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+.jev-suggest-ex { margin-top: 5px; font-size: 10.5px; color: var(--muted-2); }
+.jev-suggest-out { margin-top: 10px; font-size: 11px; color: var(--muted-2); }

@@ -70,6 +70,16 @@ endpoint — it does not serve Jev.
   in `neutral` ("unclear") make that question count for nothing when most of the answer lands there. Good = the
   average of counted must/signal answers ≥ 60%. Sets saved before kinds existed: a no-is-fit noul is `exclude`,
   the rest `must`.
+- **Suggest tags from Other** (company mode, after a run): the companies left in Other (their list data plus any
+  scraped website facts) go to `anthropic/claude-sonnet-5` via OpenRouter (`JEV_SUGGEST_MODEL`), which proposes new
+  tags with descriptions, example companies and counts, and names the ones that are genuinely out of scope. Nothing
+  is saved until someone ticks and adds them; then "Re-tag N" re-runs only the Other + Needs review rows (scrapes are
+  cached). Live on the 240-company file: 14 in Other → 3, in ~21s. Tag labels with a leaked instruction ("tag each
+  company as one of the following: Health System") are repaired on load by `stripInstruction`.
+- **Stale-tab guard:** the client bundle carries `NEXT_PUBLIC_BUILD_ID` (the commit, set in `next.config.ts`) and
+  `/api/jev/questions` returns the server's; on a mismatch the page shows "Reply Radar was updated — Reload" and
+  blocks Run. Added after an old tab ran Bright Data-era pipeline code against the AI Ark server and skipped every
+  contact lookup silently.
 - **Structured contact ICP** (`icp` on the question set; `app/jev/[slug]/icp.tsx`): a pool of target titles
   (turned into one Choice question verbatim by `titlePoolQuestion` — never paraphrased), responsibilities,
   company size range (checked in code by `sizeCheck` against `listed_company_profile.employees`; unknown size is

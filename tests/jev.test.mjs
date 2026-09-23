@@ -18,9 +18,12 @@ import {
   planColumns,
   tagVerdict,
   toTagWire,
+  addTags,
   normalizeIcp,
   normalizeQuestionSet,
+  otherSample,
   parseCsv,
+  parseSuggestions,
   parseEmployees,
   sizeCheck,
   titlePoolQuestion,
@@ -354,4 +357,28 @@ test("mergeNamedTags keeps the typed tags exactly, in order, with the model's de
   assert.equal(merged.tags[0].description, "Multi-hospital system");
   assert.equal(merged.tags[1].description, "");
   assert.equal(merged.instructions, "Which?");
+});
+
+test("a typed lead-in never becomes a tag, and a set saved with one is repaired on load", () => {
+  assert.deepEqual(parseTagList("Tag each company as one of the following: Health System | ACO | IPA"), ["Health System", "ACO", "IPA"]);
+  const repaired = normalizeTagSet({ tags: [{ key: "tag_each_company_as_one_of_the_following_health_system", label: "tag each company as one of the following: Health System" }, { key: "aco", label: "ACO" }] });
+  assert.deepEqual(repaired.tags.map((t) => [t.key, t.label]), [["health_system", "Health System"], ["aco", "ACO"], ["other", "Other"]]);
+  // A real tag with a colon in it is left alone.
+  assert.equal(normalizeTagSet({ tags: ["Post-Acute: Skilled Nursing", "ACO"] }).tags[0].label, "Post-Acute: Skilled Nursing");
+});
+
+test("suggestions from Other: new labels only, examples kept, added before Other", () => {
+  const sample = otherSample([{ profile: { name: "Shirley Ryan AbilityLab", industry: "hospitals", from_website: { what_they_do: "Inpatient rehabilitation hospital", organization_type: "nonprofit hospital" } }, runnerUp: "Academic Medical Center" }]);
+  assert.deepEqual(sample[0], { n: 1, name: "Shirley Ryan AbilityLab", industry: "hospitals", what_they_do: "Inpatient rehabilitation hospital", organization_type: "nonprofit hospital", runner_up: "Academic Medical Center" });
+  const { suggestions, outOfScope } = parseSuggestions(JSON.stringify({ suggestions: [
+    { label: "Rehabilitation Hospital", description: "Inpatient rehab", examples: ["Shirley Ryan AbilityLab"], count: 4 },
+    { label: "ACO", description: "dupe of an existing tag" },
+    { label: "Other", description: "never" },
+    { label: "Dental / Orthodontics Group", description: "Dental practices", examples: ["Western Dental"], count: 3 },
+  ], out_of_scope: ["Nashville Chess Center"] }), ["ACO", "Other"]);
+  assert.deepEqual(suggestions.map((x) => [x.label, x.count]), [["Rehabilitation Hospital", 4], ["Dental / Orthodontics Group", 3]]);
+  assert.deepEqual(outOfScope, ["Nashville Chess Center"]);
+  const set = addTags(normalizeTagSet({ tags: ["Health System", "ACO"] }), suggestions);
+  assert.deepEqual(set.tags.map((t) => t.label), ["Health System", "ACO", "Rehabilitation Hospital", "Dental / Orthodontics Group", "Other"]);
+  assert.deepEqual(parseSuggestions("not json"), { suggestions: [], outOfScope: [] });
 });

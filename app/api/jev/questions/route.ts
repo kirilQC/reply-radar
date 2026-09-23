@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     if (!client) return NextResponse.json({ ok: false, error: "Unknown client." }, { status: 404 });
     const { apiKey, model } = jevConfig();
     const [set, tags] = await Promise.all([loadQuestionSet(slug), loadTagSet(slug)]);
-    return NextResponse.json({ ok: true, client, set, tags, jev: { configured: Boolean(apiKey), model }, enrich: enrichConfig() });
+    return NextResponse.json({ ok: true, client, set, tags, jev: { configured: Boolean(apiKey), model }, enrich: enrichConfig(), build: process.env.VERCEL_GIT_COMMIT_SHA ?? "local" });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not read the question set." }, { status: 502 });
   }
