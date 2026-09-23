@@ -17,8 +17,8 @@
  * The saved question set is read once per request and the verdict is applied against it on the server, so
  * what a run decides is always what Supabase holds — never an unsaved edit sitting in a browser tab.
  */
-import { evaluateOne, loadQuestionSet } from "../../../lib/jev";
-import { verdictFor } from "../../../../shared/jev.mjs";
+import { evaluateOne, loadQuestionSet, loadTagSet } from "../../../lib/jev";
+import { tagVerdict, toTagWire, verdictFor } from "../../../../shared/jev.mjs";
 
 export const maxDuration = 60;
 
@@ -32,12 +32,33 @@ export async function POST(request: Request) {
   const rows = Array.isArray(body?.rows) ? (body.rows as Array<{ i: number; state: unknown }>).slice(0, MAX_ROWS_PER_REQUEST) : [];
   if (!slug || !rows.length) return Response.json({ ok: false, error: "client and rows are required." }, { status: 400 });
 
-  let set;
-  try { set = await loadQuestionSet(slug); } catch (error) {
-    return Response.json({ ok: false, error: error instanceof Error ? error.message : "Could not read the question set." }, { status: 502 });
+  const companies = body?.mode === "companies";
+
+  // One function per row, so the streaming loop below is the same for both list types.
+  let judge: (state: unknown) => Promise<Record<string, unknown>>;
+  try {
+    if (companies) {
+      const tags = await loadTagSet(slug);
+      if (!tags?.tags.length) return Response.json({ ok: false, error: "This client has no saved tag set." }, { status: 409 });
+      const wire = toTagWire(tags);
+      judge = async (state) => {
+        const result = await evaluateOne(state, { wire });
+        if (!result.ok) return { ok: false, error: result.error, status: result.status ?? 0 };
+        return { ok: true, ...tagVerdict(tags, result.answers?.category), tokens: result.tokens ?? 0, cost: result.cost ?? null };
+      };
+    } else {
+      const set = await loadQuestionSet(slug);
+      if (!set?.questions.length) return Response.json({ ok: false, error: "This client has no saved question set." }, { status: 409 });
+      const { questions, thresholds } = set;
+      judge = async (state) => {
+        const result = await evaluateOne(state, questions);
+        if (!result.ok) return { ok: false, error: result.error, status: result.status ?? 0 };
+        return { ok: true, ...verdictFor(questions, result.answers, thresholds), tokens: result.tokens ?? 0, cost: result.cost ?? null };
+      };
+    }
+  } catch (error) {
+    return Response.json({ ok: false, error: error instanceof Error ? error.message : "Could not read the saved setup." }, { status: 502 });
   }
-  if (!set?.questions.length) return Response.json({ ok: false, error: "This client has no saved question set." }, { status: 409 });
-  const { questions, thresholds } = set;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -46,10 +67,7 @@ export async function POST(request: Request) {
       const worker = async () => {
         while (next < rows.length) {
           const row = rows[next++];
-          const result = await evaluateOne(row.state, questions);
-          const line = result.ok
-            ? { i: row.i, ok: true, ...verdictFor(questions, result.answers, thresholds), tokens: result.tokens ?? 0, cost: result.cost ?? null }
-            : { i: row.i, ok: false, error: result.error, status: result.status ?? 0 };
+          const line = { i: row.i, ...(await judge(row.state)) };
           controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
         }
       };

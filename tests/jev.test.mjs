@@ -8,8 +8,16 @@ import {
   duplicateIndexes,
   identify,
   identifyWith,
+  buildCompanyProfile,
+  identifyCompany,
+  mergeNamedTags,
   missingFields,
+  normalizeTagSet,
+  parseGeneratedTagSet,
+  parseTagList,
   planColumns,
+  tagVerdict,
+  toTagWire,
   normalizeQuestionSet,
   parseCsv,
   parseGeneratedQuestionSet,
@@ -109,7 +117,7 @@ test("Sales Nav-style headers: company scope, LinkedIn casing, unrecognised text
   const { headers, rows } = csvRows(`Full Name,Job Title,Company,Company Domain,Profile URL,Location,Industry,Headcount,Tenure in Position,Headline,Summary
 Ada Lee,CISO,Acme Health,acme.com,https://www.linkedin.com/sales/lead/A,"Boston, MA",Hospitals and Health Care,201-500,1 year 2 months,CISO at Acme,Security leader`);
   const plan = planColumns(headers, rows);
-  assert.equal(roleOf(plan, "Company Domain"), "ignore");
+  assert.equal(roleOf(plan, "Company Domain"), "website"); // identifies the company; never sent
   assert.equal(roleOf(plan, "Profile URL"), "linkedin");
   const p = buildProfile(rows[0], plan);
   assert.equal(p.listed_company_profile.industry, "Hospitals and Health Care");
@@ -239,4 +247,63 @@ test("parseGeneratedQuestionSet reads fenced or chatty JSON and rejects nonsense
   assert.equal(parseGeneratedQuestionSet(fenced).questions.length, 1);
   assert.equal(parseGeneratedQuestionSet('Here you go: {"questions":[{"label":"X","type":"noul","instructions":"?"}]} Hope that helps').questions.length, 1);
   assert.equal(parseGeneratedQuestionSet("no json here").questions.length, 0);
+});
+
+test("a company export is read into the company profile, and duplicates are found by website", () => {
+  const { headers, rows } = csvRows(`Company Name,Company Name for Emails,Headcount,Employee Size,Industry,Industry Tags,Product and Services,Description,SEO Description,Website,LinkedIn,Company Type,Number of Locations,Company Address,Company Country,Company State,Annual Revenue,Last Funding Type,Last Funding Amount,AI Ark Account ID
+Centerstone,Centerstone,3482,10001+,mental health care,mental health care,"behavioral health, addiction",Largest nonprofit behavioral health organization.,Healing and hope.,centerstone.org,https://www.linkedin.com/company/centerstone,NON_PROFIT,4,"1 Main St, Nashville",United States,Tennessee,100000000-499999999,,,cc9
+Centerstone TN,Centerstone,3482,10001+,mental health care,mental health care,,Same org.,,https://www.centerstone.org/,,NON_PROFIT,4,,United States,Tennessee,,,,cc8`);
+  const plan = planColumns(headers, rows);
+  assert.equal(roleOf(plan, "Company Name for Emails"), "ignore");
+  assert.equal(roleOf(plan, "Website"), "website");
+  assert.equal(roleOf(plan, "Number of Locations"), "company_locations");
+  assert.equal(roleOf(plan, "Company Address"), "ignore");
+  assert.equal(roleOf(plan, "Last Funding Amount"), "ignore");
+  const p = buildCompanyProfile(rows[0], plan);
+  assert.equal(p.name, "Centerstone");
+  assert.equal(p.industry, "mental health care");
+  assert.equal(p.description, "Largest nonprofit behavioral health organization. · Healing and hope.");
+  assert.equal(p.locations, "4");
+  assert.equal(JSON.stringify(p).includes("centerstone.org"), false);
+  const ids = rows.map((r) => identifyCompany(r, plan));
+  assert.deepEqual([...duplicateIndexes(ids)], [1]);
+});
+
+test("tag sets: labels become keys, Other is always present, confidence line is kept", () => {
+  const t = normalizeTagSet({ tags: ["Health System", { label: "Children's Hospital", description: "Mainly treats children" }, "Health System"], minConfidence: 0.7 });
+  assert.deepEqual(t.tags.map((x) => x.key), ["health_system", "children_s_hospital", "other"]);
+  assert.equal(t.minConfidence, 0.7);
+  assert.ok(t.problems.some((p) => /twice/.test(p)));
+  assert.equal(normalizeTagSet({ tags: ["Only one"] }).tags.length, 2); // Other added makes it usable
+  assert.equal(normalizeTagSet({ tags: [] }).tags.length, 0);
+  assert.deepEqual(parseTagList("Health System | ACO |IPA"), ["Health System", "ACO", "IPA"]);
+  assert.deepEqual(parseTagList("- Hospice\n- Home Health"), ["Hospice", "Home Health"]);
+  assert.deepEqual(toTagWire(t).category.criteria.children_s_hospital, "Children's Hospital: Mainly treats children");
+});
+
+test("tagVerdict: top tag, runner-up when it is a contender, review below the line", () => {
+  const set = normalizeTagSet({ tags: ["Behavioral Health Provider", "Telehealth / Virtual Care"], minConfidence: 0.6 });
+  const sure = tagVerdict(set, { choice: "behavioral_health_provider", probabilities: { behavioral_health_provider: 0.93, telehealth_virtual_care: 0.05, other: 0.02 }, confidence: 0.92 });
+  assert.equal(sure.status, "tagged");
+  assert.equal(sure.label, "Behavioral Health Provider");
+  assert.equal(sure.runnerUp, null);
+  const unsure = tagVerdict(set, { choice: "telehealth_virtual_care", probabilities: { telehealth_virtual_care: 0.54, behavioral_health_provider: 0.46, other: 0 }, confidence: 0.52 });
+  assert.equal(unsure.status, "review");
+  assert.equal(unsure.runnerUp.label, "Behavioral Health Provider");
+  assert.equal(unsure.reason, "Unsure: Telehealth / Virtual Care or Behavioral Health Provider");
+  assert.equal(tagVerdict(set, {}).status, "error");
+});
+
+test("mergeNamedTags keeps the typed tags exactly, in order, with the model's descriptions", () => {
+  const generated = parseGeneratedTagSet(JSON.stringify({ instructions: "Which?", tags: [
+    { label: "PBM", description: "renamed by the model" },
+    { label: "Health System", description: "Multi-hospital system" },
+    { label: "Wellness Spa", description: "not asked for" },
+    { label: "Other", description: "None fits" },
+  ] }));
+  const merged = mergeNamedTags(generated, ["Health System", "Pharmacy / PBM", "ACO"]);
+  assert.deepEqual(merged.tags.map((t) => t.label), ["Health System", "Pharmacy / PBM", "ACO", "Other"]);
+  assert.equal(merged.tags[0].description, "Multi-hospital system");
+  assert.equal(merged.tags[1].description, "");
+  assert.equal(merged.instructions, "Which?");
 });

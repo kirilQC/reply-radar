@@ -193,3 +193,36 @@
   .jev-col-sample { display: none; }
   .jev-detail { padding-left: 14px; }
 }
+
+/* ── List type, describe box, tags ── */
+.jev-modes { display: inline-flex; gap: 6px; padding: 4px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); flex-wrap: wrap; }
+.jev-mode { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 16px; border-radius: 9px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 650; text-align: left; }
+.jev-mode small { font-size: 10px; font-weight: 600; color: var(--muted-2); }
+.jev-mode.on { background: var(--panel-2); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
+.jev-mode.on small { color: var(--accent); }
+.jev-mode:disabled { opacity: .55; cursor: not-allowed; }
+.jev-describe { border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border-soft)); border-radius: 11px; padding: 12px; margin-bottom: 14px; background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.jev-describe-label { display: block; font-size: 12px; font-weight: 650; }
+.jev-describe-text { min-height: 84px; }
+.jev-describe-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+.jev-taglist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.jev-taglist li { border: 1px solid var(--border-soft); border-radius: 9px; padding: 9px 11px; background: var(--panel-2); display: flex; flex-direction: column; gap: 4px; }
+.jev-taglist strong { font-size: 12.5px; }
+.jev-taglist span { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+.jev-muted { color: var(--muted-2) !important; font-style: italic; }
+.jev-chip-count { margin-left: 4px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.jev-stack { display: flex; flex-direction: column; gap: 5px; }
+.jev-stack > span { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted-2); font-weight: 700; }
+.jev-tag-edit { display: grid; grid-template-columns: 220px 1fr auto; gap: 8px; align-items: start; }
+.jev-tag-edit .jev-textarea { margin-top: 0; }
+.jev-tag-label { font-weight: 600; }
+.jev-filter.tag b { color: var(--accent); }
+.jev-runner { color: var(--muted-2); }
+.jev-review { color: var(--amber); }
+@media (max-width: 700px) {
+  .jev-tag-edit { grid-template-columns: 1fr auto; }
+  .jev-tag-edit .jev-textarea { grid-column: 1 / -1; }
+}
+/* Company rows carry tag names like "Physician Group / Medical Group", so the tag column is wide and wraps. */
+.jev-tr.is-co { grid-template-columns: 48px minmax(220px, 1.2fr) minmax(140px, .7fr) minmax(210px, 1fr) minmax(220px, 1.1fr); }
+.jev-tr.is-co .jev-verdict { white-space: normal; display: inline-block; line-height: 1.3; }

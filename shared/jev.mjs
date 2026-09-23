@@ -27,6 +27,8 @@
 
 /** Hard ceilings, so a malformed file or a runaway question set fails loudly rather than slowly. */
 export const MAX_ROWS = 10_000;
+/** Company rows are a tenth the size of a contact row, and company lists are the ones pulled by the hundred thousand. */
+export const MAX_COMPANY_ROWS = 100_000;
 export const MAX_QUESTIONS = 10;
 export const MAX_CHOICE_OPTIONS = 255;
 export const DEFAULT_THRESHOLDS = { keep: 0.6, drop: 0.35 };
@@ -163,6 +165,7 @@ export const COLUMN_ROLES = {
   company_revenue: "Company revenue",
   company_location: "Company location",
   company_type: "Company type",
+  company_locations: "Company number of locations",
   experience: "Job history (numbered)",
   experience_json: "Job history (JSON list)",
   other: "Send as extra",
@@ -170,15 +173,19 @@ export const COLUMN_ROLES = {
   first_name: "First name (not sent)",
   last_name: "Last name (not sent)",
   linkedin: "LinkedIn URL (not sent)",
+  website: "Company website (not sent)",
+  company_linkedin: "Company LinkedIn (not sent)",
   ignore: "Ignore",
 };
-/** Roles whose value identifies the person rather than describing them. Used for display and de-duplication only. */
-const IDENTITY_ROLES = new Set(["name", "first_name", "last_name", "linkedin"]);
+/** Roles that identify the row rather than describe it. Used for display and de-duplication only, never sent. */
+const IDENTITY_ROLES = new Set(["name", "first_name", "last_name", "linkedin", "website", "company_linkedin"]);
 
 const MAX_CURRENT_ROLES = 4;
 const MAX_OTHER_COLUMNS = 8;
 const OTHER_BUDGET = 1_500;
-const CLIP = { title: 160, headline: 220, about: 600, seniority: 40, department: 80, location: 100, skills: 200, company: 120, company_industry: 100, company_employees: 30, company_description: 500, company_products: 250, company_funding: 40, company_revenue: 40, company_location: 100, company_type: 40, other: 300 };
+const CLIP = { title: 160, headline: 220, about: 600, seniority: 40, department: 80, location: 100, skills: 200, company: 120, company_industry: 100, company_employees: 30, company_description: 500, company_products: 250, company_funding: 40, company_revenue: 40, company_location: 100, company_type: 40, company_locations: 20, other: 300 };
+/** A company list has nothing else to go on, so its descriptive fields get more room than a contact's do. */
+const COMPANY_CLIP = { ...CLIP, company_description: 900, company_products: 400, company_industry: 160 };
 
 /** A header as lowercase words: "1st Experience Company" → "1st experience company". */
 // camelCase is split ("jobTitle" → "job title"), but brand casing is protected first, or "LinkedIn" becomes
@@ -218,6 +225,9 @@ function roleFromHeader(header) {
   const companyScoped = has(w, /^\s(company|organization|organisation|account|employer|business|firm)\s/) || has(w, /\scompany\s/);
   if (companyScoped) {
     if (has(w, /\s(growth|change|increase)\s/)) return { role: "ignore", why: "not about fit" };
+    if (has(w, /\slinkedin\s/) && !has(w, /\s(followers|id)\s/)) return { role: "company_linkedin" };
+    if (has(w, /\s(website|domain|url)\s/) && !has(w, /\s(logo|image|linkedin)\s/)) return { role: "website" };
+    if (has(w, /\s(locations|sites|facilities|offices)\s/) && !has(w, /\saddress\s/)) return { role: "company_locations" };
     if (has(w, /\s(industry|industries|sector|vertical)\s/)) return { role: "company_industry" };
     if (has(w, /\s(employees|employee|headcount|size|staff)\s/)) return { role: "company_employees" };
     if (has(w, /\s(description|about|overview|summary|tagline|bio)\s/)) return { role: "company_description" };
@@ -237,10 +247,12 @@ function roleFromHeader(header) {
   if (has(w, /^\s(profile url|li url|sales nav(igator)? url)\s$/)) return { role: "linkedin" };
   if (has(w, /^\s(current )?(job )?(title|position|job title|role|designation|occupation)\s$/)) return { role: "title" };
   if (has(w, /^\s(current )?(organization|organisation|org|employer|account name|account|company|firm|workplace)\s$/)) return { role: "company" };
-  if (has(w, /^\s(industry|industries|sector|vertical)\s$/)) return { role: "company_industry" };
-  if (has(w, /^\s(# employees|employees|employee count|headcount|num employees|number of employees|size|employee range|employees range)\s$/)) return { role: "company_employees" };
-  if (has(w, /^\s(description|short description|seo description|overview)\s$/)) return { role: "company_description" };
-  if (has(w, /^\s(keywords|technologies|specialties|specialities|products|services)\s$/)) return { role: "company_products" };
+  if (has(w, /^\s(website|domain|domain url|company url|web|homepage)\s$/)) return { role: "website" };
+  if (has(w, /\s(industry|industries|sector|vertical)\s/) && !has(w, /\s(growth|id)\s/)) return { role: "company_industry" };
+  if (has(w, /^\s(# employees|employees|employee count|employee size|headcount|num employees|number of employees|size|employee range|employees range|staff count)\s$/)) return { role: "company_employees" };
+  if (has(w, /^\s(description|short description|seo description|overview|about us)\s$/)) return { role: "company_description" };
+  if (has(w, /\s(keywords|technologies|specialties|specialities|products?|services?|offerings?)\s/)) return { role: "company_products" };
+  if (has(w, /\s(locations|sites|facilities)\s/) && !has(w, /\saddress\s/)) return { role: "company_locations" };
   if (has(w, /\s(funding stage|latest funding|last funding type|funding type|funding)\s/) && !has(w, /\s(amount|date|total|raised)\s/)) return { role: "company_funding" };
   if (has(w, /\s(annual revenue|revenue|revenue range)\s/)) return { role: "company_revenue" };
   if (NOISE_WORDS.test(w)) return { role: "ignore", why: "not about fit" };
@@ -355,16 +367,20 @@ function currentRoles(cells, plan) {
   return roles;
 }
 
-/** Values for one role across every column assigned to it: the first for single facts, a de-duplicated join for places. */
-function valueFor(cells, plan, role) {
+/** Roles whose columns are joined rather than first-wins: two descriptions or two industry lists each add something. */
+const JOINED = new Set(["location", "company_location", "company_industry", "company_description", "company_products"]);
+
+/** Values for one role across every column assigned to it: the first for single facts, a de-duplicated join for the rest. */
+function valueFor(cells, plan, role, clips = CLIP) {
   const vals = plan.columns.filter((c) => c.role === role).map((c) => String(cell(cells, c)).trim()).filter(Boolean);
   if (!vals.length) return "";
-  if (role === "location" || role === "company_location") {
+  const max = clips[role] ?? 300;
+  if (JOINED.has(role)) {
     const out = [];
     for (const v of vals) if (!out.some((o) => o.toLowerCase().includes(v.toLowerCase()))) out.push(v);
-    return clipTo(role, out.join(", "));
+    return clip(out.join(role.endsWith("location") ? ", " : " · "), max);
   }
-  return clipTo(role, vals[0]);
+  return clip(vals[0], max);
 }
 
 /**
@@ -419,6 +435,49 @@ export function identifyWith(cells, plan) {
     company: valueFor(cells, plan, "company") || roles[0]?.company || "",
     linkedin: clip(plan.columns.filter((c) => c.role === "linkedin").map((c) => cell(cells, c)).find((v) => String(v).trim()) ?? "", 300),
   };
+}
+
+/**
+ * The profile Jev sees for one row of a *company* list. The company name is included — it is not personal data,
+ * and "Children's Hospital of …" or "… Hospice" is often the strongest signal a company list carries.
+ */
+export function buildCompanyProfile(cells, plan) {
+  const other = {};
+  let spent = 0;
+  for (const c of plan.columns) {
+    if (c.role !== "other") continue;
+    const v = clipTo("other", cell(cells, c));
+    if (!v || spent + v.length > OTHER_BUDGET) continue;
+    other[c.header] = v;
+    spent += v.length;
+  }
+  const v = (role) => valueFor(cells, plan, role, COMPANY_CLIP);
+  return prune({
+    name: v("company"),
+    industry: v("company_industry"),
+    description: v("company_description"),
+    products: v("company_products"),
+    employees: v("company_employees"),
+    locations: v("company_locations"),
+    type: v("company_type"),
+    funding: v("company_funding"),
+    revenue: v("company_revenue"),
+    location: v("company_location") || v("location"),
+    other,
+  }) ?? {};
+}
+
+/** A company row's identity for the table and de-duplication (website, then LinkedIn page, then name). */
+export function identifyCompany(cells, plan) {
+  const first = (role) => plan.columns.filter((c) => c.role === role).map((c) => String(cell(cells, c)).trim()).find(Boolean) ?? "";
+  const name = clip(first("company"), 120);
+  const website = clip(first("website"), 200);
+  // In a company list a bare "LinkedIn" column is the company's own page, not a person's.
+  const linkedin = clip(first("company_linkedin") || first("linkedin"), 300);
+  const domain = website.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/[/?#].*$/, "");
+  // The website is the de-duplication key before the LinkedIn page: exports fill it far more often, and two rows
+  // for one company routinely differ in whether the LinkedIn column was populated.
+  return { name: name || "(no name)", title: clip(valueFor(cells, plan, "company_industry"), 80), company: domain, linkedin: domain ? `https://${domain}` : linkedin };
 }
 
 /** Convenience for one row as an object: plan from its own headers, then build. */
@@ -556,6 +615,113 @@ export function toWireQuestions(questions) {
       : { type: "choice", instructions: q.instructions, criteria: q.criteria };
   }
   return out;
+}
+
+/* ═══ Company tagging ═══ */
+
+/**
+ * A tag set: the categories a company list is sorted into, each with a plain-language description.
+ *
+ * ── Why every tag carries a description ──────────────────────────────────────────────────────────
+ * Neighbouring tags are the whole difficulty — Community Hospital vs Safety Net Hospital vs Critical Access
+ * Hospital — and a bare label gives Jev nothing to separate them on. TypeSafe's guidance is that plain-language
+ * option descriptions with the boundary cases written in are what make a Choice accurate.
+ *
+ * ── Why "Other" is always present ────────────────────────────────────────────────────────────────
+ * A choice must pick something. Without an exit, a chess club in a "mental health care" export is forced into
+ * the nearest healthcare tag with a confident-looking probability. So a set without one gets one added.
+ */
+export const DEFAULT_MIN_CONFIDENCE = 0.6;
+
+export function normalizeTagSet(input) {
+  const raw = Array.isArray(input?.tags) ? input.tags : [];
+  const problems = [];
+  const tags = [];
+  const keys = new Set();
+  for (const t of raw) {
+    const label = clip(typeof t === "string" ? t : t?.label, 80);
+    if (!label) continue;
+    let key = slugKey(typeof t === "object" && t?.key ? t.key : label) || `tag_${tags.length + 1}`;
+    if (keys.has(key)) { problems.push(`"${label}" appears twice; kept the first`); continue; }
+    keys.add(key);
+    tags.push({ key, label, description: clip(typeof t === "object" ? t?.description : "", 500) });
+    if (tags.length >= MAX_CHOICE_OPTIONS) { problems.push(`Only the first ${MAX_CHOICE_OPTIONS} tags are kept`); break; }
+  }
+  if (tags.length && !tags.some((t) => t.key === "other" || /^other\b|none of the above/i.test(t.label))) {
+    tags.push({ key: "other", label: "Other", description: "None of the other categories fits, or the profile does not say enough to tell" });
+    problems.push("Added an Other tag so nothing is forced into the wrong category");
+  }
+  if (tags.length < 2) problems.push("A tag set needs at least two tags");
+  const min = Number(input?.minConfidence);
+  return {
+    instructions: clip(input?.instructions, 600) || "Which category best describes what this organization is?",
+    tags: tags.length >= 2 ? tags : [],
+    minConfidence: Number.isFinite(min) && min > 0 && min < 1 ? min : DEFAULT_MIN_CONFIDENCE,
+    problems,
+  };
+}
+
+/** Tags typed or pasted as "A | B | C", one per line, or comma-separated. */
+export function parseTagList(text) {
+  const s = String(text ?? "");
+  const parts = s.includes("|") ? s.split("|") : s.includes("\n") ? s.split(/\r?\n/) : s.split(",");
+  return parts.map((p) => p.replace(/^[\s•*-]+/, "").trim()).filter(Boolean);
+}
+
+/** The one Choice question a company run asks. The label leads each option so the model never sees a bare slug. */
+export function toTagWire(tagSet) {
+  const criteria = {};
+  for (const t of tagSet.tags) criteria[t.key] = t.description ? `${t.label}: ${t.description}` : t.label;
+  return { category: { type: "choice", instructions: tagSet.instructions, criteria } };
+}
+
+/**
+ * A company's tag from Jev's answer: the top option, its confidence, and the runner-up when it is a real
+ * contender. Below the set's confidence line the company is "review" rather than silently tagged.
+ */
+export function tagVerdict(tagSet, answer) {
+  const probs = answer?.probabilities && typeof answer.probabilities === "object" ? answer.probabilities : null;
+  if (!probs) return { status: "error", reason: "Jev returned no category" };
+  const ranked = Object.entries(probs).map(([k, p]) => [k, Number(p) || 0]).sort((a, b) => b[1] - a[1]);
+  const label = (k) => tagSet.tags.find((t) => t.key === k)?.label ?? k;
+  const [topKey, topP] = ranked[0] ?? [answer.choice, 0];
+  const confidence = Number.isFinite(Number(answer.confidence)) ? Number(answer.confidence) : topP;
+  const second = ranked[1] && ranked[1][1] >= 0.15 ? { tag: ranked[1][0], label: label(ranked[1][0]), p: ranked[1][1] } : null;
+  return {
+    status: confidence >= tagSet.minConfidence ? "tagged" : "review",
+    tag: topKey,
+    label: label(topKey),
+    p: topP,
+    confidence,
+    runnerUp: second,
+    top: ranked.slice(0, 5).map(([k, p]) => ({ tag: k, label: label(k), p })),
+    reason: confidence >= tagSet.minConfidence ? "" : second ? `Unsure: ${label(topKey)} or ${second.label}` : `Unsure: ${label(topKey)}`,
+  };
+}
+
+/**
+ * Hold a generated tag set to the tags the person typed: every one kept, spelled as typed, in their order, with
+ * the model's description where it wrote one. A model that "improves" a tag name ("PBM" for "Pharmacy / PBM")
+ * would otherwise silently change the column the team filters on. Tags the model added that were not asked for
+ * are dropped, except its Other.
+ */
+export function mergeNamedTags(generated, named) {
+  if (!Array.isArray(named) || named.length < 3) return generated;
+  const norm = (x) => String(x ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const byLabel = new Map((generated?.tags ?? []).map((t) => [norm(t.label), t]));
+  const tags = named.map((label) => ({ label, description: byLabel.get(norm(label))?.description ?? "" }));
+  const other = (generated?.tags ?? []).find((t) => t.key === "other" || /^other\b/i.test(t.label));
+  if (other && !tags.some((t) => /^other\b/i.test(t.label))) tags.push({ label: other.label, description: other.description });
+  return normalizeTagSet({ ...generated, tags });
+}
+
+/** A tag set out of a model's reply. */
+export function parseGeneratedTagSet(text) {
+  const body = String(text ?? "").replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  if (start < 0 || end <= start) return normalizeTagSet({});
+  try { return normalizeTagSet(JSON.parse(body.slice(start, end + 1))); } catch { return normalizeTagSet({}); }
 }
 
 /* ═══ Verdicts ═══ */

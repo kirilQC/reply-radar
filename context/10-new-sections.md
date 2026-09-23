@@ -84,6 +84,18 @@ endpoint — it does not serve Jev.
   with backoff.
 - **Gotcha already hit:** building CSV fields with `field += ch` made V8 keep per-character ropes — 351MB of
   heap for a 5k-row file. The parser slices by index (72MB). Parity with Python's `csv` verified on real exports.
+- **Describe box** (both modes): a teammate types what they want in plain words; `POST /api/jev/build` has Sonnet
+  turn it into the setup (with the client's Brain + brief as background, the description leading) and saves it.
+  For company tags typed as "A | B | C", `mergeNamedTags` keeps every typed tag verbatim and in order — the
+  model only writes descriptions.
+- **Company lists** (`?mode=companies`): one Choice over the client's tag set (`jev_tags_<slug>` in
+  `rr_app_config`), each tag sent as "Label: description" so neighbours can be told apart; an Other tag is always
+  added. Below `minConfidence` (60%) a company is "Needs review", with the runner-up shown. Profile = name,
+  industry, description (+SEO), products, employees, locations, type, funding, revenue, location. De-duplicated
+  by website, then LinkedIn page. Up to 100k rows; 6 lanes.
+- **Measured live** (real Jev via OpenRouter, 2026-09-23): 240 companies in 2.2s through the app (~110/s, $0.01);
+  113 contacts ~1s ($0.005). Response shape matches TypeSafe's docs; model reported as `typesafe/jev-1.13-20260917`.
+  At 100k companies against a stub: 2s to load a 115MB file, ~384MB heap, no long tasks, export 0.6s.
 - **Not verified live** at time of writing: the real OpenRouter response (built to TypeSafe's documented
   shape, `usage.cost` read if present) and the Sonnet draft. Duplicates within the file are removed in code;
   DNC / already-in-`rr_leads` filtering is not built yet.
