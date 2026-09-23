@@ -63,8 +63,18 @@ endpoint — it does not serve Jev.
 - **Per-client question set** in `rr_app_config` under `jev_questions_<slug>` — no migration. Drafted by
   Sonnet from the client's QC Brain folder + client brief (`draftQuestionSet`), then editable. Each question
   is a noul (TypeSafe's name for yes/no) or a choice, with one answer marked "fits".
-- **Verdict is a gate** (`verdictFor` in `shared/jev.mjs`): good only if every question's fit-probability ≥
-  keep (60%), bad if any < drop (35%), else borderline. Reason = weakest question.
+- **Verdict is a score with vetoes** (`verdictFor` in `shared/jev.mjs`). It used to be an all-must-pass gate
+  (every question ≥ 60%), and a vetted 500-contact Bluevia list came back 20 good fits (4%) — six gates compound,
+  and "unclear" counted as a fail. Now each question has a `kind`: `must` drops a contact only below the drop line
+  (35%); `exclude` drops only when the disqualifier is ≥ 80% sure; `signal` only moves the score. Choice options
+  in `neutral` ("unclear") make that question count for nothing when most of the answer lands there. Good = the
+  average of counted must/signal answers ≥ 60%. Sets saved before kinds existed: a no-is-fit noul is `exclude`,
+  the rest `must`.
+- **Structured contact ICP** (`icp` on the question set; `app/jev/[slug]/icp.tsx`): a pool of target titles
+  (turned into one Choice question verbatim by `titlePoolQuestion` — never paraphrased), responsibilities,
+  company size range (checked in code by `sizeCheck` against `listed_company_profile.employees`; unknown size is
+  left out, not failed) and exclusions. The question writer is told to be generous and to leave titles and size
+  alone.
 - **The browser parses the CSV and trims each row to a profile** before sending anything; the file never goes
   to the server whole (a 5k-row AI Ark export is ~30MB, past Vercel's body limit).
 - **Any export works — columns are classified, not matched by name** (`planColumns` in `shared/jev.mjs`). Each

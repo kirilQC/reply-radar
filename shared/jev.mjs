@@ -580,7 +580,7 @@ export function normalizeQuestionSet(input) {
       const f = clip(q?.criteria?.false, 400);
       const criteria = t || f ? { ...(t ? { true: t } : {}), ...(f ? { false: f } : {}) } : undefined;
       const pass = q?.pass === false || q?.pass === "false" || q?.pass === "no" ? false : true;
-      questions.push({ key, label, type, instructions, ...(criteria ? { criteria } : {}), pass });
+      questions.push({ key, label, type, instructions, ...(criteria ? { criteria } : {}), pass, kind: kindOf(q, pass) });
     } else {
       const entries = Object.entries(q?.criteria && typeof q.criteria === "object" ? q.criteria : {})
         .map(([k, v]) => [slugKey(k), clip(v, 400)])
@@ -591,7 +591,10 @@ export function normalizeQuestionSet(input) {
       const pass = (Array.isArray(q?.pass) ? q.pass : [q?.pass]).map(slugKey).filter((k) => k in criteria);
       if (!pass.length) { problems.push(`${label}: no option is marked as a fit`); continue; }
       if (pass.length === entries.length) { problems.push(`${label}: every option is marked as a fit, so it can never fail anyone`); continue; }
-      questions.push({ key, label, type, instructions, criteria, pass });
+      // "Can't tell" options: named explicitly, or recognised by their key. Never also a fit.
+      const named = Array.isArray(q?.neutral) ? q.neutral.map(slugKey) : [];
+      const neutral = Object.keys(criteria).filter((k) => !pass.includes(k) && (named.includes(k) || (!Array.isArray(q?.neutral) && NEUTRAL_KEY.test(k))));
+      questions.push({ key, label, type, instructions, criteria, pass, ...(neutral.length ? { neutral } : {}), kind: kindOf(q, true) });
     }
     keys.add(key);
     if (questions.length >= MAX_QUESTIONS) break;
@@ -603,10 +606,85 @@ export function normalizeQuestionSet(input) {
     drop: Number.isFinite(drop) && drop > 0 && drop < 1 ? drop : DEFAULT_THRESHOLDS.drop,
   };
   if (thresholds.drop >= thresholds.keep) { thresholds.keep = DEFAULT_THRESHOLDS.keep; thresholds.drop = DEFAULT_THRESHOLDS.drop; problems.push("Thresholds reset: the drop line must sit below the keep line"); }
-  return { questions, thresholds, problems };
+  const icp = normalizeIcp(input?.icp);
+  return { questions, thresholds, problems, ...(icp ? { icp } : {}) };
 }
 
-/** The question map in TypeSafe's wire format. `label` and `pass` are ours and never leave the server. */
+/**
+ * What a question does to the verdict.
+ * - `must`: the contact has to pass it; a clear fail drops them.
+ * - `exclude`: a disqualifier (competitor, wrong specialty); drops the contact only when it is clearly true.
+ * - `signal`: evidence for or against; only moves the fit score.
+ * Sets saved before kinds existed get `exclude` for a noul whose fit answer is "no" — those were always written
+ * as disqualifiers — and `must` for everything else.
+ */
+export const QUESTION_KINDS = ["must", "exclude", "signal"];
+const kindOf = (q, pass) => (QUESTION_KINDS.includes(q?.kind) ? q.kind : pass === false ? "exclude" : "must");
+const NEUTRAL_KEY = /^(unclear|unknown|not_stated|not_sure|cannot_tell|can_t_tell|no_data|insufficient|none_stated|not_enough_info)$/;
+
+/**
+ * The structured half of a client's contact ICP: the pool of target titles, what those people are responsible
+ * for, the company size range, and exclusions. Titles and size are applied in code and by a question built from
+ * the pool verbatim; the rest feeds the question writer.
+ */
+export function normalizeIcp(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const lines = (v) => (Array.isArray(v) ? v : String(v ?? "").split(/\r?\n|;/)).map((x) => clip(String(x).replace(/^[\s•*-]+/, ""), 80)).filter(Boolean);
+  const num = (v) => { const n = Number(String(v ?? "").replace(/[^0-9]/g, "")); return String(v ?? "").trim() && Number.isFinite(n) && n > 0 ? n : null; };
+  const titles = [...new Set(lines(raw.titles))].slice(0, 200);
+  const icp = {
+    titles,
+    responsibilities: clip(raw.responsibilities, 1_000),
+    sizeMin: num(raw.sizeMin),
+    sizeMax: num(raw.sizeMax),
+    exclusions: clip(raw.exclusions, 1_000),
+  };
+  if (icp.sizeMin && icp.sizeMax && icp.sizeMin > icp.sizeMax) [icp.sizeMin, icp.sizeMax] = [icp.sizeMax, icp.sizeMin];
+  return icp.titles.length || icp.responsibilities || icp.sizeMin || icp.sizeMax || icp.exclusions ? icp : null;
+}
+
+/**
+ * The title-pool question, built from the pool verbatim — never paraphrased by a model, because the pool is the
+ * team's own definition of who they sell to. Jev picks which target role the person's current job matches, with
+ * room for a similar role the pool did not spell out, and a neutral "can't tell".
+ */
+export function titlePoolQuestion(icp, descriptions = {}) {
+  if (!icp?.titles?.length) return null;
+  const criteria = {};
+  for (const t of icp.titles) {
+    const k = slugKey(t);
+    if (k && !criteria[k]) criteria[k] = descriptions[k] ? `${t}: ${descriptions[k]}` : t;
+  }
+  const keys = Object.keys(criteria);
+  criteria.similar_role = "A different title that carries the same responsibilities as one of the target roles above";
+  criteria.not_a_target = "None of the target roles — a different function, or too junior to be one of them";
+  criteria.unclear = "The profile does not say enough about their current job to tell";
+  return {
+    key: "target_role", label: "Target role", type: "choice", kind: "must",
+    instructions: "Which of these target roles best matches this person's CURRENT main job? Judge by what they are responsible for, using `listed_title`, `headline`, `about` and `current_roles` — not by exact title wording.",
+    criteria, pass: [...keys, "similar_role"], neutral: ["unclear"],
+  };
+}
+
+/** Employee count as a range, from the forms exports use: "11-50", "3482", "10001+", "1,001-5,000 employees". */
+export function parseEmployees(value) {
+  const s = String(value ?? "").replace(/,/g, "");
+  const nums = (s.match(/\d+/g) ?? []).map(Number);
+  if (!nums.length) return null;
+  if (/\+/.test(s) || /more than|over/i.test(s)) return { min: nums[0], max: Infinity };
+  return nums.length >= 2 ? { min: Math.min(nums[0], nums[1]), max: Math.max(nums[0], nums[1]) } : { min: nums[0], max: nums[0] };
+}
+
+/** The company-size check, in code: "outside", "inside", or null when the size is unknown or no range is set. */
+export function sizeCheck(icp, profile) {
+  if (!icp || (!icp.sizeMin && !icp.sizeMax)) return null;
+  const size = parseEmployees(profile?.listed_company_profile?.employees ?? profile?.employees);
+  if (!size) return null;
+  const lo = icp.sizeMin ?? 0, hi = icp.sizeMax ?? Infinity;
+  return size.max < lo || size.min > hi ? "outside" : "inside";
+}
+
+/** The question map in TypeSafe's wire format. `label`, `pass`, `kind` and `neutral` are ours and never leave the server. */
 export function toWireQuestions(questions) {
   const out = {};
   for (const q of questions) {
@@ -747,27 +825,57 @@ export function passProbability(question, answer) {
   return null;
 }
 
+/** How much of a choice answer landed on "can't tell" options. */
+function neutralShare(question, answer) {
+  if (question.type !== "choice" || !question.neutral?.length) return 0;
+  const probs = answer?.probabilities ?? {};
+  return question.neutral.reduce((n, k) => n + (Number(probs[k]) || 0), 0);
+}
+
+/** Below this, an exclusion's "fit" probability means the disqualifier is clearly true (≥80% sure). */
+export const EXCLUDE_LINE = 0.2;
+
 /**
- * Combine one row's answers into `{ verdict: "good" | "borderline" | "bad", reason, scores }`.
+ * Combine one row's answers into `{ verdict: "good" | "borderline" | "bad", reason, scores, score }`.
  *
- * `reason` names the weakest question, which is what an engineer needs to judge a drop at a glance. A
- * question Jev did not answer makes the row borderline rather than silently passing it.
+ * ── Why this is a score with vetoes, not an all-must-pass gate ───────────────────────────────────
+ * The first version required every question to clear 60%. With six questions that compounds — six questions
+ * each passing 75% of real targets would keep under 20% of them — and a live Bluevia list of 500 already-vetted
+ * contacts came back 20 good fits (4%). So now:
+ * - a `must` question drops a contact only on a clear fail (below the drop line);
+ * - an `exclude` question drops them only when the disqualifier is clearly true;
+ * - a choice answered mostly "can't tell" counts for nothing either way — thin data is not evidence of a bad fit;
+ * - the company size range is checked in code; an unknown size is left out, not failed;
+ * - everything else is averaged into a fit score, and the score decides good vs borderline.
  */
-export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS) {
+export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS, context = {}) {
   const scores = {};
-  let weakest = null;
+  const counted = [];
+  const unclear = [];
+  let excluded = null;
+  let failed = null;
   let missing = null;
   for (const q of questions) {
-    const p = passProbability(q, answers?.[q.key]);
+    const answer = answers?.[q.key];
+    const p = passProbability(q, answer);
     scores[q.key] = p;
     if (p === null) { missing ??= q; continue; }
-    if (!weakest || p < weakest.p) weakest = { q, p };
+    if (neutralShare(q, answer) >= 0.5) { unclear.push(q); continue; }
+    const kind = q.kind ?? (q.type === "noul" && q.pass === false ? "exclude" : "must");
+    if (kind === "exclude") { if (p < EXCLUDE_LINE && (!excluded || p < excluded.p)) excluded = { q, p }; continue; }
+    if (kind === "must" && p < thresholds.drop && (!failed || p < failed.p)) failed = { q, p };
+    counted.push({ q, p });
   }
-  if (weakest && weakest.p < thresholds.drop) return { verdict: "bad", reason: `Failed: ${weakest.q.label}`, scores };
-  if (missing) return { verdict: "borderline", reason: `No answer: ${missing.label}`, scores };
-  if (!weakest) return { verdict: "borderline", reason: "No questions answered", scores };
-  if (weakest.p < thresholds.keep) return { verdict: "borderline", reason: `Unsure: ${weakest.q.label}`, scores };
-  return { verdict: "good", reason: "", scores };
+  const size = sizeCheck(context.icp, context.profile);
+  if (size === "outside") return { verdict: "bad", reason: `Company size outside ${context.icp.sizeMin ?? 0}–${context.icp.sizeMax ?? "any"} employees`, scores, score: null };
+  if (excluded) return { verdict: "bad", reason: `Excluded: ${excluded.q.label}`, scores, score: null };
+  if (failed) return { verdict: "bad", reason: `Failed: ${failed.q.label}`, scores, score: null };
+  if (!counted.length) return { verdict: "borderline", reason: missing ? `No answer: ${missing.label}` : "Not enough data to judge", scores, score: null };
+  const score = counted.reduce((n, c) => n + c.p, 0) / counted.length;
+  const weakest = counted.reduce((w, c) => (c.p < w.p ? c : w));
+  const note = unclear.length ? ` · can't tell: ${unclear.map((q) => q.label).join(", ")}` : "";
+  if (score >= thresholds.keep && !missing) return { verdict: "good", reason: note ? note.slice(3) : "", scores, score };
+  return { verdict: "borderline", reason: `Score ${Math.round(score * 100)}% — weakest: ${weakest.q.label}${note}`, scores, score };
 }
 
 /* ═══ Generation ═══ */

@@ -22,11 +22,12 @@
 import { clientContext } from "./client-context";
 import { brainContext } from "./brain-context";
 import { readConfig, writeConfig } from "./app-config";
-import { mergeNamedTags, normalizeQuestionSet, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
+import { mergeNamedTags, normalizeIcp, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
 
 type Row = Record<string, unknown>;
-export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[] };
-export type JevQuestionSet = { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
+export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: "must" | "exclude" | "signal"; neutral?: string[] };
+export type JevIcp = { titles: string[]; responsibilities: string; sizeMin: number | null; sizeMax: number | null; exclusions: string };
+export type JevQuestionSet = { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; icp?: JevIcp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
 export type JevTag = { key: string; label: string; description: string };
 export type JevTagSet = { instructions: string; tags: JevTag[]; minConfidence: number; source?: string; updatedAt?: string; brief?: string };
 export type JevAnswer = { type: string; noul?: number; choice?: string; probabilities?: Record<string, number>; confidence?: number };
@@ -99,11 +100,12 @@ export async function loadQuestionSet(slug: string): Promise<JevQuestionSet | nu
   const raw = await readConfig(questionSetKey(slug));
   const value = typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw;
   if (!value || typeof value !== "object") return null;
-  const { questions, thresholds } = normalizeQuestionSet(value);
+  const { questions, thresholds, icp } = normalizeQuestionSet(value) as { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; icp?: JevIcp };
   const meta = value as Row;
   return {
-    questions: questions as JevQuestion[],
+    questions,
     thresholds,
+    ...(icp ? { icp } : {}),
     source: text(meta.source) || undefined,
     updatedAt: text(meta.updatedAt) || undefined,
     brainFolder: text(meta.brainFolder) || undefined,
@@ -131,11 +133,12 @@ export async function saveTagSet(slug: string, input: unknown, source = "manual"
 }
 
 export async function saveQuestionSet(slug: string, input: unknown, source = "manual"): Promise<{ set: JevQuestionSet; problems: string[] }> {
-  const { questions, thresholds, problems } = normalizeQuestionSet(input);
+  const { questions, thresholds, problems, icp } = normalizeQuestionSet(input) as { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; problems: string[]; icp?: JevIcp };
   const meta = (input && typeof input === "object" ? input : {}) as Row;
   const set: JevQuestionSet = {
-    questions: questions as JevQuestion[],
+    questions,
     thresholds,
+    ...(icp ? { icp } : {}),
     source,
     updatedAt: new Date().toISOString(),
     ...(text(meta.brainFolder) ? { brainFolder: text(meta.brainFolder) } : {}),
@@ -169,10 +172,17 @@ Rules, from TypeSafe's own guidance on how Jev fails:
 - Every question has exactly one answer that means "fits". For a noul (yes/no), prefer phrasing where yes = fits; set "pass": false only when a "no" is naturally the fit answer (e.g. "Is this company a competitor?"). Keep the criteria aligned with the instruction — never make "true" mean the bad outcome of a positively-worded question.
 - For a choice, 3–6 options with plain-language descriptions, always including an "unclear" option for when the profile does not say. Mark only the genuinely fitting options in "pass"; "unclear" is not a fit.
 - When the person running the list has described what they want, build from that description first; use the client's ICP below only to fill in what they left unsaid. Otherwise base every question on the ICP as written. Do not invent targeting neither supports.
-- 4 to 7 questions. The first should usually check that the listed company is the person's main current job.
+- Give every question a "kind":
+  - "must": a real requirement — the contact is dropped only if they clearly fail it. Use for at most 2–3 questions.
+  - "exclude": a disqualifier (competitor, vendor, a specialty or segment the client does not serve). Phrase it so "yes" means the disqualifier is true and set "pass": false. The contact is dropped only when Jev is clearly sure.
+  - "signal": evidence that makes a contact more or less attractive (owns a budget, the right sub-specialty). It only moves a score and never drops anyone. Prefer this for anything that is "nice to have".
+- Be generous. These lists are already targeted; the job is to remove the clear mistakes, not to find a perfect few. A question that a genuine target could fail for lack of data, or for an unusual but legitimate title, must not be a "must".
+- For a choice, list the can't-tell options in "neutral" (e.g. ["unclear"]). A neutral answer counts for nothing either way — thin data is not evidence of a bad fit.
+- If a TARGET TITLES pool is given below, do NOT write a title or seniority question: one is built from the pool automatically. Use the stated responsibilities for a "signal" or "must" question about what the person owns, and the exclusions for "exclude" questions. Company size is checked in code; do not write a size question.
+- 3 to 6 questions. Usually one checks that the listed company is the person's main current job (kind "must").
 
 Reply with JSON only, no prose, in exactly this shape:
-{"questions":[{"label":"Short name shown to the engineer","type":"noul","instructions":"…","criteria":{"true":"…","false":"…"},"pass":true},{"label":"…","type":"choice","instructions":"…","criteria":{"option_key":"description", "unclear":"The profile does not say"},"pass":["option_key"]}]}`;
+{"questions":[{"label":"Short name shown to the engineer","type":"noul","kind":"must","instructions":"…","criteria":{"true":"…","false":"…"},"pass":true},{"label":"…","type":"choice","kind":"signal","instructions":"…","criteria":{"option_key":"description","unclear":"The profile does not say"},"pass":["option_key"],"neutral":["unclear"]}]}`;
 
 const TAG_PROMPT = `You design the category set a fast classification model (TypeSafe's Jev) uses to tag a list of companies for QC Growth, a B2B outbound agency. Off-the-shelf GTM tools stop at labels like "mental health care" or "hospitals and health care"; the point of this is to sort companies far more finely than that.
 
@@ -187,6 +197,17 @@ What makes this accurate:
 
 Reply with JSON only, no prose, in exactly this shape:
 {"instructions":"…","tags":[{"label":"Tag name","description":"…"}]}`;
+
+/** The structured ICP as the question writer sees it. */
+function icpBlock(icp: JevIcp): string {
+  return [
+    "STRUCTURED ICP (from the person running the list):",
+    icp.titles.length ? `TARGET TITLES (a pool — a question matching against it is built automatically):\n${icp.titles.map((t) => `- ${t}`).join("\n")}` : "",
+    icp.responsibilities ? `WHAT THESE PEOPLE ARE RESPONSIBLE FOR:\n${icp.responsibilities}` : "",
+    icp.sizeMin || icp.sizeMax ? `COMPANY SIZE: ${icp.sizeMin ?? 0}–${icp.sizeMax ?? "any"} employees (checked in code — do not write a question for it)` : "",
+    icp.exclusions ? `EXCLUDE:\n${icp.exclusions}` : "",
+  ].filter(Boolean).join("\n\n");
+}
 
 async function askSonnet(system: string, content: string): Promise<{ ok: boolean; text?: string; error?: string }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -217,9 +238,10 @@ async function askSonnet(system: string, content: string): Promise<{ ok: boolean
  * A company tag list typed as "A | B | C" is taken literally — every tag the person named is kept, in order —
  * and the model only writes the descriptions that let Jev tell neighbours apart.
  */
-export async function buildFromDescription(slug: string, mode: "contacts" | "companies", description: string, sampleProfile: unknown): Promise<{ ok: boolean; error?: string; set?: JevQuestionSet | JevTagSet; problems?: string[] }> {
+export async function buildFromDescription(slug: string, mode: "contacts" | "companies", description: string, sampleProfile: unknown, icpInput?: unknown): Promise<{ ok: boolean; error?: string; set?: JevQuestionSet | JevTagSet; problems?: string[] }> {
   const brief = text(description).slice(0, 4_000);
-  if (!brief) return { ok: false, error: "Describe how the list should be judged first." };
+  const icp = mode === "contacts" ? (normalizeIcp(icpInput) as JevIcp | null) : null;
+  if (!brief && !icp) return { ok: false, error: "Describe how the list should be judged first." };
   const [row] = await workspaceRows(`slug=eq.${encodeURIComponent(slug)}&limit=1`);
   if (!row) return { ok: false, error: "Unknown client." };
   const name = text(row.name);
@@ -231,7 +253,8 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
   const named = mode === "companies" ? parseTagList(brief) : [];
   const content = [
     `Client: ${name}`,
-    `WHAT THE PERSON RUNNING THIS LIST ASKED FOR — this leads; everything below is background:\n${brief}`,
+    brief ? `WHAT THE PERSON RUNNING THIS LIST ASKED FOR — this leads; everything below is background:\n${brief}` : "",
+    icp ? icpBlock(icp) : "",
     named.length >= 3 ? `They named these tags; keep every one, spelled exactly so and in this order:\n${named.map((t: string) => `- ${t}`).join("\n")}` : "",
     clientBrief,
     brain.block,
@@ -248,8 +271,12 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
     return { ok: true, set, problems: [...parsed.problems, ...problems] };
   }
   const parsed = parseGeneratedQuestionSet(reply.text);
-  if (!parsed.questions.length) return { ok: false, error: "The build came back without a usable question. Try again.", problems: parsed.problems };
-  const { set, problems } = await saveQuestionSet(slug, { ...parsed, brief, brainFolder: brain.folder, brainDocuments: brain.documents }, "description");
+  // The title pool is the team's own list, so its question is built from it verbatim and leads the set.
+  const pool = icp ? titlePoolQuestion(icp) : null;
+  const generated = parsed.questions as unknown as JevQuestion[];
+  const questions: JevQuestion[] = pool ? [pool as unknown as JevQuestion, ...generated.filter((q) => q.key !== "target_role")] : generated;
+  if (!questions.length) return { ok: false, error: "The build came back without a usable question. Try again.", problems: parsed.problems };
+  const { set, problems } = await saveQuestionSet(slug, { ...parsed, questions, icp, brief, brainFolder: brain.folder, brainDocuments: brain.documents }, "description");
   return { ok: true, set, problems: [...parsed.problems, ...problems] };
 }
 

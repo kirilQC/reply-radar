@@ -18,8 +18,12 @@ import {
   planColumns,
   tagVerdict,
   toTagWire,
+  normalizeIcp,
   normalizeQuestionSet,
   parseCsv,
+  parseEmployees,
+  sizeCheck,
+  titlePoolQuestion,
   parseGeneratedQuestionSet,
   passProbability,
   profileFor,
@@ -223,23 +227,67 @@ test("passProbability inverts a no-is-fit noul and sums fitting choice options",
   assert.equal(passProbability({ type: "noul", pass: true }, undefined), null);
 });
 
-test("verdictFor: every question must pass to keep, one clear fail drops, the rest is borderline", () => {
+test("verdictFor: a score with vetoes — musts drop on a clear fail, exclusions only when clearly true", () => {
   const { questions } = normalizeQuestionSet({ questions: [
     { label: "Main job", type: "noul", instructions: "?" },
     { label: "Competitor", type: "noul", instructions: "?", pass: false },
+    { label: "Owns purchasing", type: "noul", instructions: "?", kind: "signal" },
   ] });
+  assert.deepEqual(questions.map((q) => q.kind), ["must", "exclude", "signal"]);
   const t = { keep: 0.6, drop: 0.35 };
-  assert.equal(verdictFor(questions, { main_job: { noul: 0.95 }, competitor: { noul: 0.05 } }, t).verdict, "good");
-  const bad = verdictFor(questions, { main_job: { noul: 0.95 }, competitor: { noul: 0.9 } }, t);
-  assert.equal(bad.verdict, "bad");
-  assert.equal(bad.reason, "Failed: Competitor");
-  const unsure = verdictFor(questions, { main_job: { noul: 0.5 }, competitor: { noul: 0.05 } }, t);
-  assert.equal(unsure.verdict, "borderline");
-  assert.equal(unsure.reason, "Unsure: Main job");
+  assert.equal(verdictFor(questions, { main_job: { noul: 0.9 }, competitor: { noul: 0.1 }, owns_purchasing: { noul: 0.7 } }, t).verdict, "good");
+  // A weak signal no longer sinks a strong contact on its own — it lowers the score.
+  const soft = verdictFor(questions, { main_job: { noul: 0.95 }, competitor: { noul: 0.05 }, owns_purchasing: { noul: 0.3 } }, t);
+  assert.equal(soft.verdict, "good");
+  assert.ok(Math.abs(soft.score - 0.625) < 1e-9);
+  // A must-have clearly failed drops them.
+  assert.equal(verdictFor(questions, { main_job: { noul: 0.2 }, competitor: { noul: 0.05 }, owns_purchasing: { noul: 0.9 } }, t).reason, "Failed: Main job");
+  // An exclusion drops only when clearly true (≥80%)…
+  assert.equal(verdictFor(questions, { main_job: { noul: 0.9 }, competitor: { noul: 0.9 }, owns_purchasing: { noul: 0.9 } }, t).reason, "Excluded: Competitor");
+  // …and a 60% maybe-competitor stays in play.
+  assert.equal(verdictFor(questions, { main_job: { noul: 0.9 }, competitor: { noul: 0.6 }, owns_purchasing: { noul: 0.9 } }, t).verdict, "good");
+  // In between is borderline, with the score and the weakest question named.
+  const mid = verdictFor(questions, { main_job: { noul: 0.5 }, competitor: { noul: 0.05 }, owns_purchasing: { noul: 0.5 } }, t);
+  assert.equal(mid.verdict, "borderline");
+  assert.equal(mid.reason, "Score 50% — weakest: Main job");
   // A question left unanswered never silently passes a contact.
-  assert.equal(verdictFor(questions, { main_job: { noul: 0.95 } }, t).verdict, "borderline");
-  // …but a clear fail elsewhere still drops them.
-  assert.equal(verdictFor(questions, { competitor: { noul: 0.99 } }, t).verdict, "bad");
+  assert.equal(verdictFor(questions, { main_job: { noul: 0.95 }, owns_purchasing: { noul: 0.9 } }, t).verdict, "borderline");
+});
+
+test("verdictFor: 'can't tell' is left out instead of failing the contact", () => {
+  const { questions } = normalizeQuestionSet({ questions: [
+    { label: "Facility type", type: "choice", instructions: "?", criteria: { asc: "Surgery center", other: "Other", unclear: "Not stated" }, pass: ["asc"] },
+    { label: "Main job", type: "noul", instructions: "?" },
+  ] });
+  assert.deepEqual(questions[0].neutral, ["unclear"]);
+  const thin = verdictFor(questions, { facility_type: { probabilities: { asc: 0.1, other: 0.1, unclear: 0.8 } }, main_job: { noul: 0.9 } });
+  assert.equal(thin.verdict, "good");
+  assert.equal(thin.reason, "can't tell: Facility type");
+  // Under the old rule this was a clear fail (10% fit) and the contact was dropped.
+  assert.equal(verdictFor(questions, { facility_type: { probabilities: { asc: 0.1, other: 0.8, unclear: 0.1 } }, main_job: { noul: 0.9 } }).verdict, "bad");
+  // Nothing but "can't tell" is borderline, not bad.
+  assert.equal(verdictFor([questions[0]], { facility_type: { probabilities: { unclear: 1 } } }).reason, "Not enough data to judge");
+});
+
+test("ICP: title pool question is built verbatim, company size is checked in code", () => {
+  const icp = normalizeIcp({ titles: "Administrator\nDirector of Nursing\n- OR Director\nAdministrator", sizeMin: "10", sizeMax: "1,000" });
+  assert.deepEqual(icp.titles, ["Administrator", "Director of Nursing", "OR Director"]);
+  assert.equal(icp.sizeMax, 1000);
+  const q = titlePoolQuestion(icp);
+  assert.deepEqual(Object.keys(q.criteria), ["administrator", "director_of_nursing", "or_director", "similar_role", "not_a_target", "unclear"]);
+  assert.deepEqual(q.pass, ["administrator", "director_of_nursing", "or_director", "similar_role"]);
+  assert.deepEqual(q.neutral, ["unclear"]);
+  assert.equal(q.kind, "must");
+  assert.equal(normalizeQuestionSet({ questions: [q] }).questions[0].neutral[0], "unclear");
+  assert.deepEqual(parseEmployees("10001+"), { min: 10001, max: Infinity });
+  assert.deepEqual(parseEmployees("1,001-5,000 employees"), { min: 1001, max: 5000 });
+  assert.equal(parseEmployees(""), null);
+  assert.equal(sizeCheck(icp, { listed_company_profile: { employees: "11-50" } }), "inside");
+  assert.equal(sizeCheck(icp, { listed_company_profile: { employees: "5001-10000" } }), "outside");
+  assert.equal(sizeCheck(icp, { listed_company_profile: {} }), null);
+  const v = verdictFor(normalizeQuestionSet({ questions: [q] }).questions, { target_role: { probabilities: { administrator: 0.9 } } }, undefined, { icp, profile: { listed_company_profile: { employees: "10001+" } } });
+  assert.equal(v.reason, "Company size outside 10–1000 employees");
+  assert.equal(normalizeIcp({}), null);
 });
 
 test("parseGeneratedQuestionSet reads fenced or chatty JSON and rejects nonsense", () => {

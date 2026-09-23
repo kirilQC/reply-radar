@@ -13,6 +13,6 @@ export async function POST(request: Request) {
   const slug = typeof body?.client === "string" ? body.client.trim().toLowerCase() : "";
   const mode = body?.mode === "companies" ? "companies" : "contacts";
   if (!slug) return NextResponse.json({ ok: false, error: "client is required." }, { status: 400 });
-  const result = await buildFromDescription(slug, mode, typeof body?.description === "string" ? body.description : "", body?.sample);
+  const result = await buildFromDescription(slug, mode, typeof body?.description === "string" ? body.description : "", body?.sample, body?.icp);
   return NextResponse.json(result, { status: result.ok ? 200 : 502 });
 }

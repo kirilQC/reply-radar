@@ -49,13 +49,17 @@ import {
   toWireQuestions,
 } from "../../../shared/jev.mjs";
 import { DescribeBox, TagEditor, TagList, type TagSet } from "./tags";
+import { IcpBox, type Icp } from "./icp";
 import { freshStats, runPipeline, type EnrichMode, type Enriched, type Outcome, type Stage } from "./pipeline";
 import { ActivityLog, EnrichControl, StageCards, type Detection, type LogLine } from "./pipeline-view";
 import { missingData, scrapeTarget } from "../../../shared/enrich.mjs";
 import "../../jev.css";
 
-type Question = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[] };
-type QuestionSet = { questions: Question[]; thresholds: { keep: number; drop: number }; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
+type Kind = "must" | "exclude" | "signal";
+type Question = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: Kind; neutral?: string[] };
+const KIND_LABEL: Record<Kind, string> = { must: "Must-have", exclude: "Exclusion", signal: "Signal" };
+const kindOf = (q: Question): Kind => q.kind ?? (q.type === "noul" && q.pass === false ? "exclude" : "must");
+type QuestionSet = { questions: Question[]; thresholds: { keep: number; drop: number }; icp?: Icp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Person = { name: string; title: string; company: string; linkedin: string };
 type PlanColumn = { header: string; idx: number; role: string; why?: string; index?: number; field?: string; overridden?: boolean; filled: number };
@@ -131,7 +135,12 @@ function QuestionEditor({ value, onChange }: { value: QuestionSet; onChange: (v:
               <input className="jev-input jev-edit-label" value={q.label} onChange={(e) => setQ(idx, { label: e.target.value })} placeholder="Short name" />
               <div className="jev-seg">
                 <button type="button" className={q.type === "noul" ? "on" : ""} onClick={() => setQ(idx, { type: "noul", criteria: { true: "", false: "" }, pass: true })}>Yes / No</button>
-                <button type="button" className={q.type === "choice" ? "on" : ""} onClick={() => setQ(idx, { type: "choice", criteria: { fits: "", does_not_fit: "", unclear: "The profile does not say" }, pass: ["fits"] })}>Choice</button>
+                <button type="button" className={q.type === "choice" ? "on" : ""} onClick={() => setQ(idx, { type: "choice", criteria: { fits: "", does_not_fit: "", unclear: "The profile does not say" }, pass: ["fits"], neutral: ["unclear"] })}>Choice</button>
+              </div>
+              <div className="jev-seg" title="What this question does to the verdict">
+                {(["must", "exclude", "signal"] as Kind[]).map((k) => (
+                  <button key={k} type="button" className={kindOf(q) === k ? "on" : ""} onClick={() => setQ(idx, { kind: k })}>{KIND_LABEL[k]}</button>
+                ))}
               </div>
               <button type="button" className="jev-icon-btn" title="Move up" onClick={() => move(idx, -1)} disabled={idx === 0}>↑</button>
               <button type="button" className="jev-icon-btn" title="Move down" onClick={() => move(idx, 1)} disabled={idx === value.questions.length - 1}>↓</button>
@@ -155,13 +164,17 @@ function QuestionEditor({ value, onChange }: { value: QuestionSet; onChange: (v:
                 {options.map(([key, desc], oi) => (
                   <div className="jev-opt" key={oi}>
                     <label className="jev-fit-check" title="Counts as a good fit">
-                      <input type="checkbox" checked={passList.includes(key)} onChange={(e) => setQ(idx, { pass: e.target.checked ? [...passList, key] : passList.filter((k) => k !== key) })} />
+                      <input type="checkbox" checked={passList.includes(key)} onChange={(e) => setQ(idx, { pass: e.target.checked ? [...passList, key] : passList.filter((k) => k !== key), neutral: (q.neutral ?? []).filter((k) => k !== key) })} />
                       <span>fit</span>
+                    </label>
+                    <label className="jev-fit-check" title="Can't tell — counts for nothing either way">
+                      <input type="checkbox" checked={(q.neutral ?? []).includes(key)} onChange={(e) => setQ(idx, { neutral: e.target.checked ? [...(q.neutral ?? []), key] : (q.neutral ?? []).filter((k) => k !== key), pass: passList.filter((k) => k !== key) })} />
+                      <span>?</span>
                     </label>
                     <input className="jev-input jev-opt-key" value={key} onChange={(e) => {
                       const nk = e.target.value;
                       const entries = options.map(([k, d]) => (k === key ? [nk, d] : [k, d]));
-                      setQ(idx, { criteria: Object.fromEntries(entries), pass: passList.map((k) => (k === key ? nk : k)) });
+                      setQ(idx, { criteria: Object.fromEntries(entries), pass: passList.map((k) => (k === key ? nk : k)), neutral: (q.neutral ?? []).map((k) => (k === key ? nk : k)) });
                     }} />
                     <input className="jev-input" value={desc} placeholder="What this option means" onChange={(e) => setQ(idx, { criteria: { ...q.criteria, [key]: e.target.value } })} />
                     <button type="button" className="jev-icon-btn danger" title="Remove option" onClick={() => {
@@ -196,6 +209,7 @@ function QuestionList({ set, missing }: { set: QuestionSet; missing: Record<stri
         <li key={q.key} className={missing[q.key] ? "has-gap" : ""}>
           <div className="jev-q-head">
             <strong>{q.label}</strong>
+            <span className={`jev-q-kind ${kindOf(q)}`}>{KIND_LABEL[kindOf(q)]}</span>
             <span className="jev-q-type">{q.type === "noul" ? "Yes / No" : "Choice"}</span>
             <span className="jev-q-pass">
               Fit: {q.type === "noul" ? (q.pass === false ? "No" : "Yes") : (q.pass as string[]).join(", ")}
@@ -205,7 +219,7 @@ function QuestionList({ set, missing }: { set: QuestionSet; missing: Record<stri
           {q.type === "choice" && (
             <div className="jev-q-opts">
               {Object.entries(q.criteria ?? {}).map(([k, d]) => (
-                <span key={k} className={(q.pass as string[]).includes(k) ? "is-fit" : ""} title={d}>{k}</span>
+                <span key={k} className={(q.pass as string[]).includes(k) ? "is-fit" : (q.neutral ?? []).includes(k) ? "is-neutral" : ""} title={d}>{k}</span>
               ))}
             </div>
           )}
@@ -370,7 +384,7 @@ export default function JevClientPage() {
     return { name, mode: as, headers, rows, plan, overrides, people, profiles, duplicates: duplicateIndexes(people) as Set<number> };
   };
 
-  /** Switching list type keeps the loaded file and rebuilds its rows the other way. */
+  /** Switching list type clears the loaded file: a company list read as contacts is a table of "(no name)" rows. */
   const setMode = (next: Mode) => {
     if (running || next === mode) return;
     setModeState(next);
@@ -378,7 +392,7 @@ export default function JevClientPage() {
     if (next === "companies") url.searchParams.set("mode", "companies"); else url.searchParams.delete("mode");
     window.history.replaceState(null, "", url);
     setNotice(null); setEditing(null); setEditingTags(null); setCollapsed(false);
-    if (file) { const rebuilt = buildFile(file.name, file.headers, file.rows, file.overrides, next); setFile(rebuilt); resetResults(rebuilt); }
+    if (file) { setFile(null); setFileError(""); resetResults(null); enrichedRef.current = new Map(); }
   };
 
   const setColumnRole = (header: string, role: string) => {
@@ -431,12 +445,12 @@ export default function JevClientPage() {
     finally { setBusy(""); }
   };
 
-  const buildSetup = async (description: string) => {
+  const buildSetup = async (description: string, icp?: Record<string, unknown>) => {
     const existing = mode === "companies" ? tags?.tags.length : set?.questions.length;
     if (existing && !window.confirm(`This replaces ${client?.name}'s saved ${mode === "companies" ? `tag set (${existing} tags)` : `screening questions (${existing})`} with a new setup built from your description. The current one cannot be recovered.`)) return;
     setBusy("building"); setNotice({ kind: "info", text: mode === "companies" ? "Writing a description for every tag…" : "Turning your description into screening questions…" });
     try {
-      const response = await fetch("/api/jev/build", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, mode, description, sample: sampleProfile() }) });
+      const response = await fetch("/api/jev/build", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, mode, description, icp, sample: sampleProfile() }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Build failed (${response.status}).` }); return; }
       if (mode === "companies") { setTags(payload.set); setEditingTags(null); } else { setSet(payload.set); setEditing(null); }
@@ -707,14 +721,13 @@ export default function JevClientPage() {
                       </div>
                     </div>
                     {!editing && !collapsed && (
-                      <DescribeBox
+                      <IcpBox
                         key={`contacts-${set?.updatedAt ?? ""}`}
-                        label="Describe who should stay on the list"
-                        value={set?.brief ?? ""}
-                        placeholder="e.g. Keep only VPs and C-level at US hospitals and health systems. Drop anyone in physical security, facilities or sales, and anyone whose main job is at a different company than the one listed."
+                        icp={set?.icp}
+                        brief={set?.brief ?? ""}
                         busy={busy === "building"}
                         disabled={running || (Boolean(busy) && busy !== "building")}
-                        onBuild={(t) => void buildSetup(t)}
+                        onBuild={(t, icp) => void buildSetup(t, icp)}
                       />
                     )}
                     {notice && <div className={`jev-banner is-${notice.kind}`}>{notice.text}</div>}
@@ -726,7 +739,7 @@ export default function JevClientPage() {
                       <>
                         <QuestionList set={set} missing={gaps} />
                         <div className="jev-rule-line">
-                          Good fit: every question ≥ {Math.round(set.thresholds.keep * 100)}% · Bad fit: any question &lt; {Math.round(set.thresholds.drop * 100)}% · otherwise Borderline
+                          Good fit: average ≥ {Math.round(set.thresholds.keep * 100)}% · Dropped: a must-have &lt; {Math.round(set.thresholds.drop * 100)}%, an exclusion ≥ 80% sure{set.icp && (set.icp.sizeMin || set.icp.sizeMax) ? `, or outside ${set.icp.sizeMin ?? 0}–${set.icp.sizeMax ?? "any"} employees` : ""}{" · "}can&apos;t-tell answers don&apos;t count
                           {set.updatedAt && <span> · saved {new Date(set.updatedAt).toLocaleString()}</span>}
                         </div>
                       </>
