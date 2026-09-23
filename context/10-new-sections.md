@@ -49,6 +49,35 @@ per-client UI that mirrors the onboarding hub.
   for review, never counted. QC identity comes from `rr_leads` (LinkedIn) + `rr_meetings` (email + LinkedIn).
   CRM fetch in `app/lib/crm.ts`; **Attio's extraction is unverified against a live workspace** — validate before trusting.
 
+## Jev list check (`/jev`)
+
+Engineers vet a pulled contact list before a campaign launches: client directory → per-client page → drop a
+CSV → Run → only the good fits come back. Built on **TypeSafe's Jev** (a "System One" classifier: typed
+answers with probabilities, no text generation), reached through **OpenRouter's System One endpoint**
+(`POST https://openrouter.ai/api/v1/systemone`, model `jev-1.13`). **Not** the OpenAI-compatible chat
+endpoint — it does not serve Jev.
+
+- **Env:** `OPENROUTER_API_KEY` (required). Optional `JEV_MODEL` (default `jev-1.13`, pinned on purpose —
+  thresholds are tuned to one model's probabilities) and `JEV_BASE_URL` (default `https://openrouter.ai/api`;
+  `https://api.typesafe.ai` with a TypeSafe key works unchanged — same wire format).
+- **Per-client question set** in `rr_app_config` under `jev_questions_<slug>` — no migration. Drafted by
+  Sonnet from the client's QC Brain folder + client brief (`draftQuestionSet`), then editable. Each question
+  is a noul (TypeSafe's name for yes/no) or a choice, with one answer marked "fits".
+- **Verdict is a gate** (`verdictFor` in `shared/jev.mjs`): good only if every question's fit-probability ≥
+  keep (60%), bad if any < drop (35%), else borderline. Reason = weakest question.
+- **The browser parses the CSV and trims each row to a profile** (~380–620 tokens) before sending anything;
+  the file never goes to the server whole (a 5k-row AI Ark export is ~30MB, past Vercel's body limit). AI Ark
+  exports get a structured profile (headline, About, *every current role*, company description); anything
+  else gets a generic column filter. Names, emails, LinkedIn URLs and photos are never sent.
+- **Throughput:** browser sends 40-row chunks on 4 lanes to `/api/jev/classify`, which runs 12 at a time
+  and streams NDJSON back one line per contact. 5,000 rows ≈ 21s against a ~165ms stub. 429/529/5xx retried
+  with backoff.
+- **Gotcha already hit:** building CSV fields with `field += ch` made V8 keep per-character ropes — 351MB of
+  heap for a 5k-row file. The parser slices by index (72MB). Parity with Python's `csv` verified on real exports.
+- **Not verified live** at time of writing: the real OpenRouter response (built to TypeSafe's documented
+  shape, `usage.cost` read if present) and the Sonnet draft. Duplicates within the file are removed in code;
+  DNC / already-in-`rr_leads` filtering is not built yet.
+
 ## Assistant / MCP (`app/lib/assistant-tools.ts`)
 
 New read tools so the assistant covers everything: `slack_channels`, `slack_scan` (full channel history),

@@ -21,6 +21,8 @@ const items = [
   ["/project-management", "Project management", "project"],
   ["/deals", "Deals", "deals"],
   ["/onboarding", "Onboarding", "onboarding"],
+  // Before a campaign launches: checking the contact list it will be sent to.
+  ["/jev", "Jev", "jev"],
   ["/analytics", "Analytics", "analytics"],
   ["/reports", "Reports", "reports"],
   ["/mcp", "MCP", "mcp"],
@@ -57,6 +59,8 @@ const iconPaths: Record<string, string> = {
   // looked like a plain diagonal line. Still distinct from the analytics bars beside it because it is
   // one connected polyline rather than four separate uprights.
   onboarding: "M4 20h6v-6h6v-6h4",
+  // A funnel of rows narrowing to a tick — a list going in, only the good fits coming out.
+  jev: "M4 5h16 M6 10h12 M9 15h6 M10 19l2 2 4-4",
   // A channel hash. Slack's own mark is four rounded bars in a pinwheel, which is theirs and needs
   // fills this rail does not use; `#` is how everyone writes a Slack channel anyway.
   slack: "M9 4v16M15 4v16M4 9h16M4 15h16",
