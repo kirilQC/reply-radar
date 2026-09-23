@@ -108,6 +108,19 @@
 .jev-peek { margin-top: 10px; }
 .jev-peek summary { font-size: 11px; color: var(--accent); cursor: pointer; }
 .jev-peek pre { margin: 8px 0 0; max-height: 280px; overflow: auto; font-size: 10.5px; line-height: 1.45; padding: 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border-soft); color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.jev-gap { margin-top: 8px; font-size: 11px; color: var(--amber); }
+.jev-qlist li.has-gap { border-color: color-mix(in srgb, var(--amber) 35%, var(--border-soft)); }
+.jev-columns > summary { margin-top: 2px; }
+.jev-col-group { margin-top: 10px; }
+.jev-col-group-head { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; color: var(--muted-2); margin-bottom: 5px; }
+.jev-col-group-head b { color: var(--text); margin-left: 4px; }
+.jev-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) 170px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border-soft); font-size: 11px; }
+.jev-col-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jev-col-sample { color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jev-col-sample em { font-style: normal; opacity: .6; }
+.jev-col-role { height: 26px; font-size: 11px; padding: 0 6px; width: 100%; }
+.jev-col.is-overridden .jev-col-role { border-color: var(--accent); }
+.jev-col-why { grid-column: 2 / -1; font-size: 10px; color: var(--muted-2); margin-top: -3px; }
 .jev-run-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 .jev-run { height: 38px !important; padding: 0 26px !important; font-size: 13px !important; }
 .jev-run:disabled, .jev-downloads button:disabled { opacity: .45; cursor: not-allowed; }
@@ -176,5 +189,7 @@
   .jev-edit-noul { grid-template-columns: 1fr; }
   .jev-opt { grid-template-columns: auto 1fr auto; }
   .jev-opt-key { display: none; }
+  .jev-col { grid-template-columns: minmax(0, 1fr) 150px; }
+  .jev-col-sample { display: none; }
   .jev-detail { padding-left: 14px; }
 }

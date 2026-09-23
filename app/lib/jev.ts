@@ -134,7 +134,14 @@ Rules, from TypeSafe's own guidance on how Jev fails:
 - One judgement per question. Never "senior AND in the right industry". Split it.
 - Literal wording. Jev answers the words you wrote, not what you meant. State the exact condition and put boundary cases in the criteria.
 - No arithmetic, counting or date comparison.
-- Refer to profile fields by name in backticks, for example \`current_roles\` or \`listed_company_profile.description\`, using only field names that appear in the sample profile.
+- Refer to profile fields by name in backticks. Every contact list, whatever tool exported it, is mapped onto this one profile shape, and a question set is reused across lists, so name only these fields:
+  \`listed_title\`, \`listed_company\` — the title and company the list was pulled for
+  \`headline\`, \`about\` — the person's own LinkedIn headline and About text
+  \`seniority\`, \`department\`, \`location\`, \`skills\`
+  \`current_roles\` — every job the person holds now: title, company, since, about
+  \`listed_company_profile\` — .industry, .employees, .description, .products, .funding, .revenue, .location, .type
+  \`other\` — unrecognised extra columns, by their original header
+- Any field can be missing on a given list or contact. Write each question so a missing field leads to the "unclear" option (choice) or to the non-fit answer being unlikely either way — never so that absence reads as a fit. The sample profile shows which fields this client's current list actually carries; lean on those, but do not depend on a field only one exporter provides.
 - Every question has exactly one answer that means "fits". For a noul (yes/no), prefer phrasing where yes = fits; set "pass": false only when a "no" is naturally the fit answer (e.g. "Is this company a competitor?"). Keep the criteria aligned with the instruction — never make "true" mean the bad outcome of a positively-worded question.
 - For a choice, 3–6 options with plain-language descriptions, always including an "unclear" option for when the profile does not say. Mark only the genuinely fitting options in "pass"; "unclear" is not a fit.
 - Base every question on the client's ICP as written below. Do not invent targeting the documents do not support.

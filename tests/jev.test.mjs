@@ -4,9 +4,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildProfile,
   duplicateIndexes,
   identify,
-  isAiArkExport,
+  identifyWith,
+  missingFields,
+  planColumns,
   normalizeQuestionSet,
   parseCsv,
   parseGeneratedQuestionSet,
@@ -66,29 +69,101 @@ const sideRoleRow = {
   "Profile Picture URL": "https://media.licdn.com/x.jpg",
 };
 
-test("an AI Ark export is recognised and trimmed to what decides fit", () => {
-  assert.equal(isAiArkExport(AIARK_HEADERS), true);
-  assert.equal(isAiArkExport(["Name", "Title", "Company"]), false);
+test("an AI Ark-style export is read into the fixed profile shape", () => {
   const profile = profileFor(sideRoleRow, AIARK_HEADERS);
   assert.equal(profile.listed_company, "Lumenuity, Inc.");
   assert.equal(profile.headline, "CEO | Launch i/o, Inc");
   // Every current role is kept — the side role and the real job — and past roles are not.
   assert.deepEqual(profile.current_roles.map((r) => r.company), ["Launch i/o, INC", "Lumenuity, Inc."]);
   assert.equal(JSON.stringify(profile).includes("Lenovo"), false);
+  assert.equal(profile.listed_company_profile.description, "Deep-tech optics company.");
   // Identity, contact details and photos never reach Jev.
   const flat = JSON.stringify(profile);
   for (const leaked of ["Jeffrey", "j@x.com", "linkedin.com", "licdn"]) assert.equal(flat.includes(leaked), false, leaked);
   // Empty fields are pruned rather than sent as "".
   assert.equal("products" in profile.listed_company_profile, false);
   assert.equal(flat.includes('""'), false);
+  assert.equal(identify(sideRoleRow, AIARK_HEADERS).linkedin, "https://www.linkedin.com/in/jeffrey-l");
 });
 
-test("a generic export keeps useful columns and drops noise", () => {
-  const headers = ["Full Name", "Job Title", "Company", "Industry", "Person Linkedin Url", "Email", "Phone", "Notes"];
-  const row = { "Full Name": "Ada Lee", "Job Title": "CISO", Company: "Acme", Industry: "Fintech", "Person Linkedin Url": "linkedin.com/in/ada", Email: "a@acme.com", Phone: "555", Notes: "" };
-  const profile = profileFor(row, headers);
-  assert.deepEqual(Object.keys(profile), ["Job Title", "Company", "Industry"]);
-  assert.deepEqual(identify(row, headers), { name: "Ada Lee", title: "CISO", company: "Acme", linkedin: "linkedin.com/in/ada" });
+const csvRows = (text) => parseCsv(text, { asArrays: true });
+const roleOf = (plan, header) => plan.columns.find((c) => c.header === header)?.role;
+
+test("Apollo-style headers map onto the same profile fields", () => {
+  const { headers, rows } = csvRows(`First Name,Last Name,Title,Company,Company Name for Emails,Email,Seniority,Departments,# Employees,Industry,Keywords,Person Linkedin Url,Website,City,State,Country,Total Funding,Latest Funding,Short Description,Apollo Contact Id
+Maya,Chen,VP of Security,Northwind Bank,Northwind,maya@nw.com,vp,Information Technology,5200,banking,"fraud, payments",http://www.linkedin.com/in/mayachen,http://nw.com,New York,New York,United States,50000000,Series C,Regional bank for mid-market businesses,5f1`);
+  const plan = planColumns(headers, rows);
+  assert.equal(roleOf(plan, "Company Name for Emails"), "ignore");
+  assert.equal(roleOf(plan, "Total Funding"), "ignore");
+  assert.equal(roleOf(plan, "Latest Funding"), "company_funding");
+  const p = buildProfile(rows[0], plan);
+  assert.deepEqual(p, {
+    listed_title: "VP of Security", listed_company: "Northwind Bank", seniority: "vp", department: "Information Technology",
+    location: "New York, United States",
+    listed_company_profile: { industry: "banking", employees: "5200", description: "Regional bank for mid-market businesses", products: "fraud, payments", funding: "Series C" },
+  });
+  assert.equal(identifyWith(rows[0], plan).linkedin, "http://www.linkedin.com/in/mayachen");
+});
+
+test("Sales Nav-style headers: company scope, LinkedIn casing, unrecognised text kept as extra", () => {
+  const { headers, rows } = csvRows(`Full Name,Job Title,Company,Company Domain,Profile URL,Location,Industry,Headcount,Tenure in Position,Headline,Summary
+Ada Lee,CISO,Acme Health,acme.com,https://www.linkedin.com/sales/lead/A,"Boston, MA",Hospitals and Health Care,201-500,1 year 2 months,CISO at Acme,Security leader`);
+  const plan = planColumns(headers, rows);
+  assert.equal(roleOf(plan, "Company Domain"), "ignore");
+  assert.equal(roleOf(plan, "Profile URL"), "linkedin");
+  const p = buildProfile(rows[0], plan);
+  assert.equal(p.listed_company_profile.industry, "Hospitals and Health Care");
+  assert.deepEqual(p.other, { "Tenure in Position": "1 year 2 months" });
+  assert.equal("Full Name" in p, false);
+});
+
+test("job history is read from numbered columns with end dates, and from a JSON list", () => {
+  const numbered = csvRows(`First,Last,Experience 1 Title,Experience 1 Company,Experience 1 End Date,Experience 2 Title,Experience 2 Company,Experience 2 End Date
+Hal,Ivy,Engineer,Pylon,2024-01,CTO,Mint,`);
+  const p1 = buildProfile(numbered.rows[0], planColumns(numbered.headers, numbered.rows));
+  assert.deepEqual(p1.current_roles, [{ title: "CTO", company: "Mint" }]);
+  // With no title or company column, the listed ones fall back to the current job.
+  assert.equal(p1.listed_company, "Mint");
+
+  const clay = csvRows(`Name,Title,Company,Experience
+Cy,Head of RevOps,Loop,"[{""title"":""Head of RevOps"",""company"":""Loop"",""is_current"":true},{""title"":""Advisor"",""company"":""Glide"",""is_current"":true},{""title"":""Ops"",""company"":""Stripe"",""is_current"":false}]"
+Di,CEO,Glide,[]`);
+  const plan = planColumns(clay.headers, clay.rows);
+  assert.equal(roleOf(plan, "Experience"), "experience_json");
+  assert.deepEqual(buildProfile(clay.rows[0], plan).current_roles.map((r) => r.company), ["Loop", "Glide"]);
+});
+
+test("unrecognised columns are judged by their values", () => {
+  const { headers, rows } = csvRows(`contact,org,what they do,Record Link,Imported,Tier
+Eve,Brightline Clinics,Runs IT for 12 clinics,https://x.io/1,2026-09-01,A
+Fay,Brightline Clinics,Intern,https://x.io/2,2026-09-01,A
+Gil,Brightline Clinics,Nurse,https://x.io/3,2026-09-01,A
+Hana,Brightline Clinics,CFO,https://x.io/4,2026-09-01,A
+Ivo,Brightline Clinics,COO,https://x.io/5,2026-09-01,A`);
+  const plan = planColumns(headers, rows);
+  assert.equal(roleOf(plan, "contact"), "name");
+  assert.equal(roleOf(plan, "org"), "company");
+  assert.equal(roleOf(plan, "what they do"), "other");
+  assert.equal(roleOf(plan, "Record Link"), "ignore");
+  assert.equal(roleOf(plan, "Imported"), "ignore");
+  assert.equal(roleOf(plan, "Tier"), "ignore"); // the same value on every row tells contacts apart not at all
+});
+
+test("an override beats detection", () => {
+  const { headers, rows } = csvRows(`Name,Notes\nAda,Buys security tooling`);
+  assert.equal(roleOf(planColumns(headers, rows), "Notes"), "other");
+  const plan = planColumns(headers, rows, { Notes: "about", Name: "ignore" });
+  assert.equal(buildProfile(rows[0], plan).about, "Buys security tooling");
+  assert.equal(identifyWith(rows[0], plan).name, "(no name)");
+});
+
+test("missingFields flags questions that name a field this file does not carry", () => {
+  const questions = [
+    { key: "main_job", instructions: "Is `listed_company` in `current_roles`?" },
+    { key: "desc", instructions: "Does `listed_company_profile.description` describe software?" },
+  ];
+  const profiles = [{ listed_company: "A", current_roles: [{ title: "CEO" }] }, { listed_company: "B" }, { listed_company: "C" }];
+  assert.deepEqual(missingFields(questions, profiles), { main_job: ["current_roles"], desc: ["listed_company_profile.description"] });
 });
 
 test("duplicates are found by normalised LinkedIn URL, then by name and company", () => {

@@ -23,14 +23,16 @@ import AppSidebar from "../../components/AppSidebar";
 import Crumb from "../../components/Crumb";
 import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import {
+  COLUMN_ROLES,
   MAX_ROWS,
+  buildProfile,
   duplicateIndexes,
   estimateTokens,
-  identify,
-  isAiArkExport,
+  identifyWith,
+  missingFields,
   parseCsv,
-  profileFor,
-  rowObject,
+  planColumns,
+  planSummary,
   toCsv,
   toWireQuestions,
 } from "../../../shared/jev.mjs";
@@ -40,7 +42,20 @@ type Question = { key: string; label: string; type: "noul" | "choice"; instructi
 type QuestionSet = { questions: Question[]; thresholds: { keep: number; drop: number }; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[] };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Person = { name: string; title: string; company: string; linkedin: string };
-type LoadedFile = { name: string; headers: string[]; rows: string[][]; format: "aiark" | "generic"; people: Person[]; profiles: unknown[]; duplicates: Set<number> };
+type PlanColumn = { header: string; idx: number; role: string; why?: string; index?: number; field?: string; overridden?: boolean; filled: number };
+type Plan = { columns: PlanColumn[]; experienceHasCurrent: boolean; experienceHasEnd: boolean };
+type LoadedFile = { name: string; headers: string[]; rows: string[][]; plan: Plan; overrides: Record<string, string>; people: Person[]; profiles: unknown[]; duplicates: Set<number> };
+/** Rows the column plan is detected from — enough to see a column's real contents, cheap on a 10k-row file. */
+const PLAN_SAMPLE = 300;
+const ROLE_GROUPS: [string, string[]][] = [
+  ["Person", ["title", "headline", "about", "seniority", "department", "location", "skills"]],
+  ["Company", ["company", "company_industry", "company_employees", "company_description", "company_products", "company_funding", "company_revenue", "company_location", "company_type"]],
+  ["Job history", ["experience", "experience_json"]],
+  ["Identity (never sent)", ["name", "first_name", "last_name", "linkedin"]],
+  ["Other", ["other", "ignore"]],
+];
+const IDENTITY = new Set(["name", "first_name", "last_name", "linkedin"]);
+const roleLabel = (c: PlanColumn) => (c.role === "experience" && c.field ? `Job ${c.index} · ${c.field}` : (COLUMN_ROLES as Record<string, string>)[c.role] ?? c.role);
 type Status = "good" | "borderline" | "bad" | "error" | "duplicate";
 type Result = { status: Status; reason: string; scores?: Record<string, number | null>; tokens?: number; cost?: number | null };
 type Filter = "all" | Status;
@@ -147,11 +162,11 @@ function QuestionEditor({ value, onChange }: { value: QuestionSet; onChange: (v:
 
 /* ══ Read-only question list ══ */
 
-function QuestionList({ set }: { set: QuestionSet }) {
+function QuestionList({ set, missing }: { set: QuestionSet; missing: Record<string, string[]> }) {
   return (
     <ol className="jev-qlist">
       {set.questions.map((q) => (
-        <li key={q.key}>
+        <li key={q.key} className={missing[q.key] ? "has-gap" : ""}>
           <div className="jev-q-head">
             <strong>{q.label}</strong>
             <span className="jev-q-type">{q.type === "noul" ? "Yes / No" : "Choice"}</span>
@@ -167,9 +182,53 @@ function QuestionList({ set }: { set: QuestionSet }) {
               ))}
             </div>
           )}
+          {missing[q.key] && (
+            <div className="jev-gap">Most contacts in this file have no {missing[q.key].map((f) => `\`${f}\``).join(", ")} — Jev will be answering this one blind.</div>
+          )}
         </li>
       ))}
     </ol>
+  );
+}
+
+/* ══ Column plan ══ */
+
+/**
+ * How each column of this file was read, with a role picker to correct it. Used columns first, then the ones
+ * that identify the person (shown in the table, never sent), then everything ignored — with the reason, so an
+ * engineer can see at a glance that "Company Domain" was dropped because it is a link, not because it was missed.
+ */
+function ColumnPanel({ file, onChange, disabled }: { file: LoadedFile; onChange: (header: string, role: string) => void; disabled: boolean }) {
+  const sampleOf = (idx: number) => { for (const cells of file.rows.slice(0, PLAN_SAMPLE)) { const v = (cells[idx] ?? "").trim(); if (v) return v.length > 70 ? `${v.slice(0, 70)}…` : v; } return ""; };
+  const groups: [string, PlanColumn[]][] = [
+    ["Sent to Jev", file.plan.columns.filter((c) => c.role !== "ignore" && !IDENTITY.has(c.role))],
+    ["Identifies the person — shown here, never sent", file.plan.columns.filter((c) => IDENTITY.has(c.role))],
+    ["Ignored", file.plan.columns.filter((c) => c.role === "ignore")],
+  ];
+  const [used, identity, ignored] = groups.map(([, cols]) => cols.length);
+  return (
+    <details className="jev-peek jev-columns">
+      <summary>Columns: {used} sent · {identity} identity · {ignored} ignored</summary>
+      {groups.map(([label, cols]) => cols.length > 0 && (
+        <div key={label} className="jev-col-group">
+          <div className="jev-col-group-head">{label} <b>{cols.length}</b></div>
+          {cols.map((c) => (
+            <div key={c.header} className={`jev-col ${c.overridden ? "is-overridden" : ""}`}>
+              <span className="jev-col-name" title={c.header}>{c.header}</span>
+              <span className="jev-col-sample" title={sampleOf(c.idx)}>{sampleOf(c.idx) || <em>empty</em>}</span>
+              <select className="jev-input jev-col-role" value={c.role} disabled={disabled} onChange={(e) => onChange(c.header, e.target.value)} aria-label={`What ${c.header} holds`}>
+                {ROLE_GROUPS.map(([g, roles]) => (
+                  <optgroup key={g} label={g}>
+                    {roles.map((r) => <option key={r} value={r}>{r === c.role && c.role === "experience" ? roleLabel(c) : (COLUMN_ROLES as Record<string, string>)[r]}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+              {c.role === "ignore" && c.why && <span className="jev-col-why">{c.why}</span>}
+            </div>
+          ))}
+        </div>
+      ))}
+    </details>
   );
 }
 
@@ -241,6 +300,29 @@ export default function JevClientPage() {
 
   /* ── File ── */
 
+  /**
+   * Read every column for what it means, then build each contact's profile from that plan. Re-run with
+   * overrides when an engineer corrects a column, so the same code path produces what the run sends.
+   */
+  const buildFile = (name: string, headers: string[], rows: string[][], overrides: Record<string, string>): LoadedFile => {
+    const plan = planColumns(headers, rows.slice(0, PLAN_SAMPLE), overrides) as Plan;
+    const people: Person[] = [];
+    const profiles: unknown[] = [];
+    for (const cells of rows) {
+      people.push(identifyWith(cells, plan) as Person);
+      profiles.push(buildProfile(cells, plan));
+    }
+    return { name, headers, rows, plan, overrides, people, profiles, duplicates: duplicateIndexes(people) as Set<number> };
+  };
+
+  const setColumnRole = (header: string, role: string) => {
+    if (!file || running) return;
+    const overrides = { ...file.overrides, [header]: role };
+    const next = buildFile(file.name, file.headers, file.rows, overrides);
+    setFile(next);
+    resetResults(next);
+  };
+
   const readFile = async (f: File) => {
     setFileError("");
     if (!/\.csv$/i.test(f.name) && f.type !== "text/csv") { setFileError("That is not a CSV file."); return; }
@@ -248,16 +330,7 @@ export default function JevClientPage() {
       const { headers, rows } = parseCsv(await f.text(), { asArrays: true }) as { headers: string[]; rows: string[][] };
       if (!rows.length) { setFileError("The file has a header row but no contacts."); return; }
       if (rows.length > MAX_ROWS) { setFileError(`The file has ${rows.length.toLocaleString()} rows; the limit is ${MAX_ROWS.toLocaleString()}. Split it and run each half.`); return; }
-      const format = isAiArkExport(headers) ? "aiark" : "generic";
-      // Each row is expanded to an object only long enough to read it; the cells are what is kept.
-      const people: Person[] = [];
-      const profiles: unknown[] = [];
-      for (const cells of rows) {
-        const row = rowObject(headers, cells);
-        people.push(identify(row, headers) as Person);
-        profiles.push(profileFor(row, headers, format));
-      }
-      const loaded: LoadedFile = { name: f.name, headers, rows, format, people, profiles, duplicates: duplicateIndexes(people) as Set<number> };
+      const loaded = buildFile(f.name, headers, rows, {});
       setFile(loaded);
       resetResults(loaded);
     } catch (error) {
@@ -419,6 +492,9 @@ export default function JevClientPage() {
     return { tokens: sum, cost: sum * PRICE_PER_TOKEN, perRow: toCheck ? Math.round(sum / toCheck) : 0 };
   }, [file, set, toCheck]);
 
+  const gaps = useMemo(() => (file && set?.questions.length ? (missingFields(set.questions, file.profiles) as Record<string, string[]>) : {}), [file, set]);
+  const columnStats = useMemo(() => (file ? (planSummary(file.plan) as { used: number; identity: number; ignored: number }) : null), [file]);
+
   const visible: number[] = (() => {
     if (!file) return [];
     if (filter === "all") {
@@ -506,7 +582,7 @@ export default function JevClientPage() {
                     <div className="jev-q-chips">{set.questions.map((q, n) => <span key={q.key}><b>{n + 1}</b>{q.label}</span>)}</div>
                   ) : set?.questions.length ? (
                     <>
-                      <QuestionList set={set} />
+                      <QuestionList set={set} missing={gaps} />
                       <div className="jev-rule-line">
                         Good fit: every question ≥ {Math.round(set.thresholds.keep * 100)}% · Bad fit: any question &lt; {Math.round(set.thresholds.drop * 100)}% · otherwise Borderline
                         {set.updatedAt && <span> · saved {new Date(set.updatedAt).toLocaleString()}</span>}
@@ -544,7 +620,7 @@ export default function JevClientPage() {
                       <div className="jev-file-stats">
                         <span><b>{total.toLocaleString()}</b> contacts</span>
                         {file.duplicates.size > 0 && <span><b>{file.duplicates.size}</b> duplicates skipped</span>}
-                        <span><b>{file.format === "aiark" ? "AI Ark" : "Generic"}</b> format</span>
+                        <span><b>{columnStats?.used}</b> of {file.headers.length} columns used</span>
                         {estimate && <span><b>~{estimate.perRow}</b> tokens / contact</span>}
                         {estimate && <span>est. <b>{money(estimate.cost)}</b></span>}
                       </div>
@@ -552,6 +628,7 @@ export default function JevClientPage() {
                         <summary>What Jev sees for row 1</summary>
                         <pre>{JSON.stringify(file.profiles[0], null, 2)}</pre>
                       </details>
+                      <ColumnPanel file={file} onChange={setColumnRole} disabled={running} />
                     </div>
                   )}
                   {fileError && <div className="jev-banner is-error">{fileError}</div>}

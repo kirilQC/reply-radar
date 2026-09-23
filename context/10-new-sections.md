@@ -65,10 +65,20 @@ endpoint — it does not serve Jev.
   is a noul (TypeSafe's name for yes/no) or a choice, with one answer marked "fits".
 - **Verdict is a gate** (`verdictFor` in `shared/jev.mjs`): good only if every question's fit-probability ≥
   keep (60%), bad if any < drop (35%), else borderline. Reason = weakest question.
-- **The browser parses the CSV and trims each row to a profile** (~380–620 tokens) before sending anything;
-  the file never goes to the server whole (a 5k-row AI Ark export is ~30MB, past Vercel's body limit). AI Ark
-  exports get a structured profile (headline, About, *every current role*, company description); anything
-  else gets a generic column filter. Names, emails, LinkedIn URLs and photos are never sent.
+- **The browser parses the CSV and trims each row to a profile** before sending anything; the file never goes
+  to the server whole (a 5k-row AI Ark export is ~30MB, past Vercel's body limit).
+- **Any export works — columns are classified, not matched by name** (`planColumns` in `shared/jev.mjs`). Each
+  header is read for meaning (company-scoped first, so "Company Description" is not the person's; numbered job
+  history like "1st Experience Title" / "Experience 2 Company" / "job_3_title"; JSON job-history lists as Clay
+  exports them), and a header that says nothing is judged by its values (links, ids, numbers, dates and
+  one-value-on-every-row columns are ignored; other text is sent as `other`, capped at 8 columns).
+  Tested against AI Ark, Apollo, Sales Nav, Clay and hand-made headers. The page's **Columns** panel shows how
+  every column was read and lets an engineer override it.
+- **The profile shape is fixed** (`listed_title`, `listed_company`, `headline`, `about`, `seniority`,
+  `department`, `location`, `skills`, `current_roles[]`, `listed_company_profile{industry, employees,
+  description, products, funding, revenue, location, type}`, `other`), so one question set works on every
+  file. Questions name these fields in backticks; `missingFields` warns on the page when a file lacks a field a
+  question depends on. Names, emails, LinkedIn URLs and photos are never sent.
 - **Throughput:** browser sends 40-row chunks on 4 lanes to `/api/jev/classify`, which runs 12 at a time
   and streams NDJSON back one line per contact. 5,000 rows ≈ 21s against a ~165ms stub. 429/529/5xx retried
   with backoff.
