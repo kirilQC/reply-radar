@@ -183,13 +183,17 @@ test("an override beats detection", () => {
   assert.equal(identifyWith(rows[0], plan).name, "(no name)");
 });
 
-test("missingFields flags questions that name a field this file does not carry", () => {
+test("missingFields flags only questions with nothing to go on, and ignores fields inside roles", () => {
   const questions = [
-    { key: "main_job", instructions: "Is `listed_company` in `current_roles`?" },
-    { key: "desc", instructions: "Does `listed_company_profile.description` describe software?" },
+    { key: "blind", instructions: "Does `listed_company_profile.description` describe software?" },
+    { key: "partial", instructions: "Using `headline`, `about` and `past_roles` (each entry's `title`, `to` and `about`), is it likely…" },
+    { key: "role_fields", instructions: "Is the entry in `current_roles` with no `to` date a director role? Check its `about`." },
   ];
-  const profiles = [{ listed_company: "A", current_roles: [{ title: "CEO" }] }, { listed_company: "B" }, { listed_company: "C" }];
-  assert.deepEqual(missingFields(questions, profiles), { main_job: ["current_roles"], desc: ["listed_company_profile.description"] });
+  const profiles = [{ headline: "VP at Anthem", current_roles: [{ title: "VP" }] }, { headline: "Director", current_roles: [{ title: "Director" }] }, { listed_title: "CEO" }];
+  // Only the question whose every field is missing for most contacts is flagged; `to` is never looked for.
+  assert.deepEqual(missingFields(questions, profiles), { blind: ["listed_company_profile.description"] });
+  // All present → nothing flagged.
+  assert.deepEqual(missingFields([questions[0]], [{ listed_company_profile: { description: "x" } }]), {});
 });
 
 test("duplicates are found by normalised LinkedIn URL, then by name and company", () => {

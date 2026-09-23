@@ -539,14 +539,30 @@ export function questionFieldRefs(question) {
  * about `current_roles` on a file with no job history will be answered against nothing, and the engineer should
  * know that before paying for the run.
  */
+/** The profile's own top-level fields. Anything else a question names in backticks is a field inside a role. */
+const PROFILE_FIELDS = new Set(["listed_title", "listed_company", "headline", "about", "seniority", "department", "location", "skills", "current_roles", "past_roles", "listed_company_profile", "other"]);
+
+/**
+ * For each question, the profile fields it names when most of this file's contacts have NONE of them — the case
+ * where Jev really is answering blind.
+ *
+ * ── Why "none of them", and why only top-level fields ───────────────────────────────────────────
+ * The first version flagged a question if any one field it named was missing, and read every backticked word as a
+ * field. On a Vitalic AI Ark export that warned "no `to`" (the end date inside a past role) and "no `about`" (meant
+ * as a role's description) under questions that also read the headline, current roles and past roles — a false
+ * alarm on every question. A question is blind only when it has nothing at all to go on.
+ */
 export function missingFields(questions, profiles) {
   const n = Math.min(profiles.length, 200);
   const sample = profiles.slice(0, n);
-  const present = (p, path) => path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), p) !== undefined;
+  const present = (p, path) => { const v = path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), p); return v !== undefined && !(Array.isArray(v) && !v.length); };
   const out = {};
+  if (!n) return out;
   for (const q of questions) {
-    const missing = questionFieldRefs(q).filter((path) => n && sample.filter((p) => present(p, path)).length < n * 0.5);
-    if (missing.length) out[q.key] = missing;
+    const refs = questionFieldRefs(q).filter((path) => PROFILE_FIELDS.has(path.split(".")[0]));
+    if (!refs.length) continue;
+    const blind = sample.filter((p) => !refs.some((path) => present(p, path))).length;
+    if (blind >= n * 0.5) out[q.key] = refs;
   }
   return out;
 }
