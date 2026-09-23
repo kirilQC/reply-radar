@@ -22,7 +22,7 @@
 import { clientContext } from "./client-context";
 import { brainContext } from "./brain-context";
 import { readConfig, writeConfig } from "./app-config";
-import { mergeNamedTags, normalizeIcp, otherSample, parseSuggestions, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
+import { mergeNamedTags, normalizeIcp, parseTagEntries, otherSample, parseSuggestions, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
 
 type Row = Record<string, unknown>;
 export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: "must" | "exclude" | "signal"; neutral?: string[] };
@@ -252,11 +252,12 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
   // description a tag already had — and the browser fills in the rest in batches via `describeTags`. Writing all
   // the descriptions in this one request is what timed out on a ~200-tag Bluevia list.
   if (mode === "companies") {
-    const typed = parseTagList(brief);
+    const typed = parseTagEntries(brief) as Array<{ label: string; description: string }>;
     if (typed.length >= 3) {
       const existing = await loadTagSet(slug).catch(() => null);
       const known = new Map((existing?.tags ?? []).map((t) => [t.label.toLowerCase(), t.description]));
-      const tags = typed.map((label) => ({ label, description: known.get(label.toLowerCase()) ?? "" }));
+      // A description the person wrote wins; otherwise keep the one the tag already had.
+      const tags = typed.map(({ label, description }) => ({ label, description: description || (known.get(label.toLowerCase()) ?? "") }));
       const { set, problems } = await saveTagSet(slug, { instructions: existing?.instructions || "Which category best describes what this organization primarily is? If it fits more than one, choose its primary business.", minConfidence: existing?.minConfidence, tags, brief }, "description");
       return { ok: true, set, problems, pendingDescriptions: set.tags.filter((t) => !t.description && t.key !== "other").map((t) => t.label) };
     }

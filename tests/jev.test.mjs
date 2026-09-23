@@ -14,6 +14,7 @@ import {
   missingFields,
   normalizeTagSet,
   parseGeneratedTagSet,
+  parseTagEntries,
   parseTagList,
   planColumns,
   tagVerdict,
@@ -381,4 +382,28 @@ test("suggestions from Other: new labels only, examples kept, added before Other
   const set = addTags(normalizeTagSet({ tags: ["Health System", "ACO"] }), suggestions);
   assert.deepEqual(set.tags.map((t) => t.label), ["Health System", "ACO", "Rehabilitation Hospital", "Dental / Orthodontics Group", "Other"]);
   assert.deepEqual(parseSuggestions("not json"), { suggestions: [], outOfScope: [] });
+});
+
+test("typed tags carry their own descriptions: 'Name: description', one per line", () => {
+  const text = `tag each company as one of the following:
+
+Health System: A multi-hospital organization that owns or operates two or more hospitals.
+Community Hospital: A single independent or locally governed hospital serving a general community.
+Post-Acute: Skilled Nursing
+Dental / DSO — Dental practices and dental service organizations.
+1. ACO
+Other`;
+  assert.deepEqual(parseTagEntries(text), [
+    { label: "Health System", description: "A multi-hospital organization that owns or operates two or more hospitals." },
+    { label: "Community Hospital", description: "A single independent or locally governed hospital serving a general community." },
+    { label: "Post-Acute: Skilled Nursing", description: "" },
+    { label: "Dental / DSO", description: "Dental practices and dental service organizations." },
+    { label: "ACO", description: "" },
+    { label: "Other", description: "" },
+  ]);
+  // Hyphenated names are not split.
+  assert.deepEqual(parseTagEntries("Women's Health / OB-GYN | Long-Term Acute Care Hospital | IPA"), [
+    { label: "Women's Health / OB-GYN", description: "" }, { label: "Long-Term Acute Care Hospital", description: "" }, { label: "IPA", description: "" },
+  ]);
+  assert.deepEqual(parseTagList("Tag each company as one of the following: A | B | C"), ["A", "B", "C"]);
 });

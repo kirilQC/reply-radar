@@ -750,11 +750,36 @@ export function normalizeTagSet(input) {
 }
 
 /** Tags typed or pasted as "A | B | C", one per line, or comma-separated. */
-export function parseTagList(text) {
-  // "Tag each company as one of the following: A | B | C" — the lead-in is an instruction, not the first tag.
+/**
+ * Tags typed or pasted as a list — "A | B | C", one per line, or comma-separated — each optionally followed by
+ * its own description: "Health System: A multi-hospital organization that…" or "Health System — …".
+ *
+ * ── Why a name/description split, and why it is conservative ─────────────────────────────────────
+ * One per line with a description after a colon is how people write a taxonomy, and reading the whole line as the
+ * name produced 71 tags called "Health System: A multi-hospital organization that owns or operates two or more
+ * h…" with no descriptions. A line is split at its first ": " or " — " only when what follows reads as a sentence
+ * (three words or more), so a name that itself contains a colon, "Post-Acute: Skilled Nursing", stays whole.
+ * A heading line like "Tag each company as one of the following:" is an instruction and is dropped.
+ */
+export function parseTagEntries(text) {
   const s = String(text ?? "").replace(/^[^|\n]*?:\s*(?=[^|\n]*\|)/, "");
   const parts = s.includes("|") ? s.split("|") : s.includes("\n") ? s.split(/\r?\n/) : s.split(",");
-  return parts.map((p) => p.replace(/^[\s•*-]+/, "").trim()).filter(Boolean);
+  const out = [];
+  for (const raw of parts) {
+    const part = raw.replace(/^[\s•*·-]+/, "").replace(/^\d{1,3}[.)]\s+/, "").trim();
+    if (!part) continue;
+    // A heading: ends in a colon with nothing after it, or is an instruction with nothing left once stripped.
+    if (/:\s*$/.test(part) || !stripInstruction(part)) continue;
+    const m = part.match(/^(.{2,80}?)\s*(?::|\s[—–]\s|\s-\s)\s*(.+)$/);
+    if (m && m[2].trim().split(/\s+/).length >= 3) out.push({ label: stripInstruction(m[1]).trim(), description: m[2].trim() });
+    else out.push({ label: stripInstruction(part), description: "" });
+  }
+  return out.filter((e) => e.label);
+}
+
+/** Just the names from a typed tag list. */
+export function parseTagList(text) {
+  return parseTagEntries(text).map((e) => e.label);
 }
 
 /** The one Choice question a company run asks. The label leads each option so the model never sees a bare slug. */

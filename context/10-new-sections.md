@@ -79,7 +79,9 @@ endpoint — it does not serve Jev.
 - **Long typed tag lists** (Bluevia: 169 tags): a "A | B | C" list is saved at once with no model call, keeping
   any description a tag already had; the browser then fills the missing descriptions 25 tags a request, four at a
   time, via `/api/jev/tags/describe` (Sonnet 5 on OpenRouter, the full name list as context) and saves once.
-  Writing them all in the build request timed out at 52s. The typed text cap is 12,000 characters (4,000 silently
+  Writing them all in the build request timed out at 52s. Typed lines of the form "Name: description" (or
+  "Name — description") keep their own description (`parseTagEntries`; split only when a sentence follows, so
+  "Post-Acute: Skilled Nursing" stays a name) and are never sent to the model. The typed text cap is 12,000 characters (4,000 silently
   dropped the list's last tags). Measured: 169 described in ~32s; 240 companies tagged against all 169 in 4.5s,
   ~8.4k Jev tokens a company (~$0.00035), Other 14 → 6, Needs review 6 → 25 (finer neighbours, lower margins).
 - **Stale-tab guard:** the client bundle carries `NEXT_PUBLIC_BUILD_ID` (the commit, set in `next.config.ts`) and
