@@ -226,3 +226,45 @@
 /* Company rows carry tag names like "Physician Group / Medical Group", so the tag column is wide and wraps. */
 .jev-tr.is-co { grid-template-columns: 48px minmax(220px, 1.2fr) minmax(140px, .7fr) minmax(210px, 1fr) minmax(220px, 1.1fr); }
 .jev-tr.is-co .jev-verdict { white-space: normal; display: inline-block; line-height: 1.3; }
+
+/* ── Enrichment pipeline ── */
+.jev-enrich { margin-top: 12px; border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
+.jev-enrich-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.jev-enrich-title { font-size: 12px; font-weight: 650; }
+.jev-enrich-body { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 11px; color: var(--muted); }
+.jev-enrich-body b { color: var(--text); font-variant-numeric: tabular-nums; }
+.jev-muted-line { width: 100%; color: var(--muted-2); }
+.jev-warn-line { width: 100%; color: var(--amber); }
+.jev-stages { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.jev-stage { position: relative; border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); min-width: 0; transition: border-color .2s ease; }
+.jev-stage.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel-2)); }
+.jev-stage.is-done { border-color: color-mix(in srgb, var(--green) 35%, var(--border-soft)); }
+.jev-stage.is-skipped { opacity: .5; }
+.jev-stage-top { display: flex; align-items: center; gap: 7px; font-size: 11.5px; }
+.jev-stage-n { flex: none; width: 17px; height: 17px; border-radius: 5px; display: grid; place-items: center; font-size: 9.5px; font-weight: 750; color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, var(--panel)); }
+.jev-stage.is-done .jev-stage-n { color: var(--green); background: color-mix(in srgb, var(--green) 15%, var(--panel)); }
+.jev-stage-pulse { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: jev-pulse 1s ease-in-out infinite; }
+.jev-stage-main { font-size: 22px; font-weight: 700; letter-spacing: -.03em; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.jev-stage-sub { font-size: 10.5px; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jev-stage-meta { display: flex; flex-wrap: wrap; gap: 3px 8px; margin-top: 6px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.jev-stage-meta .active { color: var(--accent); }
+.jev-stage-meta .failed { color: var(--coral); }
+.jev-stage-job { margin-top: 6px; font-size: 10.5px; color: var(--amber); }
+.jev-log { margin-top: 14px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--bg); }
+.jev-log summary { padding: 8px 12px; font-size: 11.5px; font-weight: 650; cursor: pointer; }
+.jev-log summary b { color: var(--muted-2); margin-left: 4px; font-weight: 600; }
+.jev-log ol { list-style: none; margin: 0; padding: 0 12px 10px; max-height: 220px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; line-height: 1.6; }
+.jev-log li { display: flex; gap: 10px; color: var(--muted); }
+.jev-log time { flex: none; color: var(--muted-2); }
+.jev-log li.is-ok span { color: var(--text); }
+.jev-log li.is-warn span { color: var(--amber); }
+.jev-log li.is-error span { color: var(--coral); }
+.jev-enriched-tag { display: inline-block; margin-right: 6px; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: 4px; padding: 0 4px; }
+.jev-note { display: block; font-size: 10.5px; color: var(--muted-2); margin-top: 2px; }
+.jev-enrich-detail { margin: 10px 0 2px; font-size: 11.5px; color: var(--muted); max-width: 900px; }
+.jev-enrich-src a { color: var(--accent); }
+.jev-enrich-src b { color: var(--text); }
+.jev-evidence { margin: 6px 0 0; padding-left: 16px; }
+.jev-evidence li { margin: 2px 0; }
+.jev-evidence b { font-size: 9.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted-2); margin-right: 6px; }
+@media (max-width: 1000px) { .jev-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

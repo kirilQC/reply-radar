@@ -96,6 +96,26 @@ endpoint — it does not serve Jev.
 - **Measured live** (real Jev via OpenRouter, 2026-09-23): 240 companies in 2.2s through the app (~110/s, $0.01);
   113 contacts ~1s ($0.005). Response shape matches TypeSafe's docs; model reported as `typesafe/jev-1.13-20260917`.
   At 100k companies against a stub: 2s to load a 115MB file, ~384MB heap, no long tasks, export 0.6s.
+- **Enrichment pipeline** (both modes; `shared/enrich.mjs` pure, `app/lib/enrich.ts` I/O, driven from the browser by
+  `app/jev/[slug]/pipeline.ts`): **CSV → Jev first pass → scrape → GPT-6 Luna structures → Jev final pass.**
+  Auto mode (default) scrapes only rows Jev is unsure about or whose data is thin (`missingData`: a company needs a
+  real description; a contact needs headline/About + current roles + any field the questions name). A contact Jev
+  rules out clearly (any question < 15%) is never scraped. "Every row" and "Off" do what they say.
+  - Companies: the company's own website, fetched directly (browser headers — a bare UA got a firewall page), home
+    + About when the home page is short; bot walls/parked/error pages are rejected by `unusablePage`, never sent to
+    the model. SSRF-guarded (private IPs, localhost, redirects). `JINA_API_KEY` optional fallback for JS-only sites.
+  - Contacts: LinkedIn via **Bright Data's async API** (`BRIGHTDATA_API_KEY`; trigger → poll snapshot 202/200). No
+    LinkedIn account or cookie of ours is ever used. Without the key, thin contacts are judged on the CSV and say so.
+  - Structuring: `openai/gpt-6-luna` (`JEV_STRUCTURE_MODEL`), reasoning off, strict JSON schema, null when the source
+    doesn't say, verbatim evidence. **6 rows per call** with row ids, because **OpenRouter caps new accounts at 20
+    requests/min per model** (hit live). The browser paces to `JEV_STRUCTURE_RPM` (default 18) and holds a batch on
+    429 instead of failing it; a cut-off answer is retried as halves. Solar Mini was rejected: it copied a firewall
+    error page into "customers".
+  - Website facts go under `from_website`; LinkedIn fills empty contact fields and adds `from_linkedin` (the CSV is
+    never overwritten). Enriched profiles are cached per file so re-runs don't pay twice. Exports add
+    "Enriched: …" columns with the evidence.
+  - Measured live: 60 thin companies (name + website) → 54 read, 54 structured, re-tagged in 42s for ~$0.013 total.
+    Full 240-company file on Auto scraped only 33 rows. Contacts through a Bright Data double + real Luna + Jev: 19/20.
 - **Not verified live** at time of writing: the real OpenRouter response (built to TypeSafe's documented
   shape, `usage.cost` read if present) and the Sonnet draft. Duplicates within the file are removed in code;
   DNC / already-in-`rr_leads` filtering is not built yet.

@@ -3,6 +3,13 @@
 
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect */
+/*
+ * eslint-disable react-hooks/refs, react-hooks/purity — deliberate, see "Why results live in a ref" below:
+ * the run's results, stages and log are mutable stores written ~100 times a second and read during render,
+ * with one requestAnimationFrame tick per frame to repaint. Moving them into state re-renders per answer, which
+ * is the lag this design exists to avoid. Date.now() in render is the elapsed clock, which ticks on purpose.
+ */
+/* eslint-disable react-hooks/refs, react-hooks/purity */
 
 /**
  * One client's Jev list check: their screening questions, a CSV drop, and a live run.
@@ -36,11 +43,15 @@ import {
   parseCsv,
   planColumns,
   planSummary,
+  questionFieldRefs,
   toCsv,
   toTagWire,
   toWireQuestions,
 } from "../../../shared/jev.mjs";
 import { DescribeBox, TagEditor, TagList, type TagSet } from "./tags";
+import { freshStats, runPipeline, type EnrichMode, type Enriched, type Outcome, type Stage } from "./pipeline";
+import { ActivityLog, EnrichControl, StageCards, type Detection, type LogLine } from "./pipeline-view";
+import { missingData, scrapeTarget } from "../../../shared/enrich.mjs";
 import "../../jev.css";
 
 type Question = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[] };
@@ -64,18 +75,22 @@ const roleLabel = (c: PlanColumn) => (c.role === "experience" && c.field ? `Job 
 type Mode = "contacts" | "companies";
 type Status = "good" | "borderline" | "bad" | "tagged" | "review" | "error" | "duplicate";
 type Ranked = { tag: string; label: string; p: number };
-type Result = { status: Status; reason: string; scores?: Record<string, number | null>; tag?: string; label?: string; confidence?: number; runnerUp?: Ranked | null; top?: Ranked[]; tokens?: number; cost?: number | null };
+type Result = { status: Status; reason: string; scores?: Record<string, number | null>; tag?: string; label?: string; confidence?: number; runnerUp?: Ranked | null; top?: Ranked[]; tokens?: number; cost?: number | null; note?: string; enriched?: boolean; firstStatus?: string };
 /** "all", a status, or "tag:<key>" for one company tag. */
 type Filter = string;
 type Notice = { kind: "ok" | "error" | "info"; text: string } | null;
 
-/**
- * Rows per request, and requests in flight at once: 40 × lanes × 12 server-side. Company runs get more lanes —
- * they are the 100k-row jobs, and a live run of 240 companies at 48 concurrent held ~80 rows a second with no
- * rate limiting, so there is headroom.
- */
-const CHUNK_SIZE = 40;
-const LANES: Record<Mode, number> = { contacts: 4, companies: 6 };
+const ENRICH_COLUMNS: Record<Mode, [string, string][]> = {
+  companies: [["source", "Jev enriched from"], ["what_they_do", "Enriched: what they do"], ["industry", "Enriched: industry"], ["customers", "Enriched: customers"], ["organization_type", "Enriched: organization type"], ["evidence", "Enriched: evidence"]],
+  contacts: [["source", "Jev enriched from"], ["headline", "Enriched: headline"], ["current_title", "Enriched: current title"], ["current_company", "Enriched: current company"], ["current_roles", "Enriched: current roles"], ["evidence", "Enriched: evidence"]],
+};
+const STAGE_LABEL: Record<Stage, string> = { first: "First pass…", scrape: "Scraping…", structure: "Structuring…", final: "Final pass…" };
+/** Jev's verdict line, as the classify route streams it, turned into a table row's result. */
+const toResult = (mode: Mode, r: Record<string, unknown> | null | undefined): Result => {
+  if (!r || !r.ok) return { status: "error", reason: String(r?.error || "Jev did not answer.") };
+  if (mode === "companies") return { status: r.status as Status, reason: String(r.reason ?? ""), tag: r.tag as string, label: r.label as string, confidence: r.confidence as number, runnerUp: r.runnerUp as Ranked | null, top: r.top as Ranked[], tokens: r.tokens as number, cost: r.cost as number | null };
+  return { status: r.verdict as Status, reason: String(r.reason ?? ""), scores: r.scores as Record<string, number | null>, tokens: r.tokens as number, cost: r.cost as number | null };
+};
 /** How many rows the live table draws. The counts and downloads always cover every row. */
 const VISIBLE_ROWS = 300;
 /** OpenRouter's listed Jev price, used only when a response does not report its own cost. */
@@ -268,7 +283,15 @@ export default function JevClientPage() {
 
   const results = useRef(new Map<number, Result>());
   const order = useRef<number[]>([]);
-  const inFlight = useRef(new Set<number>());
+  // Where each unsettled row is in the pipeline; a row leaves this map when its final verdict lands.
+  const stages = useRef(new Map<number, Stage>());
+  const stats = useRef(freshStats());
+  const logLines = useRef<LogLine[]>([]);
+  // Scraped-and-structured profiles survive re-runs of the same file, so changing a question never pays to
+  // scrape a row twice. Cleared whenever the rows themselves change.
+  const enrichedRef = useRef(new Map<number, Enriched>());
+  const [enrichMode, setEnrichMode] = useState<EnrichMode>("auto");
+  const [enrichCfg, setEnrichCfg] = useState<{ brightData: boolean; jina: boolean; structureModel: string; structureRpm: number; llm: boolean } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const rafRef = useRef(0);
   const [, setVersion] = useState(0);
@@ -287,7 +310,7 @@ export default function JevClientPage() {
       const response = await fetch(`/api/jev/questions?client=${encodeURIComponent(slug)}`, { cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) { setLoadError(payload.error || `Could not load this client (${response.status}).`); return; }
-      setClient(payload.client); setSet(payload.set); setTags(payload.tags ?? null); setJev(payload.jev);
+      setClient(payload.client); setSet(payload.set); setTags(payload.tags ?? null); setJev(payload.jev); setEnrichCfg(payload.enrich ?? null);
     } catch { setLoadError("Could not reach the server."); }
   }, [slug]);
   useEffect(() => { void load(); }, [load]);
@@ -321,7 +344,9 @@ export default function JevClientPage() {
   const resetResults = (loaded: LoadedFile | null) => {
     results.current = new Map();
     order.current = [];
-    inFlight.current = new Set();
+    stages.current = new Map();
+    stats.current = freshStats();
+    logLines.current = [];
     if (loaded) for (const i of loaded.duplicates) results.current.set(i, { status: "duplicate", reason: loaded.mode === "companies" ? "Same company appears earlier in the file" : "Same person appears earlier in the file" });
     setTiming(null); setRunError(""); setExpanded(null); setFilter("all");
     flush();
@@ -341,6 +366,7 @@ export default function JevClientPage() {
       people.push((as === "companies" ? identifyCompany(cells, plan) : identifyWith(cells, plan)) as Person);
       profiles.push(as === "companies" ? buildCompanyProfile(cells, plan) : buildProfile(cells, plan));
     }
+    enrichedRef.current = new Map();
     return { name, mode: as, headers, rows, plan, overrides, people, profiles, duplicates: duplicateIndexes(people) as Set<number> };
   };
 
@@ -456,88 +482,70 @@ export default function JevClientPage() {
 
   /* ── Run ── */
 
-  const runChunk = async (chunk: number[], signal: AbortSignal): Promise<"ok" | "fatal"> => {
-    if (!file) return "fatal";
-    for (const i of chunk) inFlight.current.add(i);
+  const pushLog = (kind: LogLine["kind"], text: string) => {
+    logLines.current.push({ t: Date.now(), kind, text });
+    if (logLines.current.length > 2_000) logLines.current.splice(0, logLines.current.length - 2_000);
     flush();
-    const answered = new Set<number>();
-    const settle = (i: number, r: Result) => {
-      answered.add(i); inFlight.current.delete(i);
-      results.current.set(i, r); order.current.push(i); flush();
-    };
-    try {
-      const response = await fetch("/api/jev/classify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ client: slug, mode: file.mode, rows: chunk.map((i) => ({ i, state: file.profiles[i] })) }),
-        signal,
-      });
-      if (!response.ok || !response.body) {
-        const payload = await response.json().catch(() => ({}));
-        const message = payload.error || `Request failed (${response.status}).`;
-        for (const i of chunk) settle(i, { status: "error", reason: message });
-        // A missing question set or a bad request will fail every chunk the same way; stop instead.
-        if (response.status === 400 || response.status === 409) { setRunError(message); return "fatal"; }
-        return "ok";
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let nl;
-        while ((nl = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, nl).trim(); buffer = buffer.slice(nl + 1);
-          if (!line) continue;
-          try {
-            const r = JSON.parse(line);
-            if (typeof r.i !== "number") continue;
-            settle(r.i, !r.ok
-              ? { status: "error", reason: r.error || "Jev did not answer." }
-              : file.mode === "companies"
-                ? { status: r.status, reason: r.reason ?? "", tag: r.tag, label: r.label, confidence: r.confidence, runnerUp: r.runnerUp, top: r.top, tokens: r.tokens, cost: r.cost }
-                : { status: r.verdict, reason: r.reason ?? "", scores: r.scores, tokens: r.tokens, cost: r.cost });
-            if (!r.ok && /OPENROUTER_API_KEY|401|403/.test(String(r.error))) { setRunError(String(r.error)); return "fatal"; }
-          } catch { /* a malformed line is one lost row, reported below */ }
-        }
-      }
-    } catch (error) {
-      if (signal.aborted) { for (const i of chunk) inFlight.current.delete(i); flush(); return "fatal"; }
-      const message = error instanceof Error ? error.message : "Connection dropped.";
-      for (const i of chunk) if (!answered.has(i)) settle(i, { status: "error", reason: message });
-      return "ok";
-    }
-    for (const i of chunk) if (!answered.has(i)) settle(i, { status: "error", reason: "No answer came back for this row." });
-    return "ok";
   };
+
+  /** The fields this client's questions name, so a row missing one of them counts as thin. */
+  const requiredFields = useMemo(() => (mode === "contacts" && set?.questions.length ? [...new Set(set.questions.flatMap((q) => questionFieldRefs(q) as string[]))] : []), [mode, set]);
 
   const run = async (only?: number[]) => {
     if (!file || running || !(file.mode === "companies" ? tags?.tags.length : set?.questions.length)) return;
     const targets = only ?? file.rows.map((_, i) => i).filter((i) => !file.duplicates.has(i));
     if (!only) resetResults(file);
     else { const retry = new Set(only); for (const i of only) results.current.delete(i); order.current = order.current.filter((i) => !retry.has(i)); }
-    const chunks: number[][] = [];
-    for (let k = 0; k < targets.length; k += CHUNK_SIZE) chunks.push(targets.slice(k, k + CHUNK_SIZE));
     const controller = new AbortController();
     abortRef.current = controller;
     setRunning(true); setRunError(""); setTiming({ start: Date.now(), end: null }); setNow(Date.now());
     setCollapsed(true);
     setTimeout(() => progressRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
-    let cursor = 0;
-    let fatal = false;
-    const lane = async () => {
-      while (!fatal && !controller.signal.aborted && cursor < chunks.length) {
-        const chunk = chunks[cursor++];
-        if ((await runChunk(chunk, controller.signal)) === "fatal") { fatal = true; controller.abort(); }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(LANES[file.mode], chunks.length) }, lane));
-    inFlight.current = new Set();
+    const fm = file.mode;
+    const { fatal } = await runPipeline({
+      client: slug,
+      mode: fm,
+      enrichMode,
+      brightData: Boolean(enrichCfg?.brightData),
+      structureRpm: enrichCfg?.structureRpm ?? 18,
+      signal: controller.signal,
+      stats: stats.current,
+      profileOf: (i) => file.profiles[i],
+      nameOf: (i) => file.people[i]?.name ?? `row ${i + 1}`,
+      targetOf: (i) => scrapeTarget(fm, file.people[i]) as string,
+      missingOf: (_i, profile) => missingData(fm, profile, requiredFields) as string[],
+      cached: enrichedRef.current,
+      onStage: (i, stage) => { if (stage) stages.current.set(i, stage); else stages.current.delete(i); },
+      onEnriched: () => {},
+      onSettle: (o: Outcome) => {
+        const first = o.first ? toResult(fm, o.first) : null;
+        results.current.set(o.i, { ...toResult(fm, o.result), note: o.note, enriched: o.enriched, firstStatus: first && o.enriched ? (first.label ?? STATUS_LABEL[first.status]) : undefined });
+        order.current.push(o.i);
+        flush();
+      },
+      onLog: pushLog,
+      onChange: flush,
+    }, targets);
+    if (fatal) setRunError(fatal);
+    if (controller.signal.aborted) pushLog("warn", "Stopped by hand");
+    else pushLog("ok", `Run finished — ${results.current.size.toLocaleString()} rows settled`);
+    stages.current = new Map();
     abortRef.current = null;
     setRunning(false); setTiming((t) => (t ? { ...t, end: Date.now() } : t)); flush();
   };
+
+  /** What detection finds in this file before anything is spent: thin rows, and which of them can be scraped. */
+  const detection = useMemo<Detection | null>(() => {
+    if (!file) return null;
+    let thin = 0; let scrapeable = 0; let noTarget = 0;
+    file.profiles.forEach((p, i) => {
+      if (file.duplicates.has(i)) return;
+      const target = scrapeTarget(file.mode, file.people[i]);
+      if (!target) noTarget += 1;
+      if ((missingData(file.mode, p, requiredFields) as string[]).length) { thin += 1; if (target) scrapeable += 1; }
+    });
+    return { rows: file.rows.length - file.duplicates.size, thin, scrapeable, noTarget, blocked: file.mode === "contacts" && !enrichCfg?.brightData };
+  }, [file, requiredFields, enrichCfg]);
 
   const stop = () => abortRef.current?.abort();
 
@@ -585,7 +593,7 @@ export default function JevClientPage() {
       // and stopped at the cap, because this runs every frame and a 100k-row run must not copy the lot.
       const out: number[] = [];
       for (let k = order.current.length - 1; k >= 0 && out.length < VISIBLE_ROWS; k -= 1) out.push(order.current[k]);
-      for (const i of inFlight.current) { if (out.length >= VISIBLE_ROWS) break; out.push(i); }
+      for (const i of stages.current.keys()) { if (out.length >= VISIBLE_ROWS) break; if (!all.has(i)) out.push(i); }
       for (const i of file.duplicates) { if (out.length >= VISIBLE_ROWS) break; out.push(i); }
       return out;
     }
@@ -596,27 +604,40 @@ export default function JevClientPage() {
   })();
   const filteredCount = filter === "all" ? total : filter.startsWith("tag:") ? tagCounts[filter.slice(4)] ?? 0 : counts[filter as Status] ?? 0;
 
+  /** What enrichment found, as columns beside the verdict — the scraped facts are worth keeping in the sheet. */
+  const enrichCells = (m: Mode, i: number): string[] => {
+    const e = enrichedRef.current.get(i);
+    return ENRICH_COLUMNS[m].map(([key]) => {
+      if (!e) return "";
+      if (key === "source") return e.source.url;
+      if (key === "evidence") return e.evidence.map((q) => q.quote).join(" | ");
+      const v = e.structured?.[key];
+      if (Array.isArray(v)) return v.map((x) => [x?.title, x?.company].filter(Boolean).join(" @ ")).join("; ");
+      return typeof v === "string" ? v : "";
+    });
+  };
+
   const exportCompanies = (keep: (r: Result | undefined) => boolean, label: string) => {
     if (!file) return;
-    const headers = ["Jev tag", "Jev confidence", "Jev runner-up", "Jev needs review", ...file.headers];
+    const headers = ["Jev tag", "Jev confidence", "Jev runner-up", "Jev needs review", "Jev note", ...ENRICH_COLUMNS.companies.map(([, h]) => h), ...file.headers];
     const rows = file.rows.flatMap((cells, i) => {
       const r = all.get(i);
       if (!keep(r)) return [];
       const tagged = r && (r.status === "tagged" || r.status === "review");
-      const lead = [tagged ? r.label ?? "" : r ? STATUS_LABEL[r.status] : "Not checked", tagged ? pct(r.confidence) : "", r?.runnerUp ? `${r.runnerUp.label} (${pct(r.runnerUp.p)})` : "", r?.status === "review" ? "Yes" : ""];
-      return [[...lead, ...cells]];
+      const lead = [tagged ? r.label ?? "" : r ? STATUS_LABEL[r.status] : "Not checked", tagged ? pct(r.confidence) : "", r?.runnerUp ? `${r.runnerUp.label} (${pct(r.runnerUp.p)})` : "", r?.status === "review" ? "Yes" : "", r?.note ?? ""];
+      return [[...lead, ...enrichCells("companies", i), ...cells]];
     });
     download(`${slug}-jev-${label}-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(headers, rows));
   };
 
   const exportRows = (keep: (r: Result | undefined) => boolean, label: string) => {
     if (!file || !set) return;
-    const headers = ["Jev verdict", "Jev reason", ...set.questions.map((q) => `Jev: ${q.label}`), ...file.headers];
+    const headers = ["Jev verdict", "Jev reason", "Jev note", ...set.questions.map((q) => `Jev: ${q.label}`), ...ENRICH_COLUMNS.contacts.map(([, h]) => h), ...file.headers];
     const rows = file.rows.flatMap((cells, i) => {
       const r = all.get(i);
       if (!keep(r)) return [];
-      const verdict = [r ? STATUS_LABEL[r.status] : "Not checked", r?.reason ?? "", ...set.questions.map((q) => (r?.scores ? pct(r.scores[q.key]) : ""))];
-      return [[...verdict, ...cells]];
+      const verdict = [r ? STATUS_LABEL[r.status] : "Not checked", r?.reason ?? "", r?.note ?? "", ...set.questions.map((q) => (r?.scores ? pct(r.scores[q.key]) : ""))];
+      return [[...verdict, ...enrichCells("contacts", i), ...cells]];
     });
     const stamp = new Date().toISOString().slice(0, 10);
     download(`${slug}-jev-${label}-${stamp}.csv`, toCsv(headers, rows));
@@ -778,6 +799,9 @@ export default function JevClientPage() {
                     </div>
                   )}
                   {fileError && <div className="jev-banner is-error">{fileError}</div>}
+                  {file && (
+                    <EnrichControl mode={mode} value={enrichMode} onChange={setEnrichMode} detection={detection} disabled={running} llmModel={enrichCfg?.structureModel ?? "openai/gpt-6-luna"} brightData={Boolean(enrichCfg?.brightData)} />
+                  )}
                   <div className="jev-run-row">
                     {!running ? (
                       <button className="primary-button jev-run" onClick={() => void run()} disabled={!ready}>{done > counts.duplicate ? "Run again" : "Run"}</button>
@@ -799,10 +823,11 @@ export default function JevClientPage() {
                 <section className="jev-progress" ref={progressRef}>
                   <div className="jev-progress-top">
                     <strong>{running ? (file.mode === "companies" ? "Tagging…" : "Checking…") : finished ? "Done" : "Stopped"}</strong>
+                    {(stats.current.structure.cost > 0 || stats.current.scrape.cost > 0) && <span>enrichment {money(stats.current.structure.cost + stats.current.scrape.cost)}</span>}
                     <span className="jev-progress-count">{done.toLocaleString()} / {total.toLocaleString()}</span>
                     <span>{fmtDuration(elapsed)}{running && remaining > 0 ? ` · ~${fmtDuration(remaining)} left` : ""}</span>
                     {rate > 0 && <span>{rate.toFixed(1)} / sec</span>}
-                    <span>{tokens.toLocaleString()} tokens · {money(spent)}</span>
+                    <span>Jev {tokens.toLocaleString()} tokens · {money(spent)}</span>
                   </div>
                   <div className="jev-bar" aria-label={`${Math.round(progress * 100)}% checked`}>
                     <i className="good" style={{ width: `${((counts.good + counts.tagged) / total) * 100}%` }} />
@@ -811,6 +836,7 @@ export default function JevClientPage() {
                     <i className="duplicate" style={{ width: `${(counts.duplicate / total) * 100}%` }} />
                     <i className="error" style={{ width: `${(counts.error / total) * 100}%` }} />
                   </div>
+                  <StageCards stats={stats.current} mode={file.mode} running={running} rows={file.rows.length} llmModel={enrichCfg?.structureModel ?? "openai/gpt-6-luna"} enrichMode={enrichMode} />
                   {runError && <div className="jev-banner is-error">{runError}</div>}
                   {finished && file.mode === "contacts" && (
                     <div className="jev-downloads">
@@ -827,6 +853,7 @@ export default function JevClientPage() {
                       <button className="secondary-button" onClick={() => exportCompanies((r) => r?.status === "review", "needs-review")} disabled={!counts.review}>Needs review ({counts.review.toLocaleString()})</button>
                     </div>
                   )}
+                  <ActivityLog lines={logLines.current} />
                 </section>
               )}
 
@@ -855,7 +882,8 @@ export default function JevClientPage() {
                     {visible.map((i) => {
                       const p = file.people[i];
                       const r = all.get(i);
-                      const status = r?.status ?? (inFlight.current.has(i) ? "checking" : "pending");
+                      const inStage = !r ? stages.current.get(i) : undefined;
+                      const status = r?.status ?? (inStage ? "checking" : "pending");
                       const open = expanded === i;
                       const co = file.mode === "companies";
                       const tagged = co && (status === "tagged" || status === "review");
@@ -870,11 +898,13 @@ export default function JevClientPage() {
                             <span className="jev-company">{p.company}</span>
                             <span>
                               <em className={`jev-verdict ${status === "tagged" ? "good" : status === "review" ? "borderline" : status}`}>
-                                {status === "checking" ? (co ? "Tagging…" : "Checking…") : status === "pending" ? "Waiting" : tagged ? r?.label : STATUS_LABEL[status as Status]}
+                                {status === "checking" ? (inStage ? STAGE_LABEL[inStage] : "Checking…") : status === "pending" ? "Waiting" : tagged ? r?.label : STATUS_LABEL[status as Status]}
                               </em>
                             </span>
                             <span className="jev-why">
+                              {r?.enriched && <span className="jev-enriched-tag" title={r.firstStatus ? `Before enrichment: ${r.firstStatus}` : "Judged on scraped data"}>enriched</span>}
                               {tagged ? <>{pct(r?.confidence)}{r?.runnerUp ? <span className="jev-runner"> · or {r.runnerUp.label} {pct(r.runnerUp.p)}</span> : null}{status === "review" ? <span className="jev-review"> · needs review</span> : null}</> : r?.reason}
+                              {r?.note && <span className="jev-note">{r.note}</span>}
                             </span>
                           </div>
                           {open && (
@@ -905,6 +935,20 @@ export default function JevClientPage() {
                                   ))}
                                 </div>
                               )}
+                              {enrichedRef.current.get(i) && (() => {
+                                const e = enrichedRef.current.get(i)!;
+                                return (
+                                  <div className="jev-enrich-detail">
+                                    <div className="jev-enrich-src">
+                                      Enriched from <a href={e.source.url} target="_blank" rel="noreferrer">{e.source.url.replace(/^https:\/\/(www\.)?/, "")}</a>
+                                      {e.source.chars ? ` · ${e.source.chars.toLocaleString()} chars` : ""}{e.source.pages && e.source.pages.length > 1 ? " · home + about" : ""}
+                                      {r?.firstStatus && <> · before: <b>{r.firstStatus}</b></>}
+                                      {e.filled.length > 0 && <> · added {e.filled.join(", ")}</>}
+                                    </div>
+                                    {e.evidence.length > 0 && <ul className="jev-evidence">{e.evidence.map((q, k) => <li key={k}>{q.field && <b>{q.field}</b>}“{q.quote}”</li>)}</ul>}
+                                  </div>
+                                );
+                              })()}
                               {p.linkedin && <a href={/^https?:/i.test(p.linkedin) ? p.linkedin : `https://${p.linkedin}`} target="_blank" rel="noreferrer" className="jev-li">{co ? "Open ↗" : "LinkedIn ↗"}</a>}
                               <details className="jev-peek"><summary>What Jev saw</summary><pre>{JSON.stringify(file.profiles[i], null, 2)}</pre></details>
                             </div>

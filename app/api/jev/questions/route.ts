@@ -2,6 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
+import { enrichConfig } from "../../../lib/enrich";
 import { jevClient, jevConfig, loadQuestionSet, loadTagSet, saveQuestionSet, saveTagSet } from "../../../lib/jev";
 
 const slugOf = (value: unknown) => (typeof value === "string" ? value.trim().toLowerCase() : "");
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
     if (!client) return NextResponse.json({ ok: false, error: "Unknown client." }, { status: 404 });
     const { apiKey, model } = jevConfig();
     const [set, tags] = await Promise.all([loadQuestionSet(slug), loadTagSet(slug)]);
-    return NextResponse.json({ ok: true, client, set, tags, jev: { configured: Boolean(apiKey), model } });
+    return NextResponse.json({ ok: true, client, set, tags, jev: { configured: Boolean(apiKey), model }, enrich: enrichConfig() });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not read the question set." }, { status: 502 });
   }
