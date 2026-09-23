@@ -462,6 +462,10 @@ export default function JevClientPage() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Build failed (${response.status}).` }); return; }
       if (mode === "companies") { setTags(payload.set); setEditingTags(null); } else { setSet(payload.set); setEditing(null); }
+      if (mode === "companies" && Array.isArray(payload.pendingDescriptions) && payload.pendingDescriptions.length) {
+        await describePending(payload.set, payload.pendingDescriptions);
+        return;
+      }
       setCollapsed(false);
       const n = mode === "companies" ? payload.set.tags.length : payload.set.questions.length;
       const notes = payload.problems?.length ? ` ${payload.problems.join(" · ")}.` : "";
@@ -504,6 +508,42 @@ export default function JevClientPage() {
       setNotice({ kind: "ok", text: `Added ${chosen.length} tag${chosen.length === 1 ? "" : "s"}. Re-tag the ${rows.length} companies in Other and Needs review to use them.` });
     } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
     finally { setBusy(""); }
+  };
+
+  /**
+   * Fill in descriptions for a typed tag list, 25 tags a request, four at a time, then save the set once. The
+   * names are already saved, so a failure here leaves a usable (if less precise) tag set rather than nothing.
+   */
+  const describePending = async (saved: TagSet, pending: string[]) => {
+    const SLICE = 25;
+    const all = saved.tags.map((t) => t.label);
+    const slices: string[][] = [];
+    for (let k = 0; k < pending.length; k += SLICE) slices.push(pending.slice(k, k + SLICE));
+    const found: Record<string, string> = {};
+    let done = 0; let failed = 0; let next = 0;
+    setNotice({ kind: "info", text: `Saved ${saved.tags.length} tags. Writing descriptions… 0 of ${pending.length}` });
+    await Promise.all(Array.from({ length: Math.min(4, slices.length) }, async () => {
+      while (next < slices.length) {
+        const slice = slices[next++];
+        try {
+          const response = await fetch("/api/jev/tags/describe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, labels: slice, all }) });
+          const payload = await response.json().catch(() => ({}));
+          if (response.ok && payload.ok) Object.assign(found, payload.descriptions ?? {}); else failed += slice.length;
+        } catch { failed += slice.length; }
+        done += slice.length;
+        setTags((t) => (t ? { ...t, tags: t.tags.map((tag) => (found[tag.label] && !tag.description ? { ...tag, description: found[tag.label] } : tag)) } : t));
+        setNotice({ kind: "info", text: `Saved ${saved.tags.length} tags. Writing descriptions… ${done} of ${pending.length}` });
+      }
+    }));
+    const withDescriptions = { ...saved, tags: saved.tags.map((t) => (found[t.label] && !t.description ? { ...t, description: found[t.label] } : t)) };
+    try {
+      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, kind: "tags", set: withDescriptions }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Saving descriptions failed (${response.status}).` }); return; }
+      setTags(payload.set);
+      const missing = payload.set.tags.filter((t: { description: string; key: string }) => !t.description && t.key !== "other").length;
+      setNotice({ kind: missing ? "info" : "ok", text: `Saved ${payload.set.tags.length} tags with descriptions${missing ? ` — ${missing} still have none${failed ? " (some batches failed; build again to retry just those)" : ""}` : ""}. Check them below before running.` });
+    } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
   };
 
   const saveTags = async () => {

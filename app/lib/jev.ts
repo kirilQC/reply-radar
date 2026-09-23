@@ -42,6 +42,7 @@ const MAX_ATTEMPTS = 5;
 
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 export const questionSetKey = (slug: string) => `jev_questions_${slug}`;
+const MAX_BRIEF_CHARS = 12_000;
 /** Company tagging is stored beside the contact questions, one key per client, so each client has one of each. */
 export const tagSetKey = (slug: string) => `jev_tags_${slug}`;
 
@@ -127,7 +128,7 @@ export async function loadTagSet(slug: string): Promise<JevTagSet | null> {
 export async function saveTagSet(slug: string, input: unknown, source = "manual"): Promise<{ set: JevTagSet; problems: string[] }> {
   const { instructions, tags, minConfidence, problems } = normalizeTagSet(input);
   const meta = (input && typeof input === "object" ? input : {}) as Row;
-  const set: JevTagSet = { instructions, tags: tags as JevTag[], minConfidence, source, updatedAt: new Date().toISOString(), ...(text(meta.brief) ? { brief: text(meta.brief).slice(0, 4_000) } : {}) };
+  const set: JevTagSet = { instructions, tags: tags as JevTag[], minConfidence, source, updatedAt: new Date().toISOString(), ...(text(meta.brief) ? { brief: text(meta.brief).slice(0, MAX_BRIEF_CHARS) } : {}) };
   if (tags.length) await writeConfig(tagSetKey(slug), set);
   return { set, problems };
 }
@@ -143,7 +144,7 @@ export async function saveQuestionSet(slug: string, input: unknown, source = "ma
     updatedAt: new Date().toISOString(),
     ...(text(meta.brainFolder) ? { brainFolder: text(meta.brainFolder) } : {}),
     ...(Array.isArray(meta.brainDocuments) ? { brainDocuments: (meta.brainDocuments as unknown[]).map(String) } : {}),
-    ...(text(meta.brief) ? { brief: text(meta.brief).slice(0, 4_000) } : {}),
+    ...(text(meta.brief) ? { brief: text(meta.brief).slice(0, MAX_BRIEF_CHARS) } : {}),
   };
   await writeConfig(questionSetKey(slug), set);
   return { set, problems };
@@ -238,13 +239,28 @@ async function askSonnet(system: string, content: string): Promise<{ ok: boolean
  * A company tag list typed as "A | B | C" is taken literally — every tag the person named is kept, in order —
  * and the model only writes the descriptions that let Jev tell neighbours apart.
  */
-export async function buildFromDescription(slug: string, mode: "contacts" | "companies", description: string, sampleProfile: unknown, icpInput?: unknown): Promise<{ ok: boolean; error?: string; set?: JevQuestionSet | JevTagSet; problems?: string[] }> {
-  const brief = text(description).slice(0, 4_000);
+export async function buildFromDescription(slug: string, mode: "contacts" | "companies", description: string, sampleProfile: unknown, icpInput?: unknown): Promise<{ ok: boolean; error?: string; set?: JevQuestionSet | JevTagSet; problems?: string[]; pendingDescriptions?: string[] }> {
+  // Long enough for a typed list of ~250 tags (Bluevia's 169 run to ~4,300 characters); a 4,000 cap silently
+  // dropped the last tags of that list.
+  const brief = text(description).slice(0, MAX_BRIEF_CHARS);
   const icp = mode === "contacts" ? (normalizeIcp(icpInput) as JevIcp | null) : null;
   if (!brief && !icp) return { ok: false, error: "Describe how the list should be judged first." };
   const [row] = await workspaceRows(`slug=eq.${encodeURIComponent(slug)}&limit=1`);
   if (!row) return { ok: false, error: "Unknown client." };
   const name = text(row.name);
+  // A typed tag list needs no model to be saved: the names are the person's. It is saved at once — keeping any
+  // description a tag already had — and the browser fills in the rest in batches via `describeTags`. Writing all
+  // the descriptions in this one request is what timed out on a ~200-tag Bluevia list.
+  if (mode === "companies") {
+    const typed = parseTagList(brief);
+    if (typed.length >= 3) {
+      const existing = await loadTagSet(slug).catch(() => null);
+      const known = new Map((existing?.tags ?? []).map((t) => [t.label.toLowerCase(), t.description]));
+      const tags = typed.map((label) => ({ label, description: known.get(label.toLowerCase()) ?? "" }));
+      const { set, problems } = await saveTagSet(slug, { instructions: existing?.instructions || "Which category best describes what this organization primarily is? If it fits more than one, choose its primary business.", minConfidence: existing?.minConfidence, tags, brief }, "description");
+      return { ok: true, set, problems, pendingDescriptions: set.tags.filter((t) => !t.description && t.key !== "other").map((t) => t.label) };
+    }
+  }
   const [brain, clientBrief] = await Promise.all([
     brainContext({ slug, name, brain_folder: text(row.brain_folder) || null }),
     clientContext(slug),
@@ -412,5 +428,48 @@ export async function suggestTags(slug: string, items: unknown[]): Promise<{ ok:
     return { ok: true, suggestions, outOfScope, cost: Number.isFinite(cost) ? cost : null };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "The suggestion call failed." };
+  }
+}
+
+/* ── Describing a typed tag list, a batch at a time ── */
+
+const DESCRIBE_PROMPT = `You write the descriptions a fast classifier (TypeSafe's Jev) uses to tell company categories apart. For each tag you are given, write ONE plain-language sentence (at most 30 words) saying what kind of organization belongs in it and, where it could be confused with a neighbouring tag from the full list, how it differs. Literal wording; no numbers Jev would have to compute. Keep each tag's label exactly as given.
+
+Reply with JSON only: {"tags":[{"label":"…","description":"…"}]}`;
+
+/**
+ * Descriptions for a slice of a (possibly very long) tag list. The whole list goes along as names only, so each
+ * description can say how its tag differs from its neighbours; only the slice is written. Returns label → text
+ * and saves nothing — the browser collects every slice and saves the set once, so parallel slices cannot
+ * overwrite each other.
+ */
+export async function describeTags(slug: string, labels: string[], allLabels: string[]): Promise<{ ok: boolean; error?: string; descriptions?: Record<string, string>; cost?: number | null }> {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) return { ok: false, error: "OPENROUTER_API_KEY is not set." };
+  const slice = [...new Set(labels.map((l) => text(l)).filter(Boolean))].slice(0, 40);
+  if (!slice.length) return { ok: true, descriptions: {} };
+  const brief = await clientContext(slug);
+  const content = [
+    brief,
+    `THE FULL TAG LIST (for context — do not describe these unless listed below):\n${allLabels.slice(0, 260).join(" | ")}`,
+    `WRITE DESCRIPTIONS FOR THESE ${slice.length} TAGS:\n${slice.map((l) => `- ${l}`).join("\n")}`,
+  ].filter(Boolean).join("\n\n");
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: SUGGEST_MODEL(), temperature: 0, max_tokens: 3_000, messages: [{ role: "system", content: DESCRIBE_PROMPT }, { role: "user", content }] }),
+      signal: AbortSignal.timeout(50_000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, error: `${SUGGEST_MODEL()} ${response.status}: ${payload?.error?.message ?? "no answer"}` };
+    const parsed = parseGeneratedTagSet(payload?.choices?.[0]?.message?.content);
+    const byLabel = new Map((parsed.tags as JevTag[]).map((t) => [t.label.toLowerCase(), t.description]));
+    const descriptions: Record<string, string> = {};
+    for (const l of slice) { const d = byLabel.get(l.toLowerCase()); if (d) descriptions[l] = d; }
+    const cost = Number(payload?.usage?.cost);
+    return { ok: true, descriptions, cost: Number.isFinite(cost) ? cost : null };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "The description call failed." };
   }
 }
