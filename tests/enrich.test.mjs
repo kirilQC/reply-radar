@@ -5,18 +5,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   afterFirstPass,
+  aiArkEvidence,
+  aiArkFacts,
   evidenceOf,
+  mergeAiArk,
   htmlToText,
   linkedinProfileUrl,
   mergeStructured,
   missingData,
-  recordUrl,
   scrapeTarget,
   splitBatchAnswer,
   structureBatchInput,
   structureBatchSchema,
   structureSchema,
-  trimLinkedinRecord,
   unusablePage,
   websiteUrl,
 } from "../shared/enrich.mjs";
@@ -100,13 +101,44 @@ test("mergeStructured: website facts go under from_website; LinkedIn fills only 
   assert.deepEqual(person.filled, ["about", "current_roles", "from_linkedin"]);
 });
 
-test("evidence and LinkedIn records are cleaned for display and for the model", () => {
+test("evidence is cleaned for display", () => {
   assert.deepEqual(evidenceOf({ evidence: [{ field: "name", quote: "  The Nashville Chess Center " }, "loose quote", { field: "x", quote: "" }] }), [{ field: "name", quote: "The Nashville Chess Center" }, { field: "", quote: "loose quote" }]);
-  const rec = trimLinkedinRecord({ name: "Ada", position: "CISO at Acme", about: "a".repeat(3000), recommendations: ["x"], avatar: "img", current_company: { name: "Acme", link: "l", company_id: "9" }, experience: [{ title: "CISO", company: "Acme", company_id: "9", start_date: "2020" }], input: { url: "https://www.linkedin.com/in/ada" } });
-  assert.deepEqual(Object.keys(rec).sort(), ["about", "current_company", "experience", "name", "position"]);
-  assert.equal(rec.about.length <= 2001, true);
-  assert.deepEqual(rec.experience, [{ title: "CISO", company: "Acme", start_date: "2020" }]);
-  assert.equal(recordUrl({ input: { url: "http://linkedin.com/in/ada?x" } }), "https://www.linkedin.com/in/ada/");
+});
+
+// AI Ark's documented People Search example, cut to the fields the mapping reads.
+const ARK_PERSON = {
+  profile: { headline: "CEO of Voda Cleaning and Restoration", title: "Chief Executive Officer & Co-Founder", summary: "Dan Claps is an accomplished entrepreneur." },
+  location: { default: "New York, New York, United States, North America" },
+  position_groups: [
+    { company: { name: "Voda Cleaning & Restoration" }, profile_positions: [{ company: "Voda Cleaning & Restoration", title: "Chief Executive Officer & Co-Founder", employment_type: "Full-time", date: { start: "2023-01-01", end: null } }] },
+    { company: { name: "Titus Center for Franchising" }, profile_positions: [{ company: "Titus Center for Franchising", title: "Advisory Board Member", employment_type: "Freelance", date: { start: "2025-01-01", end: null } }] },
+    { company: { name: "Murphy Business" }, profile_positions: [{ company: "Murphy Business", title: "Advisor", date: { start: "2019-01-01", end: "2022-12-31" } }] },
+  ],
+  company: { summary: { name: "Voda Cleaning & Restoration", description: "Voda is elevating the standards of cleaning.", industry: "consumer services", staff: { range: { start: 11, end: 50 } } }, keywords: ["carpet cleaning", "water damage restoration"] },
+  department: { departments: ["operations", "business_development"], seniority: "founder" },
+};
+
+test("aiArkFacts: current roles are the open-ended ones, with employment type; company facts come along", () => {
+  const f = aiArkFacts(ARK_PERSON);
+  assert.deepEqual(f.current_roles.map((r) => [r.company, r.employment_type]), [["Voda Cleaning & Restoration", "Full-time"], ["Titus Center for Franchising", "Freelance"]]);
+  assert.equal(f.current_company, "Voda Cleaning & Restoration");
+  assert.equal(f.company_employees, "11-50");
+  assert.equal(f.company_products, "carpet cleaning, water damage restoration");
+  assert.equal(f.department, "operations, business_development");
+  assert.equal(aiArkFacts(null).current_roles.length, 0);
+});
+
+test("mergeAiArk: fills what the list lacks, exposes a side-role listing, and never pins the wrong employer's description", () => {
+  const sideRole = mergeAiArk({ listed_title: "Advisory Board Member", listed_company: "Titus Center for Franchising" }, ARK_PERSON);
+  assert.equal(sideRole.profile.headline, "CEO of Voda Cleaning and Restoration");
+  assert.deepEqual(sideRole.profile.from_linkedin, { title: "Chief Executive Officer & Co-Founder", company: "Voda Cleaning & Restoration" });
+  assert.equal(sideRole.profile.seniority, "founder");
+  assert.equal(sideRole.profile.listed_company_profile, undefined); // Voda's description is not Titus Center's
+  const main = mergeAiArk({ listed_title: "CEO", listed_company: "Voda Cleaning & Restoration", headline: "From the CSV" }, ARK_PERSON);
+  assert.equal(main.profile.headline, "From the CSV"); // the CSV is never overwritten
+  assert.equal(main.profile.listed_company_profile.description, "Voda is elevating the standards of cleaning.");
+  assert.ok(main.filled.includes("listed_company_profile.industry"));
+  assert.deepEqual(aiArkEvidence(main.facts).map((e) => e.field), ["headline", "title", "company"]);
 });
 
 test("batched structuring: every row carries its id, and answers are split back without crossing rows", () => {

@@ -104,8 +104,13 @@ endpoint — it does not serve Jev.
   - Companies: the company's own website, fetched directly (browser headers — a bare UA got a firewall page), home
     + About when the home page is short; bot walls/parked/error pages are rejected by `unusablePage`, never sent to
     the model. SSRF-guarded (private IPs, localhost, redirects). `JINA_API_KEY` optional fallback for JS-only sites.
-  - Contacts: LinkedIn via **Bright Data's async API** (`BRIGHTDATA_API_KEY`; trigger → poll snapshot 202/200). No
-    LinkedIn account or cookie of ours is ever used. Without the key, thin contacts are judged on the CSV and say so.
+  - Contacts: **AI Ark People Search** (`AI_ARK_API_KEY`, the same key the inbox's lead enrichment uses), 100
+    LinkedIn URLs per call via `lookupPeople` in `app/lib/ai-ark-enrichment.ts`, matched back by normalised URL.
+    AI Ark's record is already structured, so contacts are mapped in code (`aiArkFacts`/`mergeAiArk`) and **skip the
+    LLM entirely**. Current roles = positions with no end date, with `employment_type` kept ("Freelance" is how an
+    advisory-board listing shows). The employer's description is only attached when it matches the listed company.
+    0.5 credits per person found; unknown URLs cost nothing. Replaced a Bright Data scrape (async polling + an LLM pass,
+    and LinkedIn had largely stopped exposing experience). `AI_ARK_BASE_URL` overrides the host for tests.
   - Structuring: `openai/gpt-6-luna` (`JEV_STRUCTURE_MODEL`), reasoning off, strict JSON schema, null when the source
     doesn't say, verbatim evidence. **6 rows per call** with row ids, because **OpenRouter caps new accounts at 20
     requests/min per model** (hit live). The browser paces to `JEV_STRUCTURE_RPM` (default 18) and holds a batch on
@@ -115,7 +120,7 @@ endpoint — it does not serve Jev.
     never overwritten). Enriched profiles are cached per file so re-runs don't pay twice. Exports add
     "Enriched: …" columns with the evidence.
   - Measured live: 60 thin companies (name + website) → 54 read, 54 structured, re-tagged in 42s for ~$0.013 total.
-    Full 240-company file on Auto scraped only 33 rows. Contacts through a Bright Data double + real Luna + Jev: 19/20.
+    Full 240-company file on Auto scraped only 33 rows. Contacts through an AI Ark double (documented response shape) + real Jev: 20 contacts in 2.4s, one call.
 - **Not verified live** at time of writing: the real OpenRouter response (built to TypeSafe's documented
   shape, `usage.cost` read if present) and the Sonnet draft. Duplicates within the file are removed in code;
   DNC / already-in-`rr_leads` filtering is not built yet.

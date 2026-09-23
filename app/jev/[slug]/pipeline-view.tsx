@@ -2,14 +2,14 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 "use client";
-/* eslint-disable react-hooks/purity -- the Bright Data wait shows seconds elapsed, read from the clock on each repaint */
+/* eslint-disable react-hooks/purity -- the rate-limit wait shows seconds remaining, read from the clock on each repaint */
 
 /**
  * What the pipeline is doing, drawn: one card per stage with its live counts and cost, and an activity log of
  * every read, batch and failure. The counts come straight from the pipeline's stats object, so a card can never
  * claim progress the run has not made.
  */
-import { BRIGHTDATA_PER_RECORD, type EnrichMode, type Mode, type PipelineStats, type Stage } from "./pipeline";
+import { AI_ARK_CREDITS_PER_PERSON, type EnrichMode, type Mode, type PipelineStats, type Stage } from "./pipeline";
 
 export type LogLine = { t: number; kind: "info" | "ok" | "warn" | "error"; text: string };
 export type Detection = { rows: number; thin: number; scrapeable: number; noTarget: number; blocked: boolean };
@@ -19,10 +19,10 @@ const n = (x: number) => x.toLocaleString();
 
 /** Enrichment choice plus what detection found in this file, before anything is spent. */
 export function EnrichControl({ mode, value, onChange, detection, disabled, llmModel }: {
-  mode: Mode; value: EnrichMode; onChange: (v: EnrichMode) => void; detection: Detection | null; disabled: boolean; llmModel: string; brightData?: boolean;
+  mode: Mode; value: EnrichMode; onChange: (v: EnrichMode) => void; detection: Detection | null; disabled: boolean; llmModel: string;
 }) {
-  const source = mode === "companies" ? "company websites" : "LinkedIn profiles (Bright Data)";
-  const scrapeCost = mode === "contacts" && detection ? detection.scrapeable * BRIGHTDATA_PER_RECORD : 0;
+  const source = mode === "companies" ? "company websites" : "AI Ark";
+  const credits = mode === "contacts" && detection ? detection.scrapeable * AI_ARK_CREDITS_PER_PERSON : 0;
   return (
     <div className="jev-enrich">
       <div className="jev-enrich-head">
@@ -38,22 +38,24 @@ export function EnrichControl({ mode, value, onChange, detection, disabled, llmM
           <span><b>{n(detection.thin)}</b> of {n(detection.rows)} rows have thin data</span>
           <span><b>{n(value === "all" ? detection.rows - detection.noTarget : detection.scrapeable)}</b> {value === "all" ? "would be scraped" : "can be scraped"} from {source}</span>
           {detection.noTarget > 0 && <span><b>{n(detection.noTarget)}</b> have no {mode === "companies" ? "website" : "LinkedIn URL"}</span>}
-          <span>structured by <b>{llmModel.replace(/^openai\//, "")}</b></span>
-          {mode === "contacts" && <span>scrape ≈ <b>{money(scrapeCost)}</b> at most</span>}
-          {detection.blocked && <span className="jev-warn-line">LinkedIn scraping is not set up — add BRIGHTDATA_API_KEY in Vercel. Contacts will be judged on the CSV alone.</span>}
+          {mode === "companies" ? <span>structured by <b>{llmModel.replace(/^openai\//, "")}</b></span> : <span>≤ <b>{n(credits)}</b> AI Ark credits</span>}
+          {detection.blocked && <span className="jev-warn-line">AI Ark is not set up — add AI_ARK_API_KEY in Vercel. Contacts will be judged on the CSV alone.</span>}
         </div>
       )}
     </div>
   );
 }
 
-const STAGES: [Stage | "read", string][] = [["read", "Read list"], ["first", "Jev first pass"], ["scrape", "Scrape"], ["structure", "Structure"], ["final", "Jev final pass"]];
+const STAGE_NAMES: Record<Mode, [Stage | "read", string][]> = {
+  companies: [["read", "Read list"], ["first", "Jev first pass"], ["scrape", "Scrape"], ["structure", "Structure"], ["final", "Jev final pass"]],
+  contacts: [["read", "Read list"], ["first", "Jev first pass"], ["scrape", "AI Ark lookup"], ["structure", "Structure"], ["final", "Jev final pass"]],
+};
 
 /** One card per stage. A stage is lit while it has work in flight or queued, and checked once it has none left. */
 export function StageCards({ stats, mode, running, rows, llmModel, enrichMode }: { stats: PipelineStats; mode: Mode; running: boolean; rows: number; llmModel: string; enrichMode: EnrichMode }) {
   return (
     <div className="jev-stages">
-      {STAGES.map(([key, label], idx) => {
+      {STAGE_NAMES[mode].map(([key, label], idx) => {
         if (key === "read") {
           return (
             <div key={key} className="jev-stage is-done">
@@ -64,11 +66,12 @@ export function StageCards({ stats, mode, running, rows, llmModel, enrichMode }:
           );
         }
         const s = stats[key];
-        const skipped = (key === "first" && enrichMode === "all") || (key !== "first" && enrichMode === "off");
+        // Contacts come back from AI Ark already structured, so their structure stage never runs.
+        const skipped = (key === "first" && enrichMode === "all") || (key !== "first" && enrichMode === "off") || (key === "structure" && mode === "contacts");
         const busy = s.active > 0 || s.queued > 0;
         const state = skipped ? "is-skipped" : busy ? "is-active" : s.done + s.failed > 0 ? "is-done" : running ? "is-waiting" : "";
         const sub =
-          key === "scrape" ? (mode === "companies" ? "websites read" : "LinkedIn profiles") :
+          key === "scrape" ? (mode === "companies" ? "websites read" : "contacts found") :
           key === "structure" ? llmModel.replace(/^openai\//, "") :
           key === "first" ? "on the CSV data" : "on enriched data";
         const cost = key === "structure" ? s.cost : key === "scrape" ? s.cost : 0;
@@ -76,18 +79,18 @@ export function StageCards({ stats, mode, running, rows, llmModel, enrichMode }:
           <div key={key} className={`jev-stage ${state}`}>
             <div className="jev-stage-top"><span className="jev-stage-n">{idx + 1}</span><strong>{label}</strong>{busy && <i className="jev-stage-pulse" />}</div>
             <div className="jev-stage-main">{skipped ? "—" : n(s.done)}</div>
-            <div className="jev-stage-sub">{skipped ? "skipped" : sub}</div>
+            <div className="jev-stage-sub">{skipped ? (key === "structure" && mode === "contacts" ? "not needed — AI Ark is structured" : "skipped") : sub}</div>
             {!skipped && (
               <div className="jev-stage-meta">
                 {s.active > 0 && <span className="active">{n(s.active)} in progress</span>}
                 {s.queued > 0 && <span>{n(s.queued)} queued</span>}
                 {s.failed > 0 && <span className="failed">{n(s.failed)} failed</span>}
                 {key === "scrape" && s.skipped > 0 && <span>{n(s.skipped)} not needed</span>}
-                {cost > 0 && <span>{key === "scrape" ? "≈" : ""}{money(cost)}</span>}
+                {cost > 0 && <span>{money(cost)}</span>}
+                {key === "scrape" && (s.credits ?? 0) > 0 && <span>{n(s.credits ?? 0)} credits</span>}
               </div>
             )}
             {key === "structure" && s.waitUntil && s.waitUntil > Date.now() && <div className="jev-stage-job">Rate limited by OpenRouter · resuming in {Math.ceil((s.waitUntil - Date.now()) / 1000)}s</div>}
-            {key === "scrape" && stats.job && <div className="jev-stage-job">Waiting on Bright Data · {n(stats.job.count)} profiles · {Math.round((Date.now() - stats.job.since) / 1000)}s</div>}
           </div>
         );
       })}

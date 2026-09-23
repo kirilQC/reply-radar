@@ -251,7 +251,7 @@ export function mergeStructured(mode, profile, structured) {
     if (v && !has(out[k])) { out[k] = v; filled.push(k); }
   }
   const roles = (Array.isArray(s.current_roles) ? s.current_roles : [])
-    .map((r) => ({ title: val(r?.title, 140), company: val(r?.company, 120), since: val(r?.since, 20) }))
+    .map((r) => ({ title: val(r?.title, 140), company: val(r?.company, 120), since: val(r?.since, 20), employment_type: val(r?.employment_type, 40) }))
     .filter((r) => r.title || r.company)
     .map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v)));
   if (!roles.length && (val(s.current_title, 140) || val(s.current_company, 120))) {
@@ -273,23 +273,80 @@ export function evidenceOf(structured) {
     .slice(0, 4);
 }
 
-/* ═══ LinkedIn records ═══ */
+/* ═══ AI Ark people ═══ */
 
 /**
- * A Bright Data profile record cut to what the structuring model needs. Records carry recommendations, activity,
- * images and dozens of ids; sending them costs tokens and buries the About section.
+ * A contact's facts straight from an AI Ark People Search record — no model in between.
+ *
+ * AI Ark returns the profile already structured: headline, summary, every position with its dates and employment
+ * type, the current company's own description, staff range and keywords, and department/seniority. Running that
+ * through an LLM would only add cost, latency and a chance of paraphrasing a fact wrong, so contacts are mapped in
+ * code and only company websites go to the structuring model.
+ *
+ * A position counts as current when its end date is empty. Its employment type is kept because it is the tell
+ * this pipeline exists to catch: a "Freelance" advisory-board seat listed as the contact's company.
  */
-export function trimLinkedinRecord(rec) {
-  if (!rec || typeof rec !== "object") return null;
-  const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o?.[k] != null && o[k] !== "" && !(Array.isArray(o[k]) && !o[k].length)).map((k) => [k, o[k]]));
-  const exp = (Array.isArray(rec.experience) ? rec.experience : []).slice(0, 6).map((e) => pick(e, ["title", "company", "company_name", "start_date", "end_date", "duration", "description", "location"]));
-  const cc = rec.current_company && typeof rec.current_company === "object" ? pick(rec.current_company, ["name", "title", "link", "location"]) : rec.current_company;
-  const out = pick({ ...rec, current_company: cc, experience: exp }, ["name", "position", "headline", "about", "city", "location", "country_code", "current_company", "current_company_name", "experience", "followers", "url"]);
-  for (const k of ["about", "position", "headline"]) if (typeof out[k] === "string") out[k] = clip(out[k], 2_000);
-  return out;
+export function aiArkFacts(personValue) {
+  const person = personValue && typeof personValue === "object" ? personValue : {};
+  const profile = person.profile ?? {};
+  const str = (v, max = 300) => (typeof v === "string" && v.trim() ? clip(v, max) : null);
+  const roles = [];
+  for (const group of Array.isArray(person.position_groups) ? person.position_groups : []) {
+    for (const pos of Array.isArray(group?.profile_positions) ? group.profile_positions : []) {
+      if (pos?.date?.end) continue;
+      const role = { title: str(pos?.title, 140), company: str(pos?.company || group?.company?.name, 120), since: str(pos?.date?.start, 10), employment_type: str(pos?.employment_type, 40) };
+      if (role.title || role.company) roles.push(role);
+    }
+  }
+  const co = person.company?.summary ?? {};
+  const staff = co.staff?.range;
+  const keywords = Array.isArray(person.company?.keywords) ? person.company.keywords.slice(0, 12).join(", ") : "";
+  const dept = person.department ?? {};
+  return {
+    headline: str(profile.headline, 220),
+    about: str(profile.summary, 600),
+    current_title: str(profile.title, 140),
+    current_company: str(co.name, 120) ?? roles[0]?.company ?? null,
+    current_roles: roles.slice(0, 4),
+    location: str(person.location?.default ?? person.location?.short, 100),
+    seniority: str(dept.seniority, 40),
+    department: Array.isArray(dept.departments) && dept.departments.length ? clip(dept.departments.join(", "), 80) : null,
+    company_description: str(co.description, 500),
+    company_industry: str(co.industry, 100),
+    company_employees: staff && (staff.start || staff.end) ? `${staff.start ?? ""}-${staff.end ?? ""}` : null,
+    company_products: keywords ? clip(keywords, 250) : null,
+    evidence: [],
+  };
 }
 
-/** The URL a Bright Data record was scraped for, normalised so it matches the row that asked for it. */
-export function recordUrl(rec) {
-  return linkedinProfileUrl(rec?.input?.url ?? rec?.input_url ?? rec?.url ?? "");
+/**
+ * Fold AI Ark's facts into the profile. As with the model path, the CSV is never overwritten — AI Ark fills what
+ * the list left empty, and adds `from_linkedin` so a question can compare the listed company with the real one.
+ */
+export function mergeAiArk(profile, person) {
+  const facts = aiArkFacts(person);
+  const { profile: merged, filled } = mergeStructured("contacts", profile, facts);
+  for (const [k, v] of [["seniority", facts.seniority], ["department", facts.department]]) {
+    if (v && !has(merged[k])) { merged[k] = v; filled.push(k); }
+  }
+  // The employer's own description only applies when AI Ark's current company is the one the list names; for
+  // anyone else it would describe the wrong organisation.
+  const listed = String(merged.listed_company ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const current = String(facts.current_company ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (listed && current && (listed.includes(current) || current.includes(listed))) {
+    const lcp = { ...(merged.listed_company_profile ?? {}) };
+    for (const [k, v] of [["description", facts.company_description], ["industry", facts.company_industry], ["employees", facts.company_employees], ["products", facts.company_products]]) {
+      if (v && !has(lcp[k])) { lcp[k] = v; filled.push(`listed_company_profile.${k}`); }
+    }
+    if (Object.keys(lcp).length) merged.listed_company_profile = lcp;
+  }
+  if (Array.isArray(merged.current_roles)) merged.current_roles = merged.current_roles.map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v)));
+  return { profile: merged, filled, facts };
+}
+
+/** AI Ark's quotable lines for the evidence panel: its own headline and title, verbatim. */
+export function aiArkEvidence(facts) {
+  return [["headline", facts?.headline], ["title", facts?.current_title], ["company", facts?.current_company]]
+    .filter(([, v]) => v)
+    .map(([field, quote]) => ({ field, quote: clip(quote, 200) }));
 }

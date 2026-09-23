@@ -2,8 +2,8 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 /**
- * The I/O half of Jev's enrichment: reading company websites, scraping LinkedIn profiles through Bright Data,
- * and having a cheap model structure what came back. Pure logic is in `shared/enrich.mjs`.
+ * The I/O half of Jev's enrichment: reading company websites (which a cheap model then structures) and looking
+ * contacts up in AI Ark (already structured, so no model). Pure logic is in `shared/enrich.mjs`.
  *
  * ── Why websites are read directly, not through a scraping service ───────────────────────────────
  * A company homepage is public HTML and a plain fetch with browser-like headers reads most of them in well under
@@ -11,18 +11,20 @@
  * failed — it renders JavaScript-only sites the direct read cannot. The first test, with a bare user-agent, was
  * served a firewall's "Not Acceptable" page instead of the site; the headers below are what fixed it.
  *
- * ── Why LinkedIn goes through Bright Data's async API ────────────────────────────────────────────
- * Bright Data scrapes from its own infrastructure, so no LinkedIn account or cookie of ours is ever involved —
- * the rule is never to put a sender account at risk. Its synchronous endpoint can take a full minute, longer than
- * a Vercel function may run, so a batch is triggered, the browser polls, and the snapshot is collected when ready.
+ * ── Why contacts go to AI Ark rather than a LinkedIn scraper ─────────────────────────────────────
+ * AI Ark is a data provider, not a scraper: no LinkedIn account or cookie of ours is ever involved, it answers
+ * synchronously, a hundred profiles a call, and its records are already structured — headline, summary, every
+ * position with dates and employment type, the employer's description. That replaced a Bright Data scrape that
+ * needed polling and a model pass, and whose experience fields LinkedIn had largely stopped exposing.
  *
  * ── Why the host is checked before every fetch ───────────────────────────────────────────────────
  * The URLs come from an uploaded CSV. Without a check, a row reading "localhost:5432" or a cloud metadata
  * address would have this server fetch its own internals and hand the text to a model.
  */
 import { lookup } from "node:dns/promises";
+import { lookupPeople } from "./ai-ark-enrichment";
 import { isIP } from "node:net";
-import { batchPrompt, htmlToText, splitBatchAnswer, structureBatchInput, structureBatchSchema, trimLinkedinRecord, unusablePage } from "../../shared/enrich.mjs";
+import { batchPrompt, htmlToText, splitBatchAnswer, structureBatchInput, structureBatchSchema, unusablePage } from "../../shared/enrich.mjs";
 
 const FETCH_TIMEOUT_MS = 8_000;
 const MAX_HTML_BYTES = 1_500_000;
@@ -31,15 +33,12 @@ const BROWSER_HEADERS = {
   accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "accept-language": "en-US,en;q=0.9",
 };
-const PROFILES_DATASET = "gd_l1viktl72bvl7bjuj0";
-/** Overridable for a proxy or a test double; Bright Data itself is the default. */
-const brightDataBase = () => (process.env.BRIGHTDATA_BASE_URL || "https://api.brightdata.com").replace(/\/+$/, "");
 /** Cheap, fast, and it returns null rather than inventing — the test that ruled out a cheaper model. */
 const DEFAULT_STRUCTURE_MODEL = "openai/gpt-6-luna";
 
 export function enrichConfig() {
   return {
-    brightData: Boolean(process.env.BRIGHTDATA_API_KEY),
+    aiArk: Boolean(process.env.AI_ARK_API_KEY),
     jina: Boolean(process.env.JINA_API_KEY),
     structureModel: process.env.JEV_STRUCTURE_MODEL || DEFAULT_STRUCTURE_MODEL,
     // Requests a minute the browser paces itself to. 18 sits under the 20/min OpenRouter gives new accounts;
@@ -144,49 +143,35 @@ export async function readWebsite(url: string): Promise<WebsiteRead> {
   return { ok: true, url, title: page!.title, description: page!.description, text: page!.text, chars: page!.text.length, pages, via: "direct" };
 }
 
-/* ── LinkedIn via Bright Data ── */
+/* ── Contacts via AI Ark ── */
 
-export async function triggerProfiles(urls: string[]): Promise<{ ok: boolean; snapshot?: string; error?: string }> {
-  const key = process.env.BRIGHTDATA_API_KEY;
-  if (!key) return { ok: false, error: "BRIGHTDATA_API_KEY is not set, so LinkedIn profiles cannot be scraped." };
-  try {
-    const response = await fetch(`${brightDataBase()}/datasets/v3/trigger?dataset_id=${PROFILES_DATASET}&include_errors=true&format=json`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify(urls.map((url) => ({ url }))),
-      signal: AbortSignal.timeout(30_000),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload?.snapshot_id) return { ok: false, error: `Bright Data refused the batch: ${payload?.error ?? payload?.message ?? `HTTP ${response.status}`}` };
-    return { ok: true, snapshot: String(payload.snapshot_id) };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Could not reach Bright Data." };
-  }
+/**
+ * AI Ark People Search for a batch of LinkedIn URLs, each result trimmed to the facts Jev reads. Replaces the
+ * Bright Data scrape: AI Ark answers synchronously, a hundred profiles a call, already structured — so contacts
+ * need no polling and no structuring model.
+ */
+export async function lookupContacts(urls: string[]): Promise<{ ok: boolean; found: Map<string, Record<string, unknown>>; error?: string }> {
+  const result = await lookupPeople(urls);
+  const found = new Map<string, Record<string, unknown>>();
+  for (const [key, person] of result.people) found.set(key, trimAiArkPerson(person));
+  return { ok: result.ok, found, error: result.error };
 }
 
-/** A triggered batch: not ready yet, or its records trimmed for the structuring model. */
-export async function collectProfiles(snapshot: string): Promise<{ ok: boolean; ready?: boolean; records?: unknown[]; error?: string }> {
-  const key = process.env.BRIGHTDATA_API_KEY;
-  if (!key) return { ok: false, error: "BRIGHTDATA_API_KEY is not set." };
-  if (!/^[a-z0-9_-]{4,80}$/i.test(snapshot)) return { ok: false, error: "Not a snapshot id." };
-  try {
-    const response = await fetch(`${brightDataBase()}/datasets/v3/snapshot/${encodeURIComponent(snapshot)}?format=json`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(45_000) });
-    if (response.status === 202) return { ok: true, ready: false };
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) return { ok: false, error: `Bright Data: ${(payload as { error?: string })?.error ?? `HTTP ${response.status}`}` };
-    const list = Array.isArray(payload) ? payload : [];
-    return {
-      ok: true,
-      ready: true,
-      records: list.map((rec: Record<string, unknown>) => {
-        const input = (rec?.input as { url?: string } | undefined)?.url ?? rec?.input_url ?? rec?.url;
-        const error = rec?.error || rec?.error_code ? String(rec.error ?? rec.error_code) : "";
-        return { input, error, record: error ? null : trimLinkedinRecord(rec) };
-      }),
-    };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Could not reach Bright Data." };
-  }
+/** The parts of an AI Ark person record the mapping uses. The rest (images, technologies, ids) never leaves the server. */
+function trimAiArkPerson(person: Record<string, unknown>): Record<string, unknown> {
+  const p = person as { profile?: Record<string, unknown>; location?: unknown; position_groups?: Array<Record<string, unknown>>; company?: { summary?: Record<string, unknown>; keywords?: unknown }; department?: unknown; link?: unknown };
+  const summary = p.company?.summary ?? {};
+  return {
+    profile: { headline: p.profile?.headline, title: p.profile?.title, summary: p.profile?.summary },
+    location: p.location,
+    link: p.link,
+    department: p.department,
+    position_groups: (p.position_groups ?? []).slice(0, 12).map((g) => ({
+      company: { name: (g.company as { name?: string } | undefined)?.name },
+      profile_positions: ((g.profile_positions as Array<Record<string, unknown>> | undefined) ?? []).map((pos) => ({ company: pos.company, title: pos.title, employment_type: pos.employment_type, date: pos.date })),
+    })),
+    company: { summary: { name: summary.name, description: summary.description, industry: summary.industry, staff: summary.staff, type: summary.type }, keywords: p.company?.keywords },
+  };
 }
 
 /* ── Structuring ── */

@@ -82,7 +82,7 @@ type Notice = { kind: "ok" | "error" | "info"; text: string } | null;
 
 const ENRICH_COLUMNS: Record<Mode, [string, string][]> = {
   companies: [["source", "Jev enriched from"], ["what_they_do", "Enriched: what they do"], ["industry", "Enriched: industry"], ["customers", "Enriched: customers"], ["organization_type", "Enriched: organization type"], ["evidence", "Enriched: evidence"]],
-  contacts: [["source", "Jev enriched from"], ["headline", "Enriched: headline"], ["current_title", "Enriched: current title"], ["current_company", "Enriched: current company"], ["current_roles", "Enriched: current roles"], ["evidence", "Enriched: evidence"]],
+  contacts: [["source", "Jev enriched from"], ["headline", "Enriched: headline"], ["current_title", "Enriched: current title"], ["current_company", "Enriched: current company"], ["current_roles", "Enriched: current roles"], ["seniority", "Enriched: seniority"], ["company_description", "Enriched: company description"]],
 };
 const STAGE_LABEL: Record<Stage, string> = { first: "First pass…", scrape: "Scraping…", structure: "Structuring…", final: "Final pass…" };
 /** Jev's verdict line, as the classify route streams it, turned into a table row's result. */
@@ -291,7 +291,7 @@ export default function JevClientPage() {
   // scrape a row twice. Cleared whenever the rows themselves change.
   const enrichedRef = useRef(new Map<number, Enriched>());
   const [enrichMode, setEnrichMode] = useState<EnrichMode>("auto");
-  const [enrichCfg, setEnrichCfg] = useState<{ brightData: boolean; jina: boolean; structureModel: string; structureRpm: number; llm: boolean } | null>(null);
+  const [enrichCfg, setEnrichCfg] = useState<{ aiArk: boolean; jina: boolean; structureModel: string; structureRpm: number; llm: boolean } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const rafRef = useRef(0);
   const [, setVersion] = useState(0);
@@ -506,7 +506,7 @@ export default function JevClientPage() {
       client: slug,
       mode: fm,
       enrichMode,
-      brightData: Boolean(enrichCfg?.brightData),
+      aiArk: Boolean(enrichCfg?.aiArk),
       structureRpm: enrichCfg?.structureRpm ?? 18,
       signal: controller.signal,
       stats: stats.current,
@@ -544,7 +544,7 @@ export default function JevClientPage() {
       if (!target) noTarget += 1;
       if ((missingData(file.mode, p, requiredFields) as string[]).length) { thin += 1; if (target) scrapeable += 1; }
     });
-    return { rows: file.rows.length - file.duplicates.size, thin, scrapeable, noTarget, blocked: file.mode === "contacts" && !enrichCfg?.brightData };
+    return { rows: file.rows.length - file.duplicates.size, thin, scrapeable, noTarget, blocked: file.mode === "contacts" && !enrichCfg?.aiArk };
   }, [file, requiredFields, enrichCfg]);
 
   const stop = () => abortRef.current?.abort();
@@ -800,7 +800,7 @@ export default function JevClientPage() {
                   )}
                   {fileError && <div className="jev-banner is-error">{fileError}</div>}
                   {file && (
-                    <EnrichControl mode={mode} value={enrichMode} onChange={setEnrichMode} detection={detection} disabled={running} llmModel={enrichCfg?.structureModel ?? "openai/gpt-6-luna"} brightData={Boolean(enrichCfg?.brightData)} />
+                    <EnrichControl mode={mode} value={enrichMode} onChange={setEnrichMode} detection={detection} disabled={running} llmModel={enrichCfg?.structureModel ?? "openai/gpt-6-luna"} />
                   )}
                   <div className="jev-run-row">
                     {!running ? (
@@ -940,7 +940,7 @@ export default function JevClientPage() {
                                 return (
                                   <div className="jev-enrich-detail">
                                     <div className="jev-enrich-src">
-                                      Enriched from <a href={e.source.url} target="_blank" rel="noreferrer">{e.source.url.replace(/^https:\/\/(www\.)?/, "")}</a>
+                                      Enriched from {e.source.kind === "aiark" ? "AI Ark · " : ""}<a href={e.source.url} target="_blank" rel="noreferrer">{e.source.url.replace(/^https:\/\/(www\.)?/, "")}</a>
                                       {e.source.chars ? ` · ${e.source.chars.toLocaleString()} chars` : ""}{e.source.pages && e.source.pages.length > 1 ? " · home + about" : ""}
                                       {r?.firstStatus && <> · before: <b>{r.firstStatus}</b></>}
                                       {e.filled.length > 0 && <> · added {e.filled.join(", ")}</>}

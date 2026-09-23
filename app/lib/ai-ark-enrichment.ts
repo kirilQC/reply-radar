@@ -6,10 +6,12 @@ import { createHash } from "node:crypto";
 export type JsonObject = Record<string, unknown>;
 type SupabaseConfig = { url: string; key: string };
 
-const ENDPOINT = "https://api.ai-ark.com/api/developer-portal/v1/people";
+// Overridable for a proxy or a test double; AI Ark itself is the default.
+const API_BASE = (process.env.AI_ARK_BASE_URL || "https://api.ai-ark.com").replace(/\/+$/, "");
+const ENDPOINT = `${API_BASE}/api/developer-portal/v1/people`;
 // Phone numbers are NOT part of People Search — AI Ark reveals a mobile through a separate finder endpoint,
 // billed 5 credits only when a number is found. Takes a LinkedIn URL; the number is at data.data[0][0].
-const PHONE_ENDPOINT = "https://api.ai-ark.com/api/developer-portal/v2/people/mobile-phone-finder";
+const PHONE_ENDPOINT = `${API_BASE}/api/developer-portal/v2/people/mobile-phone-finder`;
 const BUCKET = "reply-radar-enrichment";
 const object = (value: unknown): JsonObject =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -20,7 +22,7 @@ const text = (value: unknown) =>
 const list = (value: unknown) => (Array.isArray(value) ? value : []);
 const normalize = (value: unknown) =>
   text(value).toLowerCase().replace(/\s+/g, " ");
-const normalizeLinkedIn = (value: unknown) => {
+export const normalizeLinkedIn = (value: unknown) => {
   const candidate = text(value);
   if (!candidate) return "";
   try {
@@ -36,7 +38,7 @@ const normalizeLinkedIn = (value: unknown) => {
       .replace(/\/+$/, "");
   }
 };
-const personLinkedIn = (value: unknown) => {
+export const personLinkedIn = (value: unknown) => {
   const person = object(value);
   return (
     text(object(person.link).linkedin) ||
@@ -75,6 +77,49 @@ export async function findMobilePhone(profileUrl: string): Promise<string | null
   } catch {
     return null;
   }
+}
+
+/**
+ * Up to 100 people in one People Search call, matched back to the URLs asked for.
+ *
+ * Built for the Jev pipeline, where a list of thousands would otherwise be thousands of calls against AI Ark's
+ * default limit of 5 requests a second. `socialMediaLink.any.include` is an OR over the URLs; each result is
+ * matched to its URL by the same normalisation `selectAiArkPerson` uses, so a near-namesake can never be
+ * attached to the wrong row. Billed 0.5 credits per result returned — URLs AI Ark does not know cost nothing.
+ */
+export async function lookupPeople(profileUrls: string[]): Promise<{ ok: boolean; people: Map<string, JsonObject>; error?: string; rateLimited?: boolean }> {
+  const apiKey = text(process.env.AI_ARK_API_KEY);
+  const people = new Map<string, JsonObject>();
+  if (!apiKey) return { ok: false, people, error: "AI_ARK_API_KEY is not set." };
+  const urls = [...new Set(profileUrls.map(text).filter(Boolean))].slice(0, 100);
+  if (!urls.length) return { ok: true, people };
+  let last = "";
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const response = await fetch(ENDPOINT, {
+        method: "POST",
+        headers: { "X-TOKEN": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ contact: { socialMediaLink: { any: { include: urls } } }, page: 0, size: urls.length }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const data = object(await response.json().catch(() => ({})));
+      if (response.ok) {
+        const wanted = new Set(urls.map(normalizeLinkedIn));
+        for (const candidate of list(data.content)) {
+          const key = normalizeLinkedIn(personLinkedIn(candidate));
+          if (key && wanted.has(key) && !people.has(key)) people.set(key, object(candidate));
+        }
+        return { ok: true, people };
+      }
+      last = `AI Ark People Search failed (${response.status}): ${JSON.stringify(data).slice(0, 300)}`;
+      if (response.status === 429) { await new Promise((r) => setTimeout(r, 1_000 * 2 ** attempt)); continue; }
+      if (response.status < 500) break;
+    } catch (error) {
+      last = error instanceof Error ? error.message : "Could not reach AI Ark.";
+    }
+    await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+  }
+  return { ok: false, people, error: last || "AI Ark did not answer.", rateLimited: /\(429\)/.test(last) };
 }
 
 export function selectAiArkPerson(

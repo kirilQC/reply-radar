@@ -7,8 +7,8 @@
  * decides what to draw.
  *
  * ── Why the browser drives it ────────────────────────────────────────────────────────────────────
- * Each server route does one short, bounded thing (classify 40 rows, read 12 sites, structure 6 rows, start or
- * collect one Bright Data batch) and returns inside Vercel's 60s ceiling. A 5,000-contact run is many of those,
+ * Each server route does one short, bounded thing (classify 40 rows, read 12 sites, structure 6 rows, look up
+ * 100 contacts in AI Ark) and returns inside Vercel's 60s ceiling. A 5,000-contact run is many of those,
  * sequenced here, with the table and stage counters updating as each one lands.
  *
  * ── Why chunks are pipelined rather than staged ──────────────────────────────────────────────────
@@ -16,16 +16,16 @@
  * the first twenty minutes of a big company run. Pipelined, the first chunk is fully classified while later
  * chunks are still being read, and the counters show every stage moving at once.
  */
-import { afterFirstPass, evidenceOf, mergeStructured, recordUrl } from "../../../shared/enrich.mjs";
+import { afterFirstPass, aiArkEvidence, evidenceOf, mergeAiArk, mergeStructured } from "../../../shared/enrich.mjs";
 
 export type Mode = "contacts" | "companies";
 export type EnrichMode = "auto" | "all" | "off";
 export type Stage = "first" | "scrape" | "structure" | "final";
-export type Source = { kind: "website" | "linkedin"; url: string; title?: string; description?: string; text?: string; record?: unknown; chars?: number; pages?: string[]; via?: string };
+export type Source = { kind: "website" | "aiark"; url: string; title?: string; description?: string; text?: string; record?: unknown; chars?: number; pages?: string[]; via?: string };
 export type Enriched = { profile: unknown; filled: string[]; evidence: { field: string; quote: string }[]; source: Omit<Source, "text" | "record">; structured: Record<string, unknown>; cost: number | null };
 export type Outcome = { i: number; result: Record<string, unknown>; first?: Record<string, unknown> | null; enriched: boolean; note: string };
-export type StageStats = { queued: number; active: number; done: number; failed: number; skipped: number; cost: number; waitUntil?: number };
-export type PipelineStats = Record<Stage, StageStats> & { tokens: number; jevCost: number; job?: { snapshot: string; count: number; since: number } | null };
+export type StageStats = { queued: number; active: number; done: number; failed: number; skipped: number; cost: number; credits?: number; waitUntil?: number };
+export type PipelineStats = Record<Stage, StageStats> & { tokens: number; jevCost: number };
 export type LogKind = "info" | "ok" | "warn" | "error";
 
 export const freshStats = (): PipelineStats => ({
@@ -35,14 +35,14 @@ export const freshStats = (): PipelineStats => ({
   final: { queued: 0, active: 0, done: 0, failed: 0, skipped: 0, cost: 0 },
   tokens: 0,
   jevCost: 0,
-  job: null,
 });
 
 export type Hooks = {
   client: string;
   mode: Mode;
   enrichMode: EnrichMode;
-  brightData: boolean;
+  /** AI Ark is configured, so contacts can be looked up. */
+  aiArk: boolean;
   /** Structuring requests a minute, shared by every lane — OpenRouter's limit is per account, not per request. */
   structureRpm: number;
   signal: AbortSignal;
@@ -59,20 +59,19 @@ export type Hooks = {
   onChange: () => void;
 };
 
-/** Rows per chunk and chunks in flight. Contact chunks are large because each one is a Bright Data job, and
- *  Bright Data blacklists IPs that start too many; company chunks are small so websites stream in quickly. */
-const CHUNK: Record<Mode, number> = { contacts: 250, companies: 40 };
+/** Rows per chunk and chunks in flight. A contact chunk is two AI Ark calls (100 people each) and two lanes stay
+ *  well under AI Ark's 5 requests a second; company chunks are small so websites stream in quickly. */
+const CHUNK: Record<Mode, number> = { contacts: 200, companies: 40 };
 const LANES: Record<Mode, number> = { contacts: 2, companies: 6 };
+const PEOPLE_BATCH = 100;
 const CLASSIFY_BATCH = 40;
 const SITE_BATCH = 12;
 /** Rows per structuring call. Six keeps a call's output well inside the 60s function ceiling (~20s at Luna's speed). */
 const STRUCTURE_BATCH = 6;
 const MAX_RATE_WAITS = 40;
 const PARALLEL = 3;
-const POLL_MS = 10_000;
-const MAX_WAIT_MS = 20 * 60_000;
-/** Bright Data's PAYG price; shown as an estimate beside the costs OpenRouter reports exactly. */
-export const BRIGHTDATA_PER_RECORD = 1.5 / 1_000;
+/** AI Ark bills People Search per result returned; a URL it does not know costs nothing. */
+export const AI_ARK_CREDITS_PER_PERSON = 0.5;
 
 class Fatal extends Error {}
 
@@ -198,47 +197,40 @@ async function scrapeSites(h: Hooks, rows: number[], onSource: (i: number, s: So
   });
 }
 
-/** LinkedIn profiles for a set of contact rows: one Bright Data batch, polled until it is ready. */
-async function scrapeProfiles(h: Hooks, rows: number[], onSource: (i: number, s: Source) => void, onFail: (i: number, why: string) => void) {
+/**
+ * Contacts looked up in AI Ark, a hundred a call. AI Ark's record is already structured, so each found contact is
+ * merged straight into its profile here — contacts never go through the structuring model.
+ */
+async function lookupContacts(h: Hooks, rows: number[], onEnriched: (i: number, e: Enriched) => void, onFail: (i: number, why: string) => void) {
   const st = h.stats.scrape;
-  const byUrl = new Map<string, number[]>();
-  for (const i of rows) { const u = h.targetOf(i); byUrl.set(u, [...(byUrl.get(u) ?? []), i]); }
-  for (const i of rows) h.onStage(i, "scrape");
-  st.queued -= rows.length; st.active += rows.length; h.onChange();
-  const failAll = (why: string) => { for (const i of rows) { st.active -= 1; st.failed += 1; onFail(i, why); } h.onChange(); };
-  const trig = await fetch("/api/jev/scrape", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "contacts", urls: [...byUrl.keys()] }), signal: h.signal }).then((r) => r.json()).catch((e) => ({ ok: false, error: e instanceof Error ? e.message : "Could not reach the server." }));
-  if (!trig?.ok) { h.onLog("error", `Bright Data batch not started: ${trig?.error}`); failAll(`LinkedIn scrape failed to start: ${trig?.error}`); return; }
-  const since = Date.now();
-  h.stats.job = { snapshot: trig.snapshot, count: byUrl.size, since };
-  h.onLog("info", `Bright Data batch started — ${byUrl.size} profiles (${trig.snapshot})`);
-  h.onChange();
-  for (;;) {
-    await sleep(POLL_MS, h.signal);
-    if (h.signal.aborted) return;
-    const got = await fetch(`/api/jev/scrape?snapshot=${encodeURIComponent(trig.snapshot)}`, { signal: h.signal }).then((r) => r.json()).catch(() => ({ ok: false, error: "Could not reach the server." }));
-    if (got?.ok && got.ready) {
-      const records = Array.isArray(got.records) ? got.records : [];
-      const found = new Set<number>();
-      let missing = 0;
-      for (const rec of records) {
-        const url = recordUrl({ input: { url: rec.input } });
-        for (const i of byUrl.get(url) ?? []) {
-          if (found.has(i)) continue;
-          found.add(i); st.active -= 1;
-          if (rec.record) { st.done += 1; onSource(i, { kind: "linkedin", url, record: rec.record, chars: JSON.stringify(rec.record).length, via: "brightdata" }); }
-          else { st.failed += 1; missing += 1; onFail(i, `LinkedIn profile not returned: ${rec.error || "not found"}`); }
+  await each(rows, PEOPLE_BATCH, 2, async (batch) => {
+    for (const i of batch) h.onStage(i, "scrape");
+    st.queued -= batch.length; st.active += batch.length; h.onChange();
+    const seen = new Set<number>();
+    let found = 0;
+    try {
+      await stream("/api/jev/scrape", { mode: "contacts", items: batch.map((i) => ({ i, url: h.targetOf(i) })) }, h.signal, (line) => {
+        const i = Number(line.i); if (seen.has(i)) return; seen.add(i); st.active -= 1;
+        if (line.ok && line.person) {
+          st.done += 1; found += 1;
+          st.credits = (st.credits ?? 0) + AI_ARK_CREDITS_PER_PERSON;
+          const { profile, filled, facts } = mergeAiArk(h.profileOf(i), line.person) as { profile: unknown; filled: string[]; facts: Record<string, unknown> };
+          onEnriched(i, { profile, filled, evidence: aiArkEvidence(facts), source: { kind: "aiark", url: String(line.url), via: "aiark" }, structured: facts, cost: null });
+        } else {
+          st.failed += 1;
+          onFail(i, line.error === "not in AI Ark" ? "Not in AI Ark — judged on the list's own data" : `AI Ark lookup failed: ${line.error}`);
         }
-      }
-      for (const i of rows) if (!found.has(i)) { st.active -= 1; st.failed += 1; missing += 1; onFail(i, "LinkedIn profile not returned by Bright Data."); }
-      h.onLog(missing ? "warn" : "ok", `Bright Data batch ready — ${rows.length - missing} profiles${missing ? `, ${missing} not found` : ""} after ${Math.round((Date.now() - since) / 1000)}s`);
-      h.stats.scrape.cost += (rows.length - missing) * BRIGHTDATA_PER_RECORD;
-      h.stats.job = null; h.onChange();
-      return;
+        h.onChange();
+      });
+    } catch (error) {
+      if (error instanceof Fatal || h.signal.aborted) throw error;
+      const message = error instanceof Error ? error.message : "Connection dropped.";
+      for (const i of batch) if (!seen.has(i)) { seen.add(i); st.active -= 1; st.failed += 1; onFail(i, `AI Ark lookup failed: ${message}`); }
     }
-    if (got && !got.ok) h.onLog("warn", `Bright Data check failed, retrying: ${got.error}`);
-    if (Date.now() - since > MAX_WAIT_MS) { h.onLog("error", `Bright Data batch ${trig.snapshot} still not ready after 20 minutes`); h.stats.job = null; failAll("LinkedIn scrape timed out."); return; }
+    for (const i of batch) if (!seen.has(i)) { st.active -= 1; st.failed += 1; onFail(i, "The AI Ark lookup did not come back."); }
+    h.onLog(found ? "ok" : "warn", `AI Ark — ${found} of ${batch.length} contacts found${batch.length - found ? `, ${batch.length - found} not in AI Ark` : ""} · ${found * AI_ARK_CREDITS_PER_PERSON} credits`);
     h.onChange();
-  }
+  });
 }
 
 /** The structuring model over scraped sources, a few rows a call, paced to the account's rate limit. */
@@ -324,9 +316,9 @@ async function runChunk(h: Hooks, chunk: number[]) {
     } else if (!h.targetOf(i)) {
       noTarget += 1;
       settle({ i, result: r ?? { ok: false, error: "No answer" }, first: r, enriched: false, note: h.mode === "companies" ? "Needs more data, but the row has no website to read" : "Needs more data, but the row has no LinkedIn profile URL" });
-    } else if (h.mode === "contacts" && !h.brightData) {
+    } else if (h.mode === "contacts" && !h.aiArk) {
       noTarget += 1;
-      settle({ i, result: r ?? { ok: false, error: "No answer" }, first: r, enriched: false, note: "Needs more data — LinkedIn scraping is not set up (BRIGHTDATA_API_KEY)" });
+      settle({ i, result: r ?? { ok: false, error: "No answer" }, first: r, enriched: false, note: "Needs more data — AI Ark is not set up (AI_ARK_API_KEY)" });
     } else toScrape.push(i);
   }
   if (fresh.length && h.enrichMode !== "all") {
@@ -341,11 +333,11 @@ async function runChunk(h: Hooks, chunk: number[]) {
     const r = first.get(i) ?? null;
     settle({ i, result: r?.ok ? r : { ok: false, error: why }, first: r, enriched: false, note: why });
   };
+  const ready: number[] = [...cached];
   if (toScrape.length) {
     if (h.mode === "companies") await scrapeSites(h, toScrape, (i, s) => sources.push({ i, source: s }), fallback);
-    else await scrapeProfiles(h, toScrape, (i, s) => sources.push({ i, source: s }), fallback);
+    else await lookupContacts(h, toScrape, (i, e) => { h.cached.set(i, e); h.onEnriched(i, e); ready.push(i); }, fallback);
   }
-  const ready: number[] = [...cached];
   if (sources.length) {
     await structure(h, sources, (i, e) => { h.cached.set(i, e); h.onEnriched(i, e); ready.push(i); }, fallback);
   }
