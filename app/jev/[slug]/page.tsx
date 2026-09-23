@@ -82,7 +82,7 @@ type Mode = "contacts" | "companies";
 type Status = "good" | "borderline" | "bad" | "tagged" | "review" | "error" | "duplicate";
 type Ranked = { tag: string; label: string; p: number };
 type Review = { kind: "existing" | "new" | "unplaced"; confidence: string; reason: string; jevLabel?: string };
-type Result = { review?: Review; status: Status; reason: string; scores?: Record<string, number | null>; tag?: string; label?: string; confidence?: number; runnerUp?: Ranked | null; top?: Ranked[]; tokens?: number; cost?: number | null; note?: string; enriched?: boolean; firstStatus?: string };
+type Result = { review?: Review; score?: number | null; status: Status; reason: string; scores?: Record<string, number | null>; tag?: string; label?: string; confidence?: number; runnerUp?: Ranked | null; top?: Ranked[]; tokens?: number; cost?: number | null; note?: string; enriched?: boolean; firstStatus?: string };
 /** "all", a status, or "tag:<key>" for one company tag. */
 type Filter = string;
 type Notice = { kind: "ok" | "error" | "info"; text: string } | null;
@@ -96,7 +96,7 @@ const STAGE_LABEL: Record<Stage, string> = { first: "First pass…", scrape: "Sc
 const toResult = (mode: Mode, r: Record<string, unknown> | null | undefined): Result => {
   if (!r || !r.ok) return { status: "error", reason: String(r?.error || "Jev did not answer.") };
   if (mode === "companies") return { status: r.status as Status, reason: String(r.reason ?? ""), tag: r.tag as string, label: r.label as string, confidence: r.confidence as number, runnerUp: r.runnerUp as Ranked | null, top: r.top as Ranked[], tokens: r.tokens as number, cost: r.cost as number | null };
-  return { status: r.verdict as Status, reason: String(r.reason ?? ""), scores: r.scores as Record<string, number | null>, tokens: r.tokens as number, cost: r.cost as number | null };
+  return { status: r.verdict as Status, reason: String(r.reason ?? ""), scores: r.scores as Record<string, number | null>, score: typeof r.score === "number" ? r.score : null, tokens: r.tokens as number, cost: r.cost as number | null };
 };
 /** How many rows the live table draws. The counts and downloads always cover every row. */
 const VISIBLE_ROWS = 300;
@@ -810,11 +810,11 @@ export default function JevClientPage() {
 
   const exportRows = (keep: (r: Result | undefined) => boolean, label: string) => {
     if (!file || !set) return;
-    const headers = ["Jev verdict", "Jev reason", "Jev note", ...set.questions.map((q) => `Jev: ${q.label}`), ...ENRICH_COLUMNS.contacts.map(([, h]) => h), ...file.headers];
+    const headers = ["Jev verdict", "Jev fit score", "Jev reason", "Jev note", ...set.questions.map((q) => `Jev: ${q.label}`), ...ENRICH_COLUMNS.contacts.map(([, h]) => h), ...file.headers];
     const rows = file.rows.flatMap((cells, i) => {
       const r = all.get(i);
       if (!keep(r)) return [];
-      const verdict = [r ? STATUS_LABEL[r.status] : "Not checked", r?.reason ?? "", r?.note ?? "", ...set.questions.map((q) => (r?.scores ? pct(r.scores[q.key]) : ""))];
+      const verdict = [r ? STATUS_LABEL[r.status] : "Not checked", typeof r?.score === "number" ? pct(r.score) : "", r?.reason ?? "", r?.note ?? "", ...set.questions.map((q) => (r?.scores ? pct(r.scores[q.key]) : ""))];
       return [[...verdict, ...enrichCells("contacts", i), ...cells]];
     });
     const stamp = new Date().toISOString().slice(0, 10);

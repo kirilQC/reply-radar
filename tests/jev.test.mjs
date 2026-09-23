@@ -253,10 +253,17 @@ test("verdictFor: a score with vetoes — musts drop on a clear fail, exclusions
   assert.equal(verdictFor(questions, { main_job: { noul: 0.9 }, competitor: { noul: 0.9 }, owns_purchasing: { noul: 0.9 } }, t).reason, "Excluded: Competitor");
   // …and a 60% maybe-competitor stays in play.
   assert.equal(verdictFor(questions, { main_job: { noul: 0.9 }, competitor: { noul: 0.6 }, owns_purchasing: { noul: 0.9 } }, t).verdict, "good");
-  // In between is borderline, with the score and the weakest question named.
-  const mid = verdictFor(questions, { main_job: { noul: 0.5 }, competitor: { noul: 0.05 }, owns_purchasing: { noul: 0.5 } }, t);
+  // A must-have in between is borderline, and names itself.
+  const mid = verdictFor(questions, { main_job: { noul: 0.5 }, competitor: { noul: 0.05 }, owns_purchasing: { noul: 0.9 } }, t);
   assert.equal(mid.verdict, "borderline");
-  assert.equal(mid.reason, "Score 50% — weakest: Main job");
+  assert.equal(mid.reason, "Unsure: Main job (50%)");
+  // Passing every must-have is a good fit even when a signal is weak — signals rank, they do not demote.
+  const ranked = verdictFor(questions, { main_job: { noul: 0.9 }, competitor: { noul: 0.05 }, owns_purchasing: { noul: 0.1 } }, t);
+  assert.equal(ranked.verdict, "good");
+  assert.ok(Math.abs(ranked.score - 0.5) < 1e-9);
+  // With no must-have at all, the average decides.
+  const signalsOnly = normalizeQuestionSet({ questions: [{ label: "A", type: "noul", instructions: "?", kind: "signal" }, { label: "B", type: "noul", instructions: "?", kind: "signal" }] }).questions;
+  assert.equal(verdictFor(signalsOnly, { a: { noul: 0.5 }, b: { noul: 0.5 } }, t).reason, "Score 50% — weakest: A");
   // A question left unanswered never silently passes a contact.
   assert.equal(verdictFor(questions, { main_job: { noul: 0.95 }, owns_purchasing: { noul: 0.9 } }, t).verdict, "borderline");
 });

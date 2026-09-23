@@ -216,16 +216,31 @@ function icpBlock(icp: JevIcp): string {
   ].filter(Boolean).join("\n\n");
 }
 
-async function askSonnet(system: string, content: string): Promise<{ ok: boolean; text?: string; error?: string }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { ok: false, error: "ANTHROPIC_API_KEY is not set." };
+/**
+ * The question writer's model call. Through OpenRouter (Sonnet 5) when that key is set — the same key and
+ * provider every other Jev step uses, so one key runs the whole feature — and straight to Anthropic otherwise.
+ */
+async function askSonnet(system: string, content: string, maxTokens = 6_000): Promise<{ ok: boolean; text?: string; error?: string }> {
+  const openrouter = process.env.OPENROUTER_API_KEY;
+  const anthropic = process.env.ANTHROPIC_API_KEY;
+  if (!openrouter && !anthropic) return { ok: false, error: "Neither OPENROUTER_API_KEY nor ANTHROPIC_API_KEY is set." };
   try {
+    if (openrouter) {
+      const model = process.env.JEV_BUILD_MODEL || "anthropic/claude-sonnet-5";
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: `Bearer ${openrouter}` },
+        body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0, messages: [{ role: "system", content: system }, { role: "user", content }] }),
+        signal: AbortSignal.timeout(52_000),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) return { ok: false, error: `${model} refused the build: ${payload?.error?.message ?? `HTTP ${response.status}`}` };
+      return { ok: true, text: String(payload?.choices?.[0]?.message?.content ?? "") };
+    }
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      // A 40-tag set at one sentence each is ~2k tokens of output, which Sonnet writes in well under the
-      // function's 60s ceiling; the cap and the timeout are the backstop, not the plan.
-      body: JSON.stringify({ model: GENERATOR_MODEL, max_tokens: 6_000, temperature: 0, system, messages: [{ role: "user", content }] }),
+      headers: { "content-type": "application/json", "x-api-key": anthropic!, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: GENERATOR_MODEL, max_tokens: maxTokens, temperature: 0, system, messages: [{ role: "user", content }] }),
       signal: AbortSignal.timeout(52_000),
     });
     const payload = await response.json().catch(() => ({}));
@@ -304,8 +319,6 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
 }
 
 export async function draftQuestionSet(slug: string, sampleProfile: unknown): Promise<{ ok: boolean; error?: string; set?: JevQuestionSet; problems?: string[]; brain?: { folder: string; documents: string[]; reason: string } }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { ok: false, error: "ANTHROPIC_API_KEY is not set." };
   const [row] = await workspaceRows(`slug=eq.${encodeURIComponent(slug)}&limit=1`);
   if (!row) return { ok: false, error: "Unknown client." };
   const name = text(row.name);
@@ -326,23 +339,12 @@ export async function draftQuestionSet(slug: string, sampleProfile: unknown): Pr
       : "No sample profile was provided. Refer to fields generically as the person's current role and the company's description.",
     "Write the question set now.",
   ].filter(Boolean).join("\n\n");
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: GENERATOR_MODEL, max_tokens: 4_000, temperature: 0, system: GENERATOR_PROMPT, messages: [{ role: "user", content }] }),
-      signal: AbortSignal.timeout(50_000),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) return { ok: false, error: `Anthropic refused the draft: ${payload?.error?.message ?? `HTTP ${response.status}`}` };
-    const reply = Array.isArray(payload?.content) ? payload.content.filter((p: { type?: string }) => p?.type === "text").map((p: { text?: string }) => String(p.text ?? "")).join("") : "";
-    const parsed = parseGeneratedQuestionSet(reply);
-    if (!parsed.questions.length) return { ok: false, error: "The draft came back without a usable question. Try again.", problems: parsed.problems };
-    const { set, problems } = await saveQuestionSet(slug, { ...parsed, brainFolder: brain.folder, brainDocuments: brain.documents }, "brain");
-    return { ok: true, set, problems: [...parsed.problems, ...problems], brain: { folder: brain.folder, documents: brain.documents, reason: brain.reason } };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "The draft call failed." };
-  }
+  const reply = await askSonnet(GENERATOR_PROMPT, content, 4_000);
+  if (!reply.ok) return { ok: false, error: reply.error };
+  const parsed = parseGeneratedQuestionSet(reply.text);
+  if (!parsed.questions.length) return { ok: false, error: "The draft came back without a usable question. Try again.", problems: parsed.problems };
+  const { set, problems } = await saveQuestionSet(slug, { ...parsed, brainFolder: brain.folder, brainDocuments: brain.documents }, "brain");
+  return { ok: true, set, problems: [...parsed.problems, ...problems], brain: { folder: brain.folder, documents: brain.documents, reason: brain.reason } };
 }
 
 /* ── Calling Jev ── */

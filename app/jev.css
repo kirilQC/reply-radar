@@ -307,3 +307,6 @@
 .jev-suggest-ex { margin-top: 5px; font-size: 10.5px; color: var(--muted-2); }
 .jev-suggest-out { margin-top: 10px; font-size: 11px; color: var(--muted-2); }
 .jev-claude-tag { display: inline-block; margin-right: 6px; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border)); border-radius: 4px; padding: 0 4px; }
+
+.jev-icp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.jev-icp-head .jev-describe-label { margin: 0; }

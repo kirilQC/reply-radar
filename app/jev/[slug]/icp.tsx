@@ -28,10 +28,32 @@ export function IcpBox({ icp, brief, busy, disabled, onBuild }: {
   const [sizeMax, setSizeMax] = useState(icp?.sizeMax ? String(icp.sizeMax) : "");
   const [exclusions, setExclusions] = useState(icp?.exclusions ?? "");
   const [notes, setNotes] = useState(brief);
+  // Two ways in: a plain prompt, for anyone who would rather describe the list in their own words, or the form.
+  // Opens on whichever the saved setup was built from.
+  const hasIcp = Boolean(icp && (icp.titles?.length || icp.responsibilities || icp.sizeMin || icp.sizeMax || icp.exclusions));
+  const [view, setView] = useState<"prompt" | "form">(hasIcp ? "form" : "prompt");
   const count = titles.split("\n").map((t) => t.trim()).filter(Boolean).length;
-  const empty = !count && !responsibilities.trim() && !sizeMin && !sizeMax && !exclusions.trim() && !notes.trim();
+  const empty = view === "prompt" ? !notes.trim() : !count && !responsibilities.trim() && !sizeMin && !sizeMax && !exclusions.trim() && !notes.trim();
+  const tabs = (
+    <div className="jev-seg jev-icp-tabs">
+      <button type="button" className={view === "prompt" ? "on" : ""} onClick={() => setView("prompt")} disabled={disabled}>Prompt</button>
+      <button type="button" className={view === "form" ? "on" : ""} onClick={() => setView("form")} disabled={disabled}>ICP form</button>
+    </div>
+  );
+  if (view === "prompt") {
+    return (
+      <div className="jev-describe jev-icp">
+        <div className="jev-icp-head"><span className="jev-describe-label">Describe who should stay on the list</span>{tabs}</div>
+        <textarea className="jev-input jev-textarea jev-describe-text" rows={8} value={notes} onChange={(e) => setNotes(e.target.value)} disabled={disabled} placeholder="e.g. Keep anyone whose role or company involves Medicare, Medicaid or Medicare Advantage in any way…" />
+        <div className="jev-describe-foot">
+          <button className="primary-button" disabled={disabled || busy || empty} onClick={() => onBuild(notes, {})}>{busy ? "Building…" : "Build Jev setup"}</button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="jev-describe jev-icp">
+      <div className="jev-icp-head"><span className="jev-describe-label">Contact ICP</span>{tabs}</div>
       <div className="jev-icp-grid">
         <label className="jev-icp-titles">
           <span>Target titles <b>{count || ""}</b></span>

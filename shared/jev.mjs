@@ -26,7 +26,8 @@
  */
 
 /** Hard ceilings, so a malformed file or a runaway question set fails loudly rather than slowly. */
-export const MAX_ROWS = 10_000;
+/** Contact rows. A 20k-row, 250-column AI Ark export is a real list (Vitalic), and rows are kept as cell arrays. */
+export const MAX_ROWS = 30_000;
 /** Company rows are a tenth the size of a contact row, and company lists are the ones pulled by the hundred thousand. */
 export const MAX_COMPANY_ROWS = 100_000;
 export const MAX_QUESTIONS = 10;
@@ -1027,7 +1028,8 @@ export const EXCLUDE_LINE = 0.2;
  * - an `exclude` question drops them only when the disqualifier is clearly true;
  * - a choice answered mostly "can't tell" counts for nothing either way — thin data is not evidence of a bad fit;
  * - the company size range is checked in code; an unknown size is left out, not failed;
- * - everything else is averaged into a fit score, and the score decides good vs borderline.
+ * - with must-haves, good means every must-have clears the keep line; signals only rank, via `score`;
+ * - with no must-have, the averaged score decides good vs borderline.
  */
 export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS, context = {}) {
   const scores = {};
@@ -1045,7 +1047,7 @@ export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS, 
     const kind = q.kind ?? (q.type === "noul" && q.pass === false ? "exclude" : "must");
     if (kind === "exclude") { if (p < EXCLUDE_LINE && (!excluded || p < excluded.p)) excluded = { q, p }; continue; }
     if (kind === "must" && p < thresholds.drop && (!failed || p < failed.p)) failed = { q, p };
-    counted.push({ q, p });
+    counted.push({ q, p, kind });
   }
   const size = sizeCheck(context.icp, context.profile);
   if (size === "outside") return { verdict: "bad", reason: `Company size outside ${context.icp.sizeMin ?? 0}–${context.icp.sizeMax ?? "any"} employees`, scores, score: null };
@@ -1053,8 +1055,20 @@ export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS, 
   if (failed) return { verdict: "bad", reason: `Failed: ${failed.q.label}`, scores, score: null };
   if (!counted.length) return { verdict: "borderline", reason: missing ? `No answer: ${missing.label}` : "Not enough data to judge", scores, score: null };
   const score = counted.reduce((n, c) => n + c.p, 0) / counted.length;
-  const weakest = counted.reduce((w, c) => (c.p < w.p ? c : w));
   const note = unclear.length ? ` · can't tell: ${unclear.map((q) => q.label).join(", ")}` : "";
+  /*
+   * With must-haves, they alone decide good vs borderline; signals only rank (the `score`). A Vitalic test put
+   * "VP of Provider Growth at a Medicaid-focused company" in Borderline: it passed "any Medicare/Medicaid
+   * connection" but a generic title failed the "own role handles it" signal, and averaging let the signal sink a
+   * contact the list exists to keep. Without any must-have, the average is all there is, so it decides.
+   */
+  const musts = counted.filter((c) => c.kind === "must");
+  if (musts.length) {
+    const weakMust = musts.reduce((w, c) => (c.p < w.p ? c : w));
+    if (weakMust.p >= thresholds.keep && !missing) return { verdict: "good", reason: note ? note.slice(3) : "", scores, score };
+    return { verdict: "borderline", reason: missing ? `No answer: ${missing.label}${note}` : `Unsure: ${weakMust.q.label} (${Math.round(weakMust.p * 100)}%)${note}`, scores, score };
+  }
+  const weakest = counted.reduce((w, c) => (c.p < w.p ? c : w));
   if (score >= thresholds.keep && !missing) return { verdict: "good", reason: note ? note.slice(3) : "", scores, score };
   return { verdict: "borderline", reason: `Score ${Math.round(score * 100)}% — weakest: ${weakest.q.label}${note}`, scores, score };
 }

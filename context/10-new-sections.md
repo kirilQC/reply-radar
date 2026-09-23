@@ -96,6 +96,15 @@ endpoint — it does not serve Jev.
   `/api/jev/questions` returns the server's; on a mismatch the page shows "Reply Radar was updated — Reload" and
   blocks Run. Added after an old tab ran Bright Data-era pipeline code against the AI Ark server and skipped every
   contact lookup silently.
+- **Contact setup has two ways in:** a Prompt tab (free text → Sonnet writes the questions) and the ICP form.
+  The question writer now goes through OpenRouter (`anthropic/claude-sonnet-5`, `JEV_BUILD_MODEL`) when that key is
+  set, Anthropic direct otherwise — one key runs the whole feature.
+- **Must-haves decide, signals rank.** With any `must` question, good = every must ≥ keep; signals only feed `score`
+  (exported as "Jev fit score"). Averaging signals into the verdict put "VP of Provider Growth at a Medicaid-focused
+  company" in Borderline on a Vitalic "any Medicare/Medicaid/MA connection" run because a generic title failed the
+  "own role" signal. With no must-have, the average still decides.
+- **Contact lists up to 30,000 rows.** A 20k-row, 250-column AI Ark export (125MB) loads in 2s at ~280MB heap and
+  runs at ~300 rows/s against a stub (real Jev ~80–120/s).
 - **Structured contact ICP** (`icp` on the question set; `app/jev/[slug]/icp.tsx`): a pool of target titles
   (turned into one Choice question verbatim by `titlePoolQuestion` — never paraphrased), responsibilities,
   company size range (checked in code by `sizeCheck` against `listed_company_profile.employees`; unknown size is
