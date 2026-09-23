@@ -180,7 +180,8 @@ test("an override beats detection", () => {
   assert.equal(roleOf(planColumns(headers, rows), "Notes"), "other");
   const plan = planColumns(headers, rows, { Notes: "about", Name: "ignore" });
   assert.equal(buildProfile(rows[0], plan).about, "Buys security tooling");
-  assert.equal(identifyWith(rows[0], plan).name, "(no name)");
+  // The name still shows (it is never sent): identity follows the header, so a re-roled column cannot blank it.
+  assert.equal(identifyWith(rows[0], plan).name, "Ada");
 });
 
 test("missingFields flags only questions with nothing to go on, and ignores fields inside roles", () => {
@@ -286,7 +287,8 @@ test("verdictFor: 'can't tell' is left out instead of failing the contact", () =
   ] });
   assert.deepEqual(questions[0].neutral, ["unclear"]);
   const thin = verdictFor(questions, { facility_type: { probabilities: { asc: 0.1, other: 0.1, unclear: 0.8 } }, main_job: { noul: 0.9 } });
-  assert.equal(thin.verdict, "good");
+  // Unchecked is not a fit: it is kept as a Maybe for review rather than shown as good.
+  assert.equal(thin.verdict, "borderline");
   assert.equal(thin.reason, "can't tell: Facility type");
   // Under the old rule this was a clear fail (10% fit) and the contact was dropped.
   assert.equal(verdictFor(questions, { facility_type: { probabilities: { asc: 0.1, other: 0.8, unclear: 0.1 } }, main_job: { noul: 0.9 } }).verdict, "bad");
@@ -497,7 +499,38 @@ test("weighted: a question marked must-have is still a hard line (director and u
   ] });
   const t = { keep: 0.6, drop: 0.35 };
   assert.equal(verdictFor(questions, { director_or_above: { noul: 0.1 }, medicare_connection: { noul: 0.99 } }, t, { scoring: "weighted" }).reason, "Failed: Director or above");
-  assert.equal(verdictFor(questions, { director_or_above: { noul: 0.5 }, medicare_connection: { noul: 0.9 } }, t, { scoring: "weighted" }).verdict, "good");
+  // Between the lines the director check is unsure, so the contact is a Maybe for review, never a good fit.
+  assert.equal(verdictFor(questions, { director_or_above: { noul: 0.5 }, medicare_connection: { noul: 0.9 } }, t, { scoring: "weighted" }).verdict, "borderline");
+  assert.equal(verdictFor(questions, { director_or_above: { noul: 0.8 }, medicare_connection: { noul: 0.9 } }, t, { scoring: "weighted" }).verdict, "good");
+});
+
+test("a can't-tell answer never becomes a good fit, in either scoring mode", () => {
+  const { questions } = normalizeQuestionSet({ questions: [
+    { label: "Director or above", type: "noul", instructions: "?", kind: "must" },
+    { label: "Current role touches Medicare", type: "choice", instructions: "?", kind: "signal", criteria: { yes: "Yes", no: "No", unclear: "Can't tell" }, pass: ["yes"] },
+  ] });
+  const t = { keep: 0.6, drop: 0.35 };
+  const unsure = { director_or_above: { noul: 0.95 }, current_role_touches_medicare: { probabilities: { yes: 0.1, no: 0.1, unclear: 0.8 } } };
+  for (const scoring of ["weighted", "gates"]) {
+    const v = verdictFor(questions, unsure, t, { scoring });
+    assert.equal(v.verdict, "borderline", scoring);
+    assert.match(v.reason, /can't tell: Current role touches Medicare/);
+  }
+  const checked = { director_or_above: { noul: 0.95 }, current_role_touches_medicare: { probabilities: { yes: 0.9, no: 0.05, unclear: 0.05 } } };
+  assert.equal(verdictFor(questions, checked, t, { scoring: "weighted" }).verdict, "good");
+});
+
+test("duplicates: a name-less row never matches, and a re-roled LinkedIn column still identifies people", () => {
+  assert.equal(duplicateIndexes([{ name: "(no name)", company: "Anthem", linkedin: "" }, { name: "(no name)", company: "Anthem", linkedin: "" }]).size, 0);
+  assert.equal(duplicateIndexes([{ name: "Ada", company: "", linkedin: "" }, { name: "Ada", company: "", linkedin: "" }]).size, 0);
+  assert.deepEqual([...duplicateIndexes([{ name: "Ada", company: "Anthem" }, { name: "ada", company: "anthem" }])], [1]);
+  const { headers, rows } = parseCsv(`Full Name,Title,Organization,LinkedIn
+Ada Lovelace,Director,Anthem,https://www.linkedin.com/in/ada
+Grace Hopper,VP,Anthem,https://www.linkedin.com/in/grace`, { asArrays: true });
+  const plan = planColumns(headers, rows, { LinkedIn: "other", "Full Name": "other" });
+  const people = rows.map((r) => identifyWith(r, plan));
+  assert.deepEqual(people.map((p) => [p.name, p.linkedin]), [["Ada Lovelace", "https://www.linkedin.com/in/ada"], ["Grace Hopper", "https://www.linkedin.com/in/grace"]]);
+  assert.equal(duplicateIndexes(people).size, 0);
 });
 
 test("always-keep terms: 'MA' only as a real word, never in locations, degrees or inside other words", () => {

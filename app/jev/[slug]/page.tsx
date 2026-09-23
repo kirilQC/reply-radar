@@ -1017,7 +1017,7 @@ export default function JevClientPage() {
                           {set.scoring === "weighted"
                             ? <span>Every question counts equally · Good fit: average ≥ {Math.round(set.thresholds.keep * 100)}% · Maybe: {Math.round(set.thresholds.drop * 100)}–{Math.round(set.thresholds.keep * 100)}% (kept) · Out: below {Math.round(set.thresholds.drop * 100)}%</span>
                             : <span>Good fit: every must-have ≥ {Math.round(set.thresholds.keep * 100)}% · Dropped: a must-have &lt; {Math.round(set.thresholds.drop * 100)}%, an exclusion ≥ 80% sure{set.icp && (set.icp.sizeMin || set.icp.sizeMax) ? `, or outside ${set.icp.sizeMin ?? 0}–${set.icp.sizeMax ?? "any"} employees` : ""}</span>}
-                          <span>{" · "}can&apos;t-tell answers don&apos;t count{set.updatedAt ? ` · saved ${new Date(set.updatedAt).toLocaleString()}` : ""}</span>
+                          <span>{" · "}any can&apos;t-tell answer makes it a Maybe{set.updatedAt ? ` · saved ${new Date(set.updatedAt).toLocaleString()}` : ""}</span>
                         </div>
                         <KeepTermsField key={`keep-${set.updatedAt ?? ""}`} value={set.keepTerms ?? []} disabled={running || Boolean(busy)} onSave={(t) => void saveKeepTerms(t)} />
                       </>
@@ -1081,10 +1081,12 @@ export default function JevClientPage() {
                       <div className="jev-file-name">{file.name}</div>
                       <div className="jev-file-stats">
                         <span><b>{total.toLocaleString()}</b> {mode === "companies" ? "companies" : "contacts"}</span>
-                        {file.duplicates.size > 0 && <span><b>{file.duplicates.size}</b> duplicates skipped</span>}
+                        {file.duplicates.size > 0 && <span><b>{file.duplicates.size.toLocaleString()}</b> duplicates skipped</span>}
                         <span><b>{columnStats?.used}</b> of {file.headers.length} columns used</span>
                         {estimate && <span><b>~{estimate.perRow}</b> tokens / row</span>}
                         {estimate && <span>est. <b>{money(estimate.cost)}</b></span>}
+                        {/* A run once skipped 17,023 of 17,097 rows as duplicates without a word; this many is a column problem. */}
+                        {file.duplicates.size > total * 0.2 && <span className="jev-warn-line">{Math.round((file.duplicates.size / total) * 100)}% of rows read as duplicates — check the name and LinkedIn columns below before running.</span>}
                       </div>
                       <details className="jev-peek">
                         <summary>What Jev sees for row 1</summary>

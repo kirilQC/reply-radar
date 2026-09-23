@@ -309,7 +309,10 @@ export function planColumns(headers, sampleRows = [], overrides = {}) {
     const forced = overrides[header];
     if (forced && forced in COLUMN_ROLES) {
       const exp = forced === "experience" ? roleFromHeader(header) : null;
-      return { header, idx, role: forced, ...(exp?.role === "experience" ? { index: exp.index, field: exp.field } : {}), overridden: true, filled: values.filter((v) => v && v.trim()).length };
+      // What the header says it is, kept so identity (name, LinkedIn URL) survives a column being re-roled — a
+      // LinkedIn column set to "Send as extra" left a 17k-row run with no way to tell contacts apart.
+      const detected = roleFromHeader(header).role;
+      return { header, idx, role: forced, ...(exp?.role === "experience" ? { index: exp.index, field: exp.field } : {}), overridden: true, ...(detected && detected !== forced ? { detected } : {}), filled: values.filter((v) => v && v.trim()).length };
     }
     let found = roleFromHeader(header);
     if (!found.role) found = roleFromValues(values);
@@ -461,15 +464,16 @@ export function buildProfile(cells, plan) {
 
 /** Who a row is, for the table and de-duplication — never sent to Jev. */
 export function identifyWith(cells, plan) {
-  const first = valueFor(cells, plan, "first_name");
-  const last = valueFor(cells, plan, "last_name");
-  const name = clip(plan.columns.filter((c) => c.role === "name").map((c) => cell(cells, c)).find((v) => String(v).trim()) || `${first} ${last}`, 120);
+  const identity = (role) => plan.columns.filter((c) => c.role === role || c.detected === role).map((c) => String(cell(cells, c) ?? "").trim()).find(Boolean) ?? "";
+  const name = clip(identity("name") || `${identity("first_name")} ${identity("last_name")}`.trim(), 120);
   const roles = currentRoles(cells, plan);
+  // No LinkedIn column at all: any cell holding a profile URL still identifies the person.
+  const linkedin = identity("linkedin") || (Array.isArray(cells) ? cells : Object.values(cells ?? {})).map((v) => String(v ?? "").trim()).find((v) => /^(https?:\/\/)?([a-z]+\.)?linkedin\.com\/in\/[^/\s]+/i.test(v)) || "";
   return {
     name: name || "(no name)",
     title: valueFor(cells, plan, "title") || roles[0]?.title || "",
     company: valueFor(cells, plan, "company") || roles[0]?.company || "",
-    linkedin: clip(plan.columns.filter((c) => c.role === "linkedin").map((c) => cell(cells, c)).find((v) => String(v).trim()) ?? "", 300),
+    linkedin: clip(linkedin, 300),
   };
 }
 
@@ -596,8 +600,11 @@ export function duplicateIndexes(people) {
   const dupes = new Set();
   people.forEach((p, i) => {
     const url = String(p.linkedin || "").toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/[?#].*$/, "").replace(/\/+$/, "");
-    const key = url || `${String(p.name).toLowerCase()}|${String(p.company).toLowerCase()}`;
-    if (!key || key === "(no name)|") return;
+    // Name + company only counts with both present: "(no name)|Anthem" once collapsed 17,023 different contacts.
+    const name = String(p.name ?? "").trim().toLowerCase();
+    const company = String(p.company ?? "").trim().toLowerCase();
+    const key = url || (name && name !== "(no name)" && company ? `${name}|${company}` : "");
+    if (!key) return;
     if (seen.has(key)) dupes.add(i); else seen.add(key);
   });
   return dupes;
@@ -1231,8 +1238,17 @@ function weightedVerdict(questions, answers, thresholds, context) {
   const score = counted.reduce((n, c) => n + c.p, 0) / counted.length;
   const weakest = counted.reduce((w, c) => (c.p < w.p ? c : w));
   const pctOf = (x) => `${Math.round(x * 100)}%`;
-  if (score >= thresholds.keep && !missing) return { verdict: "good", reason: note ? note.slice(3) : "", scores, score };
   if (score < thresholds.drop) return { verdict: "bad", reason: `Score ${pctOf(score)} — weakest: ${weakest.label}${note}`, scores, score };
+  /*
+   * Good fit means Jev checked everything. A Vitalic run marked contacts good with "can't tell: Current role
+   * touches Medicare" because can't-tell answers sat out of the average and the one or two answered questions
+   * carried it — a guess shown as a fit. Anything unanswered, unclear, or a must-have short of the keep line is
+   * a Maybe instead, which Claude or the team reviews.
+   */
+  const weakMust = questions.filter((q) => q.kind === "must" && typeof scores[q.key] === "number" && !unclear.includes(q)).reduce((w, q) => (!w || scores[q.key] < scores[w.key] ? q : w), null);
+  if (score >= thresholds.keep && !missing && !unclear.length && (!weakMust || scores[weakMust.key] >= thresholds.keep)) return { verdict: "good", reason: "", scores, score };
+  if (score >= thresholds.keep && weakMust && scores[weakMust.key] < thresholds.keep) return { verdict: "borderline", reason: `Maybe — unsure: ${weakMust.label} (${pctOf(scores[weakMust.key])})${note}`, scores, score };
+  if (score >= thresholds.keep) return { verdict: "borderline", reason: missing ? `Maybe — no answer: ${missing.label}${note}` : `Maybe — ${note.slice(3)}`, scores, score };
   return { verdict: "borderline", reason: `Maybe — score ${pctOf(score)}, weakest: ${weakest.label}${note}`, scores, score };
 }
 
@@ -1295,11 +1311,13 @@ export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS, 
   const musts = counted.filter((c) => c.kind === "must");
   if (musts.length) {
     const weakMust = musts.reduce((w, c) => (c.p < w.p ? c : w));
-    if (weakMust.p >= thresholds.keep && !missing) return { verdict: "good", reason: note ? note.slice(3) : "", scores, score };
-    return { verdict: "borderline", reason: missing ? `No answer: ${missing.label}${note}` : `Unsure: ${weakMust.q.label} (${Math.round(weakMust.p * 100)}%)${note}`, scores, score };
+    // Same rule as weighted scoring: a can't-tell answer means Jev did not check it, so the row cannot be a good fit.
+    if (weakMust.p >= thresholds.keep && !missing && !unclear.length) return { verdict: "good", reason: "", scores, score };
+    return { verdict: "borderline", reason: missing ? `No answer: ${missing.label}${note}` : weakMust.p >= thresholds.keep ? note.slice(3) : `Unsure: ${weakMust.q.label} (${Math.round(weakMust.p * 100)}%)${note}`, scores, score };
   }
   const weakest = counted.reduce((w, c) => (c.p < w.p ? c : w));
-  if (score >= thresholds.keep && !missing) return { verdict: "good", reason: note ? note.slice(3) : "", scores, score };
+  if (score >= thresholds.keep && !missing && !unclear.length) return { verdict: "good", reason: "", scores, score };
+  if (score >= thresholds.keep && !missing) return { verdict: "borderline", reason: note.slice(3), scores, score };
   return { verdict: "borderline", reason: `Score ${Math.round(score * 100)}% — weakest: ${weakest.q.label}${note}`, scores, score };
 }
 

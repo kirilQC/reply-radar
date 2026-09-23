@@ -213,3 +213,7 @@ Inbox route groups messages by conversation once (was O(conversations×messages)
 parallel and Attio person fetches are concurrency-capped; the assistant caches the workspace list for 30s.
 Known follow-ups: CRM API keys are stored plaintext (same pattern as the HeyReach key); the meetings/deals
 directory reads are unbounded and will undercount past ~1000 rows.
+
+### Jev — no guessed good fits; identity survives re-roled columns
+- **Good fit requires every question answered.** In both scoring modes, any "can't tell" answer (or a must-have between the drop and keep lines) makes the row a Maybe, never Good. A Vitalic run showed Good rows reading "can't tell: Current role touches Medicare" — can't-tell answers sat out of the average and one or two answered questions carried the row.
+- **Duplicates:** `duplicateIndexes` only matches on a LinkedIn URL, or on name + company when both are real. A 17,097-row Vitalic run had its LinkedIn column set to "Send as extra"; names resolved to "(no name)" and every contact at the same company collapsed, so 17,023 were skipped. `planColumns` now keeps the header's `detected` role on overridden columns, and `identifyWith` reads name/LinkedIn from it (and from any cell holding a linkedin.com/in/ URL). The file card warns when more than 20% of rows read as duplicates.
