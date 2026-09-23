@@ -103,6 +103,15 @@ endpoint — it does not serve Jev.
   (exported as "Jev fit score"). Averaging signals into the verdict put "VP of Provider Growth at a Medicaid-focused
   company" in Borderline on a Vitalic "any Medicare/Medicaid/MA connection" run because a generic title failed the
   "own role" signal. With no must-have, the average still decides.
+- **Weighted scoring** (`scoring: "weighted"` on the question set; Weighted / Must-pass switch under the questions):
+  every answered question counts equally, none can drop a contact alone; good ≥ keep, out < drop, **Maybe** (kept)
+  in between. Company size becomes one more 0/1 vote. A rebuild keeps the chosen mode.
+- **Past roles reach Jev** (`past_roles`: up to 4 most recent ended jobs with their descriptions, from numbered
+  history and from AI Ark lookups). The question writer is told to infer from context, never keyword-match.
+- **Review maybes with Claude** (contacts): Sonnet 5 via OpenRouter, 8 a request, the team's written criteria + the
+  questions as a cached block; each maybe comes back keep/drop with confidence and a cited reason and the row
+  moves to Good/Bad with a CLAUDE badge. Downloads add "Good + maybe". Live on 113 AI Ark contacts with the Vitalic
+  Medicare prompt: 4 maybes → 3 kept (senior-living employer, past elder-care role), 1 dropped, 20s, $0.03.
 - **Contact lists up to 30,000 rows.** A 20k-row, 250-column AI Ark export (125MB) loads in 2s at ~280MB heap and
   runs at ~300 rows/s against a stub (real Jev ~80–120/s).
 - **Structured contact ICP** (`icp` on the question set; `app/jev/[slug]/icp.tsx`): a pool of target titles

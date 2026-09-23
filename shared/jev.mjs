@@ -182,6 +182,7 @@ export const COLUMN_ROLES = {
 const IDENTITY_ROLES = new Set(["name", "first_name", "last_name", "linkedin", "website", "company_linkedin"]);
 
 const MAX_CURRENT_ROLES = 4;
+const MAX_PAST_ROLES = 4;
 const MAX_OTHER_COLUMNS = 8;
 const OTHER_BUDGET = 1_500;
 const CLIP = { title: 160, headline: 220, about: 600, seniority: 40, department: 80, location: 100, skills: 200, company: 120, company_industry: 100, company_employees: 30, company_description: 500, company_products: 250, company_funding: 40, company_revenue: 40, company_location: 100, company_type: 40, company_locations: 20, other: 300 };
@@ -349,6 +350,33 @@ function rolesFromJson(text) {
  * file has one, from a blank end date when it has those, and otherwise the first job listed is taken as current
  * — the order every export we have seen uses.
  */
+/** Numbered job-history columns grouped by position, in the order the export lists them (most recent first). */
+function historyGroups(cells, plan) {
+  const groups = new Map();
+  for (const c of plan.columns) {
+    if (c.role !== "experience" || !c.field) continue;
+    const g = groups.get(c.index) ?? {};
+    const v = cell(cells, c);
+    if (v && !g[c.field]) g[c.field] = v;
+    groups.set(c.index, g);
+  }
+  return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([, g]) => g).filter((g) => g.title || g.company);
+}
+
+/**
+ * The most recent jobs a person has LEFT, with what they did there. A generic current title ("Director") says
+ * little, and the connection a client cares about is often in the jobs before it — eight years at a Medicare
+ * Advantage plan, a risk-adjustment role two jobs ago. Capped at four, most recent first.
+ */
+function pastRoles(cells, plan) {
+  const ordered = historyGroups(cells, plan);
+  let past;
+  if (plan.experienceHasCurrent) past = ordered.filter((g) => !truthy(g.current));
+  else if (plan.experienceHasEnd) past = ordered.filter((g) => String(g.end ?? "").trim() && !truthy(g.end));
+  else past = ordered.slice(1);
+  return past.slice(0, MAX_PAST_ROLES).map((g) => prune({ title: clip(g.title, 140), company: clip(g.company, 120), from: clip(g.start, 10), to: clip(g.end, 10), about: clip(g.about, 240) }) ?? {});
+}
+
 function currentRoles(cells, plan) {
   const groups = new Map();
   for (const c of plan.columns) {
@@ -409,6 +437,7 @@ export function buildProfile(cells, plan) {
     location: valueFor(cells, plan, "location"),
     skills: valueFor(cells, plan, "skills"),
     current_roles: roles,
+    past_roles: pastRoles(cells, plan),
     listed_company_profile: {
       industry: valueFor(cells, plan, "company_industry"),
       employees: valueFor(cells, plan, "company_employees"),
@@ -608,7 +637,8 @@ export function normalizeQuestionSet(input) {
   };
   if (thresholds.drop >= thresholds.keep) { thresholds.keep = DEFAULT_THRESHOLDS.keep; thresholds.drop = DEFAULT_THRESHOLDS.drop; problems.push("Thresholds reset: the drop line must sit below the keep line"); }
   const icp = normalizeIcp(input?.icp);
-  return { questions, thresholds, problems, ...(icp ? { icp } : {}) };
+  const scoring = SCORING_MODES.includes(input?.scoring) ? input.scoring : "gates";
+  return { questions, thresholds, problems, scoring, ...(icp ? { icp } : {}) };
 }
 
 /**
@@ -620,6 +650,14 @@ export function normalizeQuestionSet(input) {
  * as disqualifiers — and `must` for everything else.
  */
 export const QUESTION_KINDS = ["must", "exclude", "signal"];
+/**
+ * How the answers become a verdict.
+ * - `gates`: must-haves and exclusions can drop a contact on their own; signals rank.
+ * - `weighted`: every question counts the same and none can drop anyone alone — the average decides, and the
+ *   middle band is "maybe", kept for a thinking model or a person to look at. Asked for on a 20k-contact Vitalic
+ *   list where a generic title failing one question must not throw the contact away.
+ */
+export const SCORING_MODES = ["gates", "weighted"];
 const kindOf = (q, pass) => (QUESTION_KINDS.includes(q?.kind) ? q.kind : pass === false ? "exclude" : "must");
 const NEUTRAL_KEY = /^(unclear|unknown|not_stated|not_sure|cannot_tell|can_t_tell|no_data|insufficient|none_stated|not_enough_info)$/;
 
@@ -975,6 +1013,44 @@ export function mergeProposals(outcomes) {
   return [...byKey.values()].sort((a, b) => b.rows.length - a.rows.length);
 }
 
+/* ═══ Claude review of maybe contacts ═══ */
+
+/** Strict schema for Claude's call on each maybe contact: keep or drop, how sure, and why. */
+export const CONTACT_REVIEW_SCHEMA = {
+  type: "object", additionalProperties: false, required: ["results"],
+  properties: {
+    results: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false, required: ["id", "decision", "confidence", "reason"],
+        properties: { id: { type: "integer" }, decision: { type: "string", enum: ["keep", "drop"] }, confidence: { type: "string", enum: ["high", "medium", "low"] }, reason: { type: "string" } },
+      },
+    },
+  },
+};
+
+/** One maybe contact as Claude sees it: the profile Jev read, plus Jev's score on each question. */
+export function contactReviewItem(id, profile, questions, scores) {
+  const jev = {};
+  for (const q of Array.isArray(questions) ? questions : []) {
+    const p = scores?.[q.key];
+    if (typeof p === "number") jev[q.label] = `${Math.round(p * 100)}%`;
+  }
+  return { id, profile: profile ?? {}, jev_scores: jev };
+}
+
+/** Claude's decisions, one per contact asked about; anything missing or malformed is left undecided, never guessed. */
+export function parseContactReview(parsed, ids) {
+  const wanted = new Set(ids);
+  const out = new Map();
+  for (const r of Array.isArray(parsed?.results) ? parsed.results : []) {
+    const id = Number(r?.id);
+    if (!wanted.has(id) || out.has(id) || !["keep", "drop"].includes(r?.decision)) continue;
+    out.set(id, { decision: r.decision, confidence: ["high", "medium", "low"].includes(r?.confidence) ? r.confidence : "low", reason: clip(r?.reason, 300) });
+  }
+  return out;
+}
+
 /** A tag set out of a model's reply. */
 export function parseGeneratedTagSet(text) {
   const body = String(text ?? "").replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
@@ -1007,6 +1083,37 @@ export function passProbability(question, answer) {
   return null;
 }
 
+/**
+ * Equal-weight scoring: each answered question contributes its fit probability once — an exclusion's is already
+ * "not excluded" — and "can't tell" answers sit out. Good at or above the keep line, out below the drop line,
+ * "maybe" in between. A company-size range, when set, counts as one more question (0 outside, 1 inside) instead
+ * of a veto.
+ */
+function weightedVerdict(questions, answers, thresholds, context) {
+  const scores = {};
+  const counted = [];
+  const unclear = [];
+  let missing = null;
+  for (const q of questions) {
+    const answer = answers?.[q.key];
+    const p = passProbability(q, answer);
+    scores[q.key] = p;
+    if (p === null) { missing ??= q; continue; }
+    if (neutralShare(q, answer) >= 0.5) { unclear.push(q); continue; }
+    counted.push({ label: q.label, p });
+  }
+  const size = sizeCheck(context.icp, context.profile);
+  if (size) counted.push({ label: "Company size", p: size === "inside" ? 1 : 0 });
+  const note = unclear.length ? ` · can't tell: ${unclear.map((q) => q.label).join(", ")}` : "";
+  if (!counted.length) return { verdict: "borderline", reason: missing ? `No answer: ${missing.label}` : `Not enough data to judge${note}`, scores, score: null };
+  const score = counted.reduce((n, c) => n + c.p, 0) / counted.length;
+  const weakest = counted.reduce((w, c) => (c.p < w.p ? c : w));
+  const pctOf = (x) => `${Math.round(x * 100)}%`;
+  if (score >= thresholds.keep && !missing) return { verdict: "good", reason: note ? note.slice(3) : "", scores, score };
+  if (score < thresholds.drop) return { verdict: "bad", reason: `Score ${pctOf(score)} — weakest: ${weakest.label}${note}`, scores, score };
+  return { verdict: "borderline", reason: `Maybe — score ${pctOf(score)}, weakest: ${weakest.label}${note}`, scores, score };
+}
+
 /** How much of a choice answer landed on "can't tell" options. */
 function neutralShare(question, answer) {
   if (question.type !== "choice" || !question.neutral?.length) return 0;
@@ -1032,6 +1139,7 @@ export const EXCLUDE_LINE = 0.2;
  * - with no must-have, the averaged score decides good vs borderline.
  */
 export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS, context = {}) {
+  if (context.scoring === "weighted") return weightedVerdict(questions, answers, thresholds, context);
   const scores = {};
   const counted = [];
   const unclear = [];

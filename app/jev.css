@@ -310,3 +310,5 @@
 
 .jev-icp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .jev-icp-head .jev-describe-label { margin: 0; }
+
+.jev-scoring { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

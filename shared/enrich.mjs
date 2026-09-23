@@ -298,6 +298,14 @@ export function aiArkFacts(personValue) {
       if (role.title || role.company) roles.push(role);
     }
   }
+  const past = [];
+  for (const group of Array.isArray(person.position_groups) ? person.position_groups : []) {
+    for (const pos of Array.isArray(group?.profile_positions) ? group.profile_positions : []) {
+      if (!pos?.date?.end) continue;
+      const role = { title: str(pos?.title, 140), company: str(pos?.company || group?.company?.name, 120), from: str(pos?.date?.start, 10), to: str(pos?.date?.end, 10), about: str(pos?.description, 240) };
+      if (role.title || role.company) past.push(role);
+    }
+  }
   const co = person.company?.summary ?? {};
   const staff = co.staff?.range;
   const keywords = Array.isArray(person.company?.keywords) ? person.company.keywords.slice(0, 12).join(", ") : "";
@@ -308,6 +316,7 @@ export function aiArkFacts(personValue) {
     current_title: str(profile.title, 140),
     current_company: str(co.name, 120) ?? roles[0]?.company ?? null,
     current_roles: roles.slice(0, 4),
+    past_roles: past.slice(0, 4),
     location: str(person.location?.default ?? person.location?.short, 100),
     seniority: str(dept.seniority, 40),
     department: Array.isArray(dept.departments) && dept.departments.length ? clip(dept.departments.join(", "), 80) : null,
@@ -328,6 +337,11 @@ export function mergeAiArk(profile, person) {
   const { profile: merged, filled } = mergeStructured("contacts", profile, facts);
   for (const [k, v] of [["seniority", facts.seniority], ["department", facts.department]]) {
     if (v && !has(merged[k])) { merged[k] = v; filled.push(k); }
+  }
+  // Past jobs, with what they did there, because a generic current title is often explained by the job before.
+  if (facts.past_roles?.length && !has(merged.past_roles)) {
+    merged.past_roles = facts.past_roles.map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v)));
+    filled.push("past_roles");
   }
   // The employer's own description only applies when AI Ark's current company is the one the list names; for
   // anyone else it would describe the wrong organisation.

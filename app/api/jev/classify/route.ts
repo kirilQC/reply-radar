@@ -49,12 +49,12 @@ export async function POST(request: Request) {
     } else {
       const set = await loadQuestionSet(slug);
       if (!set?.questions.length) return Response.json({ ok: false, error: "This client has no saved question set." }, { status: 409 });
-      const { questions, thresholds, icp } = set;
+      const { questions, thresholds, icp, scoring } = set;
       judge = async (state) => {
         const result = await evaluateOne(state, questions);
         if (!result.ok) return { ok: false, error: result.error, status: result.status ?? 0 };
         // The profile goes in too: the company-size range is checked in code against it.
-        return { ok: true, ...verdictFor(questions, result.answers, thresholds, { icp, profile: state }), tokens: result.tokens ?? 0, cost: result.cost ?? null };
+        return { ok: true, ...verdictFor(questions, result.answers, thresholds, { icp, profile: state, scoring }), tokens: result.tokens ?? 0, cost: result.cost ?? null };
       };
     }
   } catch (error) {

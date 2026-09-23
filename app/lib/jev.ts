@@ -22,12 +22,12 @@
 import { clientContext } from "./client-context";
 import { brainContext } from "./brain-context";
 import { readConfig, writeConfig } from "./app-config";
-import { REVIEW_SCHEMA, mergeNamedTags, normalizeIcp, parseReview, reviewItem, parseTagEntries, otherSample, parseSuggestions, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
+import { CONTACT_REVIEW_SCHEMA, REVIEW_SCHEMA, contactReviewItem, parseContactReview, mergeNamedTags, normalizeIcp, parseReview, reviewItem, parseTagEntries, otherSample, parseSuggestions, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
 
 type Row = Record<string, unknown>;
 export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: "must" | "exclude" | "signal"; neutral?: string[] };
 export type JevIcp = { titles: string[]; responsibilities: string; sizeMin: number | null; sizeMax: number | null; exclusions: string };
-export type JevQuestionSet = { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; icp?: JevIcp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
+export type JevQuestionSet = { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; icp?: JevIcp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
 export type JevTag = { key: string; label: string; description: string };
 export type JevTagSet = { instructions: string; tags: JevTag[]; minConfidence: number; source?: string; updatedAt?: string; brief?: string };
 export type JevAnswer = { type: string; noul?: number; choice?: string; probabilities?: Record<string, number>; confidence?: number };
@@ -107,11 +107,12 @@ export async function loadQuestionSet(slug: string): Promise<JevQuestionSet | nu
   const raw = await readConfig(questionSetKey(slug));
   const value = typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw;
   if (!value || typeof value !== "object") return null;
-  const { questions, thresholds, icp } = normalizeQuestionSet(value) as { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; icp?: JevIcp };
+  const { questions, thresholds, icp, scoring } = normalizeQuestionSet(value) as { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; icp?: JevIcp; scoring: "gates" | "weighted" };
   const meta = value as Row;
   return {
     questions,
     thresholds,
+    scoring,
     ...(icp ? { icp } : {}),
     source: text(meta.source) || undefined,
     updatedAt: text(meta.updatedAt) || undefined,
@@ -140,11 +141,12 @@ export async function saveTagSet(slug: string, input: unknown, source = "manual"
 }
 
 export async function saveQuestionSet(slug: string, input: unknown, source = "manual"): Promise<{ set: JevQuestionSet; problems: string[] }> {
-  const { questions, thresholds, problems, icp } = normalizeQuestionSet(input) as { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; problems: string[]; icp?: JevIcp };
+  const { questions, thresholds, problems, icp, scoring } = normalizeQuestionSet(input) as { questions: JevQuestion[]; thresholds: { keep: number; drop: number }; problems: string[]; icp?: JevIcp; scoring: "gates" | "weighted" };
   const meta = (input && typeof input === "object" ? input : {}) as Row;
   const set: JevQuestionSet = {
     questions,
     thresholds,
+    scoring,
     ...(icp ? { icp } : {}),
     source,
     updatedAt: new Date().toISOString(),
@@ -166,6 +168,7 @@ The problem being solved: lists pulled from Clay or Sales Navigator contain cont
 
 Rules, from TypeSafe's own guidance on how Jev fails:
 - One judgement per question. Never "senior AND in the right industry". Split it.
+- Ask Jev to INFER from context, never to match keywords. Titles are often generic ("Director", "VP Operations"); the answer is in what the headline, About, current and past role descriptions and the employer's description imply. Phrase questions as "Based on everything in the profile, is it likely that …" and write criteria that describe the indirect evidence that counts (e.g. an employer that serves seniors implies Medicare exposure; years at a health plan imply payer experience) as well as the direct kind.
 - Literal wording. Jev answers the words you wrote, not what you meant. State the exact condition and put boundary cases in the criteria.
 - No arithmetic, counting or date comparison.
 - Refer to profile fields by name in backticks. Every contact list, whatever tool exported it, is mapped onto this one profile shape, and a question set is reused across lists, so name only these fields:
@@ -173,6 +176,7 @@ Rules, from TypeSafe's own guidance on how Jev fails:
   \`headline\`, \`about\` — the person's own LinkedIn headline and About text
   \`seniority\`, \`department\`, \`location\`, \`skills\`
   \`current_roles\` — every job the person holds now: title, company, since, about
+  \`past_roles\` — their most recent previous jobs: title, company, from, to, about (often where the real background shows)
   \`listed_company_profile\` — .industry, .employees, .description, .products, .funding, .revenue, .location, .type
   \`other\` — unrecognised extra columns, by their original header
 - Any field can be missing on a given list or contact. Write each question so a missing field leads to the "unclear" option (choice) or to the non-fit answer being unlikely either way — never so that absence reads as a fit. The sample profile shows which fields this client's current list actually carries; lean on those, but do not depend on a field only one exporter provides.
@@ -314,7 +318,9 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
   const generated = parsed.questions as unknown as JevQuestion[];
   const questions: JevQuestion[] = pool ? [pool as unknown as JevQuestion, ...generated.filter((q) => q.key !== "target_role")] : generated;
   if (!questions.length) return { ok: false, error: "The build came back without a usable question. Try again.", problems: parsed.problems };
-  const { set, problems } = await saveQuestionSet(slug, { ...parsed, questions, icp, brief, brainFolder: brain.folder, brainDocuments: brain.documents }, "description");
+  // A rebuild keeps the team's scoring choice; it is a setting about the client, not about one prompt.
+  const previous = await loadQuestionSet(slug).catch(() => null);
+  const { set, problems } = await saveQuestionSet(slug, { ...parsed, questions, icp, brief, scoring: previous?.scoring ?? "gates", brainFolder: brain.folder, brainDocuments: brain.documents }, "description");
   return { ok: true, set, problems: [...parsed.problems, ...problems] };
 }
 
@@ -559,6 +565,57 @@ async function reviewOnce(tags: JevTagSet, batch: Array<{ i: number; profile: un
     void cut;
     const cost = Number(payload?.usage?.cost);
     return { ok: true, results: [...placed.entries()].map(([i, o]) => ({ i, ...o })), cost: Number.isFinite(cost) ? cost : null };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "The review call failed." };
+  }
+}
+
+/* ── Claude review of maybe contacts ── */
+
+const CONTACT_REVIEW_PROMPT = `You are the second opinion on an outbound contact list for QC Growth, a B2B outbound agency. A fast classifier (Jev) scored these contacts against the client's criteria and could not decide: they are "maybes". Jev reads profiles literally; you can reason. Decide for each contact whether it should stay on the list.
+
+- Read the whole profile: headline, About, current roles, PAST roles and what they did there, and the employer's description. Connect the dots — a generic title at an employer whose business clearly matches, or a past role that shows the relevant background, counts.
+- Follow the client's criteria as written below. When they say to be inclusive, lean to "keep" whenever there is a real, plausible connection; drop only when the profile gives a clear reason the contact does not fit.
+- Jev's per-question scores are shown for context; overrule them when the profile says otherwise.
+- "reason": one sentence citing the specific fact that decided it. "confidence": high, medium or low.`;
+
+export async function reviewContacts(slug: string, items: Array<{ i: number; profile: unknown; scores?: Record<string, number | null> }>): Promise<{ ok: boolean; error?: string; results?: Array<Record<string, unknown>>; cost?: number | null; rateLimited?: boolean }> {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) return { ok: false, error: "OPENROUTER_API_KEY is not set." };
+  const set = await loadQuestionSet(slug);
+  if (!set?.questions.length) return { ok: false, error: "This client has no saved screening questions." };
+  const batch = items.slice(0, 10);
+  if (!batch.length) return { ok: true, results: [] };
+  const criteria = [
+    set.brief ? `THE CLIENT'S CRITERIA, AS THE TEAM WROTE THEM:\n${set.brief.slice(0, MAX_PROMPT_BRIEF_CHARS)}` : "",
+    `THE QUESTIONS JEV WAS ASKED:\n${set.questions.map((q) => `- ${q.label}: ${q.instructions}`).join("\n")}`,
+  ].filter(Boolean).join("\n\n");
+  const contacts = batch.map((it) => JSON.stringify(contactReviewItem(it.i, it.profile, set.questions, it.scores ?? {}))).join("\n");
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: REVIEW_MODEL(),
+        temperature: 0,
+        max_tokens: Math.min(8_000, 350 * batch.length + 600),
+        response_format: { type: "json_schema", json_schema: { name: "decisions", strict: true, schema: CONTACT_REVIEW_SCHEMA } },
+        messages: [
+          // The criteria are identical on every batch, so they are cached after the first.
+          { role: "system", content: [{ type: "text", text: CONTACT_REVIEW_PROMPT }, { type: "text", text: criteria, cache_control: { type: "ephemeral" } }] },
+          { role: "user", content: `CONTACTS TO DECIDE (${batch.length}):\n${contacts}` },
+        ],
+      }),
+      signal: AbortSignal.timeout(50_000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 429) return { ok: false, rateLimited: true, error: "Rate limited by OpenRouter" };
+    if (!response.ok) return { ok: false, error: `${REVIEW_MODEL()} ${response.status}: ${payload?.error?.message ?? "no answer"}` };
+    let parsed: unknown = null;
+    try { parsed = JSON.parse(payload?.choices?.[0]?.message?.content ?? ""); } catch { return { ok: false, error: payload?.choices?.[0]?.finish_reason === "length" ? "Claude's answer was cut off." : "Claude's answer was not valid JSON." }; }
+    const decided = parseContactReview(parsed, batch.map((b) => b.i)) as Map<number, Record<string, unknown>>;
+    const cost = Number(payload?.usage?.cost);
+    return { ok: true, results: [...decided.entries()].map(([i, o]) => ({ i, ...o })), cost: Number.isFinite(cost) ? cost : null };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "The review call failed." };
   }

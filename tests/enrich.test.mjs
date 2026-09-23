@@ -139,6 +139,8 @@ test("mergeAiArk: fills what the list lacks, exposes a side-role listing, and ne
   assert.equal(main.profile.listed_company_profile.description, "Voda is elevating the standards of cleaning.");
   assert.ok(main.filled.includes("listed_company_profile.industry"));
   assert.deepEqual(aiArkEvidence(main.facts).map((e) => e.field), ["headline", "title", "company"]);
+  // The ended Murphy Business job comes back as a past role.
+  assert.deepEqual(main.profile.past_roles, [{ title: "Advisor", company: "Murphy Business", from: "2019-01-01", to: "2022-12-31" }]);
 });
 
 test("batched structuring: every row carries its id, and answers are split back without crossing rows", () => {

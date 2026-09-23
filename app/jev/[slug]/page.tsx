@@ -61,7 +61,7 @@ type Kind = "must" | "exclude" | "signal";
 type Question = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: Kind; neutral?: string[] };
 const KIND_LABEL: Record<Kind, string> = { must: "Must-have", exclude: "Exclusion", signal: "Signal" };
 const kindOf = (q: Question): Kind => q.kind ?? (q.type === "noul" && q.pass === false ? "exclude" : "must");
-type QuestionSet = { questions: Question[]; thresholds: { keep: number; drop: number }; icp?: Icp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
+type QuestionSet = { questions: Question[]; thresholds: { keep: number; drop: number }; scoring?: "gates" | "weighted"; icp?: Icp; source?: string; updatedAt?: string; brainFolder?: string; brainDocuments?: string[]; brief?: string };
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type Person = { name: string; title: string; company: string; linkedin: string };
 type PlanColumn = { header: string; idx: number; role: string; why?: string; index?: number; field?: string; overridden?: boolean; filled: number };
@@ -81,7 +81,7 @@ const roleLabel = (c: PlanColumn) => (c.role === "experience" && c.field ? `Job 
 type Mode = "contacts" | "companies";
 type Status = "good" | "borderline" | "bad" | "tagged" | "review" | "error" | "duplicate";
 type Ranked = { tag: string; label: string; p: number };
-type Review = { kind: "existing" | "new" | "unplaced"; confidence: string; reason: string; jevLabel?: string };
+type Review = { kind: "existing" | "new" | "unplaced" | "keep" | "drop"; confidence: string; reason: string; jevLabel?: string };
 type Result = { review?: Review; score?: number | null; status: Status; reason: string; scores?: Record<string, number | null>; tag?: string; label?: string; confidence?: number; runnerUp?: Ranked | null; top?: Ranked[]; tokens?: number; cost?: number | null; note?: string; enriched?: boolean; firstStatus?: string };
 /** "all", a status, or "tag:<key>" for one company tag. */
 type Filter = string;
@@ -103,7 +103,7 @@ const VISIBLE_ROWS = 300;
 /** OpenRouter's listed Jev price, used only when a response does not report its own cost. */
 const PRICE_PER_TOKEN = 0.042 / 1_000_000;
 
-const STATUS_LABEL: Record<Status, string> = { good: "Good fit", borderline: "Borderline", bad: "Bad fit", tagged: "Tagged", review: "Needs review", error: "Error", duplicate: "Duplicate" };
+const STATUS_LABEL: Record<Status, string> = { good: "Good fit", borderline: "Maybe", bad: "Bad fit", tagged: "Tagged", review: "Needs review", error: "Error", duplicate: "Duplicate" };
 const pct = (p: number | null | undefined) => (typeof p === "number" ? `${Math.round(p * 100)}%` : "—");
 const money = (n: number) => (n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
@@ -621,6 +621,59 @@ export default function JevClientPage() {
     finally { setBusy(""); }
   };
 
+  /** Switch how answers become a verdict. Verdicts are computed at run time, so the current run is cleared. */
+  const setScoring = async (scoring: "gates" | "weighted") => {
+    if (!set || set.scoring === scoring || (scoring === "gates" && !set.scoring)) return;
+    setBusy("saving");
+    try {
+      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, set: { ...set, scoring } }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
+      setSet(payload.set);
+      setNotice({ kind: "ok", text: scoring === "weighted" ? "Weighted scoring — every question counts equally and no single answer removes anyone. Run again to apply." : "Must-pass scoring — must-haves and exclusions can drop a contact. Run again to apply." });
+      if (file) resetResults(file);
+    } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
+    finally { setBusy(""); }
+  };
+
+  /** Claude's keep-or-drop on every maybe contact, 8 a request, three at a time; rows update as answers land. */
+  const reviewMaybes = async () => {
+    if (!file || running || review) return;
+    const rows = [...results.current.entries()].filter(([, r]) => r.status === "borderline" && !r.review).map(([i]) => i);
+    if (!rows.length) return;
+    let done = 0; let cost = 0; let failed = 0; let kept = 0; let dropped = 0; let lastError = "";
+    setReview({ done: 0, total: rows.length, cost: 0 });
+    const batches: number[][] = [];
+    for (let k = 0; k < rows.length; k += 8) batches.push(rows.slice(k, k + 8));
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(3, batches.length) }, async () => {
+      while (next < batches.length) {
+        const batch = batches[next++];
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          const items = batch.map((i) => ({ i, profile: enrichedRef.current.get(i)?.profile ?? file.profiles[i], scores: results.current.get(i)?.scores }));
+          const response = await fetch("/api/jev/review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, items }) }).catch(() => null);
+          const payload = response ? await response.json().catch(() => ({})) : {};
+          if (response?.status === 429 && attempt < 5) { pushLog("warn", `OpenRouter rate limit — holding ${batch.length} contacts for 20s`); await new Promise((r) => setTimeout(r, 20_000)); continue; }
+          if (!response?.ok || !payload.ok) { failed += batch.length; lastError = String(payload?.error ?? `HTTP ${response?.status ?? "no response"}`); pushLog("error", `Claude review failed for ${batch.length} contacts: ${lastError}`); break; }
+          cost += Number(payload.cost) || 0;
+          for (const o of payload.results ?? []) {
+            const i = Number(o.i); const prev = results.current.get(i);
+            if (!prev) continue;
+            if (o.decision === "keep") kept += 1; else dropped += 1;
+            results.current.set(i, { ...prev, status: o.decision === "keep" ? "good" : "bad", review: { kind: o.decision, confidence: o.confidence, reason: o.reason, jevLabel: "Maybe" } });
+          }
+          pushLog("ok", `Claude decided ${payload.results?.length ?? 0} of ${batch.length} maybes`);
+          break;
+        }
+        done += batch.length;
+        setReview({ done, total: rows.length, cost });
+        flush();
+      }
+    }));
+    setReview(null);
+    setNotice({ kind: failed ? "info" : "ok", text: `Claude reviewed ${rows.length.toLocaleString()} maybes — kept ${kept.toLocaleString()}, dropped ${dropped.toLocaleString()}${failed ? `; ${failed} could not be reviewed (${lastError}) — click again to retry` : ""} · ${money(cost)}` });
+  };
+
   const saveTags = async () => {
     if (!editingTags) return;
     setBusy("saving");
@@ -810,11 +863,11 @@ export default function JevClientPage() {
 
   const exportRows = (keep: (r: Result | undefined) => boolean, label: string) => {
     if (!file || !set) return;
-    const headers = ["Jev verdict", "Jev fit score", "Jev reason", "Jev note", ...set.questions.map((q) => `Jev: ${q.label}`), ...ENRICH_COLUMNS.contacts.map(([, h]) => h), ...file.headers];
+    const headers = ["Jev verdict", "Jev fit score", "Jev reason", "Jev note", "Claude review", ...set.questions.map((q) => `Jev: ${q.label}`), ...ENRICH_COLUMNS.contacts.map(([, h]) => h), ...file.headers];
     const rows = file.rows.flatMap((cells, i) => {
       const r = all.get(i);
       if (!keep(r)) return [];
-      const verdict = [r ? STATUS_LABEL[r.status] : "Not checked", typeof r?.score === "number" ? pct(r.score) : "", r?.reason ?? "", r?.note ?? "", ...set.questions.map((q) => (r?.scores ? pct(r.scores[q.key]) : ""))];
+      const verdict = [r ? STATUS_LABEL[r.status] : "Not checked", typeof r?.score === "number" ? pct(r.score) : "", r?.reason ?? "", r?.note ?? "", r?.review ? `${r.review.kind === "keep" ? "Keep" : r.review.kind === "drop" ? "Drop" : r.review.kind} (${r.review.confidence}): ${r.review.reason}` : "", ...set.questions.map((q) => (r?.scores ? pct(r.scores[q.key]) : ""))];
       return [[...verdict, ...enrichCells("contacts", i), ...cells]];
     });
     const stamp = new Date().toISOString().slice(0, 10);
@@ -905,9 +958,15 @@ export default function JevClientPage() {
                     ) : set?.questions.length ? (
                       <>
                         <QuestionList set={set} missing={gaps} />
-                        <div className="jev-rule-line">
-                          Good fit: average ≥ {Math.round(set.thresholds.keep * 100)}% · Dropped: a must-have &lt; {Math.round(set.thresholds.drop * 100)}%, an exclusion ≥ 80% sure{set.icp && (set.icp.sizeMin || set.icp.sizeMax) ? `, or outside ${set.icp.sizeMin ?? 0}–${set.icp.sizeMax ?? "any"} employees` : ""}{" · "}can&apos;t-tell answers don&apos;t count
-                          {set.updatedAt && <span> · saved {new Date(set.updatedAt).toLocaleString()}</span>}
+                        <div className="jev-rule-line jev-scoring">
+                          <div className="jev-seg" title="How the answers become a verdict">
+                            <button type="button" className={set.scoring === "weighted" ? "on" : ""} onClick={() => void setScoring("weighted")} disabled={running || Boolean(busy)}>Weighted</button>
+                            <button type="button" className={set.scoring !== "weighted" ? "on" : ""} onClick={() => void setScoring("gates")} disabled={running || Boolean(busy)}>Must-pass</button>
+                          </div>
+                          {set.scoring === "weighted"
+                            ? <span>Every question counts equally · Good fit: average ≥ {Math.round(set.thresholds.keep * 100)}% · Maybe: {Math.round(set.thresholds.drop * 100)}–{Math.round(set.thresholds.keep * 100)}% (kept) · Out: below {Math.round(set.thresholds.drop * 100)}%</span>
+                            : <span>Good fit: every must-have ≥ {Math.round(set.thresholds.keep * 100)}% · Dropped: a must-have &lt; {Math.round(set.thresholds.drop * 100)}%, an exclusion ≥ 80% sure{set.icp && (set.icp.sizeMin || set.icp.sizeMax) ? `, or outside ${set.icp.sizeMin ?? 0}–${set.icp.sizeMax ?? "any"} employees` : ""}</span>}
+                          <span>{" · "}can&apos;t-tell answers don&apos;t count{set.updatedAt ? ` · saved ${new Date(set.updatedAt).toLocaleString()}` : ""}</span>
                         </div>
                       </>
                     ) : null}
@@ -1025,7 +1084,10 @@ export default function JevClientPage() {
                   {finished && file.mode === "contacts" && (
                     <div className="jev-downloads">
                       <button className="primary-button" onClick={() => exportRows((r) => r?.status === "good", "good-fits")} disabled={!counts.good}>Download {counts.good.toLocaleString()} good fits</button>
-                      <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "borderline", "borderline")} disabled={!counts.borderline}>Borderline ({counts.borderline.toLocaleString()})</button>
+                      <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "good" || r?.status === "borderline", "good-and-maybe")} disabled={!counts.good && !counts.borderline}>Good + maybe ({(counts.good + counts.borderline).toLocaleString()})</button>
+                      <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "borderline", "maybe")} disabled={!counts.borderline}>Maybe ({counts.borderline.toLocaleString()})</button>
+                      {review ? <button className="secondary-button" disabled>Claude reviewing… {review.done}/{review.total}</button>
+                        : (() => { const n = [...all.values()].filter((r) => r.status === "borderline" && !r.review).length; return n > 0 ? <button className="primary-button" onClick={() => void reviewMaybes()}>Review {n.toLocaleString()} maybes with Claude</button> : null; })()}
                       <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "bad" || r?.status === "duplicate", "removed")} disabled={!counts.bad && !counts.duplicate}>Removed ({(counts.bad + counts.duplicate).toLocaleString()})</button>
                       <button className="secondary-button" onClick={() => exportRows(() => true, "all")}>Everything, with verdicts</button>
                     </div>

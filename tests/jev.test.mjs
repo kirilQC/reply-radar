@@ -20,6 +20,8 @@ import {
   tagVerdict,
   toTagWire,
   addTags,
+  contactReviewItem,
+  parseContactReview,
   mergeProposals,
   parseReview,
   reviewItem,
@@ -92,9 +94,11 @@ test("an AI Ark-style export is read into the fixed profile shape", () => {
   const profile = profileFor(sideRoleRow, AIARK_HEADERS);
   assert.equal(profile.listed_company, "Lumenuity, Inc.");
   assert.equal(profile.headline, "CEO | Launch i/o, Inc");
-  // Every current role is kept — the side role and the real job — and past roles are not.
+  // Every current role is kept — the side role and the real job.
   assert.deepEqual(profile.current_roles.map((r) => r.company), ["Launch i/o, INC", "Lumenuity, Inc."]);
-  assert.equal(JSON.stringify(profile).includes("Lenovo"), false);
+  // The ended Lenovo job is history, not a current role.
+  assert.equal(JSON.stringify(profile.current_roles).includes("Lenovo"), false);
+  assert.deepEqual(profile.past_roles, [{ title: "VP Operations", company: "Lenovo" }]);
   assert.equal(profile.listed_company_profile.description, "Deep-tech optics company.");
   // Identity, contact details and photos never reach Jev.
   const flat = JSON.stringify(profile);
@@ -438,4 +442,43 @@ test("Claude review: placements are held to the tag set, new tags are merged acr
   assert.equal(out.has(99), false);
   const merged = mergeProposals(new Map([[10, { kind: "new", tag: "vet_clinic", label: "Vet Clinic", description: "" }], [11, { kind: "new", tag: "vet_clinic", label: "Vet Clinic", description: "Animal care" }], [12, { kind: "existing" }]]));
   assert.deepEqual(merged, [{ key: "vet_clinic", label: "Vet Clinic", description: "Animal care", rows: [10, 11] }]);
+});
+
+test("weighted scoring: every question counts the same, one fail never eliminates, the middle is maybe", () => {
+  const { questions, scoring } = normalizeQuestionSet({ scoring: "weighted", questions: [
+    { label: "Any Medicare connection", type: "noul", instructions: "?", kind: "must" },
+    { label: "Employer runs Medicare business", type: "noul", instructions: "?", kind: "signal" },
+    { label: "Own role handles it", type: "noul", instructions: "?", kind: "signal" },
+    { label: "Outside healthcare", type: "noul", instructions: "?", kind: "exclude", pass: false },
+  ] });
+  assert.equal(scoring, "weighted");
+  const t = { keep: 0.6, drop: 0.35 };
+  const ctx = { scoring: "weighted" };
+  const carried = verdictFor(questions, { any_medicare_connection: { noul: 0.2 }, employer_runs_medicare_business: { noul: 0.9 }, own_role_handles_it: { noul: 0.8 }, outside_healthcare: { noul: 0.05 } }, t, ctx);
+  assert.equal(carried.verdict, "good");
+  assert.ok(Math.abs(carried.score - (0.2 + 0.9 + 0.8 + 0.95) / 4) < 1e-9);
+  const maybe = verdictFor(questions, { any_medicare_connection: { noul: 0.5 }, employer_runs_medicare_business: { noul: 0.4 }, own_role_handles_it: { noul: 0.2 }, outside_healthcare: { noul: 0.1 } }, t, ctx);
+  assert.equal(maybe.verdict, "borderline");
+  assert.match(maybe.reason, /^Maybe — score 50%, weakest: Own role handles it/);
+  const out = verdictFor(questions, { any_medicare_connection: { noul: 0.1 }, employer_runs_medicare_business: { noul: 0.1 }, own_role_handles_it: { noul: 0.1 }, outside_healthcare: { noul: 0.9 } }, t, ctx);
+  assert.equal(out.verdict, "bad");
+  const icp = normalizeIcp({ sizeMin: 100 });
+  const sized = verdictFor([questions[0]], { any_medicare_connection: { noul: 0.95 } }, t, { scoring: "weighted", icp, profile: { listed_company_profile: { employees: "11-50" } } });
+  assert.equal(sized.verdict, "borderline");
+  assert.equal(normalizeQuestionSet({ questions: [] }).scoring, "gates");
+});
+
+test("past roles reach the profile, from numbered history and from AI Ark", () => {
+  const { headers, rows } = parseCsv(`Name,Title,Experience 1 Title,Experience 1 Company,Experience 1 End Date,Experience 1 Summary,Experience 2 Title,Experience 2 Company,Experience 2 End Date,Experience 2 Summary
+Ada,Director,Director,Acme Health,,Runs operations,Manager of Risk Adjustment,Humana,2021-06,Led HCC coding for Medicare Advantage members`, { asArrays: true });
+  const p = buildProfile(rows[0], planColumns(headers, rows));
+  assert.deepEqual(p.past_roles, [{ title: "Manager of Risk Adjustment", company: "Humana", to: "2021-06", about: "Led HCC coding for Medicare Advantage members" }]);
+  assert.deepEqual(p.current_roles, [{ title: "Director", company: "Acme Health", about: "Runs operations" }]);
+});
+
+test("contact review: each maybe gets keep or drop with a reason, nothing guessed", () => {
+  const item = contactReviewItem(3, { listed_title: "Director" }, [{ key: "any", label: "Any Medicare connection" }], { any: 0.52 });
+  assert.deepEqual(item, { id: 3, profile: { listed_title: "Director" }, jev_scores: { "Any Medicare connection": "52%" } });
+  const out = parseContactReview({ results: [{ id: 3, decision: "keep", confidence: "high", reason: "Six years at Humana in risk adjustment" }, { id: 4, decision: "maybe", confidence: "low", reason: "?" }, { id: 9, decision: "drop" }] }, [3, 4]);
+  assert.deepEqual([...out.entries()], [[3, { decision: "keep", confidence: "high", reason: "Six years at Humana in risk adjustment" }]]);
 });
