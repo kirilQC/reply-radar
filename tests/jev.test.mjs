@@ -20,6 +20,9 @@ import {
   tagVerdict,
   toTagWire,
   addTags,
+  mergeProposals,
+  parseReview,
+  reviewItem,
   normalizeIcp,
   normalizeQuestionSet,
   otherSample,
@@ -406,4 +409,26 @@ Other`;
     { label: "Women's Health / OB-GYN", description: "" }, { label: "Long-Term Acute Care Hospital", description: "" }, { label: "IPA", description: "" },
   ]);
   assert.deepEqual(parseTagList("Tag each company as one of the following: A | B | C"), ["A", "B", "C"]);
+});
+
+test("Claude review: placements are held to the tag set, new tags are merged across batches", () => {
+  const set = normalizeTagSet({ tags: ["Health System", "Rehabilitation Hospital", "Dental / DSO"] });
+  const item = reviewItem(7, { name: "Shirley Ryan AbilityLab", industry: "hospitals", from_website: { what_they_do: "Inpatient rehab" } }, [{ label: "Academic Medical Center", p: 0.35 }, { label: "Other", p: 0.01 }]);
+  assert.deepEqual(item.jev_top_guesses, ["Academic Medical Center (35%)"]);
+  const out = parseReview({ results: [
+    { id: 1, existing_tag: "rehabilitation hospital", new_tag_label: null, new_tag_description: null, confidence: "high", reason: "Inpatient rehab" },
+    { id: 2, existing_tag: "Made-up Tag", new_tag_label: "Veterinary Clinic", new_tag_description: "Animal care", confidence: "medium", reason: "Vet" },
+    { id: 3, existing_tag: null, new_tag_label: "Dental / DSO", new_tag_description: "dupe", confidence: "high", reason: "Dentist" },
+    { id: 4, existing_tag: null, new_tag_label: null, new_tag_description: null, confidence: "low", reason: "A chess club" },
+    { id: 99, existing_tag: "Health System", confidence: "high", reason: "not asked" },
+  ] }, set.tags, [1, 2, 3, 4, 5]);
+  assert.deepEqual(out.get(1), { kind: "existing", tag: "rehabilitation_hospital", label: "Rehabilitation Hospital", confidence: "high", reason: "Inpatient rehab" });
+  assert.equal(out.get(2).kind, "new");
+  assert.equal(out.get(2).label, "Veterinary Clinic");
+  assert.equal(out.get(3).label, "Dental / DSO"); // a "new" tag that already exists is placed there
+  assert.equal(out.get(4).kind, "unplaced");
+  assert.equal(out.get(5).reason, "Claude did not answer for this company");
+  assert.equal(out.has(99), false);
+  const merged = mergeProposals(new Map([[10, { kind: "new", tag: "vet_clinic", label: "Vet Clinic", description: "" }], [11, { kind: "new", tag: "vet_clinic", label: "Vet Clinic", description: "Animal care" }], [12, { kind: "existing" }]]));
+  assert.deepEqual(merged, [{ key: "vet_clinic", label: "Vet Clinic", description: "Animal care", rows: [10, 11] }]);
 });

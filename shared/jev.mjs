@@ -887,6 +887,93 @@ export function addTags(tagSet, newTags) {
   return normalizeTagSet({ ...tagSet, tags: [...rest, ...newTags.map((t) => ({ label: t.label, description: t.description ?? "" })), ...other] });
 }
 
+/* ═══ Claude review of Other / Needs review ═══ */
+
+/**
+ * What Claude is shown for one company it is asked to place: the same facts Jev saw (list data plus scraped
+ * website facts) and Jev's own top candidates, so it can confirm, correct, or reject them.
+ */
+export function reviewItem(id, profile, top) {
+  const p = profile ?? {};
+  return prune({
+    id,
+    name: clip(p.name, 120),
+    industry: clip(p.industry, 160),
+    description: clip(p.description, 700),
+    products: clip(p.products, 300),
+    from_website: p.from_website,
+    type: clip(p.type, 60),
+    employees: clip(p.employees, 30),
+    location: clip(p.location, 100),
+    jev_top_guesses: (Array.isArray(top) ? top : []).filter((t) => t && t.p > 0.02).slice(0, 3).map((t) => `${t.label} (${Math.round(t.p * 100)}%)`),
+  }) ?? { id };
+}
+
+/** Strict JSON schema for Claude's placements: an existing tag, or a new one, never both, with a reason. */
+export const REVIEW_SCHEMA = {
+  type: "object", additionalProperties: false, required: ["results"],
+  properties: {
+    results: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "existing_tag", "new_tag_label", "new_tag_description", "confidence", "reason"],
+        properties: {
+          id: { type: "integer" },
+          existing_tag: { type: ["string", "null"] },
+          new_tag_label: { type: ["string", "null"] },
+          new_tag_description: { type: ["string", "null"] },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          reason: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
+/**
+ * Claude's answer, held to the tag set: an `existing_tag` must match a real tag (case- and punctuation-
+ * insensitively), a `new_tag_label` must not duplicate one, and every row asked about gets exactly one outcome.
+ * A row it left out, or answered with neither, comes back as `unplaced` rather than being guessed.
+ */
+export function parseReview(parsed, tags, ids) {
+  const norm = (x) => String(x ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const byLabel = new Map((tags ?? []).map((t) => [norm(t.label), t]));
+  const wanted = new Set(ids);
+  const out = new Map();
+  for (const r of Array.isArray(parsed?.results) ? parsed.results : []) {
+    const id = Number(r?.id);
+    if (!wanted.has(id) || out.has(id)) continue;
+    const reason = clip(r?.reason, 300);
+    const confidence = ["high", "medium", "low"].includes(r?.confidence) ? r.confidence : "low";
+    const existing = r?.existing_tag ? byLabel.get(norm(stripInstruction(r.existing_tag))) : null;
+    if (existing) { out.set(id, { kind: "existing", tag: existing.key, label: existing.label, confidence, reason }); continue; }
+    const label = clip(stripInstruction(r?.new_tag_label ?? ""), 80);
+    const clash = label ? byLabel.get(norm(label)) : null;
+    if (clash) { out.set(id, { kind: "existing", tag: clash.key, label: clash.label, confidence, reason }); continue; }
+    if (label) { out.set(id, { kind: "new", tag: slugKey(label), label, description: clip(r?.new_tag_description, 400), confidence, reason }); continue; }
+    out.set(id, { kind: "unplaced", confidence, reason: reason || "Claude gave no tag" });
+  }
+  for (const id of ids) if (!out.has(id)) out.set(id, { kind: "unplaced", confidence: "low", reason: "Claude did not answer for this company" });
+  return out;
+}
+
+/**
+ * New tags proposed across a whole review, merged by name: "Rehab Hospital" from one batch and "rehab hospital"
+ * from another are one proposal, with every company it caught.
+ */
+export function mergeProposals(outcomes) {
+  const byKey = new Map();
+  for (const [i, o] of outcomes) {
+    if (o?.kind !== "new") continue;
+    const cur = byKey.get(o.tag) ?? { key: o.tag, label: o.label, description: o.description, rows: [] };
+    if (!cur.description && o.description) cur.description = o.description;
+    cur.rows.push(i);
+    byKey.set(o.tag, cur);
+  }
+  return [...byKey.values()].sort((a, b) => b.rows.length - a.rows.length);
+}
+
 /** A tag set out of a model's reply. */
 export function parseGeneratedTagSet(text) {
   const body = String(text ?? "").replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();

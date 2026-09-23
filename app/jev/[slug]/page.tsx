@@ -34,6 +34,7 @@ import {
   MAX_COMPANY_ROWS,
   MAX_ROWS,
   addTags,
+  mergeProposals,
   buildCompanyProfile,
   buildProfile,
   duplicateIndexes,
@@ -80,7 +81,8 @@ const roleLabel = (c: PlanColumn) => (c.role === "experience" && c.field ? `Job 
 type Mode = "contacts" | "companies";
 type Status = "good" | "borderline" | "bad" | "tagged" | "review" | "error" | "duplicate";
 type Ranked = { tag: string; label: string; p: number };
-type Result = { status: Status; reason: string; scores?: Record<string, number | null>; tag?: string; label?: string; confidence?: number; runnerUp?: Ranked | null; top?: Ranked[]; tokens?: number; cost?: number | null; note?: string; enriched?: boolean; firstStatus?: string };
+type Review = { kind: "existing" | "new" | "unplaced"; confidence: string; reason: string; jevLabel?: string };
+type Result = { review?: Review; status: Status; reason: string; scores?: Record<string, number | null>; tag?: string; label?: string; confidence?: number; runnerUp?: Ranked | null; top?: Ranked[]; tokens?: number; cost?: number | null; note?: string; enriched?: boolean; firstStatus?: string };
 /** "all", a status, or "tag:<key>" for one company tag. */
 type Filter = string;
 type Notice = { kind: "ok" | "error" | "info"; text: string } | null;
@@ -287,6 +289,10 @@ export default function JevClientPage() {
   // Tags proposed from a run's "Other" pile, and — once some are added — the rows worth re-tagging with them.
   const [suggestion, setSuggestion] = useState<{ suggestions: Suggestion[]; outOfScope: string[] } | null>(null);
   const [retag, setRetag] = useState<number[]>([]);
+  // Claude's second opinion on Other / Needs review: progress while it runs, and the new tags it proposed.
+  const [review, setReview] = useState<{ done: number; total: number; cost: number } | null>(null);
+  const [proposals, setProposals] = useState<Suggestion[] | null>(null);
+  const newTagLabels = useRef(new Map<string, string>());
   const [mode, setModeState] = useState<Mode>("contacts");
   const [jev, setJev] = useState<{ configured: boolean; model: string } | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -546,6 +552,75 @@ export default function JevClientPage() {
     } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
   };
 
+  /**
+   * Send the rows Jev could not place to Claude, 15 a request, three at a time. Each answer updates its row as it
+   * lands: an existing tag, a proposed new tag (collected for the team to adopt), or left as it was with a reason.
+   */
+  const reviewWithClaude = async () => {
+    if (!file || running || review) return;
+    const rows = [...results.current.entries()].filter(([, r]) => (r.status === "review" || (r.status === "tagged" && r.tag === "other")) && !r.review).map(([i]) => i);
+    if (!rows.length) return;
+    const outcomes = new Map<number, Record<string, unknown>>();
+    let done = 0; let cost = 0; let failed = 0; let lastError = "";
+    setReview({ done: 0, total: rows.length, cost: 0 }); setProposals(null);
+    const batches: number[][] = [];
+    // Eight a request: a review answer carries a reason per company, and eight keeps it well inside the output
+    // cap and the 60s ceiling; the server still halves a batch whose answer comes back cut off.
+    for (let k = 0; k < rows.length; k += 8) batches.push(rows.slice(k, k + 8));
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(3, batches.length) }, async () => {
+      while (next < batches.length) {
+        const batch = batches[next++];
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          const items = batch.map((i) => ({ i, profile: enrichedRef.current.get(i)?.profile ?? file.profiles[i], top: results.current.get(i)?.top }));
+          const response = await fetch("/api/jev/tags/review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, items }) }).catch(() => null);
+          const payload = response ? await response.json().catch(() => ({})) : {};
+          if (response?.status === 429 && attempt < 5) { pushLog("warn", `OpenRouter rate limit — holding ${batch.length} companies for 20s`); await new Promise((r) => setTimeout(r, 20_000)); continue; }
+          if (!response?.ok || !payload.ok) { failed += batch.length; lastError = String(payload?.error ?? `HTTP ${response?.status ?? "no response"}`); pushLog("error", `Claude review failed for ${batch.length} companies: ${lastError}`); break; }
+          cost += Number(payload.cost) || 0;
+          for (const o of payload.results ?? []) {
+            const i = Number(o.i); const prev = results.current.get(i);
+            if (!prev) continue;
+            outcomes.set(i, o);
+            const rv: Review = { kind: o.kind, confidence: o.confidence, reason: o.reason, jevLabel: prev.label };
+            if (o.kind === "unplaced") results.current.set(i, { ...prev, review: rv });
+            else {
+              if (o.kind === "new") newTagLabels.current.set(o.tag, o.label);
+              results.current.set(i, { ...prev, status: "tagged", tag: o.tag, label: o.label, review: rv });
+            }
+          }
+          const placed = (payload.results ?? []).filter((o: { kind: string }) => o.kind !== "unplaced").length;
+          pushLog("ok", `Claude placed ${placed} of ${batch.length}${placed < batch.length ? `, ${batch.length - placed} left as they were` : ""}`);
+          break;
+        }
+        done += batch.length;
+        setReview({ done, total: rows.length, cost });
+        flush();
+      }
+    }));
+    const merged = mergeProposals(outcomes) as Array<{ key: string; label: string; description: string; rows: number[] }>;
+    setProposals(merged.map((m) => ({ label: m.label, description: m.description, count: m.rows.length, examples: m.rows.slice(0, 5).map((i) => file.people[i]?.name ?? "") })));
+    setReview(null);
+    const placed = [...outcomes.values()].filter((o) => o.kind !== "unplaced").length;
+    setNotice({ kind: failed ? "info" : "ok", text: `Claude reviewed ${rows.length.toLocaleString()} companies — placed ${placed.toLocaleString()}${merged.length ? `, proposing ${merged.length} new tag${merged.length === 1 ? "" : "s"}` : ""}${failed ? `; ${failed} could not be reviewed (${lastError}) — click Review again to retry them` : ""} · ${money(cost)}` });
+    setCollapsed(false);
+  };
+
+  /** Adopt Claude's proposed tags into the saved set. Rows already carry them, so nothing needs to re-run. */
+  const adoptProposals = async (chosen: Suggestion[]) => {
+    if (!tags || !chosen.length) return;
+    setBusy("saving");
+    try {
+      const next = addTags(tags, chosen.map((c) => ({ label: c.label, description: c.description })));
+      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, kind: "tags", set: { ...tags, ...next } }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
+      setTags(payload.set); setProposals(null);
+      setNotice({ kind: "ok", text: `Added ${chosen.length} tag${chosen.length === 1 ? "" : "s"} to the tag set — future runs will use them.` });
+    } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
+    finally { setBusy(""); }
+  };
+
   const saveTags = async () => {
     if (!editingTags) return;
     setBusy("saving");
@@ -721,12 +796,13 @@ export default function JevClientPage() {
 
   const exportCompanies = (keep: (r: Result | undefined) => boolean, label: string) => {
     if (!file) return;
-    const headers = ["Jev tag", "Jev confidence", "Jev runner-up", "Jev needs review", "Jev note", ...ENRICH_COLUMNS.companies.map(([, h]) => h), ...file.headers];
+    const headers = ["Jev tag", "Jev confidence", "Jev runner-up", "Jev needs review", "Jev note", "Claude review", "Claude new tag", ...ENRICH_COLUMNS.companies.map(([, h]) => h), ...file.headers];
     const rows = file.rows.flatMap((cells, i) => {
       const r = all.get(i);
       if (!keep(r)) return [];
       const tagged = r && (r.status === "tagged" || r.status === "review");
-      const lead = [tagged ? r.label ?? "" : r ? STATUS_LABEL[r.status] : "Not checked", tagged ? pct(r.confidence) : "", r?.runnerUp ? `${r.runnerUp.label} (${pct(r.runnerUp.p)})` : "", r?.status === "review" ? "Yes" : "", r?.note ?? ""];
+      const lead = [tagged ? r.label ?? "" : r ? STATUS_LABEL[r.status] : "Not checked", tagged && !r?.review ? pct(r.confidence) : r?.review ? r.review.confidence : "", r?.runnerUp ? `${r.runnerUp.label} (${pct(r.runnerUp.p)})` : "", r?.status === "review" ? "Yes" : "", r?.note ?? "",
+        r?.review ? `${r.review.reason}${r.review.jevLabel ? ` (Jev said ${r.review.jevLabel})` : ""}` : "", r?.review?.kind === "new" && !tags?.tags.some((t) => t.key === r.tag) ? "Yes" : ""];
       return [[...lead, ...enrichCells("companies", i), ...cells]];
     });
     download(`${slug}-jev-${label}-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(headers, rows));
@@ -747,7 +823,7 @@ export default function JevClientPage() {
 
   const configured = mode === "companies" ? Boolean(tags?.tags.length) : Boolean(set?.questions.length);
   const ready = Boolean(!stale && jev?.configured && configured && file && file.mode === mode && !editing && !editingTags);
-  const tagLabel = (key: string) => tags?.tags.find((t) => t.key === key)?.label ?? key;
+  const tagLabel = (key: string) => tags?.tags.find((t) => t.key === key)?.label ?? newTagLabels.current.get(key) ?? key;
   const finished = Boolean(file && timing?.end && !running);
 
   /* ── Render ── */
@@ -862,6 +938,7 @@ export default function JevClientPage() {
                       />
                     )}
                     {notice && <div className={`jev-banner is-${notice.kind}`}>{notice.text}</div>}
+                    {proposals && proposals.length > 0 && !editingTags && <SuggestPanel title="New tags Claude proposed" suggestions={proposals} outOfScope={[]} busy={busy === "saving"} onAdd={(c) => void adoptProposals(c)} onDismiss={() => setProposals(null)} />}
                     {suggestion && !editingTags && <SuggestPanel suggestions={suggestion.suggestions} outOfScope={suggestion.outOfScope} busy={busy === "saving"} onAdd={(c) => void addSuggested(c)} onDismiss={() => setSuggestion(null)} />}
                     {editingTags ? <TagEditor value={editingTags} onChange={setEditingTags} /> : tags?.tags.length ? <TagList set={tags} collapsed={collapsed} counts={tagCounts} /> : null}
                   </section>
@@ -958,6 +1035,11 @@ export default function JevClientPage() {
                       <button className="primary-button" onClick={() => exportCompanies(() => true, "tagged")}>Download all {total.toLocaleString()}, tagged</button>
                       {filter.startsWith("tag:") && <button className="secondary-button" onClick={() => exportCompanies((r) => r?.tag === filter.slice(4) && r?.status !== "error", `tag-${filter.slice(4)}`)}>Only {tagLabel(filter.slice(4))} ({(tagCounts[filter.slice(4)] ?? 0).toLocaleString()})</button>}
                       <button className="secondary-button" onClick={() => exportCompanies((r) => r?.status === "review", "needs-review")} disabled={!counts.review}>Needs review ({counts.review.toLocaleString()})</button>
+                      {(() => {
+                        const n = [...all.values()].filter((r) => (r.status === "review" || (r.status === "tagged" && r.tag === "other")) && !r.review).length;
+                        if (review) return <button className="secondary-button" disabled>Claude reviewing… {review.done}/{review.total}</button>;
+                        return n > 0 ? <button className="primary-button" onClick={() => void reviewWithClaude()}>Review {n.toLocaleString()} with Claude</button> : null;
+                      })()}
                     </div>
                   )}
                   <ActivityLog lines={logLines.current} />
@@ -1009,8 +1091,12 @@ export default function JevClientPage() {
                               </em>
                             </span>
                             <span className="jev-why">
+                              {r?.review && r.review.kind !== "unplaced" && <span className="jev-claude-tag" title={r.review.jevLabel ? `Jev said: ${r.review.jevLabel}` : ""}>claude{r.review.kind === "new" && !tags?.tags.some((t) => t.key === r.tag) ? " · new tag" : ""}</span>}
                               {r?.enriched && <span className="jev-enriched-tag" title={r.firstStatus ? `Before enrichment: ${r.firstStatus}` : "Judged on scraped data"}>enriched</span>}
-                              {tagged ? <>{pct(r?.confidence)}{r?.runnerUp ? <span className="jev-runner"> · or {r.runnerUp.label} {pct(r.runnerUp.p)}</span> : null}{status === "review" ? <span className="jev-review"> · needs review</span> : null}</> : r?.reason}
+                              {/* A row Claude placed shows Claude's confidence, not the Jev score it overruled. */}
+                              {r?.review && r.review.kind !== "unplaced" ? <>{r.review.confidence} confidence{r.review.jevLabel && r.review.jevLabel !== r.label ? <span className="jev-runner"> · Jev said {r.review.jevLabel}</span> : null}</>
+                                : tagged ? <>{pct(r?.confidence)}{r?.runnerUp ? <span className="jev-runner"> · or {r.runnerUp.label} {pct(r.runnerUp.p)}</span> : null}{status === "review" ? <span className="jev-review"> · needs review</span> : null}</> : r?.reason}
+                              {r?.review && <span className="jev-note">Claude ({r.review.confidence}): {r.review.reason}</span>}
                               {r?.note && <span className="jev-note">{r.note}</span>}
                             </span>
                           </div>

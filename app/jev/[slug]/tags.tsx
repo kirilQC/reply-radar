@@ -87,8 +87,8 @@ export type Suggestion = { label: string; description: string; examples: string[
  * New tags proposed from a run's "Other" pile: tick the ones to keep, rename if needed, add. Nothing is saved
  * until "Add" — a suggestion is a proposal about the client's market, and the team owns that call.
  */
-export function SuggestPanel({ suggestions, outOfScope, busy, onAdd, onDismiss }: {
-  suggestions: Suggestion[]; outOfScope: string[]; busy: boolean;
+export function SuggestPanel({ suggestions, outOfScope, busy, onAdd, onDismiss, title = "Suggested tags" }: {
+  suggestions: Suggestion[]; outOfScope: string[]; busy: boolean; title?: string;
   onAdd: (chosen: Suggestion[]) => void; onDismiss: () => void;
 }) {
   const [picked, setPicked] = useState(() => suggestions.map(() => true));
@@ -97,7 +97,7 @@ export function SuggestPanel({ suggestions, outOfScope, busy, onAdd, onDismiss }
   return (
     <div className="jev-suggest">
       <div className="jev-suggest-head">
-        <strong>Suggested tags <b>{suggestions.length}</b></strong>
+        <strong>{title} <b>{suggestions.length}</b></strong>
         <div className="jev-actions">
           <button className="secondary-button" onClick={onDismiss} disabled={busy}>Dismiss</button>
           <button className="primary-button" onClick={() => onAdd(chosen)} disabled={busy || !chosen.length}>{busy ? "Adding…" : `Add ${chosen.length} tag${chosen.length === 1 ? "" : "s"}`}</button>

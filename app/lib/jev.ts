@@ -22,7 +22,7 @@
 import { clientContext } from "./client-context";
 import { brainContext } from "./brain-context";
 import { readConfig, writeConfig } from "./app-config";
-import { mergeNamedTags, normalizeIcp, parseTagEntries, otherSample, parseSuggestions, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
+import { REVIEW_SCHEMA, mergeNamedTags, normalizeIcp, parseReview, reviewItem, parseTagEntries, otherSample, parseSuggestions, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
 
 type Row = Record<string, unknown>;
 export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: "must" | "exclude" | "signal"; neutral?: string[] };
@@ -478,5 +478,86 @@ export async function describeTags(slug: string, labels: string[], allLabels: st
     return { ok: true, descriptions, cost: Number.isFinite(cost) ? cost : null };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "The description call failed." };
+  }
+}
+
+/* ── Claude review of Other / Needs review ── */
+
+const REVIEW_MODEL = () => process.env.JEV_REVIEW_MODEL || "anthropic/claude-sonnet-5";
+
+const REVIEW_PROMPT = `You are the second opinion on a company list for QC Growth, a B2B outbound agency. A fast classifier (Jev) could not confidently place these companies in the client's tag set: it put them in "Other" or was unsure between tags. Look at each company properly and place it.
+
+For each company, do exactly one of:
+- "existing_tag": the single best tag from the tag set, spelled exactly as listed. Prefer this whenever a tag genuinely fits — the tag set is the client's own taxonomy and a new tag is a cost.
+- "new_tag_label" + "new_tag_description": only when no existing tag fits and the company is a real, recurring kind of organization in the client's market. Name it the way people in that market would; one plain sentence (at most 30 words) saying what belongs in it and how it differs from the nearest existing tag. Reuse the same new label for similar companies in this batch.
+- neither (both null): the company is outside the client's market entirely (a chess club, a church, a consumer brand) or there is too little information to tell. Say which in the reason.
+
+Judge by what the organization primarily does, from its description and website facts — not its name alone. Jev's guesses are shown; confirm or overrule them. "reason": one short sentence citing the fact that decided it. "confidence": high, medium or low.`;
+
+type ReviewResult = { ok: boolean; error?: string; results?: Array<Record<string, unknown>>; cost?: number | null; rateLimited?: boolean; truncated?: boolean };
+
+export async function reviewCompanies(slug: string, items: Array<{ i: number; profile: unknown; top?: unknown }>): Promise<ReviewResult> {
+  const tags = await loadTagSet(slug);
+  if (!tags?.tags.length) return { ok: false, error: "This client has no saved tag set." };
+  return reviewBatch(tags, items.slice(0, 15));
+}
+
+/**
+ * One review call, split in half and retried when the answer comes back cut off. A reason per company makes the
+ * answer long, and a 15-company batch overran the output cap in live testing — a cut-off answer is not valid
+ * JSON, so the whole batch failed. Halves always fit.
+ */
+async function reviewBatch(tags: JevTagSet, batch: Array<{ i: number; profile: unknown; top?: unknown }>): Promise<ReviewResult> {
+  const first = await reviewOnce(tags, batch);
+  if (!first.ok && first.truncated && batch.length > 1) {
+    const mid = Math.ceil(batch.length / 2);
+    const a = await reviewBatch(tags, batch.slice(0, mid));
+    const b = await reviewBatch(tags, batch.slice(mid));
+    if (a.ok && b.ok) return { ok: true, results: [...(a.results ?? []), ...(b.results ?? [])], cost: (a.cost ?? 0) + (b.cost ?? 0) };
+    return a.ok ? b : a;
+  }
+  return first;
+}
+
+async function reviewOnce(tags: JevTagSet, batch: Array<{ i: number; profile: unknown; top?: unknown }>): Promise<ReviewResult> {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) return { ok: false, error: "OPENROUTER_API_KEY is not set." };
+  if (!batch.length) return { ok: true, results: [] };
+  const tagList = tags.tags.map((t) => `- ${t.label}${t.description ? `: ${t.description}` : ""}`).join("\n");
+  const companies = batch.map((it) => JSON.stringify(reviewItem(it.i, it.profile, it.top))).join("\n");
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: REVIEW_MODEL(),
+        temperature: 0,
+        // ~250 tokens a company with its reason; room for a long one.
+        max_tokens: Math.min(8_000, 450 * batch.length + 600),
+        response_format: { type: "json_schema", json_schema: { name: "placements", strict: true, schema: REVIEW_SCHEMA } },
+        messages: [
+          // The tag set is identical on every batch of a review, so it is sent as a cached block: the first batch
+          // pays for ~10k tokens of tag descriptions and the rest read them from cache.
+          { role: "system", content: [
+            { type: "text", text: REVIEW_PROMPT },
+            { type: "text", text: `THE CLIENT'S TAG SET (${tags.tags.length} tags):\n${tagList}`, cache_control: { type: "ephemeral" } },
+          ] },
+          { role: "user", content: `COMPANIES TO PLACE (${batch.length}):\n${companies}` },
+        ],
+      }),
+      signal: AbortSignal.timeout(50_000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 429) return { ok: false, rateLimited: true, error: "Rate limited by OpenRouter" };
+    if (!response.ok) return { ok: false, error: `${REVIEW_MODEL()} ${response.status}: ${payload?.error?.message ?? "no answer"}` };
+    let parsed: unknown = null;
+    const cut = payload?.choices?.[0]?.finish_reason === "length";
+    try { parsed = JSON.parse(payload?.choices?.[0]?.message?.content ?? ""); } catch { return { ok: false, truncated: true, error: cut ? "Claude's answer was cut off." : "Claude's answer was not valid JSON." }; }
+    const placed = parseReview(parsed, tags.tags, batch.map((b) => b.i)) as Map<number, Record<string, unknown>>;
+    void cut;
+    const cost = Number(payload?.usage?.cost);
+    return { ok: true, results: [...placed.entries()].map(([i, o]) => ({ i, ...o })), cost: Number.isFinite(cost) ? cost : null };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "The review call failed." };
   }
 }

@@ -85,6 +85,13 @@ endpoint — it does not serve Jev.
   each silently dropped the end of a real list; Bluevia's 188 described tags are ~30,000); prose sent to a model is
   cut at 12,000 separately. Measured: 169 described in ~32s; 240 companies tagged against all 169 in 4.5s,
   ~8.4k Jev tokens a company (~$0.00035), Other 14 → 6, Needs review 6 → 25 (finer neighbours, lower margins).
+- **Review with Claude** (company mode, after a run): rows in Other or Needs review go to `anthropic/claude-sonnet-5`
+  via OpenRouter (`JEV_REVIEW_MODEL`), 8 a request, 3 at a time, with the full tag set as a cached system block.
+  Each company comes back as an existing tag, a proposed new tag (with a description), or unplaced — always with a
+  reason, held to the tag set by `parseReview`. Rows update live with a CLAUDE badge; proposals are merged across
+  batches (`mergeProposals`) and can be adopted into the set (rows already carry them). A cut-off answer is split in
+  half and retried — a 15-company batch overran the output cap live. Measured: 24 leftovers on 188 tags, 19 placed,
+  1 new tag, 31s, $0.10; Needs review 23 → 3.
 - **Stale-tab guard:** the client bundle carries `NEXT_PUBLIC_BUILD_ID` (the commit, set in `next.config.ts`) and
   `/api/jev/questions` returns the server's; on a mismatch the page shows "Reply Radar was updated — Reload" and
   blocks Run. Added after an old tab ran Bright Data-era pipeline code against the AI Ark server and skipped every
