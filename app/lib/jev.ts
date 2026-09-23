@@ -42,7 +42,13 @@ const MAX_ATTEMPTS = 5;
 
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 export const questionSetKey = (slug: string) => `jev_questions_${slug}`;
-const MAX_BRIEF_CHARS = 12_000;
+/**
+ * How much typed text a build keeps. A pasted taxonomy is long — Bluevia's 188 tags with a sentence each are
+ * ~30,000 characters — and every earlier cap (4,000, then 12,000) silently dropped the end of it. The list is parsed
+ * in code, so it can be large; only free-form prose goes to a model, and that is cut separately.
+ */
+const MAX_BRIEF_CHARS = 200_000;
+const MAX_PROMPT_BRIEF_CHARS = 12_000;
 /** Company tagging is stored beside the contact questions, one key per client, so each client has one of each. */
 export const tagSetKey = (slug: string) => `jev_tags_${slug}`;
 
@@ -270,7 +276,7 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
   const named = mode === "companies" ? parseTagList(brief) : [];
   const content = [
     `Client: ${name}`,
-    brief ? `WHAT THE PERSON RUNNING THIS LIST ASKED FOR — this leads; everything below is background:\n${brief}` : "",
+    brief ? `WHAT THE PERSON RUNNING THIS LIST ASKED FOR — this leads; everything below is background:\n${brief.slice(0, MAX_PROMPT_BRIEF_CHARS)}` : "",
     icp ? icpBlock(icp) : "",
     named.length >= 3 ? `They named these tags; keep every one, spelled exactly so and in this order:\n${named.map((t: string) => `- ${t}`).join("\n")}` : "",
     clientBrief,
