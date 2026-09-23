@@ -663,7 +663,7 @@ export default function JevClientPage() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
       setSet(payload.set);
-      setNotice({ kind: "ok", text: scoring === "weighted" ? "Weighted scoring — every question counts equally and no single answer removes anyone. Run again to apply." : "Must-pass scoring — must-haves and exclusions can drop a contact. Run again to apply." });
+      setNotice({ kind: "ok", text: scoring === "weighted" ? "Weighted scoring — must-haves are gates, every other question counts equally. Run again to apply." : "Must-pass scoring — must-haves and exclusions can drop a contact. Run again to apply." });
       if (file) resetResults(file);
     } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
     finally { setBusy(""); }
@@ -1032,9 +1032,9 @@ export default function JevClientPage() {
                             <button type="button" className={set.scoring !== "weighted" ? "on" : ""} onClick={() => void setScoring("gates")} disabled={running || Boolean(busy)}>Must-pass</button>
                           </div>
                           {set.scoring === "weighted"
-                            ? <span>Every question counts equally · Good fit: average ≥ {Math.round(set.thresholds.keep * 100)}% · Maybe: {Math.round(set.thresholds.drop * 100)}–{Math.round(set.thresholds.keep * 100)}% (kept) · Out: below {Math.round(set.thresholds.drop * 100)}%</span>
+                            ? <span>Must-haves are gates, never votes · every other question counts equally · Good fit: average ≥ {Math.round(set.thresholds.keep * 100)}% · Maybe: {Math.round(set.thresholds.drop * 100)}–{Math.round(set.thresholds.keep * 100)}% (kept) · Out: below {Math.round(set.thresholds.drop * 100)}%</span>
                             : <span>Good fit: every must-have ≥ {Math.round(set.thresholds.keep * 100)}% · Dropped: a must-have &lt; {Math.round(set.thresholds.drop * 100)}%, an exclusion ≥ 80% sure{set.icp && (set.icp.sizeMin || set.icp.sizeMax) ? `, or outside ${set.icp.sizeMin ?? 0}–${set.icp.sizeMax ?? "any"} employees` : ""}</span>}
-                          <span>{" · "}any can&apos;t-tell answer makes it a Maybe{set.updatedAt ? ` · saved ${new Date(set.updatedAt).toLocaleString()}` : ""}</span>
+                          <span>{" · "}Good fit needs most questions answered, not can&apos;t-tell{set.updatedAt ? ` · saved ${new Date(set.updatedAt).toLocaleString()}` : ""}</span>
                         </div>
                         <KeepTermsField key={`keep-${set.updatedAt ?? ""}`} value={set.keepTerms ?? []} disabled={running || Boolean(busy)} onSave={(t) => void saveKeepTerms(t)} />
                       </>

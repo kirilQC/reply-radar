@@ -170,7 +170,8 @@ The problem being solved: lists pulled from Clay or Sales Navigator contain cont
 
 Rules, from TypeSafe's own guidance on how Jev fails:
 - One judgement per question. Never "senior AND in the right industry". Split it.
-- Ask Jev to INFER from context, never to match keywords. Titles are often generic ("Director", "VP Operations"); the answer is in what the headline, About, current and past role descriptions and the employer's description imply. Phrase questions as "Based on everything in the profile, is it likely that …" and write criteria that describe the indirect evidence that counts (e.g. an employer that serves seniors implies Medicare exposure; years at a health plan imply payer experience) as well as the direct kind.
+- Ask Jev to INFER from context, never to match keywords. Titles are often generic ("Director", "VP Operations"); the answer is in what the headline, About, current and past role descriptions and the employer's description imply. Phrase questions as "Based on everything in the profile, is it likely that …" and write criteria that describe the indirect evidence that counts (e.g. years at a health plan imply payer experience) as well as the direct kind.
+- Judge the PERSON, not the employer, whenever the person running the list says the companies are already chosen (curated, vetted, "all X companies"). Then every contact's employer qualifies by definition, so a question about the employer — or one that lets the employer count as evidence — marks the whole list a fit. Write no employer question, and say in each question's instructions that working at a qualifying company is not evidence on its own: what counts is what this person's own function does (their title, headline, About and role descriptions). Criteria must separate a role that exists for the target work from a general one that merely sits inside such a company (e.g. corporate IT, HR, finance, general strategy).
 - Literal wording. Jev answers the words you wrote, not what you meant. State the exact condition and put boundary cases in the criteria.
 - No arithmetic, counting or date comparison.
 - Refer to profile fields by name in backticks. Every contact list, whatever tool exported it, is mapped onto this one profile shape, and a question set is reused across lists, so name only these fields:
@@ -186,7 +187,7 @@ Rules, from TypeSafe's own guidance on how Jev fails:
 - For a choice, 3–6 options with plain-language descriptions, always including an "unclear" option for when the profile does not say. Mark only the genuinely fitting options in "pass"; "unclear" is not a fit.
 - When the person running the list has described what they want, build from that description first; use the client's ICP below only to fill in what they left unsaid. Otherwise base every question on the ICP as written. Do not invent targeting neither supports.
 - Give every question a "kind":
-  - "must": a real requirement — the contact is dropped only if they clearly fail it. Use for at most 2–3 questions.
+  - "must": a real requirement — the contact is dropped only if they clearly fail it. Use for at most 2–3 questions. A must-have is a gate only: passing it never makes someone a fit, so seniority, "is this their main job" and similar entry conditions belong here, never as signals.
   - "exclude": a disqualifier (competitor, vendor, a specialty or segment the client does not serve). Phrase it so "yes" means the disqualifier is true and set "pass": false. The contact is dropped only when Jev is clearly sure.
   - "signal": evidence that makes a contact more or less attractive (owns a budget, the right sub-specialty). It only moves a score and never drops anyone. Prefer this for anything that is "nice to have".
 - Be generous. These lists are already targeted; the job is to remove the clear mistakes, not to find a perfect few. A question that a genuine target could fail for lack of data, or for an unusual but legitimate title, must not be a "must".
@@ -369,6 +370,7 @@ export async function evaluateOne(state: unknown, questions: JevQuestion[] | { w
   const body = JSON.stringify({ model, state, questions: Array.isArray(questions) ? toWireQuestions(questions) : questions.wire });
   let lastError = "";
   let lastStatus = 0;
+  let partial: { answers: Record<string, JevAnswer>; usage?: { cost?: unknown; input_tokens?: unknown; prompt_tokens?: unknown } } | null = null;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
     try {
       const response = await fetch(endpoint, {
@@ -378,6 +380,10 @@ export async function evaluateOne(state: unknown, questions: JevQuestion[] | { w
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       const payload = await response.json().catch(() => ({}));
+      // Jev now and then leaves one question out of an otherwise good reply; one more try usually fills it, and the
+      // row gets a real verdict instead of "No answer". The partial reply is kept in case the retry fails.
+      const gaps = Array.isArray(questions) && payload?.answers ? questions.filter((q) => !payload.answers[q.key]).length : 0;
+      if (response.ok && payload?.answers && gaps && attempt === 0) { partial = payload; continue; }
       if (response.ok && payload?.answers) {
         const usage = payload.usage ?? {};
         const cost = Number(usage.cost);
@@ -394,6 +400,10 @@ export async function evaluateOne(state: unknown, questions: JevQuestion[] | { w
       lastError = error instanceof Error ? error.message : "Network error reaching Jev.";
       await sleep(400 * 2 ** attempt + Math.random() * 300);
     }
+  }
+  if (partial) {
+    const cost = Number(partial.usage?.cost);
+    return { ok: true, answers: partial.answers, tokens: Number(partial.usage?.input_tokens ?? partial.usage?.prompt_tokens) || 0, cost: Number.isFinite(cost) ? cost : null };
   }
   return { ok: false, error: lastError || "Jev did not answer.", status: lastStatus };
 }

@@ -1104,7 +1104,10 @@ export function findKeepTerm(cells, headers, plan, terms) {
   const roleOf = new Map((plan?.columns ?? []).map((c) => [c.idx, c.role]));
   for (let idx = 0; idx < headers.length; idx += 1) {
     const header = headers[idx];
-    if (SKIP_COLUMN.test(header) || SKIP_ROLES.has(roleOf.get(idx))) continue;
+    // Company columns are skipped too: on a list of companies chosen for their Medicare business, every row's
+    // "Company Product and Services" says Medicare Advantage, and the term stopped meaning anything about the person.
+    const role = roleOf.get(idx) ?? "";
+    if (SKIP_COLUMN.test(header) || SKIP_ROLES.has(role) || role === "company" || role.startsWith("company_") || /^(company|organi[sz]ation) /i.test(header)) continue;
     const text = String((Array.isArray(cells) ? cells[idx] : cells?.[header]) ?? "");
     if (!text) continue;
     for (const [term, match] of matchers) {
@@ -1214,7 +1217,8 @@ export function passProbability(question, answer) {
 }
 
 /**
- * Equal-weight scoring: each answered question contributes its fit probability once — an exclusion's is already
+ * Equal-weight scoring: each answered signal or exclusion contributes its fit probability once (must-haves are
+ * gates, not votes) — an exclusion's is already
  * "not excluded" — and "can't tell" answers sit out. Good at or above the keep line, out below the drop line,
  * "maybe" in between. A company-size range, when set, counts as one more question (0 outside, 1 inside) instead
  * of a veto.
@@ -1231,11 +1235,16 @@ function weightedVerdict(questions, answers, thresholds, context) {
     scores[q.key] = p;
     if (p === null) { missing ??= q; continue; }
     if (neutralShare(q, answer) >= 0.5) { unclear.push(q); continue; }
-    // A must-have is the one hard line even in weighted mode ("director and up only"); everything else is a vote.
-    if (q.kind === "must" && p < thresholds.drop && (!failedMust || p < failedMust.p)) failedMust = { label: q.label, p };
+    /*
+     * A must-have is a gate, never a vote. It used to be averaged in too, and on a Vitalic list of directors the
+     * 99% "director or higher" answer lifted nearly everyone to good fit — seniority let a contact through the
+     * door but was being scored as evidence that they work on Medicare Advantage. Now it only drops (clear fail)
+     * or holds back (unsure); the score is the signals alone.
+     */
+    if (q.kind === "must") { if (p < thresholds.drop && (!failedMust || p < failedMust.p)) failedMust = { label: q.label, p }; continue; }
     counted.push({ label: q.label, p });
   }
-  if (failedMust) return { verdict: "bad", reason: `Failed: ${failedMust.label}`, scores, score: counted.reduce((n, c) => n + c.p, 0) / counted.length };
+  if (failedMust) return { verdict: "bad", reason: `Failed: ${failedMust.label}`, scores, score: counted.length ? counted.reduce((n, c) => n + c.p, 0) / counted.length : null };
   const size = sizeCheck(context.icp, context.profile);
   if (size) counted.push({ label: "Company size", p: size === "inside" ? 1 : 0 });
   const note = unclear.length ? ` · can't tell: ${unclear.map((q) => q.label).join(", ")}` : "";
@@ -1245,13 +1254,17 @@ function weightedVerdict(questions, answers, thresholds, context) {
   const pctOf = (x) => `${Math.round(x * 100)}%`;
   if (score < thresholds.drop) return { verdict: "bad", reason: `Score ${pctOf(score)} — weakest: ${weakest.label}${note}`, scores, score };
   /*
-   * Good fit means Jev checked everything. A Vitalic run marked contacts good with "can't tell: Current role
-   * touches Medicare" because can't-tell answers sat out of the average and the one or two answered questions
-   * carried it — a guess shown as a fit. Anything unanswered, unclear, or a must-have short of the keep line is
-   * a Maybe instead, which Claude or the team reviews.
+   * Good fit needs Jev to have actually checked most of the evidence. A Vitalic run marked contacts good with
+   * "can't tell: Current role touches Medicare" — can't-tell answers sat out of the average and one or two
+   * answered questions carried it, a guess shown as a fit. Requiring *every* answer went too far the other way:
+   * "Director, Medicare Stars" with no past roles on file was held back for a question that had nothing to read.
+   * So: a majority of the signals answered, the average above the keep line, and every must-have clearly passed.
    */
+  const signals = questions.filter((q) => q.kind !== "must").length;
+  const answered = signals - unclear.filter((q) => q.kind !== "must").length;
+  const checkedEnough = answered * 2 > signals;
   const weakMust = questions.filter((q) => q.kind === "must" && typeof scores[q.key] === "number" && !unclear.includes(q)).reduce((w, q) => (!w || scores[q.key] < scores[w.key] ? q : w), null);
-  if (score >= thresholds.keep && !missing && !unclear.length && (!weakMust || scores[weakMust.key] >= thresholds.keep)) return { verdict: "good", reason: "", scores, score };
+  if (score >= thresholds.keep && !missing && checkedEnough && (!weakMust || scores[weakMust.key] >= thresholds.keep)) return { verdict: "good", reason: note ? note.slice(3) : "", scores, score };
   if (score >= thresholds.keep && weakMust && scores[weakMust.key] < thresholds.keep) return { verdict: "borderline", reason: `Maybe — unsure: ${weakMust.label} (${pctOf(scores[weakMust.key])})${note}`, scores, score };
   if (score >= thresholds.keep) return { verdict: "borderline", reason: missing ? `Maybe — no answer: ${missing.label}${note}` : `Maybe — ${note.slice(3)}`, scores, score };
   return { verdict: "borderline", reason: `Maybe — score ${pctOf(score)}, weakest: ${weakest.label}${note}`, scores, score };

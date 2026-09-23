@@ -542,7 +542,9 @@ test("always-keep terms: 'MA' only as a real word, never in locations, degrees o
   assert.equal(find(["Jane Doe, MA, LPC", "", "", "", "", "", ""]), null);
   assert.deepEqual(find(["Director, MA Operations", "", "", "", "", "", ""]), { term: "MA", column: "Headline", snippet: "Director, MA Operations" });
   assert.equal(find(["", "Led our MA plan growth", "", "", "", "", ""]).column, "Summary");
-  assert.equal(find(["", "", "", "", "Stars ratings for medicare advantage plans", "", ""]).term, "Medicare Advantage");
+  assert.equal(find(["", "Stars ratings for medicare advantage plans", "", "", "", "", ""]).term, "Medicare Advantage");
+  // The employer's description says nothing about the person: on a curated Medicare list it matched every row.
+  assert.equal(find(["", "", "", "", "Stars ratings for medicare advantage plans", "", ""]), null);
   assert.deepEqual(applyKeepTerm("bad", "Failed: Director or above", { term: "MA", column: "Summary" }), { verdict: "borderline", reason: 'Kept: mentions "MA" in Summary (Jev: Failed: Director or above)' });
   assert.equal(applyKeepTerm("good", "", { term: "MA", column: "Summary" }).verdict, "good");
   assert.deepEqual(applyKeepTerm("bad", "x", null), { verdict: "bad", reason: "x" });
@@ -564,4 +566,29 @@ test("cleaned export: original headers and cells survive a round trip, and a dup
   const a = parseCsv(src, { asArrays: true });
   assert.deepEqual(parseCsv(toCsv(a.headers, a.rows), { asArrays: true }), a);
   assert.deepEqual([...duplicateOf(a.rows.map((r) => ({ name: r[0], linkedin: r[1] })))], [[2, 0]]);
+});
+
+test("weighted: passing the director gate never adds to the score", () => {
+  const { questions } = normalizeQuestionSet({ scoring: "weighted", questions: [
+    { label: "Director or above", type: "noul", instructions: "?", kind: "must" },
+    { label: "Current role works on MA", type: "noul", instructions: "?", kind: "signal" },
+    { label: "Past roles worked on MA", type: "noul", instructions: "?", kind: "signal" },
+  ] });
+  const t = { keep: 0.6, drop: 0.35 };
+  // Averaged with the gate this was (0.99 + 0.5 + 0.3) / 3 = 60% — a good fit on seniority alone.
+  const v = verdictFor(questions, { director_or_above: { noul: 0.99 }, current_role_works_on_ma: { noul: 0.5 }, past_roles_worked_on_ma: { noul: 0.3 } }, t, { scoring: "weighted" });
+  assert.equal(v.verdict, "borderline");
+  assert.ok(Math.abs(v.score - 0.4) < 1e-9);
+  assert.equal(verdictFor(questions, { director_or_above: { noul: 0.1 }, current_role_works_on_ma: { noul: 0.99 }, past_roles_worked_on_ma: { noul: 0.99 } }, t, { scoring: "weighted" }).verdict, "bad");
+});
+
+test("weighted: good needs most signals answered — one confident yes among can't-tells stays a maybe", () => {
+  const c = (label) => ({ label, type: "choice", instructions: "?", kind: "signal", criteria: { yes: "y", no: "n", unclear: "?" }, pass: ["yes"] });
+  const { questions } = normalizeQuestionSet({ scoring: "weighted", questions: [{ label: "Director", type: "noul", instructions: "?", kind: "must" }, c("Current"), c("Past"), c("Headline")] });
+  const t = { keep: 0.6, drop: 0.35 };
+  const yes = { probabilities: { yes: 0.95, no: 0.03, unclear: 0.02 } };
+  const unsure = { probabilities: { yes: 0.05, no: 0.05, unclear: 0.9 } };
+  // No past roles on file is not doubt about the current role: two clear yeses make a good fit.
+  assert.equal(verdictFor(questions, { director: { noul: 0.99 }, current: yes, past: unsure, headline: yes }, t, { scoring: "weighted" }).verdict, "good");
+  assert.equal(verdictFor(questions, { director: { noul: 0.99 }, current: unsure, past: yes, headline: unsure }, t, { scoring: "weighted" }).verdict, "borderline");
 });
