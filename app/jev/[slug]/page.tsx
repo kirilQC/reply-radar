@@ -515,6 +515,41 @@ export default function JevClientPage() {
     finally { setBusy(""); }
   };
 
+  /**
+   * The setup as JSON, and saving one back — the way in that skips the question writer entirely. The writer
+   * is a model call and can be slow or wrong on a long brief; a setup written by hand (or by Claude in chat)
+   * should go in exactly as written. It is still validated server-side, and anything unusable is reported.
+   */
+  const setupJson = (current: QuestionSet | null) => JSON.stringify({
+    scoring: current?.scoring ?? "gates",
+    thresholds: current?.thresholds ?? { keep: 0.6, drop: 0.35 },
+    ...(current?.keepTerms?.length ? { keepTerms: current.keepTerms } : {}),
+    questions: (current?.questions ?? []).map(({ label, type, kind, instructions, criteria, pass, neutral }) => ({ label, type, kind, instructions, criteria, pass, ...(neutral?.length ? { neutral } : {}) })),
+    brief: current?.brief ?? "",
+  }, null, 2);
+
+  const importJson = async (text: string) => {
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { setNotice({ kind: "error", text: "That isn't valid JSON." }); return; }
+    // A bare list of questions is accepted too, since that is the part people usually have to hand.
+    const incoming = (Array.isArray(parsed) ? { questions: parsed } : parsed) as Record<string, unknown>;
+    if (!Array.isArray(incoming?.questions) || !incoming.questions.length) { setNotice({ kind: "error", text: "The JSON needs a \"questions\" list." }); return; }
+    if (set?.questions.length && !window.confirm(`This replaces ${client?.name}'s saved screening questions (${set.questions.length}) with the ${incoming.questions.length} in this JSON. The current set cannot be recovered.`)) return;
+    setBusy("building");
+    try {
+      // Settings the JSON leaves out are kept, so pasting only questions does not wipe the review instructions.
+      const merged = { scoring: set?.scoring, thresholds: set?.thresholds, keepTerms: set?.keepTerms, reviewBrief: set?.reviewBrief, brief: set?.brief, ...incoming };
+      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, set: merged }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: [payload.error || `Save failed (${response.status}).`, ...(payload.problems ?? [])].join(" · ") }); return; }
+      setSet(payload.set); setEditing(null); setCollapsed(false);
+      const dropped = payload.problems?.length ? ` Not saved: ${payload.problems.join(" · ")}.` : "";
+      setNotice({ kind: payload.problems?.length ? "info" : "ok", text: `Saved ${payload.set.questions.length} questions from JSON, exactly as written.${dropped}` });
+      if (file) resetResults(file);
+    } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
+    finally { setBusy(""); }
+  };
+
   /** Rows the last run put in Other or left for review — the ones new tags could change. */
   const otherRows = () => [...results.current.entries()].filter(([, r]) => (r.status === "tagged" || r.status === "review") && (r.tag === "other" || r.status === "review")).map(([i]) => i);
 
@@ -1091,6 +1126,8 @@ export default function JevClientPage() {
                         busy={busy === "building"}
                         disabled={running || (Boolean(busy) && busy !== "building")}
                         onBuild={(t, icp) => void buildSetup(t, icp)}
+                        json={setupJson(set)}
+                        onImport={(text) => void importJson(text)}
                       />
                     )}
                     {notice && <div className={`jev-banner is-${notice.kind}`}>{notice.text}</div>}

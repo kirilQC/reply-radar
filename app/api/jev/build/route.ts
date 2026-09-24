@@ -4,8 +4,10 @@
 import { NextResponse } from "next/server";
 import { buildFromDescription } from "../../../lib/jev";
 
-// Reads the brain and asks Sonnet for up to 40 described tags; that is the slow part of this route.
-export const maxDuration = 60;
+// Reads the brain and asks Sonnet to write the setup. A long brief plus the QC Brain plus an enriched sample
+// profile took the question writer past 60s, and the platform killed the request mid-build with nothing
+// saved — the page kept the old questions. Same ceiling as the other model-heavy routes here.
+export const maxDuration = 180;
 
 // Turn a plain-language description into a client's Jev setup (and save it): questions for contacts, tags for companies.
 export async function POST(request: Request) {

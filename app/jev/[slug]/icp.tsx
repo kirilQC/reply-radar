@@ -17,9 +17,11 @@ import { useState } from "react";
 
 export type Icp = { titles: string[]; responsibilities: string; sizeMin: number | null; sizeMax: number | null; exclusions: string };
 
-export function IcpBox({ icp, brief, busy, disabled, onBuild }: {
+export function IcpBox({ icp, brief, busy, disabled, onBuild, json, onImport }: {
   icp?: Icp | null; brief: string; busy: boolean; disabled: boolean;
   onBuild: (description: string, icp: Record<string, unknown>) => void;
+  /** The saved setup as editable JSON, and the save for it — the no-AI way in. Absent for company tags. */
+  json?: string; onImport?: (text: string) => void;
 }) {
   // Seeded from what is saved; the parent re-keys this box after a build so it picks up the new values.
   const [titles, setTitles] = useState((icp?.titles ?? []).join("\n"));
@@ -31,15 +33,31 @@ export function IcpBox({ icp, brief, busy, disabled, onBuild }: {
   // Two ways in: a plain prompt, for anyone who would rather describe the list in their own words, or the form.
   // Opens on whichever the saved setup was built from.
   const hasIcp = Boolean(icp && (icp.titles?.length || icp.responsibilities || icp.sizeMin || icp.sizeMax || icp.exclusions));
-  const [view, setView] = useState<"prompt" | "form">(hasIcp ? "form" : "prompt");
+  const [view, setView] = useState<"prompt" | "form" | "json">(hasIcp ? "form" : "prompt");
+  const [jsonText, setJsonText] = useState(json ?? "");
+  // Checked as it is typed, so a stray comma is caught here rather than coming back as a failed save.
+  const jsonError = (() => { if (!jsonText.trim()) return "Paste a setup."; try { JSON.parse(jsonText); return ""; } catch (e) { return e instanceof Error ? e.message : "Not valid JSON."; } })();
   const count = titles.split("\n").map((t) => t.trim()).filter(Boolean).length;
   const empty = view === "prompt" ? !notes.trim() : !count && !responsibilities.trim() && !sizeMin && !sizeMax && !exclusions.trim() && !notes.trim();
   const tabs = (
     <div className="jev-seg jev-icp-tabs">
       <button type="button" className={view === "prompt" ? "on" : ""} onClick={() => setView("prompt")} disabled={disabled}>Prompt</button>
       <button type="button" className={view === "form" ? "on" : ""} onClick={() => setView("form")} disabled={disabled}>ICP form</button>
+      {onImport && <button type="button" className={view === "json" ? "on" : ""} onClick={() => setView("json")} disabled={disabled}>JSON</button>}
     </div>
   );
+  if (view === "json" && onImport) {
+    return (
+      <div className="jev-describe jev-icp">
+        <div className="jev-icp-head"><span className="jev-describe-label">Setup as JSON</span>{tabs}</div>
+        <textarea className="jev-input jev-textarea jev-describe-text jev-json-text" rows={16} spellCheck={false} value={jsonText} onChange={(e) => setJsonText(e.target.value)} disabled={disabled} />
+        <div className="jev-describe-foot">
+          {jsonError && jsonText.trim() && <span className="jev-warn-line">{jsonError}</span>}
+          <button className="primary-button" disabled={disabled || busy || Boolean(jsonError)} onClick={() => onImport(jsonText)}>{busy ? "Saving…" : "Save JSON setup"}</button>
+        </div>
+      </div>
+    );
+  }
   if (view === "prompt") {
     return (
       <div className="jev-describe jev-icp">

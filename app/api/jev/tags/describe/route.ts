@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { describeTags } from "../../../../lib/jev";
 
 // One model call for up to 40 tag descriptions (~1.5k tokens out) — comfortably inside the ceiling.
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 // Write descriptions for one slice of a typed tag list. Returns them; the browser saves the whole set once.
 export async function POST(request: Request) {

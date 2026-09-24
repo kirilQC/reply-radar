@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { draftQuestionSet } from "../../../../lib/jev";
 
 // Drafting reads the client's brain folder and asks Sonnet for a question set; both can take a while.
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 // Draft (and save) a client's question set from their QC Brain ICP and client brief.
 export async function POST(request: Request) {

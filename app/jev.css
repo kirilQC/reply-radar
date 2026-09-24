@@ -323,3 +323,6 @@
 .jev-review-brief summary { cursor: pointer; font-weight: 600; font-size: 13px; }
 .jev-review-brief textarea { width: 100%; margin-top: 8px; box-sizing: border-box; }
 .jev-review-brief button { margin-top: 8px; }
+
+/* Pasted setups are code: monospace, no wrapping surprises, room to read a whole question. */
+.jev-json-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; white-space: pre; overflow-x: auto; }

@@ -242,7 +242,7 @@ async function askSonnet(system: string, content: string, maxTokens = 6_000): Pr
         method: "POST",
         headers: { "content-type": "application/json", Authorization: `Bearer ${openrouter}` },
         body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0, messages: [{ role: "system", content: system }, { role: "user", content }] }),
-        signal: AbortSignal.timeout(52_000),
+        signal: AbortSignal.timeout(150_000),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) return { ok: false, error: `${model} refused the build: ${payload?.error?.message ?? `HTTP ${response.status}`}` };
@@ -252,7 +252,7 @@ async function askSonnet(system: string, content: string, maxTokens = 6_000): Pr
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": anthropic!, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({ model: GENERATOR_MODEL, max_tokens: maxTokens, temperature: 0, system, messages: [{ role: "user", content }] }),
-      signal: AbortSignal.timeout(52_000),
+      signal: AbortSignal.timeout(150_000),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) return { ok: false, error: `Anthropic refused the build: ${payload?.error?.message ?? `HTTP ${response.status}`}` };
