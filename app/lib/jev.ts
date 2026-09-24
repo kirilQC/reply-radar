@@ -228,6 +228,20 @@ function icpBlock(icp: JevIcp): string {
 }
 
 /**
+ * Why a build produced nothing, in the writer's own words when it wrote prose instead of JSON.
+ *
+ * "Came back without a usable question. Try again." was the whole message, so a request the writer declined
+ * (a Cotool brief asking to flag people with a brain aneurysm or stroke — a personal medical condition, which
+ * it will not screen people on) looked like a flaky build, and trying again only got the same refusal.
+ */
+function noSetupBecause(text: string | undefined, noun: "question" | "tag"): string {
+  const body = String(text ?? "").trim();
+  if (!body || /^\s*[{[]/.test(body) || body.startsWith("```")) return `The build came back without a usable ${noun}. Try again.`;
+  const said = body.replace(/\s+/g, " ").slice(0, 400);
+  return `The question writer did not build a setup. It said: "${said}${body.length > 400 ? "…" : ""}"`;
+}
+
+/**
  * The question writer's model call. Through OpenRouter (Sonnet 5) when that key is set — the same key and
  * provider every other Jev step uses, so one key runs the whole feature — and straight to Anthropic otherwise.
  */
@@ -315,7 +329,7 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
   if (mode === "companies") {
     // Tags the person typed are kept exactly as typed; the model only supplies their descriptions.
     const parsed = mergeNamedTags(parseGeneratedTagSet(reply.text), named);
-    if (!parsed.tags.length) return { ok: false, error: "The build came back without usable tags. Try again.", problems: parsed.problems };
+    if (!parsed.tags.length) return { ok: false, error: noSetupBecause(reply.text, "tag"), problems: parsed.problems };
     const { set, problems } = await saveTagSet(slug, { ...parsed, brief }, "description");
     return { ok: true, set, problems: [...parsed.problems, ...problems] };
   }
@@ -324,7 +338,7 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
   const pool = icp ? titlePoolQuestion(icp) : null;
   const generated = parsed.questions as unknown as JevQuestion[];
   const questions: JevQuestion[] = pool ? [pool as unknown as JevQuestion, ...generated.filter((q) => q.key !== "target_role")] : generated;
-  if (!questions.length) return { ok: false, error: "The build came back without a usable question. Try again.", problems: parsed.problems };
+  if (!questions.length) return { ok: false, error: noSetupBecause(reply.text, "question"), problems: parsed.problems };
   // A rebuild keeps the team's scoring choice; it is a setting about the client, not about one prompt.
   const previous = await loadQuestionSet(slug).catch(() => null);
   const { set, problems } = await saveQuestionSet(slug, { ...parsed, questions, icp, brief, scoring: previous?.scoring ?? "gates", keepTerms: previous?.keepTerms, reviewBrief: previous?.reviewBrief, brainFolder: brain.folder, brainDocuments: brain.documents }, "description");
@@ -355,7 +369,7 @@ export async function draftQuestionSet(slug: string, sampleProfile: unknown): Pr
   const reply = await askSonnet(GENERATOR_PROMPT, content, 4_000);
   if (!reply.ok) return { ok: false, error: reply.error };
   const parsed = parseGeneratedQuestionSet(reply.text);
-  if (!parsed.questions.length) return { ok: false, error: "The draft came back without a usable question. Try again.", problems: parsed.problems };
+  if (!parsed.questions.length) return { ok: false, error: noSetupBecause(reply.text, "question"), problems: parsed.problems };
   const { set, problems } = await saveQuestionSet(slug, { ...parsed, brainFolder: brain.folder, brainDocuments: brain.documents }, "brain");
   return { ok: true, set, problems: [...parsed.problems, ...problems], brain: { folder: brain.folder, documents: brain.documents, reason: brain.reason } };
 }
