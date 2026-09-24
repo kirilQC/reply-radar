@@ -308,15 +308,24 @@ export async function buildFromDescription(slug: string, mode: "contacts" | "com
       return { ok: true, set, problems, pendingDescriptions: set.tags.filter((t) => !t.description && t.key !== "other").map((t) => t.label) };
     }
   }
-  const [brain, clientBrief] = await Promise.all([
-    brainContext({ slug, name, brain_folder: text(row.brain_folder) || null }),
-    clientContext(slug),
-  ]);
+  /*
+   * A typed prompt is built from the prompt alone. Reading the client's QC Brain and brief as "background" was
+   * the slow part of this route — the one step only production does — and it worked against the person: a
+   * doctors list for a stroke-care screen was refused because the writer weighed it against Cotool's
+   * security-engineering ICP. The brain still informs a build from the ICP form, where it is the point.
+   */
+  const promptOnly = Boolean(brief);
+  const [brain, clientBrief] = promptOnly
+    ? [{ block: "", folder: undefined as string | undefined, documents: undefined as string[] | undefined }, ""]
+    : await Promise.all([
+      brainContext({ slug, name, brain_folder: text(row.brain_folder) || null }),
+      clientContext(slug),
+    ]);
   const sample = sampleProfile && typeof sampleProfile === "object" ? JSON.stringify(sampleProfile, null, 2).slice(0, 6_000) : "";
   const named = mode === "companies" ? parseTagList(brief) : [];
   const content = [
-    `Client: ${name}`,
-    brief ? `WHAT THE PERSON RUNNING THIS LIST ASKED FOR — this leads; everything below is background:\n${brief.slice(0, MAX_PROMPT_BRIEF_CHARS)}` : "",
+    promptOnly ? "" : `Client: ${name}`,
+    brief ? (promptOnly ? `WHAT THE PERSON RUNNING THIS LIST ASKED FOR — build the setup from this alone:\n${brief.slice(0, MAX_PROMPT_BRIEF_CHARS)}` : `WHAT THE PERSON RUNNING THIS LIST ASKED FOR — this leads; everything below is background:\n${brief.slice(0, MAX_PROMPT_BRIEF_CHARS)}`) : "",
     icp ? icpBlock(icp) : "",
     named.length >= 3 ? `They named these tags; keep every one, spelled exactly so and in this order:\n${named.map((t: string) => `- ${t}`).join("\n")}` : "",
     clientBrief,
