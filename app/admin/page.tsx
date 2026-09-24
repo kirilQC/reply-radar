@@ -1269,7 +1269,7 @@ function GranolaKeysView() {
               still looks like coverage on the morning brief grid until somebody checks it. */}
           <p className="release-count"><b>{working}</b> of {keys.length} working</p>
         </div>
-        <a className="filter-button" href="https://granola.ai" target="_blank" rel="noreferrer">Granola → Settings → API</a>
+        <a className="filter-button" href="https://granola.ai" target="_blank" rel="noreferrer">Granola → Settings → Connectors → API keys</a>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="granola-key-form">
@@ -1299,7 +1299,7 @@ function GranolaKeysView() {
                   {/* A key that sees only other people's notes is a key that will never find its holder's calls. */}
                   {sightings[key.id].ownersKnown && sightings[key.id].totalInYear > 0 && sightings[key.id].ownInYear === 0 && (
                     <p className="granola-key-error">
-                      None of these {sightings[key.id].totalInYear} meetings are {key.label || "this person"}&apos;s own — they are notes shared with the whole workspace, which every key sees. This key can&apos;t see {key.label || "their"}&apos;s calls: it is likely a workspace key or from a different Granola login. Replace it with a personal API key from {key.label || "their"}&apos;s own Granola account (Settings → API).
+                      None of these {sightings[key.id].totalInYear} meetings are {key.label || "this person"}&apos;s own — they are notes shared with the whole workspace, which every key sees. This key can&apos;t see {key.label || "their"}&apos;s calls: it is likely missing the &ldquo;Personal notes&rdquo; scope, is a workspace key, or is from a different Granola login. Replace it with a personal API key from {key.label || "their"}&apos;s own Granola account (Settings → Connectors → API keys → Create new key), with the &ldquo;Personal notes&rdquo; scope ticked.
                     </p>
                   )}
                   {sightings[key.id].meetings.length === 0 ? (

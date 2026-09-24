@@ -157,7 +157,7 @@ export async function POST(request: Request) {
     // Granola's keys are prefixed. Catching this here saves a round trip and, more usefully, catches the
     // commonest paste error — the workspace id, or the whole curl line, instead of the key.
     if (!/^grn_/.test(apiKey)) {
-      return NextResponse.json({ error: "A Granola API key starts with grn_. Copy it from Granola under Settings, then API." }, { status: 400 });
+      return NextResponse.json({ error: "A Granola API key starts with grn_. Create one in Granola under Settings → Connectors → API keys, with the 'Personal notes' scope ticked." }, { status: 400 });
     }
 
     const checked = await verifyKey(apiKey);
