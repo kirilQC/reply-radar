@@ -179,3 +179,8 @@ the script surfaced a real stale assertion immediately.
 **If a verification result looks catastrophic, suspect the verification first.** Next 16 serves CSS
 from `/_next/static/chunks/*.css`, not `/_next/static/css/`, and grepping the old path reported zero
 stylesheets, which looked like a broken front end and was a broken check.
+
+### Granola keys: pagination and whose notes a key sees (2026-09-24)
+- Jake, Nick and Kori's keys all listed the same three Keewano meetings. Per Granola's docs a **personal** key returns the holder's notes + notes shared with them + every note visible to the whole workspace; a **workspace** key returns only the workspace-visible notes. Three keys showing only the same shared notes is the signature of workspace keys (or personal keys from the wrong login) — their holders' own calls are invisible to briefs.
+- The list call read **one page of 30 with no cursor**, both for briefs (`listNotes`) and the Test probe (a year in one page). Now `listAll` follows `cursor`/`hasMore`: 3 pages for briefs, 20 for the Test probe.
+- The Test button shows each note's `owner` and warns when none of a key's notes belong to the person it is saved under (matched on first name / email local part against the label).

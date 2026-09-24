@@ -123,14 +123,44 @@ export async function verifyKey(apiKey: string): Promise<{ ok: boolean; notes: n
   }
 }
 
+/**
+ * How many pages of 30 a brief reads per key: ninety notes in the call window.
+ *
+ * This used to be one page, with no cursor followed. Granola pages with `cursor` / `hasMore` and does not
+ * document its sort order, so a key with more than thirty notes in the window could lose exactly the call a
+ * brief was looking for without any sign of it. Three pages is a heavy fortnight for one person, and three
+ * sequential requests still fit the route's budget ahead of the model call.
+ */
+const BRIEF_PAGES = 3;
+
+/**
+ * Every note one key can see since `createdAfter`, following Granola's cursor up to `maxPages`.
+ *
+ * A key sees more than its owner's meetings: Granola returns the owner's notes, notes shared with them, and
+ * every note visible to the whole workspace. A workspace-visible note therefore turns up under every key in
+ * that workspace, which is why `pickWinner` treats the same meeting under two keys as one meeting.
+ */
+async function listAll(apiKey: string, createdAfter: string, maxPages: number): Promise<unknown[]> {
+  const notes: unknown[] = [];
+  let cursor = "";
+  for (let page = 0; page < maxPages; page += 1) {
+    const payload = (await granola(apiKey, `/notes?created_after=${encodeURIComponent(createdAfter)}&page_size=${PAGE_SIZE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`)) as Row;
+    notes.push(...notesOf(payload));
+    const next = typeof payload?.cursor === "string" ? payload.cursor : "";
+    const more = payload?.hasMore ?? payload?.has_more;
+    if (!next || more === false) break;
+    cursor = next;
+  }
+  return notes;
+}
+
 /** Every key's recent notes, in one burst. A key that refuses contributes an error and no notes. */
 async function listNotes(keys: GranolaKey[], windowDays: number, errors: string[]) {
   const createdAfter = new Date(Date.now() - windowDays * 86_400_000).toISOString();
-  const query = `/notes?created_after=${encodeURIComponent(createdAfter)}&page_size=${PAGE_SIZE}`;
   return Promise.all(
     keys.map(async (key) => {
       try {
-        return { key, notes: notesOf(await granola(key.apiKey, query)) };
+        return { key, notes: await listAll(key.apiKey, createdAfter, BRIEF_PAGES) };
       } catch (error) {
         errors.push(`${key.label || "A Granola key"}: ${error instanceof Error ? error.message : "could not be read."}`);
         return { key, notes: [] as unknown[] };
@@ -336,24 +366,34 @@ export async function latestCallsAcrossKeys(
 export type NoteSighting = {
   keyLabel: string;
   error: string;
-  notes: Array<{ id: string; title: string; startedAt: number; matches: boolean }>;
+  /** `owner` is whoever recorded the note — not necessarily the key's holder; see `listAll`. */
+  notes: Array<{ id: string; title: string; startedAt: number; matches: boolean; owner: string; ownerEmail: string }>;
 };
 
-export async function inspectNotes(keys: GranolaKey[], needles: string[][], windowDays: number): Promise<NoteSighting[]> {
+/** Who recorded a note, from the list response's `owner: { name, email }`. */
+function ownerOf(raw: unknown): { owner: string; ownerEmail: string } {
+  const owner = ((raw ?? {}) as Row).owner;
+  if (owner && typeof owner === "object") {
+    const o = owner as Row;
+    return { owner: String(o.name ?? "").trim(), ownerEmail: String(o.email ?? "").trim() };
+  }
+  return { owner: typeof owner === "string" ? owner.trim() : "", ownerEmail: "" };
+}
+
+export async function inspectNotes(keys: GranolaKey[], needles: string[][], windowDays: number, maxPages = BRIEF_PAGES): Promise<NoteSighting[]> {
   const createdAfter = new Date(Date.now() - windowDays * 86_400_000).toISOString();
-  const query = `/notes?created_after=${encodeURIComponent(createdAfter)}&page_size=${PAGE_SIZE}`;
   return Promise.all(keys.map(async (key) => {
     try {
-      const notes = notesOf(await granola(key.apiKey, query));
+      const notes = await listAll(key.apiKey, createdAfter, maxPages);
       return {
         keyLabel: key.label || "A Granola key",
         error: "",
         // A note `normalizeNote` refused could never have been chosen as a client's call either, so
         // leaving it out keeps this list honest about what was actually in play.
         notes: notes
-          .map((raw) => normalizeNote(raw))
-          .filter((note): note is GranolaNote => Boolean(note))
-          .map((note) => ({ id: note.id, title: note.title, startedAt: note.startedAt, matches: titleMatches(note.title, needles) })),
+          .map((raw) => ({ note: normalizeNote(raw), ...ownerOf(raw) }))
+          .filter((entry): entry is { note: GranolaNote; owner: string; ownerEmail: string } => Boolean(entry.note))
+          .map(({ note, owner, ownerEmail }) => ({ id: note.id, title: note.title, startedAt: note.startedAt, matches: titleMatches(note.title, needles), owner, ownerEmail })),
       };
     } catch (error) {
       return { keyLabel: key.label || "A Granola key", error: error instanceof Error ? error.message : "could not be read.", notes: [] };

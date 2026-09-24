@@ -1174,7 +1174,8 @@ const readScreenshot = (file: File) =>
 
 type GranolaKeyRow = { id: string; label: string; masked: string; lastCheckedAt: string | null; lastStatus: string; lastError: string };
 /** What one Test found: the meetings this key can see, and the window they were looked for in. */
-type GranolaSighting = { windowDays: number; meetings: Array<{ title: string; startedAt: string }>; olderMeetings: Array<{ title: string; startedAt: string }>; totalInYear: number };
+type GranolaMeeting = { title: string; startedAt: string; owner?: string; own?: boolean };
+type GranolaSighting = { windowDays: number; meetings: GranolaMeeting[]; olderMeetings: GranolaMeeting[]; totalInYear: number; ownInYear: number; ownersKnown: boolean };
 
 /**
  * One Granola key per teammate.
@@ -1243,6 +1244,8 @@ function GranolaKeysView() {
         meetings: Array.isArray(payload?.meetings) ? (payload.meetings as GranolaSighting["meetings"]) : [],
         olderMeetings: Array.isArray(payload?.olderMeetings) ? (payload.olderMeetings as GranolaSighting["meetings"]) : [],
         totalInYear: Number(payload?.totalInYear ?? 0),
+        ownInYear: Number(payload?.ownInYear ?? 0),
+        ownersKnown: Boolean(payload?.ownersKnown),
       },
     }));
     setBusyId("");
@@ -1293,6 +1296,12 @@ function GranolaKeysView() {
               </div>
               {sightings[key.id] && (
                 <div className="granola-key-meetings">
+                  {/* A key that sees only other people's notes is a key that will never find its holder's calls. */}
+                  {sightings[key.id].ownersKnown && sightings[key.id].totalInYear > 0 && sightings[key.id].ownInYear === 0 && (
+                    <p className="granola-key-error">
+                      None of these {sightings[key.id].totalInYear} meetings are {key.label || "this person"}&apos;s own — they are notes shared with the whole workspace, which every key sees. This key can&apos;t see {key.label || "their"}&apos;s calls: it is likely a workspace key or from a different Granola login. Replace it with a personal API key from {key.label || "their"}&apos;s own Granola account (Settings → API).
+                    </p>
+                  )}
                   {sightings[key.id].meetings.length === 0 ? (
                     <p className="granola-key-meetings-empty">
                       No meetings in the last {sightings[key.id].windowDays || 14} days.
@@ -1304,7 +1313,7 @@ function GranolaKeysView() {
                     <ul>
                       {sightings[key.id].meetings.map((meeting, index) => (
                         <li key={`${meeting.startedAt}-${index}`}>
-                          <span>{meeting.title}</span>
+                          <span>{meeting.title}{meeting.owner && !meeting.own ? <small className="granola-key-owner"> · {meeting.owner}&apos;s note</small> : null}</span>
                           <small>{new Date(meeting.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
                         </li>
                       ))}
@@ -1314,7 +1323,7 @@ function GranolaKeysView() {
                     <ul className="granola-key-older">
                       {sightings[key.id].olderMeetings.slice(0, 8).map((meeting, index) => (
                         <li key={`old-${meeting.startedAt}-${index}`}>
-                          <span>{meeting.title}</span>
+                          <span>{meeting.title}{meeting.owner && !meeting.own ? <small className="granola-key-owner"> · {meeting.owner}&apos;s note</small> : null}</span>
                           <small>{new Date(meeting.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</small>
                         </li>
                       ))}

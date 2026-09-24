@@ -112,12 +112,27 @@ export async function POST(request: Request) {
        */
       const PROBE_DAYS = 365;
       const cutoff = Date.now() - CALL_WINDOW_DAYS * 86_400_000;
+      // Twenty pages of thirty, so a year of a busy calendar is actually read rather than its first page.
       const all = result.ok
-        ? await inspectNotes([{ id, label: String(stored.label ?? ""), apiKey }], [], PROBE_DAYS)
+        ? await inspectNotes([{ id, label: String(stored.label ?? ""), apiKey }], [], PROBE_DAYS, 20)
           .then((sightings) => sightings[0]?.notes ?? [])
           .catch(() => [])
         : [];
-      const shape = (note: { title: string; startedAt: number }) => ({ title: note.title, startedAt: new Date(note.startedAt).toISOString() });
+      /*
+       * Whose meetings these are. A key returns its holder's notes plus every note shared with the whole
+       * workspace, so three teammates' keys listing the same three meetings looked like a bug in this page —
+       * it was three keys seeing only the workspace-shared notes and none of their holders' own calls, which
+       * is what a workspace-level key (or a personal key from the wrong account) does. Matching the note's
+       * owner against the label the key was saved under is what makes that visible.
+       */
+      const holder = String(stored.label ?? "").trim().toLowerCase();
+      const isHolders = (note: { owner: string; ownerEmail: string }) => {
+        if (!holder) return false;
+        const first = note.owner.toLowerCase().split(/\s+/)[0] ?? "";
+        const local = note.ownerEmail.toLowerCase().split("@")[0] ?? "";
+        return first === holder || note.owner.toLowerCase() === holder || local.startsWith(holder);
+      };
+      const shape = (note: { title: string; startedAt: number; owner: string; ownerEmail: string }) => ({ title: note.title, startedAt: new Date(note.startedAt).toISOString(), owner: note.owner, own: isHolders(note) });
       const sorted = all.slice().sort((left, right) => right.startedAt - left.startedAt);
       return NextResponse.json({
         ok: result.ok,
@@ -129,6 +144,8 @@ export async function POST(request: Request) {
         // Everything older than the brief's window but within the last year — proof the key can see notes.
         olderMeetings: sorted.filter((note) => note.startedAt < cutoff).map(shape),
         totalInYear: all.length,
+        ownInYear: all.filter(isHolders).length,
+        ownersKnown: all.some((note) => note.owner || note.ownerEmail),
       });
     }
 

@@ -6576,6 +6576,16 @@ body.light-mode .brain-icp {
   opacity: 0.6;
 }
 
+/* Whose note a meeting is, when it is not the key holder's: inline after the title, not a date column. */
+.granola-key-meetings li .granola-key-owner {
+  font-size: 10.5px;
+  opacity: 0.6;
+}
+
+.granola-key-meetings > .granola-key-error {
+  margin: 0 0 8px;
+}
+
 .granola-key-meetings-empty {
   margin: 0;
   font-size: 11px;
