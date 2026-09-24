@@ -6180,6 +6180,11 @@ body.light-mode .brain-icp {
   color: var(--report-brand);
 }
 
+/* Granola is still being asked: neither a tick nor a failure. */
+.brief-check.is-pending b {
+  opacity: 0.5;
+}
+
 .brief-check.is-missing {
   border-color: color-mix(in srgb, var(--report-danger, #d4574a) 45%, var(--report-line));
 }

@@ -173,6 +173,35 @@ export default function SlackPage() {
 
   const directory = directories[automation];
 
+  /*
+   * Whether each client's call actually turns up in Granola, and on whose keys — asked for once, apart from
+   * the directory, because the directory is also what the worker polls (see /api/granola/coverage). Until it
+   * answers, the Granola box says it is checking rather than showing a tick it has not earned.
+   */
+  const [coverage, setCoverage] = useState<{ state: "loading" | "ready" | "error"; windowDays: number; bySlug: Record<string, { latest: { title: string; startedAt: number } | null; seenBy: string[] }> }>({ state: "loading", windowDays: 14, bySlug: {} });
+  useEffect(() => {
+    void fetch("/api/granola/coverage", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload) => setCoverage(payload?.ok ? { state: "ready", windowDays: Number(payload.windowDays) || 14, bySlug: payload.coverage ?? {} } : { state: "error", windowDays: 14, bySlug: {} }))
+      .catch(() => setCoverage({ state: "error", windowDays: 14, bySlug: {} }));
+  }, []);
+
+  /** The Granola box's real state: a tick only when a call matching this client was found on some key. */
+  const granolaCheck = (client: BriefClient): { ok: boolean; pending?: boolean; detail: string; title?: string } | null => {
+    const base = client.readiness.granola;
+    if (!base) return null;
+    if (!base.ok) return base;
+    if (coverage.state === "loading") return { ok: false, pending: true, detail: "Checking Granola…" };
+    if (coverage.state === "error") return { ok: false, pending: true, detail: "Couldn't reach Granola", title: "The keys are set, but Granola could not be asked just now." };
+    const found = coverage.bySlug[client.slug];
+    if (!found?.latest) {
+      return { ok: false, detail: `No call in ${coverage.windowDays} days`, title: `No meeting with "${client.granolaTitleMatch}" in the title on any key in the last ${coverage.windowDays} days. Either there was no call, or whoever took it hasn't added their Granola key.` };
+    }
+    const when = new Date(found.latest.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const who = found.seenBy.length > 2 ? `${found.seenBy.slice(0, 2).join(", ")} +${found.seenBy.length - 2}` : found.seenBy.join(", ");
+    return { ok: true, detail: `${when} · ${who}`, title: `"${found.latest.title}" on ${when}. Seen on: ${found.seenBy.join(", ")}.` };
+  };
+
   const load = async (which: Automation = automation) => {
     const payload = (await fetch(API[which], { cache: "no-store" }).then((response) => response.json()).catch(() => null)) as Directory | null;
     if (!payload || payload.ok === false || payload.error) {
@@ -458,10 +487,12 @@ export default function SlackPage() {
               {clients.map((client) => {
                 // HeyReach is a morning-brief source only; a call analysis reads Slack and Granola. So the
                 // row shows two marks or three depending on which automation is open.
-                const checks: Array<[string, { ok: boolean; detail: string }]> = [
-                  ...(client.readiness.heyreach ? [["HeyReach", client.readiness.heyreach] as [string, { ok: boolean; detail: string }]] : []),
+                type Mark = { ok: boolean; pending?: boolean; detail: string; title?: string };
+                const granola = granolaCheck(client);
+                const checks: Array<[string, Mark]> = [
+                  ...(client.readiness.heyreach ? [["HeyReach", client.readiness.heyreach] as [string, Mark]] : []),
                   ["Slack", client.readiness.slack],
-                  ...(client.readiness.granola ? [["Granola", client.readiness.granola] as [string, { ok: boolean; detail: string }]] : []),
+                  ...(granola ? [["Granola", granola] as [string, Mark]] : []),
                 ];
                 return (
                   <li key={client.slug} className={client.readiness.ready ? "brief-client" : "brief-client is-short"}>
@@ -474,8 +505,8 @@ export default function SlackPage() {
                     </div>
                     <div className="brief-client-checks">
                       {checks.map(([label, check]) => (
-                        <span key={label} className={check.ok ? "brief-check is-ok" : "brief-check is-missing"} title={check.detail}>
-                          <b>{check.ok ? "✓" : "✕"}</b>{label}<small>{check.detail}</small>
+                        <span key={label} className={check.ok ? "brief-check is-ok" : check.pending ? "brief-check is-pending" : "brief-check is-missing"} title={check.title ?? check.detail}>
+                          <b>{check.ok ? "✓" : check.pending ? "…" : "✕"}</b>{label}<small>{check.detail}</small>
                         </span>
                       ))}
                     </div>
@@ -558,7 +589,8 @@ export default function SlackPage() {
                       const sources: Array<[string, Check | undefined]> = [
                         ["campaign figures", active.readiness.heyreach],
                         ["Slack channels", active.readiness.slack],
-                        ["the client's call", active.readiness.granola],
+                        // Whether a call was actually found, once Granola has answered; the setting alone until then.
+                        ["the client's call", (() => { const found = granolaCheck(active); return found?.pending ? active.readiness.granola : found ?? undefined; })()],
                       ];
                       const present = sources.filter(([, check]) => check);
                       const missing = present.filter(([, check]) => !check?.ok).map(([label]) => label);

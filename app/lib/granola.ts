@@ -353,6 +353,38 @@ export async function latestCallsAcrossKeys(
 }
 
 /**
+ * For the automations page: each client's newest matching call and every key that can see one.
+ *
+ * The Granola box there used to be ticked whenever any key existed and a title was set, so it could not
+ * show the one thing it is looked at for — whether this client's calls actually turn up, and on whose key.
+ * `seenBy` is what answers "am I missing somebody's key": a client whose call only one person's key can
+ * see is covered, and a client no key can see is either quiet or recorded by someone whose key is absent.
+ * Same single list pass as `latestCallsAcrossKeys`; nothing is opened.
+ */
+export async function callCoverage(
+  keys: GranolaKey[],
+  clients: Array<{ slug: string; titleMatch: unknown; clientName: unknown }>,
+  windowDays: number,
+): Promise<{ coverage: Record<string, { latest: CallSighting | null; seenBy: string[] }>; keysSeen: number; errors: string[] }> {
+  const errors: string[] = [];
+  const coverage: Record<string, { latest: CallSighting | null; seenBy: string[] }> = {};
+  for (const client of clients) coverage[client.slug] = { latest: null, seenBy: [] };
+  if (!keys.length) return { coverage, keysSeen: 0, errors: ["No Granola API keys have been added, so no calls can be seen."] };
+  const listed = await listNotes(keys, windowDays, errors);
+  for (const client of clients) {
+    const needles = parseTitleNeedles(client.titleMatch, client.clientName);
+    if (!needles.length) continue;
+    const seenBy = listed.filter(({ notes }) => pickLatestCall(notes, needles)).map(({ key }) => key.label || "a teammate");
+    const winner = pickWinner(listed, needles, new Set());
+    coverage[client.slug] = {
+      seenBy,
+      latest: winner ? { noteId: winner.note.id, title: winner.note.title, startedAt: winner.note.startedAt, ageDays: callAgeDays(winner.note.startedAt), owner: winner.key.label || "a teammate" } : null,
+    };
+  }
+  return { coverage, keysSeen: keys.length, errors };
+}
+
+/**
  * What each key can actually see, for when a call that definitely happened was definitely not found.
  *
  * There are two reasons for that and they need opposite fixes: either the note is not in this person's
