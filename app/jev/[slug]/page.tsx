@@ -938,21 +938,38 @@ export default function JevClientPage() {
     download(`${slug}-jev-${label}-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(headers, rows));
   };
 
+  /**
+   * Every decision Jev made for one row, as columns: the verdict and why, then per question what it answered
+   * (the option it chose — the "tag"), the probability that answer is a fit, and its confidence, then the
+   * always-keep match and Claude's review. Shared by both contact downloads so they cannot describe the same
+   * run two different ways.
+   */
+  const decisionHeaders = (questions: Question[]) => [
+    "Jev verdict", "Jev fit score", "Jev reason", "Jev note", "Always-keep match", "Claude review",
+    ...questions.flatMap((q) => [`Jev: ${q.label} — answer`, `Jev: ${q.label} — fit %`, `Jev: ${q.label} — confidence`]),
+  ];
+  const decisionCells = (questions: Question[], r: Result | undefined) => [
+    r ? STATUS_LABEL[r.status] : "Not checked",
+    typeof r?.score === "number" ? pct(r.score) : "",
+    r?.reason ?? "",
+    r?.note ?? "",
+    r?.keep ? `"${r.keep.term}" in ${r.keep.column}: ${r.keep.snippet}` : "",
+    r?.review ? `${r.review.kind === "keep" ? "Keep" : r.review.kind === "drop" ? "Drop" : r.review.kind} (${r.review.confidence}): ${r.review.reason}` : "",
+    ...questions.flatMap((q) => {
+      const a = r?.answers?.[q.key];
+      const answer = !a ? "" : typeof a.yes === "number" ? `${a.yes >= 0.5 ? "Yes" : "No"} (${pct(a.yes)} yes)` : `${a.choice ?? ""}${typeof a.p === "number" ? ` ${pct(a.p)}` : ""}${a.second ? ` · then ${a.second}` : ""}`;
+      return [answer, r?.scores ? pct(r.scores[q.key]) : "", typeof a?.confidence === "number" ? pct(a.confidence) : ""];
+    }),
+  ];
+
   const exportRows = (keep: (r: Result | undefined) => boolean, label: string) => {
     if (!file || !set) return;
-    // Every decision Jev made, per question: what it answered, the probability that answer is a fit, and its
-    // confidence — then the keep-term match, Claude's review, enrichment, and the exact profile Jev read.
-    const qCols = set.questions.flatMap((q) => [`Jev: ${q.label} — answer`, `Jev: ${q.label} — fit %`, `Jev: ${q.label} — confidence`]);
-    const headers = ["Jev verdict", "Jev fit score", "Jev reason", "Jev note", "Always-keep match", "Claude review", ...qCols, ...ENRICH_COLUMNS.contacts.map(([, h]) => h), "Jev input (what Jev saw)", ...file.headers];
+    // Jev's decisions first, then enrichment and the exact profile Jev read, then the original columns.
+    const headers = [...decisionHeaders(set.questions), ...ENRICH_COLUMNS.contacts.map(([, h]) => h), "Jev input (what Jev saw)", ...file.headers];
     const rows = file.rows.flatMap((cells, i) => {
       const r = all.get(i);
       if (!keep(r)) return [];
-      const perQuestion = set.questions.flatMap((q) => {
-        const a = r?.answers?.[q.key];
-        const answer = !a ? "" : typeof a.yes === "number" ? `${a.yes >= 0.5 ? "Yes" : "No"} (${pct(a.yes)} yes)` : `${a.choice ?? ""}${typeof a.p === "number" ? ` ${pct(a.p)}` : ""}${a.second ? ` · then ${a.second}` : ""}`;
-        return [answer, r?.scores ? pct(r.scores[q.key]) : "", typeof a?.confidence === "number" ? pct(a.confidence) : ""];
-      });
-      const verdict = [r ? STATUS_LABEL[r.status] : "Not checked", typeof r?.score === "number" ? pct(r.score) : "", r?.reason ?? "", r?.note ?? "", r?.keep ? `"${r.keep.term}" in ${r.keep.column}: ${r.keep.snippet}` : "", r?.review ? `${r.review.kind === "keep" ? "Keep" : r.review.kind === "drop" ? "Drop" : r.review.kind} (${r.review.confidence}): ${r.review.reason}` : "", ...perQuestion];
+      const verdict = decisionCells(set.questions, r);
       const seen = JSON.stringify(enrichedRef.current.get(i)?.profile ?? file.profiles[i]);
       return [[...verdict, ...enrichCells("contacts", i), seen, ...cells]];
     });
@@ -969,9 +986,17 @@ export default function JevClientPage() {
   const exportOriginal = () => {
     if (!file) return;
     const firstOf = duplicateOf(file.people) as Map<number, number>;
-    const rows = file.rows.filter((_, i) => all.get(firstOf.get(i) ?? i)?.status !== "bad");
+    const kept = file.rows.map((cells, i) => ({ cells, r: all.get(firstOf.get(i) ?? i) })).filter(({ r }) => r?.status !== "bad");
+    /*
+     * The upload's columns exactly as they came, then Jev's decisions appended after them — so the file still
+     * drops into whatever it came from, and every row says why it stayed. Appended rather than prepended
+     * because the original columns are the ones other tools map by position.
+     */
+    const questions = file.mode === "contacts" && set ? set.questions : [];
+    const headers = questions.length ? [...file.headers, ...decisionHeaders(questions)] : file.headers;
+    const rows = kept.map(({ cells, r }) => (questions.length ? [...file.headers.map((_, k) => cells[k] ?? ""), ...decisionCells(questions, r)] : cells));
     // No byte-order mark: it would glue itself to the first header name in tools that re-import the file.
-    download(`${file.name.replace(/\.csv$/i, "")} - jev cleaned.csv`, toCsv(file.headers, rows), false);
+    download(`${file.name.replace(/\.csv$/i, "")} - jev cleaned.csv`, toCsv(headers, rows), false);
   };
 
   const configured = mode === "companies" ? Boolean(tags?.tags.length) : Boolean(set?.questions.length);
@@ -1189,7 +1214,7 @@ export default function JevClientPage() {
                   {finished && file.mode === "contacts" && set && <ReviewBriefField key={`rb-${set.updatedAt ?? ""}`} value={set.reviewBrief ?? ""} disabled={Boolean(review) || Boolean(busy)} onSave={(t) => void saveReviewBrief(t)} />}
                   {finished && file.mode === "contacts" && (
                     <div className="jev-downloads">
-                      <button className="primary-button" onClick={exportOriginal}>Cleaned list, original columns ({cleanedCount.toLocaleString()})</button>
+                      <button className="primary-button" onClick={exportOriginal}>Cleaned list + Jev reasons ({cleanedCount.toLocaleString()})</button>
                       <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "good", "good-fits")} disabled={!counts.good}>Good fits ({counts.good.toLocaleString()})</button>
                       <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "good" || r?.status === "borderline", "good-and-maybe")} disabled={!counts.good && !counts.borderline}>Good + maybe ({(counts.good + counts.borderline).toLocaleString()})</button>
                       <button className="secondary-button" onClick={() => exportRows((r) => r?.status === "borderline", "maybe")} disabled={!counts.borderline}>Maybe ({counts.borderline.toLocaleString()})</button>
