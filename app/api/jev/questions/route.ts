@@ -35,6 +35,20 @@ export async function PUT(request: Request) {
       if (!set.tags.length) return NextResponse.json({ ok: false, error: "A tag set needs at least two tags.", problems }, { status: 422 });
       return NextResponse.json({ ok: true, set, problems });
     }
+    /*
+     * A setting change, not a new question set. Always-keep terms, review instructions and the scoring mode
+     * used to be saved by sending the whole set back as the tab held it, so a tab opened before a rebuild
+     * could save a review note and silently restore the old questions — the next run then judged a Bluevia
+     * list on questions nobody could see any more. A patch is merged into the set as it is stored now.
+     */
+    if (body?.patch && typeof body.patch === "object") {
+      const current = await loadQuestionSet(slug);
+      if (!current?.questions.length) return NextResponse.json({ ok: false, error: "This client has no saved question set." }, { status: 409 });
+      const patch: Record<string, unknown> = {};
+      for (const field of ["keepTerms", "reviewBrief", "scoring"]) if (field in body.patch) patch[field] = body.patch[field];
+      const { set, problems } = await saveQuestionSet(slug, { ...current, ...patch }, current.source || "manual");
+      return NextResponse.json({ ok: true, set, problems });
+    }
     const { set, problems } = await saveQuestionSet(slug, body?.set, "manual");
     if (!set.questions.length) return NextResponse.json({ ok: false, error: "No usable question to save.", problems }, { status: 422 });
     return NextResponse.json({ ok: true, set, problems });

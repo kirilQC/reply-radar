@@ -400,6 +400,9 @@ export default function JevClientPage() {
     rafRef.current = requestAnimationFrame(() => { rafRef.current = 0; setVersion((v) => v + 1); });
   };
 
+  /** The questions the last run was judged on — what the downloads label their answer columns with. */
+  const runQuestions = useRef<Question[] | null>(null);
+
   const resetResults = (loaded: LoadedFile | null) => {
     results.current = new Map();
     order.current = [];
@@ -658,7 +661,7 @@ export default function JevClientPage() {
     if (!set) return;
     setBusy("saving");
     try {
-      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, set: { ...set, keepTerms } }) });
+      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, patch: { keepTerms } }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
       setSet(payload.set);
@@ -672,7 +675,7 @@ export default function JevClientPage() {
     if (!set) return;
     setBusy("saving");
     try {
-      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, set: { ...set, reviewBrief } }) });
+      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, patch: { reviewBrief } }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
       setSet(payload.set);
@@ -686,7 +689,7 @@ export default function JevClientPage() {
     if (!set || set.scoring === scoring || (scoring === "gates" && !set.scoring)) return;
     setBusy("saving");
     try {
-      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, set: { ...set, scoring } }) });
+      const response = await fetch("/api/jev/questions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, patch: { scoring } }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
       setSet(payload.set);
@@ -788,11 +791,22 @@ export default function JevClientPage() {
 
   const run = async (only?: number[]) => {
     // Re-check the build before spending anything: a tab open across a deploy is exactly when this bites.
+    let saved: QuestionSet | null = set;
     try {
       const probe = await fetch(`/api/jev/questions?client=${encodeURIComponent(slug)}`, { cache: "no-store" }).then((r) => r.json());
       if (probe?.build && process.env.NEXT_PUBLIC_BUILD_ID && probe.build !== process.env.NEXT_PUBLIC_BUILD_ID) { setStale(true); return; }
+      /*
+       * The server judges every row against the setup as it is saved, not as this tab shows it. A Bluevia run
+       * came back with verdicts from the previous questions under the new ones' column headings, because the
+       * saved setup and the tab had drifted apart. So the tab takes the saved one before running, and says so.
+       */
+      if (probe?.set?.questions?.length) {
+        saved = probe.set as QuestionSet;
+        if (saved.updatedAt !== set?.updatedAt) { setSet(saved); setNotice({ kind: "info", text: "The saved screening questions had changed since this page loaded, so the run uses the saved ones — shown above." }); }
+      }
     } catch { /* offline checks fall through to the run's own errors */ }
-    if (!file || running || !(file.mode === "companies" ? tags?.tags.length : set?.questions.length)) return;
+    if (!file || running || !(file.mode === "companies" ? tags?.tags.length : saved?.questions.length)) return;
+    runQuestions.current = saved?.questions ?? null;
     const targets = only ?? file.rows.map((_, i) => i).filter((i) => !file.duplicates.has(i));
     if (!only) resetResults(file);
     else { const retry = new Set(only); for (const i of only) results.current.delete(i); order.current = order.current.filter((i) => !retry.has(i)); }
@@ -965,11 +979,13 @@ export default function JevClientPage() {
   const exportRows = (keep: (r: Result | undefined) => boolean, label: string) => {
     if (!file || !set) return;
     // Jev's decisions first, then enrichment and the exact profile Jev read, then the original columns.
-    const headers = [...decisionHeaders(set.questions), ...ENRICH_COLUMNS.contacts.map(([, h]) => h), "Jev input (what Jev saw)", ...file.headers];
+    // The run's own questions: answers are keyed by them, so the columns always line up with what was asked.
+    const questions = runQuestions.current ?? set.questions;
+    const headers = [...decisionHeaders(questions), ...ENRICH_COLUMNS.contacts.map(([, h]) => h), "Jev input (what Jev saw)", ...file.headers];
     const rows = file.rows.flatMap((cells, i) => {
       const r = all.get(i);
       if (!keep(r)) return [];
-      const verdict = decisionCells(set.questions, r);
+      const verdict = decisionCells(questions, r);
       const seen = JSON.stringify(enrichedRef.current.get(i)?.profile ?? file.profiles[i]);
       return [[...verdict, ...enrichCells("contacts", i), seen, ...cells]];
     });
@@ -992,7 +1008,7 @@ export default function JevClientPage() {
      * drops into whatever it came from, and every row says why it stayed. Appended rather than prepended
      * because the original columns are the ones other tools map by position.
      */
-    const questions = file.mode === "contacts" && set ? set.questions : [];
+    const questions = file.mode === "contacts" ? runQuestions.current ?? set?.questions ?? [] : [];
     const headers = questions.length ? [...file.headers, ...decisionHeaders(questions)] : file.headers;
     const rows = kept.map(({ cells, r }) => (questions.length ? [...file.headers.map((_, k) => cells[k] ?? ""), ...decisionCells(questions, r)] : cells));
     // No byte-order mark: it would glue itself to the first header name in tools that re-import the file.
