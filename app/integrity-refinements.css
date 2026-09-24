@@ -6724,3 +6724,18 @@ body.light-mode .brain-icp {
 .pa-client.is-on { color: color-mix(in srgb, var(--accent) 88%, #fff); background: color-mix(in srgb, var(--accent) 15%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 .pa-form-actions { display: flex; gap: 10px; }
 @media (max-width: 620px) { .pa-field-row { grid-template-columns: 1fr; } }
+
+/* The internal-only switch under the Slack channel ids: a plain checkbox line, sized like the note under it. */
+.internal-only-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.internal-only-toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+}

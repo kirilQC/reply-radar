@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { parseSlackBrief, parseInline, recapPlainText, EMOJI, emojiGlyph } from "../app/lib/brief-format.ts";
 
 /** The shape a real posted brief has: fenced centred headings, bullets indented four per level, a footer. */
-const DIVIDER = "=".repeat(37);
+const DIVIDER = "=".repeat(32);
 const SAMPLE = [
   `${DIVIDER}`,
   ``,

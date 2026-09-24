@@ -152,9 +152,9 @@ export default function AdminPage() {
   const [workspaceDraft, setWorkspaceDraft] = useState<{
     name: string; slug: string; brief: string; timezone: string; website: string; messagingDocUrl: string;
     anthropicModel: string; systemPrompt: string; apiKey: string; brainFolder: string;
-    slackInternal: string; slackExternal: string; granolaTitleMatch: string;
+    slackInternal: string; slackExternal: string; slackInternalOnly: boolean; granolaTitleMatch: string;
     slackExtra: string[]; granolaExtra: string[]; airtableBaseId: string; clayDncWebhookUrl: string;
-  }>({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", granolaTitleMatch: "", slackExtra: [], granolaExtra: [], airtableBaseId: "", clayDncWebhookUrl: "" });
+  }>({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", slackInternalOnly: false, granolaTitleMatch: "", slackExtra: [], granolaExtra: [], airtableBaseId: "", clayDncWebhookUrl: "" });
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -205,7 +205,7 @@ export default function AdminPage() {
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", granolaTitleMatch: client.granolaTitleMatch ?? "", slackExtra: client.slackExtraChannelIds ?? [], granolaExtra: client.granolaExtraTitleMatches ?? [], airtableBaseId: client.airtableBaseId ?? "", clayDncWebhookUrl: client.clayDncWebhookUrl ?? "" });
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", slackInternalOnly: Boolean(client.guardrails?.slack_internal_only), granolaTitleMatch: client.granolaTitleMatch ?? "", slackExtra: client.slackExtraChannelIds ?? [], granolaExtra: client.granolaExtraTitleMatches ?? [], airtableBaseId: client.airtableBaseId ?? "", clayDncWebhookUrl: client.clayDncWebhookUrl ?? "" });
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -223,7 +223,8 @@ export default function AdminPage() {
     const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || client.slug;
     const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
     const mutationIdentity = isNewWorkspace ? { create: true } : { id: client.id, previousSlug: client.slug };
-    const nextGuardrails = { ...(client.guardrails ?? {}), messaging_doc_url: workspaceDraft.messagingDocUrl.trim() };
+    // Kept in guardrails with the client's other switches, so it needs no column of its own.
+    const nextGuardrails = { ...(client.guardrails ?? {}), messaging_doc_url: workspaceDraft.messagingDocUrl.trim(), slack_internal_only: workspaceDraft.slackInternalOnly };
     const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, granolaTitleMatch: workspaceDraft.granolaTitleMatch, slackExtraChannelIds: workspaceDraft.slackExtra, granolaExtraTitleMatches: workspaceDraft.granolaExtra, airtableBaseId: workspaceDraft.airtableBaseId, clayDncWebhookUrl: workspaceDraft.clayDncWebhookUrl, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
     if (!response?.ok) {
       const detail = await response?.json().catch(() => ({}));
@@ -398,6 +399,8 @@ export default function AdminPage() {
     if (wrong.length) return `That does not look like a channel id (${wrong.join(" and ")}). Open the channel in Slack, choose View channel details, and copy the id from the bottom — or paste the channel URL here and the id will be read out of it.`;
     if (internal && internal === external) return "Both fields hold the same channel. The internal channel is where the team talks and the external one is shared with the client — briefs written for one are not safe to post in the other.";
     if (internal && external) return "The internal channel is read for what the team committed to. The external channel is read for anything the client asked that nobody answered. The Reply Radar bot has to be invited to both.";
+    if (internal && !external && workspaceDraft.slackInternalOnly) return "Internal channel only, as ticked above. The morning brief can be switched on without an external channel.";
+    if (internal && !external) return "Only the internal channel is set. The morning brief can't be switched on until the external channel is added — or tick the box above if this client doesn't have one.";
     if (internal || external) return `Only the ${internal ? "internal" : "external"} channel is set. A brief will still be written, but it will be missing whatever the other channel would have told it.`;
     return "Briefs need at least one channel. Paste the channel id, or the channel URL, and the id will be read out of it.";
   })();
@@ -751,6 +754,12 @@ export default function AdminPage() {
                       {/* Named plainly because both mistakes here are silent. A channel name instead of an
                           id saves without complaint and resolves to nothing; the two ids the wrong way
                           round sends the team's own notes to the client. */}
+                      {/* The morning brief needs both channels unless this is ticked, because a blank external
+                          field is usually a channel nobody pasted, not a client without one. */}
+                      <label className="internal-only-toggle">
+                        <input type="checkbox" checked={workspaceDraft.slackInternalOnly} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slackInternalOnly: event.target.checked }))} />
+                        <span>This client only has an internal channel</span>
+                      </label>
                       <p className="slack-channel-note">{slackChannelNote}</p>
                       {/* Marked as extras in the label as well as by position, because the prompt ranks
                           them below the two above and somebody who thought this was a third equal channel

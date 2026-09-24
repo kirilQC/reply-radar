@@ -122,6 +122,8 @@ export type ReadinessInput = {
   externalChannelId: string;
   granolaTitleMatch: string;
   granolaKeyCount: number;
+  /** Set in the client's settings when they have no external channel at all; see `readinessOf`. */
+  internalOnly?: boolean;
 };
 
 export type Check = { ok: boolean; detail: string };
@@ -144,13 +146,16 @@ export function readinessOf(input: ReadinessInput, now = Date.now()): Readiness 
         ? { ok: false, detail: `Last polled ${Math.round(pollAge)}h ago` }
         : { ok: true, detail: pollAge < 1 ? "Polling now" : `Polled ${Math.round(pollAge)}h ago` };
 
-  // Internal is the one that matters: it is where the team's commitments are, and where a brief posts.
-  // A missing external channel costs the brief one section, so it is a note rather than a failure.
+  // Both channels by default: a blank external field is far more often a channel nobody pasted in than a
+  // client without one, and a brief missing the client's unanswered asks still reads as complete. A client
+  // who genuinely has only an internal channel is marked so in their settings, which is what lets it pass.
   const slack: Check = !input.internalChannelId
     ? { ok: false, detail: "No internal channel" }
     : input.externalChannelId
       ? { ok: true, detail: "Both channels set" }
-      : { ok: true, detail: "Internal only" };
+      : input.internalOnly
+        ? { ok: true, detail: "Internal only" }
+        : { ok: false, detail: "No external channel" };
 
   const granola: Check = !input.granolaKeyCount
     ? { ok: false, detail: "No Granola keys added" }

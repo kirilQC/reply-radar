@@ -819,7 +819,7 @@ export function briefWeekdayNote(timezone: string, at: Date = new Date()): strin
 }
 
 /** The divider, shared so the prompt, the headings and the footer cannot drift to different widths. */
-export const BRIEF_DIVIDER = "=".repeat(37);
+export const BRIEF_DIVIDER = "=".repeat(32);
 
 /**
  * How wide things render in Slack, measured in spaces, because a space is the only unit of indent we have.

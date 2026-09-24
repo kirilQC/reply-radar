@@ -258,14 +258,22 @@ test("a HeyReach key that stopped reporting is not a working source", () => {
   assert.equal(readinessOf({ ...READY, heyreachKeyConfigured: false }, NOW).heyreach.detail, "No HeyReach key");
 });
 
-test("no internal channel is a failure, one missing external channel is not", () => {
+test("both channels are required unless the client is marked internal-only", () => {
   // Internal is where the team's commitments are and where a brief posts, so without it there is
-  // nothing to read and nowhere to put the result. External costs the brief one section.
+  // nothing to read and nowhere to put the result.
   assert.equal(readinessOf({ ...READY, internalChannelId: "" }, NOW).slack.ok, false);
+  // A blank external field is usually a channel nobody pasted in, so by default it blocks.
   const externalMissing = readinessOf({ ...READY, externalChannelId: "" }, NOW);
-  assert.equal(externalMissing.slack.ok, true);
-  assert.equal(externalMissing.slack.detail, "Internal only");
-  assert.equal(externalMissing.ready, true);
+  assert.equal(externalMissing.slack.ok, false);
+  assert.equal(externalMissing.slack.detail, "No external channel");
+  assert.equal(externalMissing.ready, false);
+  // A client that genuinely has only an internal channel is ticked so in settings, and then it passes.
+  const internalOnly = readinessOf({ ...READY, externalChannelId: "", internalOnly: true }, NOW);
+  assert.equal(internalOnly.slack.ok, true);
+  assert.equal(internalOnly.slack.detail, "Internal only");
+  assert.equal(internalOnly.ready, true);
+  // The flag never excuses a missing internal channel.
+  assert.equal(readinessOf({ ...READY, internalChannelId: "", internalOnly: true }, NOW).slack.ok, false);
 });
 
 test("a key with no name to match on, and a name with no key, are both not ready", () => {

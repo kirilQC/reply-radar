@@ -144,7 +144,7 @@ export async function GET() {
 
   try {
     const [workspaceRows, keyedRows, briefRows, granolaRows, automationRows] = await Promise.all([
-      read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match,morning_brief_enabled,last_successful_poll_at&slug=neq.misc&order=name.asc"),
+      read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match,morning_brief_enabled,last_successful_poll_at,guardrails&slug=neq.misc&order=name.asc"),
       read("rr_workspaces?select=id&heyreach_api_key_ciphertext=not.is.null"),
       // Every client's brief history in one read rather than one read per client. 200 rows is roughly a
       // year of three-a-week briefs for a dozen clients, and only the newest per client is used.
@@ -189,6 +189,7 @@ export async function GET() {
         externalChannelId,
         granolaTitleMatch,
         granolaKeyCount,
+        internalOnly: Boolean((workspace.guardrails as Row | null)?.slack_internal_only),
       }, now.getTime());
       const sentToday = alreadySentToday(sent ? String(sent.created_at ?? "") : null, schedule, now);
       return {
