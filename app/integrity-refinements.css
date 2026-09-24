@@ -6587,6 +6587,12 @@ body.light-mode .brain-icp {
   opacity: 0.6;
 }
 
+.granola-key-shared {
+  margin: 8px 0 0;
+  font-size: 10.5px;
+  opacity: 0.6;
+}
+
 .granola-key-meetings > .granola-key-error {
   margin: 0 0 8px;
 }

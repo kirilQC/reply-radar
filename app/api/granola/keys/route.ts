@@ -133,7 +133,17 @@ export async function POST(request: Request) {
         return first === holder || note.owner.toLowerCase() === holder || local.startsWith(holder);
       };
       const shape = (note: { title: string; startedAt: number; owner: string; ownerEmail: string }) => ({ title: note.title, startedAt: new Date(note.startedAt).toISOString(), owner: note.owner, own: isHolders(note) });
-      const sorted = all.slice().sort((left, right) => right.startedAt - left.startedAt);
+      /*
+       * The holder's own meetings only. Notes a teammate set visible to the whole workspace come back on every
+       * key with the "Public notes" scope, so Ben's calls were listed under Jake and Nick and read as theirs.
+       * They are counted, with whose they are, rather than listed. Until owners are known (an older Granola
+       * response) nothing is filtered, because hiding every note would look like an empty account.
+       */
+      const ownersKnown = all.some((note) => note.owner || note.ownerEmail);
+      const mine = ownersKnown ? all.filter(isHolders) : all;
+      const shared = ownersKnown ? all.filter((note) => !isHolders(note)) : [];
+      const sharedFrom = [...new Set(shared.map((note) => note.owner || note.ownerEmail).filter(Boolean))];
+      const sorted = mine.slice().sort((left, right) => right.startedAt - left.startedAt);
       return NextResponse.json({
         ok: result.ok,
         error: result.error,
@@ -145,7 +155,9 @@ export async function POST(request: Request) {
         olderMeetings: sorted.filter((note) => note.startedAt < cutoff).map(shape),
         totalInYear: all.length,
         ownInYear: all.filter(isHolders).length,
-        ownersKnown: all.some((note) => note.owner || note.ownerEmail),
+        ownersKnown,
+        sharedInWindow: shared.filter((note) => note.startedAt >= cutoff).length,
+        sharedFrom,
       });
     }
 

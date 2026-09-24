@@ -198,8 +198,11 @@ export default function SlackPage() {
       return { ok: false, detail: `No call in ${coverage.windowDays} days`, title: `No meeting with "${client.granolaTitleMatch}" in the title on any key in the last ${coverage.windowDays} days. Either there was no call, or whoever took it hasn't added their Granola key.` };
     }
     const when = new Date(found.latest.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    const who = found.seenBy.length > 2 ? `${found.seenBy.slice(0, 2).join(", ")} +${found.seenBy.length - 2}` : found.seenBy.join(", ");
-    return { ok: true, detail: `${when} · ${who}`, title: `"${found.latest.title}" on ${when}. Seen on: ${found.seenBy.join(", ")}.` };
+    // First names in the box, which is narrow; everyone in full on hover. These are the people who recorded
+    // a matching call, not whose key returned it (see callCoverage).
+    const first = [...new Set(found.seenBy.map((name) => name.split(/\s+/)[0] || name))];
+    const who = first.length > 2 ? `${first.slice(0, 2).join(", ")} +${first.length - 2}` : first.join(", ");
+    return { ok: true, detail: `${when} · ${who}`, title: `"${found.latest.title}" on ${when}. Recorded by: ${found.seenBy.join(", ")}.` };
   };
 
   const load = async (which: Automation = automation) => {

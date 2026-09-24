@@ -1175,7 +1175,7 @@ const readScreenshot = (file: File) =>
 type GranolaKeyRow = { id: string; label: string; masked: string; lastCheckedAt: string | null; lastStatus: string; lastError: string };
 /** What one Test found: the meetings this key can see, and the window they were looked for in. */
 type GranolaMeeting = { title: string; startedAt: string; owner?: string; own?: boolean };
-type GranolaSighting = { windowDays: number; meetings: GranolaMeeting[]; olderMeetings: GranolaMeeting[]; totalInYear: number; ownInYear: number; ownersKnown: boolean };
+type GranolaSighting = { windowDays: number; meetings: GranolaMeeting[]; olderMeetings: GranolaMeeting[]; totalInYear: number; ownInYear: number; ownersKnown: boolean; sharedInWindow: number; sharedFrom: string[] };
 
 /**
  * One Granola key per teammate.
@@ -1246,6 +1246,8 @@ function GranolaKeysView() {
         totalInYear: Number(payload?.totalInYear ?? 0),
         ownInYear: Number(payload?.ownInYear ?? 0),
         ownersKnown: Boolean(payload?.ownersKnown),
+        sharedInWindow: Number(payload?.sharedInWindow ?? 0),
+        sharedFrom: Array.isArray(payload?.sharedFrom) ? (payload.sharedFrom as string[]) : [],
       },
     }));
     setBusyId("");
@@ -1318,6 +1320,12 @@ function GranolaKeysView() {
                         </li>
                       ))}
                     </ul>
+                  )}
+                  {/* Teammates' workspace-visible notes come back on this key too; they are theirs, so counted, not listed. */}
+                  {sightings[key.id].sharedInWindow > 0 && (
+                    <p className="granola-key-shared">
+                      + {sightings[key.id].sharedInWindow} shared by {sightings[key.id].sharedFrom.slice(0, 3).join(", ")}{sightings[key.id].sharedFrom.length > 3 ? ` +${sightings[key.id].sharedFrom.length - 3}` : ""} — visible to everyone in the workspace, not {key.label || "this person"}&apos;s own
+                    </p>
                   )}
                   {sightings[key.id].meetings.length === 0 && sightings[key.id].olderMeetings.length > 0 && (
                     <ul className="granola-key-older">

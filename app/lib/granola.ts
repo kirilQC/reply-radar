@@ -374,7 +374,19 @@ export async function callCoverage(
   for (const client of clients) {
     const needles = parseTitleNeedles(client.titleMatch, client.clientName);
     if (!needles.length) continue;
-    const seenBy = listed.filter(({ notes }) => pickLatestCall(notes, needles)).map(({ key }) => key.label || "a teammate");
+    /*
+     * Who recorded a matching call, not whose key returned it. Notes set visible to the whole workspace come
+     * back on every key with the "Public notes" scope, so crediting by key put Ben's calls under Jake and
+     * Nick. The owner is on each listed note; a key's label stands in only when a note carries no owner.
+     */
+    const owners = new Set<string>();
+    for (const { key, notes } of listed) {
+      for (const raw of notes) {
+        const note = normalizeNote(raw);
+        if (note && titleMatches(note.title, needles)) owners.add(ownerOf(raw).owner || key.label || "a teammate");
+      }
+    }
+    const seenBy = [...owners];
     const winner = pickWinner(listed, needles, new Set());
     coverage[client.slug] = {
       seenBy,
