@@ -84,7 +84,14 @@ async function call(method: string, init: RequestInit, actor: SlackActor = "read
   const body = await raw(token, method, init);
   // Slack's own errors are more useful than the status, and they are the ones a teammate can act on:
   // `channel_not_found` means the id is wrong, `not_in_channel` means whoever's token this is is not a member.
-  if (!body.ok) throw new Error(slackErrorText(body.error, body.status, actor));
+  if (!body.ok) {
+    // The humanised text is what a teammate reads; the raw slug rides along on `.code` so callers that
+    // can recover from a specific one (e.g. `postMessage` self-joining on `not_in_channel`) can branch on
+    // it without re-parsing English.
+    const failure = new Error(slackErrorText(body.error, body.status, actor)) as Error & { code?: string };
+    failure.code = typeof body.error === "string" ? body.error : "";
+    throw failure;
+  }
   return body;
 }
 
@@ -425,8 +432,32 @@ export async function openDm(userId: string): Promise<string> {
   }
 }
 
+/**
+ * Add QC Bot to a channel it was handed the id of but never invited to. Returns whether it worked.
+ *
+ * Only a *public* channel can be self-joined — that is exactly what `conversations.join` is for, and it
+ * needs the bot's `channels:join` scope. A private channel answers `channel_not_found` (Slack will not
+ * even confirm it exists to a non-member), so joining fails there and the caller surfaces the original
+ * "invite the bot" error. Never throws: a failed join is just a `false`, so the post's own error is what
+ * the caller reports rather than a second one about the join.
+ */
+async function joinPublicChannel(channelId: string): Promise<boolean> {
+  const token = botToken();
+  if (!token || !channelId) return false;
+  try {
+    const body = await raw(token, "conversations.join", {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ channel: channelId }),
+    });
+    return Boolean(body.ok);
+  } catch {
+    return false;
+  }
+}
+
 export async function postMessage(channelId: string, text: string, threadTs = "", blocks?: unknown[]): Promise<string> {
-  const body = await call("chat.postMessage", {
+  const send = () => call("chat.postMessage", {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },
     // `unfurl_links: false` because a brief that quotes a campaign URL should not paste a preview card
@@ -443,7 +474,18 @@ export async function postMessage(channelId: string, text: string, threadTs = ""
       ...(blocks && blocks.length ? { blocks } : {}),
     }),
   }, "write");
-  return String(body.ts ?? "");
+
+  try {
+    return String((await send()).ts ?? "");
+  } catch (error) {
+    // The one failure worth a retry: the channel id is right but the bot is not a member. A public channel
+    // it can add itself to, then post — which is what turns "configured but the bot was never invited" from
+    // a silent daily miss into a delivered brief. Any other error, and a private channel it cannot self-join,
+    // fall straight through with their original message.
+    if ((error as { code?: string })?.code !== "not_in_channel") throw error;
+    if (!(await joinPublicChannel(channelId))) throw error;
+    return String((await send()).ts ?? "");
+  }
 }
 
 /**
