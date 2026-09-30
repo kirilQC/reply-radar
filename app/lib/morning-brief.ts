@@ -149,6 +149,8 @@ Then these three sections in this order. Drop a section entirely if it has nothi
 
 Only campaigns that are *both* active *and* still have leads to contact. A campaign with 0 pending leads is finished, whatever its status says, and everybody reading already knows that; listing it is two lines about work nobody can do. A paused campaign is not running either. Leave all of them out without comment.
 
+A campaign that is marked active but has not sent for days is stalled, not healthy: it is not spending the days-of-sending-left the Figures show, because it is not sending at all. When the Figures tell you to reconcile an active campaign against an account that has gone quiet, do exactly that: report it once, as sending that has stopped and needs restarting, not as a healthy campaign in this list and separately as a warning that nothing is running. Never state a days-of-sending-left number the Figures did not give you, and never tell the team to build new campaigns when leads are already loaded and only the sending has stalled.
+
 Numbered, one campaign each, and never more than two sub-bullets under a campaign:
 
 1. *FULL CAMPAIGN NAME*
@@ -651,6 +653,23 @@ export function signalsAsText(signals: BriefSignals): string {
   // No em dash, here or in any other line handed to the model. The brief is told never to write one, and a
   // prompt that demands that while modelling the opposite loses to the example every time.
   else if (sending.quietDays >= 2) lines.push(`Nothing has been sent since ${sending.lastDayWithSends}, which is ${sending.quietDays} days quiet.`);
+
+  /*
+   * The contradiction this brief kept posting: HeyReach still reports a campaign as active, with leads
+   * loaded and a days-of-sending-left figure on paper, while the account has not actually sent for days.
+   * Handed to the model as two unrelated facts, it writes both halves — "here are your active campaigns
+   * with N days of runway" in the campaigns list, and "nothing is running, build new campaigns" in the
+   * warning — about the same campaigns, in the same brief. HeyReach keeps a campaign IN_PROGRESS when its
+   * sending accounts are paused or capped, so "active" and "not sending" are both true at once and neither
+   * layer is wrong; what was missing is the instruction to reconcile them into one picture. Stated here,
+   * in the figures, so the two halves cannot disagree — same reason the depleted-campaign rule is.
+   */
+  if (sending.quietDays >= 2 && campaigns.active > 0 && sending.lastDayWithSends) {
+    const many = campaigns.active !== 1;
+    lines.push(
+      `Reconcile before writing the campaigns section: ${campaigns.active} campaign${many ? "s" : ""} above ${many ? "are" : "is"} marked active with leads still loaded and a days-of-sending-left figure, yet nothing has been sent since ${sending.lastDayWithSends} (${sending.quietDays} days). Those are the same campaigns, so write one coherent picture rather than both halves. An active campaign that has not sent for days is stalled, not healthy: either its sending has stopped and the point is to restart it or check its accounts, or, if that gap is only a weekend, it is fine and about to resume. Do not present them as healthy active runway in the campaigns list and separately warn that nothing is running. And do not tell the team to build or pull new campaigns while ${runway.pending} lead${runway.pending === 1 ? " is" : "s are"} already loaded across them: the work is to get sending moving again, not to add lists.`,
+    );
+  }
 
   lines.push(`Replies in the last 7 days: ${replies.thisWeek}. In the 7 days before that: ${replies.lastWeek}.`);
   if (acceptance.thisWeek !== null) lines.push(`Acceptance rate over the last 7 days: ${acceptance.thisWeek}%${acceptance.lastWeek === null ? "" : `, against ${acceptance.lastWeek}% the week before`}.`);

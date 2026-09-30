@@ -630,7 +630,12 @@ test("a client override is a different key from the global prompt", () => {
 test("Slack's own error slug is what gets translated, not the HTTP status", () => {
   // Slack answers 200 with `{ ok: false }`, so a route that trusted the status would report success on
   // every failure there is.
-  assert.match(slackLib, /if \(!body\.ok\) throw new Error\(slackErrorText/);
+  // Gated on Slack's own `ok`, and the thrown message is built from the slug via slackErrorText. The error
+  // also carries the raw slug on `.code` so postMessage can self-join on `not_in_channel`, so the throw is a
+  // short block rather than a one-liner now; the invariant the test guards is the same.
+  assert.match(slackLib, /if \(!body\.ok\) \{/);
+  assert.match(slackLib, /new Error\(slackErrorText\(body\.error, body\.status, actor\)\)/);
+  assert.match(slackLib, /\.code = typeof body\.error === "string"/);
   assert.match(slackLib, /not_in_channel/);
   assert.match(slackLib, /channel_not_found/);
 });
@@ -639,12 +644,13 @@ test("a brief posts as the bot even when only a user token is set", () => {
   // The user token exists so reads need no channel invitations. Letting a post fall back to it would put
   // a brief into a client-facing channel under a person's name, and the client would reply to them.
   assert.match(slackLib, /const token = actor === "write" \? botToken\(\) : readToken\(\);/);
-  // The only calls that ask for the write credential are the five that write: posting a message, editing
+  // The only calls that ask for the write credential are the six that write: posting a message, editing
   // one (the Slack assistant rewrites its reply in place as the answer forms), deleting one (the assistant
-  // leaves the thread with just QC Bot's answer), and adding and removing the :eyes: reaction that marks
-  // the bot working. Reads must never reach for the write token, so this count guards against a read
-  // quietly acquiring it.
-  assert.equal(slackLib.match(/\}, "write"\);/g)?.length, 5);
+  // leaves the thread with just QC Bot's answer), opening a DM (the personal assistant sends per-person
+  // briefs), and adding and removing the :eyes: reaction that marks the bot working. Reads must never reach
+  // for the write token, so this count guards against a read quietly acquiring it.
+  assert.equal(slackLib.match(/\}, "write"\);/g)?.length, 6);
+  assert.match(slackLib, /conversations\.open[\s\S]{0,400}\}, "write"\);/);
   assert.match(slackLib, /chat\.postMessage[\s\S]{0,700}\}, "write"\);/);
   assert.match(slackLib, /chat\.update[\s\S]{0,700}\}, "write"\);/);
   assert.match(slackLib, /chat\.delete[\s\S]{0,400}\}, "write"\);/);
@@ -1087,8 +1093,13 @@ test("a brief with nowhere to go is refused before the model is called", () => {
   assert.ok(refuseAt < modelAt, "the channel is checked before the model is called");
 });
 
-test("the brief route fits inside the Hobby function ceiling", () => {
-  assert.match(route, /export const maxDuration = 60;/);
+test("the brief route stays within the Vercel Pro function ceiling", () => {
+  // Raised from 60 to 180 when the project moved to Vercel Pro (commit f3fde42) so the brief plus the
+  // tracker and board sync fit in one invocation. Pro's ceiling is 300s; this guards against a value that
+  // would silently exceed it.
+  const match = route.match(/export const maxDuration = (\d+);/);
+  assert.ok(match, "maxDuration is declared");
+  assert.ok(Number(match[1]) <= 300, "maxDuration is within the Vercel Pro ceiling");
 });
 
 // ── The trace ────────────────────────────────────────────────────────
