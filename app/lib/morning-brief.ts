@@ -149,8 +149,6 @@ Then these three sections in this order. Drop a section entirely if it has nothi
 
 Only campaigns that are *both* active *and* still have leads to contact. A campaign with 0 pending leads is finished, whatever its status says, and everybody reading already knows that; listing it is two lines about work nobody can do. A paused campaign is not running either. Leave all of them out without comment.
 
-A campaign that is marked active but has not sent for days is stalled, not healthy: it is not spending the days-of-sending-left the Figures show, because it is not sending at all. When the Figures tell you to reconcile an active campaign against an account that has gone quiet, do exactly that: report it once, as sending that has stopped and needs restarting, not as a healthy campaign in this list and separately as a warning that nothing is running. Never state a days-of-sending-left number the Figures did not give you, and never tell the team to build new campaigns when leads are already loaded and only the sending has stalled.
-
 Numbered, one campaign each, and never more than two sub-bullets under a campaign:
 
 1. *FULL CAMPAIGN NAME*
@@ -515,6 +513,16 @@ export function composeSignals(
   const runwaySenders = new Set(running.flatMap((row) => row.senderIds)).size;
   const runwayDaysLeft = sendingDaysLeft(runwayPending, runwaySenders);
 
+  // The lead supply loaded across the whole account, used only to decide the "build new campaigns" alarm.
+  // Separate from the active runway above because the alarm is a claim that the account is out of leads to
+  // send, and that has to be judged on every lead sitting in a campaign, not on the active runway alone.
+  // Measured against at least one sender so that a campaign whose sender ids were never recorded — a data
+  // gap, which `sendingDaysLeft` returns null for — cannot read as an empty account. Without this, a client
+  // with thousands of pending leads whose senders HeyReach did not report was told to go pull new lists.
+  const loadedPending = facts.reduce((total, row) => total + row.pending, 0);
+  const loadedSenders = new Set(facts.flatMap((row) => row.senderIds)).size;
+  const loadedDaysLeft = sendingDaysLeft(loadedPending, Math.max(1, loadedSenders));
+
   return {
     campaigns: {
       total: facts.length,
@@ -543,14 +551,14 @@ export function composeSignals(
       daysLeft: runwayDaysLeft,
       pending: runwayPending,
       senders: runwaySenders,
-      // Fires on the OVERALL runway pooled across every active campaign, not on any single one — one
-      // campaign running dry while another has a week left is normal and must not raise the alarm (the pooled
-      // maths already handles that: two campaigns' leads over their shared senders is a runway well over two
-      // days, so a single short campaign never trips it). A null runway — no senders recorded on the active
-      // campaigns — is a real "nothing is actually sending" state and does flag, since a campaign with no
-      // senders is not sending at all. Only claimed when there are campaign records to judge: "build new
-      // campaigns" on the strength of no data is the wrong instruction that gets the whole brief ignored.
-      needsCampaigns: facts.length > 0 && (runwayDaysLeft === null || runwayDaysLeft < RUNWAY_ALARM_DAYS),
+      // "Build new campaigns" is the claim that the account is about to run out of leads to send, so it
+      // fires only when the leads actually loaded across every campaign — active, paused, or with no senders
+      // recorded — are under the two-day line. It deliberately does NOT fire on a null active runway: senders
+      // not being recorded on the active campaigns is a data gap, not an empty account, and a client with
+      // thousands of pending leads must never be told to pull new lists. Paused campaigns and an account that
+      // has simply stopped sending (out of credits, sender caps) still have their leads loaded and ready, so
+      // they do not trip it either. Only claimed when there are campaign records to judge at all.
+      needsCampaigns: facts.length > 0 && loadedDaysLeft !== null && loadedDaysLeft < RUNWAY_ALARM_DAYS,
     },
     sending: {
       thisWeek,
@@ -653,23 +661,6 @@ export function signalsAsText(signals: BriefSignals): string {
   // No em dash, here or in any other line handed to the model. The brief is told never to write one, and a
   // prompt that demands that while modelling the opposite loses to the example every time.
   else if (sending.quietDays >= 2) lines.push(`Nothing has been sent since ${sending.lastDayWithSends}, which is ${sending.quietDays} days quiet.`);
-
-  /*
-   * The contradiction this brief kept posting: HeyReach still reports a campaign as active, with leads
-   * loaded and a days-of-sending-left figure on paper, while the account has not actually sent for days.
-   * Handed to the model as two unrelated facts, it writes both halves — "here are your active campaigns
-   * with N days of runway" in the campaigns list, and "nothing is running, build new campaigns" in the
-   * warning — about the same campaigns, in the same brief. HeyReach keeps a campaign IN_PROGRESS when its
-   * sending accounts are paused or capped, so "active" and "not sending" are both true at once and neither
-   * layer is wrong; what was missing is the instruction to reconcile them into one picture. Stated here,
-   * in the figures, so the two halves cannot disagree — same reason the depleted-campaign rule is.
-   */
-  if (sending.quietDays >= 2 && campaigns.active > 0 && sending.lastDayWithSends) {
-    const many = campaigns.active !== 1;
-    lines.push(
-      `Reconcile before writing the campaigns section: ${campaigns.active} campaign${many ? "s" : ""} above ${many ? "are" : "is"} marked active with leads still loaded and a days-of-sending-left figure, yet nothing has been sent since ${sending.lastDayWithSends} (${sending.quietDays} days). Those are the same campaigns, so write one coherent picture rather than both halves. An active campaign that has not sent for days is stalled, not healthy: either its sending has stopped and the point is to restart it or check its accounts, or, if that gap is only a weekend, it is fine and about to resume. Do not present them as healthy active runway in the campaigns list and separately warn that nothing is running. And do not tell the team to build or pull new campaigns while ${runway.pending} lead${runway.pending === 1 ? " is" : "s are"} already loaded across them: the work is to get sending moving again, not to add lists.`,
-    );
-  }
 
   lines.push(`Replies in the last 7 days: ${replies.thisWeek}. In the 7 days before that: ${replies.lastWeek}.`);
   if (acceptance.thisWeek !== null) lines.push(`Acceptance rate over the last 7 days: ${acceptance.thisWeek}%${acceptance.lastWeek === null ? "" : `, against ${acceptance.lastWeek}% the week before`}.`);

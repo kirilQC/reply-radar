@@ -438,10 +438,29 @@ test("a campaign with no senders reports an unknown runway rather than a finishe
   );
   assert.equal(signals.campaigns.names[0].daysLeft, null);
   assert.equal(signals.runway.daysLeft, null);
-  assert.equal(signals.runway.needsCampaigns, true);
+  // The active runway is unknown (no senders), but 500 leads are loaded, so the account is NOT out of leads:
+  // "build new campaigns" would be the wrong instruction. The missing-senders problem is flagged instead.
+  assert.equal(signals.runway.needsCampaigns, false);
   const text = signalsAsText(signals);
   assert.match(text, /No senders are assigned to it/);
   assert.match(text, /Total days of sending left cannot be worked out/);
+  assert.doesNotMatch(text, /new campaigns need building/);
+});
+
+test("active campaigns loaded with leads never trip the build-new-campaigns alarm", async () => {
+  // The Ema Health regression: two campaigns sending, thousands of leads pending, but the account had gone
+  // quiet and its sender ids were not fully recorded. The old rule fired "no campaigns running, out of
+  // leads, build new campaigns" purely because the active runway came out null. Leads loaded is what the
+  // alarm is about, and there are thousands, so it must stay silent.
+  const signals = await gatherSignals(
+    readerFor([
+      { name: "EM031: Business", status: "IN_PROGRESS", connections_sent: 200, connections_accepted: 54, replies: 8, leads_pending: 584, sender_ids: [], refreshed_at: new Date().toISOString() },
+      { name: "EM031: Clinical", status: "IN_PROGRESS", connections_sent: 300, connections_accepted: 34, replies: 6, leads_pending: 1376, sender_ids: [], refreshed_at: new Date().toISOString() },
+    ], dayRows(7, 7, 0)),
+    WORKSPACE,
+  );
+  assert.equal(signals.runway.needsCampaigns, false);
+  assert.doesNotMatch(signalsAsText(signals), /new campaigns need building/);
 });
 
 test("an assigned sender whose name we do not know is a count, never an id and never a guess", async () => {
