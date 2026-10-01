@@ -7,7 +7,7 @@
  * matches the face.
  */
 
-export const MASCOT_NAME = "Pip";
+export const MASCOT_NAME = "Scout";
 
 const T = "#65EBE0";
 const TD = "#499B8F";
