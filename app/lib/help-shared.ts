@@ -58,6 +58,17 @@ export const HELP_PAGES: { path: string; label: string }[] = [
   { path: "/admin", label: "Configuration" },
 ];
 
+/** The readable part of an article's URL: /help/working-the-follow-ups-list. */
+export const slugify = (title: string) =>
+  title.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+
+/** The shareable path for an article. Titles are unique in practice; the id still resolves if a title changes. */
+export const articlePath = (article: Pick<HelpArticle, "title" | "id">) => `/help/${slugify(article.title) || article.id}`;
+
+/** Finds the article a /help/<x> path points at: by its current slug first, then by id. */
+export const findBySlug = <T extends Pick<HelpArticle, "title" | "id">>(articles: T[], slug: string) =>
+  articles.find((a) => slugify(a.title) === slug) ?? articles.find((a) => a.id === slug);
+
 export const pageLabel = (path: string) => HELP_PAGES.find((page) => page.path === path)?.label ?? "";
 
 /**

@@ -14,7 +14,7 @@
 
 import { readConfig, writeConfig } from "./app-config";
 import { BUILT_IN_HELP } from "./help-defaults";
-import { HELP_KINDS, type HelpArticle, type HelpImage, type HelpKind, loomEmbedUrl, pageLabel } from "./help-shared";
+import { articlePath, HELP_KINDS, type HelpArticle, type HelpImage, type HelpKind, loomEmbedUrl, pageLabel } from "./help-shared";
 
 const KEY = "help_articles";
 /** Ids of built-in articles someone deleted, so they stay deleted. */
@@ -168,7 +168,7 @@ export function helpForAssistant(article: HelpArticle, baseUrl: string) {
     page: article.page ? { name: pageLabel(article.page) || article.page, url: `${baseUrl}${article.page}` } : null,
     video: article.loomUrl && loomEmbedUrl(article.loomUrl) ? article.loomUrl : null,
     screenshots: (article.images ?? []).map((image) => ({ url: `${baseUrl}${image.src}`, caption: image.caption })),
-    helpUrl: `${baseUrl}/help#${article.id}`,
+    helpUrl: `${baseUrl}${articlePath(article)}`,
     body: article.body,
   };
 }

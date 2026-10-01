@@ -99,7 +99,7 @@ export const kindPath = (kind: HelpKind) => KIND_PATHS[kind];
 
 export function Glyph({ d, size = 16, className }: { d: string; size?: number; className?: string }) {
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className={className} width={size} height={size} style={{ width: size, height: size, flex: "none" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d={d} />
     </svg>
   );

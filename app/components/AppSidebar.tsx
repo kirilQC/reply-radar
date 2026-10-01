@@ -140,8 +140,12 @@ export default function AppSidebar() {
       : pathname.startsWith("/project-management")
         ? "reply-radar-sidebar:project-management"
         : "reply-radar-sidebar:page";
+  // Help always opens with the rail folded: the article list is its own navigation, and the reading
+  // column wants every pixel. It can still be expanded for the visit; it just doesn't stay that way.
+  const forceCollapsed = pathname.startsWith("/help");
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === "undefined") return !home;
+    if (forceCollapsed) return true;
     const stored = window.localStorage.getItem(collapseKey);
     return stored ? stored === "collapsed" : !home;
   });
@@ -180,14 +184,16 @@ export default function AppSidebar() {
   useEffect(() => {
     // Navigating between pages does not remount this, so the new context's default has to be
     // re-read rather than inherited from the page we came from.
+    if (forceCollapsed) { setCollapsed(true); return; }
     const stored = window.localStorage.getItem(collapseKey);
     setCollapsed(stored ? stored === "collapsed" : !home);
-  }, [collapseKey, home]);
+  }, [collapseKey, home, forceCollapsed]);
   const toggle = () => {
     const next = !collapsed;
     setCollapsed(next);
     // Written here rather than in an effect so a route change cannot save the previous
     // page's state against the new page's key.
+    if (forceCollapsed) return;
     window.localStorage.setItem(
       collapseKey,
       next ? "collapsed" : "expanded",

@@ -12,6 +12,7 @@ import "./onboarding.css";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import PreferenceBootstrap from "./components/PreferenceBootstrap";
+import HelpWidget from "./components/HelpWidget";
 
 /**
  * Without this, iOS Safari assumes a 980px-wide desktop page and scales the whole thing down to
@@ -80,7 +81,7 @@ export default function RootLayout({
         HeyReach. The `?client=` query on those URLs is the useful part — it says which clients get
         worked and which get forgotten — and it goes to a dashboard only we can see.
       */}
-      <body><PreferenceBootstrap />{children}<SpeedInsights /><Analytics /></body>
+      <body><PreferenceBootstrap />{children}<HelpWidget /><SpeedInsights /><Analytics /></body>
     </html>
   );
 }

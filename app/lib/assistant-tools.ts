@@ -76,6 +76,7 @@ import { getClientDeals, listDealClients } from "./deals";
 import { addToDnc, listDnc, removeFromDnc } from "./dnc";
 import { onboardingForAssistant, listOnboardingClients, setTaskDone, addTemplateStep, listTemplate } from "./onboarding";
 import { helpForAssistant, readHelp, searchHelp } from "./help-center";
+import { articlePath } from "./help-shared";
 import { publicBaseUrl } from "./public-url";
 
 type Row = Record<string, unknown>;
@@ -1877,7 +1878,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const found = searchHelp(articles, query, query ? 4 : 50);
       if (!found.length) return { articles: [], note: `No Help center article matches "${query}". Say so plainly and suggest they ask Kiril; do not make up steps.`, helpUrl: `${base}/help` };
       // An empty query is a table of contents: titles and links only, so the list stays short.
-      if (!query) return { articles: found.map((article) => ({ title: article.title, section: article.kind, helpUrl: `${base}/help#${article.id}` })) };
+      if (!query) return { articles: found.map((article) => ({ title: article.title, section: article.kind, helpUrl: `${base}${articlePath(article)}` })) };
       return { articles: found.map((article) => helpForAssistant(article, base)) };
     }
 
