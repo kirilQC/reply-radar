@@ -229,7 +229,8 @@ export function bigListToFile(tool: string, result: unknown): { file: { name: st
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
   const name = `${tool.replace(/_/g, "-")}-${stamp}.csv`;
   const file = { name, mime: "text/csv", content: toCsv(found.list) };
-  const note = `${found.list.length} rows. The full list has been attached to the answer as ${name}, which the reader can download. Do NOT write these rows out. Give the count, the useful breakdowns (by client, campaign, status…) and at most 10 example rows in a table, then point to the attached CSV.`;
+  const partial = found.list.length > MODEL_ROWS ? ` You were given the first ${MODEL_ROWS}; count breakdowns from those and say so.` : " You have every row: count breakdowns exactly from them, never approximate or write \"~\".";
+  const note = `${found.list.length} rows. The full list has been attached to the answer as ${name}, which the reader can download. Do NOT write these rows out. Give the exact count, the useful breakdowns (by client, campaign, status…) and at most 10 example rows in a table, then point to the attached CSV.${partial}`;
   const kept = found.list.slice(0, MODEL_ROWS);
   const rest = found.path === null
     ? { rows: kept, totalRows: found.list.length, csvAttached: name, instruction: note }
