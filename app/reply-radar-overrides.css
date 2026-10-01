@@ -362,4 +362,4 @@ html:not(.hydrated) body{visibility:hidden}
 .brand-wordmark .brand-wordmark-light { display: none; }
 .light-mode .brand-wordmark .brand-wordmark-dark { display: none; }
 .light-mode .brand-wordmark .brand-wordmark-light { display: block; }
-.login-brand { display: inline-flex; align-items: center; }
+.login-brand { display: flex; justify-content: center; align-items: center; width: 100%; margin-bottom: 6px; }

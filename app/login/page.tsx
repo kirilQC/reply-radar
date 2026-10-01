@@ -46,7 +46,6 @@ export default function LoginPage() {
     <div className="login-shell">
       <form className="login-card" onSubmit={submit}>
         <div className="login-brand"><BrandWordmark height={34} /></div>
-        <p className="login-sub">Enter the password to continue.</p>
         <input
           type="password"
           className="login-input"
