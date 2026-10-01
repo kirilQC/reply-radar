@@ -459,4 +459,584 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
 3. **Report a bug** with **Send feedback** in Configuration → **Feedback**. Add a screenshot if you can.
 4. Still blocked? Message Kiril.`,
   },
+  // ── More walkthroughs ─────────────────────────────────────────────────────
+  {
+    id: "w-follow-ups",
+    kind: "walkthrough",
+    title: "Working the Follow-ups list",
+    page: "/inbox",
+    keywords: ["follow-up", "follow ups", "urgency", "gone quiet", "nudge", "chase"],
+    body: `1. In the **Inbox**, click **Follow-ups** above the queue.
+2. Leads who have gone quiet are listed with an **URGENCY** score out of 100. Highest first.
+3. Open one. The **FOLLOW-UP RECOMMENDED** box says why they need a nudge.
+4. Check the **AI DRAFT**, edit it, and send.
+
+Want fewer or more alerts? Change **FOLLOW-UP ALERT THRESHOLD** or **FOLLOW-UP PROMPT** in Configuration → AI → **Client AI context**.`,
+  },
+  {
+    id: "w-custom-dates",
+    kind: "walkthrough",
+    title: "Looking at a custom date range",
+    page: "/inbox",
+    keywords: ["custom", "date range", "dates", "calendar", "last month", "period"],
+    body: `1. In the **Inbox**, click **Custom** above the queue.
+2. Click **Pick dates**, then click a start day and an end day on the calendar.
+3. Click **Done**. The queue and the numbers above it now cover only those days.
+
+**Clear** on the calendar removes the range. Click **Today** or **All replies** to go back.`,
+  },
+  {
+    id: "w-sentiment",
+    kind: "walkthrough",
+    title: "Sentiment and re-scoring a reply",
+    page: "/inbox",
+    keywords: ["sentiment", "positive", "negative", "neutral", "rescore", "wrong sentiment"],
+    body: `Every reply gets a sentiment badge: **Positive**, **Neutral** or **Negative**.
+
+- **Looks wrong?** Click the badge on the open conversation to re-score it with the current rules.
+- **See only one kind:** **Filters → Sentiment**.
+- **Change the rules:** Configuration → AI → **Prompts** → Sentiment analysis. **Reset to default prompt** undoes your edits.`,
+  },
+  {
+    id: "w-lead-score",
+    kind: "walkthrough",
+    title: "Lead score and tiers",
+    page: "/inbox",
+    keywords: ["lead score", "icp score", "score", "tier", "hot", "warm", "nurture", "fit"],
+    body: `The **LEAD SCORE** column is how well a lead fits the client's ICP, scored by the AI from their profile.
+
+- Sort by it with **Filters → Sort → Score**.
+- Narrow to **Filters → Tier**: Hot, Warm or Nurture.
+- The score follows the client's **ICP PROMPT** and **CLIENT BRIEF** (Configuration → AI → **Client AI context**). Sharpen those and new scores improve.`,
+  },
+  {
+    id: "w-inbox-analytics",
+    kind: "walkthrough",
+    title: "Graphs under the Inbox",
+    page: "/inbox",
+    keywords: ["graph", "chart", "client analytics", "reply volume", "add graph"],
+    body: `Scroll below the reply queue to **Client analytics**.
+
+1. Pick a range: **Today**, **This week**, **This month**, **This quarter** or **All time**.
+2. Click **+ Add graph** to add another chart.
+3. Use the **⚙** on a graph to change it, or **×** to remove it.
+
+Don't want them? Turn off **Show inbox analytics** in the **⚙** Inbox layout panel.`,
+  },
+  {
+    id: "w-personal-inbox",
+    kind: "walkthrough",
+    title: "General inbox, client inbox and your inbox",
+    page: "/inbox",
+    keywords: ["general inbox", "my inbox", "client inbox", "profile inbox", "scope"],
+    body: `There are three ways to open the Inbox:
+
+- **General inbox**: every client at once. Click **Inbox** in the sidebar.
+- **One client**: click the client in the sidebar's **Clients** list.
+- **Your clients only**: open your card under **Profiles** on the Dashboard.
+
+Each one remembers its own layout.`,
+  },
+  {
+    id: "w-export",
+    kind: "walkthrough",
+    title: "Exporting leads to a spreadsheet",
+    page: "/database",
+    keywords: ["export", "csv", "download", "spreadsheet", "excel", "list"],
+    body: `- **Database:** set your filters, then click **Export CSV ↓**.
+- **Inbox:** click **Export ↓** above the queue. It exports what you're looking at.
+- **Cold calling:** **Export** downloads the call list.
+- **MCP:** ask for a list ("export Willow's positive replies this month") and click **Download CSV** on the answer.`,
+  },
+  {
+    id: "w-block",
+    kind: "walkthrough",
+    title: "Blocking a lead for good",
+    page: "/database",
+    keywords: ["block", "unblock", "stop", "remove", "spam", "never show"],
+    body: `1. Open the lead in **Database**.
+2. Scroll to **Danger zone** and click **Block lead**.
+
+They are deleted and every future reply from them is ignored. Blocking needs a LinkedIn profile URL on the lead.
+
+Changed your mind? Open **Blocked leads** at the bottom of the Database and click **Unblock**. Their old conversations don't come back.`,
+  },
+  {
+    id: "w-enrich",
+    kind: "walkthrough",
+    title: "Finding a lead's phone number",
+    page: "/database",
+    keywords: ["phone", "mobile", "number", "enrich", "ai ark", "retry enrichment"],
+    body: `- **One lead:** open them in **Database** and click **Enrich** next to **Phone number**. It uses 5 AI Ark credits and needs a LinkedIn URL.
+- **A whole campaign:** in **Cold calling**, use **+ Add leads → From a campaign → Fetch & enrich**.
+- **Profile looks empty?** Click **Retry enrichment** on the lead.
+
+Not every lead has a findable number.`,
+  },
+  {
+    id: "w-call-csv",
+    kind: "walkthrough",
+    title: "Importing a call list from a CSV",
+    page: "/cold-calling",
+    keywords: ["csv", "upload", "import", "call list", "spreadsheet"],
+    body: `1. Open **Cold calling** and pick the client.
+2. Click **+ Add leads**, then **Upload a CSV**.
+3. Give it a **List name** so the team knows whose list it is.
+4. Click **Choose a CSV file**. Name, phone, LinkedIn, company and title columns are found automatically.
+5. Check **Detected columns** look right, then click **Import**.`,
+  },
+  {
+    id: "w-call-outcomes",
+    kind: "walkthrough",
+    title: "Logging call outcomes",
+    page: "/cold-calling",
+    keywords: ["outcome", "voicemail", "callback", "interested", "no answer", "called", "notes"],
+    body: `After each call, pick what happened: **Connected**, **Voicemail**, **No answer**, **Interested**, **Callback**, **Not interested**, **Bad number** or **Do not call**.
+
+Add a note if useful, then click **Save & next →**. You need an outcome or a note to save. **Skip** moves on without saving.
+
+The tabs at the top of the list (**All**, **Replied**, **No reply**, **Called**) show who's left.`,
+  },
+  {
+    id: "w-call-script",
+    kind: "walkthrough",
+    title: "Writing a call script",
+    page: "/cold-calling",
+    keywords: ["script", "call script", "talk track", "pitch"],
+    body: `1. Open the client in **Cold calling**.
+2. Click the **CALL SCRIPT** tab on the right edge.
+3. Type or paste the script. It saves as you go (**Saved ✓**).
+
+Each client has one script, shared by everyone who calls for them.`,
+  },
+  {
+    id: "w-pm-views",
+    kind: "walkthrough",
+    title: "Grouping clients into a View",
+    page: "/project-management",
+    keywords: ["view", "group", "portfolio", "healthtech", "board"],
+    body: `A View puts several clients on one board, like all your healthtech clients.
+
+1. In **Project management**, click **+ New view**.
+2. Give it a **Name**, an optional logo and an optional **Internal Slack channel ID**.
+3. Tick the **Clients in this view**, then save.
+
+Open it from **VIEWS** at the top of the page.`,
+  },
+  {
+    id: "w-pm-slack",
+    kind: "walkthrough",
+    title: "Posting a task update to Slack",
+    page: "/project-management",
+    keywords: ["slack", "post", "update", "status", "internal channel"],
+    body: `1. Make sure the client has an internal channel. In **Project management**, click **⋯** on the client and **Set internal Slack channel**.
+2. Open a task and save it.
+3. Click the task's Slack button. Its status is posted to that channel.
+
+The button stays disabled until the task is saved.`,
+  },
+  {
+    id: "w-pm-from-slack",
+    kind: "walkthrough",
+    title: "Managing tasks from Slack",
+    page: "/project-management",
+    keywords: ["slack", "qc bot", "create task", "update task", "tasks"],
+    body: `Ask **@QC Bot** and it updates the board for you:
+
+- "Add a task for Kuddo: launch KD009, due Friday, assign Kori"
+- "What's blocked for Willow?"
+- "Move the Cotool list build to Completed"
+
+Everything it does shows up in **Project management** straight away.`,
+  },
+  {
+    id: "w-onboarding-template",
+    kind: "walkthrough",
+    title: "Editing the onboarding checklist",
+    page: "/onboarding",
+    keywords: ["template", "checklist", "steps", "onboarding template"],
+    body: `1. In **Onboarding**, click **Edit template**.
+2. Use **Add step** and **Add sub-step**. Group steps with a **Section (optional)**.
+3. Reorder with move up and down, or **Edit** and **Delete** a step.
+
+Changes apply to clients you add from now on.`,
+  },
+  {
+    id: "w-onboarding-updates",
+    kind: "walkthrough",
+    title: "Posting onboarding updates to Slack",
+    page: "/onboarding",
+    keywords: ["onboarding update", "slack", "progress", "template message"],
+    body: `1. Open the client in **Onboarding**.
+2. Under **Client onboarding updates**, click **Start from a template** or write your own.
+3. Click **Send to Slack**. It posts to the client's internal channel.
+
+**Manage templates** saves messages you reuse. Write **{client}** and it becomes the client's name.`,
+  },
+  {
+    id: "w-jev-tuning",
+    kind: "walkthrough",
+    title: "Tuning how strict Jev is",
+    page: "/jev",
+    keywords: ["jev", "threshold", "weighted", "must-pass", "strict", "too many maybes"],
+    body: `- **Question roles:** mark each question **Must-have**, **Key**, **Exclusion** or **Signal**.
+- **Verdict mode:** **Weighted** adds the answers up. **Must-pass** drops anyone who fails a must-have.
+- **Thresholds:** **Keep at or above** and **Drop below** set the cut-offs.
+- **Always keep if the row mentions:** words that save a row no matter what.
+
+Click **Save questions**, then **Run again**.`,
+  },
+  {
+    id: "w-jev-companies",
+    kind: "walkthrough",
+    title: "Tagging a company list with Jev",
+    page: "/jev",
+    keywords: ["company list", "accounts", "tag companies", "jev tags"],
+    body: `1. Open the client in **Jev** and choose **Company lists**.
+2. Under **Describe how to tag the companies**, write the tags you want, then **Save tags**.
+3. Drop the CSV in and click **Run**.
+4. Click **Download all, tagged** for the whole list with Jev's tags added.`,
+  },
+  {
+    id: "w-report-template",
+    kind: "walkthrough",
+    title: "Making your own report template",
+    page: "/reports",
+    keywords: ["template", "report template", "custom report", "monthly recap"],
+    body: `1. In **Reports**, click **+ Add template**.
+2. Name it, write a one-line card description, and choose **An email to send** or **A PDF document**.
+3. Write the prompt: what the report should cover and how it should sound.
+4. Click **Save template**. It now appears for every client.`,
+  },
+  {
+    id: "w-report-style",
+    kind: "walkthrough",
+    title: "Styling a PDF report",
+    page: "/reports",
+    keywords: ["pdf", "style", "cover", "accent", "branding", "prepared by", "sections"],
+    body: `When you run a report you can choose:
+
+- **Sections**: tick only what this client cares about, like Booked meetings or Hot conversations.
+- **Report title**, **Prepared by** and a closing note.
+- **Accent**, **Cover**, **Headings**, **Density** and **Page budget** for the look.
+- **Edit prompt** to change what gets written.
+
+Then click **Generate PDF**.`,
+  },
+  {
+    id: "w-mcp-files",
+    kind: "walkthrough",
+    title: "Attaching files and downloading answers in MCP",
+    page: "/mcp",
+    keywords: ["attach", "upload", "screenshot", "pdf", "spreadsheet", "download", "csv"],
+    body: `- **Attach:** click the paperclip, or drag a screenshot, PDF or spreadsheet onto the chat. Then ask about it ("which of these companies are already in our database?").
+- **Download:** tables in answers have **Download CSV** and **Download PDF**. Files the assistant makes appear as chips you can click.
+- **Start over:** click **+** for a new conversation.`,
+  },
+  {
+    id: "w-mcp-prompts",
+    kind: "walkthrough",
+    title: "Saving your own MCP prompts",
+    page: "/mcp",
+    keywords: ["saved prompt", "prompt", "shortcut", "reuse", "favorite question"],
+    body: `1. On **MCP**, click **+ Save a prompt of your own**.
+2. Name it and write the question.
+3. Click **Save**. It appears under **Yours**. Click it any time to run it.
+
+Click **×** to forget one. Saved prompts live in this browser only.`,
+  },
+  {
+    id: "w-bot-corrections",
+    kind: "walkthrough",
+    title: "Correcting a brief QC Bot posted",
+    page: "/slack",
+    keywords: ["correct", "fix brief", "wrong line", "edit brief", "strike"],
+    body: `1. Find the morning brief or EOW report in Slack.
+2. Reply in its thread and tag **@QC Bot** with the fix: "strike the line about Acme" or "the meeting was Thursday, not Friday".
+3. The bot edits the original post.
+
+It won't wipe a post, only change the part you point at.`,
+  },
+  {
+    id: "w-personal-assistant",
+    kind: "walkthrough",
+    title: "Setting up a Personal assistant",
+    page: "/slack",
+    keywords: ["personal assistant", "dm", "my brief", "member id", "teammate brief"],
+    body: `The Personal assistant DMs one teammate a morning brief across all their clients.
+
+1. Open **Slack → Personal assistant** and click **+ Add person**.
+2. Enter their **NAME** and **SLACK USER ID**. In Slack: their profile → **⋮** → **Copy member ID**.
+3. Tick the **Clients to track** and set the schedule.
+4. Click **Create assistant**.`,
+  },
+  {
+    id: "w-call-analysis",
+    kind: "walkthrough",
+    title: "Call analysis after a client call",
+    page: "/slack",
+    keywords: ["call analysis", "granola", "transcript", "call recap", "meeting notes"],
+    body: `When a client call is recorded in Granola, QC Command writes a call analysis and posts it to Slack. It checks for new calls every hour, 5 AM to 8 PM Eastern.
+
+For it to work:
+1. The person on the call has a key under Configuration → **Granola keys**.
+2. The client's **MEETING TITLE CONTAINS** (Configuration → the client → **Call transcripts**) matches the call's title.
+3. The client is **On** under **Slack → Call analysis**.`,
+  },
+  {
+    id: "w-brain-icp",
+    kind: "walkthrough",
+    title: "Generating an ICP document",
+    page: "/qc-brain",
+    keywords: ["icp", "icp doc", "ideal customer", "generate", "personas"],
+    body: `1. Open **QC Brain** and pick the client.
+2. Click **Generate ICP document**. It takes about a minute.
+3. Read it, then click **Edit** to adjust and **Propose change** to save it to the brain.
+
+Missing documents are marked on the client's page, so you can see what still needs writing.`,
+  },
+  {
+    id: "w-ai-prompts",
+    kind: "walkthrough",
+    title: "Editing the AI prompts",
+    page: "/admin",
+    keywords: ["prompt", "ai", "system prompt", "morning brief prompt", "sentiment prompt"],
+    body: `1. Go to Configuration → **AI** → **Prompts**.
+2. Pick the prompt: Sentiment analysis, Create ICP doc or Morning brief.
+3. Edit and save. The next run uses it.
+
+**Reset to default prompt** puts the original back. Client-specific instructions belong in that client's **Client AI context**, not here.`,
+  },
+  {
+    id: "w-client-docs",
+    kind: "walkthrough",
+    title: "Giving the AI a client's documents",
+    page: "/admin",
+    keywords: ["upload", "documents", "pdf", "docx", "context", "case study", "pitch deck"],
+    body: `1. Go to Configuration → **AI** → **Client AI context** and pick the client.
+2. Paste the **CLIENT BRIEF** (the output of /client-summary works well).
+3. Use **Upload client documents** for PDFs, Word files or text: case studies, pricing, FAQs.
+
+Every draft, ICP score and follow-up score for that client reads these.`,
+  },
+  {
+    id: "w-granola",
+    kind: "walkthrough",
+    title: "Adding your Granola key",
+    page: "/admin",
+    keywords: ["granola", "api key", "calls", "transcripts", "grn"],
+    body: `1. Go to Configuration → **Granola keys**.
+2. Choose **WHOSE KEY** it is and paste the **API KEY** (it starts with grn_).
+3. Save.
+
+Your client calls can now feed call analysis and the morning briefs. **Remove** takes a key out.`,
+  },
+  {
+    id: "w-feedback",
+    kind: "walkthrough",
+    title: "Sending feedback or a bug report",
+    page: "/admin",
+    keywords: ["feedback", "bug", "report a problem", "idea", "feature request"],
+    body: `1. Go to Configuration → **Feedback**.
+2. Click **Send feedback**. Describe **WHAT HAPPENED**, add a screenshot if you can, and your name.
+3. Submit.
+
+Everything sent is listed under **Submitted feedback** with its status.`,
+  },
+  {
+    id: "w-audit-log",
+    kind: "walkthrough",
+    title: "Checking the Audit log and Slack bot log",
+    page: "/admin",
+    keywords: ["audit", "log", "history", "who changed", "bot log", "events"],
+    body: `- **Audit log** (Configuration → **Audit log**): every change and event. Search, filter by **Source**, **Status** or date, and **Export CSV ↓**.
+- **Slack bot log** (Configuration → **AI** → **Slack bot log**): every question QC Bot was asked and what it did. Start here when the bot gives a strange answer.`,
+  },
+  {
+    id: "w-health",
+    kind: "walkthrough",
+    title: "Reading System health",
+    page: "/health",
+    keywords: ["health", "status", "down", "outage", "red", "heartbeat"],
+    body: `**System health** shows whether everything QC Command depends on is working. It refreshes every 30 seconds, or click **Refresh checks ↻**.
+
+- **Core services**: the database, AI, Slack, Airtable and more. Red means that service is failing.
+- **Client connection heartbeat**: whether each client's replies are flowing in.
+- **Advanced view** shows the detail behind each check.
+
+It's read-only, so nothing here can break anything.`,
+  },
+  {
+    id: "w-remove-client",
+    kind: "walkthrough",
+    title: "Removing a client",
+    page: "/admin",
+    keywords: ["remove", "delete client", "offboard", "churn", "workspace"],
+    body: `1. Go to Configuration → **Client directory** and open the client.
+2. Scroll to **Remove workspace**.
+3. Type the client's name to confirm, then remove.
+
+This can't be undone, so export anything you need first.`,
+  },
+  {
+    id: "w-help-editing",
+    kind: "walkthrough",
+    title: "Writing a Help article",
+    page: "/help",
+    keywords: ["help article", "edit help", "loom", "write guide", "add article"],
+    body: `1. On **Help**, click **Edit help**.
+2. Click **+ Add article**. Pick the section and the page it's about.
+3. Write the steps in Markdown: **bold**, - bullets, 1. numbered steps.
+4. Paste a Loom link to embed a video, and add search keywords people might type.
+5. Click **Add article**.
+
+QC Bot reads these too, so a good article means better answers in Slack.`,
+  },
+  {
+    id: "w-phone",
+    kind: "walkthrough",
+    title: "Using QC Command on your phone",
+    page: "",
+    keywords: ["mobile", "phone", "iphone", "small screen", "menu"],
+    body: `QC Command works in your phone's browser. Tap the menu button at the top left (**Open navigation**) to reach every page.
+
+For quick questions on the go, DM **@QC Bot** in Slack instead.`,
+  },
+
+  // ── More FAQ ──────────────────────────────────────────────────────────────
+  {
+    id: "f-unsend",
+    kind: "faq",
+    title: "Can I unsend a reply?",
+    page: "/inbox",
+    keywords: ["unsend", "undo", "delete message", "sent by mistake"],
+    body: `Not from QC Command. A reply goes out on LinkedIn through HeyReach the moment you click **Yes, send it**. That confirmation step is there so you can check the lead and sender first.`,
+  },
+  {
+    id: "f-brief-vs-brain",
+    kind: "faq",
+    title: "What's the difference between the Client brief and the QC Brain?",
+    page: "/qc-brain",
+    keywords: ["brief", "brain", "difference", "context", "icp"],
+    body: `- **Client brief**: a short summary of the client in Configuration. Every AI draft and score reads it.
+- **QC Brain**: the full library of the client's documents (ICP, personas, voice guide, notes). The assistant and QC Bot search it when you ask.
+
+Keep the brief short and current. Put the detail in the Brain.`,
+  },
+  {
+    id: "f-meetings-source",
+    kind: "faq",
+    title: "Where do booked meetings come from?",
+    page: "/meetings",
+    keywords: ["meetings", "calendly", "booked", "missing meeting"],
+    body: `From the client's booking tool, through the **Meetings webhook** set up during onboarding. You can also add one with **Add meeting**. A missing meeting usually means the webhook isn't set up for that client yet.`,
+  },
+  {
+    id: "f-time-zone",
+    kind: "faq",
+    title: "Why are dates in the wrong time zone?",
+    page: "",
+    keywords: ["time zone", "timezone", "wrong time", "dates", "today"],
+    body: `Dates and "today" follow the **DASHBOARD TIME ZONE** in Appearance (the **◐** button, top right). Set it to where you are.`,
+  },
+  {
+    id: "f-ai-model",
+    kind: "faq",
+    title: "Which AI writes the drafts?",
+    page: "/admin",
+    keywords: ["model", "claude", "anthropic", "which ai", "gpt"],
+    body: `Claude, made by Anthropic. The model and usage are under Configuration → **AI** → **Overview**. Jev uses its own model.`,
+  },
+  {
+    id: "f-cold-calling-missing",
+    kind: "faq",
+    title: "Why isn't a client in Cold calling?",
+    page: "/cold-calling",
+    keywords: ["missing client", "cold calling", "not listed", "heyreach"],
+    body: `Cold calling only lists clients with a working HeyReach connection. Add their HeyReach API key in Configuration → the client → **HeyReach connection**.`,
+  },
+
+  // ── More troubleshooting ──────────────────────────────────────────────────
+  {
+    id: "t-draft",
+    kind: "troubleshooting",
+    title: "The AI draft is empty or off",
+    page: "/inbox",
+    keywords: ["draft", "empty", "bad draft", "wrong draft", "not generating", "ai"],
+    body: `1. Give it a moment. It says **Generating a draft…** while it works.
+2. Click **Regenerate ↻**.
+3. Still off? Improve the client's **CLIENT BRIEF** and documents (Configuration → AI → **Client AI context**).
+4. Nothing at all? Check **Anthropic API** on **System health**.`,
+  },
+  {
+    id: "t-send-failed",
+    kind: "troubleshooting",
+    title: "My reply didn't send",
+    page: "/inbox",
+    keywords: ["send failed", "didn't send", "error sending", "stuck"],
+    body: `1. Open the conversation and click refresh (**Refresh conversation from HeyReach**). It may have sent after all.
+2. Check the sender's LinkedIn account is still connected in HeyReach.
+3. Check the client's HeyReach key in Configuration, and **System health**.
+4. Still failing? Send **Feedback** with the lead's name.`,
+  },
+  {
+    id: "t-bot-silent",
+    kind: "troubleshooting",
+    title: "QC Bot isn't answering",
+    page: "/slack",
+    keywords: ["bot", "no answer", "silent", "not responding", "qc bot"],
+    body: `1. In a channel, you must **@mention** it. Untagged messages are ignored.
+2. Look for 👀. If it's there, it's still working.
+3. Check Configuration → **AI** → **Slack bot log** for what happened.
+4. Check **Slack automations** on **System health**.`,
+  },
+  {
+    id: "t-cant-turn-on",
+    kind: "troubleshooting",
+    title: "I can't turn a client On for an automation",
+    page: "/slack",
+    keywords: ["can't turn on", "disabled", "toggle", "readiness", "greyed out"],
+    body: `The **On** switch stays disabled until every readiness check passes. Look at the client's row: the failing one (HeyReach, Slack or Granola) tells you what to fix, usually a missing channel ID or key in Configuration.`,
+  },
+  {
+    id: "t-jev-setup",
+    kind: "troubleshooting",
+    title: "Jev or QC Brain says it isn't set up",
+    page: "/jev",
+    keywords: ["not set up", "not connected", "banner", "missing key", "openrouter", "github token"],
+    body: `These need a key added by an admin. Jev needs its AI key, and the QC Brain needs a GitHub token. Send Kiril the message shown on the page.`,
+  },
+  {
+    id: "t-deal-wrong",
+    kind: "troubleshooting",
+    title: "A deal is credited to QC by mistake",
+    page: "/deals",
+    keywords: ["deal", "attribution", "wrong", "not ours", "credited"],
+    body: `Open the deal and click **Not a QC deal**. It's removed from QC's totals. **Restore QC attribution** undoes it. **Matched on** shows why it was linked in the first place.`,
+  },
+  {
+    id: "t-tag-missing",
+    kind: "troubleshooting",
+    title: "I can't find a tag",
+    page: "/inbox",
+    keywords: ["tag missing", "lost tag", "tag gone", "renamed"],
+    body: `Tags are shared, so a teammate may have renamed or deleted it. Open **+ Tag** and use **Search tags…**. If it's gone, **+ Create tag** makes it again.`,
+  },
+
+  // ── More support ──────────────────────────────────────────────────────────
+  {
+    id: "s-bug-report",
+    kind: "support",
+    title: "What to put in a bug report",
+    page: "/admin",
+    keywords: ["bug report", "what to include", "screenshot", "steps"],
+    body: `The fastest fixes come from reports that say:
+
+1. **Where:** the page and the client.
+2. **What you did:** the button you clicked.
+3. **What happened** vs what you expected.
+4. **A screenshot**, and the lead's name if it's about one.
+
+Send it from Configuration → **Feedback**.`,
+  },
 ];
