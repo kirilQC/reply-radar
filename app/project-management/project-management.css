@@ -31,7 +31,7 @@
 .pm-board-head h1 { font-size: 32px; }
 .pm-viewswitch { display: flex; gap: 3px; background: var(--panel-2, #151821); border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
 .pm-viewswitch button { font: inherit; font-size: 12px; font-weight: 650; color: var(--muted); background: none; border: 0; border-radius: 7px; padding: 7px 13px; cursor: pointer; }
-.pm-viewswitch button.on { color: #fff; background: var(--accent); }
+.pm-viewswitch button.on { color:var(--accent-ink,#fff); background: var(--accent); }
 .pm-err { margin-bottom: 14px; padding: 11px 14px; border-radius: 10px; font-size: 12.5px; color: var(--coral, #e5738a); background: color-mix(in srgb, var(--coral, #e5738a) 10%, transparent); border: 1px solid color-mix(in srgb, var(--coral, #e5738a) 28%, transparent); }
 
 /* stage pill */
@@ -118,7 +118,7 @@
 .pm-seg.on.prog { background: #5aa9f0; }
 .pm-seg.on.pause { background: var(--amber); }
 .pm-seg.on.done { background: var(--green); }
-.pm-seg.on.launch { background: var(--accent); color: #fff; }
+.pm-seg.on.launch { background: var(--accent); color:var(--accent-ink,#fff); }
 .pm-prow-add { padding: 6px; }
 .pm-prow-add .pm-add-input { border-color: var(--border); }
 
@@ -138,7 +138,7 @@
 .pm-src-note { margin: 0; font-size: 11.5px; color: var(--accent); }
 .pm-modal-foot { display: flex; justify-content: space-between; padding: 14px 18px; border-top: 1px solid var(--border); }
 .pm-del { font: inherit; font-size: 12.5px; font-weight: 600; color: var(--coral, #e5738a); background: none; border: 1px solid color-mix(in srgb, var(--coral, #e5738a) 30%, transparent); border-radius: 9px; padding: 8px 15px; cursor: pointer; }
-.pm-save { font: inherit; font-size: 12.5px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 9px; padding: 9px 20px; cursor: pointer; }
+.pm-save { font: inherit; font-size: 12.5px; font-weight: 700; color:var(--accent-ink,#fff); background: var(--accent); border: 0; border-radius: 9px; padding: 9px 20px; cursor: pointer; }
 
 @media (max-width: 1100px) { .pm-tl { grid-template-columns: repeat(3, 1fr); } }
 
@@ -165,14 +165,14 @@
 .pm-link-add { display: flex; gap: 8px; }
 .pm-link-add input { flex: 1; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); padding: 0 11px; font: inherit; font-size: 12.5px; }
 .pm-link-add input:focus { border-color: var(--accent); outline: none; }
-.pm-link-add button { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 0 15px; cursor: pointer; }
+.pm-link-add button { font: inherit; font-size: 12px; font-weight: 650; color:var(--accent-ink,#fff); background: var(--accent); border: 0; border-radius: 8px; padding: 0 15px; cursor: pointer; }
 .pm-meta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
 .pm-ts { font-size: 11px; color: var(--muted-2); margin-left: auto; }
 
 /* ═══ Custom views + directory ═══ */
 .pm-dir-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
 .pm-dir-head h1 { font-size: 28px; letter-spacing: -.05em; margin: 0; }
-.pm-newview { font: inherit; font-size: 12.5px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 9px; padding: 9px 15px; cursor: pointer; }
+.pm-newview { font: inherit; font-size: 12.5px; font-weight: 700; color:var(--accent-ink,#fff); background: var(--accent); border: 0; border-radius: 9px; padding: 9px 15px; cursor: pointer; }
 .pm-newview:hover { filter: brightness(1.07); }
 .pm-dir-label { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted-2); font-weight: 750; margin: 6px 0 12px; }
 .pm-card-sub { margin-top: 4px; font-size: 11.5px; color: var(--muted-2); }
@@ -220,7 +220,7 @@
 .pm-dd-add { display: flex; gap: 5px; padding: 6px 4px 3px; border-top: 1px solid var(--border-soft, var(--border)); margin-top: 4px; }
 .pm-dd-add input { flex: 1; height: 30px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2, #151821); color: var(--text); font: inherit; font-size: 12px; padding: 0 9px; }
 .pm-dd-add input:focus { border-color: var(--accent); outline: none; }
-.pm-dd-add button { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border: 0; border-radius: 7px; padding: 0 12px; cursor: pointer; }
+.pm-dd-add button { font: inherit; font-size: 12px; font-weight: 650; color:var(--accent-ink,#fff); background: var(--accent); border: 0; border-radius: 7px; padding: 0 12px; cursor: pointer; }
 .pm-opt-logo { width: 18px; height: 18px; border-radius: 5px; object-fit: cover; flex: none; }
 .pm-opt-logo.mono { display: grid; place-items: center; color: #fff; font-size: 9px; font-weight: 800; }
 .pm-av-row { display: inline-flex; align-items: center; }
@@ -233,7 +233,7 @@
 .pm-addbox { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
 .pm-add-client { height: 32px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); font: inherit; font-size: 12px; padding: 0 9px; }
 .pm-add-actions { display: flex; gap: 6px; }
-.pm-add-go { flex: 1; font: inherit; font-size: 12px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 7px; cursor: pointer; }
+.pm-add-go { flex: 1; font: inherit; font-size: 12px; font-weight: 700; color:var(--accent-ink,#fff); background: var(--accent); border: 0; border-radius: 8px; padding: 7px; cursor: pointer; }
 .pm-add-x { font: inherit; font-size: 12px; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
 
 /* ═══ Header client bubbles (group view) — bigger, spaced, clickable ═══ */
@@ -307,7 +307,7 @@
 .pm-logo-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pm-logo-prev { width: 44px; height: 44px; border-radius: 11px; overflow: hidden; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 18px; flex: none; }
 .pm-logo-prev img { width: 100%; height: 100%; object-fit: cover; }
-.pm-logo-upload { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border-radius: 8px; padding: 8px 13px; cursor: pointer; }
+.pm-logo-upload { font: inherit; font-size: 12px; font-weight: 650; color:var(--accent-ink,#fff); background: var(--accent); border-radius: 8px; padding: 8px 13px; cursor: pointer; }
 .pm-logo-urlin { flex: 1; min-width: 160px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); padding: 0 11px; font: inherit; font-size: 12.5px; }
 .pm-logo-urlin:focus { border-color: var(--accent); outline: none; }
 
@@ -387,7 +387,7 @@
 .pm-linkadd input:focus { border-color: var(--accent); outline: none; }
 .pm-linkadd-row { display: flex; gap: 6px; }
 .pm-linkadd-row input { flex: 1; }
-.pm-linkadd-row button { font: inherit; font-size: 12px; font-weight: 650; color: #fff; background: var(--accent); border: 0; border-radius: 7px; padding: 0 13px; cursor: pointer; }
+.pm-linkadd-row button { font: inherit; font-size: 12px; font-weight: 650; color:var(--accent-ink,#fff); background: var(--accent); border: 0; border-radius: 7px; padding: 0 13px; cursor: pointer; }
 .pm-link-add2 { flex-wrap: wrap; }
 .pm-link-add2 > input { flex: 1 1 130px; }
 
@@ -495,7 +495,7 @@
 .pm-blk-foot-r { display: flex; gap: 8px; }
 .pm-blk-remove { font: inherit; font-size: 12px; color: var(--coral, #e5738a); background: none; border: 1px solid color-mix(in srgb, var(--coral, #e5738a) 30%, transparent); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
 .pm-blk-resolve { font: inherit; font-size: 12px; font-weight: 650; color: var(--green); background: none; border: 1px solid color-mix(in srgb, var(--green) 40%, transparent); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
-.pm-blk-save { font: inherit; font-size: 12px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+.pm-blk-save { font: inherit; font-size: 12px; font-weight: 700; color:var(--accent-ink,#fff); background: var(--accent); border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer; }
 
 /* ═══ Center every table column (content sits centred as the row grows) ═══ */
 .pm-table-edit th, .pm-table-edit td { text-align: center; }

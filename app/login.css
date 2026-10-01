@@ -23,7 +23,7 @@
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
 }
 .login-brand { font-size: 22px; font-weight: 750; letter-spacing: -0.04em; color: var(--text, #e8e8ef); }
-.login-brand span { color: var(--accent, #8b7cff); }
+.login-brand span { color: var(--accent, #65EBE0); }
 .login-sub { margin: 0 0 4px; color: var(--muted, #8a8fa0); font-size: 12px; }
 .login-input {
   height: 42px;
@@ -35,12 +35,12 @@
   font-size: 14px;
   outline: none;
 }
-.login-input:focus { border-color: var(--accent, #8b7cff); }
+.login-input:focus { border-color: var(--accent, #65EBE0); }
 .login-button {
   height: 42px;
   border: 0;
   border-radius: 9px;
-  background: var(--accent, #8b7cff);
+  background: var(--accent, #65EBE0);
   color: #fff;
   font-size: 14px;
   font-weight: 650;

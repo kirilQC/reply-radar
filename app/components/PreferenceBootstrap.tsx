@@ -10,13 +10,14 @@ import {
   readCachedAppearanceEntry,
   writeCachedAppearance,
 } from "../lib/preference-identity";
+import { applyAccent } from "../lib/brand-theme";
 
 type Appearance = Record<string, unknown>;
 
 const apply = (appearance: Appearance) => {
   const root = document.documentElement;
   const mode = String(appearance.mode || "midnight");
-  root.style.setProperty("--accent", String(appearance.accent || "#8b7cff"));
+  applyAccent(appearance.accent);
   root.style.setProperty(
     "--font",
     String(appearance.font || "Inter, ui-sans-serif, system-ui, sans-serif"),

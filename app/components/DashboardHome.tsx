@@ -13,13 +13,14 @@ import {
   readCachedAppearance,
   writeCachedAppearance,
 } from "../lib/preference-identity";
+import { applyAccent, DEFAULT_ACCENT, resolveAccent } from "../lib/brand-theme";
 
 const defaultAppearance: AppearancePrefs = {
   mode: "midnight",
   zoom: 100,
   font: "Inter, ui-sans-serif, system-ui, sans-serif",
   background: "#0b0c10",
-  accent: "#8b7cff",
+  accent: DEFAULT_ACCENT,
   timeZone: "America/New_York",
 };
 
@@ -65,7 +66,7 @@ export default function DashboardHome() {
       const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
       if (savedProfiles) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients?: string[]; color?: string; initials?: string; slug?: string; photo?: string | null }) => ({ ...profile, description: (profile.clients ?? []).join(" · "), tone: profile.color ?? "#8b7cff", initials: profile.initials ?? profile.name.slice(0, 2).toUpperCase(), slug: profile.slug ?? profile.name.toLowerCase().replaceAll(" ", "-"), photo: profile.photo ?? null }))); }
       const savedAppearance = readCachedAppearance();
-      if (savedAppearance) setAppearance({ ...defaultAppearance, ...savedAppearance });
+      if (savedAppearance) setAppearance({ ...defaultAppearance, ...savedAppearance, accent: resolveAccent(savedAppearance.accent) });
     } catch { /* keep the empty state */ }
   }, []);
   const loadProfiles = () => fetch("/api/admin/profiles", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).then((payload) => {
@@ -102,7 +103,7 @@ export default function DashboardHome() {
   }, []);
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--accent", appearance.accent);
+    applyAccent(appearance.accent);
     root.style.setProperty("--bg", appearance.background);
     root.style.setProperty("--font", appearance.font);
     root.style.setProperty("--reply-radar-zoom", `${appearance.zoom / 100}`);
@@ -115,7 +116,7 @@ export default function DashboardHome() {
       const detail = (event as CustomEvent).detail as
         | Partial<AppearancePrefs>
         | undefined;
-      if (detail) setAppearance((current) => ({ ...current, ...detail }));
+      if (detail) setAppearance((current) => ({ ...current, ...detail, accent: resolveAccent(detail.accent ?? current.accent) }));
     };
     window.addEventListener("reply-radar-appearance-changed", onChange);
     return () =>

@@ -230,7 +230,7 @@ export default function AppSidebar() {
             <BrandIcon size={22} />
           </span>{" "}
           <span className="sidebar-label">
-            <BrandWordmark />
+            <BrandWordmark height={21} />
           </span>
         </Link>
         {/*

@@ -161,7 +161,7 @@ function ViewEditor({ view, clients, onClose, onSaved }: { view: ViewDef | null;
           <label className="pm-f"><span>Name</span><input value={name} placeholder="e.g. Healthtech" onChange={(e) => setName(e.target.value)} /></label>
           <div className="pm-f"><span>Logo <em style={{ fontWeight: 400, color: "var(--muted-2)" }}>· optional</em></span>
             <div className="pm-logo-row">
-              <span className="pm-logo-prev" style={logoUrl ? undefined : { background: "var(--accent)" }}>{logoUrl ? <img src={logoUrl} alt="" /> : initials(name || "?")}</span>
+              <span className="pm-logo-prev" style={logoUrl ? undefined : { background: "var(--accent)", color: "var(--accent-ink)" }}>{logoUrl ? <img src={logoUrl} alt="" /> : initials(name || "?")}</span>
               <label className="pm-logo-upload">{uploading ? "Uploading…" : "Upload image"}<input type="file" accept="image/*" hidden onChange={(e) => void uploadLogo(e.target.files?.[0] ?? undefined)} /></label>
               <input className="pm-logo-urlin" value={logoUrl} placeholder="or paste an image URL" onChange={(e) => setLogoUrl(e.target.value)} />
             </div>

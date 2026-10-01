@@ -2,33 +2,36 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 /**
- * The QC Command brand: the 3×3 dot-grid icon and the "QC Command" wordmark.
+ * The QC Command brand, from the master artwork rather than a redraw.
  *
- * Drawn rather than shipped as an image so it is sharp at every size and follows the theme — the
- * "Command" half is the page's own text colour, so it stays readable in light mode where a baked-in
- * white wordmark would vanish. The icon's last column is the dimmer teal, as in the master artwork.
+ * The images in public/brand/ are cut straight out of the supplied logo — each pixel unmixed from the
+ * artwork's dark background, so the edges keep their anti-aliasing and the letterforms, weight and
+ * spacing are exactly the original. Two wordmark files because the "Command" half is white: the light
+ * one swaps it for near-black so it reads on a light background. The icon is the dot grid alone, used
+ * where there is only room for the mark (the collapsed sidebar).
  */
 
 export const BRAND_TEAL = "#65EBE0";
-export const BRAND_TEAL_DIM = "#499B8F";
+
+/** Width / height of the cropped wordmark artwork, so a given height lays out without a reflow. */
+const WORDMARK_RATIO = 1365 / 171;
+const ICON_RATIO = 170 / 165;
 
 export function BrandIcon({ size = 22, className }: { size?: number; className?: string }) {
-  const cols = [18, 50, 82];
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 100 100" aria-hidden focusable="false">
-      {cols.map((cy) =>
-        cols.map((cx, column) => (
-          <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={13.5} fill={column === 2 ? BRAND_TEAL_DIM : BRAND_TEAL} />
-        )),
-      )}
-    </svg>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img className={`brand-icon ${className ?? ""}`} src="/brand/qc-command-icon.png" alt="" aria-hidden width={Math.round(size * ICON_RATIO)} height={size} />
   );
 }
 
-export function BrandWordmark({ className }: { className?: string }) {
+export function BrandWordmark({ height = 22, className }: { height?: number; className?: string }) {
+  const width = Math.round(height * WORDMARK_RATIO);
   return (
-    <span className={`brand-wordmark ${className ?? ""}`}>
-      <span className="brand-wordmark-qc">QC</span> Command
+    <span className={`brand-wordmark ${className ?? ""}`} role="img" aria-label="QC Command">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="brand-wordmark-dark" src="/brand/qc-command-wordmark-dark.png" alt="" width={width} height={height} />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="brand-wordmark-light" src="/brand/qc-command-wordmark-light.png" alt="" width={width} height={height} />
     </span>
   );
 }

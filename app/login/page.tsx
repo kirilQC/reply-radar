@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import "../login.css";
-import { BrandIcon, BrandWordmark } from "../components/BrandMark";
+import { BrandWordmark } from "../components/BrandMark";
 
 /**
  * The password screen. The only page reachable without a session — the middleware lets it and the auth
@@ -45,7 +45,7 @@ export default function LoginPage() {
   return (
     <div className="login-shell">
       <form className="login-card" onSubmit={submit}>
-        <div className="login-brand"><BrandIcon size={30} /><BrandWordmark /></div>
+        <div className="login-brand"><BrandWordmark height={34} /></div>
         <p className="login-sub">Enter the password to continue.</p>
         <input
           type="password"

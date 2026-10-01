@@ -78,7 +78,7 @@
   border: 1px solid transparent;
   border-radius: 6px;
   background: var(--accent);
-  color: #fff;
+  color:var(--accent-ink,#fff);
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
@@ -171,7 +171,7 @@
 }
 .graph-builder-custom > button:hover {
   background: var(--accent);
-  color: #fff;
+  color:var(--accent-ink,#fff);
 }
 
 /* Cards */
@@ -488,8 +488,8 @@ i.tone-muted {
   background: #49505d;
 }
 .series-0 {
-  stroke: #8b7cff;
-  background: #8b7cff;
+  stroke: var(--accent);
+  background: var(--accent);
 }
 .series-1 {
   stroke: #4fb3a8;
@@ -615,7 +615,7 @@ i.tone-muted {
 }
 .tag-menu-primary {
   width: 100%; height: 30px; border-radius: 7px; border: 0; cursor: pointer;
-  background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+  background: var(--accent); color:var(--accent-ink,#fff); font-size: 11px; font-weight: 700;
 }
 .tag-menu-ghost {
   height: 30px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border);
@@ -684,13 +684,13 @@ i.tone-muted {
 .cal-day:hover { background: var(--panel-2, #20242e); }
 .cal-day.cal-today { box-shadow: inset 0 0 0 1px var(--border); }
 .cal-day.cal-inrange { background: color-mix(in srgb, var(--accent) 20%, transparent); border-radius: 0; color: var(--text); }
-.cal-day.cal-sel { background: var(--accent); color: #fff; font-weight: 700; }
+.cal-day.cal-sel { background: var(--accent); color:var(--accent-ink,#fff); font-weight: 700; }
 .cal-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 9px; }
 .cal-clear { background: transparent; border: 0; color: var(--muted-2); font-size: 10px; cursor: pointer; }
 .cal-clear:hover { color: var(--text); }
 .cal-done {
   height: 28px; padding: 0 14px; border: 0; border-radius: 7px; background: var(--accent);
-  color: #fff; font-size: 11px; font-weight: 700; cursor: pointer;
+  color:var(--accent-ink,#fff); font-size: 11px; font-weight: 700; cursor: pointer;
 }
 
 /* Clickable row tag chips (click to filter the queue to that tag) */

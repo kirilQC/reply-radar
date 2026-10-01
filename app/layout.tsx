@@ -2,7 +2,6 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import type { Metadata, Viewport } from "next";
-import { Outfit } from "next/font/google";
 import "./globals.css";
 import "./feature-overrides.css";
 import "./dashboard.css";
@@ -27,9 +26,6 @@ import PreferenceBootstrap from "./components/PreferenceBootstrap";
  *
  * Desktop is unaffected: browsers there already lay out at the real window width.
  */
-/** The brand wordmark face. Only the "QC Command" wordmark uses it; the app keeps its own text font. */
-const brandFont = Outfit({ subsets: ["latin"], weight: ["600", "700"], variable: "--font-brand", display: "swap" });
-
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
@@ -46,14 +42,15 @@ export const metadata: Metadata = {
    * served HTML of every page, where view-source finds it on whatever host it is running on.
    */
   authors: [{ name: "Kiril Ivlev", url: "https://www.linkedin.com/in/kiril-ivlev/" }],
-  // Versioned so browsers that cached the old Reply Radar icon fetch the new one; PNG for anything
-  // that ignores SVG icons. The apple-touch icon is app/apple-icon.png, picked up by convention.
+  // The real dot-grid mark on a dark tile, as PNGs (crisp at tab size, readable on light and dark tab
+  // bars). Versioned so browsers holding an older icon fetch this one. The apple-touch icon is
+  // app/apple-icon.png, picked up by convention.
   icons: {
     icon: [
-      { url: "/favicon.svg?v=qc1", type: "image/svg+xml" },
-      { url: "/favicon-48.png?v=qc1", type: "image/png", sizes: "48x48" },
+      { url: "/favicon-32.png?v=qc2", type: "image/png", sizes: "32x32" },
+      { url: "/favicon-64.png?v=qc2", type: "image/png", sizes: "64x64" },
     ],
-    shortcut: "/favicon-48.png?v=qc1",
+    shortcut: "/favicon-48.png?v=qc2",
   },
 };
 
@@ -65,7 +62,7 @@ export default function RootLayout({
   return (
     // Dark is the product's own look rather than a follow of the OS setting, so it is stamped
     // on the document before any preference loads. Light only arrives from an explicit choice.
-    <html lang="en" data-appearance-mode="midnight" className={brandFont.variable}>
+    <html lang="en" data-appearance-mode="midnight">
       {/*
         Real-user Core Web Vitals, from the browsers of the people actually using this.
         Imported from `/next` rather than the bare package so the dynamic route is reported as

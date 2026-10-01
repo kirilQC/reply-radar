@@ -11,6 +11,7 @@ import DashboardHome from "./components/DashboardHome";
 import AppSidebar from "./components/AppSidebar";
 import Crumb from "./components/Crumb";
 import DateRangeCalendar from "./components/DateRangeCalendar";
+import { applyAccent, DEFAULT_ACCENT, resolveAccent } from "./lib/brand-theme";
 import { usePopoverDismiss } from "./lib/use-popover-dismiss";
 import AppearancePanel, {
   type AppearancePrefs,
@@ -184,7 +185,7 @@ const defaultAppearance: AppearancePrefs = {
   zoom: 100,
   font: "Inter, ui-sans-serif, system-ui, sans-serif",
   background: "#0b0c10",
-  accent: "#8b7cff",
+  accent: DEFAULT_ACCENT,
   timeZone: "America/New_York",
 };
 const timeZoneSuffix: Record<string, string> = {
@@ -862,7 +863,7 @@ export function InboxPage() {
           setLayoutPrefs(applyLayoutDefaults(nextLayout));
         }
         if (parsed?.appearance) {
-          const nextAppearance = { ...defaultAppearance, ...parsed.appearance };
+          const nextAppearance = { ...defaultAppearance, ...parsed.appearance, accent: resolveAccent(parsed.appearance.accent) };
           setAppearance(nextAppearance);
           setTheme(nextAppearance.mode);
         }
@@ -904,6 +905,7 @@ export function InboxPage() {
           setAppearance((current) => ({
             ...current,
             ...payload.preferences.appearance,
+            accent: resolveAccent(payload.preferences.appearance.accent),
           }));
       })
       .catch(() => null);
@@ -1052,7 +1054,7 @@ export function InboxPage() {
     // Apply the same settings to the document immediately so they remain global
     // while navigating between routes (not just on the inbox's local <main>).
     const root = document.documentElement;
-    root.style.setProperty("--accent", nextAppearance.accent);
+    applyAccent(nextAppearance.accent);
     root.style.setProperty("--bg", nextAppearance.background);
     root.style.setProperty("--font", nextAppearance.font);
     root.style.setProperty(

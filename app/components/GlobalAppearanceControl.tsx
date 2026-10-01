@@ -10,19 +10,20 @@ import {
   readCachedAppearance,
   writeCachedAppearance,
 } from "../lib/preference-identity";
+import { applyAccent, DEFAULT_ACCENT, resolveAccent } from "../lib/brand-theme";
 
 const defaults: AppearancePrefs = {
   mode: "midnight",
   zoom: 100,
   font: "Inter, ui-sans-serif, system-ui, sans-serif",
   background: "#0b0c10",
-  accent: "#8b7cff",
+  accent: DEFAULT_ACCENT,
   timeZone: "America/New_York",
 };
 
 const applyAppearance = (appearance: AppearancePrefs) => {
   const root = document.documentElement;
-  root.style.setProperty("--accent", appearance.accent);
+  applyAccent(appearance.accent);
   root.style.setProperty("--bg", appearance.background);
   root.style.setProperty("--font", appearance.font);
   root.style.setProperty("--reply-radar-zoom", String(appearance.zoom / 100));
@@ -34,7 +35,7 @@ export default function GlobalAppearanceControl() {
   const [appearance, setAppearance] = useState<AppearancePrefs>(() => {
     if (typeof window === "undefined") return defaults;
     const stored = readCachedAppearance();
-    return stored ? { ...defaults, ...stored } : defaults;
+    return stored ? { ...defaults, ...stored, accent: resolveAccent(stored.accent) } : defaults;
   });
   const [open, setOpen] = useState(false);
 
@@ -46,7 +47,7 @@ export default function GlobalAppearanceControl() {
       const detail = (event as CustomEvent).detail as
         | Partial<AppearancePrefs>
         | undefined;
-      if (detail) setAppearance((current) => ({ ...current, ...detail }));
+      if (detail) setAppearance((current) => ({ ...current, ...detail, accent: resolveAccent(detail.accent ?? current.accent) }));
     };
     window.addEventListener("reply-radar-appearance-changed", onChange);
     return () =>

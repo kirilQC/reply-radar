@@ -21,7 +21,7 @@
   border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 12px; font-weight: 600;
 }
 .help-tabs button span { font-size: 10px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
-.help-tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.help-tabs button.on { background: var(--accent); border-color: var(--accent); color:var(--accent-ink,#fff); }
 .help-tabs button.on span { color: #ffffffcc; }
 
 .help-section-head { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
@@ -32,10 +32,10 @@
   height: 29px; padding: 0 11px; border-radius: 6px; border: 1px solid var(--border); background: #12151c;
   color: var(--muted); font-size: 11px; font-weight: 600;
 }
-.help-edit-toggle.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+.help-edit-toggle.on { color:var(--accent-ink,#fff); background: var(--accent); border-color: var(--accent); }
 .light-mode .help-edit-toggle:not(.on) { background: #fff; }
 
-.help-primary { height: 32px; padding: 0 14px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
+.help-primary { height: 32px; padding: 0 14px; border-radius: 8px; border: 0; background: var(--accent); color:var(--accent-ink,#fff); font-size: 12px; font-weight: 700; }
 .help-primary:disabled { opacity: .5; cursor: default; }
 .help-ghost { height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 12px; }
 .help-error { color: var(--coral); font-size: 12px; margin: 0 0 12px; }
