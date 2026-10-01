@@ -63,9 +63,9 @@ function webhookSummary(row: Row, workspace: string | null) {
   const status = text(row.status) || "unknown";
   const eventType = text(row.event_type) || "reply event";
   const error = text(row.error_text);
-  if (status === "failed") return `HeyReach sent ${eventType}${workspace ? ` for ${workspace}` : ""}, but Reply Radar could not finish processing it${error ? `: ${error}` : "."}`;
-  if (status === "processing" || status === "pending") return `HeyReach sent ${eventType}${workspace ? ` for ${workspace}` : ""}; Reply Radar is processing it now.`;
-  return `HeyReach sent ${eventType}${workspace ? ` for ${workspace}` : ""}, and Reply Radar stored it successfully.`;
+  if (status === "failed") return `HeyReach sent ${eventType}${workspace ? ` for ${workspace}` : ""}, but QC Command could not finish processing it${error ? `: ${error}` : "."}`;
+  if (status === "processing" || status === "pending") return `HeyReach sent ${eventType}${workspace ? ` for ${workspace}` : ""}; QC Command is processing it now.`;
+  return `HeyReach sent ${eventType}${workspace ? ` for ${workspace}` : ""}, and QC Command stored it successfully.`;
 }
 
 export async function GET(request: NextRequest) {

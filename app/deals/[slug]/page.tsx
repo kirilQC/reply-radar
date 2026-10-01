@@ -226,7 +226,7 @@ export default function ClientDealsPage() {
               {!crm.connected ? (
                 <div className="deal-connect">
                   <h3>Connect {client.name}&apos;s CRM</h3>
-                  <p>Paste an API key with read access to their deals. Reply Radar pulls the whole pipeline and flags which deals trace back to a person QC contacted or booked.</p>
+                  <p>Paste an API key with read access to their deals. QC Command pulls the whole pipeline and flags which deals trace back to a person QC contacted or booked.</p>
                   <label htmlFor="provider">Provider</label>
                   <select id="provider" value={provider} onChange={(e) => setProvider(e.target.value)}>
                     <option value="hubspot">HubSpot</option>

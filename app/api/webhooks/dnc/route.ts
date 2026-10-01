@@ -47,6 +47,6 @@ export async function POST(request: Request) {
   // A missing brain folder is the one reason the DNC would not reach the brain — say so plainly in the reply.
   const note = result.brainFolder
     ? `Stored, and syncing to ${result.client}'s brain folder (${result.brainFolder}).`
-    : `Stored in Reply Radar, but ${result.client} has no brain folder set, so it was NOT written to the brain. Set it in Admin → Clients → ${result.client} → Brain folder.`;
+    : `Stored in QC Command, but ${result.client} has no brain folder set, so it was NOT written to the brain. Set it in Admin → Clients → ${result.client} → Brain folder.`;
   return NextResponse.json({ ok: true, client: result.client, company: result.company, brainFolder: result.brainFolder || null, note });
 }

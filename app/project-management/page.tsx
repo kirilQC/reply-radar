@@ -110,7 +110,7 @@ function ClientEditor({ client, onClose, onSaved }: { client: Client; onClose: (
         <div className="pm-modal-head"><h2>{client.name} · Slack</h2><button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
         <div className="pm-modal-body">
           <label className="pm-f"><span>Internal Slack channel ID</span><input value={channel} placeholder="e.g. C0123ABCD" onChange={(e) => setChannel(e.target.value)} /></label>
-          <p className="pm-muted" style={{ margin: 0, lineHeight: 1.6 }}>This is where the per-task <b>Send to Slack</b> button posts a project&apos;s status. Most clients are already filled in from Reply Radar. To find an ID: open the channel in Slack → channel name → About → the ID is at the bottom (starts with C).</p>
+          <p className="pm-muted" style={{ margin: 0, lineHeight: 1.6 }}>This is where the per-task <b>Send to Slack</b> button posts a project&apos;s status. Most clients are already filled in from QC Command. To find an ID: open the channel in Slack → channel name → About → the ID is at the bottom (starts with C).</p>
           {err && <p className="pm-err" style={{ margin: 0 }}>{err}</p>}
         </div>
         <div className="pm-modal-foot"><span /><button type="button" className="pm-save" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save"}</button></div>

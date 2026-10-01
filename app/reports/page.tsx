@@ -2384,7 +2384,7 @@ function ReportCover({
         {/* Next's <Image> wants known dimensions and an optimiser; a print sheet wants neither, and the
             client logo is an arbitrary remote URL. Both marks stay plain <img> for the same reason. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className="report-cover-mark" src="/qc-growth-logo.png" alt="QC Growth" />
+        <img className="report-cover-mark" src="/qc-growth-logo.png?v=qc1" alt="QC Growth" />
         {client.workspace.logoUrl && (
           <>
             <span className="report-cover-lockup-rule" />
@@ -2456,7 +2456,7 @@ function ExecutiveSummary({
       ) : (
         <p className="exec-lede">
           In <strong>{report.periodLabel}</strong>, <strong>{client.workspace.name}</strong> received{" "}
-          <strong>{num(summary.totalReplies)}</strong> inbound replies across the outbound motion Reply Radar
+          <strong>{num(summary.totalReplies)}</strong> inbound replies across the outbound motion QC Command
           tracks. <strong>{num(summary.positiveReplies)}</strong> ({positiveShare}%) carried positive intent,
           producing <strong>{num(summary.hotCount)}</strong> conversations flagged as high-urgency follow-ups.
         </p>
@@ -2478,7 +2478,7 @@ function ExecutiveSummary({
       <p className="exec-note">
         Prepared for the period beginning {report.since ? formatDate(report.since, zone) : "the earliest recorded reply"}
         {report.until ? ` and ending ${formatDate(report.until, zone)}` : " through the present"}. All figures
-        are computed from Reply Radar's source-of-truth ledger; no sampling.
+        are computed from QC Command's source-of-truth ledger; no sampling.
       </p>
     </div>
   );

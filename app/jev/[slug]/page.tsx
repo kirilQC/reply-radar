@@ -1089,7 +1089,7 @@ export default function JevClientPage() {
               </div>
 
               {stale && (
-                <div className="jev-banner is-error">Reply Radar was updated since this page opened. <button className="secondary-button" onClick={() => window.location.reload()}>Reload</button></div>
+                <div className="jev-banner is-error">QC Command was updated since this page opened. <button className="secondary-button" onClick={() => window.location.reload()}>Reload</button></div>
               )}
               {jev && !jev.configured && (
                 <div className="jev-banner is-error">OPENROUTER_API_KEY is not set on this deployment. Add it in Vercel → Settings → Environment Variables, then redeploy.</div>

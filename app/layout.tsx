@@ -2,6 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import type { Metadata, Viewport } from "next";
+import { Outfit } from "next/font/google";
 import "./globals.css";
 import "./feature-overrides.css";
 import "./dashboard.css";
@@ -26,13 +27,16 @@ import PreferenceBootstrap from "./components/PreferenceBootstrap";
  *
  * Desktop is unaffected: browsers there already lay out at the real window width.
  */
+/** The brand wordmark face. Only the "QC Command" wordmark uses it; the app keeps its own text font. */
+const brandFont = Outfit({ subsets: ["latin"], weight: ["600", "700"], variable: "--font-brand", display: "swap" });
+
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
 };
 
 export const metadata: Metadata = {
-  title: "Reply Radar",
+  title: "QC Command",
   description: "The operating system for every conversation after the first reply.",
   /**
    * The one part of the authorship stamp that survives a build.
@@ -42,9 +46,14 @@ export const metadata: Metadata = {
    * served HTML of every page, where view-source finds it on whatever host it is running on.
    */
   authors: [{ name: "Kiril Ivlev", url: "https://www.linkedin.com/in/kiril-ivlev/" }],
+  // Versioned so browsers that cached the old Reply Radar icon fetch the new one; PNG for anything
+  // that ignores SVG icons. The apple-touch icon is app/apple-icon.png, picked up by convention.
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: [
+      { url: "/favicon.svg?v=qc1", type: "image/svg+xml" },
+      { url: "/favicon-48.png?v=qc1", type: "image/png", sizes: "48x48" },
+    ],
+    shortcut: "/favicon-48.png?v=qc1",
   },
 };
 
@@ -56,7 +65,7 @@ export default function RootLayout({
   return (
     // Dark is the product's own look rather than a follow of the OS setting, so it is stamped
     // on the document before any preference loads. Light only arrives from an explicit choice.
-    <html lang="en" data-appearance-mode="midnight">
+    <html lang="en" data-appearance-mode="midnight" className={brandFont.variable}>
       {/*
         Real-user Core Web Vitals, from the browsers of the people actually using this.
         Imported from `/next` rather than the bare package so the dynamic route is reported as

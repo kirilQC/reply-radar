@@ -219,7 +219,7 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
           body: JSON.stringify({
             status: "discarded",
             processed_at: new Date().toISOString(),
-            error_text: "The lead sent the first message and HeyReach does not have them in a campaign — Reply Radar only tracks replies to outreach we sent.",
+            error_text: "The lead sent the first message and HeyReach does not have them in a campaign — QC Command only tracks replies to outreach we sent.",
           }),
         }).catch(() => null);
       }

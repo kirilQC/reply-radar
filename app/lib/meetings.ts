@@ -391,7 +391,7 @@ export async function latestMeetingForClient(nameOrSlug: string): Promise<{ ok: 
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const client = await resolveWorkspace(nameOrSlug);
-  if (!client) return { ok: false, error: `No single Reply Radar client matches "${nameOrSlug}".` };
+  if (!client) return { ok: false, error: `No single QC Command client matches "${nameOrSlug}".` };
   let row = (await rows(url, key, `rr_meetings?select=*&workspace_id=eq.${encodeURIComponent(client.id)}&order=created_at.desc&limit=1`))[0];
   if (!row) return { ok: true, client: client.name, slug: client.slug, meeting: undefined, campaign: null };
   // Make sure the campaign is attributed before we answer — the GET is expected to carry it.
@@ -458,7 +458,7 @@ export async function ingestWebhook(payload: unknown): Promise<{ ok: boolean; er
   const { client: clientName, fields } = normalizeMeeting((payload ?? {}) as Record<string, unknown>);
   if (!str(clientName).trim()) return { ok: false, error: "The payload has no client field to route on. Add a 'client' variable with the client's name." };
   const client = await resolveWorkspace(clientName);
-  if (!client) return { ok: false, error: `No single Reply Radar client matches "${clientName}". Check the client name sent from Zapier.` };
+  if (!client) return { ok: false, error: `No single QC Command client matches "${clientName}". Check the client name sent from Zapier.` };
   if (!meetingIsUsable(fields)) return { ok: false, error: "The payload had no invitee name, email or company to record." };
 
   const body = record(client.id, "webhook", fields);

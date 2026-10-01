@@ -1907,7 +1907,7 @@ export function InboxPage() {
                   <>
                     {!profileName && (
                       <span className="inbox-heading-logo general-heading-logo">
-                        <img src="/qc-growth-logo.png" alt="QC Growth logo" />
+                        <img src="/qc-growth-logo.png?v=qc1" alt="QC Growth logo" />
                       </span>
                     )}
                     {profileName

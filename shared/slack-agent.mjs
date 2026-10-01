@@ -488,5 +488,5 @@ export function truncateForSlack(text, max = SLACK_MAX_CHARS) {
   // If the cut landed inside a code fence, an odd number of fences is open; close it so the marker shows.
   const fences = (cut.match(/```/g) ?? []).length;
   const closer = fences % 2 === 1 ? "\n```" : "";
-  return `${cut}${closer}\n\n_…answer truncated for Slack. Ask for a narrower slice, or open Reply Radar for the full version._`;
+  return `${cut}${closer}\n\n_…answer truncated for Slack. Ask for a narrower slice, or open QC Command for the full version._`;
 }

@@ -25,7 +25,7 @@ export type HelpArticle = {
 };
 
 export const HELP_KINDS: { key: HelpKind; label: string; blurb: string }[] = [
-  { key: "walkthrough", label: "Walkthroughs", blurb: "Step-by-step guides to each part of Reply Radar." },
+  { key: "walkthrough", label: "Walkthroughs", blurb: "Step-by-step guides to each part of QC Command." },
   { key: "faq", label: "FAQ", blurb: "Quick answers to common questions." },
   { key: "troubleshooting", label: "Troubleshooting", blurb: "When something looks wrong, start here." },
   { key: "support", label: "Support", blurb: "Who to ask and how to get help." },

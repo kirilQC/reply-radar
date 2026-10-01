@@ -143,7 +143,7 @@ export async function POST(request: Request) {
   const body = await response.text();
   let data: unknown = null; try { data = body ? JSON.parse(body) : null; } catch { data = body; }
   const workspaces = Array.isArray(data) ? data.map((row: Record<string, unknown>) => ({ ...row, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined })) : data;
-  if (response.ok && Array.isArray(data) && data[0]) await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.created", entityType: "workspace", entityId: String(data[0].id ?? ""), details: { source: "admin", status: "success", workspaceId: data[0].id, workspaceName: data[0].name ?? payload.name, summary: `${data[0].name ?? payload.name ?? "A client workspace"} was added to Reply Radar.` } });
+  if (response.ok && Array.isArray(data) && data[0]) await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.created", entityType: "workspace", entityId: String(data[0].id ?? ""), details: { source: "admin", status: "success", workspaceId: data[0].id, workspaceName: data[0].name ?? payload.name, summary: `${data[0].name ?? payload.name ?? "A client workspace"} was added to QC Command.` } });
   if (response.ok && Array.isArray(data) && data[0]) fileMessagingAfterSave(String(data[0].slug ?? payload.slug ?? ""), existingGuardrails);
   return NextResponse.json({ ok: response.ok, workspaces, error: response.ok ? undefined : data }, { status: response.ok ? 201 : response.status });
 }
@@ -182,6 +182,6 @@ export async function DELETE(request: Request) {
   // the lookup found a row, while still reporting a genuine no-op as 404.
   const deletedCount = Array.isArray(deleted) ? deleted.length : workspaceIds.length;
   if (deletedCount === 0) return NextResponse.json({ ok: false, error: "No workspace matched that id or slug." }, { status: 404 });
-  await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.deleted", entityType: "workspace", entityId: id || slug, details: { source: "admin", status: "success", workspaceName: slug || id, summary: `${slug || "The client workspace"} was removed from Reply Radar.` } });
+  await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.deleted", entityType: "workspace", entityId: id || slug, details: { source: "admin", status: "success", workspaceName: slug || id, summary: `${slug || "The client workspace"} was removed from QC Command.` } });
   return NextResponse.json({ ok: true, deletedCount });
 }

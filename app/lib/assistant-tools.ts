@@ -264,7 +264,7 @@ async function airtableBaseFor(name: unknown): Promise<{ client: Client; baseId:
   const client = await resolveClient(name);
   const rows_ = rows(await db(`rr_workspaces?select=airtable_base_id&id=eq.${encodeURIComponent(client.id)}&limit=1`));
   const baseId = text(rows_[0]?.airtable_base_id);
-  if (!baseId) throw new Error(`${client.name} has no Airtable base linked in Reply Radar, so their Airtable cannot be reached. Link one on the admin page.`);
+  if (!baseId) throw new Error(`${client.name} has no Airtable base linked in QC Command, so their Airtable cannot be reached. Link one on the admin page.`);
   return { client, baseId };
 }
 
@@ -447,13 +447,13 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "list_clients",
     description:
-      "Every client workspace in Reply Radar: name, slug, time zone, when they were added, and whether a HeyReach key is connected. Call this first when a question names a client you have not yet resolved, or asks how many clients there are.",
+      "Every client workspace in QC Command: name, slug, time zone, when they were added, and whether a HeyReach key is connected. Call this first when a question names a client you have not yet resolved, or asks how many clients there are.",
     input_schema: { type: "object", properties: {} },
   },
   {
     name: "client_summary",
     description:
-      "The client's own briefing as configured in Reply Radar: what they sell, who they sell to, their ICP, their positioning and how they want to sound. This is the background every scoring and drafting run for that client already uses, so reading it is how you reason about the same client the pipeline does rather than from the company name alone. Call it before writing copy for a client, before judging whether a lead or a list fits, and before explaining why a lead scored the way it did. Returns whether a briefing exists — an empty one means nobody has pasted the /client-summary output into that client's configuration yet, which is worth saying plainly instead of guessing at the answer.",
+      "The client's own briefing as configured in QC Command: what they sell, who they sell to, their ICP, their positioning and how they want to sound. This is the background every scoring and drafting run for that client already uses, so reading it is how you reason about the same client the pipeline does rather than from the company name alone. Call it before writing copy for a client, before judging whether a lead or a list fits, and before explaining why a lead scored the way it did. Returns whether a briefing exists — an empty one means nobody has pasted the /client-summary output into that client's configuration yet, which is worth saying plainly instead of guessing at the answer.",
     input_schema: {
       type: "object",
       properties: { client: { type: "string", description: "Client name or slug, e.g. \"willow\" or \"Bluevia Health\"." } },
@@ -463,13 +463,13 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "database_totals",
     description:
-      "Exact all-time totals across every client: leads, conversations, replies received, and clients. Also accepts a window to count replies received in a period. These are counted in Reply Radar's own database and match the dashboard exactly. They are NOT per client — for one client's numbers use heyreach_campaign_metrics.",
+      "Exact all-time totals across every client: leads, conversations, replies received, and clients. Also accepts a window to count replies received in a period. These are counted in QC Command's own database and match the dashboard exactly. They are NOT per client — for one client's numbers use heyreach_campaign_metrics.",
     input_schema: { type: "object", properties: { ...WINDOW_ARGS } },
   },
   {
     name: "recent_replies",
     description:
-      "The most recent conversations, newest first, with the lead's name, role, company, LinkedIn URL, their latest message, and Reply Radar's own read of it: the sentiment of their reply, how urgently it needs a follow-up (0-10), and the lead's ICP score. Any of those can be null, which means the pipeline has not analysed that row yet — it does not mean zero, and it must never be reported as a low score. Optionally scoped to one client. This is the tool for 'what came in', 'show me recent replies', or any question about what people actually said.",
+      "The most recent conversations, newest first, with the lead's name, role, company, LinkedIn URL, their latest message, and QC Command's own read of it: the sentiment of their reply, how urgently it needs a follow-up (0-10), and the lead's ICP score. Any of those can be null, which means the pipeline has not analysed that row yet — it does not mean zero, and it must never be reported as a low score. Optionally scoped to one client. This is the tool for 'what came in', 'show me recent replies', or any question about what people actually said.",
     input_schema: {
       type: "object",
       properties: {
@@ -491,7 +491,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "find_person",
     description:
-      "Find ONE named individual by name or LinkedIn profile URL across every client, with their full conversation history and Reply Radar's read of each reply. Use this when a question names a person. For a question about a kind of person rather than a named one — every CISO, everyone at Stripe, all the VPs of Engineering — use search_leads instead; this tool cannot match a job title.",
+      "Find ONE named individual by name or LinkedIn profile URL across every client, with their full conversation history and QC Command's read of each reply. Use this when a question names a person. For a question about a kind of person rather than a named one — every CISO, everyone at Stripe, all the VPs of Engineering — use search_leads instead; this tool cannot match a job title.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "A person's name, or their LinkedIn profile URL." } },
@@ -501,7 +501,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "search_outreach",
     description:
-      "Search the qc_outreach table — QC's master record of every person contacted across every client, at the contact level. Each row is one outreach: the lead's name and title, the client it was for, and the campaign (id and name) it came from. Use this for questions about QC's outreach as a whole rather than one client's Reply Radar inbox: 'who have we reached out to at Stripe across all clients', 'which campaign did we contact a person in', 'every VP we have messaged for Cotool', 'how many people did campaign CT049 reach'. Filter by any of client, campaign name, lead name, or lead title; matching is case-insensitive substring. Returns the exact total match count alongside the rows, so a capped list is never mistaken for the whole population. This is a flat outreach log — for a person's full conversation and Reply Radar's read of their replies, use find_person or search_leads instead.",
+      "Search the qc_outreach table — QC's master record of every person contacted across every client, at the contact level. Each row is one outreach: the lead's name and title, the client it was for, and the campaign (id and name) it came from. Use this for questions about QC's outreach as a whole rather than one client's QC Command inbox: 'who have we reached out to at Stripe across all clients', 'which campaign did we contact a person in', 'every VP we have messaged for Cotool', 'how many people did campaign CT049 reach'. Filter by any of client, campaign name, lead name, or lead title; matching is case-insensitive substring. Returns the exact total match count alongside the rows, so a capped list is never mistaken for the whole population. This is a flat outreach log — for a person's full conversation and QC Command's read of their replies, use find_person or search_leads instead.",
     input_schema: {
       type: "object",
       properties: {
@@ -516,7 +516,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "search_leads",
     description:
-      "Search everyone in Reply Radar's own database by job title, company or name. This is the tool for \"list the CISOs in our database\", \"who do we have at Stripe\", \"every VP of Engineering we have replied to\" — any question about a category of person rather than a named one. Matching is case-insensitive substring, so \"security\" finds \"Head of Security\". Give role as a LIST of every spelling of the title, because titles are free text as the person wrote them on LinkedIn: for CISOs pass [\"CISO\", \"Chief Information Security Officer\", \"Chief Security Officer\"], and anyone matching any of them is returned. Searches people, never message text. Returns the exact total match count as well as the rows, so you can always say how many there are even when the list is capped. Each person carries a leadScore, which is how well they fit the client's ideal customer; it is null for anyone who has not been analysed, which is not the same as a low score.",
+      "Search everyone in QC Command's own database by job title, company or name. This is the tool for \"list the CISOs in our database\", \"who do we have at Stripe\", \"every VP of Engineering we have replied to\" — any question about a category of person rather than a named one. Matching is case-insensitive substring, so \"security\" finds \"Head of Security\". Give role as a LIST of every spelling of the title, because titles are free text as the person wrote them on LinkedIn: for CISOs pass [\"CISO\", \"Chief Information Security Officer\", \"Chief Security Officer\"], and anyone matching any of them is returned. Searches people, never message text. Returns the exact total match count as well as the rows, so you can always say how many there are even when the list is capped. Each person carries a leadScore, which is how well they fit the client's ideal customer; it is null for anyone who has not been analysed, which is not the same as a low score.",
     input_schema: {
       type: "object",
       properties: {
@@ -635,7 +635,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "heyreach_inbox_search",
     description:
-      "One client's live LinkedIn inbox in HeyReach, with the full message threads. Filter by person's name, by campaign, or to unread only. Unlike recent_replies this is HeyReach's own inbox rather than Reply Radar's database, so it includes conversations Reply Radar has not ingested — use it to check something Reply Radar may have missed, or to read a thread as LinkedIn actually has it. IMPORTANT: HeyReach cannot search message text. nameContains matches the person's name only, so never conclude from an empty result that nobody mentioned a topic.",
+      "One client's live LinkedIn inbox in HeyReach, with the full message threads. Filter by person's name, by campaign, or to unread only. Unlike recent_replies this is HeyReach's own inbox rather than QC Command's database, so it includes conversations QC Command has not ingested — use it to check something QC Command may have missed, or to read a thread as LinkedIn actually has it. IMPORTANT: HeyReach cannot search message text. nameContains matches the person's name only, so never conclude from an empty result that nobody mentioned a topic.",
     input_schema: {
       type: "object",
       properties: {
@@ -661,7 +661,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "brain_search",
     description:
-      "Search the QC Brain — the shared GitHub repository holding every client's ICP, personas, tone of voice, engagement plan and call notes, plus QC's own playbooks and vertical research. This is the tool for any question about strategy, positioning, who a client sells to, what we decided, or why a campaign is written the way it is. Reply Radar's other tools know what happened; the brain knows what we intended. Returns the best-matching files with a snippet and the path to read in full. Every word in the query must appear in a file for it to match, so keep queries to two or three words.",
+      "Search the QC Brain — the shared GitHub repository holding every client's ICP, personas, tone of voice, engagement plan and call notes, plus QC's own playbooks and vertical research. This is the tool for any question about strategy, positioning, who a client sells to, what we decided, or why a campaign is written the way it is. QC Command's other tools know what happened; the brain knows what we intended. Returns the best-matching files with a snippet and the path to read in full. Every word in the query must appear in a file for it to match, so keep queries to two or three words.",
     input_schema: {
       type: "object",
       properties: {
@@ -784,7 +784,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "slack_channels",
     description:
-      "The Slack channels QC has configured for each client in Reply Radar: the internal (team) channel, the external (client-facing) channel, and any extras. Pass a client to get just theirs, or omit to list every client's. Returns each channel's id and its Slack name — a null name means the channel could not be read, which usually means the reading token is not a member of it. Use this to see what can be scanned and to get the id to hand slack_scan.",
+      "The Slack channels QC has configured for each client in QC Command: the internal (team) channel, the external (client-facing) channel, and any extras. Pass a client to get just theirs, or omit to list every client's. Returns each channel's id and its Slack name — a null name means the channel could not be read, which usually means the reading token is not a member of it. Use this to see what can be scanned and to get the id to hand slack_scan.",
     input_schema: { type: "object", properties: { client: { type: "string", description: "Optional client name or slug. Omit to list every client's channels." } } },
   },
   {
@@ -833,7 +833,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "help_center",
     description:
-      "Search Reply Radar's own Help center — the team-written walkthroughs, FAQ, troubleshooting and support articles (the Help tab in the app), some with Loom videos. Use this FIRST whenever someone asks how to do something in Reply Radar ('how do I tag a lead', 'where do I set a custom date', 'how does the morning brief work'), says they are stuck, confused, or that something in the app looks broken. Pass their question as `query` in plain words. Each result has the full written steps (`body`), the app page it is about with a link, the Loom video link if there is one, and a link to the article itself. Walk the person through the steps in your own words, link the video and the page, and do not invent steps the article does not contain. If nothing matches, say the Help center has no article on it yet and suggest they ask Kiril. Call with an empty query to list every article.",
+      "Search QC Command's own Help center — the team-written walkthroughs, FAQ, troubleshooting and support articles (the Help tab in the app), some with Loom videos. Use this FIRST whenever someone asks how to do something in QC Command ('how do I tag a lead', 'where do I set a custom date', 'how does the morning brief work'), says they are stuck, confused, or that something in the app looks broken. Pass their question as `query` in plain words. Each result has the full written steps (`body`), the app page it is about with a link, the Loom video link if there is one, and a link to the article itself. Walk the person through the steps in your own words, link the video and the page, and do not invent steps the article does not contain. If nothing matches, say the Help center has no article on it yet and suggest they ask Kiril. Call with an empty query to list every article.",
     input_schema: { type: "object", properties: { query: { type: "string", description: "The person's question in plain words, e.g. 'tag a lead as DQ'. Empty to list all articles." } } },
   },
   {
@@ -857,19 +857,19 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "list_onboarding_template",
     description:
-      "Read QC's master onboarding template — the Reply Radar onboarding checklist every new client is built from (the Onboarding tab in the app). Returns every step with its section, urgency group, and id. Call this before adding a step, to see the existing sections/groups and avoid duplicates. This is the Reply Radar template, NOT the Airtable base.",
+      "Read QC's master onboarding template — the QC Command onboarding checklist every new client is built from (the Onboarding tab in the app). Returns every step with its section, urgency group, and id. Call this before adding a step, to see the existing sections/groups and avoid duplicates. This is the QC Command template, NOT the Airtable base.",
     input_schema: { type: "object", properties: {} },
   },
   {
     name: "onboarding_add_template_step",
     description:
-      "Add a step to QC's master onboarding template — the Reply Radar onboarding checklist (the Onboarding tab in the app), the one people mean by 'the ReplyRadar onboarding task list' or 'the onboarding template'. This is NOT the Airtable base; never use the Airtable tools for this. It affects the template every future client inherits, not one client. Give the title, and place it with a `group` (the urgency band: 'Immediate', 'First week', or 'Least Urgent') and/or a `section` (the category: 'Communication', 'Data & tooling', 'Client access & integrations', 'Reply Radar setup', 'Contract & kickoff'). Call list_onboarding_template first to confirm exact section/group names and that it is not already there.",
-    input_schema: { type: "object", properties: { title: { type: "string" }, group: { type: "string", description: "Urgency band: Immediate | First week | Least Urgent" }, section: { type: "string", description: "Category, e.g. Communication, Data & tooling, Client access & integrations, Reply Radar setup, Contract & kickoff" }, description: { type: "string" }, parent_id: { type: "string", description: "Optional: id of a step to nest this under." } }, required: ["title"] },
+      "Add a step to QC's master onboarding template — the QC Command onboarding checklist (the Onboarding tab in the app), the one people mean by 'the QC Command onboarding task list' (or, by its old name, 'the ReplyRadar onboarding task list') or 'the onboarding template'. This is NOT the Airtable base; never use the Airtable tools for this. It affects the template every future client inherits, not one client. Give the title, and place it with a `group` (the urgency band: 'Immediate', 'First week', or 'Least Urgent') and/or a `section` (the category: 'Communication', 'Data & tooling', 'Client access & integrations', 'QC Command setup', 'Contract & kickoff'). Call list_onboarding_template first to confirm exact section/group names and that it is not already there.",
+    input_schema: { type: "object", properties: { title: { type: "string" }, group: { type: "string", description: "Urgency band: Immediate | First week | Least Urgent" }, section: { type: "string", description: "Category, e.g. Communication, Data & tooling, Client access & integrations, QC Command setup, Contract & kickoff" }, description: { type: "string" }, parent_id: { type: "string", description: "Optional: id of a step to nest this under." } }, required: ["title"] },
   },
   {
     name: "list_projects",
     description:
-      "Projects on QC's internal Project management board (the Project management tab in Reply Radar — NOT Airtable), grouped by stage (To do, In progress, Paused, Completed, Launched). Returns each project's id, title, stage, assignee(s), priority, week, due date, blockers, context and links. Use this to answer 'what are we working on for X', to check a project's status, or to get the id before updating/deleting. Pass a CLIENT name/slug, OR a custom VIEW name (a group of clients, e.g. 'Healthtech') — a view returns every member client's projects, each tagged with its client. If the name is not a client, it is probably a view: call list_project_views to see the groups. Optionally pass a week label (e.g. 'Sept 3') to see only that week's tasks.",
+      "Projects on QC's internal Project management board (the Project management tab in QC Command — NOT Airtable), grouped by stage (To do, In progress, Paused, Completed, Launched). Returns each project's id, title, stage, assignee(s), priority, week, due date, blockers, context and links. Use this to answer 'what are we working on for X', to check a project's status, or to get the id before updating/deleting. Pass a CLIENT name/slug, OR a custom VIEW name (a group of clients, e.g. 'Healthtech') — a view returns every member client's projects, each tagged with its client. If the name is not a client, it is probably a view: call list_project_views to see the groups. Optionally pass a week label (e.g. 'Sept 3') to see only that week's tasks.",
     input_schema: { type: "object", properties: { client: { type: "string", description: "A client name/slug, or a custom view (group) name like 'Healthtech'." }, week: { type: "string", description: "Optional week label to filter by, e.g. 'Sept 3'." } }, required: ["client"] },
   },
   {
@@ -930,7 +930,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "remove_from_dnc",
     description:
-      "Take a company back off a client's do-not-contact (DNC) list, by company name or domain. Removes it from Reply Radar's mirror; a company already pushed to the client's Clay table should be pruned there by the client. Use only when explicitly asked to un-block a company.",
+      "Take a company back off a client's do-not-contact (DNC) list, by company name or domain. Removes it from QC Command's mirror; a company already pushed to the client's Clay table should be pruned there by the client. Use only when explicitly asked to un-block a company.",
     input_schema: {
       type: "object",
       properties: {
@@ -943,7 +943,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: "submit_support_ticket",
     description:
-      "File a support ticket / feedback item for the QC team to look into — it lands in Reply Radar's Feedback & ideas section where Kiril reviews it. Use this ONLY when a QC team member is clearly stuck, blocked, or unhappy with what Reply Radar is giving them AND they have confirmed they want a ticket opened. Never file one speculatively, without the person's explicit go-ahead, or more than once for the same issue. Set kind to 'bug' when something is broken or wrong, 'idea' for a request or improvement, 'other' otherwise.",
+      "File a support ticket / feedback item for the QC team to look into — it lands in QC Command's Feedback & ideas section where Kiril reviews it. Use this ONLY when a QC team member is clearly stuck, blocked, or unhappy with what QC Command is giving them AND they have confirmed they want a ticket opened. Never file one speculatively, without the person's explicit go-ahead, or more than once for the same issue. Set kind to 'bug' when something is broken or wrong, 'idea' for a request or improvement, 'other' otherwise.",
     input_schema: {
       type: "object",
       properties: {
@@ -1016,7 +1016,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         repliesAllTime,
         ...(repliesInWindow === null ? {} : { repliesInWindow, window: { since, until } }),
         clients: clientCount,
-        note: "Counted across every client in Reply Radar's database. Not per client.",
+        note: "Counted across every client in QC Command's database. Not per client.",
       };
     }
 
@@ -1612,7 +1612,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       // An empty body would be a deletion dressed up as an edit, and a model that lost its place
       // mid-thought is far likelier than someone genuinely asking to empty a file.
       if (!body.trim()) throw new Error("The new contents are empty. Deleting a file is done in GitHub, deliberately.");
-      const pull = await proposeBrainEdit({ path, text: body, sha: text(input.sha), summary, author: "Reply Radar MCP" });
+      const pull = await proposeBrainEdit({ path, text: body, sha: text(input.sha), summary, author: "QC Command MCP" });
       forgetBrainTree();
       return {
         proposed: true,
@@ -2002,7 +2002,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         return {
           client: result.client,
           notConfigured: true,
-          note: `Do NOT tell the user the company was added — it was not. ${result.client} has no Clay DNC integration set up, so DNC adds cannot work for them yet. Tell the user they need to set it up first, in two steps: (1) paste ${result.client}'s Clay DNC table webhook URL into Reply Radar under Admin → Clients → ${result.client} → "Clay DNC webhook"; and (2) in Clay, add an HTTP API action on that DNC table that POSTs each row back to Reply Radar's DNC webhook (/api/webhooks/dnc) with the client name, company and domain. Once both are in place, adding will work. IMPORTANT: if the conversation shows you have ALREADY explained these steps for this client and the user is asking again, do not repeat the steps — tell them to ask Kiril for help instead.`,
+          note: `Do NOT tell the user the company was added — it was not. ${result.client} has no Clay DNC integration set up, so DNC adds cannot work for them yet. Tell the user they need to set it up first, in two steps: (1) paste ${result.client}'s Clay DNC table webhook URL into QC Command under Admin → Clients → ${result.client} → "Clay DNC webhook"; and (2) in Clay, add an HTTP API action on that DNC table that POSTs each row back to QC Command's DNC webhook (/api/webhooks/dnc) with the client name, company and domain. Once both are in place, adding will work. IMPORTANT: if the conversation shows you have ALREADY explained these steps for this client and the user is asking again, do not repeat the steps — tell them to ask Kiril for help instead.`,
         };
       }
       const clayReached = (result.results ?? []).some((r) => r.clay);

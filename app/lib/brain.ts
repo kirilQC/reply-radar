@@ -374,7 +374,7 @@ export async function proposeBrainEdit({
       title: summary,
       head: branch,
       base: baseBranch,
-      body: `Proposed from Reply Radar's QC Brain tab.\n\nFile: \`${path}\``,
+      body: `Proposed from QC Command's QC Brain tab.\n\nFile: \`${path}\``,
     }),
   })) as Record<string, unknown>;
 
@@ -411,7 +411,7 @@ export async function writeBrainFile({
   path,
   text,
   summary,
-  author = "Reply Radar",
+  author = "QC Command",
 }: {
   path: string;
   text: string;

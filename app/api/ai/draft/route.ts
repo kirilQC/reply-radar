@@ -295,7 +295,7 @@ export async function POST(request: Request) {
     const providerMessage = typeof payload?.error?.message === "string" ? payload.error.message : "Anthropic rejected the draft request.";
     return NextResponse.json({ ok: response.ok, ...(response.ok ? {} : { error: providerMessage }), draft: mode === "analyze" ? String(analysis.draft ?? "") : text, reason: mode === "analyze" ? String(analysis.reason ?? "") : undefined, sentiment: mode === "analyze" ? String(analysis.sentiment ?? "") : undefined, usage: payload?.usage ?? null }, { status: response.ok ? 200 : response.status });
   } catch {
-    await writeAuditEvent({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }, { actor: "anthropic", action: "draft.failed", entityType: "conversation", details: { source: "anthropic", status: "failed", model, summary: "Reply Radar could not reach Anthropic to generate the requested draft." } });
+    await writeAuditEvent({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }, { actor: "anthropic", action: "draft.failed", entityType: "conversation", details: { source: "anthropic", status: "failed", model, summary: "QC Command could not reach Anthropic to generate the requested draft." } });
     return NextResponse.json({ ok: false, error: "Unable to reach Anthropic from the server." }, { status: 502 });
   }
 }

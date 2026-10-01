@@ -131,7 +131,7 @@ export async function fetchMessagingTabs(docUrlOrId: string): Promise<DocTab[]> 
     }
     if (response.status === 403 || response.status === 404) {
       const hint =
-        "Reply Radar cannot open that document. Either set it to \u201Canyone with the link\u201D, " +
+        "QC Command cannot open that document. Either set it to \u201Canyone with the link\u201D, " +
         "or enable the Google Docs API on the service account's project.";
       throw new Error(reason ? `${hint} (Google: ${reason})` : hint);
     }

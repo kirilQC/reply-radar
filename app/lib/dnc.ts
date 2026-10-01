@@ -257,7 +257,7 @@ function renderDncMarkdown(clientName: string, entries: { company: string; domai
     .join("\n");
   return `# ${clientName} — Do Not Contact
 
-Companies QC must never reach out to for ${clientName}. Maintained automatically by Reply Radar; the working source of truth is this client's Clay DNC table. Do not edit by hand — changes here are overwritten on the next sync.
+Companies QC must never reach out to for ${clientName}. Maintained automatically by QC Command; the working source of truth is this client's Clay DNC table. Do not edit by hand — changes here are overwritten on the next sync.
 
 | Company | Domain |
 | --- | --- |
@@ -293,7 +293,7 @@ export async function syncDncToBrain(workspaceId: string, clientName: string): P
     const existing = await brainFile(path);
     if (existing.text.trim() === text.trim()) return; // nothing changed — skip the commit
   } catch { /* file doesn't exist yet — create it */ }
-  await writeBrainFile({ path, text, summary: `Update ${clientName} DNC (${entries.length})`, author: "Reply Radar" }).catch(() => {});
+  await writeBrainFile({ path, text, summary: `Update ${clientName} DNC (${entries.length})`, author: "QC Command" }).catch(() => {});
 }
 
 /** Everything on a client's DNC, newest first. */

@@ -84,7 +84,7 @@ export async function POST(request: Request) {
     if (written.done) {
       const icpPath = skeleton.docs[1]?.found || `clients/${skeleton.client}/account/icp.md`;
       try {
-        const saved = await writeBrainFile({ path: icpPath, text: written.markdown, summary: `ICP document for ${label}`, author: "Reply Radar" });
+        const saved = await writeBrainFile({ path: icpPath, text: written.markdown, summary: `ICP document for ${label}`, author: "QC Command" });
         savedUrl = saved.url;
       } catch {
         /* the document is still shown; only the write-back to the repo failed */

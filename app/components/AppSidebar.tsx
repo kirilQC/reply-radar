@@ -7,6 +7,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { BrandIcon, BrandWordmark } from "./BrandMark";
 
 const items = [
   ["/", "Dashboard", "dashboard"],
@@ -225,13 +226,11 @@ export default function AppSidebar() {
           style={{ textDecoration: "none", color: "inherit" }}
           onClick={() => setNavOpen(false)}
         >
-          <span className="brand-mark">
-            <span />
-            <span />
-            <span />
+          <span className="brand-mark brand-mark-grid">
+            <BrandIcon size={22} />
           </span>{" "}
           <span className="sidebar-label">
-            reply<span>radar</span>
+            <BrandWordmark />
           </span>
         </Link>
         {/*

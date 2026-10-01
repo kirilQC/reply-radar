@@ -181,7 +181,7 @@ async function runAndReply(opts: {
     // the old post-once behaviour rather than losing the answer.
     let statusTs = "";
     try {
-      statusTs = await postMessage(channel, ":mag: _On it — Searching the Reply Radar…_", threadTs);
+      statusTs = await postMessage(channel, ":mag: _On it — Searching QC Command…_", threadTs);
     } catch {
       /* posting failed; fall back to a single post at the end */
     }
@@ -283,7 +283,7 @@ async function runAndReply(opts: {
     const supportOwner = (process.env.SUPPORT_OWNER_SLACK_ID || "").trim();
     const extraParts: string[] = [];
     extraParts.push(`You are talking to ${askerName || "a QC team member"}${askedBy ? ` (Slack user <@${askedBy}>)` : ""}. If you file a support ticket, record submittedBy as their name.`);
-    if (surface === "dm") extraParts.push("This is a private, one-to-one direct message: you are this person's own Reply Radar assistant, with your full set of tools available. Answer for them alone — there is no channel audience reading along.");
+    if (surface === "dm") extraParts.push("This is a private, one-to-one direct message: you are this person's own QC Command assistant, with your full set of tools available. Answer for them alone — there is no channel audience reading along.");
     if (supportOwner) extraParts.push(`When you tell someone Kiril will look into a support issue, refer to him as <@${supportOwner}> so he is actually notified.`);
     const systemExtra = extraParts.join("\n");
 

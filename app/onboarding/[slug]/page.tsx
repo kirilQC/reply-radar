@@ -89,7 +89,7 @@ function ReplyRadarSetup({ slug, onConfig, client, onLogoSaved }: { slug: string
   const [cfg, setCfg] = useState<RRConfig | null>(null);
   const [bases, setBases] = useState<Array<{ id: string; name: string }>>([]);
   const [form, setForm] = useState({ website: "", messagingDoc: "", slackInternal: "", slackExternal: "", airtableBaseId: "", heyreachApiKey: "", crmProvider: "", crmApiKey: "" });
-  const [collapsed, setCollapsed] = useState(true); // the Reply Radar setup starts collapsed — it is reference, not the daily view
+  const [collapsed, setCollapsed] = useState(true); // the QC Command setup starts collapsed — it is reference, not the daily view
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -164,7 +164,7 @@ function ReplyRadarSetup({ slug, onConfig, client, onLogoSaved }: { slug: string
   return (
     <div className={`rr-setup ${complete ? "complete" : ""}`}>
       <button className="rr-setup-head" onClick={() => setCollapsed((v) => !v)}>
-        <span className="rr-setup-title">Reply Radar setup</span>
+        <span className="rr-setup-title">QC Command setup</span>
         {complete ? <span className="rr-setup-badge done">Complete ✓</span> : <span className="rr-setup-badge">{doneCount}/6</span>}
         <span className="rr-caret">{collapsed ? "▾" : "▴"}</span>
       </button>

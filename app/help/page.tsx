@@ -122,7 +122,7 @@ export default function HelpPage() {
         <main className="help-page">
           <div className="help-hero">
             <h1>How can we help?</h1>
-            <p>Guides, videos and answers for every part of Reply Radar. You can also ask QC Bot in Slack — it reads this page.</p>
+            <p>Guides, videos and answers for every part of QC Command. You can also ask QC Bot in Slack — it reads this page.</p>
             <div className="help-search">
               <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden><circle cx="9" cy="9" r="6" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M14 14l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search help — e.g. “tag a lead”, “morning brief”, “custom dates”" aria-label="Search help" />

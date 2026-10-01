@@ -567,7 +567,7 @@ export async function GET() {
         webhookStatus: !keyConfigured
           ? "Add a HeyReach API key first."
           : webhookHealthy
-            ? "Replies are reaching Reply Radar."
+            ? "Replies are reaching QC Command."
             : webhookAgeSeconds === null
               ? "Webhook down — no reply has ever arrived."
               : "Webhook down — no reply has arrived for more than one week.",

@@ -50,7 +50,7 @@ export async function PUT(request: Request) {
     };
     const response = await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(String(row.id))}`, { method: "PATCH", headers: { ...headers(key), Prefer: "return=minimal" }, body: JSON.stringify({ guardrails: next }) });
     if (!response.ok) throw new Error(`Supabase returned ${response.status}.`);
-    await writeAuditEvent({ url, key }, { actor: "Admin", action: "workspace.resources.updated", entityType: "workspace", entityId: String(row.id), details: { source: "dashboard", status: "success", workspaceId: row.id, workspaceName: row.name, summary: `Reply Radar synchronized the messaging document and ${cleanTemplates(next.quick_templates).length} quick template${cleanTemplates(next.quick_templates).length === 1 ? "" : "s"} for ${row.name}.` } });
+    await writeAuditEvent({ url, key }, { actor: "Admin", action: "workspace.resources.updated", entityType: "workspace", entityId: String(row.id), details: { source: "dashboard", status: "success", workspaceId: row.id, workspaceName: row.name, summary: `QC Command synchronized the messaging document and ${cleanTemplates(next.quick_templates).length} quick template${cleanTemplates(next.quick_templates).length === 1 ? "" : "s"} for ${row.name}.` } });
     return NextResponse.json({ ok: true, messagingDocUrl: next.messaging_doc_url ?? "", quickTemplates: cleanTemplates(next.quick_templates) });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Resources could not be saved." }, { status: 502 });

@@ -319,7 +319,7 @@ export async function saveReplyRadarConfig(slug: string, input: { website?: stri
   if (str(input.crmApiKey).trim()) record.crm_api_key_ciphertext = str(input.crmApiKey).trim();
   if (!Object.keys(record).length) return { ok: true };
   const response = await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(str(w.id))}`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify(record) });
-  return response.ok ? { ok: true } : { ok: false, error: "Could not save the Reply Radar setup." };
+  return response.ok ? { ok: true } : { ok: false, error: "Could not save the QC Command setup." };
 }
 
 // ── Add a client ───────────────────────────────────────────────────────────────────────────────────────

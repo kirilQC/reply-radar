@@ -20,7 +20,7 @@ export type CrumbStep = {
 };
 
 export default function Crumb({ trail }: { trail: CrumbStep[] }) {
-  const steps: CrumbStep[] = [{ label: "Reply Radar", href: "/" }, ...trail];
+  const steps: CrumbStep[] = [{ label: "QC Command", href: "/" }, ...trail];
   return (
     <nav className="crumb" aria-label="Breadcrumb">
       {steps.map((step, index) => {

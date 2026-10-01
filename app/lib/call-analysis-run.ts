@@ -120,7 +120,7 @@ export async function fileWeeklyCallToBrain(
       path,
       text,
       summary: `Weekly call recap: ${workspace.name} (${weeklyCallDate(workspace, input.call.startedAt)})`,
-      author: "Reply Radar",
+      author: "QC Command",
     });
     // `writeBrainFile` reports created vs replaced from the SHA it found; the tree lookup is the fallback
     // for the rare case the file was written between the two reads.

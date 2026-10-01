@@ -31,7 +31,8 @@ const SECTION_COLORS: Record<string, string> = {
   "Communication": "#4bb3fd",
   "Data & tooling": "#57c98b",
   "Client access & integrations": "#e6a95b",
-  "Reply Radar setup": "#e5738a",
+  "Reply Radar setup": "#e5738a", // the section's stored name on older data
+  "QC Command setup": "#e5738a",
 };
 const sectionColor = (s?: string | null) => (s && SECTION_COLORS[s]) || "var(--muted)";
 

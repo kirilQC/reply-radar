@@ -347,3 +347,22 @@ html:not(.hydrated) body{visibility:hidden}
 .construction-card h1{margin:0 0 10px;font-size:19px}
 .construction-card p{margin:0;color:var(--muted);font-size:11px;line-height:1.7}
 .construction-note{margin-top:12px!important;font-style:italic}
+
+/* ── QC Command brand ────────────────────────────────────────────────────
+   The dot-grid icon replaces the old three-bar mark; the wordmark is set in
+   the brand face (Outfit) with "QC" in the brand teal and "Command" in the
+   page's own text colour so it reads in light mode too. Collapsed, the
+   sidebar already hides .sidebar-label, leaving just the icon. */
+.brand-mark.brand-mark-grid { display: grid; place-items: center; width: 24px; height: 24px; flex: none; }
+.brand-mark.brand-mark-grid svg { display: block; }
+.brand-wordmark {
+  font-family: var(--font-brand), Inter, ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700; font-size: 17px; letter-spacing: -0.02em; color: var(--text); white-space: nowrap;
+}
+/* .brand-name span (the old "radar" highlight) would otherwise paint "Command" the accent purple. */
+.brand-name .brand-wordmark, .login-brand .brand-wordmark { color: var(--text); }
+.brand-wordmark .brand-wordmark-qc, .brand-name .brand-wordmark .brand-wordmark-qc { color: #65EBE0; }
+.light-mode .brand-wordmark .brand-wordmark-qc { color: #1aa898; }
+.brand-name { display: inline-flex; align-items: center; gap: 9px; }
+.login-brand { display: inline-flex; align-items: center; gap: 11px; }
+.login-brand .brand-wordmark { font-size: 24px; color: var(--text, #e8e8ef); }
