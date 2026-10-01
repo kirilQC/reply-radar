@@ -82,6 +82,6 @@
 .nav-item.active .nav-icon{color:var(--accent)}
 .nav-item.active .nav-icon :is(rect,circle,path,ellipse,polygon){fill-opacity:.28}
 .nav-item.active{background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 14%,transparent),transparent 85%)!important}
-.sidebar-icon-scout{flex-basis:20px!important;width:20px!important;margin:-2px 0}
+.sidebar-icon-scout{flex-basis:16px!important;width:16px!important;overflow:visible}.sidebar-icon-scout .mascot{margin:-2px -2px}
 .light-mode .nav-item .nav-icon{color:#5c6270}
 .light-mode .nav-item.active .nav-icon{color:var(--accent)}
