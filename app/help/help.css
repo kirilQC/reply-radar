@@ -104,3 +104,6 @@
   .help-editor-row { grid-template-columns: 1fr; }
   .hc-card-head { flex-direction: column; align-items: flex-start; }
 }
+.help-shot { margin: 14px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.help-shot img { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 10px; }
+.help-shot figcaption { color: var(--muted); font-size: 11.5px; }

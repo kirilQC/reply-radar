@@ -122,10 +122,10 @@ export default function HelpPage() {
         <main className="help-page">
           <div className="help-hero">
             <h1>How can we help?</h1>
-            <p>Guides, videos and answers for every part of QC Command. You can also ask QC Bot in Slack — it reads this page.</p>
+            <p>Guides, videos and answers for every part of QC Command. You can also ask QC Bot in Slack. It reads this page.</p>
             <div className="help-search">
               <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden><circle cx="9" cy="9" r="6" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M14 14l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search help — e.g. “tag a lead”, “morning brief”, “custom dates”" aria-label="Search help" />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search help, e.g. “tag a lead”, “morning brief”, “custom dates”" aria-label="Search help" />
               {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search">✕</button>}
             </div>
           </div>
@@ -186,7 +186,7 @@ export default function HelpPage() {
                 <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} rows={9} placeholder={"1. Open the Inbox\n2. Click a reply\n3. Click + Tag and pick DQ"} />
               </label>
               <label>
-                Search keywords <em>comma separated — words people might type that are not in the title</em>
+                Search keywords <em>comma separated: words people might type that are not in the title</em>
                 <input value={draft.keywords} onChange={(event) => setDraft({ ...draft, keywords: event.target.value })} placeholder="dq, disqualify, label" />
               </label>
               <div className="help-editor-actions">
@@ -228,6 +228,13 @@ export default function HelpPage() {
                           </div>
                         )}
                         {article.body.trim() ? <div className="help-markdown"><Markdown>{article.body}</Markdown></div> : <p className="help-muted">No written steps yet.</p>}
+                        {(article.images ?? []).map((image) => (
+                          <figure key={image.src} className="help-shot">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={image.src} alt={image.caption} loading="lazy" />
+                            {image.caption && <figcaption>{image.caption}</figcaption>}
+                          </figure>
+                        ))}
                         <div className="hc-card-foot">
                           {article.page && <a href={article.page} className="help-link">Open {pageLabel(article.page)} →</a>}
                           {editing && (
@@ -250,7 +257,7 @@ export default function HelpPage() {
                     ? <>Nothing matches that yet. Try other words, or ask QC Bot in Slack.</>
                     : editing
                       ? <>No articles here yet. <button type="button" className="help-inline" onClick={() => setDraft(emptyDraft(tab === "all" ? "walkthrough" : tab))}>Add the first one</button></>
-                      : <>Nothing here yet — check back soon.</>}
+                      : <>Nothing here yet. Check back soon.</>}
                 </div>
               )}
             </div>
@@ -259,7 +266,7 @@ export default function HelpPage() {
           {!searching && (tab === "support" || tab === "all") && (
             <div className="help-bot-card">
               <strong>Ask QC Bot</strong>
-              <p>Mention <code>@QC Bot</code> in Slack, or open the MCP tab here, and ask in plain words — “how do I tag a lead?” or “the morning brief didn’t post”. It reads these help articles and will walk you through it, with the video if there is one.</p>
+              <p>Mention <code>@QC Bot</code> in Slack, or open the MCP tab here, and ask in plain words, like “how do I tag a lead?” or “the morning brief didn’t post”. It reads these help articles and will walk you through it, with the video if there is one.</p>
             </div>
           )}
         </main>

@@ -13,7 +13,7 @@ import {
   readCachedAppearance,
   writeCachedAppearance,
 } from "../lib/preference-identity";
-import { applyAccent, DEFAULT_ACCENT, resolveAccent } from "../lib/brand-theme";
+import { accentOf, applyAccent, DEFAULT_ACCENT } from "../lib/brand-theme";
 
 const defaultAppearance: AppearancePrefs = {
   mode: "midnight",
@@ -66,7 +66,7 @@ export default function DashboardHome() {
       const savedProfiles = window.localStorage.getItem("reply-radar-profiles:v2");
       if (savedProfiles) { /* eslint-disable-next-line react-hooks/set-state-in-effect */ setProfiles(JSON.parse(savedProfiles).map((profile: { name: string; clients?: string[]; color?: string; initials?: string; slug?: string; photo?: string | null }) => ({ ...profile, description: (profile.clients ?? []).join(" · "), tone: profile.color ?? "#8b7cff", initials: profile.initials ?? profile.name.slice(0, 2).toUpperCase(), slug: profile.slug ?? profile.name.toLowerCase().replaceAll(" ", "-"), photo: profile.photo ?? null }))); }
       const savedAppearance = readCachedAppearance();
-      if (savedAppearance) setAppearance({ ...defaultAppearance, ...savedAppearance, accent: resolveAccent(savedAppearance.accent) });
+      if (savedAppearance) setAppearance({ ...defaultAppearance, ...savedAppearance, accent: accentOf(savedAppearance) });
     } catch { /* keep the empty state */ }
   }, []);
   const loadProfiles = () => fetch("/api/admin/profiles", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).then((payload) => {
@@ -116,7 +116,7 @@ export default function DashboardHome() {
       const detail = (event as CustomEvent).detail as
         | Partial<AppearancePrefs>
         | undefined;
-      if (detail) setAppearance((current) => ({ ...current, ...detail, accent: resolveAccent(detail.accent ?? current.accent) }));
+      if (detail) setAppearance((current) => ({ ...current, ...detail, accent: accentOf({ ...current, ...detail }) }));
     };
     window.addEventListener("reply-radar-appearance-changed", onChange);
     return () =>

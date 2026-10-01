@@ -11,7 +11,7 @@ import DashboardHome from "./components/DashboardHome";
 import AppSidebar from "./components/AppSidebar";
 import Crumb from "./components/Crumb";
 import DateRangeCalendar from "./components/DateRangeCalendar";
-import { applyAccent, DEFAULT_ACCENT, resolveAccent } from "./lib/brand-theme";
+import { accentOf, applyAccent, DEFAULT_ACCENT } from "./lib/brand-theme";
 import { usePopoverDismiss } from "./lib/use-popover-dismiss";
 import AppearancePanel, {
   type AppearancePrefs,
@@ -863,7 +863,7 @@ export function InboxPage() {
           setLayoutPrefs(applyLayoutDefaults(nextLayout));
         }
         if (parsed?.appearance) {
-          const nextAppearance = { ...defaultAppearance, ...parsed.appearance, accent: resolveAccent(parsed.appearance.accent) };
+          const nextAppearance = { ...defaultAppearance, ...parsed.appearance, accent: accentOf(parsed.appearance) };
           setAppearance(nextAppearance);
           setTheme(nextAppearance.mode);
         }
@@ -905,7 +905,7 @@ export function InboxPage() {
           setAppearance((current) => ({
             ...current,
             ...payload.preferences.appearance,
-            accent: resolveAccent(payload.preferences.appearance.accent),
+            accent: accentOf(payload.preferences.appearance),
           }));
       })
       .catch(() => null);

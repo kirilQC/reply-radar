@@ -3,7 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { accentInk, DEFAULT_ACCENT, resolveAccent } from "../app/lib/brand-theme.ts";
+import { accentInk, accentOf, DEFAULT_ACCENT, resolveAccent } from "../app/lib/brand-theme.ts";
 
 test("the default accent is the QC Command teal", () => {
   assert.equal(DEFAULT_ACCENT, "#65EBE0");
@@ -26,4 +26,12 @@ test("text on the accent stays readable whatever the accent is", () => {
   assert.equal(accentInk("#65EBE0"), "#0b0c10"); // light teal -> dark text
   assert.equal(accentInk("#8b7cff"), "#ffffff"); // mid purple -> white text
   assert.equal(accentInk("#1e3a8a"), "#ffffff"); // dark blue -> white text
+});
+
+test("only an accent someone picked survives a reload", () => {
+  // Saved by "save everything" before the flag existed: nobody chose this pink.
+  assert.equal(accentOf({ accent: "#ff4fa3" }), DEFAULT_ACCENT);
+  assert.equal(accentOf({ accent: "#ff4fa3", accentChosen: true }), "#ff4fa3");
+  assert.equal(accentOf(null), DEFAULT_ACCENT);
+  assert.equal(accentOf({ accent: "#8b7cff", accentChosen: true }), DEFAULT_ACCENT);
 });

@@ -24,6 +24,17 @@ export function resolveAccent(stored: unknown): string {
   return value.toLowerCase() === LEGACY_DEFAULT_ACCENT ? DEFAULT_ACCENT : value;
 }
 
+/**
+ * The accent for a whole stored appearance. Only an accent someone actually picked counts: the
+ * appearance panel stamps `accentChosen` when the colour input changes. Every accent saved before that
+ * flag existed was written by "save everything" on an unrelated change (zoom, font), so those
+ * people get the brand teal rather than a colour nobody remembers choosing.
+ */
+export function accentOf(appearance: unknown): string {
+  const value = (appearance && typeof appearance === "object" ? appearance : {}) as { accent?: unknown; accentChosen?: unknown };
+  return value.accentChosen === true ? resolveAccent(value.accent) : DEFAULT_ACCENT;
+}
+
 /** Near-black on a light accent, white on a dark one (WCAG relative luminance). */
 export function accentInk(hex: string): string {
   const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());

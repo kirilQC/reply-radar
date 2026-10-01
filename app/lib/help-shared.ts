@@ -16,6 +16,10 @@ export type HelpArticle = {
   body: string;
   /** A Loom share link. Optional; shown as an embedded player on the page and linked by the bot. */
   loomUrl: string;
+  /** Screenshots served from public/help/, shown under the video. */
+  images?: HelpImage[];
+  /** Shipped with the app (app/lib/help-defaults.ts) rather than written in the editor. */
+  builtIn?: boolean;
   /** The app page this article is about, e.g. "/inbox". Empty for general articles. */
   page: string;
   /** Extra words people might search with ("dq", "tag", "disqualify") that are not in the title. */
@@ -23,6 +27,8 @@ export type HelpArticle = {
   order: number;
   updatedAt: string;
 };
+
+export type HelpImage = { src: string; caption: string };
 
 export const HELP_KINDS: { key: HelpKind; label: string; blurb: string }[] = [
   { key: "walkthrough", label: "Walkthroughs", blurb: "Step-by-step guides to each part of QC Command." },

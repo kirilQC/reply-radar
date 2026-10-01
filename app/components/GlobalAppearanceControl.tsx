@@ -10,7 +10,7 @@ import {
   readCachedAppearance,
   writeCachedAppearance,
 } from "../lib/preference-identity";
-import { applyAccent, DEFAULT_ACCENT, resolveAccent } from "../lib/brand-theme";
+import { accentOf, applyAccent, DEFAULT_ACCENT } from "../lib/brand-theme";
 
 const defaults: AppearancePrefs = {
   mode: "midnight",
@@ -35,7 +35,7 @@ export default function GlobalAppearanceControl() {
   const [appearance, setAppearance] = useState<AppearancePrefs>(() => {
     if (typeof window === "undefined") return defaults;
     const stored = readCachedAppearance();
-    return stored ? { ...defaults, ...stored, accent: resolveAccent(stored.accent) } : defaults;
+    return stored ? { ...defaults, ...stored, accent: accentOf(stored) } : defaults;
   });
   const [open, setOpen] = useState(false);
 
@@ -47,7 +47,7 @@ export default function GlobalAppearanceControl() {
       const detail = (event as CustomEvent).detail as
         | Partial<AppearancePrefs>
         | undefined;
-      if (detail) setAppearance((current) => ({ ...current, ...detail, accent: resolveAccent(detail.accent ?? current.accent) }));
+      if (detail) setAppearance((current) => ({ ...current, ...detail, accent: accentOf({ ...current, ...detail }) }));
     };
     window.addEventListener("reply-radar-appearance-changed", onChange);
     return () =>
