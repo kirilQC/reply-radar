@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../lib/person-name";
 import { queryByIds } from "../../lib/chunk-query";
 import { dedupeMessages } from "../../lib/message-dedupe";
+import { assignmentsFor } from "../../lib/inbox-tags";
 import { classifyConversationOrigin } from "../../../shared/conversation-origin.mjs";
 type Row = Record<string, unknown>;
 
@@ -199,7 +200,7 @@ export async function GET(request: Request) {
       ),
     ];
     const conversationIds = conversations.map((row) => String(row.id));
-    const [leads, messages] = await Promise.all([
+    const [leads, messages, tagsByConversation] = await Promise.all([
       queryByIds(leadIds, 40, (batch) =>
         query(url, key, `rr_leads?select=*&id=in.(${batch.map(encodeURIComponent).join(",")})`),
       ),
@@ -210,6 +211,9 @@ export async function GET(request: Request) {
           `rr_messages?select=*&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc`,
         ),
       ),
+      // The team's inbox tags on these conversations. Never fails the inbox: an account without the tags
+      // table yet (migration not run) reads as no tags rather than a 500 on the whole queue.
+      assignmentsFor(conversationIds).catch(() => new Map<string, string[]>()),
     ]);
     // Duplicate rows are collapsed on read so the thread is correct even before a refresh repairs the
     // records themselves. Shared with the purge, which must judge who spoke first from the same view.
@@ -308,6 +312,9 @@ export async function GET(request: Request) {
       return {
         id: conversation.id,
         leadId: lead.id,
+        // The team's inbox tags on this conversation, as tag ids. The client resolves them to names and
+        // colours from the tag list it loads once; shipping the full definitions per row would repeat them.
+        tags: tagsByConversation.get(String(conversation.id)) ?? [],
         initials: initials(name),
         name,
         role: String(lead.role || lead.title || enrichment.title || ""),

@@ -574,3 +574,74 @@ i.tone-muted {
   border-radius: 6px; font-size: 10px; cursor: pointer;
 }
 .inbox-daterange-clear:hover { color: var(--text); border-color: var(--accent); }
+
+/* ── Inbox tags ──────────────────────────────────────────────────────────
+   A tag is a small coloured chip. The colour is passed inline per tag; these
+   rules carry only the shape so light and dark both work off the tag's hue. */
+.tag-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; border-radius: 5px; font-size: 9px; font-weight: 650;
+  border: 1px solid transparent; white-space: nowrap; line-height: 1.5;
+}
+.tag-chip-removable button {
+  background: transparent; color: currentColor; opacity: .6; font-size: 9px; line-height: 1; padding: 0; cursor: pointer;
+}
+.tag-chip-removable button:hover { opacity: 1; }
+
+/* Chips under a lead row's name line */
+.lead-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.lead-tag {
+  display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 8px; font-weight: 700;
+  border: 1px solid transparent; line-height: 1.6; white-space: nowrap;
+}
+
+/* The detail-pane tag strip + add control + popover anchor */
+.detail-tagwrap { position: relative; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tag-add {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 8px;
+  border: 1px dashed var(--border); border-radius: 5px; color: var(--muted);
+  background: transparent; font-size: 9px; font-weight: 650; cursor: pointer;
+}
+.tag-add:hover { color: var(--text); border-color: var(--accent); }
+
+/* The popover */
+.tag-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 244px;
+  background: var(--panel, #171a22); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 18px 44px #0009; padding: 10px; display: flex; flex-direction: column; gap: 8px;
+}
+.tag-menu-primary {
+  width: 100%; height: 30px; border-radius: 7px; border: 0; cursor: pointer;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+}
+.tag-menu-ghost {
+  height: 30px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border);
+  background: transparent; color: var(--muted); font-size: 11px; cursor: pointer;
+}
+.tag-menu-create { display: flex; flex-direction: column; gap: 8px; }
+.tag-menu-input, .tag-menu-search, .tag-menu-edit {
+  width: 100%; height: 30px; padding: 0 9px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--panel-2, #11141b); color: var(--text); font-size: 11px;
+}
+.tag-menu-edit { height: 24px; }
+.tag-menu-input:focus, .tag-menu-search:focus, .tag-menu-edit:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.tag-menu-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.tag-colors { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag-colors-inline { margin-left: auto; }
+.tag-color {
+  width: 16px; height: 16px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0;
+}
+.tag-color.on { border-color: var(--text); box-shadow: 0 0 0 1px var(--panel, #171a22) inset; }
+.tag-menu-list { display: flex; flex-direction: column; gap: 2px; max-height: 230px; overflow-y: auto; }
+.tag-menu-row { display: flex; align-items: center; gap: 6px; padding: 3px 2px; border-radius: 6px; }
+.tag-menu-row:hover { background: var(--panel-2, #1a1d26); }
+.tag-menu-check { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; cursor: pointer; }
+.tag-menu-check input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; flex: none; }
+.tag-menu-row-actions { display: flex; gap: 2px; margin-left: auto; }
+.tag-menu-row-actions button {
+  width: 22px; height: 22px; display: grid; place-items: center; border: 0; background: transparent;
+  color: var(--muted-2); font-size: 11px; cursor: pointer; border-radius: 5px;
+}
+.tag-menu-row-actions button:hover { color: var(--text); background: var(--panel, #171a22); }
+.tag-menu-empty, .uf-sub-empty { color: var(--muted-2); font-size: 10px; padding: 8px 4px; text-align: center; }
+.uf-tag-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }

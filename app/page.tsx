@@ -61,6 +61,7 @@ type Lead = {
   lastMessageAt?: string | null;
   latestReplyAt?: string | null;
   lastRefreshedAt?: string | null;
+  tags?: string[];
   messages: Array<{
     id: string;
     body: string;
@@ -69,6 +70,9 @@ type Lead = {
     authorName: string;
   }>;
 };
+/** A shared inbox tag. Mirrors app/lib/inbox-tags.ts, declared here so the client never imports the server lib. */
+type InboxTag = { id: string; name: string; color: string };
+const TAG_COLORS = ["#ed6a6a", "#e7b96e", "#55c7a2", "#5aa9f0", "#8b7cff", "#d08bd0", "#9aa0ad"];
 type LayoutPrefs = {
   order: Array<"metrics" | "analytics" | "queue">;
   showMetrics: boolean;
@@ -384,6 +388,95 @@ const writeInboxSnapshot = (scope: string, leads: Lead[]) => {
     /* quota, or private browsing — the snapshot is an optimisation, never a requirement */
   }
 };
+/**
+ * The tag popover: create a tag, search the list, tick the ones that belong on this conversation, and
+ * rename or recolour or delete any of them. Modelled on the Smartlead control in the screenshot. Closes on
+ * an outside click or Escape; every change calls back up to the inbox, which owns the state and the writes.
+ */
+function TagMenu({ tags, assigned, onToggle, onCreate, onEdit, onDelete, onClose }: {
+  tags: InboxTag[];
+  assigned: string[];
+  onToggle: (id: string) => void;
+  onCreate: (name: string, color: string) => Promise<string | null>;
+  onEdit: (id: string, fields: { name?: string; color?: string }) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(tags.length === 0);
+  const [newName, setNewName] = useState("");
+  const [newColor, setNewColor] = useState(TAG_COLORS[0]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDoc = (event: MouseEvent) => { if (ref.current && !ref.current.contains(event.target as Node)) onClose(); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [onClose]);
+  const shown = tags.filter((tag) => tag.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const submitNew = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    await onCreate(name, newColor);
+    setNewName(""); setNewColor(TAG_COLORS[0]); setCreating(false);
+  };
+  return (
+    <div className="tag-menu" ref={ref} onClick={(event) => event.stopPropagation()}>
+      {creating ? (
+        <div className="tag-menu-create">
+          <input autoFocus className="tag-menu-input" value={newName} placeholder="Tag name" maxLength={40}
+            onChange={(event) => setNewName(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void submitNew(); } }} />
+          <div className="tag-colors">
+            {TAG_COLORS.map((color) => (
+              <button key={color} type="button" className={`tag-color ${newColor === color ? "on" : ""}`} style={{ background: color }} aria-label={`Colour ${color}`} onClick={() => setNewColor(color)} />
+            ))}
+          </div>
+          <div className="tag-menu-actions">
+            <button type="button" className="tag-menu-ghost" onClick={() => { setCreating(tags.length === 0 ? true : false); setNewName(""); if (tags.length === 0) onClose(); }}>Cancel</button>
+            <button type="button" className="tag-menu-primary" onClick={() => void submitNew()}>Create tag</button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="tag-menu-primary tag-menu-new" onClick={() => setCreating(true)}>+ Create tag</button>
+      )}
+      <input className="tag-menu-search" value={search} placeholder="Search tags…" onChange={(event) => setSearch(event.target.value)} />
+      <div className="tag-menu-list">
+        {shown.map((tag) => (
+          <div className="tag-menu-row" key={tag.id}>
+            <label className="tag-menu-check">
+              <input type="checkbox" checked={assigned.includes(tag.id)} onChange={() => onToggle(tag.id)} />
+              {editingId === tag.id ? (
+                <input autoFocus className="tag-menu-edit" value={editName} maxLength={40}
+                  onChange={(event) => setEditName(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter") { onEdit(tag.id, { name: editName }); setEditingId(null); } if (event.key === "Escape") setEditingId(null); }}
+                  onBlur={() => { onEdit(tag.id, { name: editName }); setEditingId(null); }} />
+              ) : (
+                <span className="tag-chip" style={{ color: tag.color, background: `${tag.color}22`, borderColor: `${tag.color}66` }}>{tag.name}</span>
+              )}
+            </label>
+            {editingId === tag.id ? (
+              <div className="tag-colors tag-colors-inline">
+                {TAG_COLORS.map((color) => (
+                  <button key={color} type="button" className={`tag-color ${tag.color === color ? "on" : ""}`} style={{ background: color }} aria-label={`Colour ${color}`} onClick={() => onEdit(tag.id, { color })} />
+                ))}
+              </div>
+            ) : (
+              <div className="tag-menu-row-actions">
+                <button type="button" title="Rename" onClick={() => { setEditingId(tag.id); setEditName(tag.name); }}>✎</button>
+                <button type="button" title="Delete" onClick={() => onDelete(tag.id)}>🗑</button>
+              </div>
+            )}
+          </div>
+        ))}
+        {!shown.length && <div className="tag-menu-empty">{tags.length ? "No tags match." : "No tags yet."}</div>}
+      </div>
+    </div>
+  );
+}
 function Icon({ name }: { name: string }) {
   const paths: Record<string, string> = {
     inbox: "M4 5h16v14H4z M4 9h5l1.5 2h3L15 9h5",
@@ -442,6 +535,10 @@ export function InboxPage() {
   const [campaignFilter, setCampaignFilter] = useState("");
   const [senderFilter, setSenderFilter] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+  // The shared tag vocabulary, loaded once. Assignments ride on each lead's `tags` from the inbox payload.
+  const [tagDefs, setTagDefs] = useState<InboxTag[]>([]);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const leadsRef = useRef<Lead[]>([]);
@@ -1052,6 +1149,7 @@ export function InboxPage() {
             (!campaignFilter || lead.campaignName === campaignFilter) &&
             (!senderFilter || lead.senderName === senderFilter) &&
             (!sentimentFilter || lead.sentiment === sentimentFilter) &&
+            (!tagFilter || (lead.tags ?? []).includes(tagFilter)) &&
             (() => {
               if (filter === "All follow-ups") return true;
               if (filter === "Starred") return layoutPrefs.starredLeadIds.includes(String(lead.leadId || lead.id));
@@ -1112,6 +1210,7 @@ export function InboxPage() {
       campaignFilter,
       senderFilter,
       sentimentFilter,
+      tagFilter,
     ],
   );
   useEffect(() => {
@@ -1294,6 +1393,63 @@ export function InboxPage() {
     setLayoutPrefs(next);
     savePreferences(next, appearance);
   };
+
+  // ── Inbox tags ────────────────────────────────────────────────────────────
+  // Tag definitions are team-shared, so they come from the server rather than preferences. Assignments
+  // ride on each lead's `tags`; the handlers update that optimistically and persist in the background.
+  const tagById = useMemo(() => { const m: Record<string, InboxTag> = {}; for (const tag of tagDefs) m[tag.id] = tag; return m; }, [tagDefs]);
+  const tagsOf = (lead: Lead): InboxTag[] => (lead.tags ?? []).map((id) => tagById[id]).filter(Boolean);
+  const setLeadTags = (conversationId: string, nextIds: string[]) =>
+    setLeads((rows) => rows.map((row) => (row.id === conversationId ? { ...row, tags: nextIds } : row)));
+  const toggleTag = (lead: Lead, tagId: string) => {
+    const has = (lead.tags ?? []).includes(tagId);
+    const nextIds = has ? (lead.tags ?? []).filter((id) => id !== tagId) : [...(lead.tags ?? []), tagId];
+    setLeadTags(lead.id, nextIds);
+    void fetch("/api/inbox/tags", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: has ? "unassign" : "assign", conversationId: lead.id, tagId }),
+    }).then((r) => {
+      // The route resolves the conversation's client itself. A failure rolls the chip back so the view
+      // never claims a tag the server did not store.
+      if (!r.ok) setLeadTags(lead.id, lead.tags ?? []);
+    }).catch(() => setLeadTags(lead.id, lead.tags ?? []));
+  };
+  const createTag = async (name: string, color: string): Promise<string | null> => {
+    const response = await fetch("/api/inbox/tags", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "create", name, color }),
+    }).then((r) => r.json()).catch(() => null);
+    if (response?.ok && Array.isArray(response.tags)) { setTagDefs(response.tags); return response.tag?.id ?? null; }
+    return null;
+  };
+  const editTag = async (id: string, fields: { name?: string; color?: string }) => {
+    const response = await fetch("/api/inbox/tags", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "update", id, ...fields }),
+    }).then((r) => r.json()).catch(() => null);
+    if (response?.ok && Array.isArray(response.tags)) setTagDefs(response.tags);
+  };
+  const removeTag = async (id: string) => {
+    const response = await fetch("/api/inbox/tags", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "delete", id }),
+    }).then((r) => r.json()).catch(() => null);
+    if (response?.ok && Array.isArray(response.tags)) {
+      setTagDefs(response.tags);
+      // Drop the dead id off every row on screen so no chip points at a tag that no longer exists.
+      setLeads((rows) => rows.map((row) => (row.tags?.includes(id) ? { ...row, tags: row.tags.filter((t) => t !== id) } : row)));
+      if (tagFilter === id) setTagFilter("");
+    }
+  };
+  useEffect(() => {
+    void fetch("/api/inbox/tags", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload) => { if (Array.isArray(payload?.tags)) setTagDefs(payload.tags); })
+      .catch(() => {});
+  }, []);
+  // The tag popover belongs to the lead it was opened on, so a different selection dismisses it.
+  useEffect(() => { setTagMenuOpen(false); }, [selectedId]);
   const current: Lead = filtered.find((lead) => lead.id === selectedId) ?? filtered[0] ?? {
     id: "empty",
     initials: "?",
@@ -1937,7 +2093,7 @@ export function InboxPage() {
                   )}
                   <div className="unified-filter-wrap">
                     <button className="filter-button unified-filter-toggle" onClick={() => { setFilterDropdownOpen((v) => !v); setFilterSub(null); }}>
-                        Filters{(campaignFilter || senderFilter || sentimentFilter || sort !== "score-desc" || ["Starred", "Hot", "Warm", "Nurture"].includes(filter)) ? " ●" : ""}
+                        Filters{(campaignFilter || senderFilter || sentimentFilter || tagFilter || sort !== "score-desc" || ["Starred", "Hot", "Warm", "Nurture"].includes(filter)) ? " ●" : ""}
                       </button>
                       {filterDropdownOpen && (
                         <div className="unified-filter-dropdown">
@@ -1955,10 +2111,11 @@ export function InboxPage() {
                           <button className="uf-item" onMouseEnter={() => setFilterSub("campaign")} onClick={() => setFilterSub("campaign")}>Campaign {campaignFilter ? `· ${campaignFilter.slice(0, 20)}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sender")} onClick={() => setFilterSub("sender")}>Sender {senderFilter ? `· ${senderFilter.slice(0, 20)}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sentiment")} onClick={() => setFilterSub("sentiment")}>Sentiment {sentimentFilter ? `· ${sentimentFilter}` : ""}<b>›</b></button>
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("tag")} onClick={() => setFilterSub("tag")}>Tag {tagFilter ? `· ${tagById[tagFilter]?.name ?? ""}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("tier")} onClick={() => setFilterSub("tier")}>Tier {["Hot", "Warm", "Nurture"].includes(filter) ? `· ${filter}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sort")} onClick={() => setFilterSub("sort")}>Sort {sort !== "score-desc" ? `· ${sort}` : ""}<b>›</b></button>
                           <div className="uf-divider" />
-                          <button className="uf-item uf-clear" onClick={() => { setCampaignFilter(""); setSenderFilter(""); setSentimentFilter(""); setSort("score-desc"); setFilter("All follow-ups"); setFilterDropdownOpen(false); setSelectedId(""); }}>Clear all filters</button>
+                          <button className="uf-item uf-clear" onClick={() => { setCampaignFilter(""); setSenderFilter(""); setSentimentFilter(""); setTagFilter(""); setSort("score-desc"); setFilter("All follow-ups"); setFilterDropdownOpen(false); setSelectedId(""); }}>Clear all filters</button>
                           {filterSub === "campaign" && (
                             <div className="unified-filter-sub">
                               <button className={`uf-sub-item ${!campaignFilter ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(""); setSelectedId(""); }}>All campaigns</button>
@@ -1981,6 +2138,17 @@ export function InboxPage() {
                               {["positive", "neutral", "negative"].map((s) => (
                                 <button key={s} className={`uf-sub-item ${sentimentFilter === s ? "uf-active" : ""}`} onClick={() => { setSentimentFilter(s); setSelectedId(""); }}>{s[0].toUpperCase() + s.slice(1)}</button>
                               ))}
+                            </div>
+                          )}
+                          {filterSub === "tag" && (
+                            <div className="unified-filter-sub">
+                              <button className={`uf-sub-item ${!tagFilter ? "uf-active" : ""}`} onClick={() => { setTagFilter(""); setSelectedId(""); }}>All tags</button>
+                              {tagDefs.map((tag) => (
+                                <button key={tag.id} className={`uf-sub-item ${tagFilter === tag.id ? "uf-active" : ""}`} onClick={() => { setTagFilter(tag.id); setSelectedId(""); }}>
+                                  <span className="uf-tag-dot" style={{ background: tag.color }} />{tag.name}
+                                </button>
+                              ))}
+                              {!tagDefs.length && <div className="uf-sub-empty">No tags yet</div>}
                             </div>
                           )}
                           {filterSub === "tier" && (
@@ -2119,6 +2287,13 @@ export function InboxPage() {
                           <span>
                             {lead.role} @ {lead.company}
                           </span>
+                          {tagsOf(lead).length > 0 && (
+                            <span className="lead-tags">
+                              {tagsOf(lead).map((tag) => (
+                                <span key={tag.id} className="lead-tag" style={{ color: tag.color, background: `${tag.color}22`, borderColor: `${tag.color}55` }}>{tag.name}</span>
+                              ))}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="client-cell">
@@ -2306,6 +2481,29 @@ export function InboxPage() {
                         >
                           {sentimentBusy ? "scoring…" : current.sentiment}
                         </button>
+                      )}
+                      {/* The team's own inbox tags on this conversation, and the control to add one. */}
+                      {current.id !== "empty" && (
+                        <span className="detail-tagwrap">
+                          {tagsOf(current).map((tag) => (
+                            <span key={tag.id} className="tag-chip tag-chip-removable" style={{ color: tag.color, background: `${tag.color}22`, borderColor: `${tag.color}66` }}>
+                              {tag.name}
+                              <button type="button" title="Remove tag" onClick={() => toggleTag(current, tag.id)}>✕</button>
+                            </span>
+                          ))}
+                          <button type="button" className="tag-add" onClick={() => setTagMenuOpen((value) => !value)}>+ Tag</button>
+                          {tagMenuOpen && (
+                            <TagMenu
+                              tags={tagDefs}
+                              assigned={current.tags ?? []}
+                              onToggle={(id) => toggleTag(current, id)}
+                              onCreate={createTag}
+                              onEdit={editTag}
+                              onDelete={removeTag}
+                              onClose={() => setTagMenuOpen(false)}
+                            />
+                          )}
+                        </span>
                       )}
                     </div>
                     {Boolean(current.headline || current.industry) && (
