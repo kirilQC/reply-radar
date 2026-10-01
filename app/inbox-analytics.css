@@ -728,3 +728,25 @@ i.tone-muted {
 .sk-line-sm { width: 40%; height: 7px; }
 .sk-cell { width: 70%; height: 9px; }
 .sk-cell-sm { width: 45%; height: 9px; }
+
+/* ── Detail/chat pane loading skeleton ───────────────────────────────────
+   Shown over the detail card while the inbox is loading and nothing is
+   selected yet, so the right pane reads as "loading" rather than blank.
+   Absolute over the card (which is positioned) and opaque, covering the
+   empty-state text underneath. Reuses the .sk shimmer. */
+/* Make the card a containing block while the skeleton is up, so the overlay anchors to the card at
+   every width (the card is only position:sticky on desktop; narrower it is static and the overlay
+   would otherwise escape to the viewport). Scoped to loading so normal sticky behaviour is untouched. */
+.detail-card:has(.detail-skeleton) { position: relative; }
+.detail-skeleton {
+  position: absolute; inset: 0; z-index: 3;
+  background: var(--panel, #171a22);
+  padding: 18px 18px 22px; display: flex; flex-direction: column; gap: 22px;
+  border-radius: 8px;
+}
+.ds-head { display: flex; align-items: center; gap: 12px; }
+.ds-avatar { width: 44px; height: 44px; border-radius: 10px; flex: none; }
+.ds-bubbles { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+.ds-bubble { height: 54px; border-radius: 10px; }
+.ds-bubble-in { width: 78%; align-self: flex-start; }
+.ds-bubble-out { width: 68%; align-self: flex-end; }

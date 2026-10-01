@@ -1285,7 +1285,10 @@ export function InboxPage() {
       // Refreshed in small batches rather than one 50-conversation request, so the
       // progress bar is measuring real work: each batch that lands moves the bar and
       // updates its rows immediately, instead of the whole inbox arriving at once.
-      const BATCH_SIZE = 5;
+      // Two at a time so the bar advances in more, smaller steps (it jumped by fives
+      // before and read as stop-start); paired with a CSS width transition it reads as
+      // a steady climb rather than two big leaps.
+      const BATCH_SIZE = 2;
       try {
         for (let offset = 0; offset < staleIds.length; offset += BATCH_SIZE) {
           if (cancelled) return;
@@ -2451,6 +2454,22 @@ export function InboxPage() {
                   >
                     ‹ All conversations
                   </button>
+                  {inboxLoading && current.id === "empty" && (
+                    <div className="detail-skeleton" aria-busy="true" aria-label="Loading conversation">
+                      <div className="ds-head">
+                        <span className="sk ds-avatar" />
+                        <div className="sk-lines">
+                          <span className="sk sk-line sk-line-lg" />
+                          <span className="sk sk-line sk-line-sm" />
+                        </div>
+                      </div>
+                      <div className="ds-bubbles">
+                        <span className="sk ds-bubble ds-bubble-in" />
+                        <span className="sk ds-bubble ds-bubble-out" />
+                        <span className="sk ds-bubble ds-bubble-in" />
+                      </div>
+                    </div>
+                  )}
                   <div className="detail-top">
                     <div className="detail-person">
                       <div

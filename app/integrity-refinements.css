@@ -1178,8 +1178,9 @@ a.database-phone-value:hover { text-decoration: underline; }
   height: 100%;
   border-radius: 999px;
   background: var(--accent);
-  /* Batches land in steps; the transition is what makes it read as filling. */
-  transition: width 0.35s ease;
+  /* Batches land in steps; the transition is what makes it read as filling. Eased over half a
+     second so the smaller two-at-a-time steps glide into one another rather than ticking. */
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .inbox-sync-count {
