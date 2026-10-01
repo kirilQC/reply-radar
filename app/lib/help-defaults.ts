@@ -15,7 +15,7 @@ type Seed = Omit<HelpArticle, "order" | "updatedAt" | "loomUrl" | "images" | "bu
   images?: HelpArticle["images"];
 };
 
-const shot = (name: string, caption: string) => ({ src: `/help/${name}.png`, caption });
+const shot = (name: string, caption: string) => ({ src: `/help/${name.includes(".") ? name : `${name}.png`}`, caption });
 
 export const BUILT_IN_HELP: Seed[] = [
   // ── Walkthroughs ──────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ export const BUILT_IN_HELP: Seed[] = [
     title: "Getting around QC Command",
     page: "/",
     keywords: ["start", "navigate", "sidebar", "client", "switch client", "overview"],
-    images: [shot("dashboard", "The Dashboard, with every page in the sidebar on the left.")],
+    images: [shot("dashboard.jpg", "The Dashboard: reply counts, teammate profiles and every client.")],
     body: `QC Command is where we work every client's LinkedIn outreach: replies, leads, meetings, calls and reporting.
 
 1. The **sidebar** lists every page. Use **←** to collapse it to icons and **→** to expand it.
@@ -39,10 +39,7 @@ export const BUILT_IN_HELP: Seed[] = [
     title: "Working the reply queue",
     page: "/inbox",
     keywords: ["inbox", "replies", "queue", "respond", "today", "follow-ups", "custom dates"],
-    images: [
-      shot("inbox", "The Inbox: the reply queue on the left, the open conversation and AI draft on the right."),
-      shot("inbox-toolbar", "Pick a time range, search, filter or export the queue."),
-    ],
+    images: [shot("inbox.jpg", "The Inbox: the reply queue on the left, the open conversation on the right.")],
     body: `1. Open **Inbox**. With no client picked you see the **General inbox** across every client. Pick a client in the sidebar to see only theirs.
 2. Choose a range above the queue: **Today**, **This week**, **All replies**, **Follow-ups** or **Custom** (pick dates on the calendar).
 3. Click a row to open the conversation on the right. A **✓ Replied** mark means someone already answered.
@@ -57,7 +54,7 @@ export const BUILT_IN_HELP: Seed[] = [
     title: "Drafting and sending a reply",
     page: "/inbox",
     keywords: ["ai", "draft", "send", "reply", "regenerate", "message", "heyreach"],
-    images: [shot("inbox-draft", "The AI DRAFT box. Edit freely, then Send reply.")],
+    images: [shot("inbox-draft.jpg", "The AI DRAFT under the conversation. Edit it, then Send reply.")],
     body: `1. Open a conversation in the **Inbox**. An **AI DRAFT** is written automatically from the thread and the client's brief.
 2. Not right? Click **Regenerate ↻** for a fresh draft, or just edit the text.
 3. Click **Send reply**. You are asked to confirm who it goes to and from which sender. Click **Yes, send it**.
@@ -74,6 +71,7 @@ export const BUILT_IN_HELP: Seed[] = [
     title: "Tagging a lead (DQ, Scheduling and more)",
     page: "/inbox",
     keywords: ["tag", "dq", "disqualify", "label", "scheduling", "discuss"],
+    images: [shot("tag-menu.jpg", "The + Tag menu: tick a tag, or create a new one.")],
     body: `1. Open the conversation in the **Inbox**.
 2. Click **+ Tag** in the conversation header.
 3. Pick a tag, or type a new name and click **+ Create tag** (choose a colour, then **Create tag**).
@@ -90,7 +88,7 @@ export const BUILT_IN_HELP: Seed[] = [
     title: "Filtering and searching the Inbox",
     page: "/inbox",
     keywords: ["filter", "search", "sentiment", "campaign", "sender", "tier", "sort", "starred"],
-    images: [shot("inbox-filters", "The Filters menu.")],
+    images: [shot("filters.jpg", "Filters, with the Campaign list open.")],
     body: `- **Search**: click the magnifier and type a name, company, campaign, role or sender. **Esc** clears it.
 - **Filters**: narrow by **Starred**, **Campaign**, **Sender**, **Sentiment** (Positive, Neutral, Negative), **Tag** or **Tier** (Hot, Warm, Nurture), and change the **Sort**. A dot on the button means a filter is on. **Clear all filters** resets everything.
 - **Export ↓** downloads what you are looking at.
@@ -118,7 +116,7 @@ export const BUILT_IN_HELP: Seed[] = [
     title: "Finding a lead in the Database",
     page: "/database",
     keywords: ["database", "lead", "search", "export", "csv", "phone", "enrich", "block", "delete"],
-    images: [shot("database", "Search, pick a client, sort, or export every lead.")],
+    images: [shot("database.jpg", "The Lead Database."), shot("lead-drawer.jpg", "A lead's record, with Enrich next to Phone number.")],
     body: `1. Open **Database** and search by name, company, role or LinkedIn ID.
 2. Pick a **Client** to unlock the **Sender**, **Campaign** and **Time range** filters.
 3. Click a lead to open their full record: contact details, profile, company, education and the **Activity** tab.
@@ -149,6 +147,7 @@ Open your personal inbox from the **Profiles** cards on the Dashboard. It greets
     title: "Tracking booked meetings",
     page: "/meetings",
     keywords: ["meeting", "calendly", "booked", "call booked", "add meeting"],
+    images: [shot("meetings.jpg", "A client's booked meetings.")],
     body: `Meetings booked through the client's Calendly arrive here on their own. You can also add one by hand.
 
 1. Open **Meetings** and pick the client.
@@ -163,6 +162,7 @@ Each meeting is enriched automatically. Use **↻ Re-enrich** if details look th
     title: "Running a cold calling session",
     page: "/cold-calling",
     keywords: ["call", "cold call", "phone", "dial", "outcome", "voicemail", "script", "phone finder", "add leads"],
+    images: [shot("cold-calling.jpg", "A call session: the list, the conversation and outcome buttons, and the lead's record."), shot("add-leads.jpg", "+ Add leads → From a campaign.")],
     body: `1. Open **Cold calling** and pick the client.
 2. Load people to call with **+ Add leads**:
    - **From a campaign**: pick a HeyReach campaign and click **Fetch & enrich**. Everyone in it is pulled in and their mobile number is looked up (uses AI Ark credits). It runs in the background.
@@ -178,6 +178,7 @@ The **CALL SCRIPT** tab on the side holds the client's script and saves as you t
     title: "Managing tasks in Project management",
     page: "/project-management",
     keywords: ["task", "project", "kanban", "board", "blocked", "assignee", "due date", "view"],
+    images: [shot("pm-board.jpg", "A client's board in Kanban view.")],
     body: `1. Open **Project management** and pick a client, or a **View** that groups several clients.
 2. Click **+ Add a task**. Give it a title, notes, links, **Assignees**, a **Due date** and an **Owner**.
 3. Move it through the stages: To do, Planning, Building, In progress, Blocked, Paused, Completed, Launched.
@@ -192,6 +193,7 @@ The Slack button on a saved task posts its status to the client's internal chann
     title: "Onboarding a new client",
     page: "/onboarding",
     keywords: ["onboard", "new client", "setup", "checklist", "webhook", "heyreach key"],
+    images: [shot("onboarding.jpg", "A client's onboarding checklist and progress.")],
     body: `1. Open **Onboarding** and click **Add new client**. Enter the name and click **Create client**.
 2. Upload the client's logo.
 3. Fill the **QC Command setup** form: HeyReach API key, Airtable base, messaging doc, website and Slack channel IDs. Click **Save setup**.
@@ -206,11 +208,12 @@ Use **Client onboarding updates** to post progress to the client's internal Slac
     title: "Checking a list with Jev",
     page: "/jev",
     keywords: ["jev", "list", "csv", "icp", "screen", "clean", "good fit", "qualify"],
+    images: [shot("jev.jpg", "Describe who should stay on the list, then drop in the CSV.")],
     body: `Jev screens a contact or company list against the client's ICP before a campaign launches.
 
 1. Open **Jev** and pick the client.
 2. Choose **Contact lists** or **Company lists**.
-3. Set the questions. **Draft from QC Brain** writes them from the client's ICP, or **Write by hand**. Click **Save questions**.
+3. Set the questions. Describe who should stay on the list and click **Build Jev setup**, use **Draft from QC Brain** to write them from the client's ICP, or **Write by hand**.
 4. Drop the CSV in and click **Run**.
 5. Every row gets a verdict: Good fit, Maybe, Bad fit, Needs review or Duplicate, with Jev's reason.
 6. Download **Good fits**, **Good + maybe**, or the full cleaned list.
@@ -223,6 +226,7 @@ Optional: **Review maybes with Claude** gives the borderline rows a second look.
     title: "Reading campaign analytics",
     page: "/analytics",
     keywords: ["analytics", "reply rate", "acceptance rate", "campaign performance", "sync"],
+    images: [shot("analytics.jpg", "A client's analytics.")],
     body: `1. Open **Analytics** for the totals across every client: replies, reply rate, acceptance rate and positive reply rate.
 2. Pick a client to see connection requests by sender, active campaigns, best and worst performers, and the messaging that worked best.
 3. Click any campaign in **All campaigns** to read its connection request and first message.
@@ -235,6 +239,7 @@ Numbers can be up to a day old. Click **Sync now** for the latest from HeyReach.
     title: "Building a client report",
     page: "/reports",
     keywords: ["report", "eow", "end of week", "pdf", "email", "executive summary", "template"],
+    images: [shot("reports.jpg", "Pick a client, or All clients.")],
     body: `1. Open **Reports** and pick a client, or **All clients**.
 2. Choose a template, like the EOW report or the all-time executive summary, or **Build your own report**.
 3. Set the **Date range** or **Period**, pick campaigns, and tick the sections you want.
@@ -278,7 +283,7 @@ It can answer anything the MCP page can: replies, campaigns, leads, meetings, pr
     title: "Morning briefs and Slack automations",
     page: "/slack",
     keywords: ["morning brief", "eow", "call analysis", "personal assistant", "schedule", "automation"],
-    images: [shot("slack", "The four Slack automations.")],
+    images: [shot("slack.jpg", "The four Slack automations.")],
     body: `The **Slack** page runs four automations: **Morning brief**, **Call analysis**, **EOW report** and **Personal assistant**.
 
 1. Open an automation. Set its schedule with **Edit time and date**, then **Save schedule**.
@@ -309,6 +314,7 @@ Each company is saved in QC Command and sent to the client's Clay DNC table, whe
     title: "Browsing and editing the QC Brain",
     page: "/qc-brain",
     keywords: ["brain", "knowledge", "icp doc", "docs", "github", "edit doc", "skills"],
+    images: [shot("qc-brain.jpg", "A client's QC Brain page.")],
     body: `The **QC Brain** is our shared knowledge base: each client's ICP, personas, voice guide and notes.
 
 1. Open **QC Brain** and search, or browse by area or client.
@@ -414,6 +420,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "A client's replies aren't showing up",
     page: "/health",
     keywords: ["missing", "no replies", "not showing", "webhook", "empty inbox", "broken"],
+    images: [shot("health.jpg", "Client connection heartbeat shows which clients need attention.")],
     body: `1. Open **System health** and look at **Client connection heartbeat** for that client.
 2. Check the HeyReach API key in Configuration → the client → **HeyReach connection**.
 3. Make sure the client's HeyReach webhook points at the **WEBHOOK ENDPOINT** shown there.
@@ -466,6 +473,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "Working the Follow-ups list",
     page: "/inbox",
     keywords: ["follow-up", "follow ups", "urgency", "gone quiet", "nudge", "chase"],
+    images: [shot("followups.jpg", "Follow-ups, ranked by urgency, with the reason shown on the right.")],
     body: `1. In the **Inbox**, click **Follow-ups** above the queue.
 2. Leads who have gone quiet are listed with an **URGENCY** score out of 100. Highest first.
 3. Open one. The **FOLLOW-UP RECOMMENDED** box says why they need a nudge.
@@ -479,6 +487,7 @@ Want fewer or more alerts? Change **FOLLOW-UP ALERT THRESHOLD** or **FOLLOW-UP P
     title: "Looking at a custom date range",
     page: "/inbox",
     keywords: ["custom", "date range", "dates", "calendar", "last month", "period"],
+    images: [shot("custom-dates.jpg", "Custom → Pick dates.")],
     body: `1. In the **Inbox**, click **Custom** above the queue.
 2. Click **Pick dates**, then click a start day and an end day on the calendar.
 3. Click **Done**. The queue and the numbers above it now cover only those days.
@@ -515,6 +524,7 @@ Want fewer or more alerts? Change **FOLLOW-UP ALERT THRESHOLD** or **FOLLOW-UP P
     title: "Graphs under the Inbox",
     page: "/inbox",
     keywords: ["graph", "chart", "client analytics", "reply volume", "add graph"],
+    images: [shot("inbox-graphs.jpg", "Client analytics under the reply queue.")],
     body: `Scroll below the reply queue to **Client analytics**.
 
 1. Pick a range: **Today**, **This week**, **This month**, **This quarter** or **All time**.
@@ -567,6 +577,7 @@ Changed your mind? Open **Blocked leads** at the bottom of the Database and clic
     title: "Finding a lead's phone number",
     page: "/database",
     keywords: ["phone", "mobile", "number", "enrich", "ai ark", "retry enrichment"],
+    images: [shot("lead-drawer.jpg", "Enrich sits next to Phone number on the lead's record.")],
     body: `- **One lead:** open them in **Database** and click **Enrich** next to **Phone number**. It uses 5 AI Ark credits and needs a LinkedIn URL.
 - **A whole campaign:** in **Cold calling**, use **+ Add leads → From a campaign → Fetch & enrich**.
 - **Profile looks empty?** Click **Retry enrichment** on the lead.
@@ -579,6 +590,7 @@ Not every lead has a findable number.`,
     title: "Importing a call list from a CSV",
     page: "/cold-calling",
     keywords: ["csv", "upload", "import", "call list", "spreadsheet"],
+    images: [shot("csv-upload.jpg", "+ Add leads → Upload a CSV.")],
     body: `1. Open **Cold calling** and pick the client.
 2. Click **+ Add leads**, then **Upload a CSV**.
 3. Give it a **List name** so the team knows whose list it is.
@@ -789,6 +801,7 @@ For it to work:
     title: "Generating an ICP document",
     page: "/qc-brain",
     keywords: ["icp", "icp doc", "ideal customer", "generate", "personas"],
+    images: [shot("qc-brain.jpg", "Generate ICP document is on the client's QC Brain page.")],
     body: `1. Open **QC Brain** and pick the client.
 2. Click **Generate ICP document**. It takes about a minute.
 3. Read it, then click **Edit** to adjust and **Propose change** to save it to the brain.
@@ -858,6 +871,7 @@ Everything sent is listed under **Submitted feedback** with its status.`,
     title: "Reading System health",
     page: "/health",
     keywords: ["health", "status", "down", "outage", "red", "heartbeat"],
+    images: [shot("health.jpg", "System health: core services, then each client's connection.")],
     body: `**System health** shows whether everything QC Command depends on is working. It refreshes every 30 seconds, or click **Refresh checks ↻**.
 
 - **Core services**: the database, AI, Slack, Airtable and more. Red means that service is failing.
