@@ -99,3 +99,35 @@ body:has(.hw) { padding-bottom: 76px; }
 .main-area > :not(.topbar):not(header) { animation: page-in .42s cubic-bezier(.2, .7, .2, 1) both; }
 .main-area > :not(.topbar):not(header):nth-child(3) { animation-delay: 40ms; }
 @media (prefers-reduced-motion: reduce) { .main-area > * { animation: none !important; } }
+
+/* Attachments, the hand-off link and the Report to Kiril form */
+.hw-input .hw-clip { background: transparent; color: var(--muted, #8c92a2); border: 1px solid var(--border, #252a35); }
+.hw-input .hw-clip:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border, #252a35)); transform: none; }
+.hw-shots { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px 0; }
+.hw-shot { position: relative; width: 46px; height: 46px; border-radius: 9px; overflow: hidden; border: 1px solid var(--border, #252a35); animation: hw-rise .25s var(--hw-ease) both; }
+.hw-shot img { width: 100%; height: 100%; object-fit: cover; }
+.hw-shot button { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 50%; background: rgba(0, 0, 0, .7); color: #fff; font-size: 11px; line-height: 16px; }
+.hw-shots small { color: var(--coral, #ed8a77); font-size: 11.5px; }
+.hw-msg-shots { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.hw-msg-shots img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid rgba(0, 0, 0, .2); }
+.hw-msg p a, .hw-md a { color: var(--accent); font-weight: 650; }
+.hw-msg.me p a { color: inherit; }
+.hw-msg.sent { border-color: color-mix(in srgb, var(--accent) 45%, var(--border, #252a35)); background: color-mix(in srgb, var(--accent) 8%, var(--panel-2, #151821)); }
+.hw-report-link { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px 10px; background: transparent; color: var(--muted-2, #5e6574); font-size: 11.5px; font-weight: 600; transition: color .2s; }
+.hw-report-link:hover { color: var(--accent); }
+.hw-report { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border, #252a35)); border-radius: 14px; background: var(--panel-2, #151821); animation: hw-rise .3s var(--hw-ease) both; }
+.hw-report p { margin: 0; font-size: 12.5px; color: var(--text, #f3f4f7); line-height: 1.5; }
+.hw-report-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.hw-report-kinds button { height: 32px; border-radius: 9px; border: 1px solid var(--border, #252a35); background: transparent; color: var(--muted, #8c92a2); font-size: 12px; font-weight: 650; transition: all .2s; }
+.hw-report-kinds button.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.hw-report textarea { resize: vertical; min-height: 84px; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--border, #252a35); background: var(--panel, #111319); color: var(--text, #f3f4f7); font: inherit; font-size: 12.5px; line-height: 1.45; outline: none; }
+.hw-report textarea:focus { border-color: color-mix(in srgb, var(--accent) 60%, var(--border, #252a35)); }
+.hw-report-attach { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border, #252a35)); background: transparent; color: var(--accent); font-size: 12px; font-weight: 600; }
+.hw-report-shot { display: flex; align-items: center; gap: 10px; }
+.hw-report-shot img { width: 72px; height: 54px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border, #252a35); }
+.hw-report-shot button { background: transparent; color: var(--muted, #8c92a2); font-size: 12px; text-decoration: underline; }
+.hw-report-error { color: var(--coral, #ed8a77) !important; font-size: 12px !important; }
+.hw-report-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.hw-report-actions button { height: 32px; padding: 0 14px; border-radius: 9px; background: var(--accent); color: var(--accent-ink, #0b0c10); font-size: 12px; font-weight: 700; }
+.hw-report-actions button.ghost { background: transparent; color: var(--muted, #8c92a2); border: 1px solid var(--border, #252a35); }
+.hw-report-actions button:disabled { opacity: .45; cursor: default; }

@@ -6767,3 +6767,5 @@ body.light-mode .brain-icp {
 .mcp-jump { --tx: -50%; }
 @media (hover: none) { .mcp-history-drop { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .mcp-history, .mcp-history li, .mcp-jump, .mcp-history-scrim { animation: none !important; } }
+.scout-hello { display: flex; align-items: center; gap: 14px; }
+.scout-hello .mascot { flex: none; }

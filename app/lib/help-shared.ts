@@ -51,7 +51,7 @@ export const HELP_PAGES: { path: string; label: string }[] = [
   { path: "/jev", label: "Jev" },
   { path: "/analytics", label: "Analytics" },
   { path: "/reports", label: "Reports" },
-  { path: "/mcp", label: "MCP" },
+  { path: "/scout", label: "Scout" },
   { path: "/qc-brain", label: "QC Brain" },
   { path: "/slack", label: "Slack" },
   { path: "/health", label: "System health" },

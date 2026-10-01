@@ -107,7 +107,7 @@ function Spans({ spans }: { spans: Span[] }) {
         if (span.kind === "code") return <code key={index}>{span.text}</code>;
         if (span.kind === "link") {
           return (
-            <a key={index} href={span.href} target="_blank" rel="noreferrer">
+            <a key={index} href={span.href} {...(span.href.startsWith("/") ? {} : { target: "_blank", rel: "noreferrer" })}>
               {span.text}
             </a>
           );

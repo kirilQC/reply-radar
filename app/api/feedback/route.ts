@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../lib/audit-log";
+import { postMessage } from "../../lib/slack";
 
 const config = () => ({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY });
 const headers = (key: string) => ({ apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" });
@@ -118,6 +119,13 @@ export async function POST(request: Request) {
     // that the report is not traceable, and the feedback table already holds it.
     details: { source: "feedback", status: "success", summary: `A ${kind} report was submitted${submittedBy ? ` by ${submittedBy}` : " anonymously"}${screenshot ? " with a screenshot" : ""}.` },
   });
+  // Seen, not just stored: when a feedback channel is configured, Kiril is pinged with the report.
+  const channel = (process.env.SLACK_FEEDBACK_CHANNEL_ID || "").trim();
+  if (channel) {
+    const owner = (process.env.SUPPORT_OWNER_SLACK_ID || "").trim();
+    const where = String(payload.page ?? "").trim();
+    await postMessage(channel, `${owner ? `<@${owner}> ` : ""}New ${kind} report${submittedBy ? ` from *${submittedBy}*` : ""}${where ? ` on ${where}` : ""}${screenshot ? " (with a screenshot, see Configuration → Feedback)" : ""}:\n> ${message.slice(0, 1500).replace(/\n/g, "\n> ")}`).catch(() => undefined);
+  }
   return NextResponse.json({ ok: true, item: saved ? project(saved as Row) : null });
 }
 

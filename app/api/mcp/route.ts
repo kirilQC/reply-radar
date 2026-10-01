@@ -133,6 +133,9 @@ function history(raw: unknown): Turn[] {
   return messages;
 }
 
+/** The Scout tab is the same assistant as QC Bot, wearing its name. */
+const SCOUT_TAB = `In this tab you are called Scout: QC Command's assistant, a friendly teal axolotl. If someone asks who you are, you're Scout. This is the full workspace, so long answers, tables, reports and exports belong here.`;
+
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -181,7 +184,7 @@ export async function POST(request: Request) {
       };
 
       try {
-        const result = await runAgent({ apiKey, messages, emit });
+        const result = await runAgent({ apiKey, messages, emit, systemExtra: SCOUT_TAB });
 
         if (result.maxedTurns) {
           send({

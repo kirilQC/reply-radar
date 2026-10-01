@@ -909,7 +909,7 @@ function AskTheBrain({ client }: { client?: string }) {
           {client ? `Try “What does the brain say about ${client}?”` : "Type / in the chat to run one of the brain’s skills"}
         </span>
       </div>
-      <a className="brain-ask-go" href="/mcp">
+      <a className="brain-ask-go" href="/scout">
         Open MCP chat
       </a>
     </aside>

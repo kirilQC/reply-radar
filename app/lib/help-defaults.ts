@@ -250,13 +250,13 @@ Save your own format with **+ Add template**. Past runs are kept under **Past re
   {
     id: "w-mcp",
     kind: "walkthrough",
-    title: "Asking the MCP assistant",
-    page: "/mcp",
+    title: "Asking Scout",
+    page: "/scout",
     keywords: ["mcp", "assistant", "ask", "ai", "chat", "question", "skill", "prompt"],
     images: [shot("mcp.jpg", "Start from a suggested prompt, or ask your own.")],
-    body: `The **MCP** page is a chat with the same assistant as QC Bot in Slack. It can read campaigns, replies, the Database, the QC Brain, meetings, deals and these help articles.
+    body: `**Scout** (the axolotl) is QC Command's assistant. The Scout tab is a full chat with the same brain as QC Bot in Slack. It can read campaigns, replies, the Database, the QC Brain, meetings, deals and these help articles.
 
-1. Open **MCP** and click a suggested prompt, or type your own question.
+1. Open **Scout** in the sidebar and click a suggested prompt, or type your own question.
 2. Type **/** to run a QC Brain skill.
 3. Attach a screenshot, PDF or spreadsheet with the paperclip.
 4. Tables in answers can be downloaded as CSV or PDF.
@@ -274,7 +274,7 @@ Save your own format with **+ Add template**. Past runs are kept under **Past re
 - **In a DM:** just write to it. It remembers the conversation.
 - It reacts 👀 while it works and ✅ when it's done. Any files it makes are attached in the thread.
 
-It can answer anything the MCP page can: replies, campaigns, leads, meetings, projects, DNC and "how do I…" questions.
+It can answer anything Scout can: replies, campaigns, leads, meetings, projects, DNC and "how do I…" questions.
 
 **Fixing a brief:** reply in the thread under a morning brief or EOW report and tag @QC Bot ("strike the line about Acme"). It edits the original post.`,
   },
@@ -300,7 +300,7 @@ It can answer anything the MCP page can: replies, campaigns, leads, meetings, pr
     page: "",
     keywords: ["dnc", "do not contact", "blacklist", "exclude", "clay", "suppress"],
     images: [shot("qc-brain.jpg", "Each client's Do not contact list is linked from their QC Brain page.")],
-    body: `DNC lists are per client and managed by asking QC Bot (or the MCP page):
+    body: `DNC lists are per client and managed by asking QC Bot (or Scout):
 
 - "Add Acme to Willow's DNC"
 - "Is acme.com on the DNC for Willow?"
@@ -382,7 +382,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     keywords: ["shared", "team", "private", "star", "tag", "visible"],
     images: [shot("tag-menu.jpg", "Tags are shared. A tag added here shows for the whole team.")],
     body: `- **Shared with everyone:** tags, sent replies, client settings, Help articles, tasks, meetings, DNC.
-- **Just yours:** stars, Inbox layout, Appearance, saved MCP prompts.`,
+- **Just yours:** stars, Inbox layout, Appearance, saved Scout prompts.`,
   },
   {
     id: "f-this-week",
@@ -474,7 +474,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     keywords: ["help", "support", "contact", "bug", "feedback", "kiril", "ticket"],
     images: [shot("feedback.jpg", "Configuration → Feedback.")],
     body: `1. **Search this page** first.
-2. **Ask @QC Bot** in Slack, or use the **MCP** page. It reads these articles.
+2. **Ask @QC Bot** in Slack, or ask **Scout** (the Scout tab, or the help button in the corner). It reads these articles.
 3. **Report a bug** in Configuration → **Feedback**. Add a screenshot if you can.
 4. Still blocked? Message Kiril.`,
   },
@@ -572,7 +572,7 @@ Each one remembers its own layout.`,
     body: `- **Database:** set your filters, then click **Export CSV ↓**.
 - **Inbox:** click **Export ↓** above the queue. It exports what you're looking at.
 - **Cold calling:** **Export** downloads the call list.
-- **MCP:** ask for a list ("export Willow's positive replies this month") and click **Download CSV** on the answer.`,
+- **Scout:** ask for a list ("export Willow's positive replies this month"). Long lists come back as a count with the full list attached as a CSV to download.`,
   },
   {
     id: "w-block",
@@ -766,8 +766,8 @@ Then click **Generate report**.`,
   {
     id: "w-mcp-files",
     kind: "walkthrough",
-    title: "Attaching files and downloading answers in MCP",
-    page: "/mcp",
+    title: "Attaching files and downloading answers in Scout",
+    page: "/scout",
     keywords: ["attach", "upload", "screenshot", "pdf", "spreadsheet", "download", "csv"],
     images: [shot("mcp.jpg", "The paperclip sits left of the question box.")],
     body: `- **Attach:** click the paperclip, or drag a screenshot, PDF or spreadsheet onto the chat. Then ask about it ("which of these companies are already in our database?").
@@ -777,11 +777,11 @@ Then click **Generate report**.`,
   {
     id: "w-mcp-prompts",
     kind: "walkthrough",
-    title: "Saving your own MCP prompts",
-    page: "/mcp",
+    title: "Saving your own Scout prompts",
+    page: "/scout",
     keywords: ["saved prompt", "prompt", "shortcut", "reuse", "favorite question"],
     images: [shot("mcp-save-prompt.jpg", "Name it, write the question, Save.")],
-    body: `1. On **MCP**, click **+ Save a prompt of your own**.
+    body: `1. On **Scout**, click **+ Save a prompt of your own**.
 2. Name it and write the question.
 3. Click **Save**. It appears under **Yours**. Click it any time to run it.
 
@@ -959,6 +959,35 @@ QC Bot reads these too, so a good article means better answers in Slack.`,
 For quick questions on the go, DM **@QC Bot** in Slack instead.`,
   },
 
+  {
+    id: "w-scout-history",
+    kind: "walkthrough",
+    title: "Reopening a Scout conversation",
+    page: "/scout",
+    keywords: ["history", "saved", "sessions", "past conversation", "reopen", "scout"],
+    images: [shot("mcp.jpg", "History sits at the top right of the Scout tab.")],
+    body: `Every Scout conversation saves itself once it has an answer.
+
+1. In the **Scout** tab, click **History** at the top right.
+2. Click a conversation to reopen it and carry on where you left off.
+3. **+ New** starts a fresh one. Hover a conversation to delete it.
+
+Conversations follow your profile, so they're there on another computer too.`,
+  },
+  {
+    id: "w-report-to-kiril",
+    kind: "support",
+    title: "Reporting a bug or idea from the help button",
+    page: "",
+    keywords: ["report", "bug", "idea", "feature request", "kiril", "screenshot", "scout"],
+    images: [shot("feedback.jpg", "Reports land in Configuration → Feedback, where Kiril works through them.")],
+    body: `1. Click **Scout** in the bottom-right corner of any page.
+2. Click **Still stuck? Report a bug or idea to Kiril**.
+3. Pick **Something's broken** or **Feature idea**, describe it, and click **Attach a screenshot** if you can.
+4. Click **Send to Kiril**.
+
+It goes straight to Kiril and he'll work on it. You can follow it in Configuration → **Feedback**.`,
+  },
   // ── More FAQ ──────────────────────────────────────────────────────────────
   {
     id: "f-unsend",

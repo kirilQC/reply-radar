@@ -26,7 +26,7 @@ export const NAV_ITEMS = [
   ["/jev", "Jev", "jev"],
   ["/analytics", "Analytics", "analytics"],
   ["/reports", "Reports", "reports"],
-  ["/mcp", "MCP", "mcp"],
+  ["/scout", "Scout", "mcp"],
   ["/qc-brain", "QC Brain", "brain"],
   ["/slack", "Slack", "slack"],
   ["/health", "System health", "health"],
