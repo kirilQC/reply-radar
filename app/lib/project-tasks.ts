@@ -4,13 +4,13 @@
 // Shared read/write for a client's Project management board (rr_projects). Used by both the web API and
 // the QC Bot assistant tools, so the bot can do everything the board UI can.
 
-export const PROJECT_STAGES = ["todo", "in_progress", "paused", "completed", "launched"] as const;
+export const PROJECT_STAGES = ["todo", "planning", "building", "in_progress", "blocked", "paused", "completed", "launched", "other"] as const;
 export type ProjectStage = (typeof PROJECT_STAGES)[number];
-export const STAGE_LABEL: Record<string, string> = { todo: "To do", in_progress: "In progress", paused: "Paused", completed: "Completed", launched: "Launched" };
+export const STAGE_LABEL: Record<string, string> = { todo: "To do", planning: "Planning", building: "Building", in_progress: "In progress", blocked: "Blocked", paused: "Paused", completed: "Completed", launched: "Launched", other: "Other" };
 export const normalizeStage = (s: unknown): ProjectStage | null => {
   const v = String(s ?? "").toLowerCase().replace(/[\s-]+/g, "_");
   if ((PROJECT_STAGES as readonly string[]).includes(v)) return v as ProjectStage;
-  const alias: Record<string, ProjectStage> = { "todo": "todo", "backlog": "todo", "not_started": "todo", "in_progress": "in_progress", "started": "in_progress", "wip": "in_progress", "paused": "paused", "on_hold": "paused", "blocked": "paused", "done": "completed", "complete": "completed", "completed": "completed", "launched": "launched", "live": "launched", "shipped": "launched" };
+  const alias: Record<string, ProjectStage> = { "todo": "todo", "backlog": "todo", "not_started": "todo", "planning": "planning", "plan": "planning", "building": "building", "build": "building", "in_progress": "in_progress", "started": "in_progress", "wip": "in_progress", "blocked": "blocked", "blocker": "blocked", "paused": "paused", "on_hold": "paused", "done": "completed", "complete": "completed", "completed": "completed", "launched": "launched", "live": "launched", "shipped": "launched", "other": "other", "misc": "other" };
   return alias[v] ?? null;
 };
 
@@ -26,11 +26,11 @@ async function workspaceIdForSlug(slug: string, c: NonNullable<ReturnType<typeof
   return Array.isArray(rows) && rows[0]?.id ? String(rows[0].id) : "";
 }
 export type ProjectLink = string | { url: string; title?: string };
-export type Project = { id: string; title: string; stage: string; assignee: string | null; priority: string | null; week: string | null; dueDate: string | null; context: string | null; links: ProjectLink[]; blockers: unknown[]; source: string; createdAt: string; updatedAt: string };
+export type Project = { id: string; title: string; stage: string; assignee: string | null; priority: string | null; week: string | null; dueDate: string | null; context: string | null; links: ProjectLink[]; blockers: unknown[]; source: string; createdAt: string; updatedAt: string; updatedBy: string | null };
 const PRIORITIES = ["high", "medium", "low"];
 export const normalizePriority = (p: unknown): string | null => { const v = String(p ?? "").toLowerCase().trim(); if (!v || v === "none") return null; if (PRIORITIES.includes(v)) return v; const alias: Record<string, string> = { urgent: "high", h: "high", hi: "high", med: "medium", m: "medium", normal: "medium", l: "low", lo: "low" }; return alias[v] ?? null; };
 const normLinks = (links?: ProjectLink[]): ProjectLink[] => (Array.isArray(links) ? links.map((l) => (typeof l === "string" ? l : l && l.url ? { url: String(l.url), ...(l.title ? { title: String(l.title) } : {}) } : null)).filter(Boolean).slice(0, 30) as ProjectLink[] : []);
-const shape = (r: Row): Project => ({ id: String(r.id), title: String(r.title ?? ""), stage: String(r.stage ?? "todo"), assignee: (r.owner as string) || null, priority: (r.priority as string) || null, week: (r.week as string) || null, dueDate: (r.due_date as string) || null, context: (r.context as string) || null, links: Array.isArray(r.links) ? (r.links as ProjectLink[]) : [], blockers: Array.isArray(r.blocker) ? (r.blocker as unknown[]) : r.blocker ? [r.blocker] : [], source: String(r.source ?? "manual"), createdAt: String(r.created_at ?? ""), updatedAt: String(r.updated_at ?? "") });
+const shape = (r: Row): Project => ({ id: String(r.id), title: String(r.title ?? ""), stage: String(r.stage ?? "todo"), assignee: (r.owner as string) || null, priority: (r.priority as string) || null, week: (r.week as string) || null, dueDate: (r.due_date as string) || null, context: (r.context as string) || null, links: Array.isArray(r.links) ? (r.links as ProjectLink[]) : [], blockers: Array.isArray(r.blocker) ? (r.blocker as unknown[]) : r.blocker ? [r.blocker] : [], source: String(r.source ?? "manual"), createdAt: String(r.created_at ?? ""), updatedAt: String(r.updated_at ?? ""), updatedBy: (r.updated_by as string) || null });
 
 export async function listProjectsFor(slug: string, opts?: { week?: string }): Promise<{ ok: boolean; error?: string; projects?: Project[] }> {
   const c = creds(); if (!c) return { ok: false, error: "Supabase not configured" };
@@ -52,9 +52,10 @@ export async function createProjectFor(slug: string, input: { title: string; sta
   const [row] = await r.json().catch(() => []);
   return { ok: true, project: row ? shape(row) : undefined };
 }
-export async function updateProject(id: string, fields: { title?: string; stage?: string; assignee?: string | null; priority?: string | null; week?: string | null; dueDate?: string | null; context?: string | null; links?: ProjectLink[]; reassignSlug?: string }): Promise<{ ok: boolean; error?: string }> {
+export async function updateProject(id: string, fields: { title?: string; stage?: string; assignee?: string | null; priority?: string | null; week?: string | null; dueDate?: string | null; context?: string | null; links?: ProjectLink[]; reassignSlug?: string; updatedBy?: string | null }): Promise<{ ok: boolean; error?: string }> {
   const c = creds(); if (!c) return { ok: false, error: "Supabase not configured" };
   const patch: Row = { updated_at: new Date().toISOString() };
+  if (fields.updatedBy !== undefined) patch.updated_by = fields.updatedBy ? String(fields.updatedBy).slice(0, 200) : null;
   if (typeof fields.title === "string") patch.title = fields.title.slice(0, 300);
   if (fields.stage !== undefined) { const s = normalizeStage(fields.stage); if (!s) return { ok: false, error: `Unknown stage. Use one of: ${PROJECT_STAGES.join(", ")}.` }; patch.stage = s; }
   if (fields.assignee !== undefined) patch.owner = fields.assignee ? String(fields.assignee).slice(0, 400) : null;

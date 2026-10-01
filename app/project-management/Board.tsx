@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 export type LinkItem = { url: string; title?: string };
 export type Blocker = { owner?: string; text?: string; resolved?: boolean; resolvedAt?: string };
-export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; clientSlug?: string; clientName?: string };
+export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; created_at?: string | null; updated_at?: string | null; updated_by?: string | null; clientSlug?: string; clientName?: string };
 const blockerList = (b?: Blocker | Blocker[] | null): Blocker[] => (Array.isArray(b) ? b : b ? [b] : []).filter((x) => x && (x.text || x.owner));
 export type BoardClient = { slug: string; name: string; logoUrl?: string | null; accentColor?: string | null };
 export type Person = { name: string; avatarUrl?: string | null };
@@ -18,10 +18,14 @@ export type NewFields = { title: string; stage: string; assignee?: string; dueDa
 
 const STAGES = [
   { key: "todo", label: "To do", cls: "todo", color: "#6b7280" },
+  { key: "planning", label: "Planning", cls: "plan", color: "#8b93a7" },
+  { key: "building", label: "Building", cls: "build", color: "#3fb0c9" },
   { key: "in_progress", label: "In progress", cls: "prog", color: "#5aa9f0" },
+  { key: "blocked", label: "Blocked", cls: "blocked", color: "#e5484d" },
   { key: "paused", label: "Paused", cls: "pause", color: "#e0a83d" },
   { key: "completed", label: "Completed", cls: "done", color: "#3fb27f" },
   { key: "launched", label: "Launched", cls: "launch", color: "#7c6cf0" },
+  { key: "other", label: "Other", cls: "other", color: "#9a8cf0" },
 ];
 const PRIORITIES = [{ key: "high", label: "High", color: "#e5484d" }, { key: "medium", label: "Medium", color: "#f2913d" }, { key: "low", label: "Low", color: "#e6c229" }];
 const ALL_VIEWS: [View, string][] = [["kanban", "Kanban"], ["byclient", "By client"], ["individuals", "Individuals"], ["table", "Table"], ["swimlanes", "Swimlanes"]];
@@ -36,6 +40,31 @@ const normUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : `https://${u}`);
 const linkLabel = (l: LinkItem) => { if (l.title && l.title.trim()) return l.title.trim(); try { const x = new URL(l.url); return x.hostname.replace(/^www\./, "") + x.pathname.replace(/\/$/, ""); } catch { return l.url; } };
 const dueMs = (v?: string | null) => { if (!v) return Infinity; const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + "T00:00" : v); return Number.isNaN(+d) ? Infinity : +d; };
 export const weekDisplay = (w?: string | null) => (!w ? "" : /^week of/i.test(w) ? w : `Week of ${w}`);
+/* When a task was created, spelled out in Eastern time — e.g. "Sep 8, 2026, 3:42 PM EST". */
+const fmtEst = (iso?: string | null): string => {
+  if (!iso) return "";
+  const d = new Date(iso); if (Number.isNaN(+d)) return "";
+  return d.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+};
+/* Date + time in EST for the Dates column — "9/3 @ 8:00 AM". */
+const fmtDateAt = (iso?: string | null): string => {
+  if (!iso) return "";
+  const d = new Date(iso); if (Number.isNaN(+d)) return "";
+  const date = d.toLocaleString("en-US", { timeZone: "America/New_York", month: "numeric", day: "numeric" });
+  const time = d.toLocaleString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+  return `${date} @ ${time}`;
+};
+/* How long a task has been sitting since it was added — compact ("3d", "5h", "just now"). */
+const sittingFor = (iso?: string | null): string => {
+  if (!iso) return "";
+  const ms = Date.now() - Date.parse(iso); if (Number.isNaN(ms) || ms < 0) return "";
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+};
 function sortTasks(list: BoardTask[], key: SortKey): BoardTask[] {
   if (key === "manual") return list;
   const arr = [...list];
@@ -52,14 +81,24 @@ function sortTasks(list: BoardTask[], key: SortKey): BoardTask[] {
 
 /* ══ Reusable custom dropdown primitives (no native <select>) ══ */
 type Opt = { value: string; label: string; logo?: React.ReactNode; color?: string };
-function Chevron() { return <svg className="pm-chev" viewBox="0 0 10 6" width="10" height="6" aria-hidden><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
+function Chevron() { return <svg className="pm-chev" viewBox="0 0 10 6" width="8" height="5" aria-hidden><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
 function useMenu(minW = 0) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const place = () => { const r = btnRef.current?.getBoundingClientRect(); if (!r) return; const width = Math.max(r.width, minW); const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 10)); setPos({ top: r.bottom + 5, left, width }); };
   const toggle = () => { if (pos) setPos(null); else place(); };
   const close = () => setPos(null);
-  useEffect(() => { if (!pos) return; const h = () => setPos(null); window.addEventListener("scroll", h, true); window.addEventListener("resize", h); return () => { window.removeEventListener("scroll", h, true); window.removeEventListener("resize", h); }; }, [pos]);
+  useEffect(() => {
+    if (!pos) return;
+    // Close when the page behind the menu scrolls (the menu is fixed-positioned under the button, so it would
+    // otherwise detach and float). But the menu itself scrolls when the roster is long, and that scroll is
+    // caught here in the capture phase too — closing on it made a long people list impossible to scroll. So a
+    // scroll whose target is inside the open menu is ignored; only scrolling the content behind it dismisses.
+    const onScroll = (e: Event) => { const t = e.target; if (t instanceof Element && t.closest(".pm-dd-menu")) return; setPos(null); };
+    const onResize = () => setPos(null);
+    window.addEventListener("scroll", onScroll, true); window.addEventListener("resize", onResize);
+    return () => { window.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", onResize); };
+  }, [pos]);
   return { btnRef, pos, open: !!pos, toggle, close };
 }
 function Select({ value, options, onChange, placeholder, minWidth, tone, size }: { value: string; options: Opt[]; onChange: (v: string) => void; placeholder?: string; minWidth?: number; tone?: string; size?: "lg" }) {
@@ -195,6 +234,7 @@ function Card({ t, h }: { t: BoardTask; h: Handlers }) {
         <div className="pm-bcard-foot">
           {client && <span className="pm-bcard-client"><span className="pm-bcard-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span>{client.name}</span>}
           {owners.length > 0 && <span className="pm-bcard-owner"><Avatar name={owners[0]} map={h.map} />{owners.length === 1 ? owners[0] : `${owners.length} people`}</span>}
+          {t.created_at && <span className="pm-bcard-age" title={`Added ${fmtEst(t.created_at)}`}>⏱ {sittingFor(t.created_at)}</span>}
           {t.due_date && <span className="pm-bcard-due">{t.due_date}</span>}
         </div>
       </div>
@@ -236,7 +276,7 @@ function ByClientView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
 function IndividualsView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
   const owners = useMemo(() => { const set = new Set<string>(h.people.map((p) => p.name)); for (const t of tasks) for (const o of ownerList(t.owner)) set.add(o); const arr = Array.from(set); arr.push("Unassigned"); return arr; }, [tasks, h.people]);
   return (
-    <div className="pm-cols" style={{ gridTemplateColumns: `repeat(${Math.max(1, owners.length)}, minmax(240px, 1fr))` }}>
+    <div className="pm-cols" style={{ gridTemplateColumns: `repeat(${Math.max(1, owners.length)}, minmax(300px, 1fr))` }}>
       {owners.map((o) => (
         <ColumnList key={o} label={o} logo={o === "Unassigned" ? <span className="pm-bighead-logo" style={{ background: "var(--muted-2,#555)" }}>?</span> : <Avatar name={o} map={h.map} cls="pm-av-lg" />} tasks={tasks.filter((t) => { const l = ownerList(t.owner); return o === "Unassigned" ? l.length === 0 : l.includes(o); })} onAdd={() => h.openNew("todo", h.multi ? undefined : h.clients[0]?.slug, o === "Unassigned" ? "" : o)} h={h} />
       ))}
@@ -248,7 +288,16 @@ function IndividualsView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
 function AutoTextarea({ defaultValue, placeholder, onCommit, className = "" }: { defaultValue: string; placeholder?: string; onCommit: (v: string) => void; className?: string }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fit = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
-  useEffect(() => { if (ref.current) fit(ref.current); }, []);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    fit(el);
+    // Refit when the column's width changes (window resize, layout settling) so a long paragraph
+    // grows the row instead of clipping. Guarded on width so setting height can't loop the observer.
+    let lastW = el.clientWidth;
+    const ro = new ResizeObserver(() => { if (el.clientWidth !== lastW) { lastW = el.clientWidth; fit(el); } });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return <textarea ref={ref} className={`pm-cellin pm-cellarea ${className}`} rows={1} defaultValue={defaultValue} placeholder={placeholder} onInput={(e) => fit(e.currentTarget)} onBlur={(e) => onCommit(e.currentTarget.value)} />;
 }
 /* ── Links cell (table) — titled links in a popover ── */
@@ -257,16 +306,10 @@ function LinksCell({ links, onChange }: { links: LinkItem[]; onChange: (l: LinkI
   const add = () => { const u = url.trim(); if (!u) return; onChange([...links, { url: normUrl(u), title: title.trim() || undefined }]); setUrl(""); setTitle(""); };
   return (
     <div className="pm-dd pm-linkscell">
-      {links.length ? (
-        <div className="pm-links-cellrow">
-          <span className="pm-linkpills">{links.slice(0, 2).map((l, i) => <a className="pm-linkpill link" key={i} href={l.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{linkLabel(l)}</a>)}{links.length > 2 && <span className="pm-linkpill more">+{links.length - 2}</span>}</span>
-          <button ref={m.btnRef} type="button" className="pm-links-edit" title="Edit links" onClick={(e) => { e.stopPropagation(); m.toggle(); }}><Chevron /></button>
-        </div>
-      ) : (
-        <button ref={m.btnRef} type="button" className="pm-dd-btn pm-links-btn" onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
-          <span className="pm-dd-val"><span className="pm-dd-ph">Add link…</span></span><Chevron />
-        </button>
-      )}
+      <button ref={m.btnRef} type="button" className={`pm-linkstrigger ${links.length ? "" : "empty"}`} title={links.length ? `${links.length} link${links.length > 1 ? "s" : ""}` : "Add link"} onClick={(e) => { e.stopPropagation(); m.toggle(); }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
+        {links.length ? <span className="pm-linkcount">{links.length}</span> : null}<Chevron />
+      </button>
       {m.open && m.pos && <>
         <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
         <div className="pm-dd-menu pm-linkmenu" style={{ top: m.pos.top, left: m.pos.left, minWidth: Math.max(m.pos.width, 280) }} onClick={(e) => e.stopPropagation()}>
@@ -284,6 +327,22 @@ function LinksCell({ links, onChange }: { links: LinkItem[]; onChange: (l: LinkI
 const slackIcon = (
   <svg width="14" height="14" viewBox="0 0 127 127" fill="currentColor" aria-hidden><path d="M27.2 80c0 7.3-5.9 13.2-13.2 13.2C6.7 93.2.8 87.3.8 80c0-7.3 5.9-13.2 13.2-13.2h13.2V80z" /><path d="M33.8 80c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2v33c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V80z" /><path d="M47 27c-7.3 0-13.2-5.9-13.2-13.2C33.8 6.5 39.7.6 47 .6c7.3 0 13.2 5.9 13.2 13.2V27H47z" /><path d="M47 33.6c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H14C6.7 60 .8 54.1.8 46.8c0-7.3 5.9-13.2 13.2-13.2h33z" /><path d="M99.8 46.8c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H99.8V46.8z" /><path d="M93.2 46.8c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2v-33C66.8 6.5 72.7.6 80 .6c7.3 0 13.2 5.9 13.2 13.2v33z" /><path d="M80 99.6c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V99.6H80z" /><path d="M80 93c-7.3 0-13.2-5.9-13.2-13.2 0-7.3 5.9-13.2 13.2-13.2h33c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H80z" /></svg>
 );
+/* The Dates cell — when the task was added and when it was last updated (EST), and who updated it. */
+function DatesCell({ created, updated, by, map }: { created?: string | null; updated?: string | null; by?: string | null; map: Record<string, string> }) {
+  const who = (by || "").trim();
+  return (
+    <div className="pm-dates">
+      <div className="pm-dates-row" title={created ? `Added ${fmtEst(created)} · sitting ${sittingFor(created)}` : ""}>
+        <span className="pm-dates-lbl">Added</span><span className="pm-dates-val">{fmtDateAt(created) || "—"}</span>
+      </div>
+      <div className="pm-dates-row" title={updated ? (who ? `Updated ${fmtEst(updated)} · by ${who}` : `Updated ${fmtEst(updated)}`) : ""}>
+        <span className="pm-dates-lbl">Updated</span><span className="pm-dates-val">{fmtDateAt(updated) || "—"}</span>
+        {who ? <Avatar name={who} map={map} cls="pm-dates-av" /> : null}
+      </div>
+    </div>
+  );
+}
+
 function SlackButton({ id, channel }: { id: string; channel?: string }) {
   const [st, setSt] = useState<"idle" | "sending" | "sent" | "err">("idle");
   const [msg, setMsg] = useState("");
@@ -359,8 +418,8 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
     <div className="pm-table-wrap">
       <div className="pm-table-scroll">
         <table className="pm-table pm-table-edit">
-          <colgroup><col style={{ width: "9%" }} /><col style={{ width: "14%" }} /><col style={{ width: "11%" }} /><col style={{ width: 80 }} /><col style={{ width: 104 }} /><col style={{ width: "13%" }} /><col /><col style={{ width: 92 }} /><col style={{ width: 90 }} /><col style={{ width: 62 }} /></colgroup>
-          <thead><tr><th>Client</th><th>Task name</th><th>Assigned to</th><th>Priority</th><th>Status</th><th>Blockers</th><th>Context</th><th>Links</th><th>Due date</th><th /></tr></thead>
+          <colgroup><col style={{ width: "9%" }} /><col style={{ width: "12%" }} /><col style={{ width: "10%" }} /><col style={{ width: 108 }} /><col style={{ width: 128 }} /><col style={{ width: "13%" }} /><col /><col style={{ width: 52 }} /><col style={{ width: 186 }} /><col style={{ width: 72 }} /></colgroup>
+          <thead><tr><th>Client</th><th>Task name</th><th>Assigned to</th><th>Priority</th><th>Status</th><th>Blockers</th><th>Context</th><th>Links</th><th>Dates</th><th /></tr></thead>
           <tbody>
             {tasks.map((t) => { const pc = prioOf(t.priority)?.color; return (
               <tr key={t.id} className={pc ? "rp" : ""} style={pc ? ({ ["--rc" as string]: pc } as React.CSSProperties) : undefined}>
@@ -372,8 +431,8 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
                 <td><BlockerCell blockers={t.blocker} people={h.people} map={h.map} addPerson={h.addPerson} onChange={(blk) => onUpdate(t.id, { blocker: blk })} /></td>
                 <td><AutoTextarea defaultValue={t.context || ""} onCommit={(v) => { if ((v || null) !== (t.context || null)) onUpdate(t.id, { context: v }); }} /></td>
                 <td><LinksCell links={linkItems(t.links)} onChange={(l) => onUpdate(t.id, { links: l })} /></td>
-                <td><input className="pm-cellin" defaultValue={t.due_date || ""} onBlur={(e) => { if ((e.target.value || null) !== (t.due_date || null)) onUpdate(t.id, { dueDate: e.target.value }); }} /></td>
-                <td><div className="pm-rowacts"><SlackButton id={t.id} channel={h.notifyChannel} /><button type="button" className="pm-rowdel" title="Delete task" onClick={() => { if (window.confirm("Delete this task?")) h.onDelete(t.id); }}>🗑</button></div></td>
+                <td><DatesCell created={t.created_at} updated={t.updated_at} by={t.updated_by} map={h.map} /></td>
+                <td><div className="pm-rowacts"><button type="button" className="pm-rowopen" title={t.created_at ? `Open · added ${fmtEst(t.created_at)}` : "Open task"} onClick={() => h.onOpen(t)}>⤢</button><SlackButton id={t.id} channel={h.notifyChannel} /></div></td>
               </tr>
             ); })}
             {drafts.map((d) => { const pc = prioOf(d.priority)?.color; return (
@@ -386,7 +445,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
                 <td><span className="pm-blk-later">—</span></td>
                 <td><AutoTextarea defaultValue={d.context} onCommit={(v) => setDraft(d.key, { context: v })} /></td>
                 <td><LinksCell links={d.links} onChange={(l) => setDraft(d.key, { links: l })} /></td>
-                <td><input className="pm-cellin" value={d.due} onChange={(e) => setDraft(d.key, { due: e.target.value })} /></td>
+                <td><span className="pm-rowdate">—</span></td>
                 <td><button type="button" className="pm-rowdel" title="Remove row" onClick={() => setDrafts((p) => p.filter((x) => x.key !== d.key))}>✕</button></td>
               </tr>
             ); })}
@@ -430,10 +489,10 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
   const [blockers, setBlockers] = useState<Blocker[]>(blockerList(task?.blocker));
   const [nUrl, setNUrl] = useState(""); const [nTitle, setNTitle] = useState("");
   const addLink = () => { const u = nUrl.trim(); if (!u) return; setLinks((p) => [...p, { url: normUrl(u), title: nTitle.trim() || undefined }]); setNUrl(""); setNTitle(""); };
-  const stage = isNew ? state.stage : (task?.stage ?? "todo");
+  const [stage, setStage] = useState(isNew ? state.stage : (task?.stage ?? "todo"));
   const s = stageOf(stage);
   const client = clients.find((c) => c.slug === slug);
-  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(multi && week ? { week } : {}) }); } else onUpdate(task!.id, { title, owner, dueDate: due, context, links, priority, blocker: blockers, ...(multi ? { week } : {}) }); onClose(); };
+  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(multi && week ? { week } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links, priority, blocker: blockers, ...(multi ? { week } : {}) }); onClose(); };
   return (
     <div className="pm-modal-back" onClick={onClose}>
       <div className="pm-modal pm-modal-a" onClick={(e) => e.stopPropagation()}>
@@ -444,6 +503,7 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
           </div>
           {multi && client && <div className="pm-ed-client"><span className="pm-ed-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span><span className="pm-ed-cname">{client.name}</span></div>}
           <input className="pm-ed-title" autoFocus value={title} placeholder="What needs doing?" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save(); }} />
+          {!isNew && task?.created_at && <div className="pm-ed-added">Added {fmtEst(task.created_at)} · sitting {sittingFor(task.created_at)}</div>}
         </div>
         <div className="pm-ed-body">
           <div className="pm-ed-main">
@@ -456,7 +516,10 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
           <div className="pm-ed-side">
             {isNew && multi && <div className="pm-f"><span>Client</span><Select value={slug} options={clientOptsOf(clients)} size="lg" onChange={setSlug} /></div>}
             <div className="pm-f"><span>Assignees</span><MultiPeople value={owner} people={people} map={map} onChange={setOwner} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} /></div>
-            <div className="pm-f"><span>Priority</span><Select value={priority} options={prioOpts} placeholder="None" tone={prioOf(priority)?.color} onChange={setPriority} /></div>
+            <div className="pm-f-row">
+              <label className="pm-f"><span>Status</span><Select value={stage} options={stageOpts} tone={stageOf(stage).color} onChange={setStage} /></label>
+              <label className="pm-f"><span>Priority</span><Select value={priority} options={prioOpts} placeholder="None" tone={prioOf(priority)?.color} onChange={setPriority} /></label>
+            </div>
             <div className="pm-f-row">
               <label className="pm-f"><span>Due date</span><input value={due} placeholder="e.g. Thu 9/4" onChange={(e) => setDue(e.target.value)} /></label>
               {multi && <label className="pm-f"><span>Week</span><input value={week} placeholder="e.g. Sept 3" onChange={(e) => setWeek(e.target.value)} /></label>}

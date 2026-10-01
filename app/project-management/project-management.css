@@ -42,6 +42,10 @@
 .pm-stg.pause { color: var(--amber); background: color-mix(in srgb, var(--amber) 15%, transparent); }
 .pm-stg.done { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
 .pm-stg.launch { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.pm-stg.plan { color: #9aa3b5; background: color-mix(in srgb, #9aa3b5 15%, transparent); }
+.pm-stg.build { color: #3fb0c9; background: color-mix(in srgb, #3fb0c9 15%, transparent); }
+.pm-stg.blocked { color: var(--coral, #e5484d); background: color-mix(in srgb, var(--coral, #e5484d) 15%, transparent); }
+.pm-stg.other { color: #9a8cf0; background: color-mix(in srgb, #9a8cf0 15%, transparent); }
 .pm-n { font-family: ui-monospace, monospace; font-size: 10px; color: var(--muted-2); background: var(--panel-2, #20242e); border-radius: 5px; padding: 1px 6px; }
 
 /* card */
@@ -65,8 +69,9 @@
 .pm-add-input { width: 100%; height: 34px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel-2, #151821); color: var(--text); padding: 0 11px; font: inherit; font-size: 12.5px; }
 .pm-add-input:focus { outline: none; }
 
-/* 1 kanban */
-.pm-kb { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: start; }
+/* 1 kanban — one row of columns, scroll horizontally when there are more than fit. */
+.pm-kb { display: flex; gap: 12px; align-items: start; overflow-x: auto; padding-bottom: 10px; }
+.pm-kb .pm-col { flex: 0 0 300px; width: 300px; }
 .pm-col { background: var(--panel); border: 1px solid var(--border-soft, var(--border)); border-radius: 12px; padding: 10px; min-height: 260px; }
 .pm-colh { display: flex; align-items: center; gap: 7px; margin-bottom: 11px; }
 .pm-colh .pm-n { margin-left: auto; }
@@ -135,7 +140,7 @@
 .pm-del { font: inherit; font-size: 12.5px; font-weight: 600; color: var(--coral, #e5738a); background: none; border: 1px solid color-mix(in srgb, var(--coral, #e5738a) 30%, transparent); border-radius: 9px; padding: 8px 15px; cursor: pointer; }
 .pm-save { font: inherit; font-size: 12.5px; font-weight: 700; color: #fff; background: var(--accent); border: 0; border-radius: 9px; padding: 9px 20px; cursor: pointer; }
 
-@media (max-width: 1100px) { .pm-kb { grid-template-columns: repeat(2, 1fr); } .pm-tl { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 1100px) { .pm-tl { grid-template-columns: repeat(3, 1fr); } }
 
 /* View dropdown */
 .pm-viewdd { display: flex; align-items: center; gap: 8px; }
@@ -332,6 +337,37 @@
 /* ═══ Table: wider rows, growing context, priority row colouring ═══ */
 .pm-table-edit td { padding: 7px 11px; }
 .pm-cellarea { resize: none; overflow: hidden; line-height: 1.45; min-height: 32px; padding-top: 7px; padding-bottom: 7px; font-family: inherit; white-space: pre-wrap; }
+
+/* Column widths are driven by the inline <colgroup> in Board.tsx; table-layout:fixed makes
+   the browser honour them exactly instead of auto-distributing by content. The min-width lets
+   the scroll wrapper kick in on narrow screens rather than crushing every cell. */
+.pm-table-edit { table-layout: fixed; width: 100%; min-width: 1560px; }
+.pm-table-edit .pm-cellarea, .pm-table-edit .pm-cellin { word-break: break-word; }
+
+/* Links as a compact dropdown: a small trigger that opens the links in a popover, so the
+   column stays narrow instead of eating a wide "Add link…" button. */
+.pm-linkstrigger { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.pm-linkstrigger:hover { border-color: var(--border-soft, var(--border)); background: var(--panel-2, #151821); color: var(--text); }
+.pm-linkstrigger .pm-linkcount { color: var(--accent); font-weight: 750; }
+.pm-linkstrigger.empty { color: var(--muted-2); }
+
+/* The Added column — a plain EST calendar date ("9/3"), with the full timestamp on hover. */
+.pm-rowdate { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* The Dates column — "Added" and "Updated" lines, each a dim label + an EST timestamp. */
+.pm-dates { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left; }
+.pm-dates-row { display: flex; align-items: center; gap: 5px; font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pm-dates-lbl { color: var(--muted-2); font-weight: 650; }
+.pm-dates-val { color: var(--text); }
+.pm-dates-av { width: 16px; height: 16px; font-size: 8px; flex: none; }
+
+/* "You" identity picker in the board toolbar — stamps every change with who made it. */
+.pm-me-pick { display: inline-flex; align-items: center; gap: 7px; }
+.pm-me-pick > span { font-size: 12px; font-weight: 650; color: var(--muted); }
+
+/* Row "open" button — the way into the full task editor from the table. */
+.pm-rowopen { width: 26px; height: 26px; border-radius: 7px; border: 1px solid transparent; background: none; color: var(--muted-2); font-size: 13px; line-height: 1; cursor: pointer; display: grid; place-items: center; }
+.pm-rowopen:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .pm-table-edit tr.rp { background: color-mix(in srgb, var(--rc) 7%, transparent); }
 .pm-table-edit tr.rp td:first-child { box-shadow: inset 3px 0 0 var(--rc); }
 
@@ -468,11 +504,48 @@
 .pm-table-edit .pm-dd { width: auto; max-width: 100%; margin: 0 auto; }
 .pm-table-edit .pm-dd-btn { justify-content: center; gap: 6px; }
 .pm-table-edit .pm-rowacts { justify-content: center; }
-.pm-table-edit .pm-blocker-row { justify-content: center; }
-.pm-table-edit .pm-blocker-body { flex: 0 1 auto; }
+.pm-table-edit .pm-blocker-row { justify-content: flex-start; align-items: flex-start; }
+.pm-table-edit .pm-blocker-body { flex: 0 1 auto; align-items: flex-start; }
 .pm-table-edit .pm-own-inline.stack { align-items: center; }
 .pm-table-edit .pm-links-cellrow, .pm-table-edit .pm-linkpills { justify-content: center; }
 .pm-linkpill { max-width: 76px; }
+
+/* ═══ Denser table: smaller type across the board so more content fits, and Blockers
+   text wraps to two lines instead of clipping at one. Overrides the earlier "bigger"
+   rules (Round 6, etc.) that had crammed the grid. ═══ */
+.pm-table-edit td { padding: 6px 8px; }
+.pm-table-edit .pm-cellin, .pm-table-edit .pm-cellarea { font-size: 12px; }
+.pm-cell-title { font-size: 12.5px; line-height: 1.35; }
+.pm-table-edit .pm-dd-btn { font-size: 11.5px; }
+.pm-table-edit .pm-dd-lg .pm-dd-btn { font-size: 12px; font-weight: 600; }
+.pm-table-edit .pm-own-chip { font-size: 12px; gap: 6px; }
+.pm-table-edit .pm-own-chip .pm-av { width: 24px; height: 24px; font-size: 10px; }
+.pm-table-edit .pm-av-names { font-size: 12px; }
+.pm-table-edit .pm-dd-val.stack { font-size: 12px; }
+/* Blockers: let the text use up to two lines so more of it is visible. */
+.pm-table-edit .pm-blocker-body { font-size: 11.5px; }
+.pm-table-edit .pm-blocker-text { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Priority & Status (the non-"lg" dropdowns) hold short, known labels — show them in full
+   rather than truncating "Medium" → "Medi" or "In progress" → "In prog". Tighter padding
+   and gap buy the room; the column widths in the colgroup are sized to fit the longest label. */
+.pm-table-edit .pm-dd:not(.pm-dd-lg) .pm-dd-val { overflow: visible; text-overflow: clip; }
+.pm-table-edit .pm-dd:not(.pm-dd-lg) .pm-dd-btn { gap: 5px; padding: 4px 6px; }
+/* Smaller dropdown carets everywhere in the table. */
+.pm-table-edit .pm-chev { width: 8px; height: 5px; }
+
+/* Centered column headers (beats the base ".pm-table thead th { text-align:left }"). */
+.pm-table-edit thead th { text-align: center; }
+/* Vertically centre most cells so short content (a status pill, an avatar) sits in the
+   middle of a tall row rather than clinging to the top. The Blockers column is the one
+   exception: its checkbox must stay top-aligned so the boxes line up on the same y-axis
+   down the column regardless of how tall each row grows. */
+.pm-table-edit td { vertical-align: middle; }
+.pm-table-edit td:nth-child(6) { vertical-align: top; }
+/* Nudge the blocker checkbox to sit on the first line of its text. */
+.pm-table-edit .pm-blocker-check { margin-top: 1px; }
+/* Dates column: left-align its stacked "Added/Updated" rows and keep them inside the
+   column so they don't bleed into the Links column beside them. */
+.pm-table-edit td:nth-child(9) { text-align: left; }
 
 /* ═══ Kanban banner card (Option B + priority stripe) ═══ */
 .pm-bcard { position: relative; background: var(--panel-2, #171a22); border: 1px solid var(--border-soft, var(--border)); border-radius: 11px; overflow: hidden; cursor: grab; margin-bottom: 10px; }
@@ -485,6 +558,10 @@
 .pm-bcard-band.pause { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
 .pm-bcard-band.done { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
 .pm-bcard-band.launch { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.pm-bcard-band.plan { color: #9aa3b5; background: color-mix(in srgb, #9aa3b5 13%, transparent); }
+.pm-bcard-band.build { color: #3fb0c9; background: color-mix(in srgb, #3fb0c9 14%, transparent); }
+.pm-bcard-band.blocked { color: var(--coral, #e5484d); background: color-mix(in srgb, var(--coral, #e5484d) 14%, transparent); }
+.pm-bcard-band.other { color: #9a8cf0; background: color-mix(in srgb, #9a8cf0 14%, transparent); }
 .pm-bcard-prio { font-weight: 800; }
 .pm-bcard-body { padding: 11px 13px 11px 15px; }
 .pm-bcard-title { font-size: 13.5px; font-weight: 650; letter-spacing: -.01em; line-height: 1.35; }
@@ -495,6 +572,8 @@
 .pm-bcard-clogo { width: 22px; height: 22px; border-radius: 6px; overflow: hidden; display: grid; place-items: center; color: #fff; font-size: 10px; font-weight: 800; flex: none; }
 .pm-bcard-clogo img { width: 100%; height: 100%; object-fit: cover; }
 .pm-bcard-owner { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-bcard-age { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--muted-2); white-space: nowrap; }
+.pm-bcard-age + .pm-bcard-due { margin-left: 8px; }
 .pm-bcard-due { margin-left: auto; flex: none; font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted-2); }
 
 /* multiple blockers in one cell */
@@ -514,6 +593,7 @@
 .pm-ed-title { width: 100%; border: 0; background: none; color: var(--text); font: inherit; font-size: 20px; font-weight: 700; letter-spacing: -.02em; padding: 2px 0; }
 .pm-ed-title:focus { outline: none; }
 .pm-ed-title::placeholder { color: var(--muted-2); }
+.pm-ed-added { margin-top: 7px; font-size: 11.5px; color: var(--muted-2); }
 .pm-ed-body { display: grid; grid-template-columns: 1.5fr 1fr; }
 .pm-ed-main { padding: 18px 20px; display: flex; flex-direction: column; gap: 16px; border-right: 1px solid var(--border); }
 .pm-ed-side { padding: 18px 20px; display: flex; flex-direction: column; gap: 15px; background: color-mix(in srgb, var(--panel-2, #171a22) 45%, var(--panel)); }

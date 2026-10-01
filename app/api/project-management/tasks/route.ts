@@ -5,7 +5,7 @@
 // keyed to a workspace, with a stage the team drags them through.
 import { NextResponse } from "next/server";
 
-const STAGES = ["todo", "in_progress", "paused", "completed", "launched"];
+const STAGES = ["todo", "planning", "building", "in_progress", "blocked", "paused", "completed", "launched", "other"];
 type Row = Record<string, unknown>;
 
 function creds() {
@@ -72,6 +72,7 @@ export async function PATCH(request: Request) {
   if ("week" in b) patch.week = b.week || null;
   if ("blocker" in b) { const arr = Array.isArray(b.blocker) ? b.blocker : b.blocker ? [b.blocker] : []; const clean = arr.filter((x: Record<string, unknown>) => x && (x.text || x.owner)).slice(0, 20); patch.blocker = clean.length ? clean : null; }
   if (b.moveToSlug) { const wsId = await workspaceIdFor(String(b.moveToSlug), c); if (wsId) patch.workspace_id = wsId; }
+  if ("updatedBy" in b) patch.updated_by = b.updatedBy ? String(b.updatedBy).slice(0, 200) : null;
   if (typeof b.position === "number") patch.position = b.position;
   const r = await fetch(`${c.url}/rest/v1/rr_projects?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: { ...c.headers, Prefer: "return=minimal" }, body: JSON.stringify(patch) });
   if (!r.ok) return NextResponse.json({ ok: false, error: `Update failed (${r.status}).` }, { status: 502 });
