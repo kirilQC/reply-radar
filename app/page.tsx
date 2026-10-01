@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import DashboardHome from "./components/DashboardHome";
 import AppSidebar from "./components/AppSidebar";
 import Crumb from "./components/Crumb";
+import DateRangeCalendar from "./components/DateRangeCalendar";
 import { usePopoverDismiss } from "./lib/use-popover-dismiss";
 import AppearancePanel, {
   type AppearancePrefs,
@@ -2083,12 +2084,7 @@ export function InboxPage() {
                   </div>
                   {filter === "custom" && (
                     <div className="inbox-daterange">
-                      <input type="date" aria-label="From date" value={customSince} max={customUntil || undefined} onChange={(e) => setCustomSince(e.target.value)} />
-                      <span className="inbox-daterange-sep">→</span>
-                      <input type="date" aria-label="To date" value={customUntil} min={customSince || undefined} onChange={(e) => setCustomUntil(e.target.value)} />
-                      {(customSince || customUntil) && (
-                        <button type="button" className="inbox-daterange-clear" title="Clear dates" onClick={() => { setCustomSince(""); setCustomUntil(""); }}>✕</button>
-                      )}
+                      <DateRangeCalendar since={customSince} until={customUntil} onChange={(since, until) => { setCustomSince(since); setCustomUntil(until); }} />
                     </div>
                   )}
                   <div className="unified-filter-wrap">
