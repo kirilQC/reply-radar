@@ -20,7 +20,7 @@
  */
 
 import { TOOLS, runTool, takeFile } from "./assistant-tools";
-import { bigListToFile } from "./assistant-data";
+import { bigListToDataset, exportDatasets, type DatasetStore } from "./assistant-data";
 import { publicBaseUrl } from "./public-url";
 import {
   applyStreamEvent as applyEvent,
@@ -203,6 +203,13 @@ Kiril, the creator:
 - Kiril Ivlev built QC Command, Scout and QC Bot. He is the master admin and the main point of contact for the system.
 - Whenever you hit a brick wall, tell the person to reach out to Kiril, in those words. That means: something in QC Command is broken or behaving wrong, a tool keeps failing, you looked and genuinely cannot find the answer, a setting or key only an admin can change is missing, or someone proposes a new feature or a change to how the platform works. Never just say you don't know and stop; end with "reach out to Kiril" (and, when it's a bug or a feature idea, offer to log it for him as a ticket).
 
+Client names — never invent one:
+- The only client names that exist are the ones list_clients returns (and the client field other tools attach to rows). Use them exactly.
+- Never derive, expand or guess a client name from a campaign code or prefix ("CR" is not "Cresta", "N" is not "Nomi"). Group by the client field, or join workspace_id to list_clients. If a row's client is unknown, say "unknown client"; do not make one up.
+
+Who we contacted vs who replied:
+- "How many X have we reached out to / contacted / messaged" is the outreach log: search_outreach (everyone contacted, all campaigns), reporting uniquePeople. search_leads and the Database only hold people who REPLIED, so they are the answer to "how many X replied", never to "how many did we reach".
+
 Rules that change the answer:
 - Anything client-specific starts with client_summary. Copy, list judgement, why a lead scored as it did, what a reply is worth — all of it depends on what the client sells and who to, and the company name alone is not that. Read the briefing first and reason from it. If a client has no briefing saved, say so plainly and work from the data you do have; never fill the gap with what a company of that name probably does.
 - Only campaigns QC launched count. Every one is named with a client code and a number — CT003, SW019, W040. Campaigns without a code are the client's own attempts from before they hired QC, and the tools already exclude them. Never present an uncoded campaign as QC's work.
@@ -287,8 +294,8 @@ The layout serves the answer and never replaces it. Someone will read this, expo
 
 Lists — short ones are shown, long ones are counted and attached:
 - Up to 25 rows: show them all in a table, with the columns someone would actually use. "Which campaigns are live", "who is awaiting a reply today" usually fit.
-- More than 25 rows: never write the rows out. Typing hundreds of rows takes minutes and nobody reads them. Any tool result with more than 25 rows is automatically attached to your answer as a downloadable CSV (the result says csvAttached and the file name). Answer with the count, the breakdowns that matter (by client, campaign, status, title…) as a stats row or a small table, at most 10 example rows if they help, and one line saying the full list is attached as a CSV.
-- If someone asks for a list as a spreadsheet, the attached CSV is the spreadsheet. Do not rebuild it as a table.
+- More than 25 rows: never write the rows out. Typing hundreds of rows takes minutes and nobody reads them. Any tool result with more than 25 rows is held as a dataset (the result gives its datasetId). Answer with the count, the breakdowns that matter (by client, campaign, status, title…) as a stats row or a small table, at most 10 example rows if they help, then call export_csv ONCE with every dataset that makes up the final list (and dedupeBy so a person found by two lookups appears once). The reader gets exactly one CSV. Say in one line that the full list is attached.
+- If someone asks for a list as a spreadsheet, that one CSV is the spreadsheet. Do not rebuild it as a table.
 
 When there is something to lay out, this order:
 
@@ -515,6 +522,16 @@ export async function runAgent(opts: {
 
   const steps: AgentStep[] = [];
   const startedAt = Date.now();
+  // Long lists gathered during this answer; they leave as one CSV (export_csv), never one per lookup.
+  const datasets: DatasetStore = new Map();
+  let exported = false;
+  /** If the answer gathered long lists but never exported them, hand the reader one merged file anyway. */
+  const flushDatasets = () => {
+    if (exported || !datasets.size) return;
+    const { file } = exportDatasets(datasets, { datasets: [...datasets.keys()], dedupeBy: "name" });
+    emit({ type: "file", name: file.name, mime: file.mime, content: file.content });
+    exported = true;
+  };
   let inputTokens = 0;
   let outputTokens = 0;
   let outOfTime = false;
@@ -540,6 +557,7 @@ export async function runAgent(opts: {
       .trim();
 
     if (!calls.length) {
+      flushDatasets();
       return {
         reply: said,
         steps,
@@ -559,12 +577,20 @@ export async function runAgent(opts: {
         const input = call.input && typeof call.input === "object" ? (call.input as Row) : {};
         emit({ type: "tool", tool: name, input });
         try {
+          if (name === "export_csv") {
+            const { file, rows: count } = exportDatasets(datasets, input);
+            exported = true;
+            emit({ type: "file", name: file.name, mime: file.mime, content: file.content });
+            steps.push({ tool: name, input, ok: true, detail: "" });
+            emit({ type: "tool_done", tool: name, ok: true });
+            return { type: "tool_result", tool_use_id: text(call.id), content: JSON.stringify({ ok: true, file: file.name, rows: count, note: "One CSV is attached to the answer. Mention it once by name; do not list its rows." }) };
+          }
           const result = await runTool(name, input);
           // A tool that produced a file sends it straight to the caller and hands the model everything
           // except its contents. See `takeFile` for why the rows must not go both ways.
           const taken = takeFile(result);
           // A long list becomes a CSV for the reader instead of rows for the model to retype.
-          const { file, rest } = taken.file ? taken : bigListToFile(name, taken.rest);
+          const { file, rest } = taken.file ? taken : { file: null, rest: bigListToDataset(name, taken.rest, datasets) };
           // HeyReach is fetched live on every call (no-store), so the moment a HeyReach tool returns is
           // genuinely when its figures were pulled. Stamp it on the result — grounded, not guessed — so
           // the model can tell the reader how fresh the numbers are. The time is pre-formatted in Eastern
@@ -592,6 +618,7 @@ export async function runAgent(opts: {
     messages.push({ role: "user", content: results });
   }
 
+  flushDatasets();
   return {
     reply: "",
     steps,

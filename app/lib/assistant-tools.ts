@@ -78,7 +78,7 @@ import { onboardingForAssistant, listOnboardingClients, setTaskDone, addTemplate
 import { helpForAssistant, readHelp, searchHelp } from "./help-center";
 import { articlePath } from "./help-shared";
 import { publicBaseUrl } from "./public-url";
-import { DATA_TOOLS, runDataTool } from "./assistant-data";
+import { DATA_TOOLS, EXPORT_TOOL, runDataTool } from "./assistant-data";
 
 type Row = Record<string, unknown>;
 
@@ -503,15 +503,14 @@ const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "search_outreach",
     description:
-      "Search the qc_outreach table — QC's master record of every person contacted across every client, at the contact level. Each row is one outreach: the lead's name and title, the client it was for, and the campaign (id and name) it came from. Use this for questions about QC's outreach as a whole rather than one client's QC Command inbox: 'who have we reached out to at Stripe across all clients', 'which campaign did we contact a person in', 'every VP we have messaged for Cotool', 'how many people did campaign CT049 reach'. Filter by any of client, campaign name, lead name, or lead title; matching is case-insensitive substring. Returns the exact total match count alongside the rows, so a capped list is never mistaken for the whole population. This is a flat outreach log — for a person's full conversation and QC Command's read of their replies, use find_person or search_leads instead.",
+      "THE tool for 'how many X have we reached out to' / 'every CISO we have contacted': search_leads only knows people who REPLIED, this knows everyone contacted. Searches the qc_outreach table — QC's master record of every person contacted across every client, at the contact level. Each row is one outreach: the lead's name and title, the client it was for, and the campaign (id and name) it came from. Use this for questions about QC's outreach as a whole rather than one client's QC Command inbox: 'who have we reached out to at Stripe across all clients', 'which campaign did we contact a person in', 'every VP we have messaged for Cotool', 'how many people did campaign CT049 reach'. Filter by any of client, campaign name, lead name, or lead title; matching is case-insensitive substring. Returns the exact total match count alongside the rows, so a capped list is never mistaken for the whole population. This is a flat outreach log — for a person's full conversation and QC Command's read of their replies, use find_person or search_leads instead.",
     input_schema: {
       type: "object",
       properties: {
-        client: { type: "string", description: "Limit to one client, by the name stored in the outreach table (e.g. cotool, hetz)." },
-        campaign: { type: "string", description: "A campaign-name fragment, e.g. Black Hat or CT049." },
-        name: { type: "string", description: "A lead-name fragment." },
-        title: { type: "string", description: "A job-title fragment, e.g. CISO or VP." },
-        limit: { type: "number", description: "Max rows (default 50)." },
+        client: { type: "array", items: { type: "string" }, description: "Client name fragments as stored in the outreach table (e.g. cotool, hetz). Any of them matches." },
+        campaign: { type: "array", items: { type: "string" }, description: "Campaign-name fragments, e.g. Black Hat or CT049. Any of them matches." },
+        name: { type: "array", items: { type: "string" }, description: "Lead-name fragments." },
+        title: { type: "array", items: { type: "string" }, description: "Job-title fragments; pass EVERY spelling in one call, e.g. [\"CISO\", \"Chief Information Security Officer\", \"Chief Security Officer\"]. Any of them matches." },
       },
     },
   },
@@ -971,7 +970,7 @@ const percent = (fraction: number) => Math.round(fraction * 1000) / 10;
  * than a failed request.
  */
 /** Everything the assistant can call: the purpose-built tools, then general read access to every table. */
-export const TOOLS: ToolDefinition[] = [...BASE_TOOLS, ...(DATA_TOOLS as ToolDefinition[])];
+export const TOOLS: ToolDefinition[] = [...BASE_TOOLS, ...(DATA_TOOLS as ToolDefinition[]), EXPORT_TOOL as ToolDefinition];
 
 export async function runTool(name: string, input: Row): Promise<unknown> {
   switch (name) {
@@ -1089,33 +1088,41 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
 
     case "search_outreach": {
       // qc_outreach is QC's master contact-level log across every client — a flat table, not the
-      // workspace-scoped rr_* tables, so it is queried directly with ilike filters and its own count.
+      // workspace-scoped rr_* tables. Every matching row is read (paged), so the answer counts the whole
+      // population: rows are campaign enrolments, and the same person can be in several campaigns, so
+      // unique people are counted by name as well.
       const conditions = [
         containsAny("client", input.client),
         containsAny("campaign_name", input.campaign),
         containsAny("lead_name", input.name),
         containsAny("lead_title", input.title),
       ].filter(Boolean);
-      const where = conditions.length ? `and=(${conditions.join(",")})` : "";
-      const limit = rowLimit(input.limit, 50);
-      const { url, key } = supabase();
+      const where = conditions.length ? `&and=(${conditions.join(",")})` : "";
       const select = "id,client,campaign_id,campaign_name,lead_name,lead_title";
-      const [outreachRows, total] = await Promise.all([
-        db(`qc_outreach?select=${select}${where ? `&${where}` : ""}&limit=${limit}`).then(rows),
-        countRows(url, key, `qc_outreach?select=id${where ? `&${where}` : ""}`),
-      ]);
-      const matched = total ?? outreachRows.length;
+      const all: Row[] = [];
+      for (let offset = 0; offset < 20_000; offset += 1000) {
+        const page = rows(await db(`qc_outreach?select=${select}${where}&order=id.asc&limit=1000&offset=${offset}`));
+        all.push(...page);
+        if (page.length < 1000) break;
+      }
+      const people = new Map<string, { name: string; title: string; clients: Set<string>; campaigns: Set<string> }>();
+      for (const row of all) {
+        const name = text(row.lead_name);
+        const keyName = name.toLowerCase().replace(/\s+/g, " ").trim();
+        if (!keyName) continue;
+        const person = people.get(keyName) ?? { name, title: text(row.lead_title), clients: new Set<string>(), campaigns: new Set<string>() };
+        if (text(row.client)) person.clients.add(text(row.client));
+        if (text(row.campaign_name)) person.campaigns.add(text(row.campaign_name));
+        people.set(keyName, person);
+      }
+      const byClient: Record<string, number> = {};
+      for (const person of people.values()) for (const c of person.clients) byClient[c] = (byClient[c] ?? 0) + 1;
       return {
-        matched,
-        showing: outreachRows.length,
-        note: matched > outreachRows.length ? `${matched} rows match; showing the first ${outreachRows.length}. Narrow with client, campaign, name or title.` : undefined,
-        outreach: outreachRows.map((row) => ({
-          client: text(row.client),
-          campaign: text(row.campaign_name),
-          campaignId: text(row.campaign_id),
-          name: text(row.lead_name),
-          title: text(row.lead_title),
-        })),
+        enrolments: all.length,
+        uniquePeople: people.size,
+        uniquePeopleByClient: Object.fromEntries(Object.entries(byClient).sort((a, b) => b[1] - a[1])),
+        note: "enrolments = campaign rows matched (one person can be in several campaigns); uniquePeople = distinct names. Report uniquePeople as how many people were reached.",
+        people: [...people.values()].map((p) => ({ name: p.name, title: p.title, clients: [...p.clients].join("; "), campaigns: p.campaigns.size, campaignNames: [...p.campaigns].join("; ") })),
       };
     }
 
@@ -2079,7 +2086,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
 
     case "describe_data":
     case "query_data":
-      return runDataTool(name, input, async (client) => (await resolveClient(client)).id);
+      return runDataTool(name, input, async (client) => (await resolveClient(client)).id, async () => new Map((await clients()).map((c) => [c.id, c.name])));
 
     default:
       throw new Error(`There is no tool called "${name}".`);

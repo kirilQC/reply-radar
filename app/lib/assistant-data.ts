@@ -144,7 +144,12 @@ export const DATA_TOOLS = [
   },
 ];
 
-export async function runDataTool(name: string, input: Row, resolveClientId: (client: unknown) => Promise<string>): Promise<unknown> {
+export async function runDataTool(
+  name: string,
+  input: Row,
+  resolveClientId: (client: unknown) => Promise<string>,
+  clientNames: () => Promise<Map<string, string>> = async () => new Map(),
+): Promise<unknown> {
   if (name === "describe_data") {
     if (!columnsCache || Date.now() - columnsCache.at > 10 * 60_000) {
       const entries = await Promise.all(
@@ -185,7 +190,14 @@ export async function runDataTool(name: string, input: Row, resolveClientId: (cl
     params.push(`limit=${limit}`);
     const { rows, total } = await get(`${table}?${params.join("&")}`, true);
     if (countOnly) return { table, count: total ?? rows.length };
-    const clean = rows.map(redact);
+    // Every row that belongs to a client says which one, by its real name, so nothing has to be inferred
+    // from a campaign code.
+    const names = rows.some((row) => "workspace_id" in row) ? await clientNames() : new Map<string, string>();
+    const clean = rows.map((row) => {
+      const out = redact(row);
+      if ("workspace_id" in row) return { client: names.get(String(row.workspace_id)) ?? "(unknown client)", ...out };
+      return out;
+    });
     return { table, total: total ?? clean.length, returned: clean.length, rows: clean };
   }
 
@@ -230,18 +242,62 @@ function findList(result: unknown): { path: string | null; list: Row[] } | null 
   return best;
 }
 
-export function bigListToFile(tool: string, result: unknown): { file: { name: string; mime: string; content: string } | null; rest: unknown } {
-  if (NO_CSV.has(tool)) return { file: null, rest: result };
+/** Long lists collected during one answer, so they can leave as ONE file rather than one per lookup. */
+export type DatasetStore = Map<string, { tool: string; rows: Row[] }>;
+
+/**
+ * A long list is kept server-side as a dataset for this answer. The model sees enough to count and
+ * summarise plus a dataset id; the reader gets a file only when export_csv is called (or, if the model
+ * never calls it, one merged file at the end of the answer).
+ */
+export function bigListToDataset(tool: string, result: unknown, store: DatasetStore): unknown {
+  if (NO_CSV.has(tool)) return result;
   const found = findList(result);
-  if (!found || found.list.length <= BIG_LIST) return { file: null, rest: result };
-  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
-  const name = `${tool.replace(/_/g, "-")}-${stamp}.csv`;
-  const file = { name, mime: "text/csv", content: toCsv(found.list) };
+  if (!found || found.list.length <= BIG_LIST) return result;
+  const id = `ds${store.size + 1}`;
+  store.set(id, { tool, rows: found.list });
   const partial = found.list.length > MODEL_ROWS ? ` You were given the first ${MODEL_ROWS}; count breakdowns from those and say so.` : " You have every row: count breakdowns exactly from them, never approximate or write \"~\".";
-  const note = `${found.list.length} rows. The full list has been attached to the answer as ${name}, which the reader can download. Do NOT write these rows out. Give the exact count, the useful breakdowns (by client, campaign, status…) and at most 10 example rows in a table, then point to the attached CSV.${partial}`;
+  const note = `${found.list.length} rows, held as dataset ${id}. Do NOT write these rows out. Give the exact count, the useful breakdowns and at most 10 example rows. To hand the reader a spreadsheet, call export_csv ONCE at the end with every dataset that makes up the final list (they are merged and de-duplicated into a single file).${partial}`;
   const kept = found.list.slice(0, MODEL_ROWS);
-  const rest = found.path === null
-    ? { rows: kept, totalRows: found.list.length, csvAttached: name, instruction: note }
-    : { ...(result as Row), [found.path]: kept, [`${found.path}Total`]: found.list.length, csvAttached: name, instruction: note };
-  return { file, rest };
+  return found.path === null
+    ? { rows: kept, totalRows: found.list.length, datasetId: id, instruction: note }
+    : { ...(result as Row), [found.path]: kept, [`${found.path}Total`]: found.list.length, datasetId: id, instruction: note };
+}
+
+export const EXPORT_TOOL = {
+  name: "export_csv",
+  description:
+    "Turn the long lists you gathered in this answer (each tool result over 25 rows says its datasetId) into ONE CSV the reader downloads. Pass every dataset that makes up the final list; they are merged into one file. Pass dedupeBy with the column that identifies a row (e.g. name, linkedin_url, id) to drop duplicates across lookups. Call it once per answer, at the end, only when a list is the answer or a spreadsheet was asked for.",
+  input_schema: {
+    type: "object",
+    properties: {
+      datasets: { type: "array", items: { type: "string" }, description: "Dataset ids, e.g. [\"ds1\", \"ds3\"]." },
+      dedupeBy: { type: "string", description: "Column to de-duplicate on. Optional." },
+      name: { type: "string", description: "A short file name without extension, e.g. cisos-contacted." },
+    },
+    required: ["datasets"],
+  },
+};
+
+const slug = (value: unknown) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+
+/** Merges datasets into one CSV file. */
+export function exportDatasets(store: DatasetStore, input: Row): { file: { name: string; mime: string; content: string }; rows: number } {
+  const ids = (Array.isArray(input.datasets) ? input.datasets : [input.datasets]).map(String).filter((id) => store.has(id));
+  const chosen = ids.length ? ids : [...store.keys()];
+  if (!chosen.length) throw new Error("There is no long list in this answer to export.");
+  const merged: Row[] = [];
+  const seen = new Set<string>();
+  const by = String(input.dedupeBy ?? "").trim();
+  for (const id of chosen) {
+    for (const row of store.get(id)!.rows) {
+      const key = by && row[by] !== undefined ? String(row[by]).toLowerCase().trim() : JSON.stringify(row);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(row);
+    }
+  }
+  const stamp = new Date().toISOString().slice(0, 10);
+  const base = slug(input.name) || slug(store.get(chosen[0])!.tool);
+  return { file: { name: `${base}-${stamp}.csv`, mime: "text/csv", content: toCsv(merged) }, rows: merged.length };
 }
