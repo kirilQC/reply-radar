@@ -4,7 +4,8 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import DashboardHome from "./components/DashboardHome";
 import AppSidebar from "./components/AppSidebar";
@@ -394,9 +395,10 @@ const writeInboxSnapshot = (scope: string, leads: Lead[]) => {
  * rename or recolour or delete any of them. Modelled on the Smartlead control in the screenshot. Closes on
  * an outside click or Escape; every change calls back up to the inbox, which owns the state and the writes.
  */
-function TagMenu({ tags, assigned, onToggle, onCreate, onEdit, onDelete, onClose }: {
+function TagMenu({ tags, assigned, anchorRef, onToggle, onCreate, onEdit, onDelete, onClose }: {
   tags: InboxTag[];
   assigned: string[];
+  anchorRef: RefObject<HTMLButtonElement | null>;
   onToggle: (id: string) => void;
   onCreate: (name: string, color: string) => Promise<string | null>;
   onEdit: (id: string, fields: { name?: string; color?: string }) => void;
@@ -410,13 +412,38 @@ function TagMenu({ tags, assigned, onToggle, onCreate, onEdit, onDelete, onClose
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  // Anchored to the + Tag button with a fixed position, right-aligned to it and clamped to the window, so a
+  // button near the right edge of the detail pane opens a menu that stays on screen rather than clipping off.
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   useEffect(() => {
-    const onDoc = (event: MouseEvent) => { if (ref.current && !ref.current.contains(event.target as Node)) onClose(); };
+    const place = () => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = 244;
+      const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+      // Open downward, or flip above the button when there is not room below.
+      const estimate = 340;
+      const top = rect.bottom + 6 + estimate > window.innerHeight ? Math.max(8, rect.top - estimate - 6) : rect.bottom + 6;
+      setPos({ top, left });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [anchorRef]);
+  useEffect(() => {
+    const onDoc = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (ref.current && !ref.current.contains(target) && !(anchorRef.current && anchorRef.current.contains(target))) onClose();
+    };
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    // Scrolling the thread behind the menu would leave it hanging in the wrong place, so dismiss on any
+    // scroll that is not inside the menu itself.
+    const onScroll = (event: Event) => { const target = event.target; if (target instanceof Element && ref.current?.contains(target)) return; onClose(); };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
-  }, [onClose]);
+    window.addEventListener("scroll", onScroll, true);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onScroll, true); };
+  }, [onClose, anchorRef]);
   const shown = tags.filter((tag) => tag.name.toLowerCase().includes(search.trim().toLowerCase()));
   const submitNew = async () => {
     const name = newName.trim();
@@ -424,8 +451,8 @@ function TagMenu({ tags, assigned, onToggle, onCreate, onEdit, onDelete, onClose
     await onCreate(name, newColor);
     setNewName(""); setNewColor(TAG_COLORS[0]); setCreating(false);
   };
-  return (
-    <div className="tag-menu" ref={ref} onClick={(event) => event.stopPropagation()}>
+  const menu = (
+    <div className="tag-menu" ref={ref} style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, visibility: pos ? "visible" : "hidden" }} onClick={(event) => event.stopPropagation()}>
       {creating ? (
         <div className="tag-menu-create">
           <input autoFocus className="tag-menu-input" value={newName} placeholder="Tag name" maxLength={40}
@@ -477,6 +504,8 @@ function TagMenu({ tags, assigned, onToggle, onCreate, onEdit, onDelete, onClose
       </div>
     </div>
   );
+  // Rendered into <body> so the detail card's overflow:hidden and container-type cannot clip it.
+  return typeof document === "undefined" ? null : createPortal(menu, document.body);
 }
 function Icon({ name }: { name: string }) {
   const paths: Record<string, string> = {
@@ -540,6 +569,7 @@ export function InboxPage() {
   // The shared tag vocabulary, loaded once. Assignments ride on each lead's `tags` from the inbox payload.
   const [tagDefs, setTagDefs] = useState<InboxTag[]>([]);
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const tagBtnRef = useRef<HTMLButtonElement>(null);
   const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const leadsRef = useRef<Lead[]>([]);
@@ -2487,11 +2517,12 @@ export function InboxPage() {
                               <button type="button" title="Remove tag" onClick={() => toggleTag(current, tag.id)}>✕</button>
                             </span>
                           ))}
-                          <button type="button" className="tag-add" onClick={() => setTagMenuOpen((value) => !value)}>+ Tag</button>
+                          <button ref={tagBtnRef} type="button" className="tag-add" onClick={() => setTagMenuOpen((value) => !value)}>+ Tag</button>
                           {tagMenuOpen && (
                             <TagMenu
                               tags={tagDefs}
                               assigned={current.tags ?? []}
+                              anchorRef={tagBtnRef}
                               onToggle={(id) => toggleTag(current, id)}
                               onCreate={createTag}
                               onEdit={editTag}

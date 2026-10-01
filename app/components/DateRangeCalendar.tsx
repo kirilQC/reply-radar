@@ -4,6 +4,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * A date-range picker that opens a calendar rather than asking someone to type mm/dd/yyyy into a native
@@ -34,16 +35,38 @@ export default function DateRangeCalendar({ since, until, onChange, align = "lef
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<Date>(() => parse(since) || parse(until) || new Date());
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Fixed position from the trigger's rect, portaled to <body>, so the calendar is never clipped by a
+  // scrolling config card or the inbox's own overflow, and flips above the button when there is no room below.
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => { if (open) setView(parse(since) || parse(until) || new Date()); }, [open, since, until]);
   useEffect(() => {
     if (!open) return;
-    const onDoc = (event: MouseEvent) => { if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false); };
+    const place = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = 252;
+      const height = 320;
+      const left = align === "right"
+        ? Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))
+        : Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+      const top = rect.bottom + 6 + height > window.innerHeight ? Math.max(8, rect.top - height - 6) : rect.bottom + 6;
+      setPos({ top, left });
+    };
+    place();
+    const onDoc = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (ref.current && !ref.current.contains(target) && !(triggerRef.current && triggerRef.current.contains(target))) setOpen(false);
+    };
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const onScroll = (event: Event) => { const target = event.target; if (target instanceof Element && ref.current?.contains(target)) return; setOpen(false); };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
-  }, [open]);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", onScroll, true);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); window.removeEventListener("resize", place); window.removeEventListener("scroll", onScroll, true); };
+  }, [open, align]);
 
   const start = parse(since);
   const end = parse(until);
@@ -73,14 +96,8 @@ export default function DateRangeCalendar({ since, until, onChange, align = "lef
 
   const label = since || until ? `${short(since) || "Start"} → ${short(until) || "End"}` : "Pick dates";
 
-  return (
-    <div className="cal-wrap" ref={ref}>
-      <button type="button" className={`cal-trigger ${since || until ? "cal-set" : ""}`} onClick={() => setOpen((value) => !value)}>
-        <svg viewBox="0 0 20 20" width="13" height="13" aria-hidden><path fill="currentColor" d="M6 2v2M14 2v2M3 7h14M4 5h12a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z" fillOpacity="0" stroke="currentColor" strokeWidth="1.3" /></svg>
-        {label}
-      </button>
-      {open && (
-        <div className={`cal-pop cal-${align}`} onClick={(event) => event.stopPropagation()}>
+  const popover = open ? (
+    <div className="cal-pop" ref={ref} style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, visibility: pos ? "visible" : "hidden" }} onClick={(event) => event.stopPropagation()}>
           <div className="cal-head">
             <button type="button" aria-label="Previous month" onClick={() => setView(new Date(view.getFullYear(), view.getMonth() - 1, 1))}>‹</button>
             <span>{view.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>
@@ -105,8 +122,16 @@ export default function DateRangeCalendar({ since, until, onChange, align = "lef
             <button type="button" className="cal-clear" onClick={() => onChange("", "")}>Clear</button>
             <button type="button" className="cal-done" onClick={() => setOpen(false)}>Done</button>
           </div>
-        </div>
-      )}
+    </div>
+  ) : null;
+
+  return (
+    <div className="cal-wrap">
+      <button ref={triggerRef} type="button" className={`cal-trigger ${since || until ? "cal-set" : ""}`} onClick={() => setOpen((value) => !value)}>
+        <svg viewBox="0 0 20 20" width="13" height="13" aria-hidden><path fill="currentColor" d="M6 2v2M14 2v2M3 7h14M4 5h12a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z" fillOpacity="0" stroke="currentColor" strokeWidth="1.3" /></svg>
+        {label}
+      </button>
+      {typeof document === "undefined" ? null : createPortal(popover, document.body)}
     </div>
   );
 }

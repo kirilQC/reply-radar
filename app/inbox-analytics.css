@@ -588,11 +588,13 @@ i.tone-muted {
 }
 .tag-chip-removable button:hover { opacity: 1; }
 
-/* Chips under a lead row's name line */
-.lead-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-.lead-tag {
-  display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 8px; font-weight: 700;
-  border: 1px solid transparent; line-height: 1.6; white-space: nowrap;
+/* Chips under a lead row's name line. Scoped under .lead-main so they beat the global
+   `.lead-main span { display:block; overflow:hidden }` rule, which otherwise stretched each
+   chip into a full-width block instead of hugging its text. */
+.lead-main .lead-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; width: auto; overflow: visible; }
+.lead-main .lead-tag {
+  display: inline-block; width: auto; padding: 1px 6px; border-radius: 4px; font-size: 8px; font-weight: 700;
+  border: 1px solid transparent; line-height: 1.6; white-space: nowrap; overflow: visible; text-overflow: clip;
 }
 
 /* The detail-pane tag strip + add control + popover anchor */
@@ -604,9 +606,10 @@ i.tone-muted {
 }
 .tag-add:hover { color: var(--text); border-color: var(--accent); }
 
-/* The popover */
+/* The popover. Fixed-positioned (top/left set inline from the + Tag button's rect) so it escapes the
+   detail card's overflow:hidden and never clips off the right edge of the window. */
 .tag-menu {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 244px;
+  position: fixed; z-index: 60; width: 244px;
   background: var(--panel, #171a22); border: 1px solid var(--border); border-radius: 10px;
   box-shadow: 0 18px 44px #0009; padding: 10px; display: flex; flex-direction: column; gap: 8px;
 }
@@ -659,12 +662,10 @@ i.tone-muted {
 .cal-trigger svg { color: var(--muted-2); }
 
 .cal-pop {
-  position: absolute; top: calc(100% + 6px); z-index: 50; width: 252px; padding: 10px;
+  position: fixed; z-index: 60; width: 252px; padding: 10px;
   background: var(--panel, #171a22); border: 1px solid var(--border); border-radius: 11px;
   box-shadow: 0 18px 44px #0009;
 }
-.cal-pop.cal-left { left: 0; }
-.cal-pop.cal-right { right: 0; }
 .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .cal-head span { font-size: 12px; font-weight: 650; color: var(--text); }
 .cal-head button {

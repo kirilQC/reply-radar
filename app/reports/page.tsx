@@ -9,6 +9,7 @@ import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import VoiceBrief from "../components/VoiceBrief";
 import CallTranscript from "../components/CallTranscript";
+import DateRangeCalendar from "../components/DateRangeCalendar";
 import {
   BUILT_IN_TEMPLATES,
   CAMPAIGN_METRICS,
@@ -1407,14 +1408,7 @@ export default function ReportsPage() {
 
                 {period === "custom" && (
                   <div className="config-custom-range">
-                    <label>
-                      From
-                      <input type="date" value={customSince} onChange={(e) => setCustomSince(e.target.value)} />
-                    </label>
-                    <label>
-                      To
-                      <input type="date" value={customUntil} onChange={(e) => setCustomUntil(e.target.value)} />
-                    </label>
+                    <DateRangeCalendar since={customSince} until={customUntil} onChange={(since, until) => { setCustomSince(since); setCustomUntil(until); }} />
                   </div>
                 )}
               </div>
