@@ -706,3 +706,25 @@ i.tone-muted {
 }
 .tagfilter-pill span { opacity: .7; font-weight: 600; }
 .tagfilter-pill:hover span { opacity: 1; }
+
+/* ── Inbox loading skeleton ──────────────────────────────────────────────
+   Shimmering placeholder rows while /api/inbox is in flight, so a slow load
+   reads as "working" rather than "crashed". Laid out on the same grid as a
+   real .lead-row so the columns line up under the header. */
+.inbox-skeleton { display: block; }
+.skeleton-row { pointer-events: none; opacity: 0; animation: sk-fade .25s ease forwards; }
+.skeleton-row:hover { background: transparent; }
+@keyframes sk-fade { to { opacity: 1; } }
+.sk {
+  display: block; border-radius: 6px;
+  background: linear-gradient(100deg, var(--panel-2, #1a1d26) 30%, color-mix(in srgb, var(--border) 60%, var(--panel-2, #1a1d26)) 50%, var(--panel-2, #1a1d26) 70%);
+  background-size: 200% 100%; animation: sk-shimmer 1.3s ease-in-out infinite;
+}
+@keyframes sk-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.sk-avatar { width: 28px; height: 28px; border-radius: 6px; flex: none; }
+.sk-lines { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.sk-line { height: 9px; }
+.sk-line-lg { width: 65%; }
+.sk-line-sm { width: 40%; height: 7px; }
+.sk-cell { width: 70%; height: 9px; }
+.sk-cell-sm { width: 45%; height: 9px; }

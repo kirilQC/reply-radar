@@ -2277,7 +2277,25 @@ export function InboxPage() {
                     {filter === "follow-ups" && <span>URGENCY</span>}
                   </div>
                   {inboxLoading && (
-                    <p className="empty-state">Loading conversations…</p>
+                    <div className="inbox-skeleton" aria-busy="true" aria-label="Loading conversations">
+                      {Array.from({ length: 8 }).map((_, index) => (
+                        <div className="lead-row skeleton-row" key={index} style={{ animationDelay: `${index * 80}ms` }}>
+                          <div className="lead-main">
+                            <span className="sk sk-avatar" />
+                            <div className="sk-lines">
+                              <span className="sk sk-line sk-line-lg" />
+                              <span className="sk sk-line sk-line-sm" />
+                            </div>
+                          </div>
+                          <span className="sk sk-line sk-cell" />
+                          <span className="sk sk-line sk-cell" />
+                          <span className="sk sk-line sk-cell-sm" />
+                          <span className="sk sk-line sk-cell" />
+                          <span className="sk sk-line sk-cell-sm" />
+                          <span className="sk sk-line sk-cell-sm" />
+                        </div>
+                      ))}
+                    </div>
                   )}
                   {!inboxLoading && inboxError && (
                     <p className="empty-state error-text">{inboxError}</p>
