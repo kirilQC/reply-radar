@@ -200,7 +200,7 @@ The Slack button on a saved task posts its status to the client's internal chann
 4. Copy the two webhook URLs into HeyReach (incoming replies) and the booking tool (booked meetings).
 5. Work down the checklist. When it's done, click **Mark fully onboarded ✓**.
 
-Use **Client onboarding updates** to post progress to the client's internal Slack channel. **Edit template** changes the checklist for every future client.`,
+Use **Client onboarding updates** to send progress to the client's shared Slack channel. **Edit template** changes the checklist for every future client.`,
   },
   {
     id: "w-jev",
@@ -243,7 +243,7 @@ Numbers can be up to a day old. Click **Sync now** for the latest from HeyReach.
     body: `1. Open **Reports** and pick a client, or **All clients**.
 2. Choose a template, like the EOW report or the all-time executive summary, or **Build your own report**.
 3. Set the **Date range** or **Period**, pick campaigns, and tick the sections you want.
-4. Click **Generate PDF**, or copy the **Email to send**.
+4. Click **Generate report**. Email templates give you an **Email to send** to copy.
 
 Save your own format with **+ Add template**. Past runs are kept under **Past reports**.`,
   },
@@ -253,7 +253,7 @@ Save your own format with **+ Add template**. Past runs are kept under **Past re
     title: "Asking the MCP assistant",
     page: "/mcp",
     keywords: ["mcp", "assistant", "ask", "ai", "chat", "question", "skill", "prompt"],
-    images: [shot("mcp", "Start from a suggested prompt, or ask your own.")],
+    images: [shot("mcp.jpg", "Start from a suggested prompt, or ask your own.")],
     body: `The **MCP** page is a chat with the same assistant as QC Bot in Slack. It can read campaigns, replies, the Database, the QC Brain, meetings, deals and these help articles.
 
 1. Open **MCP** and click a suggested prompt, or type your own question.
@@ -269,6 +269,7 @@ Save your own format with **+ Add template**. Past runs are kept under **Past re
     title: "Using QC Bot in Slack",
     page: "/slack",
     keywords: ["slack", "qc bot", "bot", "mention", "dm", "ask in slack", "correct brief"],
+    images: [shot("bot-log.jpg", "Every question QC Bot answers is logged in Configuration → AI → Slack bot log.")],
     body: `- **In a channel:** mention **@QC Bot** with your question. It replies in a thread. Messages that don't tag it are ignored.
 - **In a DM:** just write to it. It remembers the conversation.
 - It reacts 👀 while it works and ✅ when it's done. Any files it makes are attached in the thread.
@@ -298,6 +299,7 @@ It can answer anything the MCP page can: replies, campaigns, leads, meetings, pr
     title: "Adding a company to Do Not Contact",
     page: "",
     keywords: ["dnc", "do not contact", "blacklist", "exclude", "clay", "suppress"],
+    images: [shot("qc-brain.jpg", "Each client's Do not contact list is linked from their QC Brain page.")],
     body: `DNC lists are per client and managed by asking QC Bot (or the MCP page):
 
 - "Add Acme to Willow's DNC"
@@ -330,6 +332,7 @@ You can also ask the brain a question instead of browsing it, here or in Slack.`
     title: "Deals and attribution",
     page: "/deals",
     keywords: ["deal", "crm", "hubspot", "attio", "attribution", "pipeline", "revenue"],
+    images: [shot("deals.jpg", "A client's deal pipeline, with QC's share up top."), shot("deal-drawer.jpg", "Matched on explains why a deal was credited to QC.")],
     body: `1. Open **Deals** and pick a client. If their CRM isn't connected, pick **HubSpot** or **Attio**, paste the API key and click **Connect & sync**.
 2. Deals that QC sourced are matched automatically. **Matched on** explains why.
 3. "Possible" matches (same company) need a check. Click **✓ Verified by you**, or **Not a QC deal**.
@@ -377,6 +380,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "What do teammates see that I change?",
     page: "",
     keywords: ["shared", "team", "private", "star", "tag", "visible"],
+    images: [shot("tag-menu.jpg", "Tags are shared. A tag added here shows for the whole team.")],
     body: `- **Shared with everyone:** tags, sent replies, client settings, Help articles, tasks, meetings, DNC.
 - **Just yours:** stars, Inbox layout, Appearance, saved MCP prompts.`,
   },
@@ -386,6 +390,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "Why don't \"this week\" numbers match?",
     page: "/inbox",
     keywords: ["this week", "numbers", "mismatch", "monday", "sunday", "count"],
+    images: [shot("inbox-toolbar.jpg", "The Inbox time ranges.")],
     body: `The Inbox's **This week** counts from Sunday. The Dashboard's **Replies this week** counts from Monday. Both use the time zone set in Appearance.`,
   },
   {
@@ -394,6 +399,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "How fast do new replies show up?",
     page: "/inbox",
     keywords: ["sync", "delay", "new reply", "missing reply", "webhook", "refresh"],
+    images: [shot("inbox-queue.jpg", "Last synced shows when replies last came in.")],
     body: `HeyReach sends each reply to QC Command as it lands, so it should appear on its own. If a thread looks out of date, open it and click the refresh icon (**Refresh conversation from HeyReach**).`,
   },
   {
@@ -402,6 +408,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "What does the AI know about my client?",
     page: "/admin",
     keywords: ["ai", "brief", "context", "prompt", "why did ai", "knowledge"],
+    images: [shot("client-context.jpg", "The client brief and documents every AI run reads.")],
     body: `Drafts and scores read the client's **CLIENT BRIEF** and any uploaded client documents (Configuration → AI → **Client AI context**), plus the conversation itself. Update the brief and the next draft uses it straight away.`,
   },
   {
@@ -410,6 +417,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "What uses enrichment credits?",
     page: "/cold-calling",
     keywords: ["credits", "ai ark", "cost", "enrich", "phone"],
+    images: [shot("lead-drawer.jpg", "Enrich next to Phone number uses credits.")],
     body: `AI Ark credits are used by **Enrich** on a lead's phone number (5 credits) and by **Fetch & enrich** in Cold calling (one lookup per person).`,
   },
 
@@ -432,6 +440,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "The morning brief didn't post",
     page: "/slack",
     keywords: ["brief", "didn't post", "missing brief", "slack", "morning"],
+    images: [shot("morning-brief.jpg", "A red check (like Bead's missing HeyReach key) stops the brief for that client.")],
     body: `1. Open **Slack → Morning brief** and check the client is **On**.
 2. Look at its readiness checks. Any failing check (HeyReach, Slack or Granola) stops it.
 3. Check the internal channel ID is right in Configuration.
@@ -443,6 +452,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "The client list or numbers look wrong",
     page: "",
     keywords: ["wrong", "stale", "old", "client list", "dash", "numbers"],
+    images: [shot("dashboard.jpg", "A dash where a number should be means it couldn't load.")],
     body: `A dash where a number should be means the data couldn't load. Refresh the page. If it keeps happening, open **System health** to see which service is down. The sidebar client list is remembered from your last visit, so it can look out of date until the page reloads.`,
   },
   {
@@ -451,6 +461,7 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "A lead I deleted came back",
     page: "/database",
     keywords: ["deleted", "came back", "reappeared", "block", "remove lead"],
+    images: [shot("danger-zone.jpg", "Use Block lead, not Delete lead, to stop them for good.")],
     body: `**Delete lead** only removes what's there now. Their next reply brings them back. Use **Block lead** instead (Database → the lead → **Danger zone**) to stop them for good.`,
   },
 
@@ -461,9 +472,10 @@ Click **Save appearance**, or just click away. It's saved to your profile.`,
     title: "Getting help",
     page: "",
     keywords: ["help", "support", "contact", "bug", "feedback", "kiril", "ticket"],
+    images: [shot("feedback.jpg", "Configuration → Feedback.")],
     body: `1. **Search this page** first.
 2. **Ask @QC Bot** in Slack, or use the **MCP** page. It reads these articles.
-3. **Report a bug** with **Send feedback** in Configuration → **Feedback**. Add a screenshot if you can.
+3. **Report a bug** in Configuration → **Feedback**. Add a screenshot if you can.
 4. Still blocked? Message Kiril.`,
   },
   // ── More walkthroughs ─────────────────────────────────────────────────────
@@ -500,6 +512,7 @@ Want fewer or more alerts? Change **FOLLOW-UP ALERT THRESHOLD** or **FOLLOW-UP P
     title: "Sentiment and re-scoring a reply",
     page: "/inbox",
     keywords: ["sentiment", "positive", "negative", "neutral", "rescore", "wrong sentiment"],
+    images: [shot("sentiment.jpg", "The sentiment badge on an open conversation.")],
     body: `Every reply gets a sentiment badge: **Positive**, **Neutral** or **Negative**.
 
 - **Looks wrong?** Click the badge on the open conversation to re-score it with the current rules.
@@ -512,6 +525,7 @@ Want fewer or more alerts? Change **FOLLOW-UP ALERT THRESHOLD** or **FOLLOW-UP P
     title: "Lead score and tiers",
     page: "/inbox",
     keywords: ["lead score", "icp score", "score", "tier", "hot", "warm", "nurture", "fit"],
+    images: [shot("lead-score.jpg", "LEAD SCORE is the last column of the queue.")],
     body: `The **LEAD SCORE** column is how well a lead fits the client's ICP, scored by the AI from their profile.
 
 - Sort by it with **Filters → Sort → Score**.
@@ -539,6 +553,7 @@ Don't want them? Turn off **Show inbox analytics** in the **⚙** Inbox layout p
     title: "General inbox, client inbox and your inbox",
     page: "/inbox",
     keywords: ["general inbox", "my inbox", "client inbox", "profile inbox", "scope"],
+    images: [shot("profile-inbox.jpg", "A teammate's own inbox, with only their clients.")],
     body: `There are three ways to open the Inbox:
 
 - **General inbox**: every client at once. Click **Inbox** in the sidebar.
@@ -553,6 +568,7 @@ Each one remembers its own layout.`,
     title: "Exporting leads to a spreadsheet",
     page: "/database",
     keywords: ["export", "csv", "download", "spreadsheet", "excel", "list"],
+    images: [shot("database.jpg", "Export CSV ↓ sits at the top right of the Database.")],
     body: `- **Database:** set your filters, then click **Export CSV ↓**.
 - **Inbox:** click **Export ↓** above the queue. It exports what you're looking at.
 - **Cold calling:** **Export** downloads the call list.
@@ -564,6 +580,7 @@ Each one remembers its own layout.`,
     title: "Blocking a lead for good",
     page: "/database",
     keywords: ["block", "unblock", "stop", "remove", "spam", "never show"],
+    images: [shot("danger-zone.jpg", "Danger zone at the bottom of a lead's record.")],
     body: `1. Open the lead in **Database**.
 2. Scroll to **Danger zone** and click **Block lead**.
 
@@ -603,6 +620,7 @@ Not every lead has a findable number.`,
     title: "Logging call outcomes",
     page: "/cold-calling",
     keywords: ["outcome", "voicemail", "callback", "interested", "no answer", "called", "notes"],
+    images: [shot("call-outcomes.jpg", "Pick an outcome, add a note, then Save & next.")],
     body: `After each call, pick what happened: **Connected**, **Voicemail**, **No answer**, **Interested**, **Callback**, **Not interested**, **Bad number** or **Do not call**.
 
 Add a note if useful, then click **Save & next →**. You need an outcome or a note to save. **Skip** moves on without saving.
@@ -615,6 +633,7 @@ The tabs at the top of the list (**All**, **Replied**, **No reply**, **Called**)
     title: "Writing a call script",
     page: "/cold-calling",
     keywords: ["script", "call script", "talk track", "pitch"],
+    images: [shot("call-script.jpg", "The CALL SCRIPT tab on the right edge.")],
     body: `1. Open the client in **Cold calling**.
 2. Click the **CALL SCRIPT** tab on the right edge.
 3. Type or paste the script. It saves as you go (**Saved ✓**).
@@ -627,6 +646,7 @@ Each client has one script, shared by everyone who calls for them.`,
     title: "Grouping clients into a View",
     page: "/project-management",
     keywords: ["view", "group", "portfolio", "healthtech", "board"],
+    images: [shot("pm-new-view.jpg", "+ New view.")],
     body: `A View puts several clients on one board, like all your healthtech clients.
 
 1. In **Project management**, click **+ New view**.
@@ -641,6 +661,7 @@ Open it from **VIEWS** at the top of the page.`,
     title: "Posting a task update to Slack",
     page: "/project-management",
     keywords: ["slack", "post", "update", "status", "internal channel"],
+    images: [shot("pm-task.jpg", "The Slack button at the top of a saved task.")],
     body: `1. Make sure the client has an internal channel. In **Project management**, click **⋯** on the client and **Set internal Slack channel**.
 2. Open a task and save it.
 3. Click the task's Slack button. Its status is posted to that channel.
@@ -653,6 +674,7 @@ The button stays disabled until the task is saved.`,
     title: "Managing tasks from Slack",
     page: "/project-management",
     keywords: ["slack", "qc bot", "create task", "update task", "tasks"],
+    images: [shot("bot-log.jpg", "Tasks created from Slack show up in the Slack bot log and on the board.")],
     body: `Ask **@QC Bot** and it updates the board for you:
 
 - "Add a task for Kuddo: launch KD009, due Friday, assign Kori"
@@ -667,6 +689,7 @@ Everything it does shows up in **Project management** straight away.`,
     title: "Editing the onboarding checklist",
     page: "/onboarding",
     keywords: ["template", "checklist", "steps", "onboarding template"],
+    images: [shot("onboarding-template.jpg", "The onboarding template.")],
     body: `1. In **Onboarding**, click **Edit template**.
 2. Use **Add step** and **Add sub-step**. Group steps with a **Section (optional)**.
 3. Reorder with move up and down, or **Edit** and **Delete** a step.
@@ -679,9 +702,10 @@ Changes apply to clients you add from now on.`,
     title: "Posting onboarding updates to Slack",
     page: "/onboarding",
     keywords: ["onboarding update", "slack", "progress", "template message"],
+    images: [shot("onboarding-updates.jpg", "Client onboarding updates, ready to send to the client's shared channel.")],
     body: `1. Open the client in **Onboarding**.
 2. Under **Client onboarding updates**, click **Start from a template** or write your own.
-3. Click **Send to Slack**. It posts to the client's internal channel.
+3. Click **Send to client channel**. It posts to the client's shared channel, so they see it.
 
 **Manage templates** saves messages you reuse. Write **{client}** and it becomes the client's name.`,
   },
@@ -691,6 +715,7 @@ Changes apply to clients you add from now on.`,
     title: "Tuning how strict Jev is",
     page: "/jev",
     keywords: ["jev", "threshold", "weighted", "must-pass", "strict", "too many maybes"],
+    images: [shot("jev-questions.jpg", "Each question shows its role (Must-have, Exclusion…) and what counts as a fit.")],
     body: `- **Question roles:** mark each question **Must-have**, **Key**, **Exclusion** or **Signal**.
 - **Verdict mode:** **Weighted** adds the answers up. **Must-pass** drops anyone who fails a must-have.
 - **Thresholds:** **Keep at or above** and **Drop below** set the cut-offs.
@@ -704,8 +729,9 @@ Click **Save questions**, then **Run again**.`,
     title: "Tagging a company list with Jev",
     page: "/jev",
     keywords: ["company list", "accounts", "tag companies", "jev tags"],
+    images: [shot("jev-companies.jpg", "Company lists: describe the tags, then Build Jev setup.")],
     body: `1. Open the client in **Jev** and choose **Company lists**.
-2. Under **Describe how to tag the companies**, write the tags you want, then **Save tags**.
+2. Under **Describe how to tag the companies**, write the tags you want, then click **Build Jev setup**.
 3. Drop the CSV in and click **Run**.
 4. Click **Download all, tagged** for the whole list with Jev's tags added.`,
   },
@@ -715,6 +741,7 @@ Click **Save questions**, then **Run again**.`,
     title: "Making your own report template",
     page: "/reports",
     keywords: ["template", "report template", "custom report", "monthly recap"],
+    images: [shot("reports-client.jpg", "+ ADD TEMPLATE sits above a client's templates.")],
     body: `1. In **Reports**, click **+ Add template**.
 2. Name it, write a one-line card description, and choose **An email to send** or **A PDF document**.
 3. Write the prompt: what the report should cover and how it should sound.
@@ -726,6 +753,7 @@ Click **Save questions**, then **Run again**.`,
     title: "Styling a PDF report",
     page: "/reports",
     keywords: ["pdf", "style", "cover", "accent", "branding", "prepared by", "sections"],
+    images: [shot("report-build.jpg", "Choose the period, campaigns and sections, then Generate report.")],
     body: `When you run a report you can choose:
 
 - **Sections**: tick only what this client cares about, like Booked meetings or Hot conversations.
@@ -733,7 +761,7 @@ Click **Save questions**, then **Run again**.`,
 - **Accent**, **Cover**, **Headings**, **Density** and **Page budget** for the look.
 - **Edit prompt** to change what gets written.
 
-Then click **Generate PDF**.`,
+Then click **Generate report**.`,
   },
   {
     id: "w-mcp-files",
@@ -741,6 +769,7 @@ Then click **Generate PDF**.`,
     title: "Attaching files and downloading answers in MCP",
     page: "/mcp",
     keywords: ["attach", "upload", "screenshot", "pdf", "spreadsheet", "download", "csv"],
+    images: [shot("mcp.jpg", "The paperclip sits left of the question box.")],
     body: `- **Attach:** click the paperclip, or drag a screenshot, PDF or spreadsheet onto the chat. Then ask about it ("which of these companies are already in our database?").
 - **Download:** tables in answers have **Download CSV** and **Download PDF**. Files the assistant makes appear as chips you can click.
 - **Start over:** click **+** for a new conversation.`,
@@ -751,6 +780,7 @@ Then click **Generate PDF**.`,
     title: "Saving your own MCP prompts",
     page: "/mcp",
     keywords: ["saved prompt", "prompt", "shortcut", "reuse", "favorite question"],
+    images: [shot("mcp-save-prompt.jpg", "Name it, write the question, Save.")],
     body: `1. On **MCP**, click **+ Save a prompt of your own**.
 2. Name it and write the question.
 3. Click **Save**. It appears under **Yours**. Click it any time to run it.
@@ -763,6 +793,7 @@ Click **×** to forget one. Saved prompts live in this browser only.`,
     title: "Correcting a brief QC Bot posted",
     page: "/slack",
     keywords: ["correct", "fix brief", "wrong line", "edit brief", "strike"],
+    images: [shot("bot-log.jpg", "Corrections show up in the Slack bot log like any other question.")],
     body: `1. Find the morning brief or EOW report in Slack.
 2. Reply in its thread and tag **@QC Bot** with the fix: "strike the line about Acme" or "the meeting was Thursday, not Friday".
 3. The bot edits the original post.
@@ -775,6 +806,7 @@ It won't wipe a post, only change the part you point at.`,
     title: "Setting up a Personal assistant",
     page: "/slack",
     keywords: ["personal assistant", "dm", "my brief", "member id", "teammate brief"],
+    images: [shot("personal-assistant.jpg", "Each teammate's assistant, with their clients and schedule.")],
     body: `The Personal assistant DMs one teammate a morning brief across all their clients.
 
 1. Open **Slack → Personal assistant** and click **+ Add person**.
@@ -788,6 +820,7 @@ It won't wipe a post, only change the part you point at.`,
     title: "Call analysis after a client call",
     page: "/slack",
     keywords: ["call analysis", "granola", "transcript", "call recap", "meeting notes"],
+    images: [shot("call-analysis.jpg", "Call analysis: which clients are on and whether their calls can be read.")],
     body: `When a client call is recorded in Granola, QC Command writes a call analysis and posts it to Slack. It checks for new calls every hour, 5 AM to 8 PM Eastern.
 
 For it to work:
@@ -814,6 +847,7 @@ Missing documents are marked on the client's page, so you can see what still nee
     title: "Editing the AI prompts",
     page: "/admin",
     keywords: ["prompt", "ai", "system prompt", "morning brief prompt", "sentiment prompt"],
+    images: [shot("ai-prompts.jpg", "Configuration → AI → Prompts.")],
     body: `1. Go to Configuration → **AI** → **Prompts**.
 2. Pick the prompt: Sentiment analysis, Create ICP doc or Morning brief.
 3. Edit and save. The next run uses it.
@@ -826,6 +860,7 @@ Missing documents are marked on the client's page, so you can see what still nee
     title: "Giving the AI a client's documents",
     page: "/admin",
     keywords: ["upload", "documents", "pdf", "docx", "context", "case study", "pitch deck"],
+    images: [shot("client-context.jpg", "Client brief & documents, with Upload client documents underneath.")],
     body: `1. Go to Configuration → **AI** → **Client AI context** and pick the client.
 2. Paste the **CLIENT BRIEF** (the output of /client-summary works well).
 3. Use **Upload client documents** for PDFs, Word files or text: case studies, pricing, FAQs.
@@ -838,6 +873,7 @@ Every draft, ICP score and follow-up score for that client reads these.`,
     title: "Adding your Granola key",
     page: "/admin",
     keywords: ["granola", "api key", "calls", "transcripts", "grn"],
+    images: [shot("granola.jpg", "Configuration → Granola keys.")],
     body: `1. Go to Configuration → **Granola keys**.
 2. Choose **WHOSE KEY** it is and paste the **API KEY** (it starts with grn_).
 3. Save.
@@ -850,9 +886,11 @@ Your client calls can now feed call analysis and the morning briefs. **Remove** 
     title: "Sending feedback or a bug report",
     page: "/admin",
     keywords: ["feedback", "bug", "report a problem", "idea", "feature request"],
+    images: [shot("feedback.jpg", "Configuration → Feedback.")],
     body: `1. Go to Configuration → **Feedback**.
-2. Click **Send feedback**. Describe **WHAT HAPPENED**, add a screenshot if you can, and your name.
-3. Submit.
+2. Pick **Bug**, **Idea** or **Something else**.
+3. Describe **WHAT HAPPENED** and click **Attach a screenshot** if you can. Leave **Staying anonymous** on, or add your name.
+4. Click **Submit**.
 
 Everything sent is listed under **Submitted feedback** with its status.`,
   },
@@ -862,6 +900,7 @@ Everything sent is listed under **Submitted feedback** with its status.`,
     title: "Checking the Audit log and Slack bot log",
     page: "/admin",
     keywords: ["audit", "log", "history", "who changed", "bot log", "events"],
+    images: [shot("audit.jpg", "The Audit log."), shot("bot-log.jpg", "The Slack bot log.")],
     body: `- **Audit log** (Configuration → **Audit log**): every change and event. Search, filter by **Source**, **Status** or date, and **Export CSV ↓**.
 - **Slack bot log** (Configuration → **AI** → **Slack bot log**): every question QC Bot was asked and what it did. Start here when the bot gives a strange answer.`,
   },
@@ -886,6 +925,7 @@ It's read-only, so nothing here can break anything.`,
     title: "Removing a client",
     page: "/admin",
     keywords: ["remove", "delete client", "offboard", "churn", "workspace"],
+    images: [shot("admin.png", "Open the client from the Client directory, then scroll to Remove workspace.")],
     body: `1. Go to Configuration → **Client directory** and open the client.
 2. Scroll to **Remove workspace**.
 3. Type the client's name to confirm, then remove.
@@ -898,6 +938,7 @@ This can't be undone, so export anything you need first.`,
     title: "Writing a Help article",
     page: "/help",
     keywords: ["help article", "edit help", "loom", "write guide", "add article"],
+    images: [shot("help-editor.jpg", "Edit help → + Add article.")],
     body: `1. On **Help**, click **Edit help**.
 2. Click **+ Add article**. Pick the section and the page it's about.
 3. Write the steps in Markdown: **bold**, - bullets, 1. numbered steps.
@@ -912,6 +953,7 @@ QC Bot reads these too, so a good article means better answers in Slack.`,
     title: "Using QC Command on your phone",
     page: "",
     keywords: ["mobile", "phone", "iphone", "small screen", "menu"],
+    images: [shot("sidebar.jpg", "On a phone the sidebar opens from the menu button.")],
     body: `QC Command works in your phone's browser. Tap the menu button at the top left (**Open navigation**) to reach every page.
 
 For quick questions on the go, DM **@QC Bot** in Slack instead.`,
@@ -924,6 +966,7 @@ For quick questions on the go, DM **@QC Bot** in Slack instead.`,
     title: "Can I unsend a reply?",
     page: "/inbox",
     keywords: ["unsend", "undo", "delete message", "sent by mistake"],
+    images: [shot("inbox-draft.jpg", "Check the draft before Send reply. It can't be taken back.")],
     body: `Not from QC Command. A reply goes out on LinkedIn through HeyReach the moment you click **Yes, send it**. That confirmation step is there so you can check the lead and sender first.`,
   },
   {
@@ -932,6 +975,7 @@ For quick questions on the go, DM **@QC Bot** in Slack instead.`,
     title: "What's the difference between the Client brief and the QC Brain?",
     page: "/qc-brain",
     keywords: ["brief", "brain", "difference", "context", "icp"],
+    images: [shot("client-context.jpg", "The Client brief, in Configuration."), shot("qc-brain.jpg", "The QC Brain, with every document.")],
     body: `- **Client brief**: a short summary of the client in Configuration. Every AI draft and score reads it.
 - **QC Brain**: the full library of the client's documents (ICP, personas, voice guide, notes). The assistant and QC Bot search it when you ask.
 
@@ -943,6 +987,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "Where do booked meetings come from?",
     page: "/meetings",
     keywords: ["meetings", "calendly", "booked", "missing meeting"],
+    images: [shot("meetings.jpg", "Booked meetings arrive here.")],
     body: `From the client's booking tool, through the **Meetings webhook** set up during onboarding. You can also add one with **Add meeting**. A missing meeting usually means the webhook isn't set up for that client yet.`,
   },
   {
@@ -951,6 +996,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "Why are dates in the wrong time zone?",
     page: "",
     keywords: ["time zone", "timezone", "wrong time", "dates", "today"],
+    images: [shot("appearance", "DASHBOARD TIME ZONE in the Appearance panel.")],
     body: `Dates and "today" follow the **DASHBOARD TIME ZONE** in Appearance (the **◐** button, top right). Set it to where you are.`,
   },
   {
@@ -959,6 +1005,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "Which AI writes the drafts?",
     page: "/admin",
     keywords: ["model", "claude", "anthropic", "which ai", "gpt"],
+    images: [shot("ai-overview.jpg", "Configuration → AI → Overview shows the model.")],
     body: `Claude, made by Anthropic. The model and usage are under Configuration → **AI** → **Overview**. Jev uses its own model.`,
   },
   {
@@ -967,6 +1014,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "Why isn't a client in Cold calling?",
     page: "/cold-calling",
     keywords: ["missing client", "cold calling", "not listed", "heyreach"],
+    images: [shot("cc-directory.jpg", "Only clients with HeyReach connected are listed.")],
     body: `Cold calling only lists clients with a working HeyReach connection. Add their HeyReach API key in Configuration → the client → **HeyReach connection**.`,
   },
 
@@ -977,6 +1025,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "The AI draft is empty or off",
     page: "/inbox",
     keywords: ["draft", "empty", "bad draft", "wrong draft", "not generating", "ai"],
+    images: [shot("inbox-draft.jpg", "The AI DRAFT and Regenerate ↻.")],
     body: `1. Give it a moment. It says **Generating a draft…** while it works.
 2. Click **Regenerate ↻**.
 3. Still off? Improve the client's **CLIENT BRIEF** and documents (Configuration → AI → **Client AI context**).
@@ -988,6 +1037,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "My reply didn't send",
     page: "/inbox",
     keywords: ["send failed", "didn't send", "error sending", "stuck"],
+    images: [shot("conversation.jpg", "Refresh the conversation to see whether it went out.")],
     body: `1. Open the conversation and click refresh (**Refresh conversation from HeyReach**). It may have sent after all.
 2. Check the sender's LinkedIn account is still connected in HeyReach.
 3. Check the client's HeyReach key in Configuration, and **System health**.
@@ -999,6 +1049,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "QC Bot isn't answering",
     page: "/slack",
     keywords: ["bot", "no answer", "silent", "not responding", "qc bot"],
+    images: [shot("bot-log.jpg", "The Slack bot log shows every run and its outcome.")],
     body: `1. In a channel, you must **@mention** it. Untagged messages are ignored.
 2. Look for 👀. If it's there, it's still working.
 3. Check Configuration → **AI** → **Slack bot log** for what happened.
@@ -1010,6 +1061,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "I can't turn a client On for an automation",
     page: "/slack",
     keywords: ["can't turn on", "disabled", "toggle", "readiness", "greyed out"],
+    images: [shot("morning-brief.jpg", "A red check means that client can't be turned On yet.")],
     body: `The **On** switch stays disabled until every readiness check passes. Look at the client's row: the failing one (HeyReach, Slack or Granola) tells you what to fix, usually a missing channel ID or key in Configuration.`,
   },
   {
@@ -1018,6 +1070,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "Jev or QC Brain says it isn't set up",
     page: "/jev",
     keywords: ["not set up", "not connected", "banner", "missing key", "openrouter", "github token"],
+    images: [shot("jev.jpg", "A connected client shows Jev connected under its name.")],
     body: `These need a key added by an admin. Jev needs its AI key, and the QC Brain needs a GitHub token. Send Kiril the message shown on the page.`,
   },
   {
@@ -1026,6 +1079,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "A deal is credited to QC by mistake",
     page: "/deals",
     keywords: ["deal", "attribution", "wrong", "not ours", "credited"],
+    images: [shot("deal-drawer.jpg", "Not a QC deal removes the attribution.")],
     body: `Open the deal and click **Not a QC deal**. It's removed from QC's totals. **Restore QC attribution** undoes it. **Matched on** shows why it was linked in the first place.`,
   },
   {
@@ -1034,6 +1088,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "I can't find a tag",
     page: "/inbox",
     keywords: ["tag missing", "lost tag", "tag gone", "renamed"],
+    images: [shot("tag-menu.jpg", "Search or recreate tags from the + Tag menu.")],
     body: `Tags are shared, so a teammate may have renamed or deleted it. Open **+ Tag** and use **Search tags…**. If it's gone, **+ Create tag** makes it again.`,
   },
 
@@ -1044,6 +1099,7 @@ Keep the brief short and current. Put the detail in the Brain.`,
     title: "What to put in a bug report",
     page: "/admin",
     keywords: ["bug report", "what to include", "screenshot", "steps"],
+    images: [shot("feedback.jpg", "Pick Bug, describe it and attach a screenshot.")],
     body: `The fastest fixes come from reports that say:
 
 1. **Where:** the page and the client.
@@ -1051,6 +1107,6 @@ Keep the brief short and current. Put the detail in the Brain.`,
 3. **What happened** vs what you expected.
 4. **A screenshot**, and the lead's name if it's about one.
 
-Send it from Configuration → **Feedback**.`,
+Send it from Configuration → **Feedback**, as a **Bug**.`,
   },
 ];

@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BrandIcon, BrandWordmark } from "./BrandMark";
 
-const items = [
+export const NAV_ITEMS = [
   ["/", "Dashboard", "dashboard"],
   ["/inbox", "Inbox", "inbox"],
   ["/database", "Database", "database"],
@@ -33,7 +33,7 @@ const items = [
   ["/admin", "Configuration", "settings"],
   ["/help", "Help", "help"],
 ] as const;
-const iconPaths: Record<string, string> = {
+export const iconPaths: Record<string, string> = {
   dashboard: "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
   profiles: "M16 20a4 4 0 0 0-8 0 M12 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6",
   calendar: "M5 4v3m14-3v3M4 9h16M6 6h12a2 2 0 0 1 2 2v10H4V8a2 2 0 0 1 2-2",
@@ -268,7 +268,7 @@ export default function AppSidebar() {
         on a same-pathname transition those effects would not re-run.
       */}
       <nav>
-        {items.map(([href, label, icon]) => {
+        {NAV_ITEMS.map(([href, label, icon]) => {
           // A tab stays lit on its nested routes too — /deals/[slug], /onboarding/[slug],
           // /qc-brain/[client], /meetings/[slug] — not just an exact match. Dashboard ("/") is
           // exact-only, since every path starts with "/".
