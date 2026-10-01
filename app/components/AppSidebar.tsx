@@ -8,6 +8,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BrandIcon, BrandWordmark } from "./BrandMark";
+import HelpMascot from "./HelpMascot";
+import { NavIcon } from "./NavIcon";
 
 export const NAV_ITEMS = [
   ["/", "Dashboard", "dashboard"],
@@ -68,22 +70,6 @@ export const iconPaths: Record<string, string> = {
   // fills this rail does not use; `#` is how everyone writes a Slack channel anyway.
   slack: "M9 4v16M15 4v16M4 9h16M4 15h16",
 };
-function SidebarIcon({ name }: { name: string }) {
-  return (
-    <svg
-      className="sidebar-svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d={iconPaths[name] ?? iconPaths.dashboard} />
-    </svg>
-  );
-}
 
 export default function AppSidebar() {
   const pathname = usePathname();
@@ -286,8 +272,8 @@ export default function AppSidebar() {
             className={`nav-item ${active ? "active" : ""}`}
             onClick={() => setNavOpen(false)}
           >
-            <span className="sidebar-icon">
-              <SidebarIcon name={icon} />
+            <span className={`sidebar-icon ${href === "/scout" ? "sidebar-icon-scout" : ""}`}>
+              {href === "/scout" ? <HelpMascot size={20} /> : <NavIcon name={icon} />}
             </span>
             <span>{label}</span>
           </Link>

@@ -24,7 +24,7 @@ import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import Markdown from "../components/Markdown";
 import { articlePath, findBySlug, HELP_KINDS, HELP_PAGES, type HelpArticle, type HelpImage, type HelpKind, loomEmbedUrl, pageLabel } from "../lib/help-shared";
-import { ARROW_PATH, EXPAND_PATH, Glyph, HOME_PATH, kindPath, pagePath, SEARCH_PATH, topicPath } from "./HelpIcons";
+import { ARROW_PATH, EXPAND_PATH, Glyph, HOME_PATH, kindPath, PageIcon, SEARCH_PATH, topicPath } from "./HelpIcons";
 import "./help.css";
 
 type Draft = { id?: string; kind: HelpKind; title: string; body: string; loomUrl: string; page: string; keywords: string };
@@ -297,7 +297,7 @@ export default function HelpCenter({ initialSlug }: { initialSlug?: string }) {
                   return (
                     <div key={group.path || "general"} className={`hd-group ${expanded ? "expanded" : ""}`} style={{ ["--i" as string]: gi }}>
                       <button type="button" className="hd-group-head" onClick={() => toggleGroup(group.path)} aria-expanded={expanded}>
-                        <span className="hd-ico"><Glyph d={pagePath(group.path)} size={14} /></span>
+                        <span className="hd-ico"><PageIcon path={group.path} size={14} /></span>
                         <span className="hd-group-label">{group.label}</span>
                         <small>{group.items.length}</small>
                         <span className="hd-caret" aria-hidden>›</span>
@@ -448,7 +448,7 @@ function ArticleView(props: {
         <div className="hd-head-ico"><Glyph d={topicPath(article)} size={22} /></div>
         <div className="hd-head-text">
           <div className="hd-path">
-            <button type="button" onClick={props.onGroup}><Glyph d={pagePath(article.page)} size={12} />{props.group}</button>
+            <button type="button" onClick={props.onGroup}><PageIcon path={article.page} size={12} />{props.group}</button>
             <span className={`hd-kind kind-${article.kind}`}><Glyph d={kindPath(article.kind)} size={11} />{kindLabel}</span>
           </div>
           <h1>{article.title}</h1>
@@ -461,7 +461,7 @@ function ArticleView(props: {
           <div className="hd-actions">
             {article.page && (
               <a className="hd-open" href={article.page}>
-                <Glyph d={pagePath(article.page)} size={13} />Open {pageLabel(article.page)}<Glyph d={ARROW_PATH} size={13} className="hd-open-arrow" />
+                <PageIcon path={article.page} size={13} />Open {pageLabel(article.page)}<Glyph d={ARROW_PATH} size={13} className="hd-open-arrow" />
               </a>
             )}
             <button type="button" className={`hd-copy ${props.copied ? "done" : ""}`} onClick={props.onCopy}>
@@ -585,7 +585,7 @@ function HomeView({ loading, articles, groups, onOpen, onSearch }: {
           {groups.map((g, i) => (
             <button key={g.path || "general"} type="button" className="hd-page-card hd-rise" style={{ ["--d" as string]: Math.min(i, 10) + 2 }} onClick={() => onOpen(g.items[0].id)}>
               <span className="hd-page-top">
-                <span className="hd-ico lg"><Glyph d={pagePath(g.path)} size={17} /></span>
+                <span className="hd-ico lg"><PageIcon path={g.path} size={17} /></span>
                 <small>{g.items.length}</small>
               </span>
               <strong>{g.label}</strong>

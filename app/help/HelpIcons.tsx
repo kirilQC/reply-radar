@@ -11,6 +11,7 @@
  */
 
 import { iconPaths, NAV_ITEMS } from "../components/AppSidebar";
+import { NavIcon } from "../components/NavIcon";
 import type { HelpArticle, HelpKind } from "../lib/help-shared";
 
 const TOPIC: Record<string, string> = {
@@ -93,6 +94,12 @@ export function topicPath(article: Pick<HelpArticle, "title" | "keywords" | "pag
   const words = article.keywords.join(" ");
   for (const [rule, name] of RULES) if (rule.test(words)) return TOPIC[name];
   return article.page ? pagePath(article.page) : KIND_PATHS[article.kind];
+}
+
+/** A page's icon, the same duotone one the sidebar shows. */
+export function PageIcon({ path, size = 16 }: { path: string; size?: number }) {
+  const name = pageIconName(path);
+  return name ? <NavIcon name={name} size={size} /> : <Glyph d={TOPIC.compass} size={size} />;
 }
 
 export const kindPath = (kind: HelpKind) => KIND_PATHS[kind];

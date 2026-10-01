@@ -74,3 +74,14 @@
 .dash-has-network{position:relative}
 .dash-network{position:fixed;top:0;z-index:0;pointer-events:none;display:block}
 .dash-has-network>.topbar,.dash-has-network>.dashboard-home{position:relative;z-index:1}
+
+/* Sidebar icons: duotone. A line icon with a soft fill in its own colour; the active page's icon turns teal and its fill deepens. */
+.nav-icon :is(rect,circle,path,ellipse,polygon){fill:currentColor;fill-opacity:.14;transition:fill-opacity .2s}
+.nav-item .nav-icon{color:#aeb3be;transition:color .2s}
+.nav-item:hover .nav-icon{color:var(--text)}
+.nav-item.active .nav-icon{color:var(--accent)}
+.nav-item.active .nav-icon :is(rect,circle,path,ellipse,polygon){fill-opacity:.28}
+.nav-item.active{background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 14%,transparent),transparent 85%)!important}
+.sidebar-icon-scout{flex-basis:20px!important;width:20px!important;margin:-2px 0}
+.light-mode .nav-item .nav-icon{color:#5c6270}
+.light-mode .nav-item.active .nav-icon{color:var(--accent)}
