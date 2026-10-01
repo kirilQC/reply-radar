@@ -7,6 +7,7 @@
 import AppSidebar from "./AppSidebar";
 import Crumb from "./Crumb";
 import AppearancePanel, { type AppearancePrefs } from "./AppearancePanel";
+import DashboardNetwork from "./DashboardNetwork";
 import { useEffect, useRef, useState } from "react";
 import {
   identityKey,
@@ -204,7 +205,8 @@ export default function DashboardHome() {
   return (
     <div className="app-shell">
       <AppSidebar />
-      <section className="main-area">
+      <section className="main-area dash-has-network">
+        <DashboardNetwork />
         <header className="topbar">
           <Crumb trail={[{ label: "Dashboard" }]} />
           {/* The wordmark is centred over the bar rather than sitting in the trail, so the

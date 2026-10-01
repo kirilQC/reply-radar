@@ -69,3 +69,8 @@
 
 @media(max-width:900px){.dash-greeting{display:none}}
 @media(prefers-reduced-motion:reduce){.dash-in,.dash-greeting,.dash-bump,.dash-live{animation:none!important}.dashboard-stat-tile:hover,.dashboard-profile-card:hover,.dashboard-client-card:hover{transform:none}}
+
+/* The Network background: fixed behind the content column only, never the sidebar */
+.dash-has-network{position:relative}
+.dash-network{position:fixed;top:0;z-index:0;pointer-events:none;display:block}
+.dash-has-network>.topbar,.dash-has-network>.dashboard-home{position:relative;z-index:1}
