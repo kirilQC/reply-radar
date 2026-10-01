@@ -1,50 +1,148 @@
 /* Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/ */
 /* Reply Radar — proprietary. Not licensed for redistribution or resale. */
 
-/* The password screen. Standalone — it does not use the app shell — so it carries its own fallbacks in case
-   a token has not loaded, and otherwise draws from the same palette as the rest of the app. */
+/* The password screen, "depth of field": client replies drift past at three distances behind the box, out
+   of focus and faint, and a dark pool behind the card keeps the eye on the one sharp thing on screen.
+   Standalone (no app shell) and always dark, whatever appearance a person picked inside the app. The stream
+   itself is built by LoginBackdrop.tsx. */
+@property --lg-ang { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+
 .login-shell {
+  --lg-void: #05070a;
+  --lg-teal: #65EBE0;
+  --lg-text: #e8eef0;
+  --lg-muted: #7d8a90;
+  position: relative;
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 24px;
-  background: var(--bg, #0b0c10);
+  padding: 24px 16px;
+  overflow: hidden;
+  background: var(--lg-void);
+  color: var(--lg-text);
+  color-scheme: dark;
 }
+
+/* The stream. */
+.lg-backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.lg-layer { position: absolute; inset: 0; transform-origin: 50% 50%; will-change: transform; }
+.lg-stream {
+  position: absolute;
+  inset: -8% -4%;
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  -webkit-mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent);
+  mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent);
+}
+.lg-col { flex: 0 0 220px; overflow: hidden; }
+.lg-col-inner { display: flex; flex-direction: column; gap: 14px; padding-bottom: 14px; will-change: transform; }
+.lg-msg {
+  padding: 11px 13px;
+  border: 1px solid rgba(101, 235, 224, 0.1);
+  border-radius: 12px;
+  background: rgba(14, 20, 25, 0.9);
+  color: #b9c6ca;
+  font-size: 12.5px;
+  line-height: 1.45;
+  opacity: var(--op, 0.25);
+  transition: opacity 0.5s ease, border-color 0.5s ease, box-shadow 0.5s ease;
+}
+.lg-msg b { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; color: #e8eef0; font-size: 11.5px; font-weight: 650; }
+.lg-msg i { width: 6px; height: 6px; border-radius: 50%; background: var(--lg-teal); flex: none; }
+.lg-msg i.neu { background: #499B8F; }
+.lg-msg.lit {
+  opacity: 1;
+  border-color: rgba(101, 235, 224, 0.55);
+  box-shadow: 0 0 24px rgba(101, 235, 224, 0.25);
+  transition-duration: 0.15s;
+}
+.lg-pool {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse min(400px, 95vw) min(340px, 60vh) at 50% 50%, rgba(5, 7, 10, 0.95) 38%, rgba(5, 7, 10, 0) 100%);
+}
+.lg-vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 45%, rgba(5, 7, 10, 0.9) 100%); }
+
+/* The card. */
 .login-card {
+  position: relative;
+  z-index: 1;
   width: 100%;
   max-width: 340px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 34px 28px;
-  border: 1px solid var(--border, #242833);
-  border-radius: 14px;
-  background: var(--panel, #14161d);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  padding: 36px 28px 30px;
+  border: 1px solid rgba(101, 235, 224, 0.3);
+  border-radius: 18px;
+  background: rgba(9, 13, 17, 0.94);
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.85), 0 0 90px rgba(101, 235, 224, 0.14);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
-.login-brand { font-size: 22px; font-weight: 750; letter-spacing: -0.04em; color: var(--text, #e8e8ef); }
-.login-brand span { color: var(--accent, #65EBE0); }
-.login-sub { margin: 0 0 4px; color: var(--muted, #8a8fa0); font-size: 12px; }
+/* A slow sheen running round the border. */
+.login-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(from var(--lg-ang), transparent 0deg, rgba(101, 235, 224, 0.85) 40deg, transparent 90deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: lg-sheen 7s linear infinite;
+  pointer-events: none;
+}
+.login-card.tick { border-color: rgba(101, 235, 224, 0.6); box-shadow: 0 40px 100px rgba(0, 0, 0, 0.85), 0 0 110px rgba(101, 235, 224, 0.24); }
+.login-card.shake { animation: lg-shake 0.42s ease; }
+.login-shell.entering .login-card { border-color: rgba(101, 235, 224, 0.8); box-shadow: 0 40px 100px rgba(0, 0, 0, 0.85), 0 0 140px rgba(101, 235, 224, 0.35); }
+
+/* Always the white "Command" wordmark here, even for someone who uses the app in light mode. */
+.login-shell .brand-wordmark .brand-wordmark-dark { display: block; }
+.login-shell .brand-wordmark .brand-wordmark-light { display: none; }
+
 .login-input {
-  height: 42px;
-  padding: 0 13px;
-  border: 1px solid var(--border, #242833);
-  border-radius: 9px;
-  background: var(--panel-2, #0f1118);
-  color: var(--text, #e8e8ef);
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(101, 235, 224, 0.16);
+  border-radius: 10px;
+  background: rgba(5, 7, 10, 0.8);
+  color: var(--lg-text);
   font-size: 14px;
   outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.login-input:focus { border-color: var(--accent, #65EBE0); }
+.login-input::placeholder { color: var(--lg-muted); }
+.login-input:focus { border-color: var(--lg-teal); box-shadow: 0 0 0 3px rgba(101, 235, 224, 0.14); }
 .login-button {
-  height: 42px;
+  height: 44px;
   border: 0;
-  border-radius: 9px;
-  background: var(--accent, #65EBE0);
-  color: #fff;
+  border-radius: 10px;
+  background: var(--lg-teal);
+  color: #0b0c10;
   font-size: 14px;
   font-weight: 650;
   cursor: pointer;
+  transition: opacity 0.2s ease, box-shadow 0.2s ease;
 }
-.login-button:disabled { opacity: 0.55; cursor: default; }
-.login-error { color: var(--coral, #e5738a); font-size: 12px; }
+.login-button:not(:disabled):hover { box-shadow: 0 0 24px rgba(101, 235, 224, 0.35); }
+.login-button:disabled { opacity: 0.5; cursor: default; }
+.login-shell.entering .login-button { opacity: 1; }
+.login-error { color: #f08a9c; font-size: 12px; text-align: center; }
+
+@keyframes lg-sheen { to { --lg-ang: 360deg; } }
+@keyframes lg-shake {
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(7px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-card::before { animation-duration: 30s; }
+  .login-card.shake { animation: none; }
+}
