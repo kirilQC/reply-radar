@@ -68,6 +68,11 @@ export async function readConfigPrefix(prefix: string): Promise<Map<string, unkn
  * An upsert is safe because `key` is the table's primary key — `resolution=merge-duplicates` compiles to
  * `ON CONFLICT (key)`, which PostgREST only accepts when a constraint backs the column.
  */
+/** Removes one key. Missing keys are not an error. */
+export async function deleteConfig(key: string): Promise<void> {
+  await rest(`${TABLE}?key=eq.${encodeURIComponent(key)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+}
+
 export async function writeConfig(key: string, value: unknown): Promise<void> {
   await rest(TABLE, {
     method: "POST",

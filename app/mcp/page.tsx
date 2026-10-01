@@ -41,6 +41,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { identityKey } from "../lib/preference-identity";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
@@ -199,6 +200,16 @@ const readSaved = (): SavedPrompt[] => {
  * its first exchange is still worth having, which an empty one is not.
  */
 const CHAT_KEY = "reply-radar-mcp-chat:v1";
+const SESSION_KEY = "reply-radar-mcp-session:v1";
+type SessionMeta = { id: string; title: string; updatedAt: string; createdAt: string; turns: number };
+const newSessionId = () => `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+const whenLabel = (iso: string) => {
+  const date = new Date(iso);
+  const days = Math.floor((Date.now() - date.getTime()) / 86_400_000);
+  if (days < 1) return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (days < 7) return date.toLocaleDateString([], { weekday: "short" });
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+};
 
 const readChat = (): Message[] => {
   if (typeof window === "undefined") return [];
@@ -416,6 +427,16 @@ const Turn = memo(function Turn({
 
 export default function McpPage() {
   const [messages, setMessages] = useState<Message[]>(readChat);
+  /** Which saved conversation this is. Kept for the tab, so a reload keeps saving into the same one. */
+  const [sessionId, setSessionId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    try { return window.sessionStorage.getItem(SESSION_KEY) || ""; } catch { return ""; }
+  });
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [sessions, setSessions] = useState<SessionMeta[] | null>(null);
+  const [historyError, setHistoryError] = useState("");
+  /** The transcript as it came out of History, so merely opening a conversation doesn't re-save it. */
+  const loadedRef = useRef<Message[] | null>(null);
   const [question, setQuestion] = useState("");
   const [thinking, setThinking] = useState(false);
   /** The turn in progress: what it has done so far and what it has started writing. */
@@ -547,9 +568,38 @@ export default function McpPage() {
    * Neither one drags the page back if the reader has scrolled up to re-read something.
    */
   const nearBottom = () =>
-    window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 240;
+    window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 80;
+
+  /**
+   * Whether the page should follow the answer as it is written. It starts true, turns off the moment the
+   * reader scrolls up (wheel, touch, keys or the scrollbar) and back on only when they return to the
+   * bottom themselves or press "Jump to latest". Our own scrolls only ever happen while following, and
+   * always land at the bottom, so they never switch it off.
+   */
+  const following = useRef(true);
+  const [detached, setDetached] = useState(false);
+  useEffect(() => {
+    const onScroll = () => {
+      const atBottom = nearBottom();
+      if (following.current !== atBottom) { following.current = atBottom; setDetached(!atBottom); }
+    };
+    const onUp = (event: WheelEvent) => { if (event.deltaY < 0) { following.current = false; setDetached(true); } };
+    const onKey = (event: KeyboardEvent) => {
+      if (["ArrowUp", "PageUp", "Home"].includes(event.key) && !(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement)) { following.current = false; setDetached(true); }
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("wheel", onUp, { passive: true });
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("scroll", onScroll); window.removeEventListener("wheel", onUp); window.removeEventListener("keydown", onKey); };
+  }, []);
+  const jumpToLatest = () => {
+    following.current = true;
+    setDetached(false);
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  };
 
   useEffect(() => {
+    if (!following.current) return;
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
@@ -558,6 +608,74 @@ export default function McpPage() {
   useEffect(() => {
     keepChat(messages);
   }, [messages]);
+
+  /**
+   * Saving the conversation so it can be reopened from History. After each finished turn (never mid
+   * stream), into the same session until "+" starts a new one.
+   */
+  useEffect(() => {
+    if (thinking || !messages.length || !messages.some((m) => m.role === "assistant")) return;
+    if (loadedRef.current === messages) return;
+    let id = sessionId;
+    if (!id) {
+      id = newSessionId();
+      setSessionId(id);
+    }
+    try { window.sessionStorage.setItem(SESSION_KEY, id); } catch { /* ignore */ }
+    const timer = window.setTimeout(() => {
+      void fetch("/api/mcp/sessions", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ identity: identityKey(), id, messages }),
+      }).then(() => setSessions(null)).catch(() => undefined);
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [messages, thinking, sessionId]);
+
+  const loadSessions = useCallback(() => {
+    setHistoryError("");
+    void fetch(`/api/mcp/sessions?identity=${encodeURIComponent(identityKey())}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.ok) setSessions(data.sessions ?? []);
+        else { setSessions([]); setHistoryError(String(data?.error ?? "Saved conversations are unavailable.")); }
+      })
+      .catch(() => { setSessions([]); setHistoryError("Saved conversations are unavailable."); });
+  }, []);
+  useEffect(() => { if (historyOpen && sessions === null) loadSessions(); }, [historyOpen, sessions, loadSessions]);
+
+  const startNew = () => {
+    setMessages([]);
+    setOpenTrail(null);
+    setSessionId("");
+    try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+  };
+
+  const openSession = async (id: string) => {
+    if (thinking) return;
+    try {
+      const response = await fetch(`/api/mcp/sessions?identity=${encodeURIComponent(identityKey())}&id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!data?.ok) throw new Error(String(data?.error ?? "That conversation could not be opened."));
+      const restored: Message[] = Array.isArray(data.session?.messages) ? data.session.messages : [];
+      loadedRef.current = restored;
+      setMessages(restored);
+      setSessionId(id);
+      try { window.sessionStorage.setItem(SESSION_KEY, id); } catch { /* ignore */ }
+      setOpenTrail(null);
+      setHistoryOpen(false);
+      following.current = true;
+      window.setTimeout(() => endRef.current?.scrollIntoView({ behavior: "auto", block: "end" }), 60);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "That conversation could not be opened.");
+    }
+  };
+
+  const removeSession = async (id: string) => {
+    setSessions((list) => (list ?? []).filter((s) => s.id !== id));
+    await fetch(`/api/mcp/sessions?identity=${encodeURIComponent(identityKey())}&id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
+    if (id === sessionId) startNew();
+  };
 
   /**
    * Following the tail, at most a few times a second.
@@ -572,7 +690,7 @@ export default function McpPage() {
   useEffect(() => {
     if (!thinking) return;
     if (Date.now() - followedAt.current < 160) return;
-    if (!nearBottom()) return;
+    if (!following.current) return;
     followedAt.current = Date.now();
     endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [live, thinking]);
@@ -665,6 +783,8 @@ export default function McpPage() {
       ...messages,
       { role: "user" as const, content: asked, attached, askedAt: new Date().toISOString() },
     ];
+    following.current = true;
+    setDetached(false);
     setMessages(history);
     setQuestion("");
     setAttached([]);
@@ -948,13 +1068,17 @@ export default function McpPage() {
         <header className="topbar print-hide">
           <Crumb trail={[{ label: "MCP" }]} />
           <div className="top-actions">
+            <button className={`mcp-history-toggle ${historyOpen ? "on" : ""}`} type="button" onClick={() => setHistoryOpen((v) => !v)} aria-expanded={historyOpen} title="Saved conversations">
+              <svg viewBox="0 0 24 24" width="14" height="14" style={{ width: 14, height: 14 }} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7 M3 4v4h4 M12 7v5l3 2" /></svg>
+              History
+            </button>
             {messages.length > 0 && !thinking && (
               <button
                 className="mcp-reset"
                 type="button"
                 title="New conversation"
                 aria-label="New conversation"
-                onClick={() => { setMessages([]); setOpenTrail(null); }}
+                onClick={startNew}
               >
                 <span aria-hidden="true">+</span>
               </button>
@@ -962,6 +1086,39 @@ export default function McpPage() {
             <GlobalAppearanceControl />
           </div>
         </header>
+
+        {historyOpen && (
+          <>
+            <button type="button" className="mcp-history-scrim" aria-label="Close saved conversations" onClick={() => setHistoryOpen(false)} />
+            <aside className="mcp-history" aria-label="Saved conversations">
+              <div className="mcp-history-head">
+                <strong>Saved conversations</strong>
+                <button type="button" onClick={() => { startNew(); setHistoryOpen(false); }}>+ New</button>
+              </div>
+              {historyError && <p className="mcp-history-note">{historyError}</p>}
+              {sessions === null ? (
+                <p className="mcp-history-note">Loading…</p>
+              ) : sessions.length === 0 ? (
+                <p className="mcp-history-note">Nothing saved yet. Every conversation is saved here automatically once it has an answer.</p>
+              ) : (
+                <ul>
+                  {sessions.map((s, i) => (
+                    <li key={s.id} className={s.id === sessionId ? "on" : ""} style={{ ["--i" as string]: i }}>
+                      <button type="button" className="mcp-history-open" onClick={() => void openSession(s.id)}>
+                        <span>{s.title}</span>
+                        <small>{whenLabel(s.updatedAt)} · {s.turns} question{s.turns === 1 ? "" : "s"}</small>
+                      </button>
+                      <button type="button" className="mcp-history-drop" title="Delete" aria-label={`Delete ${s.title}`} onClick={() => void removeSession(s.id)}>×</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </aside>
+          </>
+        )}
+        {detached && thinking && (
+          <button type="button" className="mcp-jump print-hide" onClick={jumpToLatest}>↓ Jump to latest</button>
+        )}
 
         <main className="mcp-page">
           {messages.length === 0 ? (

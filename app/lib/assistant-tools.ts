@@ -78,6 +78,7 @@ import { onboardingForAssistant, listOnboardingClients, setTaskDone, addTemplate
 import { helpForAssistant, readHelp, searchHelp } from "./help-center";
 import { articlePath } from "./help-shared";
 import { publicBaseUrl } from "./public-url";
+import { DATA_TOOLS, runDataTool } from "./assistant-data";
 
 type Row = Record<string, unknown>;
 
@@ -444,7 +445,7 @@ const SLACK_SCAN_DEFAULT = 400;
 const SLACK_SCAN_FULL_DEFAULT = 1200;
 const SLACK_SCAN_MAX = 1500;
 
-export const TOOLS: ToolDefinition[] = [
+const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "list_clients",
     description:
@@ -969,6 +970,9 @@ const percent = (fraction: number) => Math.round(fraction * 1000) / 10;
  * recover from, which is how "there is no client called Willo" becomes a follow-up question rather
  * than a failed request.
  */
+/** Everything the assistant can call: the purpose-built tools, then general read access to every table. */
+export const TOOLS: ToolDefinition[] = [...BASE_TOOLS, ...(DATA_TOOLS as ToolDefinition[])];
+
 export async function runTool(name: string, input: Row): Promise<unknown> {
   switch (name) {
     case "list_clients": {
@@ -2072,6 +2076,10 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       }
       return { ok: true, id, kind, note: "Support ticket filed in the Feedback & ideas section. Tell the person it's logged and that Kiril will look into it." };
     }
+
+    case "describe_data":
+    case "query_data":
+      return runDataTool(name, input, async (client) => (await resolveClient(client)).id);
 
     default:
       throw new Error(`There is no tool called "${name}".`);

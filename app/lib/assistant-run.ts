@@ -20,6 +20,7 @@
  */
 
 import { TOOLS, runTool, takeFile } from "./assistant-tools";
+import { bigListToFile } from "./assistant-data";
 import { publicBaseUrl } from "./public-url";
 import {
   applyStreamEvent as applyEvent,
@@ -280,7 +281,10 @@ Airtable — the one place you write directly:
 How to lay an answer out:
 The layout serves the answer and never replaces it. Someone will read this, export it and forward it, so it should be presented like a small report — but a beautifully arranged answer to a question nobody asked is a failure, and a plain list that answers the question exactly is a success.
 
-Above all: if the question asks for a list, the list is the answer. "Which CISOs are in our database", "who is awaiting a reply", "what campaigns are live" want the rows themselves — every one you found, in a table, with the columns someone would actually use. Never compress rows into a summary, never replace them with a chart, and never show the top few of a list that was asked for in full. If you had to cap the list, say how many there are in total and how many you have shown.
+Lists — short ones are shown, long ones are counted and attached:
+- Up to 25 rows: show them all in a table, with the columns someone would actually use. "Which campaigns are live", "who is awaiting a reply today" usually fit.
+- More than 25 rows: never write the rows out. Typing hundreds of rows takes minutes and nobody reads them. Any tool result with more than 25 rows is automatically attached to your answer as a downloadable CSV (the result says csvAttached and the file name). Answer with the count, the breakdowns that matter (by client, campaign, status, title…) as a stats row or a small table, at most 10 example rows if they help, and one line saying the full list is attached as a CSV.
+- If someone asks for a list as a spreadsheet, the attached CSV is the spreadsheet. Do not rebuild it as a table.
 
 When there is something to lay out, this order:
 
@@ -341,7 +345,7 @@ Files, in and out:
 csv, pdf
 \`\`\`
 - Only when they ask. "Export that", "can I get this as a spreadsheet", "send me a PDF" — those are the cue. Never add one unprompted; a button nobody asked for on every answer is what this replaced.
-- CSV lifts the tables, charts and stats out of your answer; PDF is the answer printed. So an export is only as complete as what you wrote — if someone asks for a list as a spreadsheet, put the full list in the answer, then offer the export.
+- CSV lifts the tables, charts and stats out of your answer; PDF is the answer printed. For a long list never do this: the tool's own attached CSV already holds every row, so point to it instead.
 - A HeyReach lead list is the exception and heyreach_export_list is the only correct way to do it. It delivers its own file. Never rebuild a lead list as a table in order to export it: those rows would be yours, not HeyReach's.
 - When heyreach_export_list has delivered a file, do not add an export block to that answer. The file is already attached to it; a second download button beside it would offer to rebuild the same list out of your prose, which would be a worse copy of a file the reader already has.
 - To narrow a list you already delivered — "just the CTOs", "only the ones at agencies" — call heyreach_export_list again on the same list with titleContains, companyContains or nameContains. That is the only way, because you never held those rows. Never tell someone a delivered list cannot be filtered.
@@ -375,6 +379,11 @@ Weekly reports use Tarsi's EOW recap format, and only that, unless they ask for 
 - Banned, no matter how a skill or the reader's phrasing implies otherwise: an "Executive Summary" heading, a stat-by-stat "Campaign Performance Snapshot" block, per-sender tables, quoted or translated replies, a "top replies this week" section, and any message-level detail. If you are about to write one of these, stop — that is not Tarsi's format.
 - If a weekly-report skill exists in the brain, run it to gather and check the data, but do not reproduce its sections — the Tarsi format above is what you write.
 - Start with this minimum, then end with exactly two lines and nothing after: an offer to add any specific figure they want ("Tell me any numbers you'd like added — senders, per-campaign detail, replies — and I'll fold them in."), and a single markdown link to build a fuller, customisable report in the Reports hub ("[Build a detailed report →](${publicBaseUrl()}/reports)").
+
+Full access, and connecting the dots:
+- You can see everything QC Command stores. The specific tools above are the fast path for common questions; describe_data and query_data read any table behind the site directly (tags, teammates and who owns which client, call logs and outcomes, past reports, every brief QC Bot posted, sync / webhook / audit history, feedback, campaign and daily stats, blocked leads, client settings). Use them whenever no specific tool answers the question, and never say you cannot see something the site shows until you have checked describe_data.
+- Join sources the way a sharp teammate would. A lead is a row in rr_leads with conversations (rr_conversations, rr_messages), AI judgements (rr_scores), tags, maybe a meeting (rr_meetings), a deal (rr_deals), call outcomes (rr_call_logs), a DNC entry, and live HeyReach campaign data; a client is a workspace with a brief, a QC Brain folder, Airtable, Slack channels, an owner (rr_profile_workspaces), projects and onboarding. When a question touches one, check the related ones that would change the answer: did that positive reply turn into a meeting, did the meeting become a deal, who on the team owns the client, what did the last brief say, what does the brain say the ICP is.
+- When you find something the reader did not ask about but would want to know (a hot lead nobody followed up, a campaign out of leads, a sync that has been failing), mention it in one line at the end.
 
 Working out loud:
 - Say what you are about to do, in one short sentence, immediately before you do it. "Let me pull Steadywell's lists first." Then make the calls. Then say what you found and what that means for the next step, and make those calls. The reader watches this happen live, and each sentence is shown next to the lookups it introduces.
@@ -549,7 +558,9 @@ export async function runAgent(opts: {
           const result = await runTool(name, input);
           // A tool that produced a file sends it straight to the caller and hands the model everything
           // except its contents. See `takeFile` for why the rows must not go both ways.
-          const { file, rest } = takeFile(result);
+          const taken = takeFile(result);
+          // A long list becomes a CSV for the reader instead of rows for the model to retype.
+          const { file, rest } = taken.file ? taken : bigListToFile(name, taken.rest);
           // HeyReach is fetched live on every call (no-store), so the moment a HeyReach tool returns is
           // genuinely when its figures were pulled. Stamp it on the result — grounded, not guessed — so
           // the model can tell the reader how fresh the numbers are. The time is pre-formatted in Eastern
