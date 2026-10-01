@@ -3,7 +3,7 @@
 
 /* ── The help button and its chat ───────────────────────────────────────────
    Bottom-right on every page. The panel grows out of the button (transform-origin bottom right), messages
-   rise in, and the mascot bobs, blinks and pulses its antenna faster while it thinks. */
+   rise in, and the mascot bobs, blinks and sways its gill frills, faster while it thinks. */
 
 .hw { --hw-ease: cubic-bezier(.2, .7, .2, 1); position: fixed; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); z-index: 90; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; pointer-events: none; font-family: var(--font, Inter, ui-sans-serif, system-ui, sans-serif); }
 .hw > * { pointer-events: auto; }
