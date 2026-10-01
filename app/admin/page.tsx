@@ -67,6 +67,26 @@ const initialClients: ClientWorkspace[] = [];
 const asTextList = (value: unknown): string[] =>
   (Array.isArray(value) ? value : []).map((entry) => String(entry ?? "").trim()).filter(Boolean);
 
+const WORKSPACE_CACHE_KEY = "reply-radar-workspaces:v2";
+
+/**
+ * Writes the workspace list to the offline cache, safely.
+ *
+ * Two things this must never do: store the base64 logo data URIs (hundreds of KB each — a full roster of
+ * them blows past the browser's ~5MB localStorage quota), and throw. The unguarded setItem was doing both:
+ * QuotaExceededError propagated out of a render effect and took the whole admin page black. The logos are
+ * re-fetched from the server on every load, so dropping them from the cache costs nothing, and any
+ * remaining quota or private-mode error is swallowed because the cache is only an optimisation.
+ */
+function cacheWorkspaces(list: ClientWorkspace[]): void {
+  try {
+    const slim = list.map(({ logoUrl: _logoUrl, apiKey: _apiKey, ...rest }) => rest);
+    window.localStorage.setItem(WORKSPACE_CACHE_KEY, JSON.stringify(slim));
+  } catch {
+    /* quota exceeded, or storage unavailable (private mode) — the cache is a convenience, not a requirement */
+  }
+}
+
 /**
  * How many extras one client may add, matching what the brief will actually read.
  *
@@ -201,7 +221,7 @@ export default function AdminPage() {
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
-    if (workspaceStorageReady) window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(workspaceClients));
+    if (workspaceStorageReady) cacheWorkspaces(workspaceClients);
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
@@ -239,7 +259,7 @@ export default function AdminPage() {
     const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaTitleMatch: String(savedRow?.granola_title_match ?? workspaceDraft.granolaTitleMatch), slackExtraChannelIds: asTextList(savedRow?.slack_extra_channel_ids ?? workspaceDraft.slackExtra), granolaExtraTitleMatches: asTextList(savedRow?.granola_extra_title_matches ?? workspaceDraft.granolaExtra), airtableBaseId: String(savedRow?.airtable_base_id ?? workspaceDraft.airtableBaseId), clayDncWebhookUrl: String(savedRow?.clay_dnc_webhook_url ?? workspaceDraft.clayDncWebhookUrl), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
     setWorkspaceClients(next);
     setWorkspaceDraft((draft) => ({ ...draft, apiKey: "" }));
-    window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
+    cacheWorkspaces(next);
     window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
     setSaving(false);
     showSavedConfirmation();
@@ -249,7 +269,7 @@ export default function AdminPage() {
     if (!response?.ok) { setPasswordError("Could not delete this workspace from Supabase."); return; }
     const next = clients.filter((_, index) => index !== selected);
     setWorkspaceClients(next);
-    window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
+    cacheWorkspaces(next);
     window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
     setSelected(0);
     setWorkspaceOpen(false);
@@ -438,7 +458,7 @@ export default function AdminPage() {
       setLogos((current) => ({ ...current, [client.slug]: logoUrl }));
       const next = workspaceClients.map((item, index) => index === selected ? { ...item, logoUrl } : item);
       setWorkspaceClients(next);
-      window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(next));
+      cacheWorkspaces(next);
       window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
       void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, previousSlug: client.slug, name: client.name, slug: client.slug, clientBrief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", websiteUrl: client.website ?? "", brainFolder: client.brainFolder ?? "", anthropicModel: client.anthropicModel ?? null, logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) });
     };

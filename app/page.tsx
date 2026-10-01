@@ -2539,9 +2539,6 @@ export function InboxPage() {
                       )}
                     </div>
                     <div className="detail-tags">
-                      <span className={`score-pill ${followUpBand(current.followUpUrgency ?? 0)}`}>
-                        {current.followUpUrgency ?? 0} · {followUpBand(current.followUpUrgency ?? 0)}
-                      </span>
                       {current.campaignName && (
                         // Straight through to this campaign's analytics. The client
                         // slug is passed when we have it so the page does not have to
