@@ -2117,6 +2117,17 @@ export function InboxPage() {
                       <DateRangeCalendar since={customSince} until={customUntil} onChange={(since, until) => { setCustomSince(since); setCustomUntil(until); }} />
                     </div>
                   )}
+                  {tagFilter && tagById[tagFilter] && (
+                    <button
+                      type="button"
+                      className="tagfilter-pill"
+                      style={{ color: tagById[tagFilter].color, background: `${tagById[tagFilter].color}22`, borderColor: `${tagById[tagFilter].color}66` }}
+                      title="Clear this tag filter"
+                      onClick={() => { setTagFilter(""); setSelectedId(""); }}
+                    >
+                      Tag: {tagById[tagFilter].name} <span aria-hidden>✕</span>
+                    </button>
+                  )}
                   <div className="unified-filter-wrap">
                     <button className="filter-button unified-filter-toggle" onClick={() => { setFilterDropdownOpen((v) => !v); setFilterSub(null); }}>
                         Filters{(campaignFilter || senderFilter || sentimentFilter || tagFilter || sort !== "score-desc" || ["Starred", "Hot", "Warm", "Nurture"].includes(filter)) ? " ●" : ""}
@@ -2316,7 +2327,16 @@ export function InboxPage() {
                           {tagsOf(lead).length > 0 && (
                             <span className="lead-tags">
                               {tagsOf(lead).map((tag) => (
-                                <span key={tag.id} className="lead-tag" style={{ color: tag.color, background: `${tag.color}22`, borderColor: `${tag.color}55` }}>{tag.name}</span>
+                                <button
+                                  key={tag.id}
+                                  type="button"
+                                  className={`lead-tag ${tagFilter === tag.id ? "lead-tag-on" : ""}`}
+                                  style={{ color: tag.color, background: `${tag.color}22`, borderColor: `${tag.color}${tagFilter === tag.id ? "" : "55"}` }}
+                                  title={tagFilter === tag.id ? `Showing only “${tag.name}” — click to clear` : `Filter to “${tag.name}”`}
+                                  onClick={(event) => { event.stopPropagation(); setTagFilter(tagFilter === tag.id ? "" : tag.id); setSelectedId(""); }}
+                                >
+                                  {tag.name}
+                                </button>
                               ))}
                             </span>
                           )}

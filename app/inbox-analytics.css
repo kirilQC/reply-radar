@@ -692,3 +692,17 @@ i.tone-muted {
   height: 28px; padding: 0 14px; border: 0; border-radius: 7px; background: var(--accent);
   color: #fff; font-size: 11px; font-weight: 700; cursor: pointer;
 }
+
+/* Clickable row tag chips (click to filter the queue to that tag) */
+.lead-main .lead-tag { cursor: pointer; transition: filter .12s, box-shadow .12s; }
+.lead-main .lead-tag:hover { filter: brightness(1.25); }
+.lead-main .lead-tag.lead-tag-on { box-shadow: 0 0 0 1px currentColor inset; filter: brightness(1.15); }
+
+/* The active tag-filter pill in the inbox toolbar */
+.tagfilter-pill {
+  display: inline-flex; align-items: center; gap: 5px; height: 29px; padding: 0 10px;
+  border: 1px solid transparent; border-radius: 6px; font-size: 10px; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
+}
+.tagfilter-pill span { opacity: .7; font-weight: 600; }
+.tagfilter-pill:hover span { opacity: 1; }
