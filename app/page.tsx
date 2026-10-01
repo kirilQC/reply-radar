@@ -433,6 +433,12 @@ export function InboxPage() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [filterSub, setFilterSub] = useState<string | null>(null);
+  // A custom date window on the inbox queue (YYYY-MM-DD, the caller's local day). Only consulted while
+  // `filter === "custom"`; empty until the person picks one. The fetch sends these as instants so the
+  // server can reach past the newest-500 ceiling, and the client memo re-applies them so a merged-in older
+  // row from a previous view never leaks into a narrowed range.
+  const [customSince, setCustomSince] = useState("");
+  const [customUntil, setCustomUntil] = useState("");
   const [campaignFilter, setCampaignFilter] = useState("");
   const [senderFilter, setSenderFilter] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState("");
@@ -822,8 +828,15 @@ export function InboxPage() {
      */
     const restored = readInboxSnapshot(inboxSnapshotScope);
     if (restored) setLeads((current) => (current.length ? current : restored));
+    // When a custom range is active, scope the fetch to it so the server can reach rows older than the
+    // newest-500 window. Each end is widened to the whole local day — "from the 11th to the 25th" means the
+    // start of the 11th to the end of the 25th — then sent as an instant the route filters last_message_at on.
+    const rangeActive = filter === "custom" && (customSince || customUntil);
+    const sinceIso = rangeActive && customSince ? new Date(`${customSince}T00:00:00`).toISOString() : "";
+    const untilIso = rangeActive && customUntil ? new Date(`${customUntil}T23:59:59.999`).toISOString() : "";
+    const rangeQuery = `${sinceIso ? `&since=${encodeURIComponent(sinceIso)}` : ""}${untilIso ? `&until=${encodeURIComponent(untilIso)}` : ""}`;
     fetch(
-      `/api/inbox?workspaces=${encodeURIComponent(trackedWorkspaceSlugs.join(","))}`,
+      `/api/inbox?workspaces=${encodeURIComponent(trackedWorkspaceSlugs.join(","))}${rangeQuery}`,
       { cache: "no-store" },
     )
       .then(async (response) => ({
@@ -858,7 +871,10 @@ export function InboxPage() {
     return () => {
       cancelled = true;
     };
-  }, [directoryLoaded, trackedWorkspaceSlugs.join(",")]);
+    // Only the custom range drives a refetch — switching between Today / This week / tiers filters the rows
+    // already loaded and must not hit the network. The key is empty unless a custom range is active, so
+    // leaving custom mode refetches the full queue and toggling the other filters never does.
+  }, [directoryLoaded, trackedWorkspaceSlugs.join(","), filter === "custom" ? `${customSince}|${customUntil}` : ""]);
   useEffect(() => {
     leadsRef.current = leads;
   }, [leads]);
@@ -1047,6 +1063,15 @@ export function InboxPage() {
                 const replyAt = new Date(String(lead.latestReplyAt || lead.lastMessageAt));
                 return replyAt >= weekStart;
               }
+              if (filter === "custom") {
+                // The server already scoped the fetch to this window, but a row merged in from a previous
+                // view could still be on the list, so the range is re-applied here. Each end covers the
+                // whole local day; an unset end is left open.
+                const replyAt = new Date(String(lead.latestReplyAt || lead.lastMessageAt));
+                if (customSince && replyAt < new Date(`${customSince}T00:00:00`)) return false;
+                if (customUntil && replyAt > new Date(`${customUntil}T23:59:59.999`)) return false;
+                return true;
+              }
               if (filter === "follow-ups") {
                 return (lead.followUpUrgency ?? 0) > 0;
               }
@@ -1078,6 +1103,8 @@ export function InboxPage() {
       leads,
       search,
       filter,
+      customSince,
+      customUntil,
       sort,
       assignedClients?.join("|") ?? "",
       excludedClients.join("|"),
@@ -1887,6 +1914,7 @@ export function InboxPage() {
                       ["This week", "week"],
                       ["All replies", "All follow-ups"],
                       ["Follow-ups", "follow-ups"],
+                      ["Custom", "custom"],
                     ].map(([label, value]) => (
                       <button
                         key={value}
@@ -1897,6 +1925,16 @@ export function InboxPage() {
                       </button>
                     ))}
                   </div>
+                  {filter === "custom" && (
+                    <div className="inbox-daterange">
+                      <input type="date" aria-label="From date" value={customSince} max={customUntil || undefined} onChange={(e) => setCustomSince(e.target.value)} />
+                      <span className="inbox-daterange-sep">→</span>
+                      <input type="date" aria-label="To date" value={customUntil} min={customSince || undefined} onChange={(e) => setCustomUntil(e.target.value)} />
+                      {(customSince || customUntil) && (
+                        <button type="button" className="inbox-daterange-clear" title="Clear dates" onClick={() => { setCustomSince(""); setCustomUntil(""); }}>✕</button>
+                      )}
+                    </div>
+                  )}
                   <div className="unified-filter-wrap">
                     <button className="filter-button unified-filter-toggle" onClick={() => { setFilterDropdownOpen((v) => !v); setFilterSub(null); }}>
                         Filters{(campaignFilter || senderFilter || sentimentFilter || sort !== "score-desc" || ["Starred", "Hot", "Warm", "Nurture"].includes(filter)) ? " ●" : ""}

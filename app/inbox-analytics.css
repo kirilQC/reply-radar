@@ -543,3 +543,34 @@ i.tone-muted {
     flex-wrap: wrap;
   }
 }
+
+/* ── Inbox custom date range ─────────────────────────────────────────────
+   Two native date inputs that appear beside the segmented filter when "Custom"
+   is picked. Styled to sit alongside .segmented / .filter-button, and given an
+   explicit colour-scheme so the browser's own calendar popup renders dark in
+   midnight mode and light otherwise rather than a bright box on a dark bar. */
+.inbox-daterange {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.inbox-daterange input[type="date"] {
+  height: 29px;
+  padding: 0 8px;
+  color: var(--text);
+  background: #11141b;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color-scheme: dark;
+}
+.light-mode .inbox-daterange input[type="date"] { background: #fff; color-scheme: light; }
+.inbox-daterange input[type="date"]:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.inbox-daterange-sep { color: var(--muted-2); font-size: 11px; }
+.inbox-daterange-clear {
+  width: 22px; height: 22px; display: grid; place-items: center;
+  color: var(--muted-2); background: transparent; border: 1px solid var(--border);
+  border-radius: 6px; font-size: 10px; cursor: pointer;
+}
+.inbox-daterange-clear:hover { color: var(--text); border-color: var(--accent); }

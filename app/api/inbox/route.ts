@@ -144,12 +144,28 @@ export async function GET(request: Request) {
       { status: 503 },
     );
   try {
+    const params = new URL(request.url).searchParams;
     const requested =
-      new URL(request.url).searchParams
+      params
         .get("workspaces")
         ?.split(",")
         .map((item) => item.trim())
         .filter(Boolean) ?? [];
+    // Optional date window on the conversation's most recent activity. Parsed as whole days in the caller's
+    // zone and already sent as ISO instants, so here they are passed straight through as PostgREST bounds on
+    // last_message_at. A bad value is dropped rather than erroring, so a malformed range never empties the
+    // inbox silently. When a range is set, it also lifts the newest-500 ceiling for that window: a custom
+    // range is a deliberate look back, and capping it at 500 would quietly hide the older half of it.
+    const isoOrNull = (value: string | null) => {
+      const trimmed = (value ?? "").trim();
+      if (!trimmed) return null;
+      const time = Date.parse(trimmed);
+      return Number.isNaN(time) ? null : new Date(time).toISOString();
+    };
+    const since = isoOrNull(params.get("since"));
+    const until = isoOrNull(params.get("until"));
+    const rangeFilter = `${since ? `&last_message_at=gte.${encodeURIComponent(since)}` : ""}${until ? `&last_message_at=lte.${encodeURIComponent(until)}` : ""}`;
+    const rowLimit = since || until ? 2000 : 500;
     const workspaces = await query(
       url,
       key,
@@ -169,7 +185,7 @@ export async function GET(request: Request) {
       query(
         url,
         key,
-        `rr_conversations?select=*&workspace_id=in.(${batch.map(encodeURIComponent).join(",")})&order=last_message_at.desc&limit=500`,
+        `rr_conversations?select=*&workspace_id=in.(${batch.map(encodeURIComponent).join(",")})${rangeFilter}&order=last_message_at.desc&limit=${rowLimit}`,
       ),
     );
     conversations.sort(

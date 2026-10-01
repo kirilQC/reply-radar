@@ -1358,7 +1358,33 @@ export default function ReportsPage() {
 
               The date fields are the exception: a template whose period is a custom range still has to be
               told which range, and there is nowhere else to say it.
+
+              The override below is the second exception, added for the people who run the same template
+              over a one-off window — a biweekly EOW is the template's format over a fortnight nobody wants
+              to save as its own template. A template keeps its own default period; this only lets a single
+              run swap that default for a custom From/To without touching the saved template.
             */}
+            {template && template.defaultPeriod !== "custom" && (
+              <div className="config-group">
+                <span className="config-label">Date range</span>
+                <div className="config-period-grid">
+                  <button
+                    type="button"
+                    className={`config-period ${period !== "custom" ? "is-active" : ""}`}
+                    onClick={() => setPeriod(template.defaultPeriod)}
+                  >
+                    {periodLabel(template.defaultPeriod)} · default
+                  </button>
+                  <button
+                    type="button"
+                    className={`config-period ${period === "custom" ? "is-active" : ""}`}
+                    onClick={() => setPeriod("custom")}
+                  >
+                    Custom range
+                  </button>
+                </div>
+              </div>
+            )}
             {(!template || period === "custom") && (
               <div className="config-group">
                 {!template && (
