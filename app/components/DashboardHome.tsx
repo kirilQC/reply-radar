@@ -9,7 +9,6 @@ import Crumb from "./Crumb";
 import AppearancePanel, { type AppearancePrefs } from "./AppearancePanel";
 import { useEffect, useRef, useState } from "react";
 import {
-  activeProfile,
   identityKey,
   readCachedAppearance,
   writeCachedAppearance,
@@ -145,9 +144,6 @@ export default function DashboardHome() {
     document.addEventListener("visibilitychange", onVisible);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
   }, []);
-  const [me, setMe] = useState("");
-  useEffect(() => { setMe(activeProfile() ?? ""); }, []);
-  const myName = profiles.find((profile) => profile.slug === me)?.name ?? "";
   /** The spotlight that follows the pointer across any card. */
   const spotlight = (event: React.PointerEvent<HTMLElement>) => {
     const card = (event.target as HTMLElement).closest<HTMLElement>(".dashboard-stat-tile, .dashboard-profile-card, .dashboard-client-card");
@@ -213,7 +209,7 @@ export default function DashboardHome() {
           <Crumb trail={[{ label: "Dashboard" }]} />
           {/* The wordmark is centred over the bar rather than sitting in the trail, so the
               breadcrumb reads the same here as on every other page. */}
-          <Greeting name={myName} timeZone={appearance.timeZone || defaultAppearance.timeZone} />
+          <Greeting name="" timeZone={appearance.timeZone || defaultAppearance.timeZone} />
           <div className="top-actions">
             <button className="icon-button theme-toggle" data-popover-toggle aria-label="Customize appearance" title="Customize appearance" onClick={() => setAppearanceOpen((open) => !open)}>◐</button>
             {appearanceOpen && <AppearancePanel prefs={appearance} onChange={setAppearance} onSave={saveAppearance} />}
@@ -253,7 +249,7 @@ export default function DashboardHome() {
           <section className="dashboard-clients-section">
             <div className="section-heading">
               <div>
-                <h2>Client workspaces {clients.length > 0 && <span className="dash-count">{clients.length}</span>}</h2>
+                <h2>Client workspaces</h2>
               </div>
             </div>
             <div className="dashboard-client-grid">
@@ -282,7 +278,7 @@ export default function DashboardHome() {
               {profiles.map(({ name, description, tone, initials, slug, photo }, index) => (
                 <a
                   href={`/inbox?profile=${slug}`}
-                  className={`dashboard-profile-card dash-in ${slug === me ? "is-me" : ""}`}
+                  className="dashboard-profile-card dash-in"
                   style={{ ["--i" as string]: index + 5 }}
                   key={name}
                 >
