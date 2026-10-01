@@ -1,0 +1,106 @@
+/* Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+   Reply Radar — proprietary. Not licensed for redistribution or resale. */
+
+/* ── Help center ─────────────────────────────────────────────────────────── */
+.help-page { max-width: 920px; margin: 0 auto; padding: 38px 32px 80px; }
+
+.help-hero { text-align: center; margin-bottom: 28px; }
+.help-hero h1 { margin: 0 0 8px; font-size: 32px; letter-spacing: -.04em; font-weight: 700; }
+.help-hero p { margin: 0 auto 20px; max-width: 560px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.help-search {
+  display: flex; align-items: center; gap: 10px; max-width: 620px; margin: 0 auto; height: 46px; padding: 0 16px;
+  background: var(--panel, #111319); border: 1px solid var(--border); border-radius: 12px; color: var(--muted-2);
+}
+.help-search:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.help-search input { flex: 1; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; }
+.help-search button { background: transparent; color: var(--muted-2); font-size: 12px; }
+
+.help-tabs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-bottom: 26px; }
+.help-tabs button {
+  display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 12px; font-weight: 600;
+}
+.help-tabs button span { font-size: 10px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.help-tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.help-tabs button.on span { color: #ffffffcc; }
+
+.help-section-head { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.help-section-head h2 { margin: 0 0 3px; font-size: 16px; letter-spacing: -.02em; }
+.help-section-head p { margin: 0; color: var(--muted-2); font-size: 11px; }
+
+.help-edit-toggle {
+  height: 29px; padding: 0 11px; border-radius: 6px; border: 1px solid var(--border); background: #12151c;
+  color: var(--muted); font-size: 11px; font-weight: 600;
+}
+.help-edit-toggle.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+.light-mode .help-edit-toggle:not(.on) { background: #fff; }
+
+.help-primary { height: 32px; padding: 0 14px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
+.help-primary:disabled { opacity: .5; cursor: default; }
+.help-ghost { height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 12px; }
+.help-error { color: var(--coral); font-size: 12px; margin: 0 0 12px; }
+
+.help-list { display: flex; flex-direction: column; gap: 8px; }
+.hc-card { border: 1px solid var(--border); border-radius: 12px; background: var(--panel, #111319); overflow: hidden; scroll-margin-top: 80px; }
+.hc-card.open { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.hc-card-head {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 15px 18px; background: transparent; text-align: left; color: var(--text);
+}
+.hc-card-head:hover { background: var(--panel-2, #151821); }
+.hc-card-title { font-size: 13px; font-weight: 650; }
+.hc-card-meta { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.help-chip { font-size: 9.5px; font-weight: 650; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+.help-chip-video { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.help-caret { width: 18px; text-align: center; color: var(--muted-2); font-size: 15px; }
+
+.hc-card-body { padding: 4px 18px 18px; border-top: 1px solid var(--border-soft); }
+.help-video { position: relative; width: 100%; aspect-ratio: 16 / 9; margin: 14px 0 6px; border-radius: 10px; overflow: hidden; background: #000; }
+.help-video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.help-markdown { font-size: 13px; line-height: 1.6; color: var(--text); }
+.help-markdown ol, .help-markdown ul { padding-left: 22px; }
+/* A global reset strips list markers; a walkthrough's numbered steps need theirs back. */
+.help-markdown ol { list-style: decimal; }
+.help-markdown ul { list-style: disc; }
+.help-markdown li::marker { color: var(--muted); font-weight: 600; }
+.help-markdown li { margin: 4px 0; }
+.help-muted { color: var(--muted-2); font-size: 12px; }
+.hc-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.help-link { color: var(--accent); font-size: 12px; font-weight: 600; text-decoration: none; }
+.help-link:hover { text-decoration: underline; }
+.hc-card-tools { display: inline-flex; gap: 5px; margin-left: auto; }
+.hc-card-tools button {
+  height: 26px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border); background: transparent;
+  color: var(--muted); font-size: 11px;
+}
+.hc-card-tools button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.hc-card-tools button:disabled { opacity: .35; cursor: default; }
+.hc-card-tools button.danger:hover { color: var(--coral); border-color: var(--coral); }
+.hc-card-skeleton { height: 50px; padding: 20px 18px; }
+
+.help-empty { text-align: center; padding: 34px 16px; color: var(--muted-2); font-size: 12px; border: 1px dashed var(--border); border-radius: 12px; }
+.help-inline { background: transparent; color: var(--accent); font-weight: 600; font-size: 12px; }
+
+.help-editor { display: flex; flex-direction: column; gap: 12px; padding: 18px; margin-bottom: 14px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: 12px; background: var(--panel, #111319); }
+.help-editor-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.help-editor label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; font-weight: 650; color: var(--muted); }
+.help-editor label em { font-style: normal; font-weight: 500; color: var(--muted-2); }
+.help-editor input, .help-editor select, .help-editor textarea {
+  font: inherit; font-size: 12.5px; font-weight: 400; color: var(--text); background: var(--panel-2, #151821);
+  border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px;
+}
+.help-editor textarea { resize: vertical; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.help-editor input:focus, .help-editor select:focus, .help-editor textarea:focus { outline: none; border-color: var(--accent); }
+.help-editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.help-bot-card { margin-top: 22px; padding: 16px 18px; border-radius: 12px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 7%, var(--panel, #111319)); }
+.help-bot-card strong { font-size: 13px; }
+.help-bot-card p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.help-bot-card code { font-size: 11px; padding: 1px 5px; border-radius: 4px; background: var(--panel-2, #151821); color: var(--text); }
+
+@media (max-width: 760px) {
+  .help-page { padding: 24px 16px 60px; }
+  .help-hero h1 { font-size: 25px; }
+  .help-editor-row { grid-template-columns: 1fr; }
+  .hc-card-head { flex-direction: column; align-items: flex-start; }
+}

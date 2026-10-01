@@ -30,6 +30,7 @@ const items = [
   ["/slack", "Slack", "slack"],
   ["/health", "System health", "health"],
   ["/admin", "Configuration", "settings"],
+  ["/help", "Help", "help"],
 ] as const;
 const iconPaths: Record<string, string> = {
   dashboard: "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
@@ -38,6 +39,7 @@ const iconPaths: Record<string, string> = {
   analytics: "M5 19V9m5 10V5m5 14v-7m5 7V3",
   reports: "M6 3h9l3 3v15H6z M15 3v4h4 M9 12h6 M9 16h6",
   health: "M4 12h3l2-6 4 12 2-6h5",
+  help: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.3-2.5 3.9 M12 17h.01",
   inbox: "M4 5h16v14H4z M4 9h5l1.5 2h3L15 9h5",
   settings: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7",
   database: "M5 5c0-2 14-2 14 0v14c0 2-14 2-14 0z M5 5c0 2 14 2 14 0 M5 12c0 2 14 2 14 0",

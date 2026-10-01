@@ -75,6 +75,8 @@ import type { ClientCall } from "./granola";
 import { getClientDeals, listDealClients } from "./deals";
 import { addToDnc, listDnc, removeFromDnc } from "./dnc";
 import { onboardingForAssistant, listOnboardingClients, setTaskDone, addTemplateStep, listTemplate } from "./onboarding";
+import { helpForAssistant, readHelp, searchHelp } from "./help-center";
+import { publicBaseUrl } from "./public-url";
 
 type Row = Record<string, unknown>;
 
@@ -827,6 +829,12 @@ export const TOOLS: ToolDefinition[] = [
     description:
       "Booked meetings. Pass a client to get that client's meetings — invitee, company, time, campaign, status and the enrichment on each. Omit the client to get a directory across all clients with each one's meeting count and next upcoming. Use this to answer who a client has booked, when their next call is, or which campaign a meeting came from.",
     input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug. Omit for the all-client directory." } } },
+  },
+  {
+    name: "help_center",
+    description:
+      "Search Reply Radar's own Help center — the team-written walkthroughs, FAQ, troubleshooting and support articles (the Help tab in the app), some with Loom videos. Use this FIRST whenever someone asks how to do something in Reply Radar ('how do I tag a lead', 'where do I set a custom date', 'how does the morning brief work'), says they are stuck, confused, or that something in the app looks broken. Pass their question as `query` in plain words. Each result has the full written steps (`body`), the app page it is about with a link, the Loom video link if there is one, and a link to the article itself. Walk the person through the steps in your own words, link the video and the page, and do not invent steps the article does not contain. If nothing matches, say the Help center has no article on it yet and suggest they ask Kiril. Call with an empty query to list every article.",
+    input_schema: { type: "object", properties: { query: { type: "string", description: "The person's question in plain words, e.g. 'tag a lead as DQ'. Empty to list all articles." } } },
   },
   {
     name: "list_deals",
@@ -1859,6 +1867,18 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
           company: m.companyName, summary: m.summary, host: m.host, campaign: m.campaign, status: m.status,
         })),
       };
+    }
+
+    case "help_center": {
+      const articles = await readHelp();
+      if (!articles.length) return { articles: [], note: "The Help center has no articles yet. Tell the person it is still being written and suggest they ask Kiril." };
+      const query = text(input.query).trim();
+      const base = publicBaseUrl() || "https://www.replyradar.dev";
+      const found = searchHelp(articles, query, query ? 4 : 50);
+      if (!found.length) return { articles: [], note: `No Help center article matches "${query}". Say so plainly and suggest they ask Kiril; do not make up steps.`, helpUrl: `${base}/help` };
+      // An empty query is a table of contents: titles and links only, so the list stays short.
+      if (!query) return { articles: found.map((article) => ({ title: article.title, section: article.kind, helpUrl: `${base}/help#${article.id}` })) };
+      return { articles: found.map((article) => helpForAssistant(article, base)) };
     }
 
     case "list_deals": {
