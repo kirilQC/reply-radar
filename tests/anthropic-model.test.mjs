@@ -18,6 +18,7 @@ test("allowlisted ids pass through", () => {
   for (const id of ACTIVE_MODELS) assert.equal(resolveModel(` ${id} `), id);
 });
 
-test("no temperature is sent to any allowlisted model (Claude 5 rejects it)", () => {
-  for (const id of [...ACTIVE_MODELS, OPENROUTER_DEFAULT_MODEL]) assert.deepEqual(temperatureField(id, 0), {}, id);
+test("Claude 5 one-shot calls send no temperature and switch thinking off", () => {
+  for (const id of ACTIVE_MODELS) assert.deepEqual(temperatureField(id, 0), { thinking: { type: "disabled" } }, id);
+  assert.deepEqual(temperatureField(OPENROUTER_DEFAULT_MODEL, 0), {});
 });

@@ -344,7 +344,7 @@ export async function gatherCalls(
 }
 
 /** Calls Anthropic once and returns the brief. One call, because a brief is short by design. */
-export async function writeBrief(systemPrompt: string, userContent: string, model = BRIEF_MODEL): Promise<string> {
+export async function writeBrief(systemPrompt: string, userContent: string, model = BRIEF_MODEL, maxTokens = MAX_OUTPUT_TOKENS): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set, so no brief can be written.");
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -352,7 +352,7 @@ export async function writeBrief(systemPrompt: string, userContent: string, mode
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model,
-      max_tokens: MAX_OUTPUT_TOKENS,
+      max_tokens: maxTokens,
       // Not zero: the same figures every Monday would otherwise produce nearly the same sentences, and
       // a brief that reads as boilerplate stops being read even when the contents changed.
       ...temperatureField(model, 0.3),
@@ -366,6 +366,9 @@ export async function writeBrief(systemPrompt: string, userContent: string, mode
     const detail = payload?.error?.message ?? `HTTP ${response.status}`;
     throw new Error(`Anthropic refused the request: ${detail}`);
   }
+  // A brief cut off by the token limit is never posted: retry once with twice the room.
+  if (payload?.stop_reason === "max_tokens" && maxTokens < MAX_OUTPUT_TOKENS * 4) return writeBrief(systemPrompt, userContent, model, maxTokens * 2);
+  if (payload?.stop_reason === "max_tokens") throw new Error("The brief ran past its length limit twice; not posting a cut-off brief.");
   const text = Array.isArray(payload?.content)
     ? payload.content.filter((part: Row) => part?.type === "text").map((part: Row) => String(part.text ?? "")).join("").trim()
     : "";

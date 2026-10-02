@@ -52,7 +52,17 @@ export function supportsTemperature(requested) {
   return true;
 }
 
-/** The temperature fragment to spread into a request body — `{ temperature }` for models that accept it, else `{}`. */
+/**
+ * The generation settings to spread into a one-shot request body.
+ *
+ * Older models take `{ temperature }`. The Claude 5 family rejects temperature, and it also thinks on its own
+ * before longer answers unless told not to; those thinking tokens count against `max_tokens`, so a call budgeted
+ * for its answer (a 2,000-token recap, a 100-token score) came back cut off mid-sentence. One-shot calls switch
+ * thinking off, which is how the older models behaved. Scout and QC Bot opt into adaptive thinking themselves.
+ * OpenRouter ids ("anthropic/…") speak a different API and get nothing extra.
+ */
 export function temperatureField(model, temperature) {
-  return supportsTemperature(model) ? { temperature } : {};
+  if (supportsTemperature(model)) return { temperature };
+  const id = typeof model === "string" ? model : "";
+  return id.startsWith("claude-") ? { thinking: { type: "disabled" } } : {};
 }
