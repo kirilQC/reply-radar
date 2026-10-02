@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import RichNotes, { plainNotes } from "../components/RichNotes";
+import LatestUpdates from "./LatestUpdates";
 
 export type LinkItem = { url: string; title?: string };
 export type Blocker = { owner?: string; text?: string; resolved?: boolean; resolvedAt?: string };
@@ -258,7 +259,21 @@ function liftedDragImage(e: React.DragEvent<HTMLElement>) {
   try { e.dataTransfer.setDragImage(wrap, e.clientX - rect.left + 24, e.clientY - rect.top + 24); } catch { /* older browsers keep the default image */ }
   window.setTimeout(() => wrap.remove(), 0);
 }
-function Card({ t, h, column, shift }: { t: BoardTask; h: Handlers; column?: string[]; shift?: boolean }) {
+/**
+ * How far a card should slide while another card in its column is dragged: up one slot if the dragged
+ * card is passing it on the way down, down one slot if it is passing it on the way up, otherwise 0.
+ * The dragged card keeps its own slot (only made invisible): Chrome cancels a drag if the source element
+ * shrinks or stops taking pointer events while the drag is starting.
+ */
+function slideFor(column: string[], id: string, h: Handlers): -1 | 0 | 1 {
+  const at = insertionIndex(column, h);
+  if (at < 0 || id === h.dragId) return 0;
+  const src = column.indexOf(h.dragId as string);
+  const i = column.indexOf(id);
+  if (i < src) return i >= at ? 1 : 0; // dragged card moving up past it: it moves down
+  return i - 1 < at ? -1 : 0; // dragged card moving down past it: it moves up into the freed slot
+}
+function Card({ t, h, column, slide = 0 }: { t: BoardTask; h: Handlers; column?: string[]; slide?: -1 | 0 | 1 }) {
   const s = stageOf(t.stage);
   const pr = prioOf(t.priority);
   const client = h.clients.find((c) => c.slug === t.clientSlug);
@@ -266,11 +281,11 @@ function Card({ t, h, column, shift }: { t: BoardTask; h: Handlers; column?: str
   const openBlockers = blockerList(t.blocker).filter((b) => !b.resolved);
   return (
     <div
-      className={`pm-bcard ${t.priority === "p1" ? "pm-bcard-p1" : ""} ${h.dragId === t.id ? "pm-bcard-source" : ""} ${shift ? "pm-bcard-shift" : ""} ${h.landedId === t.id ? "pm-bcard-landed" : ""}`}
-      style={{ ["--drag-h" as string]: `${h.dragH}px`, ...(shift ? { translate: `0 ${h.dragH + 10}px` } : {}) } as React.CSSProperties}
-      data-shift={shift ? h.dragH + 10 : 0}
+      className={`pm-bcard ${t.priority === "p1" ? "pm-bcard-p1" : ""} ${h.dragId === t.id ? "pm-bcard-source" : ""} ${slide ? "pm-bcard-shift" : ""} ${h.landedId === t.id ? "pm-bcard-landed" : ""}`}
+      style={slide ? ({ translate: `0 ${slide * (h.dragH + 10)}px` } as React.CSSProperties) : undefined}
+      data-shift={slide * (h.dragH + 10)}
       draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("id", t.id); liftedDragImage(e); h.onDrag(t.id, e.currentTarget.getBoundingClientRect().height); }}
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("id", t.id); liftedDragImage(e); const height = e.currentTarget.getBoundingClientRect().height; window.setTimeout(() => h.onDrag(t.id, height), 0); }}
       onDragEnd={() => { h.onDrag(null); h.setDropHint(null); }}
       onDragOver={column ? (e) => {
         if (!h.dragId || h.dragId === t.id || !column.includes(h.dragId)) return;
@@ -323,7 +338,7 @@ function KanbanView({ byStage, h }: { byStage: Record<string, BoardTask[]>; h: H
       {STAGES.map((s) => (
         <div className="pm-col" key={s.key} onDragOver={(e) => e.preventDefault()} onDrop={() => h.dragId && h.onMove(h.dragId, s.key)}>
           <div className="pm-colh"><span className={`pm-stg ${s.cls}`}><span className="d" />{s.label}</span></div>
-          {(() => { const ids = byStage[s.key].map((x) => x.id); const at = insertionIndex(ids, h); const rest = ids.filter((id) => id !== h.dragId); return byStage[s.key].map((t) => <Card key={t.id} t={t} h={h} column={ids} shift={at >= 0 && t.id !== h.dragId && rest.indexOf(t.id) >= at} />); })()}
+          {(() => { const ids = byStage[s.key].map((x) => x.id); return byStage[s.key].map((t) => <Card key={t.id} t={t} h={h} column={ids} slide={slideFor(ids, t.id, h)} />); })()}
           {s.key === "todo" && <button type="button" className="pm-add" onClick={() => h.openNew("todo")}>+ Add</button>}
         </div>
       ))}
@@ -407,7 +422,7 @@ function ColumnList({ label, logo, tasks, onAdd, h, reorderable, extra }: { labe
   return (
     <div className="pm-col">
       <div className="pm-colh pm-colh-big">{logo}<b>{label}</b>{extra}</div>
-      {(() => { const at = reorderable ? insertionIndex(ids, h) : -1; const rest = ids.filter((id) => id !== h.dragId); return tasks.map((t) => <Card key={t.id} t={t} h={h} column={reorderable ? ids : undefined} shift={at >= 0 && t.id !== h.dragId && rest.indexOf(t.id) >= at} />); })()}
+      {tasks.map((t) => <Card key={t.id} t={t} h={h} column={reorderable ? ids : undefined} slide={reorderable ? slideFor(ids, t.id, h) : 0} />)}
       <button type="button" className="pm-add" onClick={onAdd}>+ Add</button>
     </div>
   );
@@ -657,6 +672,7 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
         <div className="pm-ed-body">
           <div className="pm-ed-main">
             <div className="pm-f pm-f-notes"><span>Context / notes</span><RichNotes value={context} onChange={setContext} /></div>
+            {!isNew && task && !task.id.startsWith("tmp") && <div className="pm-f pm-f-updates"><span>Latest update</span><LatestUpdates taskId={task.id} people={people} map={map} /></div>}
             <div className="pm-f"><span>Links &amp; files</span><div className="pm-links">
               {links.map((l, i) => <div className="pm-link" key={i}><a href={l.url} target="_blank" rel="noreferrer">{linkLabel(l)}</a><button type="button" onClick={() => setLinks((p) => p.filter((_, j) => j !== i))}>✕</button></div>)}
               <div className="pm-link-add pm-link-add2"><input value={nTitle} placeholder="Title (optional)" onChange={(e) => setNTitle(e.target.value)} /><input value={nUrl} placeholder="Paste a URL…" onChange={(e) => setNUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLink(); } }} /><button type="button" onClick={addLink}>Add</button></div>

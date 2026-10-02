@@ -665,8 +665,8 @@
 .pm-peek-tag { margin-left: 7px; padding: 1px 6px; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: .03em; color: #e0a83d; background: color-mix(in srgb, #e0a83d 14%, transparent); vertical-align: 1px; }
 
 /* Context / notes fills the left side of the task, and is a rich-text editor (app/components/RichNotes). */
-.pm-ed-main .pm-f-notes { flex: 1 0 auto; display: flex; flex-direction: column; }
-.pm-f-notes .rn { flex: 1; display: flex; flex-direction: column; min-height: 440px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, #151821); overflow: hidden; transition: border-color .15s; }
+.pm-ed-main .pm-f-notes { flex: 2 0 auto; display: flex; flex-direction: column; }
+.pm-f-notes .rn { flex: 1; display: flex; flex-direction: column; min-height: 300px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, #151821); overflow: hidden; transition: border-color .15s; }
 .pm-f-notes .rn:focus-within { border-color: var(--accent); }
 .rn-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--border-soft, var(--border)); background: color-mix(in srgb, var(--panel) 60%, transparent); }
 .rn-btn { min-width: 28px; height: 28px; padding: 0 7px; display: inline-grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; transition: background .12s, color .12s; }
@@ -722,17 +722,59 @@
   box-shadow: 0 24px 48px rgba(0, 0, 0, .55), 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
   opacity: 1 !important;
 }
-.pm-bcard-source { animation: pm-fold .2s .04s cubic-bezier(.4, 0, .2, 1) forwards; pointer-events: none; }
-@keyframes pm-fold {
-  from { max-height: var(--drag-h); opacity: .5; }
-  to { max-height: 0; opacity: 0; margin-bottom: 0; border-width: 0; padding-top: 0; padding-bottom: 0; }
-}
+.pm-bcard-source { opacity: 0; transition: opacity .12s ease; }
 .pm-bcard-landed { animation: pm-land .65s ease-out; }
 @keyframes pm-land {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 65%, transparent); border-color: var(--accent); }
   100% { box-shadow: 0 0 0 16px transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pm-bcard, .pm-bcard-p1, .pm-bcard-age, .pm-bcard-landed, .pm-bcard-source { animation: none !important; transition: none !important; }
+  .pm-bcard, .pm-bcard-p1, .pm-bcard-age, .pm-bcard-landed { animation: none !important; transition: none !important; }
   .pm-bcard:hover { transform: none; }
 }
+
+/* ── Latest update: written updates and voice notes, a third of the task's left side ─────────── */
+.pm-ed-main .pm-f-updates { flex: 1 0 auto; display: flex; flex-direction: column; }
+.lu { flex: 1; display: flex; flex-direction: column; min-height: 210px; max-height: 330px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, #151821); overflow: hidden; }
+.lu-compose { padding: 9px; border-bottom: 1px solid var(--border-soft, var(--border)); display: flex; flex-direction: column; gap: 7px; background: color-mix(in srgb, var(--panel) 60%, transparent); }
+.lu-who { display: flex; align-items: center; gap: 8px; }
+.lu-who select { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600; }
+.lu-who select:focus { outline: none; border-color: var(--accent); }
+.lu-av { width: 24px; height: 24px; flex: none; border-radius: 50%; display: grid; place-items: center; overflow: hidden; color: #fff; font-size: 10px; font-weight: 800; }
+.lu-av img { width: 100%; height: 100%; object-fit: cover; }
+.lu-input { display: flex; align-items: flex-end; gap: 6px; }
+.lu-input textarea { flex: 1; min-width: 0; resize: none; min-height: 34px; max-height: 120px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; font-size: 13px; line-height: 1.45; }
+.lu-input textarea:focus { outline: none; border-color: var(--accent); }
+.lu-btn { height: 34px; padding: 0 13px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink, #0b0c10); font: inherit; font-size: 12.5px; font-weight: 750; cursor: pointer; flex: none; }
+.lu-btn:disabled { opacity: .45; cursor: default; }
+.lu-btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+.lu-mic { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s; }
+.lu-mic:hover { color: var(--accent); border-color: var(--accent); }
+.lu-rec { display: flex; align-items: center; gap: 9px; min-height: 34px; }
+.lu-rec-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff4d5e; animation: lu-blink 1s ease-in-out infinite; flex: none; }
+@keyframes lu-blink { 50% { opacity: .3; } }
+.lu-rec-time { font: 600 12px ui-monospace, monospace; color: var(--text); font-variant-numeric: tabular-nums; }
+.lu-rec-wave { flex: 1; display: flex; align-items: center; gap: 3px; height: 22px; overflow: hidden; }
+.lu-rec-wave i { flex: 1; max-width: 4px; height: 30%; border-radius: 2px; background: color-mix(in srgb, #ff4d5e 70%, var(--accent)); animation: lu-wave .6s ease-in-out infinite alternate; }
+@keyframes lu-wave { to { height: 100%; } }
+.lu-stop { background: #ff4d5e; color: #fff; }
+.lu-review .lu-voice { flex: 1; }
+.lu-error { margin: 0; font-size: 12px; color: #ff8a8a; }
+.lu-feed { flex: 1; overflow-y: auto; padding: 4px 10px; }
+.lu-empty { margin: 12px 2px; font-size: 12.5px; color: var(--muted-2); }
+.lu-item { display: flex; gap: 9px; padding: 9px 0; border-bottom: 1px solid var(--border-soft, var(--border)); }
+.lu-item:last-child { border-bottom: 0; }
+.lu-body { flex: 1; min-width: 0; }
+.lu-meta { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.lu-meta b { font-weight: 750; }
+.lu-meta span { color: var(--muted-2); font-size: 11px; }
+.lu-del { margin-left: auto; border: 0; background: none; color: var(--muted-2); cursor: pointer; font-size: 11px; opacity: 0; transition: opacity .15s; }
+.lu-item:hover .lu-del { opacity: 1; }
+.lu-del:hover { color: #ff8a8a; }
+.lu-text { margin: 3px 0 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lu-voice { display: flex; align-items: center; gap: 9px; margin-top: 5px; padding: 6px 9px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)); max-width: 320px; }
+.lu-play { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-ink, #0b0c10); cursor: pointer; }
+.lu-track { flex: 1; height: 5px; border-radius: 999px; background: color-mix(in srgb, var(--text) 12%, transparent); cursor: pointer; overflow: hidden; }
+.lu-track i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .15s linear; }
+.lu-time { font: 600 11px ui-monospace, monospace; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+@media (prefers-reduced-motion: reduce) { .lu-rec-dot, .lu-rec-wave i { animation: none; } }
