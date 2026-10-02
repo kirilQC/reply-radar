@@ -797,3 +797,17 @@
 .lu-who-opt b { margin-left: auto; color: var(--accent); }
 .lu-voice { margin-top: 3px; padding: 4px 8px; }
 .lu-text { margin-top: 1px; font-size: 12.5px; }
+
+/* Mascot avatars: a teammate can pick one of ten mascots instead of uploading a photo. */
+.pm-av-mascot { background: transparent !important; padding: 0; overflow: hidden; }
+.pm-av-mascot .team-mascot, .lu-av-mascot .team-mascot { width: 100% !important; height: 100% !important; }
+.pm-dd-mascotbtn { font-size: 12px; line-height: 1; }
+.pm-mascot-grid { margin: 4px 4px 6px; padding: 8px; border-radius: 10px; background: var(--panel-2, #151821); border: 1px solid var(--border-soft, var(--border)); }
+.pm-mascot-h { font-size: 10.5px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--muted-2); margin-bottom: 7px; }
+.pm-mascot-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.pm-mascot-opt { display: grid; place-items: center; padding: 4px; border-radius: 9px; border: 1px solid transparent; background: transparent; cursor: pointer; transition: transform .15s, border-color .15s; }
+.pm-mascot-opt:hover { transform: translateY(-2px) scale(1.06); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.pm-mascot-opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.rn-status { margin-left: 6px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.rn-err { color: #ff8a8a; }
+.pm-autosave-note { margin-left: auto; margin-right: 12px; align-self: center; font-size: 11.5px; color: var(--muted-2); }

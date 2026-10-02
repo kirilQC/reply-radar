@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import RichNotes, { plainNotes } from "../components/RichNotes";
 import LatestUpdates from "./LatestUpdates";
+import { MASCOTS, MascotFace, cleanPersonName, mascotOf } from "../components/TeamMascots";
 
 export type LinkItem = { url: string; title?: string };
 export type Blocker = { owner?: string; text?: string; resolved?: boolean; resolvedAt?: string };
@@ -147,6 +148,8 @@ function Select({ value, options, onChange, placeholder, minWidth, tone, size }:
 }
 function Avatar({ name, map, cls }: { name: string; map: Record<string, string>; cls?: string }) {
   const url = map[name];
+  const mascot = mascotOf(url);
+  if (mascot) return <span className={`pm-av pm-av-mascot ${cls || ""}`} title={name}><MascotFace id={mascot.id} /></span>;
   return <span className={`pm-av ${cls || ""}`} style={url ? undefined : { background: `hsl(${hue(name)} 55% 45%)` }}>{url ? <img src={url} alt="" /> : initials(name)}</span>;
 }
 function Owners({ owner, map, stack }: { owner?: string | null; map: Record<string, string>; stack?: boolean }) {
@@ -154,8 +157,8 @@ function Owners({ owner, map, stack }: { owner?: string | null; map: Record<stri
   if (list.length <= 2) return <span className={`pm-own-inline ${stack ? "stack" : ""}`}>{list.map((n) => <span className="pm-own-chip" key={n}><Avatar name={n} map={map} />{n}</span>)}</span>;
   return <span className="pm-av-row">{list.slice(0, 3).map((n) => <Avatar key={n} name={n} map={map} />)}<span className="pm-av-names">{list.length} people</span></span>;
 }
-function MultiPeople({ value, people, map, onChange, addPerson, removePerson, uploadAvatar, placeholder = "Unassigned", stack }: { value: string; people: Person[]; map: Record<string, string>; onChange: (v: string) => void; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void; placeholder?: string; stack?: boolean }) {
-  const m = useMenu(230); const sel = ownerList(value); const [draft, setDraft] = useState("");
+function MultiPeople({ value, people, map, onChange, addPerson, removePerson, uploadAvatar, setMascot, placeholder = "Unassigned", stack }: { value: string; people: Person[]; map: Record<string, string>; onChange: (v: string) => void; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void; setMascot?: (n: string, id: string) => void; placeholder?: string; stack?: boolean }) {
+  const m = useMenu(230); const sel = ownerList(value); const [draft, setDraft] = useState(""); const [picking, setPicking] = useState<string | null>(null);
   const toggle = (name: string) => { const next = sel.includes(name) ? sel.filter((x) => x !== name) : [...sel, name]; onChange(next.join(", ")); };
   const add = () => { const n = draft.trim(); if (!n) return; addPerson(n); if (!sel.includes(n)) onChange([...sel, n].join(", ")); setDraft(""); };
   const roster = Array.from(new Set([...people.map((p) => p.name), ...sel]));
@@ -171,11 +174,22 @@ function MultiPeople({ value, people, map, onChange, addPerson, removePerson, up
           {roster.map((p) => (
             <div className={`pm-dd-opt multi ${sel.includes(p) ? "on" : ""}`} key={p}>
               <button type="button" className="pm-dd-optmain" onClick={() => toggle(p)}><span className={`pm-check ${sel.includes(p) ? "on" : ""}`}>{sel.includes(p) ? "✓" : ""}</span><Avatar name={p} map={map} /><span className="pm-dd-opt-l">{p}</span></button>
+              {setMascot && <button type="button" className="pm-dd-photo pm-dd-mascotbtn" title="Pick a mascot" onClick={() => setPicking((x) => (x === p ? null : p))}>🐾</button>}
               <label className="pm-dd-photo" title="Upload photo"><svg viewBox="0 0 20 20" width="13" height="13"><path fill="currentColor" d="M4 5h3l1-2h4l1 2h3a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm6 3a3 3 0 100 6 3 3 0 000-6z" /></svg><input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAvatar(p, f); }} /></label>
               <button type="button" className="pm-dd-rm" title="Delete from the whole roster" onClick={() => removePerson(p)}>🗑</button>
             </div>
           ))}
-          <div className="pm-dd-add"><input value={draft} placeholder="Add a person…" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} /><button type="button" onClick={add}>Add</button></div>
+          {picking && setMascot && (
+            <div className="pm-mascot-grid" role="group" aria-label={`Mascot for ${picking}`}>
+              <div className="pm-mascot-h">Mascot for {picking}</div>
+              <div className="pm-mascot-row">
+                {MASCOTS.map((mm) => (
+                  <button key={mm.id} type="button" className={`pm-mascot-opt ${map[picking] === `mascot:${mm.id}` ? "on" : ""}`} title={mm.label} onClick={() => { setMascot(picking, mm.id); setPicking(null); }}><MascotFace id={mm.id} size={30} /></button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="pm-dd-add"><input value={draft} maxLength={10} placeholder="Add a person (one word)" title="One word, up to 10 characters" onChange={(e) => setDraft(cleanPersonName(e.target.value))} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} /><button type="button" onClick={add}>Add</button></div>
         </div>
       </>}
     </div>
@@ -232,7 +246,7 @@ function FiltersPanel({ view, views, onPickView, onReorderViews, sort, onSort, m
 
 type EditorState = { mode: "new"; stage: string; clientSlug?: string; assignee?: string } | { mode: "edit"; task: BoardTask } | null;
 type Handlers = {
-  clients: BoardClient[]; multi: boolean; people: Person[]; map: Record<string, string>; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void;
+  clients: BoardClient[]; multi: boolean; people: Person[]; map: Record<string, string>; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void; setMascot: (n: string, id: string) => void;
   openNew: (stage: string, clientSlug?: string, assignee?: string) => void; onOpen: (t: BoardTask) => void; onDelete: (id: string) => void; notifyChannel?: string;
   onDrag: (id: string | null, height?: number) => void; dragId: string | null; dragH: number; landedId: string | null; onMove: (id: string, stage: string) => void; onSetDay: (id: string, date: string) => void;
   /** Drop the dragged task before (or after) `targetId` within the list `ids`, i.e. reorder that column. */
@@ -598,7 +612,7 @@ function BlockerCell({ blockers, people, map, onChange, addPerson }: { blockers?
         <div className="pm-dd-menu pm-blockermenu" style={{ ...m.anchor, minWidth: Math.max(m.pos.width, 300) }} onClick={(e) => e.stopPropagation()}>
           <div className="pm-blk-label">Waiting on</div>
           <Select value={owner} options={roster} placeholder="Anyone" onChange={setOwner} minWidth={260} />
-          <div className="pm-dd-add pm-blk-add"><input value={draftName} placeholder="…or add a new person" onChange={(e) => setDraftName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addInline(); } }} /><button type="button" onClick={addInline}>Add</button></div>
+          <div className="pm-dd-add pm-blk-add"><input value={draftName} maxLength={10} placeholder="…or add a person (one word)" onChange={(e) => setDraftName(cleanPersonName(e.target.value))} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addInline(); } }} /><button type="button" onClick={addInline}>Add</button></div>
           <div className="pm-blk-label">What needs to happen</div>
           <textarea className="pm-blk-text" rows={3} value={txt} placeholder="e.g. Need the surgeon-office list reviewed before I can send" onChange={(e) => setTxt(e.target.value)} />
           <div className="pm-blk-foot">
@@ -630,7 +644,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
               <tr key={t.id} className={pc ? "rp" : ""} style={pc ? ({ ["--rc" as string]: pc } as React.CSSProperties) : undefined}>
                 <td><Select value={t.clientSlug ?? ""} options={clientOpts} size="lg" onChange={(v) => onUpdate(t.id, { moveToSlug: v })} /></td>
                 <td><AutoTextarea className="pm-cell-title" defaultValue={t.title} onCommit={(v) => { if (v !== t.title && v.trim()) onUpdate(t.id, { title: v }); }} /></td>
-                <td><MultiPeople value={t.owner || ""} people={h.people} map={h.map} stack onChange={(v) => onUpdate(t.id, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
+                <td><MultiPeople value={t.owner || ""} people={h.people} map={h.map} stack onChange={(v) => onUpdate(t.id, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} setMascot={h.setMascot} /></td>
                 <td><Select value={t.priority || ""} options={prioOpts} placeholder="None" tone={prioOf(t.priority)?.color} onChange={(v) => onUpdate(t.id, { priority: v })} /></td>
                 <td><Select value={t.stage} options={stageOpts} tone={stageOf(t.stage).color} onChange={(v) => onUpdate(t.id, { stage: v })} /></td>
                 <td><BlockerCell blockers={t.blocker} people={h.people} map={h.map} addPerson={h.addPerson} onChange={(blk) => onUpdate(t.id, { blocker: blk })} /></td>
@@ -644,7 +658,7 @@ function TableView({ tasks, h, onUpdate, onCreate, week }: { tasks: BoardTask[];
               <tr key={d.key} className={`pm-draftrow ${pc ? "rp" : ""}`} style={pc ? ({ ["--rc" as string]: pc } as React.CSSProperties) : undefined}>
                 <td><Select value={d.clientSlug} options={clientOpts} size="lg" onChange={(v) => setDraft(d.key, { clientSlug: v })} /></td>
                 <td><input className="pm-cellin pm-cell-title" autoFocus value={d.title} placeholder="New task…" onChange={(e) => setDraft(d.key, { title: e.target.value })} onBlur={() => commit(d.key)} onKeyDown={(e) => { if (e.key === "Enter") commit(d.key); }} /></td>
-                <td><MultiPeople value={d.owner} people={h.people} map={h.map} stack onChange={(v) => setDraft(d.key, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} /></td>
+                <td><MultiPeople value={d.owner} people={h.people} map={h.map} stack onChange={(v) => setDraft(d.key, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} setMascot={h.setMascot} /></td>
                 <td><Select value={d.priority} options={prioOpts} placeholder="None" tone={prioOf(d.priority)?.color} onChange={(v) => setDraft(d.key, { priority: v })} /></td>
                 <td><Select value={d.stage} options={stageOpts} tone={stageOf(d.stage).color} onChange={(v) => setDraft(d.key, { stage: v })} /></td>
                 <td><span className="pm-blk-later">—</span></td>
@@ -681,7 +695,7 @@ function SwimlanesView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
     </div>
   );
 }
-function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPerson, removePerson, uploadAvatar, onClose, onCreate, onUpdate, onDelete }: { state: Exclude<EditorState, null>; clients: BoardClient[]; people: Person[]; map: Record<string, string>; multi: boolean; notifyChannel?: string; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void; onClose: () => void; onCreate: (clientSlug: string, f: NewFields) => void; onUpdate: (id: string, f: Record<string, unknown>) => void; onDelete: (id: string) => void }) {
+function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPerson, removePerson, uploadAvatar, setMascot, onClose, onCreate, onUpdate, onDelete }: { state: Exclude<EditorState, null>; clients: BoardClient[]; people: Person[]; map: Record<string, string>; multi: boolean; notifyChannel?: string; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void; setMascot: (n: string, id: string) => void; onClose: () => void; onCreate: (clientSlug: string, f: NewFields) => void; onUpdate: (id: string, f: Record<string, unknown>) => void; onDelete: (id: string) => void }) {
   const isNew = state.mode === "new"; const task = isNew ? null : state.task;
   const [title, setTitle] = useState(task?.title ?? "");
   const [slug, setSlug] = useState((isNew ? state.clientSlug : task?.clientSlug) ?? clients[0]?.slug ?? "");
@@ -705,13 +719,26 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
   const s = stageOf(stage);
   const client = clients.find((c) => c.slug === slug);
   const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links: legacyLinks.length ? [] : links, priority, blocker: blockers, week, checks }); onClose(); };
+  // Autosave: closing the task (✕, clicking outside, Escape) saves any changes. A new task saves if it
+  // has a title and is simply discarded if it's still blank.
+  const snapshot = JSON.stringify({ title, slug, owner, due, week, priority, context, links, blockers, checks, stage });
+  const initial = useRef(snapshot);
+  const closeAndSave = () => {
+    if (isNew) { if (title.trim()) save(); else onClose(); return; }
+    if (snapshot !== initial.current && title.trim()) save(); else onClose();
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".pm-dd-menu, .lu-who-menu")) closeAndSave(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   return (
-    <div className="pm-modal-back" onClick={onClose}>
+    <div className="pm-modal-back" onClick={closeAndSave}>
       <div className="pm-modal pm-modal-a" onClick={(e) => e.stopPropagation()}>
         <div className="pm-ed-head">
           <div className="pm-ed-htop">
             <span className={`pm-stg ${s.cls}`}><span className="d" />{s.label}</span>
-            <div className="pm-ed-hactions">{!isNew && <SlackButton id={task!.id} channel={notifyChannel} />}<button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
+            <div className="pm-ed-hactions">{!isNew && <SlackButton id={task!.id} channel={notifyChannel} />}<button type="button" className="pm-modal-x" title="Close (changes save automatically)" onClick={closeAndSave}>✕</button></div>
           </div>
           {multi && client && <div className="pm-ed-client"><span className="pm-ed-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span><span className="pm-ed-cname">{client.name}</span></div>}
           <input className="pm-ed-title" autoFocus value={title} placeholder="What needs doing?" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save(); }} />
@@ -719,12 +746,12 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
         </div>
         <div className="pm-ed-body">
           <div className="pm-ed-main">
-            <div className="pm-f pm-f-notes"><span>Context / notes</span><RichNotes value={context} onChange={setContext} /></div>
+            <div className="pm-f pm-f-notes"><span>Context / notes</span><RichNotes value={context} onChange={setContext} uploadUrl="/api/project-management/upload-file" /></div>
             {!isNew && task && !task.id.startsWith("tmp") && <div className="pm-f pm-f-updates"><span>Latest update</span><LatestUpdates taskId={task.id} people={people} map={map} /></div>}
           </div>
           <div className="pm-ed-side">
             {isNew && multi && <div className="pm-f"><span>Client</span><Select value={slug} options={clientOptsOf(clients)} size="lg" onChange={setSlug} /></div>}
-            <div className="pm-f"><span>Assignees</span><MultiPeople value={owner} people={people} map={map} onChange={setOwner} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} /></div>
+            <div className="pm-f"><span>Assignees</span><MultiPeople value={owner} people={people} map={map} onChange={setOwner} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} setMascot={setMascot} /></div>
             <div className="pm-f-row">
               <div className="pm-f"><span>Status</span><Select value={stage} options={stageOpts} tone={stageOf(stage).color} onChange={setStage} /></div>
               <div className="pm-f"><span>Priority</span><Select value={priority} options={prioOpts} placeholder="None" tone={prioOf(priority)?.color} onChange={setPriority} /></div>
@@ -740,7 +767,7 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
             <div className="pm-f"><span>Blockers</span><div className="pm-ed-blockers"><BlockerCell blockers={blockers} people={people} map={map} addPerson={addPerson} onChange={setBlockers} /></div></div>
           </div>
         </div>
-        <div className="pm-modal-foot">{!isNew ? <button type="button" className="pm-del" onClick={() => { onDelete(task!.id); onClose(); }}>Delete</button> : <span />}<button type="button" className="pm-save" onClick={save}>{isNew ? "Create task" : "Save"}</button></div>
+        <div className="pm-modal-foot">{!isNew ? <button type="button" className="pm-del" onClick={() => { onDelete(task!.id); onClose(); }}>Delete</button> : <span />}<span className="pm-autosave-note">{isNew ? "Saved when you close, if it has a title" : snapshot !== initial.current ? "Unsaved changes · saved when you close" : "Changes save automatically when you close"}</span><button type="button" className="pm-save" onClick={save}>{isNew ? "Create task" : "Save"}</button></div>
       </div>
     </div>
   );
@@ -778,7 +805,9 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
 
   const pickView = (v: View) => { setView(v); try { localStorage.setItem("pm-view", v); } catch { /* ignore */ } };
   const reorderViews = (keys: View[]) => { setOrder(keys); try { localStorage.setItem("pm-view-order", JSON.stringify(keys)); } catch { /* ignore */ } };
-  const addPerson = (name: string) => { setPeople((p) => (p.some((x) => x.name.toLowerCase() === name.toLowerCase()) ? p : [...p, { name, avatarUrl: null }].sort((a, z) => a.name.localeCompare(z.name)))); void fetch("/api/project-management/people", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) }).catch(() => {}); };
+  const setMascot = (name: string, id: string) => setAvatar(name, `mascot:${id}`);
+  const addPerson = (rawName: string) => {
+    const name = cleanPersonName(rawName); if (!name) return; setPeople((p) => (p.some((x) => x.name.toLowerCase() === name.toLowerCase()) ? p : [...p, { name, avatarUrl: null }].sort((a, z) => a.name.localeCompare(z.name)))); void fetch("/api/project-management/people", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) }).catch(() => {}); };
   const removePerson = (name: string) => { setPeople((p) => p.filter((x) => x.name !== name)); void fetch(`/api/project-management/people?name=${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => {}); };
   const setAvatar = (name: string, url: string) => { setPeople((p) => { const found = p.find((x) => x.name === name); if (found) return p.map((x) => (x.name === name ? { ...x, avatarUrl: url } : x)); return [...p, { name, avatarUrl: url }].sort((a, z) => a.name.localeCompare(z.name)); }); void fetch("/api/project-management/people", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, avatarUrl: url }) }).catch(() => {}); };
   const uploadAvatar = (name: string, file: File) => { const fd = new FormData(); fd.append("file", file); void fetch("/api/project-management/upload-logo", { method: "POST", body: fd }).then((r) => r.json()).then((r) => { if (r.ok && r.logoUrl) setAvatar(name, r.logoUrl); }).catch(() => {}); };
@@ -813,7 +842,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
     }
   };
   const create = (slug: string, f: NewFields) => onCreate(slug, { ...f, week: multi && week ? week : undefined });
-  const h: Handlers = { clients, multi, people, map, addPerson, removePerson, uploadAvatar, openNew: (stage, clientSlug, assignee) => setEditor({ mode: "new", stage, clientSlug, assignee }), onOpen: (t) => setEditor({ mode: "edit", task: t }), onDelete, notifyChannel, onDrag, dragId, dragH, landedId, onMove, onSetDay, onReorder: reorder, dropHint, setDropHint };
+  const h: Handlers = { clients, multi, people, map, addPerson, removePerson, uploadAvatar, setMascot, openNew: (stage, clientSlug, assignee) => setEditor({ mode: "new", stage, clientSlug, assignee }), onOpen: (t) => setEditor({ mode: "edit", task: t }), onDelete, notifyChannel, onDrag, dragId, dragH, landedId, onMove, onSetDay, onReorder: reorder, dropHint, setDropHint };
   const byStage = useMemo(() => { const m: Record<string, BoardTask[]> = {}; for (const s of STAGES) m[s.key] = []; for (const t of visible) (m[t.stage] || m.todo).push(t); return m; }, [visible]);
   const views: [View, string][] = order.filter((v) => v !== "byclient" || multi).map((v) => ALL_VIEWS.find(([k]) => k === v)!);
 
@@ -827,7 +856,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
       {view === "individuals" && <IndividualsView tasks={visible} h={h} />}
       {view === "table" && <TableView tasks={visible} h={h} onUpdate={onUpdate} onCreate={create} week={multi && week ? week : undefined} />}
       {view === "swimlanes" && <SwimlanesView tasks={visible} h={h} />}
-      {editor && <TaskEditor state={editor} clients={clients} people={people} map={map} multi={multi} notifyChannel={notifyChannel} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} onClose={() => setEditor(null)} onCreate={create} onUpdate={onUpdate} onDelete={onDelete} />}
+      {editor && <TaskEditor state={editor} clients={clients} people={people} map={map} multi={multi} notifyChannel={notifyChannel} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} setMascot={setMascot} onClose={() => setEditor(null)} onCreate={create} onUpdate={onUpdate} onDelete={onDelete} />}
     </>
   );
 }

@@ -48,7 +48,9 @@
  */
 export function isOurCampaign(name) {
   if (typeof name !== "string") return false;
-  return /^[a-z]{1,3}:?\d{2,3}(?![a-z0-9])/i.test(name.trim());
+  // An optional version suffix (`EM031v2`) is a relaunch of the same campaign, and ours. Without it
+  // Ema's live EM031v2 pair was read as the client's own campaigns and vanished from every figure.
+  return /^[a-z]{1,3}:?\d{2,3}(?:v\d{1,2})?(?![a-z0-9])/i.test(name.trim());
 }
 
 /**
@@ -73,8 +75,8 @@ export function isOurCampaign(name) {
  */
 export function campaignCode(name) {
   if (typeof name !== "string") return "";
-  const match = /^([a-z]{1,3}):?(\d{2,3})(?![a-z0-9])/i.exec(name.trim());
-  return match ? `${match[1].toUpperCase()}${match[2]}` : "";
+  const match = /^([a-z]{1,3}):?(\d{2,3})(v\d{1,2})?(?![a-z0-9])/i.exec(name.trim());
+  return match ? `${match[1].toUpperCase()}${match[2]}${match[3] ? match[3].toLowerCase() : ""}` : "";
 }
 
 /**

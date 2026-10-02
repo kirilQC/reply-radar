@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { MascotFace, mascotOf } from "../components/TeamMascots";
 
 type Update = { id: string; author: string; text?: string; audioUrl?: string; durationSec?: number; at: string };
 type Person = { name: string; avatarUrl?: string | null };
@@ -27,6 +28,8 @@ const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec 
 const hue = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; };
 
 function Face({ name, url }: { name: string; url?: string }) {
+  const mascot = mascotOf(url);
+  if (mascot) return <span className="lu-av lu-av-mascot"><MascotFace id={mascot.id} size={24} /></span>;
   return <span className="lu-av" style={url ? undefined : { background: `hsl(${hue(name)} 55% 45%)` }}>{url ? <img src={url} alt="" /> : (name.trim()[0] || "?").toUpperCase()}</span>;
 }
 

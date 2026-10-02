@@ -28,7 +28,12 @@ export async function POST(request: Request) {
   const people = await read(c);
   const existing = people.find((p) => p.name.toLowerCase() === name.toLowerCase());
   if (existing) { if (avatarUrl !== undefined) existing.avatarUrl = avatarUrl || null; }
-  else people.push({ name, avatarUrl: avatarUrl ?? null });
+  else {
+    // New teammates are one word of up to 10 characters, so names fit on cards and in mentions.
+    const short = name.replace(/\s+/g, "").slice(0, 10);
+    if (!short) return NextResponse.json({ ok: false, error: "Name required" }, { status: 400 });
+    if (!people.some((p) => p.name.toLowerCase() === short.toLowerCase())) people.push({ name: short, avatarUrl: avatarUrl ?? null });
+  }
   people.sort((a, z) => a.name.localeCompare(z.name));
   await write(c, people);
   return NextResponse.json({ ok: true, people });

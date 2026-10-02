@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isOurCampaign, ourCampaigns } from "../shared/campaign-code.mjs";
+import { campaignCode, isOurCampaign, ourCampaigns } from "../shared/campaign-code.mjs";
 
 // Every name below was read off a live HeyReach account during the audit that produced this rule.
 // They are the regression suite: the pattern was widened until each of these was classified correctly,
@@ -73,4 +73,14 @@ test("ourCampaigns reads the name through the caller's accessor", () => {
   assert.deepEqual(ourCampaigns(stats, (row) => row.campaignName), [{ campaignName: "CT003: Ours" }]);
   assert.deepEqual(ourCampaigns(list, (row) => row.name), [{ name: "W001: Ours" }]);
   assert.deepEqual(ourCampaigns(null, (row) => row.name), []);
+});
+
+test("a versioned relaunch (EM031v2) is ours and keeps its own code", () => {
+  assert.equal(isOurCampaign("EM031v2: Master ICP - Business (Amanda)"), true);
+  assert.equal(isOurCampaign("EM031V3 Clinical"), true);
+  assert.equal(campaignCode("EM031v2: Master ICP - Clinical (Morgan)"), "EM031v2");
+  assert.equal(campaignCode("EM031: Master ICP - Clinical (Morgan)"), "EM031");
+  // A version needs digits after the v, and nothing else may follow.
+  assert.equal(isOurCampaign("EM031vx: nope"), false);
+  assert.equal(isOurCampaign("EM031v2b: nope"), false);
 });
