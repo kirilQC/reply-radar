@@ -3,6 +3,7 @@
 
 import { createHash } from "node:crypto";
 import { NEAR_DUPLICATE_MS, directionFor, extractMessageRows, messageKey, syntheticMessageId } from "../../shared/message-identity.mjs";
+import { heyreachFetch } from "../../shared/heyreach-throttle.mjs";
 
 // Re-exported so callers keep a single import for conversation handling.
 export { NEAR_DUPLICATE_MS, directionFor, extractMessageRows, messageKey, syntheticMessageId };
@@ -231,7 +232,7 @@ export function conversationFromWebhook(payload: JsonObject): HistoryResult {
 }
 
 async function heyReach(apiKey: string, path: string, init: RequestInit) {
-  const response = await fetch(`${apiBase.replace(/\/$/, "")}/${path.replace(/^\//, "")}`, {
+  const response = await heyreachFetch(apiKey, `${apiBase.replace(/\/$/, "")}/${path.replace(/^\//, "")}`, {
     ...init,
     headers: { "X-API-KEY": apiKey, accept: "application/json", "content-type": "application/json", ...(init.headers ?? {}) },
     cache: "no-store",

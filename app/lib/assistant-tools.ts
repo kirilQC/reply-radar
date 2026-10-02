@@ -79,6 +79,7 @@ import { helpForAssistant, readHelp, searchHelp } from "./help-center";
 import { articlePath } from "./help-shared";
 import { publicBaseUrl } from "./public-url";
 import { DATA_TOOLS, EXPORT_TOOL, runDataTool } from "./assistant-data";
+import { INSIGHT_TOOLS, INSIGHT_TOOL_NAMES, runInsightTool } from "./scout-insights";
 
 type Row = Record<string, unknown>;
 
@@ -484,7 +485,7 @@ const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "awaiting_reply",
     description:
-      "People who replied and have not been answered — the follow-up list. Oldest wait first, so the top of the list is the most overdue. Optionally scoped to one client. Use this for 'who needs following up', 'who are we ignoring', or a follow-up report.",
+      "People who replied and have not been answered (only that one case; for a real follow-up list — went quiet, booking link sent but no meeting — use follow_up_list). Oldest wait first, so the top of the list is the most overdue. Optionally scoped to one client. Use this for 'who needs following up', 'who are we ignoring', or a follow-up report.",
     input_schema: {
       type: "object",
       properties: { ...CLIENT_ARG, limit: { type: "integer", description: `How many, up to ${MAX_ROWS}. Default 25. For a complete follow-up report ask for the maximum rather than the default.` } },
@@ -970,9 +971,10 @@ const percent = (fraction: number) => Math.round(fraction * 1000) / 10;
  * than a failed request.
  */
 /** Everything the assistant can call: the purpose-built tools, then general read access to every table. */
-export const TOOLS: ToolDefinition[] = [...BASE_TOOLS, ...(DATA_TOOLS as ToolDefinition[]), EXPORT_TOOL as ToolDefinition];
+export const TOOLS: ToolDefinition[] = [...(INSIGHT_TOOLS as ToolDefinition[]), ...BASE_TOOLS, ...(DATA_TOOLS as ToolDefinition[]), EXPORT_TOOL as ToolDefinition];
 
 export async function runTool(name: string, input: Row): Promise<unknown> {
+  if (INSIGHT_TOOL_NAMES.has(name)) return runInsightTool(name, input);
   switch (name) {
     case "list_clients": {
       const all = await clients();

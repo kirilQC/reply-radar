@@ -301,3 +301,30 @@ export function exportDatasets(store: DatasetStore, input: Row): { file: { name:
   const base = slug(input.name) || slug(store.get(chosen[0])!.tool);
   return { file: { name: `${base}-${stamp}.csv`, mime: "text/csv", content: toCsv(merged) }, rows: merged.length };
 }
+
+
+/** A CSV file's rows as objects keyed by its header, quotes and embedded commas/newlines handled. */
+export function parseCsv(content: string): Record<string, string>[] {
+  const out: string[][] = [];
+  let row: string[] = [], cell = "", quoted = false;
+  for (let i = 0; i < content.length; i += 1) {
+    const ch = content[i];
+    if (quoted) {
+      if (ch === '"' && content[i + 1] === '"') { cell += '"'; i += 1; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && content[i + 1] === "\n") i += 1;
+      row.push(cell); cell = "";
+      if (row.some((c) => c !== "")) out.push(row);
+      row = [];
+    } else cell += ch;
+  }
+  row.push(cell);
+  if (row.some((c) => c !== "")) out.push(row);
+  const [header, ...body] = out;
+  if (!header) return [];
+  return body.map((r) => Object.fromEntries(header.map((h, k) => [h, r[k] ?? ""])));
+}

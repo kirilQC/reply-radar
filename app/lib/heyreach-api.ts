@@ -1,6 +1,8 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
+import { heyreachFetch } from "../../shared/heyreach-throttle.mjs";
+
 /**
  * Every HeyReach read endpoint, in one place, with the traps written down.
  *
@@ -82,7 +84,7 @@ export type Page<T> = { items: T[]; total: number };
 async function call(apiKey: string, path: string, body?: unknown): Promise<unknown> {
   const key = text(apiKey);
   if (!key) throw new Error("No HeyReach API key is saved for this client.");
-  const response = await fetch(`${API_BASE.replace(/\/$/, "")}/${path.replace(/^\//, "")}`, {
+  const response = await heyreachFetch(key, `${API_BASE.replace(/\/$/, "")}/${path.replace(/^\//, "")}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       "X-API-KEY": key,

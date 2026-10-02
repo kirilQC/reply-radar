@@ -38,6 +38,7 @@ import { isOurCampaign } from "../../shared/campaign-code.mjs";
 // Re-exported below, because the morning brief needs the same runway arithmetic and cannot import from
 // this file — see the note at the top of `shared/sending-runway.mjs`.
 import { DAILY_CONNECTIONS_PER_SENDER, sendingDaysLeft } from "../../shared/sending-runway.mjs";
+import { heyreachFetch } from "../../shared/heyreach-throttle.mjs";
 
 export { DAILY_CONNECTIONS_PER_SENDER, sendingDaysLeft };
 
@@ -399,7 +400,7 @@ const cache = new Map<string, { expires: number; status: CampaignStatus }>();
 async function fetchCampaignPages(apiKey: string, statuses: string[]): Promise<unknown[]> {
   const rows: unknown[] = [];
   for (let offset = 0; offset < PAGE_CEILING; offset += PAGE_SIZE) {
-    const response = await fetch(`${API_BASE.replace(/\/$/, "")}/campaign/GetAll`, {
+    const response = await heyreachFetch(apiKey, `${API_BASE.replace(/\/$/, "")}/campaign/GetAll`, {
       method: "POST",
       headers: { "X-API-KEY": apiKey, "content-type": "application/json", Accept: "application/json" },
       // An empty list is omitted rather than sent: HeyReach reads `statuses: []` as "none of them".
@@ -432,7 +433,7 @@ async function fetchSenderNames(apiKey: string): Promise<Map<string, string>> {
   const names = new Map<string, string>();
   try {
     for (let offset = 0; offset < PAGE_CEILING; offset += PAGE_SIZE) {
-      const response = await fetch(`${API_BASE.replace(/\/$/, "")}/li_account/GetAll`, {
+      const response = await heyreachFetch(apiKey, `${API_BASE.replace(/\/$/, "")}/li_account/GetAll`, {
         method: "POST",
         headers: { "X-API-KEY": apiKey, "content-type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ offset, limit: PAGE_SIZE }),

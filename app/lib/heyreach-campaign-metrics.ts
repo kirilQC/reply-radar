@@ -1,6 +1,8 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
+import { heyreachFetch } from "../../shared/heyreach-throttle.mjs";
+
 /**
  * The outbound funnel — requests sent, requests accepted, and the rates that follow from them.
  *
@@ -149,7 +151,7 @@ export async function campaignFunnelFor(
   if (cached && cached.expires > Date.now()) return cached.funnel;
 
   try {
-    const response = await fetch(`${API_BASE.replace(/\/$/, "")}/stats/GetOverallStatsByCampaign`, {
+    const response = await heyreachFetch(key, `${API_BASE.replace(/\/$/, "")}/stats/GetOverallStatsByCampaign`, {
       method: "POST",
       headers: { "X-API-KEY": key, "content-type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ accountIds: [], campaignIds: ids, startDate: since, endDate: until }),
@@ -214,7 +216,7 @@ export async function dailyStatsFor(
   const ids = campaignIds.map((id) => Number(id)).filter((id) => Number.isFinite(id));
   if (!key || !ids.length) return null;
   try {
-    const response = await fetch(`${API_BASE.replace(/\/$/, "")}/stats/GetOverallStats`, {
+    const response = await heyreachFetch(key, `${API_BASE.replace(/\/$/, "")}/stats/GetOverallStats`, {
       method: "POST",
       headers: { "X-API-KEY": key, "content-type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ accountIds: [], campaignIds: ids, startDate: since, endDate: until }),
