@@ -374,3 +374,112 @@ export async function enrichLeadWithAiArk(
   await markRun({ status: "failed", error_text: message.slice(0, 2_000) });
   throw lastError instanceof Error ? lastError : new Error(message);
 }
+
+/* ── Email finder, for QC Bot / Scout "find this person's email" ─────────────────────────────────── */
+
+const EXPORT_SINGLE_ENDPOINT = `${API_BASE}/api/developer-portal/v2/people/export/single`;
+
+export type EmailLookup = {
+  asked: string;
+  found: boolean;
+  name?: string; title?: string; company?: string; companyDomain?: string; location?: string; linkedin?: string;
+  email?: string; emailStatus?: string; emailType?: string; otherEmails?: string[];
+  phone?: string | null;
+  note?: string;
+};
+
+/** The person's details out of an AI Ark person record (People Search and Export share the shape). */
+function personSummary(person: JsonObject) {
+  const profile = object(person.profile);
+  const company = object(person.company);
+  const summary = object(company.summary);
+  const link = object(company.link);
+  const firstGroup = object(list(person.position_groups)[0]);
+  return {
+    name: text(profile.full_name) || [text(profile.first_name), text(profile.last_name)].filter(Boolean).join(" "),
+    title: text(profile.title) || text(object(list(firstGroup.profile_positions)[0]).title),
+    company: text(summary.name) || text(object(firstGroup.company).name),
+    companyDomain: text(link.domain),
+    location: text(object(person.location).default),
+    linkedin: personLinkedIn(person),
+  };
+}
+
+async function exportSingle(apiKey: string, body: JsonObject): Promise<{ person: JsonObject | null; error?: string }> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await fetch(EXPORT_SINGLE_ENDPOINT, {
+      method: "POST",
+      headers: { "X-TOKEN": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    }).catch((error: unknown) => ({ ok: false, status: 0, json: async () => ({ error: String(error) }) }) as unknown as Response);
+    const data = object(await response.json().catch(() => ({})));
+    if (response.status === 429) { await new Promise((r) => setTimeout(r, 1_000 * 2 ** attempt)); continue; }
+    if (!response.ok) return { person: null, error: `AI Ark export failed (${response.status}): ${JSON.stringify(data).slice(0, 200)}` };
+    const person = data.data && typeof data.data === "object" ? object(data.data) : null;
+    return { person, error: person ? undefined : text(data.error) || undefined };
+  }
+  return { person: null, error: "AI Ark rate limit; try again in a minute." };
+}
+
+/** People Search by name plus employer, for "find the email of Jane Doe at Acme". Best match only. */
+async function searchByName(apiKey: string, name: string, company: string, domain: string, title: string): Promise<JsonObject | null> {
+  const contact: JsonObject = { fullName: { any: { include: { mode: "SMART", content: [name] } } } };
+  if (title) contact.experience = { current: { title: { any: { include: { mode: "SMART", content: [title] } } } } };
+  const account: JsonObject = {};
+  if (domain) account.domain = { any: { include: [domain.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "")] } };
+  else if (company) account.name = { any: { include: { mode: "SMART", content: [company] } } };
+  const body: JsonObject = { contact, page: 0, size: 5 };
+  if (Object.keys(account).length) body.account = account;
+  const response = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: { "X-TOKEN": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`AI Ark People Search failed (${response.status}): ${(await response.text().catch(() => "")).slice(0, 200)}`);
+  const data = object(await response.json().catch(() => ({})));
+  const wanted = normalize(name);
+  const candidates = list(data.content).map(object);
+  return candidates.find((c) => normalize(personSummary(c).name) === wanted) ?? candidates[0] ?? null;
+}
+
+/**
+ * Emails (and optionally mobiles) for a handful of people, each given as a LinkedIn URL or as a name plus company.
+ * 1 credit per email found (0 when none), +5 per mobile found when phones are asked for.
+ */
+export async function findEmails(people: Array<{ linkedin?: string; name?: string; company?: string; domain?: string; title?: string }>, withPhone = false): Promise<EmailLookup[]> {
+  const apiKey = text(process.env.AI_ARK_API_KEY);
+  if (!apiKey) throw new Error("AI Ark isn't connected (AI_ARK_API_KEY is not set).");
+  const out: EmailLookup[] = [];
+  for (const p of people.slice(0, 10)) {
+    const linkedin = text(p.linkedin);
+    const asked = linkedin || [text(p.name), text(p.title), text(p.company) || text(p.domain)].filter(Boolean).join(", ");
+    try {
+      let body: JsonObject | null = null;
+      let fromSearch: JsonObject | null = null;
+      if (linkedin) body = { url: linkedin.startsWith("http") ? linkedin : `https://${linkedin}` };
+      else if (text(p.name)) {
+        fromSearch = await searchByName(apiKey, text(p.name), text(p.company), text(p.domain), text(p.title));
+        if (!fromSearch) { out.push({ asked, found: false, note: "No one by that name at that company in AI Ark." }); continue; }
+        body = { id: text(fromSearch.id) };
+      } else { out.push({ asked, found: false, note: "Needs a LinkedIn URL, or a name plus company." }); continue; }
+      const { person, error } = await exportSingle(apiKey, body);
+      const record = person ?? fromSearch;
+      const info = record ? personSummary(record) : {};
+      const emails = list(object(object(person ?? {}).email).output).map(object).filter((e) => text(e.address));
+      const best = emails.find((e) => text(e.status).toUpperCase() === "VALID") ?? emails[0];
+      const phone = withPhone && (info as { linkedin?: string }).linkedin ? await findMobilePhone(String((info as { linkedin?: string }).linkedin)) : undefined;
+      out.push({
+        asked, found: Boolean(best), ...info,
+        ...(best ? { email: text(best.address), emailStatus: text(best.status) || undefined, emailType: text(best.domainType) === "CATCH_ALL" ? "catch-all domain (may bounce)" : text(best.domainType) || undefined } : {}),
+        ...(emails.length > 1 ? { otherEmails: emails.slice(1).map((e) => text(e.address)) } : {}),
+        ...(withPhone ? { phone: phone ?? null } : {}),
+        ...(best ? {} : { note: error || (record ? "Found the person but AI Ark has no verified email for them." : "Not in AI Ark.") }),
+      });
+    } catch (error) {
+      out.push({ asked, found: false, note: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return out;
+}

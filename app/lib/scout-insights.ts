@@ -26,6 +26,7 @@ import { clientsIn, clientSkeleton } from "../../shared/brain-structure.mjs";
 import { ourCampaigns, campaignCode } from "../../shared/campaign-code.mjs";
 import { sendingDaysLeft } from "../../shared/sending-runway.mjs";
 import { listOnboardingClients } from "./onboarding";
+import { findEmails } from "./ai-ark-enrichment";
 
 type Row = Record<string, unknown>;
 type ToolDefinition = { name: string; description: string; input_schema: { type: "object"; properties: Row; required?: string[] } };
@@ -659,6 +660,14 @@ export const INSIGHT_TOOLS: ToolDefinition[] = [
     input_schema: { type: "object", properties: { clients: { type: "array", items: { type: "string" } }, withinDays: { type: "integer" } } },
   },
   {
+    name: "find_email",
+    description: "AI Ark enrichment: find the work email (and, only if asked, mobile phone) for 1 to 10 people. Each person is a LinkedIn URL, or a name plus company (or company domain), optionally a title. Returns name, title, company, LinkedIn, email, whether it is verified or a catch-all, and phone when asked. Costs 1 AI Ark credit per email found, +5 per phone found, nothing when not found. THE tool for 'find this person's email', 'enrich these people', 'get me their contact info'. For more than 10 people, say it takes several batches.",
+    input_schema: { type: "object", properties: {
+      people: { type: "array", maxItems: 10, items: { type: "object", properties: { linkedin: { type: "string" }, name: { type: "string" }, company: { type: "string" }, domain: { type: "string" }, title: { type: "string" } } } },
+      includePhone: { type: "boolean", description: "Also find mobile numbers. Only when the user asks for phones." },
+    }, required: ["people"] },
+  },
+  {
     name: "google_drive_search",
     description: "Search Google Drive by file name or text, newest first. Returns name, type (document, spreadsheet, folder, pdf...), last modified, owner and link. Use for 'find the X deck / sheet / doc', 'what's in Drive for client Y'. Then open a result with google_doc.",
     input_schema: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer" } }, required: ["query"] },
@@ -683,6 +692,11 @@ export async function runInsightTool(name: string, input: Row): Promise<unknown>
     case "sender_performance": return senderPerformance(input);
     case "reply_texts": return replyTexts(input);
     case "google_drive_search": return googleDriveSearch(input);
+    case "find_email": {
+      const people = (Array.isArray(input.people) ? input.people : []) as Array<Record<string, string>>;
+      const results = await findEmails(people, input.includePhone === true);
+      return { found: results.filter((r) => r.found).length, of: results.length, results };
+    }
     case "meetings_by_campaign": return meetingsByCampaign(input);
     case "sending_runway": return sendingRunway(input);
     default: throw new Error(`Unknown tool ${name}.`);
