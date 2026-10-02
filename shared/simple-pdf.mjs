@@ -226,3 +226,22 @@ export function markdownToPdf(markdown, { title = "Report", subtitle = "" } = {}
 export function wantsPdf(markdown) {
   return /```\s*export\s*\n[^`]*pdf[^`]*```/i.test(String(markdown ?? ""));
 }
+
+/**
+ * The top of a report for the chat message that carries its PDF: everything up to the first section
+ * heading after the opening (the title and the bold verdict), plus a pointer to the file.
+ */
+export function reportSummary(markdown) {
+  const lines = String(markdown ?? "").split("\n");
+  const out = [];
+  let seenText = false;
+  for (const line of lines) {
+    if (/^#{1,6}\s/.test(line) && seenText) break;
+    if (/^```/.test(line) && seenText) break;
+    if (/^\s*\|/.test(line)) break;
+    if (line.trim() && !/^#{1,6}\s/.test(line)) seenText = true;
+    out.push(line);
+    if (out.join("\n").length > 900) break;
+  }
+  return `${out.join("\n").trim()}\n\n_The full report is in the PDF below._`;
+}

@@ -28,7 +28,7 @@
  */
 
 import { after } from "next/server";
-import { markdownToPdf, wantsPdf } from "../../../../shared/simple-pdf.mjs";
+import { markdownToPdf, wantsPdf, reportSummary } from "../../../../shared/simple-pdf.mjs";
 import { MODEL, runAgent, type AgentEvent, type AgentResult, type Turn } from "../../../lib/assistant-run";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import {
@@ -303,7 +303,9 @@ async function runAndReply(opts: {
           : result.outOfTime
             ? `\n\n_Answered from ${result.steps.length} lookup${result.steps.length === 1 ? "" : "s"} before the time limit — ask for a narrower slice to let me look further._`
             : "";
-      const answer = result.reply ? toSlackText(result.reply) : "I couldn't find an answer to that.";
+      // A PDF report: the thread gets the headline and the file, not the whole report twice.
+      const pdfAsked = Boolean(result.reply && wantsPdf(result.reply));
+      const answer = result.reply ? toSlackText(pdfAsked ? reportSummary(result.reply) : result.reply) : "I couldn't find an answer to that.";
       // The total time the whole run took, shown once on the answer — the live per-beat clock was on the
       // progress message, which is now deleted, so this is the only duration the thread keeps.
       const seconds = Math.round((Date.now() - startedAt) / 1000);
@@ -312,7 +314,7 @@ async function runAndReply(opts: {
       // answer, so the list the person asked for actually arrives. Best-effort: a failed upload leaves a
       // one-line note rather than breaking the answer that is already posted.
       // A report asked for as a PDF: Scout prints it in the browser, Slack gets the file built here.
-      if (result.reply && wantsPdf(result.reply)) {
+      if (pdfAsked && result.reply) {
         try {
           const day = new Date().toLocaleDateString("en-US", { timeZone: "America/New_York", month: "long", day: "numeric", year: "numeric" });
           const heading = (/^\s*#\s+(.+)$/m.exec(result.reply)?.[1] ?? "QC report").replace(/[*_`]/g, "");
@@ -326,6 +328,8 @@ async function runAndReply(opts: {
         await uploadFile(channel, file, { threadTs, comment: `Here's *${file.name}*.` }).catch(async (error) => {
           const why = error instanceof Error ? error.message : "the upload failed";
           await postMessage(channel, `I built *${file.name}* but couldn't attach it: ${why}`, threadTs).catch(() => {});
+          // The PDF was the report; without it, post the full text so nothing is lost.
+          if (file.name.endsWith(".pdf") && result.reply) await postMessage(channel, truncateForSlack(toSlackText(result.reply)), threadTs).catch(() => {});
         });
       }
       // The answer is out; mark the asking message answered so the thread reads as done at a glance.

@@ -179,9 +179,11 @@ function tableToVertical(header, grid) {
         column === indexColumn || column === titleColumn || !row[column] ? "" : `${label}: ${row[column]}`,
       )
       .filter(Boolean);
-    return [heading, ...rest].filter(Boolean).join("\n");
+    // One line per row: the name in bold, then its figures. Two columns read as "Name: value".
+    if (header.length === 2 && indexColumn < 0) return `${heading}: ${row[1 - titleColumn] ?? ""}`;
+    return [heading, rest.join("  ·  ")].filter(Boolean).join("  ·  ");
   });
-  return blocks.filter(Boolean).join("\n\n").split("\n");
+  return blocks.filter(Boolean);
 }
 
 /**

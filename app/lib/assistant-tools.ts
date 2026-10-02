@@ -1879,7 +1879,9 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         meetings: (data?.meetings ?? []).map((m) => ({
           when: m.meetingAt || m.whenText, invitee: m.inviteeName, email: m.inviteeEmail, title: m.inviteeTitle,
           company: m.companyName, summary: m.summary, host: m.host, campaign: m.campaign, status: m.status,
+          ...(/\(test\)|\btest\b/i.test(String(m.inviteeName ?? "")) ? { testEntry: true } : {}),
         })),
+        note: "Rows with testEntry are someone trying the Meetings tab, not real meetings: leave them out of counts.",
       };
     }
 

@@ -126,7 +126,7 @@ async function dbWindowStats(clients: Client[], w: Window) {
     const sent = text(m.sentiment).toLowerCase(); if (sent) lastSentiment.set(conv, sent);
   }
   for (const [conv, sent] of lastSentiment) { const ws = wsOf.get(conv); const s = ws ? stats.get(ws) : null; if (!s) continue; if (sent === "positive") s.positive.add(conv); if (sent === "negative") s.negative.add(conv); }
-  const meetings = await dbAll(`rr_meetings?select=workspace_id,created_at,meeting_at,status&created_at=gte.${w.from}&created_at=lt.${endExclusive(w.to)}&order=created_at.asc`);
+  const meetings = (await dbAll(`rr_meetings?select=workspace_id,invitee_name,created_at,meeting_at,status&created_at=gte.${w.from}&created_at=lt.${endExclusive(w.to)}&order=created_at.asc`)).filter((m) => !isTestMeeting(m));
   const booked = new Map<string, number>();
   for (const m of meetings) { const ws = text(m.workspace_id); if (byId.has(ws) && !/cancel/i.test(text(m.status))) booked.set(ws, (booked.get(ws) ?? 0) + 1); }
   return new Map(clients.map((c) => { const s = stats.get(c.id)!; return [c.id, { peopleReplied: s.replied.size, positive: s.positive.size, negative: s.negative.size, replyMessages: s.messages, meetingsBooked: booked.get(c.id) ?? 0 }]; }));
@@ -209,6 +209,8 @@ async function clientScorecard(input: Row) {
 /* ── follow_up_list ────────────────────────────────────────────────────────────────────────────── */
 
 const BOOKING_LINK = /(calendly\.com|cal\.com\/|savvycal\.com|tidycal\.com|zcal\.co|hubspot\.com\/meetings|meetings\.hubspot\.com|chilipiper\.com|youcanbook\.me|calendar\.app\.google|calendar\.google\.com\/calendar\/appointments|book a (time|call|slot)|grab a time|booking link)/i;
+/** Meetings someone logged to try the Meetings tab ("Justin Aiken (TEST)"), never counted as real. */
+const isTestMeeting = (m: Row) => /\(test\)|\btest\b|\bdemo booking\b/i.test(text(m.invitee_name));
 const slugOf = (url: string) => (/linkedin\.com\/in\/([^/?#]+)/i.exec(url)?.[1] ?? "").toLowerCase();
 const normName = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
 
@@ -481,7 +483,7 @@ async function meetingsByCampaign(input: Row) {
   const allTime = !text(input.from) && !text(input.to);
   const w = windowOf(input.from, input.to, 3650);
   const meetings = (await dbAll(`rr_meetings?select=workspace_id,invitee_name,invitee_linkedin,company_name,campaign,status,created_at,meeting_at${allTime ? "" : `&created_at=gte.${w.from}&created_at=lt.${endExclusive(w.to)}`}&order=created_at.asc`))
-    .filter((m) => byId.has(text(m.workspace_id)) && !/cancel/i.test(text(m.status)));
+    .filter((m) => byId.has(text(m.workspace_id)) && !/cancel/i.test(text(m.status)) && !isTestMeeting(m));
   // A meeting with no campaign typed on it: find the lead it belongs to and use the campaign they were in.
   const unlabelled = meetings.filter((m) => !text(m.campaign));
   const wsIds = [...new Set(unlabelled.map((m) => text(m.workspace_id)))];
