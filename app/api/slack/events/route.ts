@@ -30,6 +30,7 @@
 import { after } from "next/server";
 import { listAssistants, personalClientDirectory } from "../../../lib/personal-brief";
 import { markdownToPdf, wantsPdf, reportSummary } from "../../../../shared/simple-pdf.mjs";
+import { answerToBlocks, ASK_ACTION } from "../../../../shared/slack-blocks.mjs";
 import { MODEL, runAgent, type AgentEvent, type AgentResult, type Turn } from "../../../lib/assistant-run";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import {
@@ -243,12 +244,17 @@ async function runAndReply(opts: {
     // end. Posting fresh also sidesteps the failure the in-place edit used to hit — a long run updates the
     // one status message dozens of times, and Slack rate-limits repeated updates to a single message, so the
     // answer's own edit could be refused and silently lost. A new `ts` is not subject to that limit.
-    const deliver = async (text: string) => {
+    const deliver = async (text: string, blocks?: unknown[] | null, fallback?: string) => {
       if (heartbeat) clearInterval(heartbeat);
       // Drain any progress edits still queued, then take the progress message down before the answer goes up.
       await chain.catch(() => {});
       if (statusTs) await deleteMessage(channel, statusTs).catch(() => {});
-      await postMessage(channel, text, threadTs).catch(() => {});
+      if (blocks?.length) {
+        // The house layout; if Slack refuses the blocks for any reason, the plain text still goes out.
+        const ok = await postMessage(channel, text, threadTs, blocks).then(() => true).catch(() => false);
+        if (ok) return;
+      }
+      await postMessage(channel, fallback || text, threadTs).catch(() => {});
     };
 
     // One row per run in the Slack bot log (rr_audit_log, actor slack_bot), read back by the AI section's
@@ -284,7 +290,14 @@ async function runAndReply(opts: {
     // hand it the mention token so "Kiril will look into it" actually pings him.
     const supportOwner = (process.env.SUPPORT_OWNER_SLACK_ID || "").trim();
     const extraParts: string[] = [];
-    extraParts.push("In Slack the message must stand on its own even when a file is attached (attachments can fail): lead with the counts and breakdown, then name the top 5 to 10 rows inline (name, company, the one fact that matters), then say the full list is in the attached file.");
+    extraParts.push(`Slack layout. Your answer is laid out as a card, so write it in exactly this shape and nothing else:
+1. First line: the verdict in bold, one sentence, under 120 characters, carrying the key number. ("**286 positive replies are waiting on us. 12 need an answer today.**")
+2. Optional: a \`\`\`stats block with 2 to 4 tiles, only when the answer has several figures. Short labels.
+3. Detail: at most 5 list items (8 for a list someone asked for). Each item is "- **Name or subject**, short context · one-line detail". When items are things to act on, start each with 🔴 (today), 🟡 (this week) or 🟢 (fine / for info). Never "Label: value · Label: value" rows; write the row the way a person would. A table only when it has at most 3 short columns.
+4. No paragraphs over two lines, no section of caveats. Put the date range, sources and the one caveat that matters in a single final line in italics.
+5. Links to QC Command go on their own line as [Open X](url); they become buttons.
+6. End with a \`\`\`actions block holding a JSON array of 1 to 3 short follow-up requests the person is likely to want next, phrased as what they would type ("All 12 as a CSV", "Same view for Kuddo"). Never end with a "Want me to…?" question; the buttons are the offer.
+The message must stand on its own even when a file is attached (attachments can fail): the counts and the top rows are always in the message.`);
     extraParts.push(`You are talking to ${askerName || "a QC team member"}${askedBy ? ` (Slack user <@${askedBy}>)` : ""}. If you file a support ticket, record submittedBy as their name.`);
     if (surface === "dm") extraParts.push("This is a private, one-to-one direct message: you are this person's own QC Command assistant, with your full set of tools available. Answer for them alone — there is no channel audience reading along.");
     // "My clients" means the roster on this person's personal assistant, when they have one.
@@ -318,11 +331,14 @@ async function runAndReply(opts: {
             : "";
       // A PDF report: the thread gets the headline and the file, not the whole report twice.
       const pdfAsked = Boolean(result.reply && wantsPdf(result.reply));
-      const answer = result.reply ? toSlackText(pdfAsked ? reportSummary(result.reply) : result.reply) : "I couldn't find an answer to that.";
+      const source = result.reply ? (pdfAsked ? reportSummary(result.reply) : result.reply) : "";
+      const answer = source ? toSlackText(source) : "I couldn't find an answer to that.";
       // The total time the whole run took, shown once on the answer — the live per-beat clock was on the
       // progress message, which is now deleted, so this is the only duration the thread keeps.
       const seconds = Math.round((Date.now() - startedAt) / 1000);
-      await deliver(`${truncateForSlack(`${answer}${cut}`)}\n\n_Answered in ${seconds}s_`);
+      const laid = source ? answerToBlocks(`${source}${cut}`, { footer: [`${seconds}s`] }) : null;
+      const fullText = `${truncateForSlack(`${answer}${cut}`)}\n\n_Answered in ${seconds}s_`;
+      await deliver(laid?.blocks ? laid.text : fullText, laid?.blocks ?? null, fullText);
       // Any file a tool produced (a HeyReach CSV, in practice) is uploaded into the same thread after the
       // answer, so the list the person asked for actually arrives. Best-effort: a failed upload leaves a
       // one-line note rather than breaking the answer that is already posted.
@@ -375,6 +391,28 @@ async function conversationTurns(channel: string, threadTs: string, fallback: st
   const turns = threadToTurns(await threadPosts(channel, threadTs), identity) as Turn[];
   if (turns.length) return turns;
   return fallback ? [{ role: "user", content: fallback }] : [];
+}
+
+/** A follow-up button under an answer: asked in the same thread (or DM) as if the person had typed it. */
+async function answerButton(action: Row, question: string): Promise<void> {
+  const channel = str(asObject(action.channel).id);
+  const message = asObject(action.message);
+  const user = str(asObject(action.user).id);
+  if (!channel || !question) return;
+  const isDm = channel.startsWith("D");
+  const threadTs = isDm ? "" : str(message.thread_ts) || str(message.ts);
+  await postMessage(channel, `<@${user}> asked: *${question}*`, threadTs).catch(() => {});
+  let turns: Turn[];
+  if (isDm) {
+    const identity = await botIdentity();
+    turns = threadToTurns(await dmHistory(channel), identity) as Turn[];
+  } else {
+    turns = await conversationTurns(channel, threadTs, "");
+  }
+  const last = turns[turns.length - 1];
+  if (last?.role === "user") last.content = `${last.content}\n\n${question}`;
+  else turns.push({ role: "user", content: question });
+  await runAndReply({ channel, threadTs, reactTs: "", messages: turns, askedBy: user, surface: isDm ? "dm" : "thread", question });
 }
 
 /** A fresh @-mention: the classic ask, answered in-thread with the whole thread as context. */
@@ -526,6 +564,24 @@ export async function POST(request: Request) {
     signature: request.headers.get("x-slack-signature") ?? "",
   });
   if (!ok) return new Response("Signature verification failed.", { status: 401 });
+
+  // A button press (Slack interactivity, pointed at this same URL) arrives form-encoded as payload=<json>.
+  if (body.startsWith("payload=")) {
+    let action: Row = {};
+    try {
+      action = asObject(JSON.parse(new URLSearchParams(body).get("payload") ?? "{}"));
+    } catch {
+      return new Response("Bad request.", { status: 400 });
+    }
+    if (action.type === "block_actions") {
+      const pressed = asObject((Array.isArray(action.actions) ? action.actions : [])[0]);
+      if (str(pressed.action_id).startsWith(ASK_ACTION) && str(pressed.value)) {
+        const claimed = await claimEvent(`click:${str(action.trigger_id) || str(pressed.action_ts)}`);
+        if (claimed && slackConfigured()) after(() => answerButton(action, str(pressed.value)));
+      }
+    }
+    return new Response("", { status: 200 });
+  }
 
   let payload: Row = {};
   try {
