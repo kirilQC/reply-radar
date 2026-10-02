@@ -1189,17 +1189,19 @@ async function collectDailyStats(workspace) {
 async function staleAnalyticsWorkspace() {
   const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&heyreach_api_key_ciphertext=not.is.null&order=created_at.asc");
   if (!workspaces || !workspaces.length) return null;
-  // Grouping has to happen here: PostgREST has no `max(...) group by`, and two columns over a thousand
-  // campaign rows is a smaller read than the aggregate would save.
-  const freshest = new Map();
-  const stamps = await supabase("rr_campaign_stats?select=workspace_id,refreshed_at&order=refreshed_at.desc&limit=5000");
-  for (const row of stamps || []) {
-    const id = String(row.workspace_id);
-    // Descending, so the first stamp seen for a workspace is its newest.
-    if (!freshest.has(id)) freshest.set(id, Date.parse(String(row.refreshed_at || "")) || 0);
-  }
+  /*
+   * Freshness is when this worker last *tried* a client (its newest analytics run), not when that client's
+   * campaign stats were last saved. Ranking by saved campaign stats starved the whole roster: a client with
+   * no campaigns (Keewano) never gets a stamp, so it looked the most out of date forever, was picked every
+   * single cycle, and nobody else's daily stats were collected for weeks. One small read per client, in
+   * parallel, because a single "newest runs" read would be filled by whichever client runs most often.
+   */
+  const lastTried = await Promise.all(workspaces.map(async (workspace) => {
+    const rows = await supabase(`rr_sync_runs?select=started_at&workspace_id=eq.${encodeURIComponent(String(workspace.id))}&run_type=eq.analytics&order=started_at.desc&limit=1`);
+    return Date.parse(String(rows?.[0]?.started_at || "")) || 0;
+  }));
   const ranked = workspaces
-    .map((workspace) => ({ workspace, at: freshest.get(String(workspace.id)) ?? 0 }))
+    .map((workspace, index) => ({ workspace, at: lastTried[index] }))
     .sort((left, right) => left.at - right.at);
   const oldest = ranked[0];
   // Nothing is due. With two clients on the roster this is what stops the pass running every cycle.
@@ -1247,7 +1249,7 @@ async function collectAnalytics() {
   // Asked-for refreshes go ahead of the daily rotation — somebody is watching a progress bar.
   const request = await queuedAnalyticsRequest();
   const workspace = request?.workspace ?? (await staleAnalyticsWorkspace());
-  if (!workspace) return;
+  if (!workspace) return false;
   const startedAt = new Date().toISOString();
   let campaigns = 0;
   let days = 0;
@@ -1272,6 +1274,23 @@ async function collectAnalytics() {
   // so the log stays one row per pass and the page watches that row go queued → running → success.
   if (request) await patchSyncRun(request.requestId, finished);
   else await writeSyncRun({ workspace_id: workspace.id, run_type: "analytics", source: "render-worker", started_at: startedAt, ...finished });
+  return true;
+}
+
+/**
+ * Analytics on its own loop. A main cycle (reconcile, CRM sync, AI pipeline, sleep) can take a quarter of
+ * an hour, and one client per main cycle meant a 30-client roster took most of a day to refresh and a
+ * "Sync now" press could wait 15 minutes. Here a Sync now press is picked up within half a minute, and
+ * clients that are due are worked one at a time, back to back, until none are.
+ */
+const ANALYTICS_IDLE_MS = 30 * 1000;
+async function analyticsLoop() {
+  for (;;) {
+    let worked = false;
+    try { worked = await collectAnalytics(); } catch (error) { console.error("reply_radar_analytics_cycle_failed", error); }
+    // A short breath between passes so HeyReach is never hit back to back by this and the main loop at once.
+    await new Promise((resolve) => setTimeout(resolve, worked ? 5_000 : ANALYTICS_IDLE_MS));
+  }
 }
 
 // ── Morning brief ───────────────────────────────────────────────────
@@ -1621,16 +1640,7 @@ async function runOnce() {
   // drain: the whole connected roster refreshes within half an hour of falling due.
   try { await syncDueDealsWorkspace(); } catch (error) { console.error("reply_radar_deals_sync_cycle_failed", error); }
 
-  /*
-   * One client's analytics per cycle: whoever asked for a refresh first, else the client whose stored
-   * figures are oldest, and only once they are over a day old.
-   *
-   * No loop timer here on purpose: the staleness check is inside `staleAnalyticsWorkspace`, reading
-   * `refreshed_at` out of the table rather than a variable that a deploy would reset. Fifteen clients
-   * all falling due at once are then worked off one per cycle over the following half hour, which is
-   * the cadence rather than a queue.
-   */
-  try { await collectAnalytics(); } catch (error) { console.error("reply_radar_analytics_cycle_failed", error); }
+  // Analytics collection runs on its own loop (analyticsLoop), not once per main cycle.
 
 
 
@@ -1683,6 +1693,7 @@ async function scheduledSendsLoop() {
 async function main() {
   console.info("reply_radar_worker_started", { pollIntervalSeconds: pollIntervalMs / 1000 });
   scheduledSendsLoop().catch((error) => console.error("reply_radar_scheduled_sends_loop_failed", error));
+  analyticsLoop().catch((error) => console.error("reply_radar_analytics_loop_failed", error));
   for (;;) {
     try { await runOnce(); } catch (error) { console.error("reply_radar_worker_cycle_failed", error); }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
