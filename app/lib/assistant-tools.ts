@@ -367,11 +367,24 @@ async function describeConversations(conversationRows: Row[]): Promise<Row[]> {
     // Every message for these conversations, not just the newest: PostgREST has no per-group limit, so
     // the newest is picked out below. Deliberately unbounded — a row cap here would drop whole
     // conversations' messages rather than trimming each one, and a blank last reply looks like data.
-    dbByIds(
-      (batch) =>
-        `rr_messages?select=conversation_id,direction,body,sent_at,raw_data&conversation_id=in.(${batch.join(",")})&order=sent_at.desc`,
-      ids,
-    ),
+    //
+    // And paged: fifty long threads pass PostgREST's 1,000-row ceiling, and the rows it dropped were
+    // the oldest conversations' entire histories, which then read as "no reply". `id` breaks sent_at
+    // ties so a page boundary cannot skip or repeat a row.
+    (async () => {
+      const batches: string[][] = [];
+      for (let start = 0; start < ids.length; start += ID_BATCH) batches.push(ids.slice(start, start + ID_BATCH));
+      const pages = await Promise.all(batches.map(async (batch) => {
+        const all: Row[] = [];
+        for (let offset = 0; ; offset += 1000) {
+          const page = rows(await db(`rr_messages?select=conversation_id,direction,body,sent_at,raw_data&conversation_id=in.(${batch.join(",")})&order=sent_at.desc,id.asc&limit=1000&offset=${offset}`));
+          all.push(...page);
+          if (page.length < 1000) break;
+        }
+        return all;
+      }));
+      return pages.flat();
+    })(),
   ]);
   const leadById = new Map(rows(leadRows).map((row) => [text(row.id), row]));
   // Only the most recent message per conversation. The rest is what `read_conversation` is for, and

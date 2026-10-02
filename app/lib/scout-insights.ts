@@ -92,10 +92,15 @@ function pickClients(all: Client[], wanted: string[]): Client[] {
 }
 
 /* ── Dates ─────────────────────────────────────────────────────────────────────────────────────── */
+// Windows are New York calendar days, the team's clock. The YYYY-MM-DD strings are what the model sees
+// and repeats; the instants below are what the database is filtered by.
+const TEAM_ZONE = "America/New_York";
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+/** Today's date in New York. UTC's date is already tomorrow from 8pm Eastern (7pm in winter). */
+const easternToday = (now = new Date()) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: TEAM_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 function windowOf(fromRaw: unknown, toRaw: unknown, fallbackDays = 30): { from: string; to: string; days: number } {
-  const today = new Date();
-  const to = /^\d{4}-\d{2}-\d{2}$/.test(text(toRaw)) ? text(toRaw) : isoDay(today);
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(text(toRaw)) ? text(toRaw) : easternToday();
   const from = /^\d{4}-\d{2}-\d{2}$/.test(text(fromRaw)) ? text(fromRaw) : isoDay(new Date(Date.parse(`${to}T12:00:00Z`) - (fallbackDays - 1) * 86_400_000));
   const days = Math.max(1, Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1);
   return { from, to, days };
@@ -104,7 +109,29 @@ const previousWindow = (w: { from: string; days: number }) => {
   const to = isoDay(new Date(Date.parse(`${w.from}T12:00:00Z`) - 86_400_000));
   return { from: isoDay(new Date(Date.parse(`${to}T12:00:00Z`) - (w.days - 1) * 86_400_000)), to, days: w.days };
 };
+/** The day after `to`, as a date string. For day-keyed sources (rr_daily_stats, HeyReach daily stats). */
 const endExclusive = (to: string) => isoDay(new Date(Date.parse(`${to}T12:00:00Z`) + 86_400_000));
+/** How far New York is ahead of UTC at an instant, in ms (always negative). */
+function easternOffsetMs(instant: number) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: TEAM_ZONE, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }).formatToParts(new Date(instant));
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"), get("second")) - Math.floor(instant / 1000) * 1000;
+}
+/**
+ * The instant New York's clock reads midnight on a YYYY-MM-DD day, as ISO.
+ *
+ * Timestamp filters used the bare date, which Postgres reads as UTC midnight: 7 or 8pm the evening
+ * before in New York, so every window gained the previous evening's replies and lost its own last
+ * evening's. The offset is read twice because the guess and the answer can sit across a DST change.
+ */
+function easternMidnight(day: string) {
+  const guess = Date.parse(`${day}T00:00:00Z`);
+  const first = guess - easternOffsetMs(guess);
+  return new Date(guess - easternOffsetMs(first)).toISOString();
+}
+/** Timestamp bounds for a window of New York days: [start of `from`, start of the day after `to`). */
+const startAt = (from: string) => easternMidnight(from);
+const endAt = (to: string) => easternMidnight(endExclusive(to));
 
 /* ── client_scorecard ──────────────────────────────────────────────────────────────────────────── */
 
@@ -112,7 +139,7 @@ type Window = { from: string; to: string; days: number };
 /** Replies (people), positive replies and meetings from QC Command's own database, per client, in a window. */
 async function dbWindowStats(clients: Client[], w: Window) {
   const byId = new Map(clients.map((c) => [c.id, c]));
-  const inbound = await dbAll(`rr_messages?select=conversation_id,sent_at,sentiment:raw_data->reply_radar->>sentiment&direction=eq.inbound&sent_at=gte.${w.from}&sent_at=lt.${endExclusive(w.to)}&order=sent_at.asc`);
+  const inbound = await dbAll(`rr_messages?select=conversation_id,sent_at,sentiment:raw_data->reply_radar->>sentiment&direction=eq.inbound&sent_at=gte.${startAt(w.from)}&sent_at=lt.${endAt(w.to)}&order=sent_at.asc`);
   const convIds = [...new Set(inbound.map((m) => text(m.conversation_id)))];
   const convs = await dbByIds((ids) => `rr_conversations?select=id,workspace_id&id=in.(${ids.join(",")})&order=id.asc`, convIds);
   const wsOf = new Map(convs.map((c) => [text(c.id), text(c.workspace_id)]));
@@ -126,7 +153,7 @@ async function dbWindowStats(clients: Client[], w: Window) {
     const sent = text(m.sentiment).toLowerCase(); if (sent) lastSentiment.set(conv, sent);
   }
   for (const [conv, sent] of lastSentiment) { const ws = wsOf.get(conv); const s = ws ? stats.get(ws) : null; if (!s) continue; if (sent === "positive") s.positive.add(conv); if (sent === "negative") s.negative.add(conv); }
-  const meetings = (await dbAll(`rr_meetings?select=workspace_id,invitee_name,created_at,meeting_at,status&created_at=gte.${w.from}&created_at=lt.${endExclusive(w.to)}&order=created_at.asc`)).filter((m) => !isTestMeeting(m));
+  const meetings = (await dbAll(`rr_meetings?select=workspace_id,invitee_name,created_at,meeting_at,status&created_at=gte.${startAt(w.from)}&created_at=lt.${endAt(w.to)}&order=created_at.asc`)).filter((m) => !isTestMeeting(m));
   const booked = new Map<string, number>();
   for (const m of meetings) { const ws = text(m.workspace_id); if (byId.has(ws) && !/cancel/i.test(text(m.status))) booked.set(ws, (booked.get(ws) ?? 0) + 1); }
   return new Map(clients.map((c) => { const s = stats.get(c.id)!; return [c.id, { peopleReplied: s.replied.size, positive: s.positive.size, negative: s.negative.size, replyMessages: s.messages, meetingsBooked: booked.get(c.id) ?? 0 }]; }));
@@ -439,8 +466,8 @@ async function outreachPeople(input: Row) {
   const ors = (field: string, terms: string[]) => (terms.length ? `&or=(${terms.map((t) => `${field}.ilike.*${encodeURIComponent(t.replace(/[(),*]/g, " "))}*`).join(",")})` : "");
   const filters = [
     picked.length === all.length ? "" : `&workspace_id=in.(${picked.map((c) => c.id).join(",")})`,
-    from ? `&last_action_at=gte.${from}` : "",
-    to ? `&last_action_at=lt.${endExclusive(to)}` : "",
+    from ? `&last_action_at=gte.${startAt(from)}` : "",
+    to ? `&last_action_at=lt.${endAt(to)}` : "",
     input.acceptedOnly === true ? "&connection_status=ilike.*accept*" : "",
   ].join("");
   // Title, company and campaign each OR across their terms; PostgREST allows one or= per request, so the
@@ -482,7 +509,7 @@ async function meetingsByCampaign(input: Row) {
   const byId = new Map(picked.map((c) => [c.id, c]));
   const allTime = !text(input.from) && !text(input.to);
   const w = windowOf(input.from, input.to, 3650);
-  const meetings = (await dbAll(`rr_meetings?select=workspace_id,invitee_name,invitee_linkedin,company_name,campaign,status,created_at,meeting_at${allTime ? "" : `&created_at=gte.${w.from}&created_at=lt.${endExclusive(w.to)}`}&order=created_at.asc`))
+  const meetings = (await dbAll(`rr_meetings?select=workspace_id,invitee_name,invitee_linkedin,company_name,campaign,status,created_at,meeting_at${allTime ? "" : `&created_at=gte.${startAt(w.from)}&created_at=lt.${endAt(w.to)}`}&order=created_at.asc`))
     .filter((m) => byId.has(text(m.workspace_id)) && !/cancel/i.test(text(m.status)) && !isTestMeeting(m));
   // A meeting with no campaign typed on it: find the lead it belongs to and use the campaign they were in.
   const unlabelled = meetings.filter((m) => !text(m.campaign));
@@ -544,7 +571,7 @@ async function replyTexts(input: Row) {
   const wantSentiment = strings(input.sentiment).map((x) => x.toLowerCase());
   const limit = Math.max(20, Math.min(600, num(input.limit) || 250));
   const contains = text(input.contains).toLowerCase();
-  const msgs = await dbAll(`rr_messages?select=conversation_id,sent_at,body,sentiment:raw_data->reply_radar->>sentiment&direction=eq.inbound&sent_at=gte.${w.from}&sent_at=lt.${endExclusive(w.to)}&order=sent_at.desc`);
+  const msgs = await dbAll(`rr_messages?select=conversation_id,sent_at,body,sentiment:raw_data->reply_radar->>sentiment&direction=eq.inbound&sent_at=gte.${startAt(w.from)}&sent_at=lt.${endAt(w.to)}&order=sent_at.desc`);
   const convs = await dbByIds((ids) => `rr_conversations?select=id,workspace_id&id=in.(${ids.join(",")})&order=id.asc`, [...new Set(msgs.map((m) => text(m.conversation_id)))]);
   const wsOf = new Map(convs.map((c) => [text(c.id), text(c.workspace_id)]));
   const seen = new Set<string>();

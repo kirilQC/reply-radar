@@ -135,6 +135,25 @@ function scheduleFrom(rows: unknown): BriefSchedule {
 }
 
 /**
+ * Whether a logged run means the client already had today's post.
+ *
+ * Any non-preview row used to count, so a run that failed at 8am (status error) or a test post to the
+ * test channel marked the client as done and the scheduled post was never retried. Only a successful
+ * post to the client's real channel counts. A failure counts for an hour, so a broken client is retried
+ * hourly rather than every minute the worker ticks. Test posts never count.
+ */
+const ERROR_RETRY_MS = 60 * 60_000;
+function countsAsSent(row: Row, nowMs: number) {
+  const destination = String(row.destination ?? "");
+  if (destination !== "internal" && destination !== "external") return false;
+  const status = String(row.status ?? "");
+  if (status === "success") return true;
+  if (status !== "error") return false;
+  const at = Date.parse(String(row.created_at ?? ""));
+  return Number.isFinite(at) && nowMs - at < ERROR_RETRY_MS;
+}
+
+/**
  * The client directory, the schedule, and which clients are due right now.
  *
  * The five reads run together because the page needs all of them before it can draw anything, and the
@@ -167,11 +186,12 @@ export async function GET() {
     // The newest *sent* brief, separately from the newest of any kind: "has this client had one today"
     // must not be satisfied by a preview nobody but the operator saw.
     const latestSent = new Map<string, Row>();
+    const nowMs = Date.now();
     for (const brief of briefs) {
       const id = String(brief.workspace_id ?? "");
       if (!id) continue;
       if (!latest.has(id)) latest.set(id, brief);
-      if (!latestSent.has(id) && String(brief.destination ?? "") !== "preview") latestSent.set(id, brief);
+      if (!latestSent.has(id) && countsAsSent(brief, nowMs)) latestSent.set(id, brief);
     }
 
     const now = new Date();

@@ -20,7 +20,7 @@
  */
 
 import { TOOLS, runTool, takeFile } from "./assistant-tools";
-import { bigListToDataset, exportDatasets, parseCsv, type DatasetStore } from "./assistant-data";
+import { bigListToDataset, capToolResult, exportDatasets, parseCsv, type DatasetStore } from "./assistant-data";
 import { publicBaseUrl } from "./public-url";
 import { DEFAULT_MODEL } from "../../shared/anthropic-model.mjs";
 import {
@@ -691,7 +691,8 @@ export async function runAgent(opts: {
           if (file) emit({ type: "file", name: file.name, mime: file.mime, content: file.content });
           steps.push({ tool: name, input, ok: true, detail: "" });
           emit({ type: "tool_done", tool: name, ok: true });
-          return { type: "tool_result", tool_use_id: text(call.id), content: JSON.stringify(stamped) };
+          // Held to ~100 KB; anything cut is marked in the result so the model never mistakes a part for the whole.
+          return { type: "tool_result", tool_use_id: text(call.id), content: capToolResult(stamped) };
         } catch (error) {
           const detail = error instanceof Error ? error.message : "The tool failed.";
           steps.push({ tool: name, input, ok: false, detail });

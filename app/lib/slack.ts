@@ -639,8 +639,15 @@ export async function threadPosts(channelId: string, threadTs: string): Promise<
 export async function dmHistory(channelId: string, limit = 40): Promise<ThreadPost[]> {
   if (!channelId) return [];
   const query = new URLSearchParams({ channel: channelId, limit: String(Math.min(200, Math.max(1, limit))) });
+  // The bot's token, never the read actor. With SLACK_USER_TOKEN set the read actor is one teammate's own
+  // token, which can only see that teammate's DMs: for everyone else this came back empty, so QC Bot
+  // forgot every earlier line and the double-message debounce never saw the first message. The DM is
+  // between the person and the bot, so the bot is the one party guaranteed to be able to read it.
+  const token = botToken();
+  if (!token) return [];
   try {
-    const body = await call(`conversations.history?${query.toString()}`, { method: "GET" });
+    const body = await raw(token, `conversations.history?${query.toString()}`, { method: "GET" });
+    if (!body.ok) return [];
     const all = Array.isArray(body.messages) ? (body.messages as RawMessage[]) : [];
     return all
       .slice()

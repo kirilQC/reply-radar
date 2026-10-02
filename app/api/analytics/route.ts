@@ -66,6 +66,14 @@ async function supabaseAll(path: string, pageSize = 1000): Promise<Row[]> {
   return all;
 }
 
+/** The team works New York hours, so "a day" on this page is a New York calendar day. */
+const TEAM_ZONE = "America/New_York";
+const dayKeyFormat = new Intl.DateTimeFormat("en-CA", { timeZone: TEAM_ZONE, year: "numeric", month: "2-digit", day: "2-digit" });
+/** YYYY-MM-DD of an instant, on the New York calendar. */
+const easternDayKey = (date: Date) => dayKeyFormat.format(date);
+/** A YYYY-MM-DD key moved by whole days. Noon UTC keeps the arithmetic clear of any DST edge. */
+const shiftDayKey = (key: string, days: number) => new Date(Date.parse(`${key}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+
 async function writeSupabase(path: string, body: unknown) {
   const { url, key } = config();
   if (!url || !key) return;
@@ -212,20 +220,20 @@ export async function GET(request: Request) {
     const recentMessages = inbound.filter((row) => new Date(String(row.sent_at)).getTime() >= weekAgo);
     // Fourteen days rather than seven: a week of bars is too short to tell a slow week from a
     // trend, and the chart now has the width for it.
-    const trendDays = Array.from({ length: 14 }, (_, index) => {
-      const dayStart = new Date(now - (13 - index) * 24 * 60 * 60 * 1000);
-      dayStart.setHours(0, 0, 0, 0);
-      return dayStart;
-    });
-    const trend = trendDays.map((dayStart) => {
-      const dayEnd = new Date(dayStart);
-      dayEnd.setDate(dayStart.getDate() + 1);
-      return inbound.filter((row) => {
-        const timestamp = new Date(String(row.sent_at)).getTime();
-        return timestamp >= dayStart.getTime() && timestamp < dayEnd.getTime();
-      }).length;
-    });
-    const trendLabels = trendDays.map((day) => day.toLocaleDateString("en-US", { month: "numeric", day: "numeric" }));
+    //
+    // Bucketed by the team's calendar day in New York. `setHours(0)` used the server's own zone, which is
+    // UTC on Vercel, so every reply after 8pm Eastern (7pm in winter) landed on the next day's bar.
+    const todayKey = easternDayKey(new Date(now));
+    const trendDays = Array.from({ length: 14 }, (_, index) => shiftDayKey(todayKey, index - 13));
+    const inboundByDay = new Map<string, number>();
+    for (const row of inbound) {
+      const sentAt = new Date(String(row.sent_at));
+      if (Number.isNaN(sentAt.getTime())) continue;
+      const key = easternDayKey(sentAt);
+      inboundByDay.set(key, (inboundByDay.get(key) ?? 0) + 1);
+    }
+    const trend = trendDays.map((key) => inboundByDay.get(key) ?? 0);
+    const trendLabels = trendDays.map((key) => `${Number(key.slice(5, 7))}/${Number(key.slice(8, 10))}`);
     /**
      * Replies per day across every client, over the trailing week.
      *

@@ -394,7 +394,21 @@ export default function AnalyticsPage() {
         }
       }
     } catch { /* a corrupt or evicted snapshot just means the old empty-shell wait */ }
-    const load = () => fetch("/api/analytics", { cache: "no-store" }).then((response) => response.json()).then((payload: AnalyticsData) => {
+    /**
+     * One request at a time. The route can take longer than the 30s poll when HeyReach is slow, and
+     * overlapping polls used to land out of order, so an older answer could paint over a newer one.
+     */
+    let inFlight = false;
+    const load = () => {
+      if (inFlight) return Promise.resolve();
+      inFlight = true;
+      return fetch("/api/analytics", { cache: "no-store" }).then((response) => response.json()).then((payload: AnalyticsData & { ok?: boolean }) => {
+      // A failed poll keeps the figures already on screen. Replacing them with an error payload blanked a
+      // working page for 30 seconds every time HeyReach or Supabase hiccuped.
+      if (payload?.ok === false) {
+        setData((current) => (current.campaignMetrics?.length ? current : payload));
+        return;
+      }
       setData(payload);
       const at = Date.now();
       setUpdatedAt(new Date(at));
@@ -406,7 +420,9 @@ export default function AnalyticsPage() {
       if (Array.isArray(payload?.campaignMetrics) && payload.campaignMetrics.length) {
         try { window.localStorage.setItem(snapshotKey, JSON.stringify({ at, data: payload })); } catch { /* quota or private mode */ }
       }
-    }).catch(() => setData((current) => (current.campaignMetrics?.length ? current : { status: "error" })));
+    }).catch(() => setData((current) => (current.campaignMetrics?.length ? current : { status: "error" })))
+        .finally(() => { inFlight = false; });
+    };
     void load();
     const timer = window.setInterval(load, 30_000);
     return () => window.clearInterval(timer);

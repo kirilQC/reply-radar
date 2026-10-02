@@ -58,15 +58,55 @@ export const DATA_TABLES: Record<string, string> = {
 /** Columns that must never be shown, whatever table they are in. */
 const SECRET = /(^|_)(api_?key|apikey|ciphertext|secret|token|password|passwd|private_?key|webhook_?url|signing|credential|bearer)s?($|_)/i;
 
-/** Secrets are dropped; whether each one is set survives as has_<column>, which is what questions need. */
-const redact = (row: Row): Row => {
+/**
+ * Secrets are dropped; whether each one is set survives as has_<column>, which is what questions need.
+ *
+ * Recursive, because a select can embed related rows (`rr_conversations(*, rr_workspaces(*))`) and
+ * PostgREST nests them as objects and arrays. Stripping only the top level let a workspace's HeyReach
+ * key ride out inside an embedded row.
+ */
+export const redact = (row: Row): Row => {
   const out: Row = {};
   for (const [key, value] of Object.entries(row)) {
     if (SECRET.test(key)) out[`has_${key}`] = value !== null && value !== undefined && String(value).trim() !== "";
-    else out[key] = value;
+    else out[key] = redactValue(value);
   }
   return out;
 };
+function redactValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (value && typeof value === "object") return redact(value as Row);
+  return value;
+}
+
+/** The identifiers in a select or column string, so a secret is caught wherever it sits (alias, embed, JSON path). */
+const identifiers = (value: string) => value.match(/[a-z0-9_]+/gi) ?? [];
+
+/**
+ * Whether a select may be sent.
+ *
+ * The old check ran the secret pattern over the whole string, which missed a secret written right before
+ * a bracket (`rr_workspaces(clay_dnc_webhook_url)`) and never looked inside an embed at all, so
+ * `rr_workspaces(*)` fetched every credential column. Each identifier is now tested on its own, and an
+ * embed of the workspaces table must name its columns: `*` there is the whole credentials row.
+ */
+export function assertSafeSelect(select: string) {
+  if (identifiers(select).some((name) => SECRET.test(name))) throw new Error("That column holds a secret and cannot be read.");
+  const embed = /rr_workspaces\s*(?:![a-z0-9_]+\s*)?\(/gi;
+  for (let match = embed.exec(select); match; match = embed.exec(select)) {
+    let depth = 1;
+    let index = match.index + match[0].length;
+    const start = index;
+    while (index < select.length && depth > 0) {
+      if (select[index] === "(") depth += 1;
+      else if (select[index] === ")") depth -= 1;
+      index += 1;
+    }
+    const inner = select.slice(start, depth === 0 ? index - 1 : index);
+    if (inner.includes("*") || !inner.trim())
+      throw new Error("Embedding rr_workspaces needs its columns named, e.g. rr_workspaces(name,slug). It holds credentials, so * is not allowed there.");
+  }
+}
 
 const OPS = new Set(["eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "in", "is"]);
 const MAX = 1000;
@@ -171,14 +211,14 @@ export async function runDataTool(
     const table = tableName(input.table);
     const params: string[] = [];
     const select = String(input.select ?? "*").trim() || "*";
-    if (SECRET.test(select)) throw new Error("That column holds a secret and cannot be read.");
+    assertSafeSelect(select);
     params.push(`select=${encodeURIComponent(select)}`);
     for (const filter of Array.isArray(input.filters) ? input.filters : []) {
       const f = filter as Row;
       const column = ident(f.column);
       const op = String(f.op ?? "").trim().toLowerCase();
       if (!OPS.has(op)) throw new Error(`Unknown filter op "${op}".`);
-      if (SECRET.test(column)) throw new Error("That column holds a secret and cannot be filtered on.");
+      if (identifiers(column).some((part) => SECRET.test(part))) throw new Error("That column holds a secret and cannot be filtered on.");
       const raw = String(f.value ?? "");
       const value = op === "in" ? `(${raw.split(",").map((v) => `"${v.trim().replace(/"/g, "")}"`).join(",")})` : op === "is" ? (raw.toLowerCase() === "null" ? "null" : raw.toLowerCase() === "true" ? "true" : "false") : raw;
       params.push(`${encodeURIComponent(column)}=${op}.${encodeURIComponent(value)}`);
@@ -262,6 +302,72 @@ export function bigListToDataset(tool: string, result: unknown, store: DatasetSt
   return found.path === null
     ? { rows: kept, totalRows: found.list.length, datasetId: id, instruction: note }
     : { ...(result as Row), [found.path]: kept, [`${found.path}Total`]: found.list.length, datasetId: id, instruction: note };
+}
+
+/* ── Tool results have a size ceiling ─────────────────────────────────────────────────────────────
+ * A tool result goes into the model's context whole. A query_data over rr_leads with raw_data, or 300
+ * rows of enriched people, came to megabytes, which either blew the context window or crowded out the
+ * conversation. Every result is held to RESULT_CAP characters, and anything removed to get there is
+ * said so in the result itself: a silently shortened list reads as the whole list, and the model would
+ * count it as such. */
+
+export const RESULT_CAP = 100_000;
+/** Fields that are bulk enrichment blobs, rarely what a question needs, and the usual cause of size. */
+const BULKY_FIELDS = new Set(["raw_data", "raw_payload", "payload", "enrichment"]);
+const LONG_STRING = 2_000;
+
+/** A copy with bulky blobs replaced by a short note and long strings shortened, both marked. */
+function slimValue(value: unknown, key = ""): unknown {
+  if (BULKY_FIELDS.has(key) && value && typeof value === "object")
+    return `[${key} omitted to fit the result size limit; query this row alone, or select specific ${key}->> fields, to read it]`;
+  if (typeof value === "string" && value.length > LONG_STRING)
+    return `${value.slice(0, LONG_STRING)} [truncated: ${value.length - LONG_STRING} more characters not shown]`;
+  if (Array.isArray(value)) return value.map((item) => slimValue(item));
+  if (value && typeof value === "object") {
+    const out: Row = {};
+    for (const [k, v] of Object.entries(value as Row)) out[k] = slimValue(v, k);
+    return out;
+  }
+  return value;
+}
+
+/**
+ * The JSON a tool result is sent to the model as, never longer than `cap` characters.
+ *
+ * Tried in order of how little it loses: as is; with bulky fields and long strings trimmed; with the
+ * longest list cut to as many rows as fit (and a note saying how many of how many); and only as a last
+ * resort a hard cut with an explicit marker.
+ */
+export function capToolResult(value: unknown, cap = RESULT_CAP): string {
+  const whole = JSON.stringify(value) ?? "null";
+  if (whole.length <= cap) return whole;
+  const slim = slimValue(value);
+  const slimmed = JSON.stringify(slim) ?? "null";
+  const trimmedNote = "Bulky fields (such as raw_data) and very long text were shortened to fit the result size limit; each shortened field says so.";
+  const withNote = (v: unknown, note: string): unknown =>
+    v && typeof v === "object" && !Array.isArray(v) ? { ...(v as Row), resultTruncated: note } : { rows: v, resultTruncated: note };
+  if (slimmed.length + trimmedNote.length + 40 <= cap) return JSON.stringify(withNote(slim, trimmedNote));
+
+  const found = findList(slim);
+  if (found) {
+    const build = (count: number) => {
+      const kept = found.list.slice(0, count);
+      const note = `${trimmedNote} Only the first ${count} of ${found.list.length} rows${found.path ? ` of "${found.path}"` : ""} fit, so the list is INCOMPLETE: do not count or total from it. Narrow the query (filters, fewer columns, countOnly) to see the rest.`;
+      return JSON.stringify(found.path === null ? { rows: kept, totalRows: found.list.length, resultTruncated: note } : { ...(slim as Row), [found.path]: kept, resultTruncated: note });
+    };
+    // Largest row count that fits, by bisection: rows vary in size, so a ratio guess can overshoot.
+    let low = 0;
+    let high = found.list.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (build(mid).length <= cap) low = mid;
+      else high = mid - 1;
+    }
+    const fitted = build(low);
+    if (fitted.length <= cap) return fitted;
+  }
+  const marker = `\n[RESULT TRUNCATED: this result was ${Math.round(whole.length / 1000)} KB and only the first ${Math.round(cap / 1000)} KB is shown, so it is incomplete and is not valid JSON past this point. Narrow the query to see the rest.]`;
+  return slimmed.slice(0, cap - marker.length) + marker;
 }
 
 export const EXPORT_TOOL = {

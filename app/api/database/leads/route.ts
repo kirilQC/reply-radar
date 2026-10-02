@@ -42,6 +42,21 @@ async function get(url: string, key: string, path: string) {
   return Array.isArray(data) ? (data as Row[]) : [];
 }
 /**
+ * Every row of a read. PostgREST returns at most 1,000 rows whatever `limit` says, so the in-memory
+ * filter path (which asked for 10,000) saw only the first thousand leads: a client with 3,000 leads
+ * reported "1,000 leads" and a sender filter missed everyone past row 1,000. `path` must carry an
+ * `order` that is unique (end it with id) so the offset windows neither overlap nor skip.
+ */
+async function getAll(url: string, key: string, path: string, pageSize = 1000) {
+  const all: Row[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await get(url, key, `${path}&limit=${pageSize}&offset=${offset}`);
+    all.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return all;
+}
+/**
  * The cursor is a row offset, not a timestamp.
  *
  * It used to carry the last row's `created_at` and page with `created_at=lt.<cursor>`, which is the
@@ -209,13 +224,17 @@ export async function GET(request: Request) {
     // rr_lead_index rather than rr_leads: every rr_leads column plus `last_reply_at` and
     // `reply_count`, which are the two things this table displays and sorts by. Reading the base table
     // meant "Newest first" ordered by insertion time while the date column showed the last reply.
-    let rows = await get(
-      url,
-      key,
-      `rr_lead_index?select=*&${filters ? `${filters}&` : ""}order=${order}&limit=${metadataFiltering ? 10000 : limit + 1}${metadataFiltering || !offset ? "" : `&offset=${offset}`}`,
-    );
+    let rows = metadataFiltering
+      ? await getAll(url, key, `rr_lead_index?select=*&${filters ? `${filters}&` : ""}order=${order},id.asc`)
+      : await get(
+          url,
+          key,
+          `rr_lead_index?select=*&${filters ? `${filters}&` : ""}order=${order}&limit=${limit + 1}${offset ? `&offset=${offset}` : ""}`,
+        );
+    // The dropdowns list every sender and campaign the client has, so they read every lead, not the
+    // first 1,000 in whatever order Postgres felt like.
     const optionRows = selectedWorkspace
-      ? await get(url, key, `rr_leads?select=raw_data&workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}&limit=10000`)
+      ? await getAll(url, key, `rr_leads?select=raw_data&workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}&order=id.asc`)
       : [];
     const filterOptions = {
       senders: [...new Set(optionRows.flatMap((lead) => rollupNames(lead.raw_data, "senders")))].sort((a, b) => a.localeCompare(b)),
@@ -225,7 +244,7 @@ export async function GET(request: Request) {
     if (campaignFilter) rows = rows.filter((lead) => rollupNames(lead.raw_data, "campaigns").includes(campaignFilter));
     if (selectedWorkspace && timeRangeDays[timeRange] && rows.length) {
       const since = new Date(Date.now() - timeRangeDays[timeRange] * 86_400_000).toISOString();
-      const recentConversations = await get(url, key, `rr_conversations?select=lead_id&workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}&last_message_at=gte.${encodeURIComponent(since)}&limit=10000`);
+      const recentConversations = await getAll(url, key, `rr_conversations?select=lead_id&workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}&last_message_at=gte.${encodeURIComponent(since)}&order=id.asc`);
       const recentLeadIds = new Set(recentConversations.map((row) => String(row.lead_id)));
       rows = rows.filter((lead) => recentLeadIds.has(String(lead.id)));
     }
@@ -256,10 +275,12 @@ export async function GET(request: Request) {
       String(conversation.id),
     );
     const messages = conversationIds.length
-      ? await get(
+      ? await getAll(
           url,
           key,
-          `rr_messages?select=conversation_id,direction,body,sent_at,raw_data&conversation_id=in.(${conversationIds.join(",")})&order=sent_at.desc&limit=1000`,
+          // Paged: a page of busy leads can hold more than 1,000 messages, and the cap dropped the
+          // oldest threads' messages entirely, blanking their latest reply and campaign.
+          `rr_messages?select=conversation_id,direction,body,sent_at,raw_data&conversation_id=in.(${conversationIds.join(",")})&order=sent_at.desc,id.asc`,
         )
       : [];
     const workspaceById = new Map(

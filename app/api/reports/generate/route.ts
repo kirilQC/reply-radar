@@ -45,50 +45,130 @@ async function query(url: string, key: string, path: string) {
   return (await response.json()) as Row[];
 }
 
+/**
+ * Every row of a read, not the first 1,000.
+ *
+ * PostgREST caps a response at 1,000 rows whatever `limit` asks for, so the old `limit=20000` quietly
+ * returned the first thousand conversations (in no particular order) and every reply in the rest
+ * vanished from the report. Pages until a short one comes back; `path` must carry an `order` so the
+ * offset windows are stable across pages.
+ */
+async function queryAll(url: string, key: string, path: string, pageSize = 1000) {
+  const all: Row[] = [];
+  const separator = path.includes("?") ? "&" : "?";
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await query(url, key, `${path}${separator}limit=${pageSize}&offset=${offset}`);
+    all.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return all;
+}
+
 type Period = "daily" | "weekly" | "monthly" | "quarterly" | "all-time" | "custom";
 
-function periodRange(period: Period, timeZone: string, custom?: { since?: string; until?: string }) {
-  const now = new Date();
+/** The team's zone. A custom range is picked as New York calendar days whatever the browser says. */
+const TEAM_ZONE = "America/New_York";
+
+/** The wall-clock date of an instant in a zone, as numbers. */
+function zonedDate(instant: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "numeric", day: "numeric" }).formatToParts(instant);
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return { year: get("year"), month: get("month"), day: get("day") };
+}
+
+/** How far the zone is ahead of UTC at an instant, in ms (negative west of Greenwich). */
+function zoneOffsetMs(instant: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric",
+  }).formatToParts(instant);
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"), get("second"));
+  return asUtc - Math.floor(instant.getTime() / 1000) * 1000;
+}
+
+/**
+ * The instant a zone's clock reads midnight on a given date.
+ *
+ * Month and day may overflow (day 0, month 13); Date.UTC normalises them, which is what lets callers
+ * say "the day after" or "three months on" without their own calendar maths. The offset is read twice
+ * because the guess and the answer can sit either side of a DST change.
+ */
+function zonedMidnight(year: number, month: number, day: number, timeZone: string) {
+  const guess = Date.UTC(year, month - 1, day);
+  const first = guess - zoneOffsetMs(new Date(guess), timeZone);
+  const second = guess - zoneOffsetMs(new Date(first), timeZone);
+  return new Date(second);
+}
+
+const DAY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * The window a report covers, as a half-open [since, until) pair of instants.
+ *
+ * Periods start at local midnight in the requested zone. They used to start at UTC midnight, which
+ * is 7 or 8pm the evening before in New York: the first of the month read as "September 30 8pm" and
+ * the label, formatted in Eastern, said September on an October report.
+ */
+function periodRange(
+  period: Period,
+  timeZone: string,
+  custom?: { since?: string; until?: string },
+  now = new Date(),
+) {
   if (period === "custom") {
-    return {
-      since: custom?.since ? new Date(custom.since).toISOString() : null,
-      until: custom?.until ? new Date(custom.until).toISOString() : null,
-      label: "Custom range",
+    // The calendar sends inclusive YYYY-MM-DD days. The end used to go in as `lt` midnight UTC of the
+    // chosen day, so the last day of every custom range was dropped. Since is that day's New York
+    // midnight; until is the following day's, exclusive.
+    const bound = (value: string | undefined, plusDays: number) => {
+      if (!value) return null;
+      const match = DAY_PATTERN.exec(value);
+      if (match) return zonedMidnight(Number(match[1]), Number(match[2]), Number(match[3]) + plusDays, TEAM_ZONE).toISOString();
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
     };
+    return { since: bound(custom?.since, 0), until: bound(custom?.until, 1), label: "Custom range" };
   }
   if (period === "all-time") return { since: null, until: null, label: "All time" };
-  const start = new Date(now);
+  const today = zonedDate(now, timeZone);
   if (period === "daily") {
-    start.setUTCHours(0, 0, 0, 0);
-    return { since: start.toISOString(), until: null, label: formatDay(start, timeZone) };
+    return { since: zonedMidnight(today.year, today.month, today.day, timeZone).toISOString(), until: null, label: formatLocalDay(today.year, today.month, today.day) };
   }
   if (period === "weekly") {
-    const day = start.getUTCDay(); // 0=Sun
-    const daysBack = (day + 6) % 7; // Monday start
-    start.setUTCDate(start.getUTCDate() - daysBack);
-    start.setUTCHours(0, 0, 0, 0);
-    return { since: start.toISOString(), until: null, label: `Week of ${formatDay(start, timeZone)}` };
+    const weekday = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay(); // 0=Sun
+    const daysBack = (weekday + 6) % 7; // Monday start
+    const monday = new Date(Date.UTC(today.year, today.month - 1, today.day - daysBack));
+    const [y, m, d] = [monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate()];
+    return { since: zonedMidnight(y, m, d, timeZone).toISOString(), until: null, label: `Week of ${formatLocalDay(y, m, d)}` };
   }
   if (period === "monthly") {
-    start.setUTCDate(1);
-    start.setUTCHours(0, 0, 0, 0);
     return {
-      since: start.toISOString(),
+      since: zonedMidnight(today.year, today.month, 1, timeZone).toISOString(),
       until: null,
-      label: new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone }).format(start),
+      // Formatted from the local date itself (as a UTC calendar date) so no zone conversion can move it.
+      label: new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(today.year, today.month - 1, 1))),
     };
   }
   // quarterly
-  const month = start.getUTCMonth();
-  const qStart = month - (month % 3);
-  start.setUTCMonth(qStart, 1);
-  start.setUTCHours(0, 0, 0, 0);
-  const quarter = Math.floor(qStart / 3) + 1;
-  return { since: start.toISOString(), until: null, label: `Q${quarter} ${start.getUTCFullYear()}` };
+  const qStartMonth = today.month - ((today.month - 1) % 3);
+  const quarter = Math.floor((qStartMonth - 1) / 3) + 1;
+  return { since: zonedMidnight(today.year, qStartMonth, 1, timeZone).toISOString(), until: null, label: `Q${quarter} ${today.year}` };
 }
 
-function formatDay(date: Date, timeZone: string) {
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone }).format(date);
+/** A local calendar date as "Oct 2, 2026", with no zone in the way. */
+function formatLocalDay(year: number, month: number, day: number) {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+/**
+ * Calendar days a window spans, for an average per day.
+ *
+ * Dividing by the days that happened to have replies made a quiet week look busy: three replies on one
+ * day out of seven read as 3/day. A window still running counts up to now, so a Wednesday read of this
+ * week divides by three days, not seven. Part-days round up.
+ */
+function calendarDays(sinceMs: number, untilMs: number) {
+  if (!Number.isFinite(sinceMs) || !Number.isFinite(untilMs) || untilMs <= sinceMs) return 1;
+  return Math.max(1, Math.ceil((untilMs - sinceMs) / 86_400_000));
 }
 
 function bucketIcp(score: number): "excellent" | "strong" | "moderate" | "weak" {
@@ -110,7 +190,11 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as Json;
   const workspaceSlug = text(body.workspaceSlug);
   const period = (text(body.period) || "monthly") as Period;
-  const timeZone = text(body.timeZone) || "America/New_York";
+  const requestedZone = text(body.timeZone);
+  // An unknown zone would make every Intl call below throw; fall back to the team's.
+  const timeZone = requestedZone && (() => { try { new Intl.DateTimeFormat("en-US", { timeZone: requestedZone }); return true; } catch { return false; } })()
+    ? requestedZone
+    : "America/New_York";
   const customSince = text(body.since);
   const customUntil = text(body.until);
   /**
@@ -169,11 +253,11 @@ export async function POST(request: Request) {
       }),
     );
 
-    // Fetch conversations for scope
-    const conversations = await query(
+    // Fetch conversations for scope, every page of them (see queryAll).
+    const conversations = await queryAll(
       url,
       key,
-      `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction&workspace_id=in.(${workspaceIds.map(encodeURIComponent).join(",")})&limit=20000`,
+      `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction&workspace_id=in.(${workspaceIds.map(encodeURIComponent).join(",")})&order=id.asc`,
     );
     const conversationIds = conversations.map((c) => text(c.id));
     const workspaceByConversation = new Map(conversations.map((c) => [text(c.id), text(c.workspace_id)]));
@@ -187,11 +271,13 @@ export async function POST(request: Request) {
     ]
       .filter(Boolean)
       .join("&");
+    // Paged too: twenty busy threads over a quarter can pass 1,000 replies, and the cap drops the oldest.
+    // `id` breaks sent_at ties so no row straddles two pages.
     const rawMessages = await queryByIds(conversationIds, 20, (batch) =>
-      query(
+      queryAll(
         url,
         key,
-        `rr_messages?select=id,conversation_id,direction,body,sent_at,raw_data&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&${messageFilters}&order=sent_at.desc&limit=20000`,
+        `rr_messages?select=id,conversation_id,direction,body,sent_at,raw_data&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&${messageFilters}&order=sent_at.desc,id.asc`,
       ),
     );
     const messages = dedupeMessages(rawMessages);
@@ -437,8 +523,14 @@ export async function POST(request: Request) {
       // Executive summary numbers
       const bestCampaign = campaignRows[0]?.name || "—";
       const bestSender = senderRows[0]?.name || "—";
-      const daysCovered = trendRows.length || 1;
-      const avgRepliesPerDay = totalReplies / daysCovered;
+      // An all-time report has no start, so it runs from this client's first reply.
+      const firstReplyMs = workspaceMessages.reduce((min, message) => {
+        const at = Date.parse(text(message.sent_at));
+        return Number.isFinite(at) && at < min ? at : min;
+      }, Date.now());
+      const windowStartMs = since ? Date.parse(since) : firstReplyMs;
+      const windowEndMs = Math.min(until ? Date.parse(until) : Date.now(), Date.now());
+      const avgRepliesPerDay = totalReplies / calendarDays(windowStartMs, windowEndMs);
 
       return {
         workspace: {
@@ -502,7 +594,10 @@ export async function POST(request: Request) {
       period,
       periodLabel: label,
       since,
-      until,
+      // The page prints this as "ending <date>", so it gets the last instant inside the window rather than
+      // the exclusive bound, which would name the day after the one picked.
+      until: until ? new Date(Date.parse(until) - 1).toISOString() : null,
+      untilExclusive: until,
       generatedAt: new Date().toISOString(),
       clients: clientReports,
     });

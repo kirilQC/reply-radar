@@ -24,8 +24,49 @@ export const ASK_ACTION = "qcbot_ask";
 
 const plain = (s) => String(s ?? "").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/__([^_]+)__/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
 const mrk = (s) => inlineToMrkdwn(String(s ?? ""));
-const section = (text) => ({ type: "section", text: { type: "mrkdwn", text: String(text).slice(0, SECTION_MAX) } });
-const context = (text) => ({ type: "context", elements: [{ type: "mrkdwn", text: String(text).slice(0, SECTION_MAX) }] });
+
+/**
+ * Text cut into pieces of at most `max` characters, at line boundaries.
+ *
+ * Slack refuses a section over 3,000 characters, and the old answer was to slice at 2,900: the end of a
+ * long answer simply vanished, and a code block lost its closing fence so everything after it rendered as
+ * code. Nothing is dropped here. Lines are packed whole; only a single line longer than `max` is broken,
+ * at a space where there is one, and its remainder carries on in the next piece.
+ */
+export function chunkText(text, max = SECTION_MAX) {
+  const pieces = [];
+  for (const raw of String(text ?? "").split("\n")) {
+    let line = raw;
+    while (line.length > max) {
+      const space = line.lastIndexOf(" ", max);
+      const at = space > max / 2 ? space : max;
+      pieces.push(line.slice(0, at));
+      line = line.slice(at).replace(/^ /, "");
+    }
+    pieces.push(line);
+  }
+  const chunks = [];
+  let current = null;
+  for (const piece of pieces) {
+    if (current === null) current = piece;
+    else if (current.length + 1 + piece.length <= max) current += `\n${piece}`;
+    else { chunks.push(current); current = piece; }
+  }
+  if (current !== null) chunks.push(current);
+  return chunks.filter((chunk) => chunk.trim());
+}
+
+/** One or more sections holding all of `text`. Spread into the block list: `blocks.push(...sections(t))`. */
+const sections = (text) => chunkText(text).map((chunk) => ({ type: "section", text: { type: "mrkdwn", text: chunk } }));
+/** A code block as one or more sections, each with its own opening and closing fence. */
+const codeSections = (body) => chunkText(body, SECTION_MAX - 8).map((chunk) => ({ type: "section", text: { type: "mrkdwn", text: "```" + chunk + "```" } }));
+/** A context block; long text becomes several elements (Slack allows ten), and anything past that is marked as cut. */
+const context = (text) => {
+  const chunks = chunkText(text);
+  const elements = chunks.slice(0, 10).map((chunk) => ({ type: "mrkdwn", text: chunk }));
+  if (chunks.length > 10) elements[9].text = `${elements[9].text.slice(0, SECTION_MAX - 40)} … [cut for length]`;
+  return { type: "context", elements: elements.length ? elements : [{ type: "mrkdwn", text: " " }] };
+};
 
 /** Splits "**Name**, Company (Client) · detail" into a first line and a detail line. */
 function splitItem(raw) {
@@ -71,19 +112,19 @@ export function answerToBlocks(markdown, opts = {}) {
     verdictText = first.length <= HEADER_MAX ? first : full;
     const restOfVerdict = verdictText === full ? "" : full.slice(first.length).trim();
     if (verdictText.length <= HEADER_MAX) blocks.push({ type: "header", text: { type: "plain_text", text: verdictText, emoji: true } });
-    else blocks.push(section(`*${verdictText}*`));
+    else blocks.push(...sections(`*${verdictText}*`));
     const after = [restOfVerdict ? `*${restOfVerdict}*` : "", bold[2].trim() ? mrk(bold[2].trim()) : ""].filter(Boolean).join(" ");
-    if (after) blocks.push(section(after));
+    if (after) blocks.push(...sections(after));
   } else if (para) {
     verdictText = plain(para).slice(0, 200);
-    blocks.push(section(mrk(para)));
+    blocks.push(...sections(mrk(para)));
   }
 
   // 2 + 3. The rest, in order.
   let pendingText = [];
   const flushText = () => {
     const t = pendingText.join("\n").trim();
-    if (t) blocks.push(section(toSlackText(t)));
+    if (t) blocks.push(...sections(toSlackText(t)));
     pendingText = [];
   };
   for (; i < lines.length; i += 1) {
@@ -111,7 +152,7 @@ export function answerToBlocks(markdown, opts = {}) {
       } else if (["chart", "map", "cards", "timeline", "export"].includes(lang)) {
         // Visuals Slack cannot draw; the numbers are in the text around them.
       } else {
-        blocks.push(section("```" + body.join("\n").slice(0, SECTION_MAX - 10) + "```"));
+        blocks.push(...codeSections(body.join("\n")));
       }
       continue;
     }
@@ -128,7 +169,7 @@ export function answerToBlocks(markdown, opts = {}) {
       run.forEach((item, n) => {
         const { marker, head, detail } = splitItem(item);
         const lead = marker ? `${marker}  ` : numbered ? `${n + 1}.  ` : "";
-        blocks.push(section(`${lead}${mrk(head)}`));
+        blocks.push(...sections(`${lead}${mrk(head)}`));
         if (detail) blocks.push(context(mrk(detail)));
       });
       continue;
@@ -140,7 +181,7 @@ export function answerToBlocks(markdown, opts = {}) {
       buttons.push({ type: "button", text: { type: "plain_text", text: plain(link[1]).replace(/\s*[→>]+\s*$/, "").slice(0, 75), emoji: true }, url: link[2], action_id: `qcbot_link_${buttons.length}` });
       continue;
     }
-    if (/^#{1,6}\s/.test(line)) { flushText(); blocks.push(section(`*${plain(line.replace(/^#{1,6}\s+/, ""))}*`)); continue; }
+    if (/^#{1,6}\s/.test(line)) { flushText(); blocks.push(...sections(`*${plain(line.replace(/^#{1,6}\s+/, ""))}*`)); continue; }
     if (isFooterLine(line)) { flushText(); footerBits.push(mrk(line.trim())); continue; }
     if (/^>\s?/.test(line)) { flushText(); blocks.push(context(mrk(line.replace(/^>\s?/, "")))); continue; }
     if (!line.trim()) { flushText(); continue; }
