@@ -85,3 +85,8 @@
 .sidebar-icon-scout{flex-basis:16px!important;width:16px!important;overflow:visible}.sidebar-icon-scout .mascot{margin:-2px -2px}
 .light-mode .nav-item .nav-icon{color:#5c6270}
 .light-mode .nav-item.active .nav-icon{color:var(--accent)}
+
+/* The logo is the sidebar's collapse control on desktop. */
+.brand-toggle{background:transparent;border:0;padding:0;margin:0;color:inherit;font:inherit;cursor:pointer;text-align:left;border-radius:8px;transition:opacity .15s ease}
+.brand-toggle:hover{opacity:.82}
+.brand-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:4px}

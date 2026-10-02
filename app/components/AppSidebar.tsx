@@ -212,31 +212,40 @@ export default function AppSidebar() {
         className={`sidebar app-sidebar ${collapsed && !drawerLayout ? "sidebar-collapsed" : ""} ${navOpen ? "sidebar-open" : ""}`}
       >
       <div className="brand-row">
-        <Link
-          href="/"
-          className="brand-name"
-          style={{ textDecoration: "none", color: "inherit" }}
-          onClick={() => setNavOpen(false)}
-        >
-          <span className="brand-mark brand-mark-grid">
-            <BrandIcon size={22} />
-          </span>{" "}
-          <span className="sidebar-label">
-            <BrandWordmark height={21} />
-          </span>
-        </Link>
         {/*
-          Collapse belongs to the desktop rail — on a phone the drawer is either open or gone, and a
-          72px collapsed drawer is not a state anyone wants. Hidden under 760px, where the button
-          beside it closes the drawer instead.
+          On the desktop rail the logo is the collapse control: one click folds the rail to icons, the
+          next opens it again. In the phone drawer, which has no collapsed state, it still goes home.
         */}
-        <button
-          className="sidebar-collapse"
-          onClick={toggle}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? "→" : "←"}
-        </button>
+        {drawerLayout ? (
+          <Link
+            href="/"
+            className="brand-name"
+            style={{ textDecoration: "none", color: "inherit" }}
+            onClick={() => setNavOpen(false)}
+          >
+            <span className="brand-mark brand-mark-grid">
+              <BrandIcon size={22} />
+            </span>{" "}
+            <span className="sidebar-label">
+              <BrandWordmark height={21} />
+            </span>
+          </Link>
+        ) : (
+          <button
+            type="button"
+            className="brand-name brand-toggle"
+            onClick={toggle}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <span className="brand-mark brand-mark-grid">
+              <BrandIcon size={22} />
+            </span>{" "}
+            <span className="sidebar-label">
+              <BrandWordmark height={21} />
+            </span>
+          </button>
+        )}
         <button
           className="rr-nav-dismiss"
           onClick={() => setNavOpen(false)}
