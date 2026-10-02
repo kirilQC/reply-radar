@@ -6816,6 +6816,10 @@ body.light-mode .brain-icp {
     height: 44px !important;
     flex: 0 0 44px !important;
   }
+  .dashboard-profile-card {
+    grid-template-columns: 44px minmax(0, 1fr) auto !important;
+    gap: 14px !important;
+  }
 
   /* The inbox client strip: a row of round logos that should wrap, not stack one per line. */
   .tracked-clients {
