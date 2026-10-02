@@ -666,7 +666,7 @@
 
 /* Context / notes fills the left side of the task, and is a rich-text editor (app/components/RichNotes). */
 .pm-ed-main .pm-f-notes { flex: 2 0 auto; display: flex; flex-direction: column; }
-.pm-f-notes .rn { flex: 1; display: flex; flex-direction: column; min-height: 300px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, #151821); overflow: hidden; transition: border-color .15s; }
+.pm-f-notes .rn { flex: 1; display: flex; flex-direction: column; min-height: 250px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, #151821); overflow: hidden; transition: border-color .15s; }
 .pm-f-notes .rn:focus-within { border-color: var(--accent); }
 .rn-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--border-soft, var(--border)); background: color-mix(in srgb, var(--panel) 60%, transparent); }
 .rn-btn { min-width: 28px; height: 28px; padding: 0 7px; display: inline-grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; transition: background .12s, color .12s; }
@@ -734,9 +734,9 @@
 }
 
 /* ── Latest update: written updates and voice notes, a third of the task's left side ─────────── */
-.pm-ed-main .pm-f-updates { flex: 1 0 auto; display: flex; flex-direction: column; }
-.lu { flex: 1; display: flex; flex-direction: column; min-height: 210px; max-height: 330px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, #151821); overflow: hidden; }
-.lu-compose { padding: 9px; border-bottom: 1px solid var(--border-soft, var(--border)); display: flex; flex-direction: column; gap: 7px; background: color-mix(in srgb, var(--panel) 60%, transparent); }
+.pm-ed-main .pm-f-updates { flex: none; display: flex; flex-direction: column; }
+.lu { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, #151821); overflow: hidden; }
+.lu-compose { padding: 7px; border-bottom: 1px solid var(--border-soft, var(--border)); display: flex; flex-direction: column; gap: 6px; background: color-mix(in srgb, var(--panel) 60%, transparent); }
 .lu-who { display: flex; align-items: center; gap: 8px; }
 .lu-who select { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600; }
 .lu-who select:focus { outline: none; border-color: var(--accent); }
@@ -760,9 +760,9 @@
 .lu-stop { background: #ff4d5e; color: #fff; }
 .lu-review .lu-voice { flex: 1; }
 .lu-error { margin: 0; font-size: 12px; color: #ff8a8a; }
-.lu-feed { flex: 1; overflow-y: auto; padding: 4px 10px; }
-.lu-empty { margin: 12px 2px; font-size: 12.5px; color: var(--muted-2); }
-.lu-item { display: flex; gap: 9px; padding: 9px 0; border-bottom: 1px solid var(--border-soft, var(--border)); }
+.lu-feed { max-height: 118px; overflow-y: auto; padding: 0 10px; }
+.lu-empty { margin: 8px 2px; font-size: 12px; color: var(--muted-2); }
+.lu-item { display: flex; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border-soft, var(--border)); }
 .lu-item:last-child { border-bottom: 0; }
 .lu-body { flex: 1; min-width: 0; }
 .lu-meta { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
@@ -779,3 +779,21 @@
 .lu-time { font: 600 11px ui-monospace, monospace; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
 @media (prefers-reduced-motion: reduce) { .lu-rec-dot, .lu-rec-wave i { animation: none; } }
 .pm-ed-side > .pm-f, .pm-ed-side > .pm-f-row { flex: none; }
+
+/* Latest update, compact: one row (who · input · mic · post) and a short feed. */
+.lu-row { display: flex; align-items: center; gap: 6px; min-height: 34px; }
+.lu-row > input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; font-size: 13px; }
+.lu-row > input:focus { outline: none; border-color: var(--accent); }
+.lu-who-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 9px 0 5px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer; max-width: 120px; transition: border-color .15s; }
+.lu-who-btn:hover { border-color: var(--accent); }
+.lu-who-btn.empty { color: var(--muted); border-style: dashed; }
+.lu-who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lu-who-q { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2, #151821); font-weight: 800; }
+.lu-who-menu { position: fixed; z-index: 400; width: 220px; overflow-y: auto; padding: 5px; border-radius: 11px; border: 1px solid var(--border); background: var(--panel); box-shadow: 0 14px 40px rgba(0,0,0,.45); }
+.lu-who-h { padding: 6px 8px 4px; font-size: 10.5px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-2); }
+.lu-who-opt { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.lu-who-opt:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.lu-who-opt.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.lu-who-opt b { margin-left: auto; color: var(--accent); }
+.lu-voice { margin-top: 3px; padding: 4px 8px; }
+.lu-text { margin-top: 1px; font-size: 12.5px; }

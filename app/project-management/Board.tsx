@@ -100,8 +100,18 @@ type Opt = { value: string; label: string; logo?: React.ReactNode; color?: strin
 function Chevron() { return <svg className="pm-chev" viewBox="0 0 10 6" width="8" height="5" aria-hidden><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
 function useMenu(minW = 0) {
   const btnRef = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
-  const place = () => { const r = btnRef.current?.getBoundingClientRect(); if (!r) return; const width = Math.max(r.width, minW); const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 10)); setPos({ top: r.bottom + 5, left, width }); };
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; width: number; maxHeight: number } | null>(null);
+  // Opens downward when there is room, otherwise upward (a long task pushes the Blockers row to the
+  // bottom of the screen, and a menu hanging off the bottom edge was unusable). Either way it is capped
+  // to the space available and scrolls inside.
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect(); if (!r) return;
+    const width = Math.max(r.width, minW);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 10));
+    const below = window.innerHeight - r.bottom - 14, above = r.top - 14;
+    if (below < 340 && above > below) setPos({ bottom: window.innerHeight - r.top + 5, left, width, maxHeight: Math.max(160, above) });
+    else setPos({ top: r.bottom + 5, left, width, maxHeight: Math.max(160, below) });
+  };
   const toggle = () => { if (pos) setPos(null); else place(); };
   const close = () => setPos(null);
   useEffect(() => {
@@ -115,7 +125,8 @@ function useMenu(minW = 0) {
     window.addEventListener("scroll", onScroll, true); window.addEventListener("resize", onResize);
     return () => { window.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", onResize); };
   }, [pos]);
-  return { btnRef, pos, open: !!pos, toggle, close };
+  const anchor = pos ? { ...(pos.top != null ? { top: pos.top } : { bottom: pos.bottom }), left: pos.left, maxHeight: pos.maxHeight } : {};
+  return { btnRef, pos, anchor, open: !!pos, toggle, close };
 }
 function Select({ value, options, onChange, placeholder, minWidth, tone, size }: { value: string; options: Opt[]; onChange: (v: string) => void; placeholder?: string; minWidth?: number; tone?: string; size?: "lg" }) {
   const m = useMenu(minWidth ?? 150);
@@ -127,7 +138,7 @@ function Select({ value, options, onChange, placeholder, minWidth, tone, size }:
       </button>
       {m.open && m.pos && <>
         <div className="pm-dd-back" onClick={(e) => { e.preventDefault(); e.stopPropagation(); m.close(); }} />
-        <div className={`pm-dd-menu ${size === "lg" ? "pm-dd-menu-lg" : ""}`} style={{ top: m.pos.top, left: m.pos.left, minWidth: m.pos.width }}>
+        <div className={`pm-dd-menu ${size === "lg" ? "pm-dd-menu-lg" : ""}`} style={{ ...m.anchor, minWidth: m.pos.width }}>
           {options.map((o) => <button key={o.value} type="button" className={`pm-dd-opt ${o.value === value ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); onChange(o.value); m.close(); }}>{o.logo}{o.color && <i className="pm-dd-dot" style={{ background: o.color }} />}<span className="pm-dd-opt-l">{o.label}</span>{o.value === value && <span className="pm-dd-ck">✓</span>}</button>)}
         </div>
       </>}
@@ -155,7 +166,7 @@ function MultiPeople({ value, people, map, onChange, addPerson, removePerson, up
       </button>
       {m.open && m.pos && <>
         <div className="pm-dd-back" onClick={(e) => { e.preventDefault(); e.stopPropagation(); m.close(); }} />
-        <div className="pm-dd-menu" style={{ top: m.pos.top, left: m.pos.left, minWidth: m.pos.width }} onClick={(e) => e.stopPropagation()}>
+        <div className="pm-dd-menu" style={{ ...m.anchor, minWidth: m.pos.width }} onClick={(e) => e.stopPropagation()}>
           {sel.length > 0 && <div className="pm-sel-chips">{sel.map((n) => <span className="pm-sel-chip" key={n}><Avatar name={n} map={map} />{n}<button type="button" title="Remove from this task" onClick={() => toggle(n)}>✕</button></span>)}</div>}
           {roster.map((p) => (
             <div className={`pm-dd-opt multi ${sel.includes(p) ? "on" : ""}`} key={p}>
@@ -186,7 +197,7 @@ function FiltersPanel({ view, views, onPickView, onReorderViews, sort, onSort, m
       </button>
       {m.open && m.pos && <>
         <div className="pm-dd-back" onClick={(e) => { e.preventDefault(); e.stopPropagation(); m.close(); }} />
-        <div className="pm-dd-menu pm-filters" style={{ top: m.pos.top, left: m.pos.left, width: m.pos.width }} onClick={(e) => e.stopPropagation()}>
+        <div className="pm-dd-menu pm-filters" style={{ ...m.anchor, width: m.pos.width }} onClick={(e) => e.stopPropagation()}>
           <div className="pm-filt-sec">
             <div className="pm-filt-h">View <em>· drag to reorder</em></div>
             {views.map(([v, label]) => (
@@ -506,7 +517,7 @@ function LinksCell({ links, onChange }: { links: LinkItem[]; onChange: (l: LinkI
       </button>
       {m.open && m.pos && <>
         <div className="pm-dd-back" onClick={(e) => { e.preventDefault(); e.stopPropagation(); m.close(); }} />
-        <div className="pm-dd-menu pm-linkmenu" style={{ top: m.pos.top, left: m.pos.left, minWidth: Math.max(m.pos.width, 280) }} onClick={(e) => e.stopPropagation()}>
+        <div className="pm-dd-menu pm-linkmenu" style={{ ...m.anchor, minWidth: Math.max(m.pos.width, 280) }} onClick={(e) => e.stopPropagation()}>
           {links.map((l, i) => <div className="pm-linkrow" key={i}><a href={l.url} target="_blank" rel="noreferrer">{linkLabel(l)}</a><button type="button" onClick={() => onChange(links.filter((_, j) => j !== i))}>✕</button></div>)}
           <div className="pm-linkadd">
             <input value={title} placeholder="Title (optional)" onChange={(e) => setTitle(e.target.value)} />
@@ -584,7 +595,7 @@ function BlockerCell({ blockers, people, map, onChange, addPerson }: { blockers?
       </div>
       {m.open && m.pos && editing !== null && <>
         <div className="pm-dd-back" onClick={(e) => { e.preventDefault(); e.stopPropagation(); closeEditor(); }} />
-        <div className="pm-dd-menu pm-blockermenu" style={{ top: m.pos.top, left: m.pos.left, minWidth: Math.max(m.pos.width, 300) }} onClick={(e) => e.stopPropagation()}>
+        <div className="pm-dd-menu pm-blockermenu" style={{ ...m.anchor, minWidth: Math.max(m.pos.width, 300) }} onClick={(e) => e.stopPropagation()}>
           <div className="pm-blk-label">Waiting on</div>
           <Select value={owner} options={roster} placeholder="Anyone" onChange={setOwner} minWidth={260} />
           <div className="pm-dd-add pm-blk-add"><input value={draftName} placeholder="…or add a new person" onChange={(e) => setDraftName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addInline(); } }} /><button type="button" onClick={addInline}>Add</button></div>
@@ -678,16 +689,22 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
   const [due, setDue] = useState(task?.due_date ?? "");
   const [week, setWeek] = useState(task?.week ?? "");
   const [priority, setPriority] = useState(task?.priority ?? "");
-  const [context, setContext] = useState(task?.context ?? "");
+  // Links now live in the notes (they support hyperlinks). Older tasks with separate links get them added
+  // to the end of the notes as Markdown links, and saving moves them there for good.
+  const legacyLinks = linkItems(task?.links).filter((l) => !(task?.context ?? "").includes(l.url));
+  const [context, setContext] = useState(() => {
+    const base = task?.context ?? "";
+    if (!legacyLinks.length) return base;
+    const lines = legacyLinks.map((l) => `- [${(l.title || linkLabel(l)).replace(/[[\]]/g, "")}](${l.url})`).join("\n");
+    return `${base.trim()}${base.trim() ? "\n\n" : ""}**Links**\n${lines}`;
+  });
   const [links, setLinks] = useState<LinkItem[]>(linkItems(task?.links));
   const [blockers, setBlockers] = useState<Blocker[]>(blockerList(task?.blocker));
   const [checks, setChecks] = useState<Checks>({ list: Boolean(task?.checks?.list), messaging: Boolean(task?.checks?.messaging) });
-  const [nUrl, setNUrl] = useState(""); const [nTitle, setNTitle] = useState("");
-  const addLink = () => { const u = nUrl.trim(); if (!u) return; setLinks((p) => [...p, { url: normUrl(u), title: nTitle.trim() || undefined }]); setNUrl(""); setNTitle(""); };
   const [stage, setStage] = useState(isNew ? state.stage : (task?.stage ?? "todo"));
   const s = stageOf(stage);
   const client = clients.find((c) => c.slug === slug);
-  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links, priority, blocker: blockers, week, checks }); onClose(); };
+  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links: legacyLinks.length ? [] : links, priority, blocker: blockers, week, checks }); onClose(); };
   return (
     <div className="pm-modal-back" onClick={onClose}>
       <div className="pm-modal pm-modal-a" onClick={(e) => e.stopPropagation()}>
@@ -704,10 +721,6 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
           <div className="pm-ed-main">
             <div className="pm-f pm-f-notes"><span>Context / notes</span><RichNotes value={context} onChange={setContext} /></div>
             {!isNew && task && !task.id.startsWith("tmp") && <div className="pm-f pm-f-updates"><span>Latest update</span><LatestUpdates taskId={task.id} people={people} map={map} /></div>}
-            <div className="pm-f"><span>Links &amp; files</span><div className="pm-links">
-              {links.map((l, i) => <div className="pm-link" key={i}><a href={l.url} target="_blank" rel="noreferrer">{linkLabel(l)}</a><button type="button" onClick={() => setLinks((p) => p.filter((_, j) => j !== i))}>✕</button></div>)}
-              <div className="pm-link-add pm-link-add2"><input value={nTitle} placeholder="Title (optional)" onChange={(e) => setNTitle(e.target.value)} /><input value={nUrl} placeholder="Paste a URL…" onChange={(e) => setNUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLink(); } }} /><button type="button" onClick={addLink}>Add</button></div>
-            </div></div>
           </div>
           <div className="pm-ed-side">
             {isNew && multi && <div className="pm-f"><span>Client</span><Select value={slug} options={clientOptsOf(clients)} size="lg" onChange={setSlug} /></div>}
