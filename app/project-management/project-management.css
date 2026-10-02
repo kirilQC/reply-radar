@@ -700,3 +700,4 @@
 .rn-doc a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .rn-empty .rn-doc::before { content: attr(data-placeholder); position: absolute; color: var(--muted-2); pointer-events: none; }
 .pm-ed-main textarea { min-height: 150px; }
+.pm-ed-main > .pm-f:not(.pm-f-notes) { flex: none; }
