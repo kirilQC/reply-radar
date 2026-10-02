@@ -11,7 +11,8 @@
  *    that was just posted and returns a stable `key` per item — reusing a key already on the board when
  *    the same work is raised again, however differently it is worded. That is what stops a second copy.
  *  - An auto item already on the board is UPDATED in place (status, owner, priority, detail), never
- *    duplicated. Matching is by `tracker_key`.
+ *    duplicated. Matching is by `tracker_key`. Once a person has edited it, only its "still raised"
+ *    marker is refreshed, so the brief never overwrites a human's changes.
  *  - An auto item that has fallen off the outstanding list — the brief no longer raises it — is taken as
  *    completed, but only after a grace period (a single quiet morning is not proof it is done), mirroring
  *    the Airtable tracker's staleness rule.
@@ -35,6 +36,22 @@ const STATUS_STAGE: Record<string, string> = { "Not Started": "todo", "In Progre
 const PRIORITY_MAP: Record<string, string> = { Urgent: "high", High: "high", Medium: "medium", Low: "low" };
 
 type Row = Record<string, unknown>;
+
+// Slack between the autosync's own updated_at and autosync_seen (both stamped from one `now`, but a DB
+// default or trigger may restamp updated_at with the server clock).
+const EDIT_TOLERANCE_MS = 60_000;
+
+/**
+ * Whether a person has edited this auto item since the autosync last wrote it. Every edit from the board,
+ * the API and the assistant stamps updated_by; an edit with no known editor still moves updated_at past
+ * the autosync's own stamp. Position-only drags stamp neither, so reordering does not count.
+ */
+function editedByPerson(row: Row): boolean {
+  if (String(row.updated_by ?? "").trim()) return true;
+  const updated = row.updated_at ? Date.parse(String(row.updated_at)) : NaN;
+  const seen = row.autosync_seen ? Date.parse(String(row.autosync_seen)) : NaN;
+  return !Number.isNaN(updated) && !Number.isNaN(seen) && updated - seen > EDIT_TOLERANCE_MS;
+}
 function creds() {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   return url && key ? { url, key, headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" } } : null;
@@ -82,7 +99,11 @@ export async function syncProjectsFromItems(slug: string, items: TrackerItem[], 
     if (existing) {
       // A human (or a prior run) has already closed it — leave it closed, don't reopen.
       if (TERMINAL.has(String(existing.stage ?? ""))) continue;
-      const patch: Row = { title: it.title.slice(0, 300), stage, priority, owner, context, source, autosync_seen: now, updated_at: now };
+      // Once a person has touched the task, their title, stage, priority, owner and context win: rewriting
+      // them every morning silently undid people's edits. Just mark it seen so it is not aged out as done.
+      const patch: Row = editedByPerson(existing)
+        ? { autosync_seen: now }
+        : { title: it.title.slice(0, 300), stage, priority, owner, context, source, autosync_seen: now, updated_at: now };
       await fetch(`${c.url}/rest/v1/rr_projects?id=eq.${encodeURIComponent(String(existing.id))}`, { method: "PATCH", headers: { ...c.headers, Prefer: "return=minimal" }, body: JSON.stringify(patch) }).catch(() => {});
       out.updated++;
     } else {

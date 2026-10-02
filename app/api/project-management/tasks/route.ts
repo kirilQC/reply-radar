@@ -4,13 +4,16 @@
 // CRUD for a client's internal projects/tasks (the Project management board). Tasks live in rr_projects,
 // keyed to a workspace, with a stage the team drags them through.
 import { NextResponse } from "next/server";
-import { deleteConfig, readConfigPrefix, writeConfig } from "../../../lib/app-config";
+import { deleteConfig, readConfigKeys, writeConfig } from "../../../lib/app-config";
 
 /**
  * The two campaign checkpoints on every task, "Contact list built" and "Messaging created". Kept in
  * rr_app_config under pm_checks:<task id> rather than a new rr_projects column, so they work without a
- * migration. Read in one prefix scan and joined onto the tasks.
+ * migration. Read by exact key for just the tasks being loaded and joined onto them. (A prefix scan across
+ * every client stopped at PostgREST's 1,000-row cap, so later tasks read as unticked and the next save wrote
+ * those blanks over the real ticks.)
  */
+const UPDATES_PREFIX = "pm_updates:";
 const CHECKS_PREFIX = "pm_checks:";
 type Checks = { list: boolean; messaging: boolean };
 const asChecks = (v: unknown): Checks => { const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>; return { list: Boolean(o.list), messaging: Boolean(o.messaging) }; };
@@ -45,8 +48,11 @@ export async function GET(request: Request) {
   const r = await fetch(`${c.url}/rest/v1/rr_projects?select=*&workspace_id=in.(${ids.map((r) => r.id).join(",")})&order=position.asc,created_at.asc`, { headers: c.headers, cache: "no-store" });
   if (!r.ok) return NextResponse.json({ ok: false, error: r.status === 404 ? TABLE_MISSING : `Load failed (${r.status}).`, tasks: [] });
   const rows = await r.json().catch(() => []);
-  const checks = await readConfigPrefix(CHECKS_PREFIX).catch(() => new Map<string, unknown>());
-  const tasks = (Array.isArray(rows) ? rows : []).map((t: Record<string, unknown>) => ({ ...t, checks: asChecks(checks.get(`${CHECKS_PREFIX}${t.id}`)), clientSlug: slugById.get(String(t.workspace_id)) ?? "", clientName: nameById.get(String(t.workspace_id)) ?? "" }));
+  const list = (Array.isArray(rows) ? rows : []) as Record<string, unknown>[];
+  // If the checks cannot be read, send null (unknown) rather than all-false, so nothing downstream mistakes
+  // a failed read for "nothing ticked".
+  const checks = await readConfigKeys(list.map((t) => `${CHECKS_PREFIX}${t.id}`)).catch(() => null);
+  const tasks = list.map((t) => ({ ...t, checks: checks ? asChecks(checks.get(`${CHECKS_PREFIX}${t.id}`)) : null, clientSlug: slugById.get(String(t.workspace_id)) ?? "", clientName: nameById.get(String(t.workspace_id)) ?? "" }));
   return NextResponse.json({ ok: true, tasks });
 }
 
@@ -101,6 +107,7 @@ export async function DELETE(request: Request) {
   if (!id) return NextResponse.json({ ok: false, error: "id required" }, { status: 400 });
   const r = await fetch(`${c.url}/rest/v1/rr_projects?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: c.headers });
   if (!r.ok) return NextResponse.json({ ok: false, error: `Delete failed (${r.status}).` }, { status: 502 });
-  await deleteConfig(`${CHECKS_PREFIX}${id}`).catch(() => {});
+  // The task's side data lives in rr_app_config keyed by its id; remove it too so nothing is orphaned.
+  await Promise.all([deleteConfig(`${CHECKS_PREFIX}${id}`), deleteConfig(`${UPDATES_PREFIX}${id}`)].map((p) => p.catch(() => {})));
   return NextResponse.json({ ok: true });
 }

@@ -463,12 +463,28 @@ export async function markAllOnboardingDone(slug: string): Promise<{ ok: boolean
   return { ok: true };
 }
 
-/** Remove a client from the hub. Deletes the workspace; the tasks cascade with it. */
+/**
+ * Remove a client's onboarding: clear its checklist and its onboarding status, leaving the client itself.
+ *
+ * This used to DELETE the rr_workspaces row, and every table keyed to a workspace cascades from it, so
+ * "remove from the hub" wiped the client's leads, conversations, meetings, deals and call logs along with
+ * its checklist. Only this client's rr_onboarding_tasks are deleted now (sub-steps cascade from their
+ * parents), and the status columns reset so the client reads as not started.
+ */
 export async function deleteOnboardingClient(slug: string): Promise<{ ok: boolean; error?: string }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
-  const response = await fetch(`${url}/rest/v1/rr_workspaces?slug=eq.${encodeURIComponent(slug)}`, { method: "DELETE", headers: authHeaders(key) });
-  if (!response.ok) return { ok: false, error: "Could not delete the client." };
+  const w = (await rows(url, key, `rr_workspaces?select=id&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
+  if (!w) return { ok: false, error: "That client was not found." };
+  const id = str(w.id);
+  if (!id) return { ok: false, error: "That client was not found." };
+  const tasks = await fetch(`${url}/rest/v1/rr_onboarding_tasks?workspace_id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders(key) }).catch(() => null);
+  if (!tasks || !tasks.ok) return { ok: false, error: "Could not clear the onboarding checklist." };
+  const reset = await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: authHeaders(key),
+    body: JSON.stringify({ onboarding_status: null, onboarding_started_at: null, onboarding_completed_at: null }),
+  }).catch(() => null);
+  if (!reset || !reset.ok) return { ok: false, error: "Could not reset the onboarding status." };
   return { ok: true };
 }
 

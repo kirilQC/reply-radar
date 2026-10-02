@@ -63,9 +63,38 @@ function flatten(payload) {
 export function parseWhen(value) {
   const text = str(value);
   if (!text) return "";
-  const cleaned = text.replace(/\s+@\s+/, " ");
-  const time = Date.parse(cleaned);
-  return Number.isNaN(time) ? "" : new Date(time).toISOString();
+  let cleaned = text.replace(/\s+@\s+/, " ");
+  if (ZONE_HINT.test(cleaned)) {
+    const time = Date.parse(cleaned);
+    return Number.isNaN(time) ? "" : new Date(time).toISOString();
+  }
+  // No zone in the string. Date.parse would read it in the server's own zone (UTC on Vercel), so "10:00 AM"
+  // landed as 10:00 UTC, i.e. 6 AM in New York. QC books on Eastern time, so read the wall clock as
+  // America/New_York instead. A bare ISO date is parsed as UTC midnight by spec, so give it a time first to
+  // keep every zoneless form on the same (local) parsing path.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) cleaned += "T00:00";
+  const local = new Date(Date.parse(cleaned));
+  if (Number.isNaN(local.getTime())) return "";
+  const wall = Date.UTC(local.getFullYear(), local.getMonth(), local.getDate(), local.getHours(), local.getMinutes(), local.getSeconds(), local.getMilliseconds());
+  // Two passes so a time near a DST switch picks up the offset in force at the result, not at the guess.
+  const guess = wall - zoneOffsetMs(wall, DEFAULT_ZONE);
+  return new Date(wall - zoneOffsetMs(guess, DEFAULT_ZONE)).toISOString();
+}
+
+/** The zone a time with no offset is assumed to be in. */
+const DEFAULT_ZONE = "America/New_York";
+
+/** An explicit zone or offset in a date string: a trailing Z, +hh:mm / -hhmm, or a name Date.parse knows. */
+const ZONE_HINT = /\dZ\b|[+-]\d{2}:?\d{2}\b|\b(?:UTC|UT|GMT|[ECMP][SD]T)\b/i;
+
+/** How far `timeZone`'s wall clock is ahead of UTC at instant `ms`, in milliseconds (negative for New York). */
+function zoneOffsetMs(ms, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(new Date(ms));
+  const get = (type) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return asUtc - Math.floor(ms / 1000) * 1000;
 }
 
 /** The statuses a meeting can be in, and the words a webhook might use for each. */

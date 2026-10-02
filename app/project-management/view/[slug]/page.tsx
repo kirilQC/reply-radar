@@ -4,7 +4,7 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import AppSidebar from "../../../components/AppSidebar";
@@ -26,6 +26,10 @@ export default function GroupView() {
   const [tasks, setTasks] = useState<BoardTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  // Edits and deletes made to a just-created task while its save is in flight. Its id is still the temporary
+  // `tmp-` one, which the API cannot find, so those calls used to be lost. Held here and replayed against the
+  // real id the moment the create returns.
+  const pending = useRef(new Map<string, { fields: Record<string, unknown>; deleted: boolean }>());
   const [weekBadge, setWeekBadge] = useState<string | null>(null);
 
   const load = async () => {
@@ -53,18 +57,33 @@ export default function GroupView() {
     const c = members.find((m) => m.slug === clientSlug);
     const tmp: BoardTask = { id: `tmp-${Date.now()}`, title: fields.title, stage: fields.stage, owner: fields.assignee || null, due_date: fields.dueDate || null, context: fields.context || null, links: fields.links || [], priority: fields.priority || null, week: fields.week || null, checks: fields.checks ?? null, source: "manual", clientSlug, clientName: c?.name };
     setTasks((p) => [...p, tmp]);
+    pending.current.set(tmp.id, { fields: {}, deleted: false });
     const r = await fetch("/api/project-management/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: clientSlug, title: fields.title, stage: fields.stage, assignee: fields.assignee, dueDate: fields.dueDate, context: fields.context, links: fields.links, priority: fields.priority, week: fields.week, checks: fields.checks }) }).then((x) => x.json()).catch(() => ({}));
-    if (r.ok && r.task) setTasks((p) => p.map((t) => (t.id === tmp.id ? { ...r.task, clientSlug, clientName: c?.name } : t)));
-    else if (view) void loadTasks(view.memberSlugs);
+    const queued = pending.current.get(tmp.id);
+    pending.current.delete(tmp.id);
+    if (r.ok && r.task) {
+      const realId = String(r.task.id);
+      if (queued?.deleted) { await fetch(`/api/project-management/tasks?id=${encodeURIComponent(realId)}`, { method: "DELETE" }).catch(() => {}); return; }
+      setTasks((p) => p.map((t) => (t.id === tmp.id ? { ...r.task, clientSlug, clientName: c?.name } : t)));
+      if (queued && Object.keys(queued.fields).length) await onUpdate(realId, queued.fields);
+    } else if (view) void loadTasks(view.memberSlugs);
   };
   const onUpdate = async (id: string, fields: Record<string, unknown>) => {
     const newClient = fields.moveToSlug ? members.find((m) => m.slug === String(fields.moveToSlug)) : undefined;
     const me = (() => { try { return localStorage.getItem("pm-me") || ""; } catch { return ""; } })();
     const stamp = { updated_at: new Date().toISOString(), updated_by: me || null };
     setTasks((p) => p.map((t) => t.id === id ? { ...t, ...stamp, ...(fields.stage ? { stage: String(fields.stage) } : {}), ...(fields.title ? { title: String(fields.title) } : {}), ...("dueDate" in fields ? { due_date: (fields.dueDate as string) || null } : {}), ...("owner" in fields ? { owner: (fields.owner as string) || null } : {}), ...("context" in fields ? { context: (fields.context as string) || null } : {}), ...("priority" in fields ? { priority: (fields.priority as string) || null } : {}), ...("week" in fields ? { week: (fields.week as string) || null } : {}), ...("checks" in fields ? { checks: fields.checks as BoardTask["checks"] } : {}), ...("blocker" in fields ? { blocker: fields.blocker as BoardTask["blocker"] } : {}), ...("links" in fields ? { links: Array.isArray(fields.links) ? fields.links as BoardTask["links"] : [] } : {}), ...(newClient ? { clientSlug: newClient.slug, clientName: newClient.name } : {}) } : t));
+    // Still saving: the board already shows the edit; hold it for the real id (later fields win).
+    const queued = pending.current.get(id);
+    if (queued) { queued.fields = { ...queued.fields, ...fields }; return; }
     await fetch("/api/project-management/tasks", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...fields, updatedBy: me || undefined }) }).catch(() => {});
   };
-  const onDelete = async (id: string) => { setTasks((p) => p.filter((t) => t.id !== id)); await fetch(`/api/project-management/tasks?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {}); };
+  const onDelete = async (id: string) => {
+    setTasks((p) => p.filter((t) => t.id !== id));
+    const queued = pending.current.get(id);
+    if (queued) { queued.deleted = true; return; }
+    await fetch(`/api/project-management/tasks?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+  };
 
   return (
     <div className="app-shell">

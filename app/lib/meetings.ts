@@ -85,6 +85,23 @@ async function rows(url: string, key: string, path: string): Promise<Row[]> {
   return Array.isArray(body) ? (body as Row[]) : [];
 }
 
+/**
+ * Every row a query matches, a page at a time. PostgREST caps one response at 1,000 rows, so an unpaged
+ * read silently stopped there and counts for later clients came out short. `order` must end on a unique
+ * column so pages neither repeat nor skip rows. A failed page ends the read with what was already fetched,
+ * matching rows()'s forgiving behavior.
+ */
+async function allRows(url: string, key: string, path: string, order: string): Promise<Row[]> {
+  const PAGE = 1000;
+  const out: Row[] = [];
+  for (let page = 0; page < 200; page++) {
+    const batch = await rows(url, key, `${path}&order=${order}&limit=${PAGE}&offset=${page * PAGE}`);
+    out.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return out;
+}
+
 function meetingFromRow(row: Row): Meeting {
   return {
     id: str(row.id),
@@ -125,16 +142,20 @@ export async function resolveWorkspace(nameOrSlug: string): Promise<Workspace | 
   if (!wanted) return null;
   const all = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=neq.misc&order=name.asc`)).map((row) => ({
     id: str(row.id),
-    name: str(row.name),
-    slug: str(row.slug),
+    name: str(row.name).trim(),
+    slug: str(row.slug).trim(),
     logoUrl: orNull(row.logo_url),
     accentColor: orNull(row.accent_color),
-  }));
-  const exact = all.filter((w) => w.slug.toLowerCase() === wanted || w.name.toLowerCase() === wanted);
+  }))
+    // A workspace with neither a name nor a slug cannot be what anyone meant.
+    .filter((w) => w.name || w.slug);
+  const exact = all.filter((w) => (w.slug && w.slug.toLowerCase() === wanted) || (w.name && w.name.toLowerCase() === wanted));
   if (exact.length === 1) return exact[0];
   // Match either way: what was sent may be shorter than the stored name ("ema" → "Ema Health") OR longer
   // ("Ema Health" → a workspace named "Ema"). Ambiguity (more than one) still returns null rather than guess.
-  const contains = (a: string, b: string) => a.includes(b) || b.includes(a);
+  // An empty string is contained in everything, so a blank name or slug would match every request; treat
+  // empty as never matching.
+  const contains = (a: string, b: string) => Boolean(a && b) && (a.includes(b) || b.includes(a));
   const partial = all.filter((w) => contains(w.name.toLowerCase(), wanted) || contains(w.slug.toLowerCase(), wanted));
   return partial.length === 1 ? partial[0] : null;
 }
@@ -145,7 +166,7 @@ export async function listMeetingClients(): Promise<MeetingClient[]> {
   if (!url || !key) return [];
   const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=neq.misc&order=name.asc`)).filter((w) => str(w.name).trim());
   if (!workspaces.length) return [];
-  const meetings = await rows(url, key, `rr_meetings?select=workspace_id,meeting_at,status`);
+  const meetings = await allRows(url, key, `rr_meetings?select=workspace_id,meeting_at,status`, "id.asc");
   const now = Date.now();
   const byWorkspace = new Map<string, { total: number; upcoming: number; next: number | null; last: number | null }>();
   for (const row of meetings) {
@@ -188,7 +209,7 @@ export async function getClientMeetings(slug: string): Promise<{ client: Workspa
   const w = workspaces[0];
   if (!w) return null;
   const id = str(w.id);
-  const rowsData = await rows(url, key, `rr_meetings?select=*&workspace_id=eq.${encodeURIComponent(id)}&order=meeting_at.desc.nullslast,created_at.desc`);
+  const rowsData = await allRows(url, key, `rr_meetings?select=*&workspace_id=eq.${encodeURIComponent(id)}`, "meeting_at.desc.nullslast,created_at.desc,id.desc");
   return {
     client: { id, name: str(w.name), slug: str(w.slug), logoUrl: orNull(w.logo_url), accentColor: orNull(w.accent_color) },
     meetings: rowsData.map(meetingFromRow),
@@ -461,8 +482,19 @@ export async function ingestWebhook(payload: unknown): Promise<{ ok: boolean; er
   if (!client) return { ok: false, error: `No single QC Command client matches "${clientName}". Check the client name sent from Zapier.` };
   if (!meetingIsUsable(fields)) return { ok: false, error: "The payload had no invitee name, email or company to record." };
 
-  const body = record(client.id, "webhook", fields);
   const hasExternal = Boolean(str(fields.external_id).trim());
+  const body = record(client.id, "webhook", fields);
+  if (hasExternal) {
+    // On the upsert path merge-duplicates updates every column present in the body. A Calendly cancel or
+    // reschedule often carries only the event id and status, so sending its empty fields as null wiped the
+    // stored time, summary and host. Leave out anything empty so the stored value survives; status is
+    // always sent because a cancel is exactly the change that must land.
+    for (const [column, value] of Object.entries(body)) {
+      if (column === "status") continue;
+      if (value === null || value === undefined || (typeof value === "string" && !value.trim())) delete body[column];
+    }
+    body.status = str(fields.status) || "scheduled";
+  }
   const endpoint = hasExternal
     ? `${url}/rest/v1/rr_meetings?on_conflict=workspace_id,external_id`
     : `${url}/rest/v1/rr_meetings`;

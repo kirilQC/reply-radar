@@ -302,7 +302,12 @@ export default function ClientMeetingsPage() {
   const save = async () => {
     if (saving) return;
     const body: Record<string, unknown> = { ...form };
-    if (meetingAt) body.meeting_at = meetingAt;
+    // datetime-local has no zone ("2026-08-19T10:00"); stored as-is Postgres read it as UTC, shifting every
+    // hand-added meeting by the teammate's offset. The browser knows its own zone, so convert here.
+    if (meetingAt) {
+      const at = new Date(meetingAt);
+      if (!Number.isNaN(at.getTime())) body.meeting_at = at.toISOString();
+    }
     if (!String(body.invitee_name ?? "").trim() && !String(body.invitee_email ?? "").trim() && !String(body.company_name ?? "").trim()) {
       setError("Add at least a name, email or company.");
       return;

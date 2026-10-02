@@ -449,14 +449,24 @@ function CallScriptDrawer({ slug, initial }: { slug: string; initial: string }) 
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => { setText(initial); }, [initial]);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // Edits typed but not yet confirmed saved. The page reloads its data on a timer, and syncing from that
+  // reload unconditionally replaced what someone was mid-way through typing with the last saved copy.
+  const unsaved = useRef(0);
+  useEffect(() => {
+    if (unsaved.current > 0 || (box.current && document.activeElement === box.current)) return;
+    setText(initial);
+  }, [initial]);
   useEffect(() => { try { if (window.innerWidth > 760) setOpen(localStorage.getItem("cc-script-open") === "1"); } catch { /* ignore */ } }, []);
 
   const onChange = (v: string) => {
     setText(v); setState("saving");
+    const edit = ++unsaved.current;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
       await fetch("/api/cold-calling/script", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug, script: v }) }).catch(() => {});
+      // Only the latest edit's save clears the flag; an older save finishing must not unblock a reload.
+      if (unsaved.current === edit) unsaved.current = 0;
       setState("saved");
       setTimeout(() => setState("idle"), 1500);
     }, 600);
@@ -474,7 +484,7 @@ function CallScriptDrawer({ slug, initial }: { slug: string; initial: string }) 
           <span>Call script</span>
           <span className="cc-script-state">{state === "saving" ? "Saving…" : state === "saved" ? "Saved ✓" : ""}</span>
         </div>
-        <textarea className="cc-scriptpanel-box" value={text} onChange={(e) => onChange(e.target.value)} placeholder="" />
+        <textarea ref={box} className="cc-scriptpanel-box" value={text} onChange={(e) => onChange(e.target.value)} placeholder="" />
       </div>
     </div>
   );

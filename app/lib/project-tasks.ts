@@ -14,6 +14,8 @@ export const normalizeStage = (s: unknown): ProjectStage | null => {
   return alias[v] ?? null;
 };
 
+import { deleteConfig } from "./app-config";
+
 type Row = Record<string, unknown>;
 function creds() {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -72,5 +74,9 @@ export async function updateProject(id: string, fields: { title?: string; stage?
 export async function deleteProject(id: string): Promise<{ ok: boolean; error?: string }> {
   const c = creds(); if (!c) return { ok: false, error: "Supabase not configured" };
   const r = await fetch(`${c.url}/rest/v1/rr_projects?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: c.headers });
-  return r.ok ? { ok: true } : { ok: false, error: `Delete failed (${r.status}).` };
+  if (!r.ok) return { ok: false, error: `Delete failed (${r.status}).` };
+  // The task's checkpoints and update log live in rr_app_config keyed by its id; remove them with it so
+  // every caller (board, API, assistant) leaves nothing orphaned. Best effort: the task itself is gone.
+  await Promise.all([deleteConfig(`pm_checks:${id}`), deleteConfig(`pm_updates:${id}`)].map((p) => p.catch(() => {})));
+  return { ok: true };
 }

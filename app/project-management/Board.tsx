@@ -44,7 +44,35 @@ const ownerList = (o?: string | null) => (o ? o.split(",").map((s) => s.trim()).
 const linkItems = (links?: (string | LinkItem)[]): LinkItem[] => (Array.isArray(links) ? links.map((l) => (typeof l === "string" ? { url: l } : l)).filter((l) => l && l.url) : []);
 const normUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : `https://${u}`);
 const linkLabel = (l: LinkItem) => { if (l.title && l.title.trim()) return l.title.trim(); try { const x = new URL(l.url); return x.hostname.replace(/^www\./, "") + x.pathname.replace(/\/$/, ""); } catch { return l.url; } };
-const dueMs = (v?: string | null) => { if (!v) return Infinity; const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + "T00:00" : v); return Number.isNaN(+d) ? Infinity : +d; };
+/**
+ * A due date as a sortable time. due_date is free text, and people type "Thu 9/4" or "Sep 4": with no year,
+ * the browser's parser fills in 2001, so those tasks sorted ahead of everything dated properly. A date with
+ * no year is taken as this year, or next year when that would put it more than about two months in the past
+ * (so "1/10" typed in November means January coming). ISO dates and anything with a year parse as written.
+ */
+const DUE_LOOKBACK_MS = 60 * 86_400_000;
+const withoutYear = (month: number, day: number) => {
+  const now = new Date();
+  const thisYear = new Date(now.getFullYear(), month, day);
+  return +thisYear < +now - DUE_LOOKBACK_MS ? +new Date(now.getFullYear() + 1, month, day) : +thisYear;
+};
+const dueMs = (v?: string | null) => {
+  const text = (v ?? "").trim();
+  if (!text) return Infinity;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) { const d = new Date(text + "T00:00"); return Number.isNaN(+d) ? Infinity : +d; }
+  // "9/4", "Thu 9/4", "Thu, 9/4", "9/4/26", "9/4/2026".
+  const md = text.match(/^(?:[a-z]{3,9}\.?,?\s+)?(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/i);
+  if (md) {
+    const month = Number(md[1]) - 1, day = Number(md[2]);
+    if (month < 0 || month > 11 || day < 1 || day > 31) return Infinity;
+    if (md[3]) { const year = Number(md[3]); return +new Date(year < 100 ? 2000 + year : year, month, day); }
+    return withoutYear(month, day);
+  }
+  const d = new Date(text);
+  if (Number.isNaN(+d)) return Infinity;
+  // "Sep 4" and friends: the parser understood the month and day but invented the year.
+  return /\d{4}/.test(text) ? +d : withoutYear(d.getMonth(), d.getDate());
+};
 export const weekDisplay = (w?: string | null) => (!w ? "" : `Starts ${w.replace(/^week of\s*/i, "")}`);
 /* When a task was created, spelled out in Eastern time — e.g. "Sep 8, 2026, 3:42 PM EST". */
 const fmtEst = (iso?: string | null): string => {
@@ -516,6 +544,13 @@ function AutoTextarea({ defaultValue, placeholder, onCommit, className = "" }: {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // The textarea is uncontrolled, so a change saved elsewhere (the task popup, a reload) never reached it, and
+  // its stale text was committed back on the next blur, reverting the edit. Pull the stored value in whenever
+  // it changes, unless the person is typing in this box right now.
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    if (document.activeElement !== el && el.value !== defaultValue) { el.value = defaultValue; fit(el); }
+  }, [defaultValue]);
   return <textarea ref={ref} className={`pm-cellin pm-cellarea ${className}`} rows={1} defaultValue={defaultValue} placeholder={placeholder} onInput={(e) => fit(e.currentTarget)} onBlur={(e) => onCommit(e.currentTarget.value)} />;
 }
 /* ── Links cell (table) — titled links in a popover ── */
@@ -717,7 +752,10 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
   const [stage, setStage] = useState(isNew ? state.stage : (task?.stage ?? "todo"));
   const s = stageOf(stage);
   const client = clients.find((c) => c.slug === slug);
-  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links: legacyLinks.length ? [] : links, priority, blocker: blockers, week, checks }); onClose(); };
+  // Only send the checkpoints when someone actually toggled one. Sending them on every save wrote whatever
+  // the board had loaded (all-false when the read missed them) over the real ticks.
+  const checksChanged = checks.list !== Boolean(task?.checks?.list) || checks.messaging !== Boolean(task?.checks?.messaging);
+  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links: legacyLinks.length ? [] : links, priority, blocker: blockers, week, ...(checksChanged ? { checks } : {}) }); onClose(); };
   // Autosave: closing the task (✕, clicking outside, Escape) saves any changes. A new task saves if it
   // has a title and is simply discarded if it's still blank.
   const snapshot = JSON.stringify({ title, slug, owner, due, week, priority, context, links, blockers, checks, stage });

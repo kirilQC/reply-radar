@@ -63,6 +63,25 @@ export async function readConfigPrefix(prefix: string): Promise<Map<string, unkn
 }
 
 /**
+ * The values stored under exactly these keys. Use this instead of a prefix scan when the caller knows which
+ * keys it needs: a prefix scan across every client grows without bound and PostgREST stops it at 1,000 rows,
+ * so keys past that point read as missing. Batched so each `key=in.(...)` URL stays a sane length.
+ */
+export async function readConfigKeys(keys: string[]): Promise<Map<string, unknown>> {
+  const out = new Map<string, unknown>();
+  const unique = [...new Set(keys.filter((key) => typeof key === "string" && key))];
+  const BATCH = 100;
+  for (let i = 0; i < unique.length; i += BATCH) {
+    // Quoted so a key containing a comma or parenthesis cannot break the in.() list.
+    const list = unique.slice(i, i + BATCH).map((key) => `"${key.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",");
+    const response = await rest(`${TABLE}?select=key,value&key=in.(${encodeURIComponent(list)})`);
+    const rows = (await response.json().catch(() => [])) as Row[];
+    for (const row of rows) if (typeof row.key === "string") out.set(row.key, row.value);
+  }
+  return out;
+}
+
+/**
  * Writes one key, replacing whatever was there.
  *
  * An upsert is safe because `key` is the table's primary key — `resolution=merge-duplicates` compiles to

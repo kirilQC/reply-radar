@@ -85,6 +85,24 @@ async function rows(url: string, key: string, path: string): Promise<Row[]> {
   return Array.isArray(body) ? (body as Row[]) : [];
 }
 
+/**
+ * Every row a query matches, a page at a time. PostgREST caps one response at 1,000 rows, so `limit=20000`
+ * quietly returned 1,000: leads past that were missing from QC's identity (deals that should have been
+ * confirmed came out "none") and clients past the first 1,000 deals showed short totals. `order` must end on
+ * a unique column so pages neither repeat nor skip rows. A failed page ends the read with what was fetched,
+ * matching rows()'s forgiving behavior.
+ */
+async function allRows(url: string, key: string, path: string, order: string): Promise<Row[]> {
+  const PAGE = 1000;
+  const out: Row[] = [];
+  for (let page = 0; page < 200; page++) {
+    const batch = await rows(url, key, `${path}&order=${order}&limit=${PAGE}&offset=${page * PAGE}`);
+    out.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return out;
+}
+
 function dealFromRow(row: Row): Deal {
   return {
     id: str(row.id),
@@ -196,8 +214,8 @@ async function gatherQcIdentity(url: string, key: string, workspaceId: string) {
   const [leadRows, meetingRows] = await Promise.all([
     // `company` is the piece that was missing — the company QC contacted each lead at. `raw_data` carries
     // the enriched company, which sometimes holds a website we can turn into a domain for a stronger match.
-    rows(url, key, `rr_leads?select=id,linkedin_profile_url,campaign_names,name,company,raw_data&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=20000`),
-    rows(url, key, `rr_meetings?select=invitee_email,invitee_linkedin,campaign,company_domain,invitee_name,company_name&workspace_id=eq.${encodeURIComponent(workspaceId)}`),
+    allRows(url, key, `rr_leads?select=id,linkedin_profile_url,campaign_names,name,company,raw_data&workspace_id=eq.${encodeURIComponent(workspaceId)}`, "id.asc"),
+    allRows(url, key, `rr_meetings?select=id,invitee_email,invitee_linkedin,campaign,company_domain,invitee_name,company_name&workspace_id=eq.${encodeURIComponent(workspaceId)}`, "id.asc"),
   ]);
   return buildQcIdentity({
     leads: leadRows.map((r) => ({
@@ -377,7 +395,7 @@ export async function listDealClients(): Promise<DealClient[]> {
   const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,crm_provider,crm_last_synced_at&slug=neq.misc&order=name.asc`)).filter((w) => str(w.name).trim());
   if (!workspaces.length) return [];
   const ids = workspaces.map((w) => str(w.id)).filter(Boolean);
-  const dealRows = ids.length ? await rows(url, key, `rr_deals?select=workspace_id,amount,attribution&workspace_id=in.(${ids.map(encodeURIComponent).join(",")})`) : [];
+  const dealRows = ids.length ? await allRows(url, key, `rr_deals?select=id,workspace_id,amount,attribution&workspace_id=in.(${ids.map(encodeURIComponent).join(",")})`, "id.asc") : [];
   const byWorkspace = new Map<string, { total: number; confirmed: number; possible: number; confirmedValue: number; totalValue: number }>();
   for (const row of dealRows) {
     const wid = str(row.workspace_id);
@@ -432,7 +450,7 @@ export async function getClientDeals(slug: string): Promise<{ client: { id: stri
   const w = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,crm_provider,crm_api_key_ciphertext,crm_last_synced_at,crm_pipeline&slug=eq.${encodeURIComponent(slug)}&limit=1`))[0];
   if (!w) return null;
   const id = str(w.id);
-  const dealRows = await rows(url, key, `rr_deals?select=*&workspace_id=eq.${encodeURIComponent(id)}&order=close_date.desc.nullslast`);
+  const dealRows = await allRows(url, key, `rr_deals?select=*&workspace_id=eq.${encodeURIComponent(id)}`, "close_date.desc.nullslast,id.desc");
   // Confirmed at the top, then possible, then the rest — the whole point is to see QC's deals first.
   const rank = (a: string) => (a === "confirmed" ? 0 : a === "possible" ? 1 : 2);
   const deals = dealRows.map(dealFromRow).sort((a, b) => rank(a.attribution) - rank(b.attribution));

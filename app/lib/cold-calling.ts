@@ -40,6 +40,26 @@ async function rows(url: string, key: string, path: string): Promise<Row[]> {
   const body = await response.json().catch(() => []);
   return Array.isArray(body) ? (body as Row[]) : [];
 }
+/**
+ * Every row a query matches, read a page at a time. PostgREST caps a single response at 1,000 rows, so a
+ * bare `limit=2000` silently stopped at 1,000 and a client's 1,001st lead never reached the call list. Pages
+ * need a stable order (always end on a unique column) or rows can repeat or vanish between pages. Returns
+ * null if any page fails, so a caller can fall back instead of acting on a partial list.
+ */
+const PAGE_SIZE = 1000;
+async function allRows(url: string, key: string, path: string, order: string): Promise<Row[] | null> {
+  const out: Row[] = [];
+  // 200 pages = 200k rows: far beyond any client, but stops a runaway loop if paging misbehaves.
+  for (let page = 0; page < 200; page++) {
+    const response = await fetch(`${url}/rest/v1/${path}&order=${order}&limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`, { headers: headers(key), cache: "no-store" }).catch(() => null);
+    if (!response || !response.ok) return null;
+    const body = await response.json().catch(() => null);
+    if (!Array.isArray(body)) return null;
+    out.push(...(body as Row[]));
+    if (body.length < PAGE_SIZE) break;
+  }
+  return out;
+}
 /** A cheap exact row count via PostgREST's Content-Range header — no rows transferred. */
 async function count(url: string, key: string, path: string): Promise<number> {
   const response = await fetch(`${url}/rest/v1/${path}`, {
@@ -117,7 +137,7 @@ export type CallLead = {
   activity: string; lastCall: { caller: string | null; result: string | null; notes: string | null; at: string } | null; callCount: number;
 };
 
-function callLeadFromRow(lead: Row, logs: Row[], replyAt: Map<string, string>): CallLead {
+function callLeadFromRow(lead: Row, logsByLead: Map<string, Row[]>, replyAt: Map<string, string>): CallLead {
   const rr = obj(obj(lead.raw_data).reply_radar);
   const rollup = obj(rr.rollup);
   const enrichment = obj(rr.ai_ark);
@@ -128,7 +148,7 @@ function callLeadFromRow(lead: Row, logs: Row[], replyAt: Map<string, string>): 
   const campaigns = (Array.isArray(rollup.campaigns) ? rollup.campaigns.map(String) : []).filter(Boolean);
   if (!campaigns.length && campaign) campaigns.push(campaign);
   const senders = (Array.isArray(rollup.senders) ? rollup.senders.map(String) : []).filter(Boolean);
-  const mine = logs.filter((log) => str(log.lead_id) === str(lead.id));
+  const mine = logsByLead.get(str(lead.id)) ?? [];
   const last = mine[0];
   return {
     id: str(lead.id),
@@ -262,14 +282,26 @@ export async function getCallList(slug: string): Promise<{ ok: boolean; error?: 
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const ws = await workspaceFor(slug);
   if (!ws) return { ok: false, error: `No client matches "${slug}".` };
-  const leads = await rows(url, key, `rr_leads?select=id,name,role,company,linkedin_profile_url,phone,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&limit=2000`);
-  const logs = await rows(url, key, `rr_call_logs?select=lead_id,caller,result,notes,called_at&workspace_id=eq.${encodeURIComponent(ws.id)}&order=called_at.desc`);
+  const wsFilter = `workspace_id=eq.${encodeURIComponent(ws.id)}`;
+  const leadSelect = `rr_leads?select=id,name,role,company,linkedin_profile_url,phone,raw_data&${wsFilter}`;
+  // Narrow on the server to rows that could be callable (a phone, a cold-call marker, or a conversation count),
+  // so a big workspace does not ship every lead's raw_data just to discard most of it. The JSON-path filter is
+  // a superset of isCallable (a count of 0 still matches), so the exact check below still runs. If this
+  // database rejects the filter, fall back to reading every lead rather than showing an empty list.
+  const serverFilter = "&or=(phone.not.is.null,raw_data->reply_radar->cold_call.not.is.null,raw_data->reply_radar->rollup->conversation_count.not.is.null)";
+  const leads = (await allRows(url, key, `${leadSelect}${serverFilter}`, "id.asc"))
+    ?? (await allRows(url, key, leadSelect, "id.asc"))
+    ?? [];
+  const logs = (await allRows(url, key, `rr_call_logs?select=lead_id,caller,result,notes,called_at&${wsFilter}`, "called_at.desc,id.desc")) ?? [];
+  // Grouped once (newest first within each lead) rather than filtering every log for every lead.
+  const logsByLead = new Map<string, Row[]>();
+  for (const log of logs) { const id = str(log.lead_id); if (!id) continue; const list = logsByLead.get(id); if (list) list.push(log); else logsByLead.set(id, [log]); }
   // Latest reply time per lead, for the "newest/oldest reply" sorts and the replied status.
-  const convos = await rows(url, key, `rr_conversations?select=lead_id,last_message_at&workspace_id=eq.${encodeURIComponent(ws.id)}&order=last_message_at.desc`);
+  const convos = (await allRows(url, key, `rr_conversations?select=lead_id,last_message_at&${wsFilter}&last_message_at=not.is.null`, "last_message_at.desc,id.desc")) ?? [];
   const replyAt = new Map<string, string>();
   for (const c of convos) { const id = str(c.lead_id); const at = str(c.last_message_at); if (id && at && !replyAt.has(id)) replyAt.set(id, at); }
   // Sort by ICP score (highest first, unscored last) in code — the icp_score column isn't guaranteed to exist.
-  const callable = leads.filter(isCallable).map((lead) => callLeadFromRow(lead, logs, replyAt))
+  const callable = leads.filter(isCallable).map((lead) => callLeadFromRow(lead, logsByLead, replyAt))
     .sort((a, b) => (b.icpScore ?? -1) - (a.icpScore ?? -1));
   const script = await getCallScript(ws.id);
   return { ok: true, client: { name: ws.name, slug: ws.slug, logoUrl: ws.logoUrl, accentColor: ws.accentColor, script }, leads: callable };
@@ -289,14 +321,16 @@ export async function listCampaigns(slug: string): Promise<{ ok: boolean; error?
 
   const [page, jobs, leads] = await Promise.all([
     heyreachCampaigns(ws.apiKey, 300).catch(() => ({ items: [], total: 0 })),
-    rows(url, key, `rr_cold_call_jobs?select=campaign_id,status,leads_fetched,leads_enriched,total_leads,error&workspace_id=eq.${encodeURIComponent(ws.id)}&order=created_at.desc`),
-    rows(url, key, `rr_leads?select=phone,cold_campaign,raw_data&workspace_id=eq.${encodeURIComponent(ws.id)}&cold_campaign=not.is.null&limit=8000`),
+    allRows(url, key, `rr_cold_call_jobs?select=campaign_id,status,leads_fetched,leads_enriched,total_leads,error&workspace_id=eq.${encodeURIComponent(ws.id)}`, "created_at.desc,id.desc").then((r) => r ?? []),
+    // Paged: a bare limit=8000 was capped at 1,000, so per-campaign fetched/enriched counts stalled there.
+    // Only the enriched flag is read from raw_data, so select just that path instead of the whole blob.
+    allRows(url, key, `rr_leads?select=id,phone,cold_campaign,enriched:raw_data->reply_radar->cold_call->enriched&workspace_id=eq.${encodeURIComponent(ws.id)}&cold_campaign=not.is.null`, "id.asc").then((r) => r ?? []),
   ]);
   const fetchedByCampaign = new Map<string, { fetched: number; enriched: number }>();
   for (const lead of leads) {
     const cid = str(lead.cold_campaign);
     if (!cid) continue;
-    const enrichedFlag = obj(obj(obj(lead.raw_data).reply_radar).cold_call).enriched === true;
+    const enrichedFlag = lead.enriched === true;
     const entry = fetchedByCampaign.get(cid) ?? { fetched: 0, enriched: 0 };
     entry.fetched += 1;
     if (orNull(lead.phone) || enrichedFlag) entry.enriched += 1;
@@ -435,14 +469,59 @@ async function enrichColdLead(url: string, key: string, origin: string, workspac
  * Advance the oldest active cold-call job for as long as the deadline allows. Called each worker cycle via
  * /api/cold-calling/process; a job that does not finish in one pass is picked up again next cycle.
  */
+/**
+ * Claim one active job so only one runner works it at a time. The fetch route's after() loop, the browser's
+ * drain loop and the worker all call processColdCallJobs; without a claim they picked the same job together,
+ * inserting the same campaign members twice and paying AI Ark for the same phone lookups twice.
+ *
+ * The claim is a conditional PATCH: set locked_until only where it is null or already expired, and ask for the
+ * row back. Postgres applies that UPDATE atomically, so of two racing runners exactly one gets a row. The lease
+ * expires on its own, so a runner that dies mid-pass only blocks the job until then.
+ *
+ * Returns `undefined` when the database has no locked_until column yet (migration 20261002_cold_call_job_lease
+ * not run), so the caller keeps the old unclaimed behavior instead of stopping all processing.
+ */
+async function claimJob(url: string, key: string, leaseUntil: Date): Promise<Row | null | undefined> {
+  if (!(await columnExists(url, key, "rr_cold_call_jobs", "locked_until"))) return undefined;
+  const free = () => `or=(locked_until.is.null,locked_until.lt.${encodeURIComponent(new Date().toISOString())})`;
+  const candidates = await rows(url, key, `rr_cold_call_jobs?select=id&status=in.(queued,fetching,enriching)&${free()}&order=created_at.asc,id.asc&limit=5`);
+  for (const candidate of candidates) {
+    const response = await fetch(`${url}/rest/v1/rr_cold_call_jobs?id=eq.${encodeURIComponent(str(candidate.id))}&status=in.(queued,fetching,enriching)&${free()}`, {
+      method: "PATCH", headers: headers(key, true), body: JSON.stringify({ locked_until: leaseUntil.toISOString() }),
+    }).catch(() => null);
+    if (!response || !response.ok) continue;
+    const claimed = (await response.json().catch(() => []))[0] as Row | undefined;
+    if (claimed) return claimed;
+  }
+  return null;
+}
+
+/**
+ * Advance the oldest active cold-call job for as long as the deadline allows. Called each worker cycle via
+ * /api/cold-calling/process; a job that does not finish in one pass is picked up again next cycle.
+ */
 export async function processColdCallJobs(origin: string, deadlineMs: number): Promise<{ processed: boolean; status?: string }> {
   const { url, key } = config();
   if (!url || !key) return { processed: false };
-  const job = (await rows(url, key, `rr_cold_call_jobs?select=*&status=in.(queued,fetching,enriching)&order=created_at.asc&limit=1`))[0];
+  // The lease outlives the deadline by a margin because the last enrich batch can run past it (each lead is
+  // up to three network calls). It is released as soon as this pass ends.
+  const claimed = await claimJob(url, key, new Date(Math.max(deadlineMs, Date.now()) + 120_000));
+  const leased = claimed !== undefined;
+  const job = leased
+    ? claimed
+    : (await rows(url, key, `rr_cold_call_jobs?select=*&status=in.(queued,fetching,enriching)&order=created_at.asc&limit=1`))[0];
   if (!job) return { processed: false };
   const jobId = str(job.id);
   const patchJob = (fields: Row) => fetch(`${url}/rest/v1/rr_cold_call_jobs?id=eq.${encodeURIComponent(jobId)}`, { method: "PATCH", headers: headers(key), body: JSON.stringify({ ...fields, updated_at: new Date().toISOString() }) }).catch(() => {});
+  try {
+    return await advanceJob(url, key, origin, deadlineMs, job, patchJob);
+  } finally {
+    // Hand the job back straight away so the next runner does not wait out the lease.
+    if (leased) await fetch(`${url}/rest/v1/rr_cold_call_jobs?id=eq.${encodeURIComponent(jobId)}`, { method: "PATCH", headers: headers(key), body: JSON.stringify({ locked_until: null }) }).catch(() => {});
+  }
+}
 
+async function advanceJob(url: string, key: string, origin: string, deadlineMs: number, job: Row, patchJob: (fields: Row) => Promise<unknown>): Promise<{ processed: boolean; status?: string }> {
   const ws = (await rows(url, key, `rr_workspaces?select=id,name,heyreach_api_key_ciphertext&id=eq.${encodeURIComponent(str(job.workspace_id))}&limit=1`))[0];
   const apiKey = str(ws?.heyreach_api_key_ciphertext);
   const workspace = { id: str(job.workspace_id), name: str(ws?.name) };
@@ -450,7 +529,7 @@ export async function processColdCallJobs(origin: string, deadlineMs: number): P
   // The enrich phase filters on these generated columns; without them it would silently match nothing (0
   // enriched). Fail the job with an actionable message instead.
   if (!(await columnExists(url, key, "rr_leads", "cold_campaign"))) {
-    await patchJob({ status: "error", error: "rr_leads is missing the cold_campaign / cold_enriched columns — run the two new ALTERs in the cold-calling migration, then click Fetch & enrich again." });
+    await patchJob({ status: "error", error: "rr_leads is missing the cold_campaign / cold_enriched columns. Run the two new ALTERs in the cold-calling migration, then click Fetch & enrich again." });
     return { processed: true, status: "error" };
   }
 
