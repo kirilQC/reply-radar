@@ -241,7 +241,9 @@ Which tool answers which question (use these first; they each answer in one call
 - "Who needs following up", "who hasn't booked", "who did we send a Calendly to that never booked", "who went quiet" → follow_up_list.
 - "What's missing for X", "which clients have no messaging doc / ICP", "what onboarding is incomplete" → client_readiness. The messaging doc is a link on the client in QC Command, not a brain file.
 - "Which messaging / hook / connection request works best" → messaging_performance.
-- A Google Docs or Sheets link, or "open X's messaging doc" → google_doc.
+- A Google Docs or Sheets link, or "open X's messaging doc" → google_doc. If the client has no messaging doc saved, say so in one line and answer from their QC Brain Personas and Voice docs instead (brain_client / brain_read), naming the file.
+- "Which senders perform best", a named sender's numbers → sender_performance.
+- "Who runs out of leads soon", "who needs new campaigns", runway for several clients → sending_runway.
 - People we contacted (by title, company, campaign, date range) → outreach_people. People who replied → search_leads.
 
 Dates:

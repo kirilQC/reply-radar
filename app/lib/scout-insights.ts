@@ -440,6 +440,50 @@ async function outreachPeople(input: Row) {
   };
 }
 
+/* ── sender_performance ────────────────────────────────────────────────────────────────────────── */
+
+async function senderPerformance(input: Row) {
+  const all = await allClients();
+  const picked = strings(input.clients ?? input.client).length ? pickClients(all, strings(input.clients ?? input.client)) : all;
+  const w = windowOf(input.from, input.to, 30);
+  const minSent = Math.max(1, num(input.minSent) || 30);
+  const nameOf = new Map(all.map((c) => [c.id, c.name]));
+  const rows = await dbAll(`rr_daily_stats?select=workspace_id,sender_id,sender_name,connections_sent,connections_accepted,replies&sender_id=neq.&day=gte.${w.from}&day=lte.${w.to}${picked.length === all.length ? "" : `&workspace_id=in.(${picked.map((c) => c.id).join(",")})`}&order=day.asc`);
+  const agg = new Map<string, Row>();
+  for (const r of rows) {
+    const key = `${text(r.workspace_id)}|${text(r.sender_id)}`;
+    const a = agg.get(key) ?? { sender: text(r.sender_name) || "unnamed sender", client: nameOf.get(text(r.workspace_id)) ?? "unknown client", sent: 0, accepted: 0, replies: 0 };
+    a.sent = num(a.sent) + num(r.connections_sent); a.accepted = num(a.accepted) + num(r.connections_accepted); a.replies = num(a.replies) + num(r.replies);
+    agg.set(key, a);
+  }
+  const list = [...agg.values()].filter((a) => num(a.sent) >= minSent).map((a) => ({ ...a, acceptanceRatePct: pct(num(a.accepted), num(a.sent)), replyRateOfAcceptedPct: pct(num(a.replies), num(a.accepted)) }))
+    .sort((a, b) => num(b.acceptanceRatePct) - num(a.acceptanceRatePct));
+  const covered = new Set(rows.map((r) => text(r.workspace_id)));
+  return {
+    window: w, minSent,
+    note: `From the per-sender daily stats the worker stores (HeyReach). Senders with fewer than ${minSent} requests in the window are left out. Clients with no stored sender stats for this window: ${picked.filter((c) => !covered.has(c.id)).map((c) => c.name).join(", ") || "none"}.`,
+    senders: list,
+  };
+}
+
+/* ── sending_runway ────────────────────────────────────────────────────────────────────────────── */
+
+async function sendingRunway(input: Row) {
+  const all = await allClients();
+  const picked = (strings(input.clients ?? input.client).length ? pickClients(all, strings(input.clients ?? input.client)) : all).filter((c) => c.apiKey);
+  const within = num(input.withinDays) || 0;
+  const results = await Promise.all(picked.map(async (c) => {
+    const r = await runway(c);
+    return r ? { client: c.name, ...r } : { client: c.name, error: "HeyReach could not be read" };
+  }));
+  const ranked = results.sort((a, b) => num((a as Row).daysOfSendingLeft ?? 9999) - num((b as Row).daysOfSendingLeft ?? 9999));
+  return {
+    definitions: "daysOfSendingLeft = leads pending across active campaigns / (senders × 25 requests a day). 0 means nothing left to send; null means no active campaigns with senders.",
+    ...(within ? { runningOutWithin: within, runningOut: ranked.filter((r) => (r as Row).daysOfSendingLeft !== null && (r as Row).daysOfSendingLeft !== undefined && num((r as Row).daysOfSendingLeft) <= within).map((r) => (r as Row).client) } : {}),
+    clients: ranked,
+  };
+}
+
 /* ── Registry ──────────────────────────────────────────────────────────────────────────────────── */
 
 const DATE_ARGS = {
@@ -474,6 +518,16 @@ export const INSIGHT_TOOLS: ToolDefinition[] = [
     input_schema: { type: "object", properties: { clients: { type: "array", items: { type: "string" } }, titleContains: { type: "array", items: { type: "string" } }, companyContains: { type: "array", items: { type: "string" } }, campaignContains: { type: "array", items: { type: "string" } }, acceptedOnly: { type: "boolean" }, ...DATE_ARGS } },
   },
   {
+    name: "sender_performance",
+    description: "Per-sender (LinkedIn account) connection requests sent, accepted, acceptance %, replies and reply rate of accepted, for any date range, across one, several or all clients. THE tool for 'which senders have the best acceptance rate', 'how is Morgan's account doing', 'which senders are underperforming'.",
+    input_schema: { type: "object", properties: { clients: { type: "array", items: { type: "string" } }, minSent: { type: "integer", description: "Minimum requests in the window to be ranked. Default 30." }, ...DATE_ARGS } },
+  },
+  {
+    name: "sending_runway",
+    description: "Live from HeyReach, for every client (or the ones named): active campaigns, leads pending and days of sending left, sorted soonest-to-run-out first. THE tool for 'who runs out of leads this week', 'which clients need new campaigns', 'how much runway does everyone have'. Pass withinDays to get the list running out within that many days.",
+    input_schema: { type: "object", properties: { clients: { type: "array", items: { type: "string" } }, withinDays: { type: "integer" } } },
+  },
+  {
     name: "google_doc",
     description: "Read a Google Doc (every tab, as text) or a Google Sheet (as CSV) from its link. Pass client instead of url to open that client's messaging doc. Docs and sheets need to be shared 'anyone with the link'. Use this whenever someone pastes a Google link or asks about a client's messaging doc.",
     input_schema: { type: "object", properties: { url: { type: "string" }, client: { type: "string" } } },
@@ -490,6 +544,8 @@ export async function runInsightTool(name: string, input: Row): Promise<unknown>
     case "messaging_performance": return messagingPerformance(input);
     case "google_doc": return googleDoc(input);
     case "outreach_people": return outreachPeople(input);
+    case "sender_performance": return senderPerformance(input);
+    case "sending_runway": return sendingRunway(input);
     default: throw new Error(`Unknown tool ${name}.`);
   }
 }
