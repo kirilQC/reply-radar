@@ -149,7 +149,7 @@ export async function GET() {
       read("rr_workspaces?select=id&heyreach_api_key_ciphertext=not.is.null"),
       // Every client's brief history in one read rather than one read per client. 200 rows is roughly a
       // year of three-a-week briefs for a dozen clients, and only the newest per client is used.
-      read(`rr_slack_briefs?select=workspace_id,created_at,status,destination,slack_channel_id&automation=eq.${AUTOMATION}&order=created_at.desc&limit=200`).catch(() => []),
+      read(`rr_slack_briefs?select=workspace_id,created_at,status,destination,slack_channel_id,error_text&automation=eq.${AUTOMATION}&order=created_at.desc&limit=200`).catch(() => []),
       read("rr_granola_keys?select=id").catch(() => []),
       read(`rr_slack_automations?select=automation,enabled,send_days,send_hour,send_minute,timezone,destination&automation=eq.${AUTOMATION}&limit=1`).catch(() => []),
     ]);
@@ -208,6 +208,7 @@ export async function GET() {
         sentToday,
         lastBriefAt: last ? String(last.created_at ?? "") : null,
         lastBriefStatus: last ? String(last.status ?? "") : null,
+        lastBriefError: last && last.error_text ? String(last.error_text).slice(0, 400) : null,
         lastBriefDestination: last ? String(last.destination ?? "") : null,
         // The worker reads this rather than recomputing it. Readiness is required as well as the toggle:
         // an enabled client whose HeyReach sync died should not post a brief built from two sources
