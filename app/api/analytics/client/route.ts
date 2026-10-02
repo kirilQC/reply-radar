@@ -81,7 +81,10 @@ export async function GET(request: Request) {
 
     const [campaignRows, dailyRows, conversations, runs] = await Promise.all([
       get(`rr_campaign_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=launched_at.desc.nullslast&limit=2000`),
-      get(`rr_daily_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=day.asc&limit=2000`),
+      // Only the window being drawn. Asking for everything oldest-first hit Supabase's 1,000-row cap
+      // (a row per sender per day adds up fast), so a long-running client like Bluevia got June's rows
+      // and none from the last fortnight, and every chart read 0.
+      getAll(`rr_daily_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&day=gte.${dayKeys(14)[0]}&order=day.asc,sender_id.asc`),
       getAll(`rr_conversations?select=id&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=id.asc`),
       /*
        * The last few collection passes for this client, which is what the page's progress bar is made

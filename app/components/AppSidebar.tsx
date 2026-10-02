@@ -262,7 +262,6 @@ export default function AppSidebar() {
           ✕
         </button>
       </div>
-      <div className="nav-label">Operate</div>
       {/*
         `Link`, not `<a href>`. These were plain anchors, which meant every tab switch was a full
         document navigation: the entire bundle re-downloaded and re-parsed, React remounted from
