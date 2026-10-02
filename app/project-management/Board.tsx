@@ -314,6 +314,13 @@ function HeyReachPeek({ slug, name }: { slug: string; name: string }) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [state, setState] = useState<{ data?: Peek; error?: string; loading: boolean }>({ loading: false });
   const [logoOk, setLogoOk] = useState(true);
+  // Belt and braces for touch screens and overlays: any scroll or click elsewhere closes the card.
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: Event) => { if (e.target instanceof Node && ref.current?.contains(e.target)) return; setOpen(false); };
+    window.addEventListener("scroll", close, true); window.addEventListener("pointerdown", close, true);
+    return () => { window.removeEventListener("scroll", close, true); window.removeEventListener("pointerdown", close, true); };
+  }, [open]);
   const show = () => {
     const r = ref.current?.getBoundingClientRect(); if (!r) return;
     const width = 340;
