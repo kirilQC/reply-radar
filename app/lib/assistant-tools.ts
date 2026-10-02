@@ -53,6 +53,7 @@ import {
   getBaseTables,
   listRecords as airtableList,
   updateRecords as airtableUpdate,
+  deleteRecords as airtableDelete,
   type AirtableResult,
   type AirtableTable,
 } from "./airtable";
@@ -74,7 +75,7 @@ import type { BriefWorkspace } from "./morning-brief";
 import type { ClientCall } from "./granola";
 import { getClientDeals, listDealClients } from "./deals";
 import { addToDnc, listDnc, removeFromDnc } from "./dnc";
-import { onboardingForAssistant, listOnboardingClients, setTaskDone, addTemplateStep, listTemplate } from "./onboarding";
+import { onboardingForAssistant, listOnboardingClients, setTaskDone, addTemplateStep, listTemplate, updateTemplateStep, deleteTemplateStep } from "./onboarding";
 import { helpForAssistant, readHelp, searchHelp } from "./help-center";
 import { articlePath } from "./help-shared";
 import { publicBaseUrl } from "./public-url";
@@ -843,6 +844,21 @@ const BASE_TOOLS: ToolDefinition[] = [
     description:
       "Deals from a client's CRM, with QC's attribution. Pass a client for that client's deals — name, amount, stage, status, and whether each is Confirmed as QC's (a person on it matched someone QC contacted or booked), Possible (same company, review), or not QC. Omit the client for a directory across all clients with how much pipeline traces to QC. Use this for 'how much have we influenced', 'which deals came from us', or a client's pipeline. Attribution is only ever certain when a person-unique identifier matched.",
     input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug. Omit for the all-client directory." } } },
+  },
+  {
+    name: "airtable_delete_records",
+    description: "Delete rows from a table in a client's Airtable base, by record id (from airtable_records). Permanent. Only when the person explicitly asks to remove those rows; name the rows you are deleting in the answer.",
+    input_schema: { type: "object", properties: { client: { type: "string" }, table: { type: "string" }, ids: { type: "array", items: { type: "string" }, description: "Airtable record ids (rec...)." } }, required: ["client", "table", "ids"] },
+  },
+  {
+    name: "onboarding_update_template_step",
+    description: "Rename, re-describe, move (section / group) or deactivate a step in QC's master onboarding template (QC Command, not Airtable). Get the id from list_onboarding_template.",
+    input_schema: { type: "object", properties: { step_id: { type: "string" }, title: { type: "string" }, section: { type: "string" }, group: { type: "string" }, description: { type: "string" }, active: { type: "boolean", description: "false hides the step from new clients without deleting it." } }, required: ["step_id"] },
+  },
+  {
+    name: "onboarding_remove_template_step",
+    description: "Delete a step from QC's master onboarding template (QC Command, not Airtable). Permanent, and every future client loses it. Get the id from list_onboarding_template; only when the person asks to remove it.",
+    input_schema: { type: "object", properties: { step_id: { type: "string" } }, required: ["step_id"] },
   },
   {
     name: "onboarding_status",
@@ -1937,6 +1953,30 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         groups: Array.from(new Set(steps.map((s) => s.group).filter(Boolean))),
         steps: steps.map((s) => ({ id: s.id, title: s.title, section: s.section, group: s.group })),
       };
+    }
+    case "airtable_delete_records": {
+      const { client, baseId } = await airtableBaseFor(input.client);
+      const tables = airtableData(await getBaseTables(baseId));
+      const table = resolveAirtableTable(tables, input.table);
+      const ids = (Array.isArray(input.ids) ? input.ids : []).map((id) => text(id)).filter((id) => /^rec\w+$/.test(id));
+      if (!ids.length) throw new Error("Give the record ids to delete (rec...), from airtable_records.");
+      if (ids.length > AIRTABLE_WRITE_ROWS) throw new Error(`That is ${ids.length} records at once; the ceiling is ${AIRTABLE_WRITE_ROWS}.`);
+      const deleted = airtableData(await airtableDelete(baseId, table.id, ids));
+      return { client: client.name, table: table.name, deleted: deleted.length, ids: deleted, note: "Deleted from Airtable. Say which rows were removed." };
+    }
+    case "onboarding_update_template_step": {
+      const patch: { title?: string; section?: string | null; group?: string | null; description?: string | null; isActive?: boolean } = {};
+      if (text(input.title)) patch.title = text(input.title);
+      if (input.section !== undefined) patch.section = text(input.section) || null;
+      if (input.group !== undefined) patch.group = text(input.group) || null;
+      if (input.description !== undefined) patch.description = text(input.description) || null;
+      if (typeof input.active === "boolean") patch.isActive = input.active;
+      const r = await updateTemplateStep(text(input.step_id), patch);
+      return r.ok ? { ok: true } : { ok: false, error: r.error };
+    }
+    case "onboarding_remove_template_step": {
+      const r = await deleteTemplateStep(text(input.step_id));
+      return r.ok ? { ok: true, removed: text(input.step_id) } : { ok: false, error: r.error };
     }
     case "onboarding_add_template_step": {
       const r = await addTemplateStep({ title: text(input.title), section: text(input.section) || undefined, group: text(input.group) || undefined, description: text(input.description) || undefined, parentId: text(input.parent_id) || undefined });

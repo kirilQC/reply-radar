@@ -350,6 +350,9 @@ const PROGRESS_LABELS = {
   google_doc: "Reading the Google Doc",
   google_drive_search: "Searching Google Drive",
   find_email: "Finding emails in AI Ark",
+  airtable_delete_records: "Removing rows from Airtable",
+  onboarding_update_template_step: "Editing the onboarding template",
+  onboarding_remove_template_step: "Removing an onboarding step",
 };
 
 /**
