@@ -5,16 +5,19 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export type LinkItem = { url: string; title?: string };
 export type Blocker = { owner?: string; text?: string; resolved?: boolean; resolvedAt?: string };
-export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; created_at?: string | null; updated_at?: string | null; updated_by?: string | null; position?: number | null; clientSlug?: string; clientName?: string };
+export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; created_at?: string | null; updated_at?: string | null; updated_by?: string | null; position?: number | null; checks?: Checks | null; clientSlug?: string; clientName?: string };
 const blockerList = (b?: Blocker | Blocker[] | null): Blocker[] => (Array.isArray(b) ? b : b ? [b] : []).filter((x) => x && (x.text || x.owner));
+/** The two checkpoints every campaign needs. */
+export type Checks = { list: boolean; messaging: boolean };
 export type BoardClient = { slug: string; name: string; logoUrl?: string | null; accentColor?: string | null };
 export type Person = { name: string; avatarUrl?: string | null };
 type View = "kanban" | "byclient" | "individuals" | "table" | "swimlanes";
 type SortKey = "manual" | "priority" | "due" | "status" | "title" | "assignee";
-export type NewFields = { title: string; stage: string; assignee?: string; dueDate?: string; context?: string; links?: LinkItem[]; priority?: string; week?: string };
+export type NewFields = { title: string; stage: string; assignee?: string; dueDate?: string; context?: string; links?: LinkItem[]; priority?: string; week?: string; checks?: Checks };
 
 const STAGES = [
   { key: "todo", label: "To do", cls: "todo", color: "#6b7280" },
@@ -27,7 +30,7 @@ const STAGES = [
   { key: "launched", label: "Launched", cls: "launch", color: "#7c6cf0" },
   { key: "other", label: "Other", cls: "other", color: "#9a8cf0" },
 ];
-const PRIORITIES = [{ key: "high", label: "High", color: "#e5484d" }, { key: "medium", label: "Medium", color: "#f2913d" }, { key: "low", label: "Low", color: "#e6c229" }];
+const PRIORITIES = [{ key: "p1", label: "Priority 1", color: "#ff2d6f" }, { key: "high", label: "High", color: "#e5484d" }, { key: "medium", label: "Medium", color: "#f2913d" }, { key: "low", label: "Low", color: "#e6c229" }];
 const ALL_VIEWS: [View, string][] = [["kanban", "Kanban"], ["byclient", "By client"], ["individuals", "Individuals"], ["table", "Table"], ["swimlanes", "Swimlanes"]];
 const stageOf = (k: string) => STAGES.find((x) => x.key === k) ?? STAGES[0];
 const prioOf = (k?: string | null) => PRIORITIES.find((x) => x.key === k) ?? null;
@@ -65,6 +68,17 @@ const sittingFor = (iso?: string | null): string => {
   if (hours < 24) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
 };
+/**
+ * How worrying a task's age is, from when it was added: fine for a week, then amber, orange and red.
+ * Finished tasks are never flagged; they are done, not sitting.
+ */
+const ageTone = (iso?: string | null, stage?: string): "" | "warn" | "late" | "stale" => {
+  if (!iso || stage === "completed" || stage === "launched") return "";
+  const days = (Date.now() - Date.parse(iso)) / 86_400_000;
+  if (!Number.isFinite(days)) return "";
+  return days >= 30 ? "stale" : days >= 14 ? "late" : days >= 7 ? "warn" : "";
+};
+const ageNote = { "": "", warn: "Sitting over a week", late: "Sitting over two weeks, take a look", stale: "Sitting over a month, overdue" } as const;
 function sortTasks(list: BoardTask[], key: SortKey): BoardTask[] {
   if (key === "manual") return list;
   const arr = [...list];
@@ -227,7 +241,7 @@ function Card({ t, h, column }: { t: BoardTask; h: Handlers; column?: string[] }
   const openBlockers = blockerList(t.blocker).filter((b) => !b.resolved);
   return (
     <div
-      className={`pm-bcard ${h.dragId === t.id ? "pm-bcard-dragging" : ""} ${h.dropHint?.id === t.id ? (h.dropHint.after ? "pm-drop-after" : "pm-drop-before") : ""}`}
+      className={`pm-bcard ${t.priority === "p1" ? "pm-bcard-p1" : ""} ${h.dragId === t.id ? "pm-bcard-dragging" : ""} ${h.dropHint?.id === t.id ? (h.dropHint.after ? "pm-drop-after" : "pm-drop-before") : ""}`}
       draggable
       onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("id", t.id); h.onDrag(t.id); }}
       onDragEnd={() => { h.onDrag(null); h.setDropHint(null); }}
@@ -253,13 +267,19 @@ function Card({ t, h, column }: { t: BoardTask; h: Handlers; column?: string[] }
       <div className="pm-bcard-body">
         <div className="pm-bcard-title">{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}</div>
         {t.context && <div className="pm-bcard-ctx">{t.context}</div>}
+        {(t.checks?.list || t.checks?.messaging) && (
+          <div className="pm-bcard-checks">
+            <span className={t.checks?.list ? "on" : ""}>{t.checks?.list ? "✓" : "○"} Contact list</span>
+            <span className={t.checks?.messaging ? "on" : ""}>{t.checks?.messaging ? "✓" : "○"} Messaging</span>
+          </div>
+        )}
         {openBlockers.length > 0 && <div className="pm-bcard-block" title={openBlockers.map((b) => `${b.owner || "someone"}: ${b.text}`).join("\n")}>⛔ Waiting on {openBlockers[0].owner || "someone"}{openBlockers.length > 1 ? ` +${openBlockers.length - 1} more` : ""}{openBlockers[0].text ? ` — ${openBlockers[0].text}` : ""}</div>}
         <div className="pm-bcard-foot">
           {client && !h.hideClient && <span className="pm-bcard-client"><span className="pm-bcard-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span>{client.name}</span>}
           {owners.length > 0 && (h.hideClient && owners.length <= 2
             ? owners.map((o) => <span className="pm-bcard-owner" key={o}><Avatar name={o} map={h.map} />{o}</span>)
             : <span className="pm-bcard-owner"><Avatar name={owners[0]} map={h.map} />{owners.length === 1 ? owners[0] : `${owners.length} people`}</span>)}
-          {t.created_at && <span className="pm-bcard-age" title={`Added ${fmtEst(t.created_at)}`}>⏱ {sittingFor(t.created_at)}</span>}
+          {t.created_at && (() => { const tone = ageTone(t.created_at, t.stage); return <span className={`pm-bcard-age ${tone ? `pm-age-${tone}` : ""}`} title={`Added ${fmtEst(t.created_at)}${tone ? ` · ${ageNote[tone]}` : ""}`}>⏱ {sittingFor(t.created_at)}</span>; })()}
           {t.week && !t.due_date && <span className="pm-bcard-due" title="Start date">Starts {t.week}</span>}
           {t.due_date && <span className="pm-bcard-due" title={t.week ? `Starts ${t.week} · due ${t.due_date}` : "Due date"}>{t.due_date}</span>}
         </div>
@@ -281,11 +301,77 @@ function KanbanView({ byStage, h }: { byStage: Record<string, BoardTask[]>; h: H
     </div>
   );
 }
-function ColumnList({ label, logo, tasks, onAdd, h, reorderable }: { label: React.ReactNode; logo?: React.ReactNode; tasks: BoardTask[]; onAdd: () => void; h: Handlers; reorderable?: boolean }) {
+type Peek = { connected: boolean; at?: string; total?: { pending: number; senders: number; daysLeft: number | null }; campaigns: Array<{ name: string; pending: number; senders: string[]; senderCount: number; daysLeft: number | null }> };
+const peekCache = new Map<string, { at: number; data?: Peek; error?: string }>();
+/**
+ * The HeyReach mark on a client's column header. Hover it and HeyReach is asked, on the spot, for that
+ * client's active campaigns, their senders, leads pending and days of sending left; move away and the
+ * card goes. Answers are reused for two minutes so sweeping across the headers doesn't re-ask each time.
+ */
+function HeyReachPeek({ slug, name }: { slug: string; name: string }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [state, setState] = useState<{ data?: Peek; error?: string; loading: boolean }>({ loading: false });
+  const [logoOk, setLogoOk] = useState(true);
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect(); if (!r) return;
+    const width = 340;
+    const left = r.right + 10 + width > window.innerWidth ? Math.max(8, r.left - width - 10) : r.right + 10;
+    setPos({ top: Math.max(8, Math.min(r.top - 8, window.innerHeight - 420)), left });
+    setOpen(true);
+    const hit = peekCache.get(slug);
+    if (hit && Date.now() - hit.at < 120_000) { setState({ data: hit.data, error: hit.error, loading: false }); return; }
+    setState({ loading: true });
+    void fetch(`/api/project-management/heyreach?client=${encodeURIComponent(slug)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((p) => { const entry = p.ok ? { at: Date.now(), data: p as Peek } : { at: Date.now(), error: String(p.error || "HeyReach could not be reached.") }; peekCache.set(slug, entry); setState({ data: entry.data, error: entry.error, loading: false }); })
+      .catch(() => setState({ error: "HeyReach could not be reached.", loading: false }));
+  };
+  const d = state.data;
+  const card = open && pos ? (
+    <div className="pm-peek" style={{ top: pos.top, left: pos.left }} role="tooltip">
+      <div className="pm-peek-head"><b>{name}</b><span>{state.loading ? "Asking HeyReach…" : d?.at ? `Live · ${new Date(d.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</span></div>
+      {state.loading ? <div className="pm-peek-load"><span className="rr-skel-bar" style={{ width: "80%", height: 10 }} /><span className="rr-skel-bar" style={{ width: "60%", height: 10 }} /><span className="rr-skel-bar" style={{ width: "70%", height: 10 }} /></div>
+        : state.error ? <p className="pm-peek-empty">{state.error}</p>
+        : !d?.connected ? <p className="pm-peek-empty">No HeyReach key is set for this client.</p>
+        : !d.campaigns.length ? <p className="pm-peek-empty">No active campaigns right now.</p>
+        : <>
+          <div className="pm-peek-total">
+            <div><strong>{d.total?.pending.toLocaleString()}</strong><small>leads pending</small></div>
+            <div><strong>{d.total?.senders}</strong><small>sender{d.total?.senders === 1 ? "" : "s"}</small></div>
+            <div className={d.total?.daysLeft != null && d.total.daysLeft <= 3 ? "warn" : ""}><strong>{d.total?.daysLeft ?? "–"}</strong><small>days of sending</small></div>
+          </div>
+          <div className="pm-peek-list">
+            {d.campaigns.map((c) => (
+              <div className="pm-peek-row" key={c.name}>
+                <div className="pm-peek-name">{c.name}</div>
+                <div className="pm-peek-meta">
+                  <span>{c.pending.toLocaleString()} pending</span>
+                  <span className={c.daysLeft != null && c.daysLeft <= 3 ? "warn" : ""}>{c.daysLeft == null ? "no senders" : `${c.daysLeft} day${c.daysLeft === 1 ? "" : "s"} left`}</span>
+                </div>
+                <div className="pm-peek-senders">{c.senders.length ? c.senders.join(", ") : `${c.senderCount} sender${c.senderCount === 1 ? "" : "s"}`}</div>
+              </div>
+            ))}
+          </div>
+        </>}
+    </div>
+  ) : null;
+  return (
+    <>
+      <button ref={ref} type="button" className="pm-peek-btn" aria-label={`Live HeyReach stats for ${name}`} onMouseEnter={show} onMouseLeave={() => setOpen(false)} onFocus={show} onBlur={() => setOpen(false)} onClick={(e) => { e.stopPropagation(); if (open) setOpen(false); else show(); }}>
+        {logoOk ? <img src="https://www.google.com/s2/favicons?domain=heyreach.io&sz=64" alt="" onError={() => setLogoOk(false)} /> : <span>HR</span>}
+      </button>
+      {typeof document !== "undefined" && card ? createPortal(card, document.body) : null}
+    </>
+  );
+}
+
+function ColumnList({ label, logo, tasks, onAdd, h, reorderable, extra }: { label: React.ReactNode; logo?: React.ReactNode; tasks: BoardTask[]; onAdd: () => void; h: Handlers; reorderable?: boolean; extra?: React.ReactNode }) {
   const ids = tasks.map((t) => t.id);
   return (
     <div className="pm-col">
-      <div className="pm-colh pm-colh-big">{logo}<b>{label}</b></div>
+      <div className="pm-colh pm-colh-big">{logo}<b>{label}</b>{extra}</div>
       {tasks.map((t) => <Card key={t.id} t={t} h={h} column={reorderable ? ids : undefined} />)}
       <button type="button" className="pm-add" onClick={onAdd}>+ Add</button>
     </div>
@@ -295,7 +381,7 @@ function ByClientView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
   return (
     <div className="pm-cols pm-cols-byclient" style={{ gridTemplateColumns: `repeat(${Math.max(1, h.clients.length)}, minmax(340px, 1fr))` }}>
       {h.clients.map((c) => (
-        <ColumnList reorderable key={c.slug} label={c.name} logo={<span className="pm-bighead-logo" style={c.logoUrl ? undefined : { background: c.accentColor || "var(--accent)" }}>{c.logoUrl ? <img src={c.logoUrl} alt="" /> : initials(c.name)}</span>} tasks={tasks.filter((t) => t.clientSlug === c.slug)} onAdd={() => h.openNew("todo", c.slug)} h={{ ...h, hideClient: true }} />
+        <ColumnList reorderable key={c.slug} extra={<HeyReachPeek slug={c.slug} name={c.name} />} label={c.name} logo={<span className="pm-bighead-logo" style={c.logoUrl ? undefined : { background: c.accentColor || "var(--accent)" }}>{c.logoUrl ? <img src={c.logoUrl} alt="" /> : initials(c.name)}</span>} tasks={tasks.filter((t) => t.clientSlug === c.slug)} onAdd={() => h.openNew("todo", c.slug)} h={{ ...h, hideClient: true }} />
       ))}
     </div>
   );
@@ -514,12 +600,13 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
   const [context, setContext] = useState(task?.context ?? "");
   const [links, setLinks] = useState<LinkItem[]>(linkItems(task?.links));
   const [blockers, setBlockers] = useState<Blocker[]>(blockerList(task?.blocker));
+  const [checks, setChecks] = useState<Checks>({ list: Boolean(task?.checks?.list), messaging: Boolean(task?.checks?.messaging) });
   const [nUrl, setNUrl] = useState(""); const [nTitle, setNTitle] = useState("");
   const addLink = () => { const u = nUrl.trim(); if (!u) return; setLinks((p) => [...p, { url: normUrl(u), title: nTitle.trim() || undefined }]); setNUrl(""); setNTitle(""); };
   const [stage, setStage] = useState(isNew ? state.stage : (task?.stage ?? "todo"));
   const s = stageOf(stage);
   const client = clients.find((c) => c.slug === slug);
-  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links, priority, blocker: blockers, week }); onClose(); };
+  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links, priority, blocker: blockers, week, checks }); onClose(); };
   return (
     <div className="pm-modal-back" onClick={onClose}>
       <div className="pm-modal pm-modal-a" onClick={(e) => e.stopPropagation()}>
@@ -551,6 +638,10 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
               <label className="pm-f"><span>Due date</span><input value={due} placeholder="e.g. Thu 9/4" onChange={(e) => setDue(e.target.value)} /></label>
               <label className="pm-f"><span>Start date</span><input value={week} placeholder="e.g. Mon 9/8" onChange={(e) => setWeek(e.target.value)} /></label>
             </div>
+            <div className="pm-f"><span>Campaign checklist</span><div className="pm-ed-checks">
+              <button type="button" className={`pm-ed-check ${checks.list ? "on" : ""}`} aria-pressed={checks.list} onClick={() => setChecks((c) => ({ ...c, list: !c.list }))}><span className="pm-check">{checks.list ? "✓" : ""}</span>Contact list built</button>
+              <button type="button" className={`pm-ed-check ${checks.messaging ? "on" : ""}`} aria-pressed={checks.messaging} onClick={() => setChecks((c) => ({ ...c, messaging: !c.messaging }))}><span className="pm-check">{checks.messaging ? "✓" : ""}</span>Messaging created</button>
+            </div></div>
             <div className="pm-f"><span>Blockers</span><div className="pm-ed-blockers"><BlockerCell blockers={blockers} people={people} map={map} addPerson={addPerson} onChange={setBlockers} /></div></div>
           </div>
         </div>

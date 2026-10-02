@@ -4,6 +4,16 @@
 // CRUD for a client's internal projects/tasks (the Project management board). Tasks live in rr_projects,
 // keyed to a workspace, with a stage the team drags them through.
 import { NextResponse } from "next/server";
+import { deleteConfig, readConfigPrefix, writeConfig } from "../../../lib/app-config";
+
+/**
+ * The two campaign checkpoints on every task, "Contact list built" and "Messaging created". Kept in
+ * rr_app_config under pm_checks:<task id> rather than a new rr_projects column, so they work without a
+ * migration. Read in one prefix scan and joined onto the tasks.
+ */
+const CHECKS_PREFIX = "pm_checks:";
+type Checks = { list: boolean; messaging: boolean };
+const asChecks = (v: unknown): Checks => { const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>; return { list: Boolean(o.list), messaging: Boolean(o.messaging) }; };
 
 const STAGES = ["todo", "planning", "building", "in_progress", "blocked", "paused", "completed", "launched", "other"];
 type Row = Record<string, unknown>;
@@ -35,7 +45,8 @@ export async function GET(request: Request) {
   const r = await fetch(`${c.url}/rest/v1/rr_projects?select=*&workspace_id=in.(${ids.map((r) => r.id).join(",")})&order=position.asc,created_at.asc`, { headers: c.headers, cache: "no-store" });
   if (!r.ok) return NextResponse.json({ ok: false, error: r.status === 404 ? TABLE_MISSING : `Load failed (${r.status}).`, tasks: [] });
   const rows = await r.json().catch(() => []);
-  const tasks = (Array.isArray(rows) ? rows : []).map((t: Record<string, unknown>) => ({ ...t, clientSlug: slugById.get(String(t.workspace_id)) ?? "", clientName: nameById.get(String(t.workspace_id)) ?? "" }));
+  const checks = await readConfigPrefix(CHECKS_PREFIX).catch(() => new Map<string, unknown>());
+  const tasks = (Array.isArray(rows) ? rows : []).map((t: Record<string, unknown>) => ({ ...t, checks: asChecks(checks.get(`${CHECKS_PREFIX}${t.id}`)), clientSlug: slugById.get(String(t.workspace_id)) ?? "", clientName: nameById.get(String(t.workspace_id)) ?? "" }));
   return NextResponse.json({ ok: true, tasks });
 }
 
@@ -53,7 +64,8 @@ export async function POST(request: Request) {
   const r = await fetch(`${c.url}/rest/v1/rr_projects`, { method: "POST", headers: { ...c.headers, Prefer: "return=representation" }, body: JSON.stringify(rec) });
   if (!r.ok) return NextResponse.json({ ok: false, error: r.status === 404 ? TABLE_MISSING : `Could not create (${r.status}).` }, { status: 502 });
   const [task] = await r.json().catch(() => []);
-  return NextResponse.json({ ok: true, task });
+  if (task?.id && b.checks && typeof b.checks === "object") await writeConfig(`${CHECKS_PREFIX}${task.id}`, asChecks(b.checks)).catch(() => {});
+  return NextResponse.json({ ok: true, task: task ? { ...task, checks: asChecks(b.checks) } : task });
 }
 
 export async function PATCH(request: Request) {
@@ -74,6 +86,7 @@ export async function PATCH(request: Request) {
   if (b.moveToSlug) { const wsId = await workspaceIdFor(String(b.moveToSlug), c); if (wsId) patch.workspace_id = wsId; }
   if ("updatedBy" in b) patch.updated_by = b.updatedBy ? String(b.updatedBy).slice(0, 200) : null;
   if (typeof b.position === "number") patch.position = b.position;
+  if (b.checks && typeof b.checks === "object") await writeConfig(`${CHECKS_PREFIX}${id}`, asChecks(b.checks));
   // Dragging a task up or down the priority order is not an edit, so it doesn't move "Updated".
   const keys = Object.keys(b).filter((k) => k !== "id" && k !== "updatedBy");
   if (keys.length === 1 && keys[0] === "position") { delete patch.updated_at; delete patch.updated_by; }
@@ -88,5 +101,6 @@ export async function DELETE(request: Request) {
   if (!id) return NextResponse.json({ ok: false, error: "id required" }, { status: 400 });
   const r = await fetch(`${c.url}/rest/v1/rr_projects?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: c.headers });
   if (!r.ok) return NextResponse.json({ ok: false, error: `Delete failed (${r.status}).` }, { status: 502 });
+  await deleteConfig(`${CHECKS_PREFIX}${id}`).catch(() => {});
   return NextResponse.json({ ok: true });
 }

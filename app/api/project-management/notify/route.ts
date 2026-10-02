@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     `*Status:* ${STAGE_LABEL[stage] ?? stage}`,
   ];
   if (owners) lines.push(`*Owner:* ${owners}`);
-  if (priority) lines.push(`*Priority:* ${priority.charAt(0).toUpperCase()}${priority.slice(1)}`);
+  if (priority) lines.push(`*Priority:* ${priority === "p1" ? "Priority 1" : `${priority.charAt(0).toUpperCase()}${priority.slice(1)}`}`);
   if (due) lines.push(`*Due:* ${due}`);
   const body_text = lines.join("\n");
   // Client logo off to the side, like a section with an image accessory.
