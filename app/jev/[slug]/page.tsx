@@ -389,6 +389,26 @@ export default function JevClientPage() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [running]);
 
+  /*
+   * beforeunload never fires for a client-side route change, so a sidebar click mid-run used to leave the
+   * pipeline spending in the background with nothing on screen to stop it. In-app links ask first while a run
+   * is going (capture phase, ahead of Next's own Link handler), and leaving the page aborts the run regardless.
+   */
+  useEffect(() => {
+    if (!running) return;
+    const guard = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const link = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!link || link.target === "_blank" || link.hasAttribute("download")) return;
+      const to = new URL(link.href, window.location.href);
+      if (to.origin !== window.location.origin || to.pathname === window.location.pathname) return;
+      if (!window.confirm("A run is still going. Leave this page and stop it?")) { e.preventDefault(); e.stopPropagation(); }
+    };
+    document.addEventListener("click", guard, true);
+    return () => document.removeEventListener("click", guard, true);
+  }, [running]);
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   // The elapsed clock ticks while a run is going; nothing else needs a timer.
   useEffect(() => {
     if (!running) return;

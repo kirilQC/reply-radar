@@ -5000,7 +5000,10 @@ body.light-mode .brain-icp {
      desktop sizes, so the only thing that grows is text you can type into. */
   input,
   textarea,
-  select {
+  select,
+  [contenteditable]:not([contenteditable="false"]),
+  .rn-doc {
+    /* Editable regions zoom on focus exactly as fields do, so the rich-text editors get the same floor. */
     font-size: 16px !important;
   }
   /* Safari also inflates text in landscape unless told not to, which undoes the sizing above. */

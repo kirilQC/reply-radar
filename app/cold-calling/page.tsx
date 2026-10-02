@@ -17,16 +17,25 @@ type Client = { id: string; name: string; slug: string; logoUrl: string | null; 
 export default function ColdCallingDirectory() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  // A failed read is kept apart from an empty answer: "No clients yet" on a network blip sends people
+  // off to check HeyReach connections that are fine.
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const payload = await fetch("/api/cold-calling/clients", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
-        if (payload.ok && Array.isArray(payload.clients)) setClients(payload.clients);
-      } catch { /* empty */ }
-      setLoading(false);
-    })();
-  }, []);
+  const loadClients = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/cold-calling/clients", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok || !Array.isArray(payload.clients)) throw new Error(String(payload.error || `The client list could not be loaded (${response.status}).`));
+      setClients(payload.clients);
+    } catch (failure) {
+      setError(failure instanceof Error && failure.message !== "Failed to fetch" ? failure.message : "The client list could not be loaded. Check your connection.");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { void loadClients(); }, []);
 
   return (
     <div className="app-shell">
@@ -41,7 +50,12 @@ export default function ColdCallingDirectory() {
             <h1>Cold calling</h1>
           </div>
           {loading && <Skeleton variant="logo-cards" count={12} label="Loading clients" />}
-          {!loading && clients.length === 0 && <div className="cc-empty">No clients with a HeyReach connection yet.</div>}
+          {!loading && error && (
+            <div className="cc-empty" role="alert">
+              {error} <button type="button" className="text-button" onClick={() => void loadClients()}>Retry</button>
+            </div>
+          )}
+          {!loading && !error && clients.length === 0 && <div className="cc-empty">No clients with a HeyReach connection yet.</div>}
           <div className="cc-directory">
             {clients.map((c) => (
               <Link href={`/cold-calling/${encodeURIComponent(c.slug)}`} className="cc-card" key={c.id}>

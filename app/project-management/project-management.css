@@ -771,6 +771,8 @@
 .lu-del { margin-left: auto; border: 0; background: none; color: var(--muted-2); cursor: pointer; font-size: 11px; opacity: 0; transition: opacity .15s; }
 .lu-item:hover .lu-del { opacity: 1; }
 .lu-del:hover { color: #ff8a8a; }
+/* No hover on touch screens, so the delete is shown outright there rather than never. */
+@media (hover: none) { .lu-del { opacity: 1; } }
 .lu-text { margin: 3px 0 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .lu-voice { display: flex; align-items: center; gap: 9px; margin-top: 5px; padding: 6px 9px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)); max-width: 320px; }
 .lu-play { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-ink, #0b0c10); cursor: pointer; }

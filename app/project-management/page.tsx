@@ -15,6 +15,14 @@ import Skeleton from "../components/Skeleton";
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; slackChannelId?: string };
 type ViewDef = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; slackChannelId?: string; memberSlugs: string[] };
 const initials = (s: string) => (s.trim()[0] || "?").toUpperCase();
+/** Escape closes a modal, as it does every other panel. */
+function useEscape(onClose: () => void) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+}
 
 export default function ProjectManagementDirectory() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -22,16 +30,22 @@ export default function ProjectManagementDirectory() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<ViewDef | "new" | null>(null);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+  // A failed client read is kept apart from an empty one: "No clients yet" on a network blip or a 500
+  // reads as if every board had been lost.
+  const [error, setError] = useState("");
 
   const load = async () => {
+    setError("");
     const [cl, vw] = await Promise.all([
-      fetch("/api/project-management/clients", { cache: "no-store" }).then((r) => r.json()).catch(() => ({})),
+      fetch("/api/project-management/clients", { cache: "no-store" }).then(async (r) => ({ status: r.status, ok: r.ok, ...(await r.json().catch(() => ({}))) })).catch(() => ({ status: 0, ok: false })),
       fetch("/api/project-management/views", { cache: "no-store" }).then((r) => r.json()).catch(() => ({})),
-    ]);
-    if (Array.isArray(cl.clients)) setClients(cl.clients);
+    ]) as [{ status: number; ok: boolean; clients?: Client[]; error?: unknown }, { views?: ViewDef[] }];
+    if (cl.ok && Array.isArray(cl.clients)) setClients(cl.clients);
+    else setError(cl.error ? String(cl.error) : cl.status ? `The client list could not be loaded (${cl.status}).` : "The client list could not be loaded. Check your connection.");
     if (Array.isArray(vw.views)) setViews(vw.views);
     setLoading(false);
   };
+  const retry = () => { setLoading(true); void load(); };
   useEffect(() => { void load(); }, []);
 
   return (
@@ -71,7 +85,12 @@ export default function ProjectManagementDirectory() {
             </>
           )}
 
-          {!loading && clients.length === 0 && <div className="pm-empty">No clients yet.</div>}
+          {!loading && error && (
+            <div className="pm-empty" role="alert">
+              {error} <button type="button" className="pm-newview" onClick={retry}>Retry</button>
+            </div>
+          )}
+          {!loading && !error && clients.length === 0 && <div className="pm-empty">No clients yet.</div>}
           {clients.length > 0 && <div className="pm-dir-label">Clients</div>}
           <div className="pm-directory">
             {clients.map((c) => (
@@ -99,6 +118,7 @@ function ClientEditor({ client, onClose, onSaved }: { client: Client; onClose: (
   const [channel, setChannel] = useState(client.slackChannelId ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  useEscape(onClose);
   const save = async () => {
     setBusy(true); setErr("");
     const r = await fetch("/api/project-management/clients", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: client.slug, slackChannelId: channel.trim() }) }).then((x) => x.json()).catch(() => ({}));
@@ -108,7 +128,7 @@ function ClientEditor({ client, onClose, onSaved }: { client: Client; onClose: (
   return (
     <div className="pm-modal-back" onClick={onClose}>
       <div className="pm-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="pm-modal-head"><h2>{client.name} · Slack</h2><button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
+        <div className="pm-modal-head"><h2>{client.name} · Slack</h2><button type="button" className="pm-modal-x" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="pm-modal-body">
           <label className="pm-f"><span>Internal Slack channel ID</span><input value={channel} placeholder="e.g. C0123ABCD" onChange={(e) => setChannel(e.target.value)} /></label>
           <p className="pm-muted" style={{ margin: 0, lineHeight: 1.6 }}>This is where the per-task <b>Send to Slack</b> button posts a project&apos;s status. Most clients are already filled in from QC Command. To find an ID: open the channel in Slack → channel name → About → the ID is at the bottom (starts with C).</p>
@@ -128,6 +148,7 @@ function ViewEditor({ view, clients, onClose, onSaved }: { view: ViewDef | null;
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState("");
+  useEscape(onClose);
   const toggle = (slug: string) => setMembers((p) => p.includes(slug) ? p.filter((s) => s !== slug) : [...p, slug]);
   const uploadLogo = async (file?: File) => {
     if (!file) return;
@@ -157,7 +178,7 @@ function ViewEditor({ view, clients, onClose, onSaved }: { view: ViewDef | null;
   return (
     <div className="pm-modal-back" onClick={onClose}>
       <div className="pm-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="pm-modal-head"><h2>{view ? "Edit view" : "New view"}</h2><button type="button" className="pm-modal-x" onClick={onClose}>✕</button></div>
+        <div className="pm-modal-head"><h2>{view ? "Edit view" : "New view"}</h2><button type="button" className="pm-modal-x" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="pm-modal-body">
           <label className="pm-f"><span>Name</span><input value={name} placeholder="e.g. Healthtech" onChange={(e) => setName(e.target.value)} /></label>
           <div className="pm-f"><span>Logo <em style={{ fontWeight: 400, color: "var(--muted-2)" }}>· optional</em></span>

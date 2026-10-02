@@ -150,7 +150,9 @@ export default function AppSidebar() {
         if (response.ok && Array.isArray(payload.workspaces)) {
           const fresh = payload.workspaces.map((item: Record<string, unknown>) => ({ name: String(item.name ?? ""), slug: String(item.slug ?? ""), tone: String(item.accent_color ?? "var(--accent)"), logoUrl: String(item.logo_url ?? "") }));
           setSidebarClients(fresh);
-          window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(fresh));
+          // Guarded on its own: a full or blocked store throwing here used to fall into the catch below,
+          // which then painted the stale cache over the fresh list that had just been set.
+          try { window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(fresh)); } catch { /* cache is optional */ }
           setClientsLoading(false);
           return;
         }

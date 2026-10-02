@@ -83,6 +83,9 @@ function dateOnly(meeting: Meeting): Date | null {
   const date = new Date(meeting.meetingAt);
   return Number.isNaN(date.getTime()) ? null : date;
 }
+// Timed meetings and messages read in the team's zone, so a 2pm call is 2pm on every teammate's screen
+// and the date beside it cannot slip a day for someone travelling.
+const TEAM_ZONE = "America/New_York";
 const dateOnlyZone = (date: Date) => (date.getUTCHours() === 0 && date.getUTCMinutes() === 0 ? "UTC" : "America/New_York");
 
 /** "CPO ; CPO" (the webhook repeats the field) as "CPO". */
@@ -100,8 +103,8 @@ function whenParts(meeting: Meeting): { top: string; bottom: string; tbd: boolea
     const date = new Date(meeting.meetingAt);
     if (!Number.isNaN(date.getTime())) {
       return {
-        top: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-        bottom: date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) + " · " + date.getFullYear(),
+        top: date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: TEAM_ZONE }),
+        bottom: date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone: TEAM_ZONE }) + " · " + date.toLocaleDateString(undefined, { year: "numeric", timeZone: TEAM_ZONE }),
         tbd: false,
       };
     }
@@ -116,8 +119,8 @@ function fullWhen(meeting: Meeting): string {
   if (meeting.meetingAt) {
     const date = new Date(meeting.meetingAt);
     if (!Number.isNaN(date.getTime())) {
-      return date.toLocaleDateString(undefined, { weekday: "short", month: "long", day: "numeric", year: "numeric" }) +
-        " · " + date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      return date.toLocaleDateString(undefined, { weekday: "short", month: "long", day: "numeric", year: "numeric", timeZone: TEAM_ZONE }) +
+        " · " + date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone: TEAM_ZONE });
     }
   }
   return meeting.whenText || "Time to be confirmed";
@@ -127,7 +130,7 @@ function messageTime(value: string | null): string {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " · " + date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: TEAM_ZONE }) + " · " + date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone: TEAM_ZONE });
 }
 
 function ConversationHistory({ history, leadName }: { history: History | undefined; leadName: string | null }) {

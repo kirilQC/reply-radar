@@ -51,7 +51,8 @@ const externalUrl = (v: unknown): string => {
   if (!s || s === "null") return "";
   return s.startsWith("http") ? s : `https://${s}`;
 };
-const whenDate = (v: unknown): string => { const s = str(v); if (!s) return ""; const d = new Date(s); return Number.isNaN(+d) ? s : d.toLocaleString(); };
+// Pinned to the team's zone so a call time reads the same on every teammate's machine.
+const whenDate = (v: unknown): string => { const s = str(v); if (!s) return ""; const d = new Date(s); return Number.isNaN(+d) ? s : d.toLocaleString("en-US", { timeZone: "America/New_York" }); };
 
 function SmartImg({ src, className, fallback }: { src: string | null; className: string; fallback: React.ReactNode }) {
   const [failed, setFailed] = useState(false);
@@ -165,7 +166,6 @@ export default function ClientCallList() {
   const [addOpen, setAddOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(30);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = async () => {
     try {
@@ -191,27 +191,30 @@ export default function ClientCallList() {
   useEffect(() => { if (slug) { void load(); void loadCampaigns(); } }, [slug]);
 
   const anyJobActive = campaigns.some((c) => c.job && c.job.status !== "done" && c.job.status !== "error");
-  useEffect(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    if (anyJobActive) { setAddOpen(true); pollRef.current = setInterval(() => { void load(); void loadCampaigns(); }, 6000); }
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyJobActive, slug]);
+  useEffect(() => { if (anyJobActive) setAddOpen(true); }, [anyJobActive]);
 
+  /*
+   * One loop while a fetch job runs: advance the queue, then reread leads and campaigns. There used to be a
+   * second 6s poller rereading the same two endpoints alongside this one, which doubled the HeyReach calls for
+   * nothing. A hidden tab skips its ticks (nobody is watching the list grow) and catches up the moment it is
+   * shown again, so a background tab never burns API quota.
+   */
   const drainingRef = useRef(false);
   useEffect(() => {
     if (!anyJobActive) return;
     let stopped = false;
     const drain = async () => {
-      if (stopped || drainingRef.current) return;
+      if (stopped || drainingRef.current || document.hidden) return;
       drainingRef.current = true;
       try { await fetch("/api/cold-calling/process", { method: "POST" }); } catch { /* ignore */ }
       drainingRef.current = false;
       if (!stopped) { await load(); await loadCampaigns(); }
     };
+    const onVisible = () => { if (!document.hidden) void drain(); };
     void drain();
     const id = setInterval(() => void drain(), 8000);
-    return () => { stopped = true; clearInterval(id); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { stopped = true; clearInterval(id); document.removeEventListener("visibilitychange", onVisible); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyJobActive, slug]);
 
@@ -525,12 +528,19 @@ function AddLeadsModal({ slug, clientName, campaigns, busy, anyJobActive, onClos
 
   const shown = campaigns.filter((c) => !search.trim() || c.name.toLowerCase().includes(search.trim().toLowerCase()));
 
+  // Escape closes the modal, as it does every other panel.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <div className="cc-modal-backdrop" onClick={onClose}>
       <div className="cc-modal" onClick={(e) => e.stopPropagation()}>
         <div className="cc-modal-head">
           <h2>Add leads{clientName ? ` · ${clientName}` : ""}</h2>
-          <button type="button" className="cc-modal-x" onClick={onClose}>✕</button>
+          <button type="button" className="cc-modal-x" onClick={onClose} aria-label="Close add leads">✕</button>
         </div>
         <div className="cc-modal-tabs">
           {hasCampaigns && <button type="button" className={tab === "campaign" ? "on" : ""} onClick={() => setTab("campaign")}>From a campaign</button>}

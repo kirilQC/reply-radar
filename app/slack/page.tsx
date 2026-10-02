@@ -410,9 +410,12 @@ export default function SlackPage() {
             <div className="hub-lede hub-lede-split">
               <h1>{AUTOMATION_LABEL[automation]}</h1>
               {/* The EOW report runs the built-in Tarsi template from the Reports hub, so there is no
-                  AI-hub prompt to edit — the other two are written in the AI hub. */}
+                  AI-hub prompt to edit — the other two are written in the AI hub. Only the morning brief
+                  has its own anchor there (the hub opens on its prompt for that hash); the call analysis
+                  prompt has no panel of its own yet, so that link lands on the hub itself rather than on
+                  an anchor that does not exist. */}
               {automation !== "eow_report" && (
-                <a className="text-button" href={automation === "call_analysis" ? "/admin?section=ai-hub#ai-call-analysis" : "/admin?section=ai-hub#ai-morning-brief"}>Edit the prompt →</a>
+                <a className="text-button" href={automation === "call_analysis" ? "/admin?section=ai-hub" : "/admin?section=ai-hub#ai-morning-brief"}>Edit the prompt →</a>
               )}
             </div>
 

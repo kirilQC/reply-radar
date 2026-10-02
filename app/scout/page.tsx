@@ -661,7 +661,17 @@ export default function McpPage() {
   }, []);
   useEffect(() => { if (historyOpen && sessions === null) loadSessions(); }, [historyOpen, sessions, loadSessions]);
 
+  /**
+   * The stream being read for the turn in progress. Aborted when a new chat starts or the page goes
+   * away, so a navigation does not leave the tab reading (and the server spending on) an answer
+   * nobody will see, and so a late answer cannot land in the chat that replaced it.
+   */
+  const streamRef = useRef<AbortController | null>(null);
+  useEffect(() => () => streamRef.current?.abort(), []);
+
   const startNew = () => {
+    streamRef.current?.abort();
+    streamRef.current = null;
     setMessages([]);
     setOpenTrail(null);
     setSessionId("");
@@ -852,6 +862,12 @@ export default function McpPage() {
       });
     };
 
+    streamRef.current?.abort();
+    const controller = new AbortController();
+    streamRef.current = controller;
+    // Set only for a refusal from the route itself, whose message is worth showing as it is.
+    let refused = "";
+
     try {
       const response = await fetch("/api/mcp", {
         method: "POST",
@@ -859,7 +875,20 @@ export default function McpPage() {
         body: JSON.stringify({
           messages: history.map(({ role, content, attached: files }) => ({ role, content, files })),
         }),
+        signal: controller.signal,
       });
+      /*
+       * A refusal (signed out, over a limit, a crashed route) arrives as an ordinary JSON or HTML body
+       * rather than an event stream. Read as a stream it parsed to no events at all, which then
+       * surfaced as "the answer stopped part-way through" and hid the actual reason.
+       */
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        let reason = "";
+        try { const parsed = JSON.parse(body) as { error?: unknown; message?: unknown }; reason = String(parsed.error ?? parsed.message ?? ""); } catch { reason = /^\s*</.test(body) ? "" : body.trim().slice(0, 300); }
+        refused = `The assistant could not answer (${response.status}${response.statusText ? ` ${response.statusText}` : ""})${reason ? `: ${reason}` : "."}`;
+        throw new Error(refused);
+      }
       if (!response.body) throw new Error("The assistant returned nothing.");
 
       const reader = response.body.getReader();
@@ -869,6 +898,7 @@ export default function McpPage() {
 
       const finish = (message: Message) => {
         settled = true;
+        if (controller.signal.aborted) return;
         setMessages([...history, message]);
       };
 
@@ -953,7 +983,7 @@ export default function McpPage() {
       // The stream ended without a verdict — the platform cut it, or the tab slept. Whatever was
       // already written is kept, because a partial answer with its lookups visible is worth more than
       // an error that throws the work away.
-      if (!settled) {
+      if (!settled && !controller.signal.aborted) {
         finish({
           role: "assistant",
           content: answer || "The answer stopped part-way through. Ask again, or narrow the question.",
@@ -964,11 +994,14 @@ export default function McpPage() {
         });
       }
     } catch {
+      // Aborted on purpose (new chat, or leaving the page): there is nothing to report, and writing
+      // the failed turn back would resurrect the conversation that was just cleared.
+      if (controller.signal.aborted) return;
       setMessages([
         ...history,
         {
           role: "assistant",
-          content: "The request did not complete. Check your connection and ask again.",
+          content: refused || "The request did not complete. Check your connection and ask again.",
           entries: [...entries],
           failed: true,
           askedAt: new Date().toISOString(),
@@ -978,6 +1011,7 @@ export default function McpPage() {
       // Cancelled before the live turn is cleared, or a frame queued by the last delta would land
       // afterwards and put the half-written answer back underneath the finished one.
       if (frame) cancelAnimationFrame(frame);
+      if (streamRef.current === controller) streamRef.current = null;
       setThinking(false);
       setLive({ entries: [], answer: "" });
       inputRef.current?.focus();

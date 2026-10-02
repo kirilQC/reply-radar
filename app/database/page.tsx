@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
@@ -270,8 +270,15 @@ export default function DatabasePage() {
     return () => window.clearTimeout(timer);
   }, [search]);
 
+  // Every fresh query takes a new sequence number; a Load more page inherits the one it was asked
+  // under. Any response whose number is no longer current belongs to a query the user has already
+  // left (another client, another search), so it is dropped instead of painting or appending the
+  // wrong client's leads over the right ones.
+  const loadSeq = useRef(0);
   const load = useCallback(
     async (append = false, requestedCursor: string | null = null) => {
+      const seq = append ? loadSeq.current : ++loadSeq.current;
+      const isCurrent = () => seq === loadSeq.current;
       if (append) setLoadingMore(true);
       else setLoading(true);
       setError("");
@@ -288,6 +295,7 @@ export default function DatabasePage() {
           cache: "no-store",
         });
         const payload = await response.json().catch(() => ({}));
+        if (!isCurrent()) return;
         if (!response.ok)
           throw new Error(
             String(payload.error ?? "Could not load the lead database."),
@@ -306,14 +314,18 @@ export default function DatabasePage() {
         setTotalLeads(typeof payload.totalLeads === "number" ? payload.totalLeads : null);
         setTotalFiltered(Boolean(payload.filtered));
       } catch (loadError) {
+        if (!isCurrent()) return;
         setError(
           loadError instanceof Error
             ? loadError.message
             : "Could not load the lead database.",
         );
       } finally {
-        setLoading(false);
-        setLoadingMore(false);
+        // A superseded request leaves the spinners to the one that replaced it.
+        if (isCurrent()) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
       }
     },
     // `sort` belongs here with the filters: the effect below re-runs whenever this callback changes,
@@ -376,7 +388,14 @@ export default function DatabasePage() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  // The lead whose detail the drawer is waiting on. Clicking B while A is still loading must not let
+  // A's answer land under B's header, where Delete would then act on B with A's counts.
+  const detailFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (detailFor.current !== selectedId) detailFor.current = null;
+  }, [selectedId]);
   const openLead = async (leadId: string) => {
+    detailFor.current = leadId;
     setSelectedId(leadId);
     setDetail(null);
     setDetailLoading(true);
@@ -386,12 +405,14 @@ export default function DatabasePage() {
         cache: "no-store",
       });
       const payload = await response.json().catch(() => ({}));
+      if (detailFor.current !== leadId) return;
       if (!response.ok)
         throw new Error(
           String(payload.error ?? "Could not load lead details."),
         );
       setDetail(payload);
     } catch (loadError) {
+      if (detailFor.current !== leadId) return;
       setError(
         loadError instanceof Error
           ? loadError.message
@@ -399,7 +420,7 @@ export default function DatabasePage() {
       );
       setSelectedId(null);
     } finally {
-      setDetailLoading(false);
+      if (detailFor.current === leadId) setDetailLoading(false);
     }
   };
 
@@ -713,7 +734,9 @@ export default function DatabasePage() {
           {hasMore && (
             <button
               className="database-load-more"
-              disabled={loadingMore}
+              // Held while a fresh query is loading too: the cursor on hand belongs to the old query,
+              // and a page fetched with it would be appended under the new one.
+              disabled={loadingMore || loading}
               onClick={() => load(true, cursor)}
             >
               {loadingMore ? "Loading…" : "Load 50 more leads"}
@@ -780,7 +803,14 @@ export default function DatabasePage() {
         </main>
       </section>
       {selectedId && (
-        <div className="database-drawer-backdrop">
+        // The keyboard route out is the window-level Escape listener above, so the backdrop's click is the
+        // pointer twin of it rather than a control that needs its own key handling.
+        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+        <div
+          className="database-drawer-backdrop"
+          // A click on the dimmed area outside the drawer closes it, the pointer twin of Escape.
+          onClick={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}
+        >
           <aside className="database-drawer" aria-label="Lead details">
             <div className="database-drawer-head">
               <div>
