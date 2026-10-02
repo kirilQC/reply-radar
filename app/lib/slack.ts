@@ -465,6 +465,31 @@ async function joinPublicChannel(channelId: string): Promise<boolean> {
   }
 }
 
+/**
+ * Adds QC Bot to a private channel, using the teammate token that reads the channels.
+ *
+ * A bot that was never invited to a private channel cannot see it at all, so Slack answers its post with
+ * `channel_not_found` rather than `not_in_channel`, and it cannot join on its own. The user token is
+ * already in every client channel (that is how the brief reads them), so it can do the inviting. Needs the
+ * user token to carry `groups:write.invites` (and `channels:write.invites` for public ones); without it this
+ * returns the scope error and the post fails with an "invite QC Bot" message instead.
+ */
+async function inviteBot(channelId: string): Promise<{ ok: boolean; error?: string }> {
+  const token = userToken();
+  const { userId } = await botIdentity();
+  if (!token || !userId || !channelId) return { ok: false, error: "no_user_token" };
+  try {
+    const body = await raw(token, "conversations.invite", {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ channel: channelId, users: userId }),
+    });
+    return body.ok || body.error === "already_in_channel" ? { ok: true } : { ok: false, error: String(body.error ?? "") };
+  } catch {
+    return { ok: false, error: "request_failed" };
+  }
+}
+
 export async function postMessage(channelId: string, text: string, threadTs = "", blocks?: unknown[]): Promise<string> {
   const send = () => call("chat.postMessage", {
     method: "POST",
@@ -491,9 +516,24 @@ export async function postMessage(channelId: string, text: string, threadTs = ""
     // it can add itself to, then post — which is what turns "configured but the bot was never invited" from
     // a silent daily miss into a delivered brief. Any other error, and a private channel it cannot self-join,
     // fall straight through with their original message.
-    if ((error as { code?: string })?.code !== "not_in_channel") throw error;
-    if (!(await joinPublicChannel(channelId))) throw error;
-    return String((await send()).ts ?? "");
+    const code = (error as { code?: string })?.code;
+    if (code !== "not_in_channel" && code !== "channel_not_found") throw error;
+    if (code === "not_in_channel" && (await joinPublicChannel(channelId))) return String((await send()).ts ?? "");
+    // A private channel the bot was never invited to: have the teammate token invite it, then post.
+    const invited = await inviteBot(channelId);
+    if (invited.ok) return String((await send()).ts ?? "");
+    // The id is valid if the teammate token can read the channel, so say what is actually wrong.
+    const readable = await raw(userToken() || botToken(), "conversations.info", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ channel: channelId }).toString(),
+    }).then((body) => Boolean(body.ok)).catch(() => false);
+    if (!readable) throw error;
+    const failure = new Error(invited.error === "missing_scope"
+      ? "QC Bot is not in this private channel and could not invite itself. Type /invite @QC Bot in the channel, or add groups:write.invites to the Slack user token."
+      : "QC Bot is not in this private channel. Type /invite @QC Bot in the channel, then try again.") as Error & { code?: string };
+    failure.code = "not_in_channel";
+    throw failure;
   }
 }
 
