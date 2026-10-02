@@ -19,6 +19,7 @@ test("allowlisted ids pass through", () => {
 });
 
 test("Claude 5 one-shot calls send no temperature and switch thinking off", () => {
-  for (const id of ACTIVE_MODELS) assert.deepEqual(temperatureField(id, 0), { thinking: { type: "between_tools" } }, id);
+  assert.deepEqual(temperatureField("claude-sonnet-5-5", 0), { thinking: { type: "between_tools" } });
+  assert.deepEqual(temperatureField("claude-opus-5-5", 0), { thinking: { type: "disabled" } });
   assert.deepEqual(temperatureField(OPENROUTER_DEFAULT_MODEL, 0), {});
 });

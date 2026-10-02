@@ -27,6 +27,9 @@ export const ACTIVE_MODELS = [
 
 /** Every AI feature runs on this unless a client is explicitly set to another allowed model. Sonnet 5.5:
  *  the newest, cheapest current-generation model ($2 / $10 per million tokens, Oct 2026). */
+/** The thinking type that means "answer directly" on each allowlisted model. */
+const THINKING_OFF = { "claude-sonnet-5-5": "between_tools", "claude-opus-5-5": "disabled" };
+
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
 
 /** The same default on OpenRouter, which spells versions with a dot. */
@@ -64,5 +67,7 @@ export function supportsTemperature(requested) {
 export function temperatureField(model, temperature) {
   if (supportsTemperature(model)) return { temperature };
   const id = typeof model === "string" ? model : "";
-  return id.startsWith("claude-") ? { thinking: { type: "between_tools" } } : {};
+  if (!id.startsWith("claude-")) return {};
+  // Each model spells "don't think first" differently, and rejects the other spelling (verified Oct 2026).
+  return { thinking: { type: THINKING_OFF[id] ?? "between_tools" } };
 }
