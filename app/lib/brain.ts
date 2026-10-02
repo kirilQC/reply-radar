@@ -228,9 +228,54 @@ export async function brainFiles(paths: string[], concurrency = 8): Promise<Brai
  */
 export async function brainCorpus(paths: string[]): Promise<BrainDoc[]> {
   if (corpusCache && corpusCache.expires > Date.now()) return corpusCache.docs;
-  const docs = await brainFiles(paths, 8);
+  // One archive download instead of one request per file: ~1,000 files at eight in flight took 13s on
+  // every fresh server, the tarball is a single ~2 MB request. Falls back to per-file reads if it fails.
+  const docs = (await brainCorpusFromTarball(paths).catch(() => null)) ?? (await brainFiles(paths, 8));
   corpusCache = { expires: Date.now() + CORPUS_CACHE_MS, docs };
   return docs;
+}
+
+/** The wanted paths, read out of the repo's HEAD tarball. Null when the archive can't be used. */
+async function brainCorpusFromTarball(paths: string[]): Promise<BrainDoc[] | null> {
+  if (!brainConfigured()) return null;
+  const wanted = new Set(paths);
+  const response = await fetch(`${API}/repos/${BRAIN_REPO}/tarball/HEAD`, {
+    headers: headers(),
+    signal: AbortSignal.timeout(TIMEOUT_MS * 2),
+    cache: "no-store",
+  });
+  if (!response.ok) return null;
+  const { gunzipSync } = await import("node:zlib");
+  const tar = gunzipSync(Buffer.from(await response.arrayBuffer()));
+  const shaByPath = new Map((treeCache?.files ?? []).map((file) => [file.path, file.sha]));
+  const docs: BrainDoc[] = [];
+  let longName = "";
+  for (let at = 0; at + 512 <= tar.length; ) {
+    const header = tar.subarray(at, at + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const field = (from: number, len: number) => header.subarray(from, from + len).toString("utf8").split("\0")[0];
+    const size = parseInt(field(124, 12).trim() || "0", 8);
+    const type = field(156, 1);
+    const prefix = field(345, 155);
+    const body = tar.subarray(at + 512, at + 512 + size);
+    at += 512 + Math.ceil(size / 512) * 512;
+    if (type === "x") {
+      // A pax header carrying the next entry's long path.
+      const match = body.toString("utf8").match(/\d+ path=([^\n]+)\n/);
+      longName = match ? match[1] : "";
+      continue;
+    }
+    if (type === "g") continue;
+    const fullName = longName || (prefix ? `${prefix}/${field(0, 100)}` : field(0, 100));
+    longName = "";
+    if (type !== "0" && type !== "") continue;
+    // Every entry sits under one "<owner>-<repo>-<sha>/" folder.
+    const path = fullName.split("/").slice(1).join("/");
+    if (!wanted.has(path)) continue;
+    docs.push({ path, sha: shaByPath.get(path) ?? "", text: body.toString("utf8"), url: `${BRAIN_URL}/blob/main/${path}` });
+  }
+  // A tarball that matched almost nothing means the layout was not what this expects; use the slow path.
+  return docs.length >= paths.length * 0.9 ? docs : null;
 }
 
 /**
