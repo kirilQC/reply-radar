@@ -10,6 +10,7 @@ import AppSidebar from "../components/AppSidebar";
 import Crumb from "../components/Crumb";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import "../cold-calling.css";
+import Skeleton from "../components/Skeleton";
 
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; callable: number; withPhone: number };
 
@@ -39,7 +40,7 @@ export default function ColdCallingDirectory() {
           <div className="cc-heading">
             <h1>Cold calling</h1>
           </div>
-          {loading && <p className="cc-muted">Loading…</p>}
+          {loading && <Skeleton variant="logo-cards" count={12} label="Loading clients" />}
           {!loading && clients.length === 0 && <div className="cc-empty">No clients with a HeyReach connection yet.</div>}
           <div className="cc-directory">
             {clients.map((c) => (

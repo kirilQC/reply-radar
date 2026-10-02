@@ -59,6 +59,7 @@ import { freshStats, runPipeline, type EnrichMode, type Enriched, type Outcome, 
 import { ActivityLog, EnrichControl, StageCards, type Detection, type LogLine } from "./pipeline-view";
 import { missingData, scrapeTarget } from "../../../shared/enrich.mjs";
 import "../../jev.css";
+import Skeleton from "../../components/Skeleton";
 
 type Kind = "must" | "exclude" | "signal" | "key";
 type Question = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: Kind; neutral?: string[] };
@@ -1071,7 +1072,7 @@ export default function JevClientPage() {
           {loadError ? (
             <div className="jev-banner is-error">{loadError} <Link href="/jev">Back to clients</Link></div>
           ) : !client ? (
-            <div className="jev-empty">Loading…</div>
+            <Skeleton variant="doc" count={7} label="Loading Jev" />
           ) : (
             <>
               <div className="jev-client-head">

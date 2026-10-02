@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import Crumb from "../components/Crumb";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
+import Skeleton from "../components/Skeleton";
 
 type Progress = { doneLeaves: number; totalLeaves: number; pct: number; complete: boolean };
 type Client = {
@@ -139,6 +140,7 @@ export default function OnboardingDirectoryPage() {
             const completed = clients.filter((c) => c.progress.complete);
             return (
               <>
+                {loading && <Skeleton variant="list" count={8} label="Loading onboarding" />}
                 {!loading && clients.length === 0 && (
                   <div className="onb-directory"><div className="onb-empty">No clients yet. Add your first one to start its checklist.</div></div>
                 )}

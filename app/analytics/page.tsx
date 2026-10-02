@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
+import Skeleton from "../components/Skeleton";
 
 type Performance = { name: string; replies: number; messages?: number; messagesSent?: number; conversations?: number; clients?: string[] };
 type CampaignMetric = { workspaceId: string; client: string; campaignId: string; name: string; connectionsSent: number; connectionsAccepted: number; replies: number; replies7d?: number; messagesStarted: number; acceptanceRate: number; replyRate: number; positiveReplies: number; positiveReplyRate: number; launchedAt: string | null; status: string | null };
@@ -573,13 +574,15 @@ export default function AnalyticsPage() {
             <small>{stage.label}</small>
           </div>
         )}
-        <section className="analytics-kpis">
+        {!clientPayload ? <Skeleton variant="stats" count={4} label="Loading this client" /> : (
+        <section className="analytics-kpis rr-appear">
           <Kpi label="All-time replies" value={allTimeReplies.toLocaleString()} sub={`${(clientPayload?.repliesSynced ?? 0).toLocaleString()} synced to the inbox`}/>
           <Kpi label="Average reply rate" value={average("replyRate") == null ? "—" : `${average("replyRate")!.toFixed(1)}%`}/>
           <Kpi label="Average acceptance rate" value={average("acceptanceRate") == null ? "—" : `${average("acceptanceRate")!.toFixed(1)}%`}/>
           <Kpi label="Average positive reply rate" value={average("positiveReplyRate") == null ? "—" : `${average("positiveReplyRate")!.toFixed(1)}%`}/>
           <Kpi label="Engagement runtime" value={runtime.label} sub={runtime.since}/>
         </section>
+        )}
         <section className="analytics-kpis analytics-kpis-secondary">
           <Kpi label="Leads reached out to" value={contacted.toLocaleString()} sub="Connection requests sent, all time"/>
           <Kpi label="Connections accepted" value={accepted.toLocaleString()} sub={contacted ? `${((accepted / contacted) * 100).toFixed(1)}% of requests sent` : undefined}/>
@@ -850,7 +853,7 @@ export default function AnalyticsPage() {
   // "6d ago" offsets that quietly went wrong once the window grew past a week.
   const trendLabels = data.trendLabels ?? [];
   return <div className="app-shell"><AppSidebar/><section className="main-area"><header className="topbar"><Crumb trail={[{ label: "Analytics" }]} /><div className="top-actions"><GlobalAppearanceControl /></div></header><main className="analytics-dashboard"><header className="analytics-hero"><div><h1>Analytics</h1></div><div className="analytics-live"><i /> Live data{updatedAt ? ` · updated ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</div></header>
-    <section className="analytics-kpis"><Kpi label="All-time replies" value={(data.totalReplies ?? 0).toLocaleString()} sub="Across all clients"/><Kpi label="Average reply rate" value={`${(data.campaignAverages?.replyRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average acceptance rate" value={`${(data.campaignAverages?.acceptanceRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average positive reply rate" value={`${(data.campaignAverages?.positiveReplyRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average daily replies" value={Math.round(data.averageDailyReplies ?? 0).toLocaleString()} sub="Last 7 full days"/></section>
+    {data.totalReplies === undefined && !data.status ? <Skeleton variant="stats" count={4} label="Loading analytics" /> : <section className="analytics-kpis rr-appear"><Kpi label="All-time replies" value={(data.totalReplies ?? 0).toLocaleString()} sub="Across all clients"/><Kpi label="Average reply rate" value={`${(data.campaignAverages?.replyRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average acceptance rate" value={`${(data.campaignAverages?.acceptanceRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average positive reply rate" value={`${(data.campaignAverages?.positiveReplyRate ?? 0).toFixed(1)}%`} sub="Across all clients"/><Kpi label="Average daily replies" value={Math.round(data.averageDailyReplies ?? 0).toLocaleString()} sub="Last 7 full days"/></section>}
     <section className="analytics-primary"><article className="analytics-card analytics-trend"><CardTitle title="Reply momentum"/><div className="analytics-bars">{trend.map((value, index) => <div key={index}><strong>{value}</strong><i style={{ height: `${Math.max(4, (value / max) * 100)}%` }}/><small>{trendLabels[index]}</small></div>)}</div></article></section>
 
     <section className="analytics-clients-section">

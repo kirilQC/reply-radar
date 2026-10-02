@@ -11,6 +11,7 @@ import AppSidebar from "../../components/AppSidebar";
 import Crumb from "../../components/Crumb";
 import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import "../../deals.css";
+import Skeleton from "../../components/Skeleton";
 
 type Deal = {
   id: string;
@@ -196,7 +197,7 @@ export default function ClientDealsPage() {
           <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="deal-shell">
-          {loading && <p style={{ color: "var(--muted)", fontSize: 12 }}>Loading…</p>}
+          {loading && <><Skeleton variant="stats" count={4} label="Loading deals" /><div style={{ height: 16 }} /><Skeleton variant="board" count={4} label="Loading deals" /></>}
           {notFound && !loading && <div className="deal-empty">That client was not found. <Link href="/deals" style={{ color: "var(--accent)" }}>Back</Link>.</div>}
 
           {client && (

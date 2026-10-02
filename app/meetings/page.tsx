@@ -9,6 +9,7 @@ import AppSidebar from "../components/AppSidebar";
 import Crumb from "../components/Crumb";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import "../meetings.css";
+import Skeleton from "../components/Skeleton";
 
 type Client = {
   id: string;
@@ -66,6 +67,7 @@ export default function MeetingsDirectoryPage() {
             <h1>Booked meetings</h1>
           </div>
 
+          {loading && <Skeleton variant="logo-cards" count={12} label="Loading meetings" />}
           {!loading && clients.length === 0 && (
             <div className="mtg-directory"><div className="mtg-empty">No clients yet.</div></div>
           )}

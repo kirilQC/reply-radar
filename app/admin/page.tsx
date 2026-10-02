@@ -13,6 +13,7 @@ import { brainFolderFor } from "../../shared/brain-link.mjs";
 import { airtableBaseFor } from "../../shared/airtable-link.mjs";
 import { looksLikeChannelId, normalizeChannelId } from "../lib/slack-channel";
 import { parseTitleNeedles, describeNeedles } from "../lib/granola-match";
+import Skeleton from "../components/Skeleton";
 
 /** What the breadcrumb calls each configuration section. */
 const adminSectionLabels: Record<string, string> = {
@@ -1308,7 +1309,7 @@ function GranolaKeysView() {
         <label className="field-label">API KEY<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="grn_…" autoComplete="off" spellCheck={false} /></label>
         <button className="primary-button" type="button" onClick={addKey} disabled={saving || !label.trim() || !apiKey.trim()}>{saving ? "Checking…" : "Add key"}</button>
       </div>
-      {loading ? <p className="feedback-empty">Loading…</p> : keys.length === 0 ? <p className="feedback-empty">No keys yet. Without one, briefs go out without the client&apos;s call.</p> : (
+      {loading ? <Skeleton variant="lines" count={2} label="Loading keys" /> : keys.length === 0 ? <p className="feedback-empty">No keys yet. Without one, briefs go out without the client&apos;s call.</p> : (
         <ul className="granola-key-list">
           {keys.map((key) => (
             <li key={key.id} className={key.lastStatus === "error" ? "granola-key broken" : "granola-key"}>
@@ -1437,7 +1438,7 @@ function ReleaseHistory() {
         <a className="filter-button" href={repoUrl} target="_blank" rel="noreferrer">View the repo</a>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
-      {loading && <p className="feedback-empty">Loading…</p>}
+      {loading && <Skeleton variant="list" count={5} label="Loading" />}
       {!loading && !error && !visible.length && <p className="feedback-empty">No commits found.</p>}
       {visible.length > 0 && (
         <ol className="release-list">
@@ -1627,7 +1628,7 @@ function FeedbackView() {
           </select>
         </div>
         {error && <p className="form-error" role="alert">{error}</p>}
-        {loading && <p className="feedback-empty">Loading…</p>}
+        {loading && <Skeleton variant="list" count={5} label="Loading" />}
         {!loading && !visible.length && <p className="feedback-empty">Nothing here yet.</p>}
         <div className="feedback-list">
           {visible.map((item) => (

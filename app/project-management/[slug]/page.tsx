@@ -12,6 +12,7 @@ import Crumb from "../../components/Crumb";
 import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import ProjectBoard, { type BoardTask, type NewFields } from "../Board";
 import "../project-management.css";
+import Skeleton from "../../components/Skeleton";
 
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 const initials = (s: string) => (s.trim()[0] || "?").toUpperCase();
@@ -62,14 +63,16 @@ export default function ClientProjects() {
         <main className="pm-shell pm-board-shell">
           <Link href="/project-management" className="pm-back">← All clients</Link>
           <div className="pm-client-head">
+            {!client && loading ? <span className="pm-client-logo rr-skel"><span className="rr-skel-bar" style={{ width: "100%", height: "100%", borderRadius: "inherit" }} /></span> : (
             <span className="pm-client-logo" style={client?.logoUrl ? undefined : { background: client?.accentColor || "var(--accent)" }}>
               {client?.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client?.name || "?")}
             </span>
-            <h1>{client?.name || "Client"}</h1>
+            )}
+            {!client && loading ? <h1 className="rr-skel" aria-label="Loading"><span className="rr-skel-bar" style={{ width: 220, height: 34, borderRadius: 8 }} /></h1> : <h1 className="rr-appear">{client?.name || "Client"}</h1>}
           </div>
           {err && <div className="pm-err">⚠ {err}</div>}
-          {loading ? <p className="pm-muted">Loading…</p> : (
-            <ProjectBoard tasks={tasks} clients={client ? [client] : []} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} />
+          {loading ? <Skeleton variant="board" label="Loading tasks" /> : (
+            <div className="rr-appear"><ProjectBoard tasks={tasks} clients={client ? [client] : []} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} /></div>
           )}
         </main>
       </section>

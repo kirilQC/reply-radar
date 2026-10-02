@@ -24,6 +24,7 @@ import {
   setActiveProfile,
   writeCachedAppearance,
 } from "./lib/preference-identity";
+import Skeleton from "./components/Skeleton";
 
 type Lead = {
   id: string;
@@ -3169,7 +3170,7 @@ function InboxAnalytics({
               </button>
             ))}
           </div>
-          {loading && <span className="inbox-analytics-loading">Loading…</span>}
+          {loading && <span className="inbox-analytics-loading rr-skel" aria-label="Loading"><span className="rr-skel-bar" style={{ width: 70, height: 8 }} /></span>}
         </div>
         <div className="graph-toolbar">
           <button
@@ -3386,7 +3387,7 @@ function GraphVisual({
   measureLabel: string;
   loading: boolean;
 }) {
-  if (loading) return <div className="analytics-empty">Loading…</div>;
+  if (loading) return <div className="analytics-empty analytics-empty-loading"><Skeleton variant="lines" count={4} label="Loading graph" /></div>;
   const populated = points.some((point) => point.value > 0);
   if (!points.length || !populated)
     return <div className="analytics-empty">No data for this view yet</div>;

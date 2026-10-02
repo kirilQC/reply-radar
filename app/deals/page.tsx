@@ -9,6 +9,7 @@ import AppSidebar from "../components/AppSidebar";
 import Crumb from "../components/Crumb";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import "../deals.css";
+import Skeleton from "../components/Skeleton";
 
 type Client = {
   id: string;
@@ -89,6 +90,7 @@ export default function DealsDirectoryPage() {
           <div className="deal-heading">
             <h1>Deals &amp; attribution</h1>
           </div>
+          {loading && <Skeleton variant="logo-cards" count={12} label="Loading deals" />}
           {!loading && clients.length === 0 && <div className="deal-directory"><div className="deal-empty">No clients yet.</div></div>}
           {clients.length > 0 && (() => {
             const connected = clients.filter((c) => c.crmProvider);

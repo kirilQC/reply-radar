@@ -89,11 +89,11 @@ function Greeting({ name, timeZone }: { name: string; timeZone: string }) {
  *
  * The context line is the point: "12 replies" alone says nothing about whether that is a good day.
  */
-function StatTile({ label, value, hint, tone, index, live, trend }: { label: string; value: number | null | undefined; hint: string; tone?: string; index: number; live?: boolean; trend?: "up" | "down" }) {
+function StatTile({ label, value, hint, tone, index, live, trend, pending }: { label: string; value: number | null | undefined; hint: string; tone?: string; index: number; live?: boolean; trend?: "up" | "down"; pending?: boolean }) {
   return (
     <article className="dashboard-stat-tile dash-in" style={{ ["--i" as string]: index }}>
       <span className="dashboard-stat-label">{label}{live && <i className="dash-live" title="Updates on its own" />}</span>
-      <strong className="dashboard-stat-value" style={tone ? { color: tone } : undefined}><CountUp value={value} /></strong>
+      <strong className="dashboard-stat-value" style={tone ? { color: tone } : undefined}>{pending && value == null ? <span className="rr-skel" aria-label="Loading"><span className="rr-skel-bar" style={{ width: 72, height: 26, borderRadius: 8, marginTop: 4 }} /></span> : <CountUp value={value} />}</strong>
       <small className={`dashboard-stat-hint ${trend ? `dash-trend-${trend}` : ""}`}>{hint}</small>
     </article>
   );
@@ -109,6 +109,7 @@ export default function DashboardHome() {
   const [appearance, setAppearance] = useState<AppearancePrefs>(defaultAppearance);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [summaryDone, setSummaryDone] = useState(false);
   useEffect(() => {
     try {
       const savedClients = window.localStorage.getItem("reply-radar-workspaces:v2");
@@ -138,7 +139,8 @@ export default function DashboardHome() {
       fetch(`/api/analytics/summary?timeZone=${encodeURIComponent(savedTimeZone())}`, { cache: "no-store" })
         .then((response) => (response.ok ? response.json() : null))
         .then((payload) => { if (payload?.ok) setSummary(payload as Summary); })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => setSummaryDone(true));
     void load();
     const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 60_000);
     const onVisible = () => { if (!document.hidden) void load(); };
@@ -220,7 +222,7 @@ export default function DashboardHome() {
         <main className="dashboard-home" onPointerMove={spotlight}>
           <section className="dashboard-stats-section">
             <div className="dashboard-stats-grid">
-              <StatTile
+              <StatTile pending={!summaryDone}
                 index={0}
                 live
                 trend={summary?.repliesToday != null && summary?.repliesYesterday != null && summary.repliesToday !== summary.repliesYesterday ? (summary.repliesToday > summary.repliesYesterday ? "up" : "down") : undefined}
@@ -234,12 +236,12 @@ export default function DashboardHome() {
                       : `${summary.repliesToday > summary.repliesYesterday ? "▲" : "▼"} ${Math.abs(summary.repliesToday - summary.repliesYesterday).toLocaleString()} vs yesterday`
                 }
               />
-              <StatTile index={1} label="Replies this week" value={summary?.repliesThisWeek} hint="Since Monday" />
-              <StatTile index={2} label="Replies this month" value={summary?.repliesThisMonth} hint={summary?.monthLabel ?? "Calendar month"} />
-              <StatTile index={3} label="All-time replies" value={summary?.repliesAllTime} hint={summary?.leads == null ? "Every reply stored" : `Across ${summary.leads.toLocaleString()} leads`} />
+              <StatTile pending={!summaryDone} index={1} label="Replies this week" value={summary?.repliesThisWeek} hint="Since Monday" />
+              <StatTile pending={!summaryDone} index={2} label="Replies this month" value={summary?.repliesThisMonth} hint={summary?.monthLabel ?? "Calendar month"} />
+              <StatTile pending={!summaryDone} index={3} label="All-time replies" value={summary?.repliesAllTime} hint={summary?.leads == null ? "Every reply stored" : `Across ${summary.leads.toLocaleString()} leads`} />
               {/* Counted from the workspaces table rather than from the browser's saved copy, which can
                   lag behind a client someone else added. */}
-              <StatTile
+              <StatTile pending={!summaryDone}
                 index={4}
                 label="Clients set up"
                 value={summary?.clients ?? (clients.length || null)}

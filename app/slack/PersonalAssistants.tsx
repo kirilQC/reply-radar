@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { DAY_NAMES, describeSchedule, type BriefSchedule } from "../lib/morning-brief-schedule";
+import Skeleton from "../components/Skeleton";
 
 type Client = { id: string; name: string; slug: string; logoUrl: string | null };
 type Person = {
@@ -167,7 +168,7 @@ export default function PersonalAssistants({ onBack }: { onBack: () => void }) {
       {note && <div className="pa-note">{note}</div>}
       {error && <div className="config-error">{error}</div>}
 
-      {loading ? <p className="brief-schedule-note">Loading…</p> : (
+      {loading ? <Skeleton variant="list" count={4} label="Loading assistants" /> : (
         <div className="pa-list">
           {people.map((p) => (
             <div className="pa-card" key={p.id}>

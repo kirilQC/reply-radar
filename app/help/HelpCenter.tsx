@@ -26,6 +26,7 @@ import Markdown from "../components/Markdown";
 import { articlePath, findBySlug, HELP_KINDS, HELP_PAGES, type HelpArticle, type HelpImage, type HelpKind, loomEmbedUrl, pageLabel } from "../lib/help-shared";
 import { ARROW_PATH, EXPAND_PATH, Glyph, HOME_PATH, kindPath, PageIcon, SEARCH_PATH, topicPath } from "./HelpIcons";
 import "./help.css";
+import Skeleton from "../components/Skeleton";
 
 type Draft = { id?: string; kind: HelpKind; title: string; body: string; loomUrl: string; page: string; keywords: string };
 type KindFilter = HelpKind | "all";
@@ -556,10 +557,11 @@ function HomeView({ loading, articles, groups, onOpen, onSearch }: {
       <div className="hd-hero hd-rise" style={{ ["--d" as string]: 0 }}>
         <span className="hd-eyebrow">Help center</span>
         <h1>Everything QC Command does, one click away.</h1>
-        <p>{loading ? "Loading guides…" : `${articles.length} short guides, each with a screenshot.`} Pick a page on the left, start below, or press <kbd>/</kbd> to search.</p>
+        <p>{loading ? "Short guides, each with a screenshot." : `${articles.length} short guides, each with a screenshot.`} Pick a page on the left, start below, or press <kbd>/</kbd> to search.</p>
         <button type="button" className="hd-hero-search" onClick={onSearch}><Glyph d={SEARCH_PATH} size={15} />Search help<kbd>/</kbd></button>
       </div>
 
+      {loading && start.length === 0 && <section className="hd-section"><Skeleton variant="cards" count={6} label="Loading guides" /></section>}
       {start.length > 0 && (
         <section className="hd-section">
           <span className="hd-eyebrow">Start here</span>

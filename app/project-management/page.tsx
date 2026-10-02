@@ -10,6 +10,7 @@ import AppSidebar from "../components/AppSidebar";
 import Crumb from "../components/Crumb";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import "./project-management.css";
+import Skeleton from "../components/Skeleton";
 
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; slackChannelId?: string };
 type ViewDef = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; slackChannelId?: string; memberSlugs: string[] };
@@ -43,7 +44,7 @@ export default function ProjectManagementDirectory() {
         </header>
         <main className="pm-shell pm-directory-shell">
           <div className="pm-dir-head"><h1>Project management</h1><button type="button" className="pm-newview" onClick={() => setEditing("new")}>+ New view</button></div>
-          {loading && <p className="pm-muted">Loading…</p>}
+          {loading && <Skeleton variant="logo-cards" count={12} label="Loading project boards" />}
 
           {views.length > 0 && (
             <>

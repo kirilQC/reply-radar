@@ -46,6 +46,7 @@ import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import Markdown from "../components/Markdown";
 import { agoLabel, clientHue, clientInitials, fileKind, staleness } from "../../shared/brain-structure.mjs";
+import Skeleton from "../components/Skeleton";
 
 type Coverage = { have: number; total: number; fraction: number };
 type IndexClient = { client: string; label: string; logo: string };
@@ -563,7 +564,7 @@ function Index({
   onArea: (prefix: string) => void;
   onSkills: () => void;
 }) {
-  if (loading) return <p className="brain-quiet">Reading the brain…</p>;
+  if (loading) return <Skeleton variant="logo-cards" count={18} label="Reading the brain" />;
   if (!clients.length) return <p className="brain-quiet">No clients found in the repository.</p>;
 
   return (
@@ -1348,7 +1349,7 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
   };
 
   if (error) return <p className="brain-error">{error}</p>;
-  if (!doc) return <p className="brain-quiet">Loading…</p>;
+  if (!doc) return <Skeleton variant="doc" label="Loading document" />;
 
   if (doc.kind !== "doc") {
     return (

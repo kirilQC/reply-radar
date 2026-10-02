@@ -11,6 +11,7 @@ import AppSidebar from "../../components/AppSidebar";
 import Crumb from "../../components/Crumb";
 import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import { computeProgress, groupTasks } from "../../../shared/onboarding.mjs";
+import Skeleton from "../../components/Skeleton";
 
 type Task = {
   id: string;
@@ -345,7 +346,7 @@ export default function OnboardingChecklistPage() {
           <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="onboarding-shell">
-          {loading && <p style={{ color: "var(--muted)", fontSize: 12 }}>Loading checklist…</p>}
+          {loading && <Skeleton variant="list" count={9} label="Loading checklist" />}
           {notFound && !loading && <div className="onb-empty">That client is not in the onboarding hub. <Link href="/onboarding" style={{ color: "var(--accent)" }}>Back</Link>.</div>}
 
           {client && (

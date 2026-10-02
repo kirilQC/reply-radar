@@ -11,6 +11,7 @@ import AppSidebar from "../../components/AppSidebar";
 import Crumb from "../../components/Crumb";
 import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import "../../meetings.css";
+import Skeleton from "../../components/Skeleton";
 
 type Meeting = {
   id: string;
@@ -356,7 +357,7 @@ export default function ClientMeetingsPage() {
           <div className="top-actions"><GlobalAppearanceControl /></div>
         </header>
         <main className="mtg-shell mtg-shell-wide">
-          {loading && <p style={{ color: "var(--muted)", fontSize: 12 }}>Loading meetings…</p>}
+          {loading && <Skeleton variant="list" count={7} label="Loading meetings" />}
           {notFound && !loading && <div className="mtg-empty">That client was not found. <Link href="/meetings" style={{ color: "var(--accent)" }}>Back</Link>.</div>}
 
           {client && (

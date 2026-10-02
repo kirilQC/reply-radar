@@ -33,6 +33,7 @@ import {
 } from "../lib/report-templates";
 import { packPages, paginate, suggestTrim } from "../../shared/report-pagination.mjs";
 import "./reports.css";
+import Skeleton from "../components/Skeleton";
 
 type Workspace = { id: string; slug: string; name: string; logo_url?: string; accent_color?: string; timezone?: string };
 
@@ -279,6 +280,7 @@ export default function ReportsPage() {
   const [templateError, setTemplateError] = useState("");
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   const [workspaceSlug, setWorkspaceSlug] = useState<string>("");
   const [period, setPeriod] = useState<Period>("monthly");
   const [customSince, setCustomSince] = useState("");
@@ -451,6 +453,7 @@ export default function ReportsPage() {
       const workspaceResponse = await fetch("/api/admin/workspaces", { cache: "no-store" }).catch(() => null);
       const payload = workspaceResponse ? await workspaceResponse.json().catch(() => ({})) : {};
       if (Array.isArray(payload.workspaces)) setWorkspaces(payload.workspaces as Workspace[]);
+      setWorkspacesLoaded(true);
       await Promise.allSettled([refreshTemplates(), refreshSaved()]);
     };
     load();
@@ -1054,9 +1057,10 @@ export default function ReportsPage() {
 
             <div className="hub-group-label">
               <span>Client workspaces</span>
-              <span>{sortedWorkspaces.length === 1 ? "1 client" : `${sortedWorkspaces.length} clients`}</span>
+              <span>{!workspacesLoaded ? "" : sortedWorkspaces.length === 1 ? "1 client" : `${sortedWorkspaces.length} clients`}</span>
             </div>
-            <div className="client-grid">
+            {!workspacesLoaded ? <Skeleton variant="logo-cards" count={12} label="Loading clients" /> : (
+            <div className="client-grid rr-appear">
               {sortedWorkspaces.map((workspace) => {
                 const count = reportCountFor(workspace);
                 return (
@@ -1080,8 +1084,9 @@ export default function ReportsPage() {
                 <small>Combined across every workspace</small>
               </button>
             </div>
+            )}
 
-            {!sortedWorkspaces.length && (
+            {workspacesLoaded && !sortedWorkspaces.length && (
               <div className="hub-empty">
                 No client workspaces yet. Add one in the admin console and it will appear here.
               </div>

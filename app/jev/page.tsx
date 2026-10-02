@@ -9,6 +9,7 @@ import AppSidebar from "../components/AppSidebar";
 import Crumb from "../components/Crumb";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import "../jev.css";
+import Skeleton from "../components/Skeleton";
 
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; hasQuestions: boolean; questionCount: number };
 
@@ -59,6 +60,7 @@ export default function JevDirectoryPage() {
             <h1>Jev list check</h1>
           </div>
           {error && <div className="jev-banner is-error">{error}</div>}
+          {loading && <Skeleton variant="logo-cards" count={12} label="Loading clients" />}
           {!loading && !error && clients.length === 0 && <div className="jev-empty">No clients yet.</div>}
           {clients.length > 0 && <div className="jev-directory">{clients.map((client) => <ClientCard key={client.id} client={client} />)}</div>}
         </main>

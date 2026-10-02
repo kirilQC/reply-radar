@@ -10,6 +10,7 @@ import AppSidebar from "../../components/AppSidebar";
 import Crumb from "../../components/Crumb";
 import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import { groupTasks, nextPosition } from "../../../shared/onboarding.mjs";
+import Skeleton from "../../components/Skeleton";
 
 type Step = {
   id: string;
@@ -165,7 +166,7 @@ export default function OnboardingTemplatePage() {
             <Link href="/onboarding" className="onb-back">← All clients</Link>
           </div>
 
-          {loading && <p style={{ color: "var(--muted)", fontSize: 12 }}>Loading template…</p>}
+          {loading && <Skeleton variant="list" count={9} label="Loading template" />}
 
           {!loading && (
             <div className="onb-tpl-list">

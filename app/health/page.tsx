@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
+import Skeleton from "../components/Skeleton";
 
 type Service = {
   id: string;
@@ -335,6 +336,10 @@ export default function HealthPage() {
               </div>
             </div>
 
+            {Object.keys(heartbeat).length === 0 ? (
+              <div style={{ display: "grid", gap: 16 }}><Skeleton variant="stats" count={3} label="Running the first health check" /><Skeleton variant="cards" count={6} label="Running the first health check" /></div>
+            ) : (
+            <div className="rr-appear">
             <div className="workspace-cards heartbeat-summary">
               <HealthCard
                 label="Total clients connected"
@@ -869,6 +874,8 @@ export default function HealthPage() {
                 </p>
               )}
             </section>
+            </div>
+            )}
           </section>
         </main>
       </section>

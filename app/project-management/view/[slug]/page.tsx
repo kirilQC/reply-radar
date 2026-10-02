@@ -12,6 +12,7 @@ import Crumb from "../../../components/Crumb";
 import GlobalAppearanceControl from "../../../components/GlobalAppearanceControl";
 import ProjectBoard, { type BoardTask, type BoardClient, type NewFields } from "../../Board";
 import "../../project-management.css";
+import Skeleton from "../../../components/Skeleton";
 
 type Client = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null };
 type ViewDef = { id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; slackChannelId?: string; memberSlugs: string[] };
@@ -78,11 +79,13 @@ export default function GroupView() {
           {!loading && !view ? <div className="pm-empty">That view was not found. <Link href="/project-management" style={{ color: "var(--accent)" }}>Back</Link>.</div> : (
             <>
               <div className="pm-client-head">
-                <span className="pm-client-logo" style={view?.logoUrl ? undefined : { background: view?.accentColor || "var(--accent)" }}>
-                  {view?.logoUrl ? <img src={view.logoUrl} alt="" /> : initials(view?.name || "?")}
+                {!view ? <span className="pm-client-logo rr-skel"><span className="rr-skel-bar" style={{ width: "100%", height: "100%", borderRadius: "inherit" }} /></span> : (
+                <span className="pm-client-logo" style={view.logoUrl ? undefined : { background: view.accentColor || "var(--accent)" }}>
+                  {view.logoUrl ? <img src={view.logoUrl} alt="" /> : initials(view.name || "?")}
                 </span>
+                )}
                 <div>
-                  <h1>{view?.name || "View"}</h1>
+                  {view ? <h1 className="rr-appear">{view.name}</h1> : <h1 className="rr-skel" aria-label="Loading"><span className="rr-skel-bar" style={{ width: 240, height: 34, borderRadius: 8 }} /></h1>}
                   <div className="pm-member-bubbles">
                     {members.map((m) => (
                       <Link className="pm-bubble" key={m.slug} title={`${m.name} → project board`} href={`/project-management/${encodeURIComponent(m.slug)}`}>
@@ -94,8 +97,8 @@ export default function GroupView() {
                 {weekBadge && <span className="pm-weekbadge">{weekBadge}</span>}
               </div>
               {err && <div className="pm-err">⚠ {err}</div>}
-              {loading ? <p className="pm-muted">Loading…</p> : (
-                <ProjectBoard tasks={tasks} clients={members} defaultView="table" notifyChannel={view?.slackChannelId || ""} onWeekChange={setWeekBadge} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} />
+              {loading ? <Skeleton variant="board" count={5} label="Loading tasks" /> : (
+                <div className="rr-appear"><ProjectBoard tasks={tasks} clients={members} defaultView="table" notifyChannel={view?.slackChannelId || ""} onWeekChange={setWeekBadge} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} /></div>
               )}
             </>
           )}

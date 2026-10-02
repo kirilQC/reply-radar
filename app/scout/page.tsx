@@ -50,6 +50,7 @@ import Markdown from "../components/Markdown";
 import { answerHasRows, answerToCsv, exportFilename } from "../../shared/answer-export.mjs";
 // The same wire format the route reads from Anthropic, so the same two helpers parse it.
 import { parseFrame, splitFrames } from "../../shared/anthropic-stream.mjs";
+import Skeleton from "../components/Skeleton";
 
 /**
  * One thing the assistant did, in the order it did it.
@@ -1119,7 +1120,7 @@ export default function McpPage() {
               </div>
               {historyError && <p className="mcp-history-note">{historyError}</p>}
               {sessions === null ? (
-                <p className="mcp-history-note">Loading…</p>
+                <Skeleton variant="lines" count={6} label="Loading history" />
               ) : sessions.length === 0 ? (
                 <p className="mcp-history-note">Nothing saved yet. Every conversation is saved here automatically once it has an answer.</p>
               ) : (

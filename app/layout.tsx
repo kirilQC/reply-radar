@@ -9,6 +9,7 @@ import "./inbox-analytics.css";
 import "./reply-radar-overrides.css";
 import "./integrity-refinements.css";
 import "./onboarding.css";
+import "./skeleton.css";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import PreferenceBootstrap from "./components/PreferenceBootstrap";

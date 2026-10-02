@@ -11,6 +11,7 @@ import AppSidebar from "../../components/AppSidebar";
 import Crumb from "../../components/Crumb";
 import GlobalAppearanceControl from "../../components/GlobalAppearanceControl";
 import "../../cold-calling.css";
+import Skeleton from "../../components/Skeleton";
 
 type CallLead = {
   id: string; name: string; title: string | null; company: string | null; linkedin: string | null;
@@ -628,7 +629,7 @@ function ConversationColumn({ lead, detail, detailLoading, busy, onSave, onSkip,
 
       <div className="cc-thread-scroll" ref={threadRef}>
         {detailLoading && !detail
-          ? <p className="cc-muted" style={{ padding: "24px 22px" }}>Loading conversation…</p>
+          ? <div style={{ padding: "20px 22px" }}><Skeleton variant="lines" count={5} label="Loading conversation" /></div>
           : messages && messages.length > 0
             ? <Conversation messages={messages} />
             : <div className="cc-thread-empty-wrap"><p className="cc-thread-empty">No LinkedIn messages on record — this lead hasn’t replied. Give them a call.</p></div>}
