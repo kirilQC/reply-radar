@@ -317,16 +317,27 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     const conversationId = String(conversationRow?.id ?? "");
     if (!conversationId) throw new Error("Conversation upsert returned no id.");
 
-    const existing = await db(config, `rr_messages?select=heyreach_message_id,direction,body,sent_at&conversation_id=eq.${encodeURIComponent(conversationId)}`) as JsonObject[];
+    /*
+     * The upsert below replaces raw_data wholesale on every message it matches, and raw_data.reply_radar
+     * is where the AI state lives: sentiment, the cached draft and reason, the follow-up score. Every
+     * new webhook on a conversation re-ingests the whole thread, so without this each reply wiped the
+     * analysis of every earlier message. The stored reply_radar is read back and laid underneath the
+     * fresh metadata, so sender, campaign and conversation stay current and nothing else is lost.
+     */
+    const existing = await db(config, `rr_messages?select=heyreach_message_id,direction,body,sent_at,reply_radar:raw_data->reply_radar&conversation_id=eq.${encodeURIComponent(conversationId)}`) as JsonObject[];
     const existingByFingerprint = new Map(existing.map((message) => [messageKey(message.sent_at, message.body), text(message.heyreach_message_id)]));
-    const messages = history.messages.map((message: ConversationMessage) => ({
-      conversation_id: conversationId,
-      heyreach_message_id: existingByFingerprint.get(messageKey(message.sentAt, message.body)) || message.externalId,
-      direction: message.direction,
-      body: message.body,
-      sent_at: message.sentAt,
-      raw_data: { ...message.raw, reply_radar: { ...object(message.raw.reply_radar), sender: history.sender, campaign, conversation: { id: conversationExternalId, accountId: history.sender.id } } },
-    }));
+    const existingRadarById = new Map(existing.map((message) => [text(message.heyreach_message_id), object(message.reply_radar)]));
+    const messages = history.messages.map((message: ConversationMessage) => {
+      const heyreachMessageId = existingByFingerprint.get(messageKey(message.sentAt, message.body)) || message.externalId;
+      return {
+        conversation_id: conversationId,
+        heyreach_message_id: heyreachMessageId,
+        direction: message.direction,
+        body: message.body,
+        sent_at: message.sentAt,
+        raw_data: { ...message.raw, reply_radar: { ...(existingRadarById.get(heyreachMessageId) ?? {}), ...object(message.raw.reply_radar), sender: history.sender, campaign, conversation: { id: conversationExternalId, accountId: history.sender.id } } },
+      };
+    });
     await writeMessageChunks(config, messages);
 
     if (eventId) await db(config, `rr_webhook_events?id=eq.${encodeURIComponent(String(eventId))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "processed", processed_at: new Date().toISOString(), error_text: null }) });

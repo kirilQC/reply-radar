@@ -37,8 +37,10 @@ async function fetchPastReplies(workspaceId: string, campaignName: string | unde
   // Get all conversations for this workspace + the lead attached to each — the
   // lead name gets attached to each past reply so the admin feed can label who
   // the example was sent to.
+  // Ordered by recent activity: without an order PostgREST returns an arbitrary 200, so a client with
+  // more conversations than that could be voiced from its oldest, least representative threads.
   const convResponse = await fetch(
-    `${url}/rest/v1/rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(resolvedId)}&limit=200`,
+    `${url}/rest/v1/rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(resolvedId)}&order=last_message_at.desc.nullslast,id.asc&limit=200`,
     { headers, cache: "no-store" },
   );
   if (!convResponse.ok) return [];
@@ -260,10 +262,14 @@ export async function POST(request: Request) {
       const store = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
       const latest = await latestInboundMessage(store, body.conversationId);
       if (latest) {
+        // The dedicated classifier owns sentiment. The draft model's guess is a side effect of writing a
+        // reply and only fills the gap when nothing classified this message yet; overwriting a stored
+        // value let a looser read flip a lead's sentiment every time a draft was generated.
         const parsed = String(analysis.sentiment ?? "").toLowerCase();
-        const sentimentValue = ["positive", "neutral", "negative"].includes(parsed) ? parsed : latest.radar.sentiment;
+        const storedSentiment = typeof latest.radar.sentiment === "string" ? latest.radar.sentiment.trim() : "";
+        const draftSentiment = ["positive", "neutral", "negative"].includes(parsed) ? parsed : "";
         await mergeMessageRadar(store, latest.id, {
-          sentiment: sentimentValue,
+          ...(!storedSentiment && draftSentiment ? { sentiment: draftSentiment } : {}),
           cached_draft: String(analysis.draft ?? ""),
           cached_reason: String(analysis.reason ?? ""),
           analyzed_at: new Date().toISOString(),

@@ -23,6 +23,25 @@ async function query(url: string, key: string, path: string) {
     throw new Error(`Supabase ${response.status}: ${JSON.stringify(data)}`);
   return Array.isArray(data) ? (data as Row[]) : [];
 }
+/**
+ * PostgREST hands back at most 1,000 rows per request no matter what `limit` says, and it does so
+ * silently: a `limit=2000` custom range came back with the newest 1,000 and nothing to say the rest
+ * existed, and a 20-conversation message batch with long threads lost its oldest messages the same
+ * way. So anything that can exceed that ceiling is read in 1,000-row pages until either `cap` rows
+ * are in hand or a short page says there is nothing more. The path must carry a total order (a
+ * unique tiebreaker such as `id`), or offset paging can skip or repeat rows across page boundaries.
+ */
+const PAGE_SIZE = 1000;
+async function queryPaged(url: string, key: string, path: string, cap = Number.POSITIVE_INFINITY) {
+  const rows: Row[] = [];
+  for (let offset = 0; rows.length < cap; offset += PAGE_SIZE) {
+    const limit = Math.min(PAGE_SIZE, cap - rows.length);
+    const page = await query(url, key, `${path}&limit=${limit}&offset=${offset}`);
+    rows.push(...page);
+    if (page.length < limit) break;
+  }
+  return rows;
+}
 const initials = (name: string) =>
   name
     .split(/\s+/)
@@ -187,10 +206,11 @@ export async function GET(request: Request) {
     // Newest conversations first with an explicit ceiling — the inbox is a working queue,
     // not an archive, and an unbounded fetch grows until PostgREST truncates it silently.
     const conversations = await queryByIds(workspaceIds, 20, (batch) =>
-      query(
+      queryPaged(
         url,
         key,
-        `rr_conversations?select=*&workspace_id=in.(${batch.map(encodeURIComponent).join(",")})${rangeFilter}&order=last_message_at.desc&limit=${rowLimit}`,
+        `rr_conversations?select=*&workspace_id=in.(${batch.map(encodeURIComponent).join(",")})${rangeFilter}&order=last_message_at.desc,id.asc`,
+        rowLimit,
       ),
     );
     conversations.sort(
@@ -209,10 +229,10 @@ export async function GET(request: Request) {
         query(url, key, `rr_leads?select=*&id=in.(${batch.map(encodeURIComponent).join(",")})`),
       ),
       queryByIds(conversationIds, 20, (batch) =>
-        query(
+        queryPaged(
           url,
           key,
-          `rr_messages?select=*&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc`,
+          `rr_messages?select=*&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc,id.asc`,
         ),
       ),
       // The team's inbox tags on these conversations. Never fails the inbox: an account without the tags

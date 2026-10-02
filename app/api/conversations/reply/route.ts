@@ -35,6 +35,7 @@
  * show nothing, which reads exactly like a failed send and invites a second press — so the reply is
  * recorded here immediately, both to show it and to arm the duplicate guard above.
  */
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { syntheticMessageId } from "../../../lib/heyreach-conversation";
@@ -70,6 +71,60 @@ const SUBJECT = "";
  * the failure would land on the one action a person has just confirmed they want to happen.
  */
 const chatroomId = (stored: string) => stored.split("::")[0];
+
+/**
+ * How long an in-flight send holds its lock before it counts as abandoned.
+ *
+ * Comfortably longer than the 20 second SendMessage timeout plus the writes either side of it, so a
+ * slow send is never mistaken for a dead one, and short enough that a crashed request does not block
+ * a genuine retry for long.
+ */
+const SEND_LOCK_TTL_MS = 2 * 60 * 1000;
+
+/**
+ * Closes the gap the 24 hour check leaves open.
+ *
+ * That check reads rr_messages, and the outbound row is only written after HeyReach accepts the send.
+ * Two requests landing together (a double click, a browser retry) both read "nothing sent yet" and
+ * both send. The lock is a row in rr_app_config keyed on the conversation and the exact text, and
+ * `key` is the primary key, so a plain insert is atomic: the second request's insert fails with 409
+ * and it is refused before it reaches HeyReach. A lock past its expiry is from a request that died
+ * mid-send; it is removed (only if unchanged, so two requests cannot both reclaim it) and taken once.
+ */
+async function acquireSendLock(url: string, key: string, lockKey: string): Promise<boolean> {
+  const headers = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" };
+  const insert = () =>
+    fetch(`${url}/rest/v1/rr_app_config`, {
+      method: "POST",
+      headers: { ...headers, Prefer: "return=minimal" },
+      body: JSON.stringify({ key: lockKey, value: { expires_at: new Date(Date.now() + SEND_LOCK_TTL_MS).toISOString() } }),
+      cache: "no-store",
+    });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await insert();
+    if (response.ok) return true;
+    if (response.status !== 409) throw new Error(`Supabase rr_app_config ${response.status}`);
+    if (attempt) return false;
+    const held = (await db(url, key, `rr_app_config?select=value,updated_at&key=eq.${encodeURIComponent(lockKey)}&limit=1`)) as Row[];
+    const lock = held[0];
+    if (!lock) continue;
+    const value = lock.value && typeof lock.value === "object" ? (lock.value as Row) : {};
+    const expiresAt = Date.parse(text(value.expires_at));
+    if (Number.isFinite(expiresAt) && expiresAt > Date.now()) return false;
+    await db(url, key, `rr_app_config?key=eq.${encodeURIComponent(lockKey)}&updated_at=eq.${encodeURIComponent(text(lock.updated_at))}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" },
+    });
+  }
+  return false;
+}
+
+async function releaseSendLock(url: string, key: string, lockKey: string) {
+  await db(url, key, `rr_app_config?key=eq.${encodeURIComponent(lockKey)}`, {
+    method: "DELETE",
+    headers: { Prefer: "return=minimal" },
+  }).catch(() => null);
+}
 
 async function db(url: string, key: string, path: string, options: RequestInit = {}) {
   const response = await fetch(`${url}/rest/v1/${path}`, {
@@ -113,6 +168,11 @@ export async function POST(request: Request) {
   if (!conversationId) return NextResponse.json({ ok: false, error: "No conversation was named." }, { status: 400 });
   if (!message) return NextResponse.json({ ok: false, error: "There is nothing written to send." }, { status: 400 });
 
+  const lockKey = `send_lock:${conversationId}:${createHash("sha256").update(message).digest("hex").slice(0, 32)}`;
+  let lockHeld = false;
+  // Cleared when HeyReach was asked and the outcome is unknown (a timeout or dropped connection): the
+  // message may well have gone out, so the lock stays until it expires rather than inviting a resend.
+  let releaseLock = true;
   try {
     const conversations = (await db(
       url,
@@ -127,6 +187,16 @@ export async function POST(request: Request) {
     if (!heyreachConversationId || !accountId) {
       return NextResponse.json(
         { ok: false, error: "This conversation is not linked to a HeyReach chatroom and sender, so nothing can be sent from it." },
+        { status: 409 },
+      );
+    }
+
+    // The lock comes before the 24 hour check, not after: a request that waited out another's send must
+    // then read the row that send wrote, and a request arriving mid-send is turned away here.
+    lockHeld = await acquireSendLock(url, key, lockKey);
+    if (!lockHeld) {
+      return NextResponse.json(
+        { ok: false, error: "That exact message is already being sent to this lead. Wait a moment, then refresh the thread." },
         { status: 409 },
       );
     }
@@ -157,6 +227,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "This client has no HeyReach API key configured." }, { status: 409 });
     }
 
+    releaseLock = false;
     const response = await fetch(`${apiBase.replace(/\/$/, "")}/inbox/SendMessage`, {
       method: "POST",
       headers: { "X-API-KEY": apiKey, accept: "application/json", "content-type": "application/json" },
@@ -170,6 +241,10 @@ export async function POST(request: Request) {
       cache: "no-store",
       signal: AbortSignal.timeout(20_000),
     });
+    // HeyReach answered, so whether the message went out is known. On failure nothing was sent and the
+    // lock can go now; on success it is held until the outbound row below is written and arms the 24
+    // hour check, so a failed write cannot reopen the door to a second send.
+    releaseLock = !response.ok;
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       // Named as "not sent" rather than "failed", because the distinction the reader needs is whether
@@ -198,6 +273,7 @@ export async function POST(request: Request) {
         },
       ]),
     });
+    releaseLock = true;
     await db(url, key, `rr_conversations?id=eq.${encodeURIComponent(conversationId)}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
@@ -230,5 +306,7 @@ export async function POST(request: Request) {
       { ok: false, error: error instanceof Error ? error.message : "That reply could not be sent." },
       { status: 502 },
     );
+  } finally {
+    if (lockHeld && releaseLock) await releaseSendLock(url, key, lockKey);
   }
 }

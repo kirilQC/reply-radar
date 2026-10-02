@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { extractMessageRows, messageKey, normalizeHeyReachMessages } from "../../../lib/heyreach-conversation";
+import { dedupeMessages } from "../../../lib/message-dedupe";
 
 type Row = Record<string, unknown>;
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -51,6 +52,16 @@ async function heyReach(apiKey: string, path: string, init: RequestInit) {
   return response.json().catch(() => null);
 }
 
+/**
+ * HeyReach's chatroom id, out of the one we store.
+ *
+ * Ingestion suffixes `heyreach_conversation_id` with `::campaign::sender` when one chatroom is
+ * attributed to more than one campaign or sender in a workspace (see `app/lib/heyreach-ingestion.ts`).
+ * GetChatroom 404s on the suffixed form, which used to drop every such row onto the lossy
+ * GetConversationsV2 fallback. Same helper as the reply route.
+ */
+const chatroomId = (stored: string) => stored.split("::")[0];
+
 /** Refresh a single conversation by re-fetching from HeyReach and updating messages. */
 async function refreshConversation(
   url: string,
@@ -77,7 +88,7 @@ async function refreshConversation(
   const lead = leads[0];
   const profileUrl = text(lead?.linkedin_profile_url);
   const accountId = text(conv.account_id);
-  const heyreachConvId = text(conv.heyreach_conversation_id);
+  const heyreachConvId = chatroomId(text(conv.heyreach_conversation_id));
 
   if (!accountId || !profileUrl) {
     return { messagesUpdated: 0, error: "Missing account_id or profile URL" };
@@ -85,8 +96,12 @@ async function refreshConversation(
 
   // Fetch conversation from HeyReach
   let chatroom: unknown = null;
+  // Only GetChatroom returns the whole thread. The GetConversationsV2 fallback carries a preview of
+  // recent messages at best, so it must not be taken as proof that the history is complete.
+  let fullHistory = false;
   try {
     chatroom = await heyReach(apiKey, `inbox/GetChatroom/${encodeURIComponent(accountId)}/${encodeURIComponent(heyreachConvId)}`, { method: "GET" });
+    fullHistory = Boolean(chatroom);
   } catch {
     // Try via GetConversationsV2 fallback
     try {
@@ -196,9 +211,10 @@ async function refreshConversation(
 
   // A refresh pulls the whole chatroom, which is precisely what a webhook-only ingest was missing.
   // Recording that unblocks the judgement about who started the conversation, which abstains until
-  // it can be sure the earliest stored message really is the earliest message.
+  // it can be sure the earliest stored message really is the earliest message. A fallback read is
+  // a partial thread, and marking it complete would let the purge judge origin on missing evidence.
   const leadRaw = object(lead?.raw_data);
-  if (messages.length && text(object(leadRaw.reply_radar).history_status) !== "complete") {
+  if (fullHistory && messages.length && text(object(leadRaw.reply_radar).history_status) !== "complete") {
     await db(url, key, `rr_leads?id=eq.${encodeURIComponent(text(conv.lead_id))}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
@@ -207,9 +223,12 @@ async function refreshConversation(
   }
 
   // Return the full updated message list so the frontend can update in-place
-  const updatedMessages = (await db(url, key,
-    `rr_messages?select=id,body,direction,sent_at,raw_data&conversation_id=eq.${encodeURIComponent(conversationId)}&order=sent_at.asc`,
-  )) as Row[];
+  // Collapsed with the same dedupe /api/inbox applies, so the thread the page swaps in matches the one it
+  // loaded. Without it a reply sent from the composer (stored under a synthetic id) and HeyReach's own
+  // copy of it, stamped a moment later, both came back and the message showed twice.
+  const updatedMessages = dedupeMessages((await db(url, key,
+    `rr_messages?select=id,conversation_id,body,direction,sent_at,raw_data&conversation_id=eq.${encodeURIComponent(conversationId)}&order=sent_at.asc,id.asc`,
+  )) as Row[]);
 
   // Determine sender name from existing messages
   const senderName = (() => {

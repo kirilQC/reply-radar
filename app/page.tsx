@@ -329,6 +329,17 @@ const followUpBand = (score: number): "hot" | "warm" | "cold" | "nurture" => {
  * A plain replace would discard AI results that were merged in client-side but whose
  * database write has not been read back yet, making scores and drafts appear to reset.
  */
+/**
+ * Identifies the reply that per-reply AI state (sentiment, draft, follow-up score) was computed for.
+ * Timestamp first, because a refresh can collapse duplicate rows and keep a different row id for the
+ * same message; the id only breaks ties when the timestamp is missing.
+ */
+const latestInboundKey = (lead: Lead) => {
+  const latest = [...lead.messages].reverse().find((message) => message.direction !== "outbound");
+  if (!latest) return "";
+  const time = Date.parse(latest.sentAt);
+  return Number.isNaN(time) ? `id:${latest.id}` : `at:${time}`;
+};
 const mergeInboxLeads = (previous: Lead[], incoming: Lead[]): Lead[] => {
   if (!previous.length) return incoming;
   const byId = new Map(previous.map((lead) => [lead.id, lead]));
@@ -336,8 +347,12 @@ const mergeInboxLeads = (previous: Lead[], incoming: Lead[]): Lead[] => {
     const old = byId.get(lead.id);
     if (!old) return lead;
     const merged: Lead = { ...lead };
-    if (!merged.sentiment && old.sentiment) merged.sentiment = old.sentiment;
-    if (!merged.analyzedAt && old.analyzedAt) {
+    // Sentiment, the draft and the follow-up score all describe one particular reply. When the lead has
+    // replied again since, the old values are about a message that is no longer the latest, and carrying
+    // them over marked the new reply as already analysed, so it was never scored or drafted.
+    const sameReply = latestInboundKey(old) === latestInboundKey(lead);
+    if (sameReply && !merged.sentiment && old.sentiment) merged.sentiment = old.sentiment;
+    if (sameReply && !merged.analyzedAt && old.analyzedAt) {
       merged.analyzedAt = old.analyzedAt;
       merged.cachedDraft = old.cachedDraft;
       merged.cachedReason = old.cachedReason;
@@ -346,7 +361,7 @@ const mergeInboxLeads = (previous: Lead[], incoming: Lead[]): Lead[] => {
       merged.leadScore = old.leadScore;
       merged.icpReason = old.icpReason;
     }
-    if (!merged.followUpAnalyzedAt && old.followUpAnalyzedAt) {
+    if (sameReply && !merged.followUpAnalyzedAt && old.followUpAnalyzedAt) {
       merged.followUpAnalyzedAt = old.followUpAnalyzedAt;
       merged.followUpUrgency = old.followUpUrgency;
       merged.followUpReason = old.followUpReason;
@@ -680,6 +695,11 @@ export function InboxPage() {
         const result = data.results[0];
         const thread = Array.isArray(result.thread) ? result.thread : null;
         const newMessages = result.newMessages ?? 0;
+        // The refreshed lead, built here rather than read back from state: `setLeads` has not re-rendered
+        // yet, so `generateAiReview` below would otherwise see the thread from before this refresh and
+        // draft a reply to a conversation that has already moved on.
+        const before = leads.find((lead) => lead.id === convId);
+        const refreshedLead = before && thread ? { ...before, messages: thread } : null;
         // Update only this conversation's messages in-place
         if (thread) {
           setLeads((prev) => prev.map((lead) =>
@@ -696,7 +716,11 @@ export function InboxPage() {
           setLeads((prev) => prev.map((lead) =>
             lead.id === convId ? { ...lead, followUpAnalyzedAt: null } : lead,
           ));
-          void generateAiReview(workspaceAi, true);
+          // Only for the conversation still on screen: the draft pane belongs to the selection, and a
+          // refresh that finished after the user moved on has no pane to fill.
+          if (refreshedLead && activeConversationRef.current === convId) {
+            void generateAiReview(workspaceAi, true, { ...refreshedLead, followUpAnalyzedAt: null });
+          }
         }
       }
     } catch { /* ignore */ }
@@ -1535,6 +1559,9 @@ export function InboxPage() {
   const scoredRef = useRef({ icp: new Set<string>(), followUp: new Set<string>() });
   useEffect(() => {
     activeConversationRef.current = current.id;
+    // A draft still loading belongs to the lead just left. This one starts idle until its own request
+    // (if any) begins, which sets the flag again.
+    setAiLoading(false);
     setComposeAnyway(false);
     // A confirmation belongs to one lead. Carrying it across a selection change is how somebody
     // confirms a send for the person they were reading a moment ago.
@@ -1552,43 +1579,56 @@ export function InboxPage() {
     });
   }, [current.id]);
   const selectedWorkspaceSlug = current.clientSlug || clientParam || "";
-  const generateAiReview = async (ai = workspaceAi, forceRegenerate = false) => {
-    if (!current.messages.length || current.id === "empty") return;
-    const conversationId = current.id;
+  /**
+   * `target` is for callers that already hold a newer copy of the lead than this render's `current`
+   * (a refresh that has just replaced the thread). Everyone else analyses what is on screen.
+   */
+  const generateAiReview = async (ai = workspaceAi, forceRegenerate = false, target?: Lead) => {
+    const subject = target ?? current;
+    if (!subject.messages.length || subject.id === "empty") return;
+    const conversationId = subject.id;
     // Check for cached data: use it if the latest inbound message hasn't changed since analysis
-    if (!forceRegenerate && current.cachedDraft && current.analyzedAt) {
-      const latestInbound = [...current.messages].reverse().find((m) => m.direction !== "outbound");
+    if (!forceRegenerate && subject.cachedDraft && subject.analyzedAt) {
+      const latestInbound = [...subject.messages].reverse().find((m) => m.direction !== "outbound");
       const latestInboundTime = latestInbound ? new Date(latestInbound.sentAt).getTime() : 0;
-      const analyzedTime = new Date(current.analyzedAt).getTime();
+      const analyzedTime = new Date(subject.analyzedAt).getTime();
       if (analyzedTime > latestInboundTime) {
-        setAiDraft(current.cachedDraft);
+        if (activeConversationRef.current === conversationId) {
+          setAiDraft(subject.cachedDraft);
+          // A request for the previous selection may still be marked as loading; this lead needs none.
+          setAiLoading(false);
+        }
         return;
       }
     }
     setAiLoading(true);
-    const response = await fetch("/api/ai/draft", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, campaignName: current.campaignName || undefined, thread: current.messages, regenerate: forceRegenerate, instruction: ai.brief ? `Client context: ${ai.brief}` : "" }),
-    }).catch(() => null);
-    const payload = await response?.json().catch(() => ({}));
-    if (response?.ok) {
-      const draft = String(payload.draft ?? "");
-      const reason = String(payload.reason ?? "This lead sent a new reply that is ready for review.");
-      // Cache against the lead this request was for, whatever is selected now.
-      const newSentiment = String(payload.sentiment ?? "").toLowerCase();
-      const now = new Date().toISOString();
-      setLeads((prev) => prev.map((lead) =>
-        lead.id === conversationId ? { ...lead, sentiment: ["positive", "neutral", "negative"].includes(newSentiment) ? newSentiment : lead.sentiment, cachedDraft: draft, cachedReason: reason, analyzedAt: now } : lead,
-      ));
-      // The user may have moved on while this was in flight; the newer request owns the pane.
-      if (activeConversationRef.current !== conversationId) return;
-      setAiDraft(draft);
-    } else {
-      if (activeConversationRef.current !== conversationId) return;
-      setAiDraft("");
+    try {
+      const response = await fetch("/api/ai/draft", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "analyze", model: ai.model || undefined, system: ai.systemPrompt || undefined, conversationId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: subject.client, leadName: subject.name, campaignName: subject.campaignName || undefined, thread: subject.messages, regenerate: forceRegenerate, instruction: ai.brief ? `Client context: ${ai.brief}` : "" }),
+      }).catch(() => null);
+      const payload = await response?.json().catch(() => ({}));
+      if (response?.ok) {
+        const draft = String(payload.draft ?? "");
+        const reason = String(payload.reason ?? "This lead sent a new reply that is ready for review.");
+        // Cache against the lead this request was for, whatever is selected now. Sentiment from the
+        // draft model only fills a gap, matching the server, which leaves the classifier's value alone.
+        const newSentiment = String(payload.sentiment ?? "").toLowerCase();
+        const now = new Date().toISOString();
+        setLeads((prev) => prev.map((lead) =>
+          lead.id === conversationId ? { ...lead, sentiment: lead.sentiment || (["positive", "neutral", "negative"].includes(newSentiment) ? newSentiment : lead.sentiment), cachedDraft: draft, cachedReason: reason, analyzedAt: now } : lead,
+        ));
+        // The user may have moved on while this was in flight; the newer request owns the pane.
+        if (activeConversationRef.current === conversationId) setAiDraft(draft);
+      } else if (activeConversationRef.current === conversationId) {
+        setAiDraft("");
+      }
+    } finally {
+      // Always cleared for the conversation on screen. Returning early when the selection had moved on
+      // used to skip this, which left the button stuck on "Generating…" for the lead now selected.
+      if (activeConversationRef.current === conversationId) setAiLoading(false);
     }
-    setAiLoading(false);
   };
   /**
    * Sends the draft, exactly as it stands, to this lead on LinkedIn.
