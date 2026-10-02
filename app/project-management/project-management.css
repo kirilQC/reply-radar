@@ -610,3 +610,18 @@
 .pm-ed-clogo img { width: 100%; height: 100%; object-fit: cover; }
 .pm-ed-cname { font-size: 22px; font-weight: 750; letter-spacing: -.02em; }
 .pm-ed-main textarea { min-height: 200px; }
+
+/* Drag to set priority order: the dragged card dims, and a teal line shows where it will land. */
+.pm-bcard { position: relative; }
+.pm-bcard-dragging { opacity: .45; }
+.pm-bcard.pm-drop-before::before,
+.pm-bcard.pm-drop-after::after { content: ""; position: absolute; left: 6px; right: 6px; height: 3px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent); z-index: 2; pointer-events: none; }
+.pm-bcard.pm-drop-before::before { top: -8px; }
+.pm-bcard.pm-drop-after::after { bottom: -8px; }
+.pm-bcard[draggable="true"] { cursor: grab; }
+.pm-bcard[draggable="true"]:active { cursor: grabbing; }
+
+/* By client: wider columns, and the card footer can hold two assignees now the client chip is gone. */
+.pm-cols-byclient .pm-bcard-foot { flex-wrap: wrap; row-gap: 8px; }
+.pm-cols-byclient .pm-bcard-owner { max-width: 48%; }
+.pm-cols-byclient .pm-bcard-age { margin-left: auto; }

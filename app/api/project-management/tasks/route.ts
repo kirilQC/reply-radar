@@ -74,6 +74,9 @@ export async function PATCH(request: Request) {
   if (b.moveToSlug) { const wsId = await workspaceIdFor(String(b.moveToSlug), c); if (wsId) patch.workspace_id = wsId; }
   if ("updatedBy" in b) patch.updated_by = b.updatedBy ? String(b.updatedBy).slice(0, 200) : null;
   if (typeof b.position === "number") patch.position = b.position;
+  // Dragging a task up or down the priority order is not an edit, so it doesn't move "Updated".
+  const keys = Object.keys(b).filter((k) => k !== "id" && k !== "updatedBy");
+  if (keys.length === 1 && keys[0] === "position") { delete patch.updated_at; delete patch.updated_by; }
   const r = await fetch(`${c.url}/rest/v1/rr_projects?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: { ...c.headers, Prefer: "return=minimal" }, body: JSON.stringify(patch) });
   if (!r.ok) return NextResponse.json({ ok: false, error: `Update failed (${r.status}).` }, { status: 502 });
   return NextResponse.json({ ok: true });

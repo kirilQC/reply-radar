@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 export type LinkItem = { url: string; title?: string };
 export type Blocker = { owner?: string; text?: string; resolved?: boolean; resolvedAt?: string };
-export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; created_at?: string | null; updated_at?: string | null; updated_by?: string | null; clientSlug?: string; clientName?: string };
+export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; created_at?: string | null; updated_at?: string | null; updated_by?: string | null; position?: number | null; clientSlug?: string; clientName?: string };
 const blockerList = (b?: Blocker | Blocker[] | null): Blocker[] => (Array.isArray(b) ? b : b ? [b] : []).filter((x) => x && (x.text || x.owner));
 export type BoardClient = { slug: string; name: string; logoUrl?: string | null; accentColor?: string | null };
 export type Person = { name: string; avatarUrl?: string | null };
@@ -39,7 +39,7 @@ const linkItems = (links?: (string | LinkItem)[]): LinkItem[] => (Array.isArray(
 const normUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : `https://${u}`);
 const linkLabel = (l: LinkItem) => { if (l.title && l.title.trim()) return l.title.trim(); try { const x = new URL(l.url); return x.hostname.replace(/^www\./, "") + x.pathname.replace(/\/$/, ""); } catch { return l.url; } };
 const dueMs = (v?: string | null) => { if (!v) return Infinity; const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + "T00:00" : v); return Number.isNaN(+d) ? Infinity : +d; };
-export const weekDisplay = (w?: string | null) => (!w ? "" : /^week of/i.test(w) ? w : `Week of ${w}`);
+export const weekDisplay = (w?: string | null) => (!w ? "" : `Starts ${w.replace(/^week of\s*/i, "")}`);
 /* When a task was created, spelled out in Eastern time — e.g. "Sep 8, 2026, 3:42 PM EST". */
 const fmtEst = (iso?: string | null): string => {
   if (!iso) return "";
@@ -110,7 +110,7 @@ function Select({ value, options, onChange, placeholder, minWidth, tone, size }:
         <span className="pm-dd-val">{cur ? <>{cur.logo}{cur.color && <i className="pm-dd-dot" style={{ background: cur.color }} />}{cur.label}</> : <span className="pm-dd-ph">{placeholder ?? "—"}</span>}</span><Chevron />
       </button>
       {m.open && m.pos && <>
-        <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
+        <div className="pm-dd-back" onClick={(e) => { e.preventDefault(); e.stopPropagation(); m.close(); }} />
         <div className={`pm-dd-menu ${size === "lg" ? "pm-dd-menu-lg" : ""}`} style={{ top: m.pos.top, left: m.pos.left, minWidth: m.pos.width }}>
           {options.map((o) => <button key={o.value} type="button" className={`pm-dd-opt ${o.value === value ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); onChange(o.value); m.close(); }}>{o.logo}{o.color && <i className="pm-dd-dot" style={{ background: o.color }} />}<span className="pm-dd-opt-l">{o.label}</span>{o.value === value && <span className="pm-dd-ck">✓</span>}</button>)}
         </div>
@@ -138,7 +138,7 @@ function MultiPeople({ value, people, map, onChange, addPerson, removePerson, up
         <span className={`pm-dd-val ${stack ? "stack" : ""}`}>{sel.length ? <Owners owner={value} map={map} stack={stack} /> : <span className="pm-dd-ph">{placeholder}</span>}</span><Chevron />
       </button>
       {m.open && m.pos && <>
-        <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
+        <div className="pm-dd-back" onClick={(e) => { e.preventDefault(); e.stopPropagation(); m.close(); }} />
         <div className="pm-dd-menu" style={{ top: m.pos.top, left: m.pos.left, minWidth: m.pos.width }} onClick={(e) => e.stopPropagation()}>
           {sel.length > 0 && <div className="pm-sel-chips">{sel.map((n) => <span className="pm-sel-chip" key={n}><Avatar name={n} map={map} />{n}<button type="button" title="Remove from this task" onClick={() => toggle(n)}>✕</button></span>)}</div>}
           {roster.map((p) => (
@@ -169,7 +169,7 @@ function FiltersPanel({ view, views, onPickView, onReorderViews, sort, onSort, m
         <span className="pm-dd-val">{curView ? curView[1] : "Filters"}{multi && week ? ` · ${weekDisplay(week)}` : ""}</span><Chevron />
       </button>
       {m.open && m.pos && <>
-        <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
+        <div className="pm-dd-back" onClick={(e) => { e.preventDefault(); e.stopPropagation(); m.close(); }} />
         <div className="pm-dd-menu pm-filters" style={{ top: m.pos.top, left: m.pos.left, width: m.pos.width }} onClick={(e) => e.stopPropagation()}>
           <div className="pm-filt-sec">
             <div className="pm-filt-h">View <em>· drag to reorder</em></div>
@@ -182,7 +182,7 @@ function FiltersPanel({ view, views, onPickView, onReorderViews, sort, onSort, m
           </div>
           {multi && (
             <div className="pm-filt-sec">
-              <div className="pm-filt-h">Week</div>
+              <div className="pm-filt-h">Start date</div>
               <button type="button" className={`pm-dd-opt ${!week ? "on" : ""}`} onClick={() => onPickWeek("")}><span className="pm-dd-opt-l">All time</span>{!week && <span className="pm-dd-ck">✓</span>}</button>
               {weeks.map((w) => (
                 <div className={`pm-dd-opt multi ${w === week ? "on" : ""}`} key={w}>
@@ -190,7 +190,7 @@ function FiltersPanel({ view, views, onPickView, onReorderViews, sort, onSort, m
                   <button type="button" className="pm-dd-rm" title="Remove week" onClick={() => onRemoveWeek(w)}>✕</button>
                 </div>
               ))}
-              <div className="pm-dd-add"><input value={draft} placeholder="New week, e.g. Sept 3" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} /><button type="button" onClick={add}>Add</button></div>
+              <div className="pm-dd-add"><input value={draft} placeholder="New start date, e.g. Sept 3" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} /><button type="button" onClick={add}>Add</button></div>
             </div>
           )}
           <div className="pm-filt-sec">
@@ -208,20 +208,43 @@ type Handlers = {
   clients: BoardClient[]; multi: boolean; people: Person[]; map: Record<string, string>; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void;
   openNew: (stage: string, clientSlug?: string, assignee?: string) => void; onOpen: (t: BoardTask) => void; onDelete: (id: string) => void; notifyChannel?: string;
   onDrag: (id: string | null) => void; dragId: string | null; onMove: (id: string, stage: string) => void; onSetDay: (id: string, date: string) => void;
+  /** Drop the dragged task before (or after) `targetId` within the list `ids`, i.e. reorder that column. */
+  onReorder: (ids: string[], targetId: string, after: boolean) => void;
+  dropHint: { id: string; after: boolean } | null; setDropHint: (h: { id: string; after: boolean } | null) => void;
+  /** In the By client view the column header already names the client. */
+  hideClient?: boolean;
 };
 function clientLogo(c: BoardClient) { return c.logoUrl ? <img className="pm-opt-logo" src={c.logoUrl} alt="" /> : <span className="pm-opt-logo mono" style={{ background: c.accentColor || "var(--accent)" }}>{initials(c.name)}</span>; }
 const clientOptsOf = (clients: BoardClient[]): Opt[] => clients.map((c) => ({ value: c.slug, label: c.name, logo: clientLogo(c) }));
 const stageOpts: Opt[] = STAGES.map((s) => ({ value: s.key, label: s.label, color: s.color }));
 const prioOpts: Opt[] = [{ value: "", label: "None" }, ...PRIORITIES.map((p) => ({ value: p.key, label: p.label, color: p.color }))];
 
-function Card({ t, h }: { t: BoardTask; h: Handlers }) {
+function Card({ t, h, column }: { t: BoardTask; h: Handlers; column?: string[] }) {
   const s = stageOf(t.stage);
   const pr = prioOf(t.priority);
   const client = h.clients.find((c) => c.slug === t.clientSlug);
   const owners = ownerList(t.owner);
   const openBlockers = blockerList(t.blocker).filter((b) => !b.resolved);
   return (
-    <div className="pm-bcard" draggable onDragStart={(e) => { e.dataTransfer.setData("id", t.id); h.onDrag(t.id); }} onDragEnd={() => h.onDrag(null)} onClick={() => h.onOpen(t)}>
+    <div
+      className={`pm-bcard ${h.dragId === t.id ? "pm-bcard-dragging" : ""} ${h.dropHint?.id === t.id ? (h.dropHint.after ? "pm-drop-after" : "pm-drop-before") : ""}`}
+      draggable
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("id", t.id); h.onDrag(t.id); }}
+      onDragEnd={() => { h.onDrag(null); h.setDropHint(null); }}
+      onDragOver={column ? (e) => {
+        if (!h.dragId || h.dragId === t.id || !column.includes(h.dragId)) return;
+        e.preventDefault(); e.stopPropagation();
+        const r = e.currentTarget.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height / 2;
+        if (h.dropHint?.id !== t.id || h.dropHint.after !== after) h.setDropHint({ id: t.id, after });
+      } : undefined}
+      onDrop={column ? (e) => {
+        if (!h.dragId || h.dragId === t.id || !column.includes(h.dragId)) return;
+        e.preventDefault(); e.stopPropagation();
+        h.onReorder(column, t.id, Boolean(h.dropHint?.id === t.id && h.dropHint.after));
+      } : undefined}
+      onClick={() => h.onOpen(t)}
+    >
       <span className="pm-bcard-stripe" style={{ background: pr ? pr.color : "var(--border-soft, var(--border))" }} />
       <div className={`pm-bcard-band ${s.cls}`}>
         <span>{s.label}</span>
@@ -232,10 +255,13 @@ function Card({ t, h }: { t: BoardTask; h: Handlers }) {
         {t.context && <div className="pm-bcard-ctx">{t.context}</div>}
         {openBlockers.length > 0 && <div className="pm-bcard-block" title={openBlockers.map((b) => `${b.owner || "someone"}: ${b.text}`).join("\n")}>⛔ Waiting on {openBlockers[0].owner || "someone"}{openBlockers.length > 1 ? ` +${openBlockers.length - 1} more` : ""}{openBlockers[0].text ? ` — ${openBlockers[0].text}` : ""}</div>}
         <div className="pm-bcard-foot">
-          {client && <span className="pm-bcard-client"><span className="pm-bcard-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span>{client.name}</span>}
-          {owners.length > 0 && <span className="pm-bcard-owner"><Avatar name={owners[0]} map={h.map} />{owners.length === 1 ? owners[0] : `${owners.length} people`}</span>}
+          {client && !h.hideClient && <span className="pm-bcard-client"><span className="pm-bcard-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span>{client.name}</span>}
+          {owners.length > 0 && (h.hideClient && owners.length <= 2
+            ? owners.map((o) => <span className="pm-bcard-owner" key={o}><Avatar name={o} map={h.map} />{o}</span>)
+            : <span className="pm-bcard-owner"><Avatar name={owners[0]} map={h.map} />{owners.length === 1 ? owners[0] : `${owners.length} people`}</span>)}
           {t.created_at && <span className="pm-bcard-age" title={`Added ${fmtEst(t.created_at)}`}>⏱ {sittingFor(t.created_at)}</span>}
-          {t.due_date && <span className="pm-bcard-due">{t.due_date}</span>}
+          {t.week && !t.due_date && <span className="pm-bcard-due" title="Start date">Starts {t.week}</span>}
+          {t.due_date && <span className="pm-bcard-due" title={t.week ? `Starts ${t.week} · due ${t.due_date}` : "Due date"}>{t.due_date}</span>}
         </div>
       </div>
     </div>
@@ -248,27 +274,28 @@ function KanbanView({ byStage, h }: { byStage: Record<string, BoardTask[]>; h: H
       {STAGES.map((s) => (
         <div className="pm-col" key={s.key} onDragOver={(e) => e.preventDefault()} onDrop={() => h.dragId && h.onMove(h.dragId, s.key)}>
           <div className="pm-colh"><span className={`pm-stg ${s.cls}`}><span className="d" />{s.label}</span></div>
-          {byStage[s.key].map((t) => <Card key={t.id} t={t} h={h} />)}
+          {byStage[s.key].map((t) => <Card key={t.id} t={t} h={h} column={byStage[s.key].map((x) => x.id)} />)}
           {s.key === "todo" && <button type="button" className="pm-add" onClick={() => h.openNew("todo")}>+ Add</button>}
         </div>
       ))}
     </div>
   );
 }
-function ColumnList({ label, logo, tasks, onAdd, h }: { label: React.ReactNode; logo?: React.ReactNode; tasks: BoardTask[]; onAdd: () => void; h: Handlers }) {
+function ColumnList({ label, logo, tasks, onAdd, h, reorderable }: { label: React.ReactNode; logo?: React.ReactNode; tasks: BoardTask[]; onAdd: () => void; h: Handlers; reorderable?: boolean }) {
+  const ids = tasks.map((t) => t.id);
   return (
     <div className="pm-col">
       <div className="pm-colh pm-colh-big">{logo}<b>{label}</b></div>
-      {tasks.map((t) => <Card key={t.id} t={t} h={h} />)}
+      {tasks.map((t) => <Card key={t.id} t={t} h={h} column={reorderable ? ids : undefined} />)}
       <button type="button" className="pm-add" onClick={onAdd}>+ Add</button>
     </div>
   );
 }
 function ByClientView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
   return (
-    <div className="pm-cols" style={{ gridTemplateColumns: `repeat(${Math.max(1, h.clients.length)}, minmax(260px, 1fr))` }}>
+    <div className="pm-cols pm-cols-byclient" style={{ gridTemplateColumns: `repeat(${Math.max(1, h.clients.length)}, minmax(340px, 1fr))` }}>
       {h.clients.map((c) => (
-        <ColumnList key={c.slug} label={c.name} logo={<span className="pm-bighead-logo" style={c.logoUrl ? undefined : { background: c.accentColor || "var(--accent)" }}>{c.logoUrl ? <img src={c.logoUrl} alt="" /> : initials(c.name)}</span>} tasks={tasks.filter((t) => t.clientSlug === c.slug)} onAdd={() => h.openNew("todo", c.slug)} h={h} />
+        <ColumnList reorderable key={c.slug} label={c.name} logo={<span className="pm-bighead-logo" style={c.logoUrl ? undefined : { background: c.accentColor || "var(--accent)" }}>{c.logoUrl ? <img src={c.logoUrl} alt="" /> : initials(c.name)}</span>} tasks={tasks.filter((t) => t.clientSlug === c.slug)} onAdd={() => h.openNew("todo", c.slug)} h={{ ...h, hideClient: true }} />
       ))}
     </div>
   );
@@ -311,7 +338,7 @@ function LinksCell({ links, onChange }: { links: LinkItem[]; onChange: (l: LinkI
         {links.length ? <span className="pm-linkcount">{links.length}</span> : null}<Chevron />
       </button>
       {m.open && m.pos && <>
-        <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); m.close(); }} />
+        <div className="pm-dd-back" onClick={(e) => { e.preventDefault(); e.stopPropagation(); m.close(); }} />
         <div className="pm-dd-menu pm-linkmenu" style={{ top: m.pos.top, left: m.pos.left, minWidth: Math.max(m.pos.width, 280) }} onClick={(e) => e.stopPropagation()}>
           {links.map((l, i) => <div className="pm-linkrow" key={i}><a href={l.url} target="_blank" rel="noreferrer">{linkLabel(l)}</a><button type="button" onClick={() => onChange(links.filter((_, j) => j !== i))}>✕</button></div>)}
           <div className="pm-linkadd">
@@ -389,7 +416,7 @@ function BlockerCell({ blockers, people, map, onChange, addPerson }: { blockers?
         <button ref={m.btnRef} type="button" className="pm-blocker-addbtn" onClick={(e) => { e.stopPropagation(); openEditor("new"); }}>{list.length ? "＋ Add blocker" : "＋ Blocker"}</button>
       </div>
       {m.open && m.pos && editing !== null && <>
-        <div className="pm-dd-back" onClick={(e) => { e.stopPropagation(); closeEditor(); }} />
+        <div className="pm-dd-back" onClick={(e) => { e.preventDefault(); e.stopPropagation(); closeEditor(); }} />
         <div className="pm-dd-menu pm-blockermenu" style={{ top: m.pos.top, left: m.pos.left, minWidth: Math.max(m.pos.width, 300) }} onClick={(e) => e.stopPropagation()}>
           <div className="pm-blk-label">Waiting on</div>
           <Select value={owner} options={roster} placeholder="Anyone" onChange={setOwner} minWidth={260} />
@@ -492,7 +519,7 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
   const [stage, setStage] = useState(isNew ? state.stage : (task?.stage ?? "todo"));
   const s = stageOf(stage);
   const client = clients.find((c) => c.slug === slug);
-  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(multi && week ? { week } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links, priority, blocker: blockers, ...(multi ? { week } : {}) }); onClose(); };
+  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links, priority, blocker: blockers, week }); onClose(); };
   return (
     <div className="pm-modal-back" onClick={onClose}>
       <div className="pm-modal pm-modal-a" onClick={(e) => e.stopPropagation()}>
@@ -517,12 +544,12 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
             {isNew && multi && <div className="pm-f"><span>Client</span><Select value={slug} options={clientOptsOf(clients)} size="lg" onChange={setSlug} /></div>}
             <div className="pm-f"><span>Assignees</span><MultiPeople value={owner} people={people} map={map} onChange={setOwner} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} /></div>
             <div className="pm-f-row">
-              <label className="pm-f"><span>Status</span><Select value={stage} options={stageOpts} tone={stageOf(stage).color} onChange={setStage} /></label>
-              <label className="pm-f"><span>Priority</span><Select value={priority} options={prioOpts} placeholder="None" tone={prioOf(priority)?.color} onChange={setPriority} /></label>
+              <div className="pm-f"><span>Status</span><Select value={stage} options={stageOpts} tone={stageOf(stage).color} onChange={setStage} /></div>
+              <div className="pm-f"><span>Priority</span><Select value={priority} options={prioOpts} placeholder="None" tone={prioOf(priority)?.color} onChange={setPriority} /></div>
             </div>
             <div className="pm-f-row">
               <label className="pm-f"><span>Due date</span><input value={due} placeholder="e.g. Thu 9/4" onChange={(e) => setDue(e.target.value)} /></label>
-              {multi && <label className="pm-f"><span>Week</span><input value={week} placeholder="e.g. Sept 3" onChange={(e) => setWeek(e.target.value)} /></label>}
+              <label className="pm-f"><span>Start date</span><input value={week} placeholder="e.g. Mon 9/8" onChange={(e) => setWeek(e.target.value)} /></label>
             </div>
             <div className="pm-f"><span>Blockers</span><div className="pm-ed-blockers"><BlockerCell blockers={blockers} people={people} map={map} addPerson={addPerson} onChange={setBlockers} /></div></div>
           </div>
@@ -544,6 +571,9 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
   const [sort, setSort] = useState<SortKey>("manual");
   const [editor, setEditor] = useState<EditorState>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [dropHint, setDropHint] = useState<{ id: string; after: boolean } | null>(null);
+  // Positions set by dragging, applied straight away while the PATCHes go out.
+  const [rank, setRank] = useState<Record<string, number>>({});
   const [people, setPeople] = useState<Person[]>([]);
   const [week, setWeek] = useState<string>("");
   const [weeks, setWeeks] = useState<string[]>([]);
@@ -567,9 +597,33 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
   const removeWeek = (label: string) => { setWeeks((w) => w.filter((x) => x !== label)); if (week === label) setWeek(""); void fetch(`/api/project-management/weeks?week=${encodeURIComponent(label)}`, { method: "DELETE" }).catch(() => {}); };
 
   const allWeeks = useMemo(() => { const set = new Set<string>(weeks); for (const t of tasks) if (t.week) set.add(t.week); return Array.from(set); }, [weeks, tasks]);
-  const visible = useMemo(() => { const base = multi && week ? tasks.filter((t) => t.week === week) : tasks; return sortTasks(base, sort); }, [tasks, multi, week, sort]);
+  const visible = useMemo(() => {
+    const base = multi && week ? tasks.filter((t) => t.week === week) : tasks;
+    // Manual order is the dragged order: each task's position, with any just-dragged ones applied.
+    const pos = (t: BoardTask, i: number) => rank[t.id] ?? (typeof t.position === "number" ? t.position : Number.MAX_SAFE_INTEGER - tasks.length + i);
+    const ordered = sort === "manual" ? base.map((t, i) => [t, pos(t, i)] as const).sort((a, b) => a[1] - b[1]).map(([t]) => t) : base;
+    return sortTasks(ordered, sort);
+  }, [tasks, multi, week, sort, rank]);
+  /** Puts the dragged task before/after the target, renumbers that column 0..n, and saves the new positions. */
+  const reorder = (ids: string[], targetId: string, after: boolean) => {
+    const moving = dragId; setDropHint(null); setDragId(null);
+    if (!moving || moving === targetId) return;
+    const rest = ids.filter((id) => id !== moving);
+    const at = rest.indexOf(targetId);
+    if (at < 0) return;
+    rest.splice(after ? at + 1 : at, 0, moving);
+    const next: Record<string, number> = {};
+    rest.forEach((id, i) => { next[id] = i * 10; });
+    setRank((r) => ({ ...r, ...next }));
+    if (sort !== "manual") setSort("manual");
+    const current = new Map(tasks.map((t) => [t.id, rank[t.id] ?? t.position]));
+    for (const [id, position] of Object.entries(next)) {
+      if (current.get(id) === position || id.startsWith("tmp")) continue;
+      void fetch("/api/project-management/tasks", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, position }) }).catch(() => {});
+    }
+  };
   const create = (slug: string, f: NewFields) => onCreate(slug, { ...f, week: multi && week ? week : undefined });
-  const h: Handlers = { clients, multi, people, map, addPerson, removePerson, uploadAvatar, openNew: (stage, clientSlug, assignee) => setEditor({ mode: "new", stage, clientSlug, assignee }), onOpen: (t) => setEditor({ mode: "edit", task: t }), onDelete, notifyChannel, onDrag: setDragId, dragId, onMove, onSetDay };
+  const h: Handlers = { clients, multi, people, map, addPerson, removePerson, uploadAvatar, openNew: (stage, clientSlug, assignee) => setEditor({ mode: "new", stage, clientSlug, assignee }), onOpen: (t) => setEditor({ mode: "edit", task: t }), onDelete, notifyChannel, onDrag: setDragId, dragId, onMove, onSetDay, onReorder: reorder, dropHint, setDropHint };
   const byStage = useMemo(() => { const m: Record<string, BoardTask[]> = {}; for (const s of STAGES) m[s.key] = []; for (const t of visible) (m[t.stage] || m.todo).push(t); return m; }, [visible]);
   const views: [View, string][] = order.filter((v) => v !== "byclient" || multi).map((v) => ALL_VIEWS.find(([k]) => k === v)!);
 
