@@ -285,8 +285,10 @@ function emailBlocks(body: string, slug: string, read: { live: boolean; internal
   const flushLines = (gapAfter = false) => {
     if (lines.length) {
       const body = lines.flatMap((l, n) => [...inline(l), ...(n < lines.length - 1 ? [{ type: "text", text: "\n" }] : [])]);
-      elements.push({ type: "rich_text_section", elements: [...(gapBefore ? [{ type: "text", text: "\n" }] : []), ...body, ...(gapAfter ? [{ type: "text", text: "\n" }] : [])] });
-      gapBefore = false;
+      // Slack drops a trailing newline in a rich text section but keeps a leading one, so a gap after this
+      // paragraph is written as a gap before the next.
+      elements.push({ type: "rich_text_section", elements: [...(gapBefore ? [{ type: "text", text: "\n" }] : []), ...body] });
+      gapBefore = gapAfter;
     }
     lines = [];
   };
