@@ -230,7 +230,17 @@ export async function brainCorpus(paths: string[]): Promise<BrainDoc[]> {
   if (corpusCache && corpusCache.expires > Date.now()) return corpusCache.docs;
   // One archive download instead of one request per file: ~1,000 files at eight in flight took 13s on
   // every fresh server, the tarball is a single ~2 MB request. Falls back to per-file reads if it fails.
-  const docs = (await brainCorpusFromTarball(paths).catch(() => null)) ?? (await brainFiles(paths, 8));
+  const fromTar = await brainCorpusFromTarball(paths).catch(() => null);
+  let docs: BrainDoc[];
+  if (fromTar) {
+    // Anything the archive did not carry (an odd path or encoding) is read the slow way, so search never
+    // silently loses a document.
+    const have = new Set(fromTar.map((doc) => doc.path));
+    const missing = paths.filter((path) => !have.has(path));
+    docs = missing.length ? [...fromTar, ...(await brainFiles(missing, 8))] : fromTar;
+  } else {
+    docs = await brainFiles(paths, 8);
+  }
   corpusCache = { expires: Date.now() + CORPUS_CACHE_MS, docs };
   return docs;
 }
