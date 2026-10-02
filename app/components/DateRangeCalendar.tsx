@@ -18,6 +18,10 @@ type Props = {
   until: string;
   onChange: (since: string, until: string) => void;
   align?: "left" | "right";
+  /** Open the calendar as soon as it mounts, for a control that exists only to pick dates. */
+  defaultOpen?: boolean;
+  /** Called when the calendar closes, by Done or a click outside. */
+  onClose?: () => void;
 };
 
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
@@ -31,8 +35,15 @@ const parse = (value: string): Date | null => {
 };
 const short = (value: string) => { const date = parse(value); return date ? date.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""; };
 
-export default function DateRangeCalendar({ since, until, onChange, align = "left" }: Props) {
-  const [open, setOpen] = useState(false);
+export default function DateRangeCalendar({ since, until, onChange, align = "left", defaultOpen = false, onClose }: Props) {
+  const [open, setOpen] = useState(defaultOpen);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current && !open) onCloseRef.current?.();
+    wasOpen.current = open;
+  }, [open]);
   const [view, setView] = useState<Date>(() => parse(since) || parse(until) || new Date());
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);

@@ -205,7 +205,7 @@ html:not(.hydrated) body{visibility:hidden}
 .uf-item{display:flex;align-items:center;justify-content:space-between;width:100%;padding:8px 14px;font-size:10px;font-weight:600;color:var(--text);background:none;border:none;cursor:pointer;text-align:left}.uf-item:hover{background:var(--panel-2)}.uf-item b{color:var(--muted);font-weight:400;font-size:12px}
 .uf-divider{height:1px;margin:4px 10px;background:var(--border-soft)}
 .uf-clear{color:var(--muted)!important;font-weight:500!important}.uf-clear:hover{color:var(--coral)!important}
-.unified-filter-sub{position:absolute;left:100%;top:0;width:200px;max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;background:var(--panel);box-shadow:0 12px 40px #000a;padding:6px 0}
+.unified-filter-sub{position:absolute;right:calc(100% + 6px);top:0;width:200px;max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;background:var(--panel);box-shadow:0 12px 40px #000a;padding:6px 0}
 .uf-sub-item{display:block;width:100%;padding:7px 14px;font-size:10px;color:var(--text);background:none;border:none;cursor:pointer;text-align:left;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.uf-sub-item:hover{background:var(--panel-2)}.uf-sub-item.uf-active{color:var(--accent);font-weight:700}
 
 /* Analytics client grid */
@@ -417,16 +417,19 @@ html:not(.hydrated) body{visibility:hidden}
   .app-sidebar.sidebar-collapsed .client-directory-item { color: transparent; transition: padding .34s var(--rail-ease), color .12s ease, background-color .15s ease; }
   .app-sidebar.sidebar-collapsed .client-directory-item i { color: #fff; }
 
-  /* The logo: the wordmark's own dot grid is the collapsed mark, so the wordmark is clipped, not swapped. */
+  /* The logo: collapsed shows the square dot-grid icon, expanded shows the full wordmark, with a short
+     fade so the swap doesn't snap. */
   .app-sidebar .brand-row { transition: padding .34s var(--rail-ease); }
   .app-sidebar.sidebar-collapsed .brand-row { padding-left: 10px; padding-right: 10px; }
-  .app-sidebar .brand-toggle { max-width: 200px; overflow: hidden; transition: max-width .34s var(--rail-ease), opacity .15s ease; }
-  .app-sidebar.sidebar-collapsed .brand-toggle { max-width: 24px; }
-  .app-sidebar .brand-toggle .brand-mark.brand-mark-grid,
-  .app-sidebar.sidebar-collapsed .brand-toggle .brand-mark.brand-mark-grid { display: none; }
-  .app-sidebar.sidebar-collapsed .brand-toggle .sidebar-label { display: inline-flex; }
+  .app-sidebar .brand-toggle .sidebar-label { animation: rail-fade .22s ease .1s both; }
+  .app-sidebar.sidebar-collapsed .brand-toggle .sidebar-label { display: none; }
+  .app-sidebar .brand-toggle .brand-mark.brand-mark-grid { display: none; }
+  .app-sidebar.sidebar-collapsed .brand-toggle .brand-mark.brand-mark-grid { display: grid; animation: rail-fade .22s ease both; }
 
   @media (prefers-reduced-motion: reduce) {
     .app-sidebar, .app-sidebar * { transition-duration: .01s !important; transition-delay: 0s !important; }
   }
 }
+.uf-sub-item.uf-sub-more{color:var(--accent);font-weight:650;border-top:1px solid var(--border-soft);margin-top:4px;padding-top:9px}
+
+@keyframes rail-fade { from { opacity: 0; } to { opacity: 1; } }

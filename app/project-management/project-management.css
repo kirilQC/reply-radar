@@ -123,7 +123,7 @@
 .pm-prow-add .pm-add-input { border-color: var(--border); }
 
 /* editor modal */
-.pm-modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); backdrop-filter: blur(2px); display: grid; place-items: center; z-index: 100; padding: 24px; }
+.pm-modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); backdrop-filter: blur(2px); display: grid; place-items: start center; z-index: 100; padding: 48px 24px; overflow-y: auto; overscroll-behavior: contain; }
 .pm-modal { width: min(460px, 100%); background: var(--panel); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.5); overflow: hidden; }
 .pm-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--border); }
 .pm-modal-head h2 { margin: 0; font-size: 17px; }

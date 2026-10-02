@@ -557,12 +557,32 @@ export function InboxPage() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [filterSub, setFilterSub] = useState<string | null>(null);
+  const [allCampaignsShown, setAllCampaignsShown] = useState(false);
+  const filterWrapRef = useRef<HTMLDivElement>(null);
+  // Clicking anywhere outside the Filters menu closes it, like any other dropdown.
+  useEffect(() => {
+    if (!filterDropdownOpen) return;
+    const close = (event: PointerEvent) => {
+      if (filterWrapRef.current && !filterWrapRef.current.contains(event.target as Node)) {
+        setFilterDropdownOpen(false);
+        setFilterSub(null);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setFilterDropdownOpen(false); setFilterSub(null); } };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", onKey); };
+  }, [filterDropdownOpen]);
+  useEffect(() => { if (filterSub !== "campaign") setAllCampaignsShown(false); }, [filterSub]);
   // A custom date window on the inbox queue (YYYY-MM-DD, the caller's local day). Only consulted while
   // `filter === "custom"`; empty until the person picks one. The fetch sends these as instants so the
   // server can reach past the newest-500 ceiling, and the client memo re-applies them so a merged-in older
   // row from a previous view never leaks into a narrowed range.
   const [customSince, setCustomSince] = useState("");
   const [customUntil, setCustomUntil] = useState("");
+  // Clicking Custom with no dates yet opens the calendar but leaves the current view on screen until
+  // a date is actually picked, instead of flashing every reply while you choose.
+  const [customPicking, setCustomPicking] = useState(false);
   const [campaignFilter, setCampaignFilter] = useState("");
   const [senderFilter, setSenderFilter] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState("");
@@ -2110,16 +2130,37 @@ export function InboxPage() {
                     ].map(([label, value]) => (
                       <button
                         key={value}
-                        className={filter === value ? "selected" : ""}
-                        onClick={() => { setFilter(value); setSelectedId(""); }}
+                        className={filter === value || (value === "custom" && customPicking) ? "selected" : ""}
+                        onClick={() => {
+                          if (value === "custom" && filter !== "custom" && !customSince && !customUntil) { setCustomPicking(true); return; }
+                          setCustomPicking(false);
+                          setFilter(value);
+                          setSelectedId("");
+                        }}
                       >
                         {label}
                       </button>
                     ))}
                   </div>
-                  {filter === "custom" && (
+                  {(filter === "custom" || customPicking) && (
                     <div className="inbox-daterange">
-                      <DateRangeCalendar since={customSince} until={customUntil} onChange={(since, until) => { setCustomSince(since); setCustomUntil(until); }} />
+                      <DateRangeCalendar
+                        since={customSince}
+                        until={customUntil}
+                        defaultOpen={customPicking}
+                        onChange={(since, until) => {
+                          setCustomSince(since);
+                          setCustomUntil(until);
+                          // The range is complete: now switch the view.
+                          if (customPicking && since && until) { setCustomPicking(false); setFilter("custom"); setSelectedId(""); }
+                        }}
+                        onClose={() => {
+                          if (!customPicking) return;
+                          setCustomPicking(false);
+                          // Closed with only a start date: use it. Closed with nothing: stay where you were.
+                          if (customSince) { setFilter("custom"); setSelectedId(""); }
+                        }}
+                      />
                     </div>
                   )}
                   {tagFilter && tagById[tagFilter] && (
@@ -2133,7 +2174,7 @@ export function InboxPage() {
                       Tag: {tagById[tagFilter].name} <span aria-hidden>✕</span>
                     </button>
                   )}
-                  <div className="unified-filter-wrap">
+                  <div className="unified-filter-wrap" ref={filterWrapRef}>
                     <button className="filter-button unified-filter-toggle" onClick={() => { setFilterDropdownOpen((v) => !v); setFilterSub(null); }}>
                         Filters{(campaignFilter || senderFilter || sentimentFilter || tagFilter || sort !== "score-desc" || ["Starred", "Hot", "Warm", "Nurture"].includes(filter)) ? " ●" : ""}
                       </button>
@@ -2161,9 +2202,28 @@ export function InboxPage() {
                           {filterSub === "campaign" && (
                             <div className="unified-filter-sub">
                               <button className={`uf-sub-item ${!campaignFilter ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(""); setSelectedId(""); }}>All campaigns</button>
-                              {[...new Set(leads.filter((l) => !assignedClients || assignedClients.includes(l.client)).map((l) => l.campaignName).filter(Boolean))].sort().map((c) => (
-                                <button key={c!} className={`uf-sub-item ${campaignFilter === c ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(String(c)); setSelectedId(""); }}>{c}</button>
-                              ))}
+                              {(() => {
+                                // Most recently active first, ten at a time: some clients have 70+ campaigns.
+                                const latest = new Map<string, number>();
+                                for (const l of leads) {
+                                  if (!l.campaignName || (assignedClients && !assignedClients.includes(l.client))) continue;
+                                  const at = Date.parse(String(l.latestReplyAt || l.lastMessageAt || "")) || 0;
+                                  latest.set(l.campaignName, Math.max(latest.get(l.campaignName) ?? 0, at));
+                                }
+                                const all = [...latest.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name]) => name);
+                                let shown = allCampaignsShown ? all : all.slice(0, 10);
+                                if (campaignFilter && !shown.includes(campaignFilter) && all.includes(campaignFilter)) shown = [...shown, campaignFilter];
+                                return (
+                                  <>
+                                    {shown.map((c) => (
+                                      <button key={c} className={`uf-sub-item ${campaignFilter === c ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(c); setSelectedId(""); }}>{c}</button>
+                                    ))}
+                                    {!allCampaignsShown && all.length > 10 && (
+                                      <button className="uf-sub-item uf-sub-more" onClick={() => setAllCampaignsShown(true)}>View all {all.length} campaigns</button>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </div>
                           )}
                           {filterSub === "sender" && (

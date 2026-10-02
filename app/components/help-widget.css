@@ -95,7 +95,10 @@ body:has(.hw) { padding-bottom: 76px; }
    the content (never the top bar, which should feel fixed) turns that jump into a transition. Opacity and
    a small translate only, and `both` ends on `transform: none`, so fixed-position panels inside the page
    are only offset for the first few frames. */
-@keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* Opacity only. A transform here, even mid-animation, turns the page into the containing block for
+   every position:fixed child, so modals opened from a long page (Project management's By client view)
+   were placed against the whole page instead of the screen and landed far below where you clicked. */
+@keyframes page-in { from { opacity: 0; } to { opacity: 1; } }
 .main-area > :not(.topbar):not(header) { animation: page-in .42s cubic-bezier(.2, .7, .2, 1) both; }
 .main-area > :not(.topbar):not(header):nth-child(3) { animation-delay: 40ms; }
 @media (prefers-reduced-motion: reduce) { .main-area > * { animation: none !important; } }
