@@ -28,6 +28,7 @@
  */
 
 import { after } from "next/server";
+import { listAssistants, personalClientDirectory } from "../../../lib/personal-brief";
 import { markdownToPdf, wantsPdf, reportSummary } from "../../../../shared/simple-pdf.mjs";
 import { MODEL, runAgent, type AgentEvent, type AgentResult, type Turn } from "../../../lib/assistant-run";
 import { writeAuditEvent } from "../../../lib/audit-log";
@@ -286,6 +287,17 @@ async function runAndReply(opts: {
     extraParts.push("In Slack the message must stand on its own even when a file is attached (attachments can fail): lead with the counts and breakdown, then name the top 5 to 10 rows inline (name, company, the one fact that matters), then say the full list is in the attached file.");
     extraParts.push(`You are talking to ${askerName || "a QC team member"}${askedBy ? ` (Slack user <@${askedBy}>)` : ""}. If you file a support ticket, record submittedBy as their name.`);
     if (surface === "dm") extraParts.push("This is a private, one-to-one direct message: you are this person's own QC Command assistant, with your full set of tools available. Answer for them alone — there is no channel audience reading along.");
+    // "My clients" means the roster on this person's personal assistant, when they have one.
+    if (askedBy) {
+      try {
+        const me = (await listAssistants()).find((a) => a.slackUserId === askedBy);
+        if (me?.clientSlugs.length) {
+          const directory = await personalClientDirectory();
+          const names = me.clientSlugs.map((slug) => directory.find((c) => c.slug === slug)?.name ?? slug);
+          extraParts.push(`${me.personName}'s own clients are: ${names.join(", ")}. When they say "my clients", "my accounts" or "my plate", scope to exactly these.`);
+        }
+      } catch { /* no roster: "my clients" falls back to asking or to all clients */ }
+    }
     if (supportOwner) extraParts.push(`When you tell someone Kiril will look into a support issue, refer to him as <@${supportOwner}> so he is actually notified.`);
     const systemExtra = extraParts.join("\n");
 
@@ -485,7 +497,13 @@ async function answerDirectMessage(event: Row): Promise<void> {
   // just-sent message is already in it, so the turns end on the human. If the read comes back empty (Slack
   // briefly unreachable, or the scope missing), the bare question still stands so the bot answers.
   const identity = await botIdentity();
-  const history = threadToTurns(await dmHistory(channel), identity) as Turn[];
+  // Two quick messages ("what's urgent?" then "and find X's email") should get one answer, not two runs
+  // that each answer both. Wait a beat; if the same person has sent something newer, that run answers it all.
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  const posts = await dmHistory(channel);
+  const mine = str(event.ts);
+  if (posts.some((post) => !post.botId && post.author === str(event.user) && Number(post.ts) > Number(mine))) return;
+  const history = threadToTurns(posts.filter((post) => Number(post.ts) <= Number(mine)), identity) as Turn[];
   const messages = history.length && history[history.length - 1].role === "user" ? history : [{ role: "user" as const, content: question }];
   // Reply straight into the DM, NOT threaded under the message. A DM is a one-to-one conversation, so
   // hanging the answer in a thread would bury it — threading is a channel-only behaviour, where the bot
