@@ -25,7 +25,8 @@ import { HELP_PAGES, type HelpArticle, pageLabel } from "../lib/help-shared";
 import "./help-widget.css";
 
 type Shot = { name: string; mime: string; data: string; preview: string };
-type Message = { role: "user" | "assistant"; content: string; shots?: string[]; error?: boolean; sent?: boolean };
+type Offer = { kind: "bug" | "idea"; summary: string };
+type Message = { role: "user" | "assistant"; content: string; shots?: string[]; error?: boolean; sent?: boolean; offer?: Offer; offerDone?: boolean };
 
 const STORE = "reply-radar-help-chat:v2";
 const GREETED = "reply-radar-help-greeted";
@@ -56,7 +57,6 @@ const Icon = ({ d, size = 15 }: { d: string; size?: number }) => (
   <svg viewBox="0 0 24 24" width={size} height={size} style={{ width: size, height: size }} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
 );
 const CLIP = "M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8";
-const FLAG = "M5 21V4 M5 4h11l-2 4 2 4H5";
 
 export default function HelpWidget() {
   const pathname = usePathname() ?? "/";
@@ -151,13 +151,24 @@ export default function HelpWidget() {
       if (!response.ok || !data.ok) {
         setMessages((prev) => [...prev, { role: "assistant", error: true, content: String(data.error ?? "I couldn't reach my notes just now. Try again, or reach out to Kiril.") }]);
       } else {
-        setMessages((prev) => [...prev, { role: "assistant", content: String(data.answer) }]);
+        const offer = data.offer && (data.offer.kind === "bug" || data.offer.kind === "idea") ? { kind: data.offer.kind, summary: String(data.offer.summary ?? asked) } as Offer : undefined;
+        setMessages((prev) => [...prev, { role: "assistant", content: String(data.answer), offer }]);
       }
     } catch {
       setMessages((prev) => [...prev, { role: "assistant", error: true, content: "I couldn't reach my notes just now. Check your connection and try again, or reach out to Kiril." }]);
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Scout spotted a stuck moment or an idea: answering yes opens the note to Kiril, already written. */
+  const answerOffer = (index: number, yes: boolean) => {
+    const message = messages[index];
+    setMessages((prev) => prev.map((m, k) => (k === index ? { ...m, offerDone: true } : m)));
+    if (!yes || !message?.offer) return;
+    const shot = [...messages.slice(0, index)].reverse().find((m) => m.role === "user" && m.shots?.length)?.shots?.[0];
+    setReport({ kind: message.offer.kind, text: message.offer.summary, shot: shot ? { name: "screenshot", mime: "", data: "", preview: shot } : null, sending: false, error: "" });
+    setReporting(true);
   };
 
   const sendReport = async () => {
@@ -189,19 +200,11 @@ export default function HelpWidget() {
             <span className="hw-head-mascot"><HelpMascot size={38} thinking={busy} /></span>
             <div className="hw-head-text">
               <strong>{MASCOT_NAME}</strong>
-              <small>{busy ? "Looking it up…" : reporting ? "Report to Kiril" : "Quick help"}</small>
+              {(busy || reporting) && <small>{busy ? "Looking it up…" : "Send to Kiril"}</small>}
             </div>
-            {messages.length > 0 && !reporting && (
-              <button type="button" className="hw-icon" title="Start over" onClick={() => setMessages([])}>
-                <Icon d="M4 12a8 8 0 1 0 2.3-5.7 M4 4v4h4" />
-              </button>
-            )}
-            <a className="hw-icon" href="/scout" title="Open the Scout tab for full answers">
-              <Icon d="M11 4c0 3.9 3.1 7 7 7-3.9 0-7 3.1-7 7 0-3.9-3.1-7-7-7 3.9 0 7-3.1 7-7z" />
-            </a>
-            <a className="hw-icon" href="/help" title="Open the Help center">
-              <Icon d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z M4 20V5" />
-            </a>
+            <button type="button" className="hw-icon" title="New chat" aria-label="New chat" onClick={() => { setMessages([]); setReporting(false); setInput(""); setShots([]); }}>
+              <Icon d="M12 5v14 M5 12h14" />
+            </button>
             <button type="button" className="hw-icon" title="Close" onClick={() => setOpen(false)}>
               <Icon d="M6 6l12 12 M18 6L6 18" />
             </button>
@@ -230,6 +233,15 @@ export default function HelpWidget() {
                   </div>
                 )}
                 {m.role === "user" ? <p>{m.content}</p> : <div className="hw-md"><Markdown>{m.content}</Markdown></div>}
+                {m.offer && !m.offerDone && (
+                  <div className="hw-offer">
+                    <span>{m.offer.kind === "idea" ? "Do you want to submit this idea to Kiril?" : "Do you want to submit this to Kiril?"}</span>
+                    <div>
+                      <button type="button" onClick={() => answerOffer(i, true)}>Yes</button>
+                      <button type="button" className="ghost" onClick={() => answerOffer(i, false)}>No thanks</button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
             {busy && (
@@ -239,7 +251,7 @@ export default function HelpWidget() {
             )}
             {reporting && (
               <div className="hw-report">
-                <p>Tell Kiril what&apos;s wrong or what you&apos;d like. A screenshot helps a lot.</p>
+                <p>Check the note, add anything Kiril should know, and attach a screenshot if it helps.</p>
                 <div className="hw-report-kinds" role="radiogroup" aria-label="Type">
                   {(["bug", "idea"] as const).map((k) => (
                     <button key={k} type="button" role="radio" aria-checked={report.kind === k} className={report.kind === k ? "on" : ""} onClick={() => setReport((r) => ({ ...r, kind: k }))}>
@@ -317,9 +329,6 @@ export default function HelpWidget() {
                   <Icon d="M4 12l16-8-6 16-3-7z M11 13l9-9" size={16} />
                 </button>
               </form>
-              <button type="button" className="hw-report-link" onClick={() => setReporting(true)}>
-                <Icon d={FLAG} size={12} /> Still stuck? Report a bug or idea to Kiril
-              </button>
             </>
           )}
         </section>

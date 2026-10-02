@@ -113,8 +113,6 @@ body:has(.hw) { padding-bottom: 76px; }
 .hw-msg p a, .hw-md a { color: var(--accent); font-weight: 650; }
 .hw-msg.me p a { color: inherit; }
 .hw-msg.sent { border-color: color-mix(in srgb, var(--accent) 45%, var(--border, #252a35)); background: color-mix(in srgb, var(--accent) 8%, var(--panel-2, #151821)); }
-.hw-report-link { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px 10px; background: transparent; color: var(--muted-2, #5e6574); font-size: 11.5px; font-weight: 600; transition: color .2s; }
-.hw-report-link:hover { color: var(--accent); }
 .hw-report { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border, #252a35)); border-radius: 14px; background: var(--panel-2, #151821); animation: hw-rise .3s var(--hw-ease) both; }
 .hw-report p { margin: 0; font-size: 12.5px; color: var(--text, #f3f4f7); line-height: 1.5; }
 .hw-report-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -131,3 +129,10 @@ body:has(.hw) { padding-bottom: 76px; }
 .hw-report-actions button { height: 32px; padding: 0 14px; border-radius: 9px; background: var(--accent); color: var(--accent-ink, #0b0c10); font-size: 12px; font-weight: 700; }
 .hw-report-actions button.ghost { background: transparent; color: var(--muted, #8c92a2); border: 1px solid var(--border, #252a35); }
 .hw-report-actions button:disabled { opacity: .45; cursor: default; }
+
+/* Scout spotted a stuck moment or an idea: a small yes/no to send it to Kiril. */
+.hw-offer { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft, #1d212a); }
+.hw-offer > span { font-size: 12.5px; font-weight: 650; color: var(--text, #f3f4f7); }
+.hw-offer > div { display: flex; gap: 8px; }
+.hw-offer button { height: 30px; padding: 0 14px; border-radius: 9px; background: var(--accent); color: var(--accent-ink, #0b0c10); font-size: 12px; font-weight: 700; }
+.hw-offer button.ghost { background: transparent; color: var(--muted, #8c92a2); border: 1px solid var(--border, #252a35); }

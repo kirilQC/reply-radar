@@ -982,9 +982,9 @@ Conversations follow your profile, so they're there on another computer too.`,
     keywords: ["report", "bug", "idea", "feature request", "kiril", "screenshot", "scout"],
     images: [shot("feedback.jpg", "Reports land in Configuration → Feedback, where Kiril works through them.")],
     body: `1. Click **Scout** in the bottom-right corner of any page.
-2. Click **Still stuck? Report a bug or idea to Kiril**.
-3. Pick **Something's broken** or **Feature idea**, describe it, and click **Attach a screenshot** if you can.
-4. Click **Send to Kiril**.
+2. Tell Scout what isn't working or what you'd like. Attach a screenshot with the paperclip if it helps.
+3. When Scout can't fix it, or it hears an idea, it asks **Do you want to submit this to Kiril?** Click **Yes**.
+4. Check the note Scout wrote, add anything missing, and click **Send to Kiril**.
 
 It goes straight to Kiril and he'll work on it. You can follow it in Configuration → **Feedback**.`,
   },

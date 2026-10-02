@@ -6,7 +6,7 @@
  * held to the bubble's job. Quick help, quick facts and fixing problems are answered here in a few lines;
  * anything that needs a table, a long list, a report or an export gets its headline plus a link that
  * opens the full answer in the Scout tab (/scout?ask=…). When it cannot solve something, it sends the
- * person to Kiril and to the bubble's Report to Kiril form.
+ * person to Kiril; stuck moments and ideas come back with an offer to send them to him.
  */
 
 import { NextResponse } from "next/server";
@@ -37,7 +37,11 @@ The bubble's job: quick help on how things work, fixing problems, and quick fact
 - Get counts from the tools, not by counting rows in your head: use query_data with countOnly and a filter (a blank text field can be null or "", so check both and add them). Finish working it out before you write anything. Never correct yourself in the answer ("wait", "let me recount"); the answer you write is final.
 - More than 5 names is a list: give the count in one sentence and the Scout link, not the names.
 - Do not narrate what you are doing; only your final answer is shown here.
-- If you can't solve it, or they're still stuck or unhappy after your answer: tell them to reach out to Kiril, and that they can tap **Report to Kiril** at the bottom of this bubble, type out the bug or feature request and attach a screenshot. It goes straight to Kiril and he'll work on it. Do not file a support ticket yourself from the bubble.`;
+- Offering to send it to Kiril: when they can't make something work, something is broken or behaving wrongly, they are still stuck or unhappy after your answer, or they suggest an idea or a feature, help as far as you can, then end your reply with one line in exactly this form and nothing after it:
+  [[KIRIL:bug|<one sentence for Kiril describing the problem, in their words, with the page>]]
+  or, for an idea or feature request:
+  [[KIRIL:idea|<one sentence for Kiril describing the idea>]]
+  The bubble turns that line into a "Do you want to submit this to Kiril?" prompt, so do not ask that question yourself and do not mention forms or buttons. Never add the line for ordinary how-to or data questions you answered fully. Do not file a support ticket yourself from the bubble.`;
 
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -83,7 +87,15 @@ export async function POST(request: Request) {
     if (!answer) answer = `I couldn't finish that here. [Open the full answer in Scout →](${scoutLink})\n\nIf it still doesn't work, reach out to Kiril.`;
     // A tool built a file the bubble cannot show: the full version lives in the Scout tab.
     if (files.length && !answer.includes("/scout?ask=")) answer += `\n\n[Open the full answer in Scout →](${scoutLink})`;
-    return NextResponse.json({ ok: true, answer, scoutUrl: scoutLink });
+    // The model flags stuck moments and ideas with a trailing marker; the bubble turns it into an offer.
+    let offer: { kind: "bug" | "idea"; summary: string } | null = null;
+    const marker = /\[\[KIRIL:(bug|idea)\|([^\]]*)\]\]\s*$/i.exec(answer);
+    if (marker) {
+      offer = { kind: marker[1].toLowerCase() === "idea" ? "idea" : "bug", summary: marker[2].trim() || question };
+      answer = answer.slice(0, marker.index).trim();
+    }
+    answer = answer.replace(/\[\[KIRIL:[^\]]*\]\]/gi, "").trim();
+    return NextResponse.json({ ok: true, answer, offer, scoutUrl: scoutLink });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: `${error instanceof Error ? error.message : "Something went wrong."} If it keeps happening, reach out to Kiril.`, scoutUrl: scoutLink },
