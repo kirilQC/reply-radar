@@ -1266,9 +1266,10 @@ async function queuedAnalyticsRequest() {
  * went out) are stored. Paced to ~5 requests a second, under HeyReach's 15 per 2 seconds. A missing table
  * (the migration not run yet) is logged once and skipped, never fatal to the analytics pass.
  */
-let outreachTableMissing = false;
+// When the table is missing, check again an hour later rather than never (it gets created by hand).
+let outreachTableMissingAt = 0;
 async function syncOutreach(workspace) {
-  if (outreachTableMissing) return 0;
+  if (outreachTableMissingAt && Date.now() - outreachTableMissingAt < 60 * 60 * 1000) return 0;
   const apiKey = workspace.heyreach_api_key_ciphertext;
   const campaigns = ourCampaigns(await heyReachCampaignPages(apiKey), (row) => row.name);
   let written = 0;
@@ -1314,7 +1315,7 @@ async function syncOutreach(workspace) {
           written += rows.length;
         } catch (error) {
           if (/PGRST205|404|does not exist/i.test(String(error))) {
-            outreachTableMissing = true;
+            outreachTableMissingAt = Date.now();
             console.warn("reply_radar_outreach_table_missing", { hint: "run supabase/migrations/20261002_rr_outreach.sql" });
             return 0;
           }
