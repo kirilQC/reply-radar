@@ -746,7 +746,7 @@ const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "airtable_create_records",
     description:
-      "Add one or more rows to a table in a client's Airtable base. This writes immediately and cannot be undone through this assistant, so read the table with airtable_tables first, use the exact field names and — for select fields — the exact options it lists, and show the person what you are about to add before you do it. Each record is an object of field name to value. Returns the created rows with their new record ids. Use this when someone asks to add, log, record or file something in a client's Airtable.",
+      "Add one or more rows to a table in a client's Airtable base. This writes immediately (a row can be removed again with airtable_delete_records), so read the table with airtable_tables first, use the exact field names and — for select fields — the exact options it lists, and show the person what you are about to add before you do it. Each record is an object of field name to value. Returns the created rows with their new record ids. Use this when someone asks to add, log, record or file something in a client's Airtable.",
     input_schema: {
       type: "object",
       properties: {
