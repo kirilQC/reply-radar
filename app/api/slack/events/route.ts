@@ -290,7 +290,7 @@ async function runAndReply(opts: {
     // hand it the mention token so "Kiril will look into it" actually pings him.
     const supportOwner = (process.env.SUPPORT_OWNER_SLACK_ID || "").trim();
     const extraParts: string[] = [];
-    extraParts.push(`Slack layout. Your answer is laid out as a card, so write it in exactly this shape and nothing else:
+    extraParts.push(`Slack layout. This section overrides the "Answer shape" rules above wherever they differ. Your answer is laid out as a card, so write it in exactly this shape and nothing else:
 1. First line: the verdict in bold, one sentence, under 120 characters, carrying the key number. ("**286 positive replies are waiting on us. 12 need an answer today.**")
 2. Optional: a \`\`\`stats block with 2 to 4 tiles, only when the answer has several figures. Short labels.
 3. Detail: at most 5 list items (8 for a list someone asked for). Each item is "- **Name or subject**, short context · one-line detail". When items are things to act on, start each with 🔴 (today), 🟡 (this week) or 🟢 (fine / for info). Never "Label: value · Label: value" rows; write the row the way a person would. A table only when it has at most 3 short columns.

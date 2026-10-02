@@ -34,6 +34,8 @@ function splitItem(raw) {
   const marker = dot ? dot[1] : "";
   const body = dot ? text.slice(dot[0].length) : text;
   // The first " · ", " - " or ": " after a bold lead separates the name from its detail.
+  const label = body.match(/^\*\*([^*]{1,60}?):\*\*\s*(.+)$/s) || body.match(/^\*\*([^*]{1,60}?)\*\*:\s*(.+)$/s);
+  if (label) return { marker, head: `**${label[1].trim()}**`, detail: label[2].trim() };
   const sep = body.match(/^(\*\*[^*]+\*\*[^·:–—-]{0,80}?)\s*(?:·|:|–|—|\s-\s)\s*(.+)$/u);
   if (sep) return { marker, head: sep[1].trim(), detail: sep[2].trim() };
   return { marker, head: body, detail: "" };
@@ -63,10 +65,15 @@ export function answerToBlocks(markdown, opts = {}) {
   const para = firstPara.join(" ").trim();
   const bold = para.match(/^\*\*(.+?)\*\*\s*(.*)$/s);
   if (bold) {
-    verdictText = plain(bold[1]);
+    const full = plain(bold[1]);
+    // The header is the first sentence; any further sentences of the verdict sit under it in bold.
+    const first = full.match(/^.+?[.!?](?=\s+[A-Z0-9]|$)/)?.[0] ?? full;
+    verdictText = first.length <= HEADER_MAX ? first : full;
+    const restOfVerdict = verdictText === full ? "" : full.slice(first.length).trim();
     if (verdictText.length <= HEADER_MAX) blocks.push({ type: "header", text: { type: "plain_text", text: verdictText, emoji: true } });
     else blocks.push(section(`*${verdictText}*`));
-    if (bold[2].trim()) blocks.push(section(mrk(bold[2].trim())));
+    const after = [restOfVerdict ? `*${restOfVerdict}*` : "", bold[2].trim() ? mrk(bold[2].trim()) : ""].filter(Boolean).join(" ");
+    if (after) blocks.push(section(after));
   } else if (para) {
     verdictText = plain(para).slice(0, 200);
     blocks.push(section(mrk(para)));
@@ -136,6 +143,16 @@ export function answerToBlocks(markdown, opts = {}) {
     if (isFooterLine(line)) { flushText(); footerBits.push(mrk(line.trim())); continue; }
     if (/^>\s?/.test(line)) { flushText(); blocks.push(context(mrk(line.replace(/^>\s?/, "")))); continue; }
     if (!line.trim()) { flushText(); continue; }
+    // A closing offer ("Want the per-campaign breakdown, or the leads behind Hetz's 44?") becomes buttons.
+    const offer = line.trim().match(/^(?:want|would you like|should i|shall i|do you want)\b(?: me to)?(?: (?:pull|see|get|show|run))?\s*(?:the\s)?(.+)\?$/i);
+    if (offer && !lines.slice(i + 1).some((l) => l.trim() && !isFooterLine(l) && !/^```/.test(l) && !/^\[/.test(l.trim()))) {
+      flushText();
+      for (const option of offer[1].split(/,\s*(?:or\s+)?|\s+or\s+/i).map((o) => plain(o).trim()).filter(Boolean).slice(0, 3)) {
+        const label = option.charAt(0).toUpperCase() + option.slice(1);
+        buttons.push({ type: "button", text: { type: "plain_text", text: label.slice(0, 75), emoji: true }, action_id: `${ASK_ACTION}_${buttons.length}`, value: label.slice(0, 1900) });
+      }
+      continue;
+    }
     pendingText.push(line);
   }
   flushText();
