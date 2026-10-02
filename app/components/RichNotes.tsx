@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { EditorContent, useEditor, type Editor } from "@tiptap/react";
+import { EditorContent, Extension, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
 
@@ -64,14 +64,34 @@ const Icon = ({ d }: { d: string }) => (
   </svg>
 );
 
+/** Shift+Enter starts a new paragraph too (or a new list item), never a soft line break inside one. */
+const NoSoftBreaks = Extension.create({
+  name: "noSoftBreaks",
+  addKeyboardShortcuts() {
+    return {
+      "Shift-Enter": () => this.editor.commands.first(({ commands }) => [() => commands.splitListItem("listItem"), () => commands.splitBlock()]),
+    };
+  },
+});
+
+const isUrl = (s: string) => /^(https?:\/\/|www\.)\S+$/i.test(s.trim());
+const asHref = (s: string) => { const u = s.trim(); return /^(https?:|mailto:)/i.test(u) ? u : `https://${u}`; };
+const shortUrl = (u: string) => { try { const x = new URL(u); return `${x.hostname.replace(/^www\./, "")}${x.pathname.length > 1 ? x.pathname : ""}`.slice(0, 48); } catch { return u.slice(0, 48); } };
+
 export default function RichNotes({ value, onChange, placeholder = "Everything about this task…", className = "", uploadUrl }: Props) {
-  const [linking, setLinking] = useState(false);
+  // One small panel under the toolbar at a time: a link (text + URL) or an attachment (title + file).
+  const [panel, setPanel] = useState<null | "link" | "file">(null);
+  const [linkText, setLinkText] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [fileTitle, setFileTitle] = useState("");
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
-  /** Uploads each file and drops a "📎 name" link to it at the cursor. */
-  const attach = async (files: File[]) => {
+  const savedRange = useRef<{ from: number; to: number } | null>(null);
+
+  /** Uploads each file and drops a "📎 title" link to it where the cursor was. */
+  const attach = async (files: File[], title = "") => {
     if (!uploadUrl || !files.length) return;
     setUploadError("");
     for (const file of files) {
@@ -80,25 +100,46 @@ export default function RichNotes({ value, onChange, placeholder = "Everything a
       const r = await fetch(uploadUrl, { method: "POST", body: fd }).then((x) => x.json()).catch(() => ({ ok: false }));
       setUploading((n) => n - 1);
       if (!r.ok) { setUploadError(r.error || `${file.name} could not be uploaded.`); continue; }
-      editorRef.current?.chain().focus().insertContent([{ type: "text", text: `📎 ${file.name}`, marks: [{ type: "link", attrs: { href: r.url } }] }, { type: "text", text: " " }]).run();
+      const label = `📎 ${(files.length === 1 && title.trim()) || file.name}`;
+      const ed = editorRef.current; if (!ed) continue;
+      const at = savedRange.current;
+      const chain = ed.chain().focus();
+      (at ? chain.insertContentAt(at, [{ type: "text", text: label, marks: [{ type: "link", attrs: { href: r.url } }] }, { type: "text", text: " " }]) : chain.insertContent([{ type: "text", text: label, marks: [{ type: "link", attrs: { href: r.url } }] }, { type: "text", text: " " }])).run();
+      savedRange.current = null;
     }
   };
-  const [href, setHref] = useState("");
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         heading: { levels: [2, 3] },
-        link: { openOnClick: false, autolink: true, linkOnPaste: true, HTMLAttributes: { target: "_blank", rel: "noreferrer" } },
+        hardBreak: false,
+        link: { openOnClick: false, autolink: true, linkOnPaste: false, HTMLAttributes: { target: "_blank", rel: "noreferrer" } },
       }),
+      NoSoftBreaks,
       Markdown.configure({ html: true, breaks: false, linkify: true, transformPastedText: true, tightLists: true }),
     ],
     content: normalizeNotes(value),
     editorProps: {
       attributes: { class: "rn-doc", "data-placeholder": placeholder },
-      // Paste or drop files straight into the notes to attach them.
-      handlePaste: (_view, event) => { const files = Array.from(event.clipboardData?.files ?? []); if (!uploadUrl || !files.length) return false; event.preventDefault(); void attach(files); return true; },
+      handlePaste: (view, event) => {
+        // Paste a URL over selected text and the text becomes that link.
+        const text = event.clipboardData?.getData("text/plain") ?? "";
+        const { empty } = view.state.selection;
+        if (!empty && isUrl(text)) { editorRef.current?.chain().focus().extendMarkRange("link").setLink({ href: asHref(text) }).run(); return true; }
+        // Paste or drop files straight into the notes to attach them.
+        const files = Array.from(event.clipboardData?.files ?? []);
+        if (!uploadUrl || !files.length) return false;
+        event.preventDefault(); void attach(files); return true;
+      },
       handleDrop: (_view, event) => { const files = Array.from((event as DragEvent).dataTransfer?.files ?? []); if (!uploadUrl || !files.length) return false; event.preventDefault(); void attach(files); return true; },
+      // ⌘/Ctrl-click opens a link (a plain click just places the cursor, so it can be edited).
+      handleClick: (_view, _pos, event) => {
+        const a = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+        if (a && (event.metaKey || event.ctrlKey)) { window.open(a.href, "_blank", "noopener"); return true; }
+        return false;
+      },
     },
     onUpdate: ({ editor: e }) => onChange(markdownOf(e)),
   });
@@ -107,9 +148,9 @@ export default function RichNotes({ value, onChange, placeholder = "Everything a
 
   // Keep in step if the task underneath changes while the editor is open.
   useEffect(() => {
-    if (!editor || editor.isFocused) return;
+    if (!editor || editor.isFocused || panel) return;
     if (markdownOf(editor) !== normalizeNotes(value || "")) editor.commands.setContent(normalizeNotes(value || ""));
-  }, [editor, value]);
+  }, [editor, value, panel]);
 
   const [, force] = useState(0);
   useEffect(() => {
@@ -120,16 +161,42 @@ export default function RichNotes({ value, onChange, placeholder = "Everything a
     return () => { editor.off("selectionUpdate", tick); editor.off("transaction", tick); };
   }, [editor]);
 
+  const ed = editor;
+  const selectedText = () => { if (!ed) return ""; const { from, to } = ed.state.selection; return ed.state.doc.textBetween(from, to, " "); };
+
+  const openLinkPanel = () => {
+    if (!ed) return;
+    if (ed.isActive("link")) ed.chain().focus().extendMarkRange("link").run();
+    const { from, to } = ed.state.selection;
+    savedRange.current = { from, to };
+    setLinkText(selectedText());
+    setLinkUrl(String(ed.getAttributes("link").href ?? ""));
+    setPanel((p) => (p === "link" ? null : "link"));
+  };
   const applyLink = () => {
-    if (!editor) return;
-    const url = href.trim();
-    if (!url) editor.chain().focus().extendMarkRange("link").unsetLink().run();
-    else editor.chain().focus().extendMarkRange("link").setLink({ href: /^(https?:|mailto:)/i.test(url) ? url : `https://${url}` }).run();
-    setLinking(false); setHref("");
+    if (!ed) return;
+    const url = linkUrl.trim();
+    const range = savedRange.current ?? { from: ed.state.selection.from, to: ed.state.selection.to };
+    if (!url) { ed.chain().focus().setTextSelection(range).extendMarkRange("link").unsetLink().run(); }
+    else {
+      const current = ed.state.doc.textBetween(range.from, range.to, " ");
+      const text = linkText.trim() || current || url;
+      if (text !== current) ed.chain().focus().insertContentAt(range, [{ type: "text", text, marks: [{ type: "link", attrs: { href: asHref(url) } }] }]).run();
+      else ed.chain().focus().setTextSelection(range).setLink({ href: asHref(url) }).run();
+    }
+    savedRange.current = null; setPanel(null); setLinkText(""); setLinkUrl("");
+  };
+  const openFilePanel = () => {
+    if (!ed) return;
+    const { from, to } = ed.state.selection;
+    savedRange.current = { from, to };
+    setFileTitle(selectedText());
+    setPanel((p) => (p === "file" ? null : "file"));
   };
 
-  const ed = editor;
   const empty = !ed || ed.isEmpty;
+  const onLink = !!ed && ed.isActive("link") && !panel;
+  const linkHref = onLink ? String(ed!.getAttributes("link").href ?? "") : "";
   return (
     <div className={`rn ${className}`}>
       <div className="rn-bar" role="toolbar" aria-label="Formatting">
@@ -143,22 +210,37 @@ export default function RichNotes({ value, onChange, placeholder = "Everything a
         <Btn label="Bullet list" title="Bullet list" on={ed?.isActive("bulletList")} onClick={() => ed?.chain().focus().toggleBulletList().run()}><Icon d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" /></Btn>
         <Btn label="Numbered list" title="Numbered list" on={ed?.isActive("orderedList")} onClick={() => ed?.chain().focus().toggleOrderedList().run()}><Icon d="M10 6h10M10 12h10M10 18h10M4 5h1v4M4 9h2M4 15.5c0-.8 2-.8 2 0s-2 1.5-2 2.5h2" /></Btn>
         <span className="rn-sep" />
-        <Btn label="Link" title="Link (select text first)" on={ed?.isActive("link") || linking} onClick={() => { setHref(String(ed?.getAttributes("link").href ?? "")); setLinking((v) => !v); }}><Icon d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></Btn>
-        {uploadUrl && (
-          <>
-            <Btn label="Attach a file" title="Attach a file (or paste / drop it in)" onClick={() => fileInput.current?.click()}><Icon d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9" /></Btn>
-            <input ref={fileInput} type="file" multiple hidden onChange={(e) => { const f = Array.from(e.target.files ?? []); e.target.value = ""; void attach(f); }} />
-          </>
-        )}
+        <Btn label="Link" title="Add a link (select text first, or type the link's text)" on={ed?.isActive("link") || panel === "link"} onClick={openLinkPanel}><Icon d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></Btn>
+        {uploadUrl && <Btn label="Attach a file" title="Attach a file (or paste / drop it in)" on={panel === "file"} onClick={openFilePanel}><Icon d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9" /></Btn>}
         {uploading > 0 && <span className="rn-status">Uploading…</span>}
         {uploadError && <span className="rn-status rn-err" title={uploadError}>{uploadError}</span>}
-        {linking && (
-          <span className="rn-link">
-            <input autoFocus value={href} placeholder="Paste a link, then Enter" onChange={(e) => setHref(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyLink(); } if (e.key === "Escape") setLinking(false); }} />
-            <button type="button" onMouseDown={(e) => { e.preventDefault(); applyLink(); }}>{href.trim() ? "Apply" : "Remove"}</button>
-          </span>
-        )}
       </div>
+
+      {panel === "link" && (
+        <div className="rn-panel">
+          <input value={linkText} placeholder="Text to show" onChange={(e) => setLinkText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyLink(); } if (e.key === "Escape") setPanel(null); }} />
+          <input autoFocus value={linkUrl} placeholder="Paste the link" onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyLink(); } if (e.key === "Escape") setPanel(null); }} />
+          <button type="button" className="rn-go" onClick={applyLink}>{linkUrl.trim() ? "Apply" : "Remove link"}</button>
+          <button type="button" className="rn-x" aria-label="Cancel" onClick={() => setPanel(null)}>✕</button>
+        </div>
+      )}
+      {panel === "file" && uploadUrl && (
+        <div className="rn-panel">
+          <input autoFocus value={fileTitle} placeholder="Title (optional, uses the file name)" onChange={(e) => setFileTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); fileInput.current?.click(); } if (e.key === "Escape") setPanel(null); }} />
+          <button type="button" className="rn-go" onClick={() => fileInput.current?.click()}>Choose file…</button>
+          <button type="button" className="rn-x" aria-label="Cancel" onClick={() => setPanel(null)}>✕</button>
+          <input ref={fileInput} type="file" hidden onChange={(e) => { const f = Array.from(e.target.files ?? []); e.target.value = ""; const t = fileTitle; setPanel(null); setFileTitle(""); void attach(f, t); }} />
+        </div>
+      )}
+      {onLink && linkHref && (
+        <div className="rn-linkbar">
+          <span className="rn-linkbar-url" title={linkHref}>🔗 {shortUrl(linkHref)}</span>
+          <a className="rn-linkbar-btn" href={linkHref} target="_blank" rel="noreferrer">Open ↗</a>
+          <button type="button" className="rn-linkbar-btn" onMouseDown={(e) => { e.preventDefault(); openLinkPanel(); }}>Edit</button>
+          <button type="button" className="rn-linkbar-btn" onMouseDown={(e) => { e.preventDefault(); ed?.chain().focus().extendMarkRange("link").unsetLink().run(); }}>Remove</button>
+        </div>
+      )}
+
       <div className={`rn-body ${empty ? "rn-empty" : ""}`} onClick={() => ed?.chain().focus().run()}>
         <EditorContent editor={editor} />
       </div>

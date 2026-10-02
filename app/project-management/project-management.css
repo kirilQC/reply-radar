@@ -816,3 +816,14 @@
 .rn-doc ol { list-style: decimal outside; }
 .rn-doc li { display: list-item; padding-left: 2px; }
 .rn-doc li::marker { color: var(--accent); }
+/* Notes: link / attachment panel, and the bar shown when the cursor is on a link. */
+.rn-panel { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-bottom: 1px solid var(--border-soft, var(--border)); background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.rn-panel input { flex: 1; min-width: 0; height: 30px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; font-size: 12.5px; }
+.rn-panel input:focus { outline: none; border-color: var(--accent); }
+.rn-panel .rn-go { flex: none; height: 30px; padding: 0 12px; border: 0; border-radius: 7px; background: var(--accent); color: var(--accent-ink, #0b0c10); font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
+.rn-panel .rn-x { flex: none; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.rn-panel .rn-x:hover { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.rn-linkbar { display: flex; align-items: center; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--border-soft, var(--border)); font-size: 12px; background: color-mix(in srgb, var(--panel) 70%, transparent); }
+.rn-linkbar-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.rn-linkbar-btn { flex: none; padding: 4px 9px; border-radius: 6px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer; }
+.rn-linkbar-btn:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
