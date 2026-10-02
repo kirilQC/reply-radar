@@ -764,7 +764,7 @@ const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "airtable_update_records",
     description:
-      "Change fields on existing rows in a client's Airtable base. This writes immediately and cannot be undone through this assistant. You must identify each row by its record id, which you get from airtable_records — never guess an id, and if you cannot find the row, say so rather than creating a duplicate with airtable_create_records. Only the fields you pass are changed; the rest of the row is untouched. Use the exact field names and select options from airtable_tables. Returns the updated rows. There is deliberately no way to delete a row here — that is done by hand in Airtable.",
+      "Change fields on existing rows in a client's Airtable base. This writes immediately. You must identify each row by its record id, which you get from airtable_records — never guess an id, and if you cannot find the row, say so rather than creating a duplicate with airtable_create_records. Only the fields you pass are changed; the rest of the row is untouched. Use the exact field names and select options from airtable_tables. Returns the updated rows. To remove a row, use airtable_delete_records.",
     input_schema: {
       type: "object",
       properties: {
@@ -918,7 +918,7 @@ const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "delete_project",
     description:
-      "Remove a project from a client's board permanently. Pass the project id (from list_projects). Confirm with the person first, since it cannot be undone.",
+      "Remove a project from a client's board permanently. Pass the project id (from list_projects). Permanent: only when the person asked to delete that task (then do it, no extra confirmation round).",
     input_schema: { type: "object", properties: { id: { type: "string", description: "Project id from list_projects." } }, required: ["id"] },
   },
   {
