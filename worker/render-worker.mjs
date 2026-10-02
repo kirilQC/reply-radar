@@ -105,11 +105,22 @@ const REFRESH_DORMANT_DAYS = 30;
 let lastRefreshRun = 0;
 
 async function heyReachFetch(apiKey, path, init = {}, timeoutMs = 15_000) {
-  const response = await fetch(`${heyreachBase}/${path.replace(/^\//, "")}`, {
+  const attempt = (ms) => fetch(`${heyreachBase}/${path.replace(/^\//, "")}`, {
     ...init,
     headers: { "X-API-KEY": apiKey, accept: "application/json", "content-type": "application/json", ...(init.headers || {}) },
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: AbortSignal.timeout(ms),
   });
+  // HeyReach is sometimes slow to wake (26s has been measured). A timed-out call gets one more try with
+  // twice the time instead of failing the whole pass: Bluevia's, Chroma's and Moss's analytics failed
+  // every time on a single slow campaign-list page.
+  let response;
+  try {
+    response = await attempt(timeoutMs);
+  } catch (error) {
+    const name = error && typeof error === "object" ? error.name : "";
+    if (name !== "TimeoutError" && name !== "AbortError") throw error;
+    response = await attempt(timeoutMs * 2);
+  }
   if (!response.ok) throw new Error(`HeyReach ${path.split("?")[0]} ${response.status}`);
   return response.json().catch(() => null);
 }
