@@ -1138,4 +1138,191 @@ Keep the brief short and current. Put the detail in the Brain.`,
 
 Send it from Configuration → **Feedback**, as a **Bug**.`,
   },
+  // ── From the October show & tell ──────────────────────────────────────────
+  {
+    id: "w-scout-unbooked",
+    kind: "walkthrough",
+    title: "Finding leads who haven't booked yet",
+    page: "/scout",
+    keywords: ["follow up", "not booked", "calendly", "no meeting", "chase", "pipeline", "scout", "report"],
+    images: [shot("mcp.jpg", "Ask Scout for the list. Long lists come back as a count and one CSV.")],
+    body: `Scout can read every reply, so it can find the people who were sent a booking link but never booked.
+
+1. Open **Scout**.
+2. Ask it in plain words, for example: *Pull an all-time report for Arcjet of leads who got a Calendly link but haven't booked a meeting, so I can follow up.*
+3. Scout gives you the count and, for a long list, one CSV to download.
+
+Narrow it the same way: *only positive replies*, *only the last 30 days*, *only Nick's clients*.`,
+  },
+  {
+    id: "w-scout-compare",
+    kind: "walkthrough",
+    title: "Comparing clients with Scout",
+    page: "/scout",
+    keywords: ["compare", "benchmark", "vs", "vertical", "healthtech", "how are we doing", "scout", "simplify"],
+    images: [shot("mcp.jpg", "Scout pulls the numbers for each client side by side.")],
+    body: `Useful when a client asks how they're doing compared to similar accounts.
+
+1. Open **Scout**.
+2. Name the clients and the window, for example: *Compare last month's performance for Steadywell and Bluevia.*
+3. Scout pulls reply, acceptance and positive reply rates for each and lays them out side by side.
+
+Too much detail? Reply *simplify this* or *give me 3 sentences I can send the client*.`,
+  },
+  {
+    id: "w-pm-blockers",
+    kind: "walkthrough",
+    title: "Flagging a blocker on a task",
+    page: "/project-management",
+    keywords: ["blocker", "blocked", "waiting on", "dependency", "messaging", "stuck task"],
+    images: [shot("pm-task.jpg", "Blockers sit on the task, with who you're waiting on.")],
+    body: `A blocker says who a task is waiting on, so that person sees it when they log in.
+
+1. Open the task in **Project management**.
+2. Under **Blockers**, click **＋ Blocker**.
+3. Pick who it's **Waiting on**, write **What needs to happen** (e.g. *messaging for the CMO campaign*), and click **Save**.
+4. The card now shows **⛔ Waiting on** and their name.
+5. When it's done, they tick the blocker to mark it cleared.
+
+A task can have more than one blocker. Click **＋ Add blocker** for each.`,
+  },
+  {
+    id: "w-pm-standup",
+    kind: "walkthrough",
+    title: "Running your weekly standup from Project management",
+    page: "/project-management",
+    keywords: ["standup", "weekly call", "sync", "team meeting", "share screen", "view", "agenda"],
+    images: [shot("pm-board.jpg", "One board on screen, walked top to bottom.")],
+    body: `The healthtech team runs its weekly call straight off the board.
+
+1. Before the call, open your **View** (or the client) in **Project management**.
+2. Share your screen and walk the board stage by stage, or switch to **Individuals** to go person by person.
+3. Update tasks as you talk: change the status, add a **Blocker**, set the **Due date**.
+4. Delete what's done so the board stays clean.
+5. Use the Slack button on a task to post its new status to the client's internal channel.
+
+After the call, everyone knows what they own without digging through Slack.`,
+  },
+  {
+    id: "w-graph-builder",
+    kind: "walkthrough",
+    title: "Building your own graph",
+    page: "/inbox",
+    keywords: ["custom graph", "chart", "x axis", "y axis", "build your own", "donut", "line", "dashboard"],
+    images: [shot("inbox-graphs.jpg", "Pick what goes along the bottom and what gets counted.")],
+    body: `Under the reply queue you can add a chart of your own to **Client analytics**.
+
+1. Click **+ Add graph**, then **Build your own**.
+2. **X axis**: what goes along the bottom. Day, Week, Client, Campaign, Sender, Sentiment, Follow-up urgency or ICP score band.
+3. **Y axis**: what gets counted. Conversations, Replies, Positive replies, Positive reply rate, Avg. replies per conversation, Avg. ICP score or Avg. follow-up urgency.
+4. **Type**: Area, Line, Columns, Horizontal bars or Donut. Add a **Title** if you like.
+5. Click **Add to dashboard**.
+
+Short on time? **Preset graphs** has ready-made ones. Your graphs are yours only.`,
+  },
+  {
+    id: "w-report-voice",
+    kind: "walkthrough",
+    title: "Talking a report through out loud",
+    page: "/reports",
+    keywords: ["voice", "talk", "dictate", "microphone", "report", "eow", "monthly report", "notes"],
+    images: [shot("report-build.jpg", "Talk it through, then let it fill the sections.")],
+    body: `A report already has the numbers, Slack and the client's calls. Talking adds what only you know.
+
+1. In **Reports**, pick the client and template.
+2. Click **Talk it through**, then **Start talking**. For example: *This week we launched 3 campaigns, including one for Black Hat.*
+3. Check the transcript and fix anything misheard.
+4. Click **Fill the sections**, then **Generate report**.
+
+For a monthly report, set the **Date range** to the whole month. Slack, HeyReach and calls are read for that window instead of the week.`,
+  },
+  {
+    id: "w-analytics-messaging",
+    kind: "walkthrough",
+    title: "Finding the messaging that works best",
+    page: "/analytics",
+    keywords: ["best messaging", "hook", "copy", "acceptance rate", "what's working", "best replies", "optimize"],
+    images: [shot("analytics.jpg", "Messaging that performed best, ranked by acceptance rate.")],
+    body: `1. Open **Analytics** and pick a client.
+2. Scroll to **Messaging that performed best**. Each campaign's connection request copy is ranked by acceptance rate, with its reply rate beside it.
+3. Click one to read the full connection request and first message.
+
+Only campaigns with more than 50 requests sent are ranked, so one lucky small campaign can't top the list.
+
+For your end of week email, the EOW report has a **Best replies from this week** section.`,
+  },
+  {
+    id: "w-jev-json",
+    kind: "walkthrough",
+    title: "Setting up Jev with Claude",
+    page: "/jev",
+    keywords: ["jev", "json", "claude", "setup", "scoring doc", "repo", "config", "paste"],
+    images: [shot("jev-questions.jpg", "Paste a setup Claude wrote into the JSON tab.")],
+    body: `Already have scoring docs for a client in the repo? Let Claude turn them into a Jev setup.
+
+1. In Claude (connected to the repo), ask: *I'm using Jev. Using this client's scoring docs, give me a JSON setup for the questions Jev should ask about each contact.*
+2. In **Jev**, pick the client and switch to the **JSON** tab.
+3. Paste it and click **Save JSON setup**.
+
+Setups stay saved for the client, so the lead engineer sets it up once and everyone uses it. Prefer plain words? Use the **Prompt** tab and click **Build Jev setup**.`,
+  },
+  {
+    id: "w-brain-catch-up",
+    kind: "walkthrough",
+    title: "Catching up on a client you just joined",
+    page: "/qc-brain",
+    keywords: ["new to client", "joined", "ramp up", "icp", "personas", "weekly call", "context", "handover"],
+    images: [shot("qc-brain.jpg", "A client's folder: ICP, personas, voice and call notes.")],
+    body: `Joining an engagement mid-way? Read up before you ask anyone.
+
+1. Open **QC Brain** and pick the client.
+2. Start with the **ICP** and **Personas**: who we reach out to and why.
+3. Read the **Voice** guide before writing any copy.
+4. Open the recent weekly calls. Each one has the action items, the key points and the full transcript.
+
+Rather ask? **Scout** reads the same folder: *Who is Hyperpath's ICP and what did we agree on the last call?*`,
+  },
+  {
+    id: "f-rates-vs-heyreach",
+    kind: "faq",
+    title: "Why is our reply rate different from HeyReach's?",
+    page: "/analytics",
+    keywords: ["reply rate", "acceptance rate", "heyreach", "benchmark", "doesn't match", "21%", "positive rate"],
+    images: [shot("analytics.jpg", "Rates are worked out per campaign from HeyReach's own counts.")],
+    body: `Both count from the step before, so most rates match:
+
+- **Acceptance rate** = accepted ÷ connection requests sent.
+- **Reply rate** = replies ÷ accepted, not ÷ requests sent.
+- **Positive reply rate** = positive replies ÷ accepted. HeyReach's *interested rate* divides by replies instead, so theirs is higher.
+
+Numbers can also be up to a day behind. Click **Sync now** in Analytics. Still off? Send Kiril the campaign and both numbers.`,
+  },
+  {
+    id: "f-deal-attribution",
+    kind: "faq",
+    title: "How does QC decide a deal came from us?",
+    page: "/deals",
+    keywords: ["attribution", "influenced", "sourced", "matched on", "possible", "crm", "events"],
+    images: [shot("deal-drawer.jpg", "Matched on shows which step credited the deal.")],
+    body: `Every deal in the client's CRM goes through these checks in order:
+
+1. **HeyReach**: was a contact on the deal in one of our campaigns? Then it's ours.
+2. **Our records**: does a contact match a lead we messaged, or someone who booked a meeting with us (LinkedIn or email)?
+3. **Same company**: someone else at that company was contacted. That's only **Possible**, and a person decides.
+
+It isn't based on calendar invites alone, so event-sourced deals count when the person is in our records. A human should still review the list.`,
+  },
+  {
+    id: "f-draft-voice",
+    kind: "faq",
+    title: "How do drafts sound like our team?",
+    page: "/inbox",
+    keywords: ["draft", "tone", "voice", "style", "ai reply", "sound like us", "learn"],
+    images: [shot("inbox-draft.jpg", "The draft mirrors how the team has been replying.")],
+    body: `Every reply sent from QC Command or HeyReach is saved. When a new reply comes in, the draft is written using that client's recent outbound replies as examples, so it copies the team's length, tone and usual moves.
+
+It only learns from the same client, so Arcjet's style never leaks into Willow's drafts.
+
+Draft off? Edit it before sending. The more good replies the team sends, the better the drafts get.`,
+  },
 ];
