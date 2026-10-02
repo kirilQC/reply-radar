@@ -36,6 +36,7 @@ import {
 import { type BriefWorkspace } from "../../../lib/morning-brief";
 import { gatherCalls, gatherChannels, gatherLiveFigures, writeBrief } from "../../../lib/morning-brief-run";
 import { gatherSignals } from "../../../lib/morning-brief";
+import { publicBaseUrl } from "../../../lib/public-url";
 import { DEFAULT_EOW_REPORT_PROMPT, eowReportUserContent } from "../../../lib/eow-report-run";
 import { brainContext } from "../../../lib/brain-context";
 import { truncateForSlack } from "../../../../shared/slack-agent.mjs";
@@ -266,6 +267,29 @@ function reportHeader(clientName: string, timeZone: string): string {
   return `*${clientName} ${shortDate(timeZone)} EOW Report*`;
 }
 
+/**
+ * The email as Slack blocks: the email itself in a quote (so it reads as "the thing to send" and copies
+ * cleanly on its own), a grey line naming what it was written from, and a button into QC Command's Reports
+ * page with this client and the same template open, to edit or regenerate it there.
+ */
+function emailBlocks(body: string, slug: string, read: { live: boolean; internal: number | null; external: number | null; call: string | null }): unknown[] {
+  const quoted = body.split("\n").map((line) => (line.trim() ? `> ${line}` : ">")).join("\n");
+  const chunks: string[] = [];
+  for (let at = 0; at < quoted.length; at += 2900) chunks.push(quoted.slice(at, at + 2900));
+  const sources = [
+    read.live ? "HeyReach live" : "HeyReach (stored figures)",
+    read.internal === null ? "" : `internal channel (${read.internal} msgs)`,
+    read.external === null ? "" : `external channel (${read.external} msgs)`,
+    read.call ? `Granola: ${read.call}` : "no call this week",
+  ].filter(Boolean).join("  ·  ");
+  const base = publicBaseUrl() || "https://www.replyradar.dev";
+  return [
+    ...chunks.map((text) => ({ type: "section", text: { type: "mrkdwn", text } })),
+    { type: "context", elements: [{ type: "mrkdwn", text: `Written from: ${sources}` }] },
+    { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "Edit in Reports" }, url: `${base}/reports?client=${encodeURIComponent(slug)}&template=weekly-recap`, action_id: "eow_edit" }] },
+  ];
+}
+
 /** The EOW report reads the last week of Slack and only a call from this week. */
 const EOW_WINDOW_DAYS = 7;
 
@@ -343,7 +367,12 @@ export async function POST(request: Request) {
     if (channelId) {
       try {
         messageTs = await postMessage(channelId, header);
-        reportTs = await postMessage(channelId, slackBody, messageTs);
+        reportTs = await postMessage(channelId, slackBody, messageTs, emailBlocks(slackBody, String(workspace.slug ?? ""), {
+          live: live.available,
+          internal: channels.internal.channelId ? channels.internal.messages : null,
+          external: channels.external.channelId ? channels.external.messages : null,
+          call: thisWeeksCall ? `${thisWeeksCall.title}${thisWeeksCall.ageDays !== null ? ` (${thisWeeksCall.ageDays === 0 ? "today" : `${thisWeeksCall.ageDays}d ago`})` : ""}` : null,
+        }));
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Slack refused the message.";
         sendError = messageTs ? `The header posted but the report did not: ${detail}` : detail;

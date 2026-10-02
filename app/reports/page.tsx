@@ -564,6 +564,27 @@ export default function ReportsPage() {
     setView("hub");
   };
 
+  // Deep link from Slack: /reports?client=<slug>&template=<id> opens that client, then that template.
+  const deepLinked = useRef(false);
+  const pendingTemplate = useRef("");
+  useEffect(() => {
+    if (deepLinked.current || !workspaces.length) return;
+    const query = new URLSearchParams(window.location.search);
+    const slug = query.get("client") ?? "";
+    if (!slug || !workspaces.some((w) => w.slug === slug)) return;
+    deepLinked.current = true;
+    pendingTemplate.current = query.get("template") ?? "";
+    openClient(slug);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaces]);
+  useEffect(() => {
+    if (!pendingTemplate.current || !workspaceSlug) return;
+    const chosen = templates.find((t) => t.id === pendingTemplate.current);
+    pendingTemplate.current = "";
+    if (chosen) openTemplate(chosen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceSlug]);
+
   const backToClients = () => {
     resetOutput();
     setWorkspaceSlug("");

@@ -51,31 +51,29 @@ The newest evidence always wins. Every source is a snapshot from a different mom
 
 ## What to write
 
-The whole email is 150 to 250 words. Not a word more. Keep it clean and scannable.
+The same email QC Command's Reports page writes ("Tarsi's EOW Report Template"): a curation, not a creation. The reader is the client contact who has not opened the dashboard all week and reads this on a phone in under two minutes. It doubles as the agenda for the next call, so it answers two questions: what happened, and what's next.
 
-Slack mrkdwn: *bold* with single asterisks for the section headings, and \`-\` at the start of a line for bullets. No \`#\` headings, no \`**double asterisks**\`, no tables, no underline. **No emoji anywhere.** **No @ mentions and no mention codes of any kind.** **Never use an em dash or an en dash**, anywhere, for any reason: use a comma, a colon, or two sentences.
+**At most 200 words in total. Shorter is better when the week was quiet.**
 
-Open with one short line that sets the tone of the week. No title, no subject, no "Hi team" or greeting line above it.
+Slack mrkdwn: *bold* with single asterisks, \`-\` at the start of a line for bullets. No \`#\` headings, no \`**double asterisks**\`, no tables. **No emoji.** **No @ mentions or mention codes.** **Never an em dash or an en dash**: use a comma, a colon, or two sentences.
 
-Then these four sections, each heading in bold on its own line, in this order. Drop any section with nothing real in it.
+Exactly this shape:
+
+*Subject: {Client} <> QC {M/D} EOW recap*
+
+One line: warm, human, specific to this week (the season, an event they were at, how the week went). No "Hi team".
 
 *Recap from this week*
+Three to five bullets, the heart of it. One fact each, with its number, written as a fragment, not a sentence. Pick what mattered: replies and how many were positive, meetings booked (and with whom, if the client knows them), requests sent and the change on last week, which campaign or sender drove the replies, a campaign launched or a list delivered, a notable lead or conversation. Only figures you were given.
 
-The quick numbers, three or four bullets: connection requests sent and the change on the week before, acceptance rate, replies, and any meetings booked. Straight from the figures.
+*Priorities next week*
+Three or four bullets: what we will do, as our own commitments in first person plural. Take them from the call and the channels: a campaign to launch, a list to pull, copy to send, an answer owed, a hot conversation to follow up.
 
-*What we worked on*
+One closing line that ties to the next call or the week ahead.
 
-Three or four bullets on what actually moved: campaigns launched, paused or finished, lists built or submitted, deliverables shipped, notable conversations that opened. From the figures and the channels.
+- QC Growth
 
-*Active campaigns*
-
-Only campaigns that are *both* active *and* still have leads to contact, one line each: the full campaign name exactly as the figures spell it, the pending leads, and roughly how many days of sending are left. If nothing is active, or the total runway across active campaigns is under two days, say so plainly in one line and note that new leads or a new campaign are needed to keep sending.
-
-*Next week*
-
-Three or four bullets on what we will do next, written as our own commitments in first person plural: a campaign to launch, a list to pull or enrich, copy to write, an answer owed. No owner names, no tags, just what we will do.
-
-Close with one short forward-looking line, then a sign-off on its own line, exactly: - QC Growth
+Leave out campaign runway, sender health and anything internal (a blocked Calendly invite, a teammate's to-do): this goes to the client.
 
 ## Rules
 
@@ -127,7 +125,7 @@ export function eowReportUserContent(workspace: BriefWorkspace, inputs: BriefInp
   })();
 
   return [
-    `# Client\n\n${workspace.name}. This report covers the week ending ${weekEnding} in ${timezone}.\n\nThis is a client-facing email. Open on the first section heading. There is no title line above it.`,
+    `# Client\n\n${workspace.name}. This report covers the week ending ${weekEnding} in ${timezone}.\n\nThis is a client-facing email. Open with the subject line, then the one-line greeting.`,
     `# How to weigh what you are given\n\nEverything below is a snapshot from a different moment. When two sources disagree, the newer one wins. Check the date on a finding before you raise it.`,
     `# Figures\n\nThese are facts. Do not restate them differently and do not compute new ones.\n\n${signalsAsText(inputs.signals)}`,
     channelSection(inputs.internal, "internal"),
