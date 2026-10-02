@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import "../login.css";
 import { BrandWordmark } from "../components/BrandMark";
 import LoginBackdrop, { type LoginBackdropHandle } from "./LoginBackdrop";
+import { safeNextPath } from "../lib/public-url";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
@@ -38,18 +39,25 @@ export default function LoginPage() {
         body: JSON.stringify({ password }),
       });
       if (response.ok) {
-        const next = new URLSearchParams(window.location.search).get("next");
-        const target = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+        // Resolved against our own origin rather than prefix-checked: `?next=/%5Cevil.com` decodes to
+        // `/\evil.com`, which passed the old check and which browsers follow off-site.
+        const target = safeNextPath(new URLSearchParams(window.location.search).get("next"), window.location.origin);
         setEntering(true);
         backdrop.current?.burst();
         const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         window.setTimeout(() => { window.location.href = target; }, reduce ? 200 : 1400);
         return;
       }
-      setError("That password is not right.");
+      // Only a 401 is a wrong password. Anything else (login not configured, a server error) says what it
+      // is, because "wrong password" sends somebody retyping a password that was right all along.
+      const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      const reason = typeof payload?.error === "string" && payload.error.trim() ? payload.error : "";
+      setError(response.status === 401 ? "That password is not right." : reason || `Sign-in failed (${response.status}). Try again.`);
       setBusy(false);
-      setShake(true);
-      window.setTimeout(() => setShake(false), 500);
+      if (response.status === 401) {
+        setShake(true);
+        window.setTimeout(() => setShake(false), 500);
+      }
     } catch {
       setError("Could not reach the server. Try again.");
       setBusy(false);

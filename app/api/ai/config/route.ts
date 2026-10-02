@@ -156,14 +156,17 @@ export async function POST(request: Request) {
 
     if (action === "save_workspace_ai") {
       const { brief, icpPrompt, followUpPrompt, replyPrompt, model, followUpThreshold } = body;
-      // Update workspace
-      const wsResponse = await supabase(url, key, `rr_workspaces?slug=eq.${encodeURIComponent(workspace)}&limit=1`);
-      const wsRows = wsResponse.ok ? ((await wsResponse.json()) as Row[]) : [];
-      if (!wsRows.length) return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+      if (typeof workspace !== "string" || !workspace.trim()) return NextResponse.json({ ok: false, error: "Pick a client first." }, { status: 400 });
+      // Read, then write. Either failing used to be ignored and the page said "Saved" regardless, so a
+      // prompt that never reached the database looked identical to one that did.
+      const wsResponse = await supabase(url, key, `rr_workspaces?select=id,client_brief,anthropic_model,guardrails&slug=eq.${encodeURIComponent(workspace)}&limit=1`);
+      if (!wsResponse.ok) return NextResponse.json({ ok: false, error: `The client could not be read (${wsResponse.status}). Nothing was saved.` }, { status: 502 });
+      const wsRows = (await wsResponse.json().catch(() => [])) as Row[];
+      if (!Array.isArray(wsRows) || !wsRows.length) return NextResponse.json({ ok: false, error: "That client no longer exists." }, { status: 404 });
       const ws = wsRows[0];
       const guardrails = ws.guardrails && typeof ws.guardrails === "object" ? ws.guardrails as Row : {};
 
-      await supabase(url, key, `rr_workspaces?slug=eq.${encodeURIComponent(workspace)}`, {
+      const saved = await supabase(url, key, `rr_workspaces?slug=eq.${encodeURIComponent(workspace)}`, {
         method: "PATCH",
         headers: { Prefer: "return=minimal" },
         body: JSON.stringify({
@@ -180,6 +183,10 @@ export async function POST(request: Request) {
           },
         }),
       });
+      if (!saved.ok) {
+        const detail = await saved.json().catch(() => null) as { message?: string } | null;
+        return NextResponse.json({ ok: false, error: detail?.message ? `Could not save: ${detail.message}` : `Could not save (${saved.status}).` }, { status: 502 });
+      }
 
       return NextResponse.json({ ok: true });
     }

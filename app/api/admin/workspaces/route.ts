@@ -5,7 +5,8 @@ import { NextResponse, after } from "next/server";
 import { resolveModel } from "../../../../shared/anthropic-model.mjs";
 import { isAiArkEnrichmentEnabled } from "../../../lib/lead-identity";
 import { writeAuditEvent } from "../../../lib/audit-log";
-import { isOurWebhookUrl, publicBaseUrl, webhookUrlFor } from "../../../lib/public-url";
+import { isOurWebhookUrl, publicBaseUrl, webhookUrlFor, workspaceSlug } from "../../../lib/public-url";
+import { firstChannelClash, type ChannelOwner } from "../../../lib/channel-clash";
 import { normalizeChannelId } from "../../../lib/slack-channel";
 import { syncMessagingDocForSlug } from "../../../lib/messaging-sync";
 import { writeConfig } from "../../../lib/app-config";
@@ -49,46 +50,106 @@ export async function GET(request: Request) {
   return slimJson({ ok: response.ok, workspaces, aiArkConfigured: Boolean(process.env.AI_ARK_API_KEY), aiArkEnrichmentEnabled: isAiArkEnrichmentEnabled() }, { status: response.ok ? 200 : response.status });
 }
 
+/**
+ * A PostgREST failure as one sentence for the form. The raw error object used to be returned as `error`,
+ * and the page printed it as "[object Object]". A unique violation on the slug gets its own wording,
+ * because it is the one failure here a person can fix by changing what they typed.
+ */
+function postgrestMessage(data: unknown, fallback: string): string {
+  if (data && typeof data === "object") {
+    const row = data as { code?: unknown; message?: unknown; details?: unknown };
+    if (row.code === "23505" && /slug/i.test(`${row.message ?? ""} ${row.details ?? ""}`)) return "That slug is already used by another client. Pick another slug.";
+    if (typeof row.message === "string" && row.message.trim()) return row.message;
+  }
+  if (typeof data === "string" && data.trim()) return data.trim().slice(0, 300);
+  return fallback;
+}
+
+/** Columns an older database may not have yet. Dropped on a 400/422 and the write retried without them. */
+const LEGACY_OPTIONAL_COLUMNS = ["timezone", "website_url", "brain_folder", "slack_internal_channel_id", "slack_external_channel_id", "granola_title_match", "slack_extra_channel_ids", "granola_extra_title_matches", "airtable_base_id", "clay_dnc_webhook_url"];
+const withoutLegacyColumns = (record: Record<string, unknown>) => {
+  const legacy = { ...record };
+  for (const column of LEGACY_OPTIONAL_COLUMNS) delete legacy[column];
+  return legacy;
+};
+
+const presentRow = (row: Record<string, unknown>) => ({ ...row, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined });
+
 export async function POST(request: Request) {
   const { url, key } = supabaseConfig();
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
+  const headers = { apikey: key, Authorization: `Bearer ${key}` };
   const payload = await request.json();
-  const existingGuardrails = payload.guardrails && typeof payload.guardrails === "object" && !Array.isArray(payload.guardrails) ? payload.guardrails : {};
-  const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, brain_folder: payload.brainFolder || null, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ? resolveModel(String(payload.anthropicModel)) : null, custom_system_prompt: payload.systemPrompt ?? null, ...(isImageRef(payload.logoUrl) ? {} : { logo_url: payload.logoUrl ?? null }), accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null, webhook_url: webhookUrlFor(payload.slug, request), guardrails: existingGuardrails };
-  // Absent means "leave alone", not "clear". Every other field here is sent by the one form that owns
-  // it, but the theme panel auto-saves a partial payload of its own, and a channel id silently emptied
-  // by a logo upload would not be noticed until a Monday brief went nowhere. Normalised on the way in
-  // rather than on the way out, because pasting the URL out of the address bar is the common case.
-  if ("slackInternalChannelId" in payload) record.slack_internal_channel_id = normalizeChannelId(payload.slackInternalChannelId) || null;
-  if ("slackExternalChannelId" in payload) record.slack_external_channel_id = normalizeChannelId(payload.slackExternalChannelId) || null;
-  // A client's internal and external channels belong to that client alone. Coraa's external channel was
-  // once saved as Vitalic's internal one, and every Coraa brief came out as a Vitalic brief. Extras are
-  // exempt: one context channel shared by several clients is deliberate.
-  let resetBriefMemoryFor = "";
-  const ownChannels = [record.slack_internal_channel_id, record.slack_external_channel_id].filter((c): c is string => typeof c === "string" && Boolean(c));
-  if (ownChannels.length) {
-    const others = await fetch(`${url}/rest/v1/rr_workspaces?select=id,slug,name,slack_internal_channel_id,slack_external_channel_id&slug=neq.misc`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" }).then((r) => (r.ok ? r.json() : [])).catch(() => []);
-    const selfId = typeof payload.id === "string" ? payload.id.trim() : "";
-    const selfSlug = String(payload.previousSlug || payload.slug || "");
-    for (const other of Array.isArray(others) ? others : []) {
-      if ((selfId && other.id === selfId) || (!selfId && other.slug === selfSlug)) {
-        // The client's channels are changing: its past briefs were read from the old ones, so the next
-        // brief must not take them as memory.
-        const changed = ("slackInternalChannelId" in payload && (record.slack_internal_channel_id ?? null) !== (other.slack_internal_channel_id ?? null))
-          || ("slackExternalChannelId" in payload && (record.slack_external_channel_id ?? null) !== (other.slack_external_channel_id ?? null));
-        if (changed && other.id) resetBriefMemoryFor = String(other.id);
-        continue;
-      }
-      const clash = ownChannels.find((c) => c === other.slack_internal_channel_id || c === other.slack_external_channel_id);
-      if (clash) {
-        const role = clash === other.slack_internal_channel_id ? "internal" : "external";
-        return NextResponse.json({ ok: false, error: `That Slack channel is already ${other.name || other.slug}'s ${role} channel. Each client needs its own internal and external channel, otherwise its morning brief reads the other client's conversation.` }, { status: 409 });
-      }
-    }
+  const previousSlug = typeof payload.previousSlug === "string" ? payload.previousSlug.trim() : "";
+  const id = typeof payload.id === "string" ? payload.id.trim() : "";
+  const create = payload.create === true;
+  const patchFilter = create ? "" : id ? `id=eq.${encodeURIComponent(id)}` : previousSlug ? `slug=eq.${encodeURIComponent(previousSlug)}` : "";
+  if (!create && !patchFilter) return NextResponse.json({ ok: false, error: "Which workspace to update is missing. Refresh and try again." }, { status: 400 });
+
+  /*
+   * Absent means "leave alone", not "clear", for every field.
+   *
+   * The logo upload used to send a partial payload, and this route rebuilt the whole row from it, so a
+   * logo change wrote guardrails {} and custom_system_prompt null and wiped the client's ICP prompt,
+   * follow-up prompt and reply prompt along with it. Only what the request names is written now; a create
+   * is the one case with nothing to keep, so it fills in the defaults.
+   */
+  const has = (field: string) => Object.prototype.hasOwnProperty.call(payload, field);
+  const record: Record<string, unknown> = {};
+  if (has("name") || create) record.name = String(payload.name ?? "").trim();
+  // Normalised here as well as in the form: this is the value that ends up in the webhook URL.
+  const slug = workspaceSlug(has("slug") ? payload.slug : "") || (create ? workspaceSlug(payload.name) : "");
+  if (create || has("slug")) {
+    if (!slug) return NextResponse.json({ ok: false, error: "A workspace needs a name or a slug of letters and numbers." }, { status: 400 });
+    record.slug = slug;
+    record.webhook_url = webhookUrlFor(slug, request);
   }
-  // Stored as the cleaned list rather than as typed, so the same string is matched against whether it
-  // arrived as "@webrix.ai, foo@webrix.ai" or a comma-free paste. Anything that is not a domain is dropped
-  // here instead of quietly matching every meeting at brief time.
+  if (has("brainFolder")) record.brain_folder = payload.brainFolder || null;
+  if (has("clientBrief")) record.client_brief = payload.clientBrief ?? null;
+  if (has("anthropicModel")) record.anthropic_model = payload.anthropicModel ? resolveModel(String(payload.anthropicModel)) : null;
+  if (has("systemPrompt")) record.custom_system_prompt = payload.systemPrompt || null;
+  // A /api/img URL is what the GET handed out in place of the stored image; writing it back would replace
+  // the logo with a pointer to itself.
+  if (has("logoUrl") && !isImageRef(payload.logoUrl)) record.logo_url = payload.logoUrl || null;
+  if (has("accentColor")) record.accent_color = payload.accentColor || null;
+  if (has("timezone") || create) record.timezone = payload.timezone || "America/New_York";
+  if (has("websiteUrl")) record.website_url = payload.websiteUrl || null;
+  // Normalised on the way in rather than on the way out, because pasting the URL out of the address bar
+  // is the common case.
+  if (has("slackInternalChannelId")) record.slack_internal_channel_id = normalizeChannelId(payload.slackInternalChannelId) || null;
+  if (has("slackExternalChannelId")) record.slack_external_channel_id = normalizeChannelId(payload.slackExternalChannelId) || null;
+  const incomingGuardrails = payload.guardrails && typeof payload.guardrails === "object" && !Array.isArray(payload.guardrails) ? payload.guardrails as Record<string, unknown> : null;
+
+  /*
+   * One read of every other client, for the two checks that need them: the slug is not somebody else's,
+   * and neither of this client's own channels is somebody else's.
+   *
+   * A create used to upsert on the slug, so adding "Acme" when an Acme already existed silently rewrote
+   * the existing client with a blank form. On a create nothing is "self": a row with the same slug is
+   * exactly the collision this is here to stop.
+   */
+  const ownChannels = [record.slack_internal_channel_id, record.slack_external_channel_id].filter((c): c is string => typeof c === "string" && Boolean(c));
+  const slugChanging = Boolean(record.slug) && (create || record.slug !== previousSlug);
+  let resetBriefMemoryFor = "";
+  if (ownChannels.length || slugChanging || (!create && ("slackInternalChannelId" in payload || "slackExternalChannelId" in payload))) {
+    const others = await fetch(`${url}/rest/v1/rr_workspaces?select=id,slug,name,slack_internal_channel_id,slack_external_channel_id`, { headers, cache: "no-store" }).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+    const list: ChannelOwner[] = Array.isArray(others) ? others : [];
+    const isSelf = (row: ChannelOwner) => !create && (id ? row.id === id : row.slug === previousSlug);
+    if (slugChanging) {
+      const taken = list.find((row) => row.slug === record.slug && !isSelf(row));
+      if (taken) return NextResponse.json({ ok: false, error: `That slug is already used by ${String(taken.name || taken.slug)}. Pick another slug.` }, { status: 409 });
+    }
+    const self = list.find(isSelf);
+    if (self?.id) {
+      // The client's channels are changing: its past briefs were read from the old ones, so the next
+      // brief must not take them as memory.
+      const changed = ("slackInternalChannelId" in payload && (record.slack_internal_channel_id ?? null) !== (self.slack_internal_channel_id ?? null))
+        || ("slackExternalChannelId" in payload && (record.slack_external_channel_id ?? null) !== (self.slack_external_channel_id ?? null));
+      if (changed) resetBriefMemoryFor = String(self.id);
+    }
+    const clash = firstChannelClash(ownChannels, list.filter((row) => row.slug !== "misc"), isSelf);
+    if (clash) return NextResponse.json({ ok: false, error: clash }, { status: 409 });
+  }
   // Stored as typed, minus surrounding space. There is no validation to do: any word somebody puts in a
   // calendar invite is a legitimate thing to match on, and blank means "use the client's name".
   if ("granolaTitleMatch" in payload) record.granola_title_match = String(payload.granolaTitleMatch ?? "").trim() || null;
@@ -126,58 +187,57 @@ export async function POST(request: Request) {
     record.clay_dnc_webhook_url = dncUrl || null;
   }
   if (typeof payload.heyreachApiKey === "string" && payload.heyreachApiKey.trim()) record.heyreach_api_key_ciphertext = payload.heyreachApiKey.trim();
-  const previousSlug = typeof payload.previousSlug === "string" ? payload.previousSlug.trim() : "";
-  const id = typeof payload.id === "string" ? payload.id.trim() : "";
-  const create = payload.create === true;
-  const patchFilter = create ? "" : id ? `id=eq.${encodeURIComponent(id)}` : previousSlug ? `slug=eq.${encodeURIComponent(previousSlug)}` : "";
+
   if (patchFilter) {
-    let patched = await fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(record) });
-    if (!patched.ok && (patched.status === 400 || patched.status === 422)) {
-      const legacyRecord = { ...record };
-      delete legacyRecord.timezone;
-      delete legacyRecord.website_url;
-      delete legacyRecord.brain_folder;
-      delete legacyRecord.slack_internal_channel_id;
-      delete legacyRecord.slack_external_channel_id;
-      delete legacyRecord.granola_title_match;
-      delete legacyRecord.slack_extra_channel_ids;
-      delete legacyRecord.granola_extra_title_matches;
-      delete legacyRecord.airtable_base_id;
-      delete legacyRecord.clay_dnc_webhook_url;
-      patched = await fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(legacyRecord) });
+    /*
+     * Guardrails are merged into what is stored, not replaced by what was sent.
+     *
+     * They hold settings owned by several screens at once (the ICP and follow-up prompts from AI context,
+     * the messaging doc and internal-only switch from this form, enrichment flags from elsewhere), and the
+     * form used to send back the whole object as it was when the page loaded, quietly reverting whatever
+     * any other screen had saved since. Read-modify-write here means a save only ever moves the keys it
+     * names.
+     */
+    if (incomingGuardrails) {
+      const current = await fetch(`${url}/rest/v1/rr_workspaces?select=guardrails&${patchFilter}&limit=1`, { headers, cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (!Array.isArray(current)) return NextResponse.json({ ok: false, error: "The workspace could not be read before saving. Try again." }, { status: 502 });
+      if (!current.length) return NextResponse.json({ ok: false, error: "The workspace no longer exists. Refresh and try again." }, { status: 404 });
+      const stored = current[0]?.guardrails && typeof current[0].guardrails === "object" && !Array.isArray(current[0].guardrails) ? current[0].guardrails as Record<string, unknown> : {};
+      record.guardrails = { ...stored, ...incomingGuardrails };
     }
+    if (!Object.keys(record).length) return NextResponse.json({ ok: false, error: "Nothing to save." }, { status: 400 });
+    const patch = (body: Record<string, unknown>) => fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { ...headers, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(body) });
+    let patched = await patch(record);
+    if (!patched.ok && (patched.status === 400 || patched.status === 422)) patched = await patch(withoutLegacyColumns(record));
     const patchText = await patched.text();
     let patchData: unknown = null; try { patchData = patchText ? JSON.parse(patchText) : null; } catch { patchData = patchText; }
-    if (!patched.ok) return NextResponse.json({ ok: false, error: patchData || "Workspace update failed." }, { status: patched.status });
+    if (!patched.ok) return NextResponse.json({ ok: false, error: postgrestMessage(patchData, "Workspace update failed.") }, { status: patched.status });
     const rows = Array.isArray(patchData) ? patchData : [];
     if (!rows.length) return NextResponse.json({ ok: false, error: "The workspace no longer exists. Refresh and try again." }, { status: 404 });
     if (resetBriefMemoryFor) await writeConfig(briefMemoryResetKey(resetBriefMemoryFor), new Date().toISOString()).catch(() => {});
     await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.updated", entityType: "workspace", entityId: String(rows[0]?.id ?? id), details: { source: "admin", status: "success", workspaceId: rows[0]?.id ?? id, workspaceName: rows[0]?.name ?? payload.name, summary: `${rows[0]?.name ?? payload.name ?? "The client workspace"} configuration was saved successfully.` } });
-    const workspaces = rows.map((row: Record<string, unknown>) => ({ ...row, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined }));
-    fileMessagingAfterSave(String(rows[0]?.slug ?? payload.slug ?? ""), existingGuardrails);
-    return NextResponse.json({ ok: true, workspaces }, { status: 200 });
+    const workspaces = rows.map((row: Record<string, unknown>) => presentRow(row));
+    // Only when this save touched the guardrails: a logo upload has no business starting a Docs sync.
+    if (incomingGuardrails) fileMessagingAfterSave(String(rows[0]?.slug ?? ""), record.guardrails as Record<string, unknown>);
+    return slimJson({ ok: true, workspaces }, { status: 200 });
   }
-  let response = await fetch(`${url}/rest/v1/rr_workspaces?on_conflict=slug`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(record) });
-  if (!response.ok && (response.status === 400 || response.status === 422)) {
-    const legacyRecord = { ...record };
-    delete legacyRecord.timezone;
-    delete legacyRecord.website_url;
-    delete legacyRecord.brain_folder;
-    delete legacyRecord.slack_internal_channel_id;
-    delete legacyRecord.slack_external_channel_id;
-    delete legacyRecord.granola_title_match;
-    delete legacyRecord.slack_extra_channel_ids;
-    delete legacyRecord.granola_extra_title_matches;
-    delete legacyRecord.airtable_base_id;
-    delete legacyRecord.clay_dnc_webhook_url;
-    response = await fetch(`${url}/rest/v1/rr_workspaces?on_conflict=slug`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(legacyRecord) });
-  }
+
+  // A plain insert, never merge-duplicates: if a racing create took the slug between the check above and
+  // here, the unique violation is reported instead of the existing client being overwritten.
+  record.guardrails = incomingGuardrails ?? {};
+  const insert = (body: Record<string, unknown>) => fetch(`${url}/rest/v1/rr_workspaces`, { method: "POST", headers: { ...headers, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(body) });
+  let response = await insert(record);
+  if (!response.ok && (response.status === 400 || response.status === 422)) response = await insert(withoutLegacyColumns(record));
   const body = await response.text();
   let data: unknown = null; try { data = body ? JSON.parse(body) : null; } catch { data = body; }
-  const workspaces = Array.isArray(data) ? data.map((row: Record<string, unknown>) => ({ ...row, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined })) : data;
-  if (response.ok && Array.isArray(data) && data[0]) await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.created", entityType: "workspace", entityId: String(data[0].id ?? ""), details: { source: "admin", status: "success", workspaceId: data[0].id, workspaceName: data[0].name ?? payload.name, summary: `${data[0].name ?? payload.name ?? "A client workspace"} was added to QC Command.` } });
-  if (response.ok && Array.isArray(data) && data[0]) fileMessagingAfterSave(String(data[0].slug ?? payload.slug ?? ""), existingGuardrails);
-  return NextResponse.json({ ok: response.ok, workspaces, error: response.ok ? undefined : data }, { status: response.ok ? 201 : response.status });
+  if (!response.ok) return NextResponse.json({ ok: false, error: postgrestMessage(data, "The workspace could not be created.") }, { status: response.status });
+  const created = Array.isArray(data) ? data : [];
+  const workspaces = created.map((row: Record<string, unknown>) => presentRow(row));
+  if (created[0]) {
+    await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.created", entityType: "workspace", entityId: String(created[0].id ?? ""), details: { source: "admin", status: "success", workspaceId: created[0].id, workspaceName: created[0].name ?? payload.name, summary: `${created[0].name ?? payload.name ?? "A client workspace"} was added to QC Command.` } });
+    fileMessagingAfterSave(String(created[0].slug ?? slug), record.guardrails as Record<string, unknown>);
+  }
+  return slimJson({ ok: true, workspaces }, { status: 201 });
 }
 
 export async function DELETE(request: Request) {

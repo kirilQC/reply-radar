@@ -4,7 +4,7 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages, jsx-a11y/label-has-associated-control, react/no-unescaped-entities, react-hooks/set-state-in-effect */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
@@ -15,6 +15,7 @@ import { looksLikeChannelId, normalizeChannelId } from "../lib/slack-channel";
 import { parseTitleNeedles, describeNeedles } from "../lib/granola-match";
 import Skeleton from "../components/Skeleton";
 import { ACTIVE_MODELS, DEFAULT_MODEL } from "../../shared/anthropic-model.mjs";
+import { workspaceSlug } from "../lib/public-url";
 
 /** What the breadcrumb calls each configuration section. */
 const adminSectionLabels: Record<string, string> = {
@@ -64,6 +65,23 @@ type ClientWorkspace = {
 };
 
 const initialClients: ClientWorkspace[] = [];
+
+/** The editable copy of one client, as the workspace form holds it. */
+type WorkspaceDraft = {
+  name: string; slug: string; brief: string; timezone: string; website: string; messagingDocUrl: string;
+  anthropicModel: string; systemPrompt: string; apiKey: string; brainFolder: string;
+  slackInternal: string; slackExternal: string; slackInternalOnly: boolean; granolaTitleMatch: string;
+  slackExtra: string[]; granolaExtra: string[]; airtableBaseId: string; clayDncWebhookUrl: string;
+};
+const emptyDraft: WorkspaceDraft = { name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", slackInternalOnly: false, granolaTitleMatch: "", slackExtra: [], granolaExtra: [], airtableBaseId: "", clayDncWebhookUrl: "" };
+
+/**
+ * The slug as it is being typed: lowercase, and anything that is not a letter or digit becomes a hyphen.
+ * Ends are not trimmed here, or the hyphen in "acme-co" could never be typed; `workspaceSlug` trims them
+ * on save, and the server normalises again.
+ */
+const typedSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-{2,}/g, "-").replace(/^-+/, "");
+const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
 /** A Postgres text array as a list of non-blank strings. Absent columns and `null` both read as empty. */
 const asTextList = (value: unknown): string[] =>
@@ -139,12 +157,13 @@ type HeartbeatPayload = {
 
 export default function AdminPage() {
   // Read once from the URL so other pages can link to a section rather than to "the configuration page,
-  // now find it yourself". Anything unrecognised falls back to the directory.
-  const [active, setActive] = useState(() => {
-    if (typeof window === "undefined") return "workspaces";
+  // now find it yourself". Anything unrecognised falls back to the directory. Read after mount rather than
+  // in the initializer, which ran differently on the server (no window) and the client and broke hydration.
+  const [active, setActive] = useState("workspaces");
+  useLayoutEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("section") ?? "";
-    return requested in adminSectionLabels ? requested : "workspaces";
-  });
+    if (requested in adminSectionLabels) setActive(requested);
+  }, []);
   const [workspaceClients, setWorkspaceClients] = useState(initialClients);
   const [workspaceStorageReady, setWorkspaceStorageReady] = useState(false);
   const [selected, setSelected] = useState(0);
@@ -155,28 +174,32 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
+  /** A non-error note about the last save, e.g. the new webhook address after a slug change. */
+  const [workspaceNotice, setWorkspaceNotice] = useState("");
+  const [logoStatus, setLogoStatus] = useState("");
   const [messagingSyncing, setMessagingSyncing] = useState(false);
   const [messagingSyncResult, setMessagingSyncResult] = useState("");
   const [themePreset, setThemePreset] = useState("midnight");
   const [logos, setLogos] = useState<Record<string, string>>({});
-  const [accentOverrides, setAccentOverrides] = useState<Record<string, string>>(() => {
-    if (typeof window === "undefined") return {};
+  const [accentOverrides, setAccentOverrides] = useState<Record<string, string>>({});
+  // Loaded after mount for the same hydration reason as `active`, and the save below waits for it, or the
+  // first render's empty object would be written over what was stored.
+  const accentOverridesLoaded = useRef(false);
+  useLayoutEffect(() => {
     try {
       const stored = window.localStorage.getItem("reply-radar-admin-accent-overrides");
-      return stored ? (JSON.parse(stored) as Record<string, string>) : {};
-    } catch { return {}; }
-  });
+      if (stored) setAccentOverrides(JSON.parse(stored) as Record<string, string>);
+    } catch { /* unreadable storage: start with no overrides */ }
+    accentOverridesLoaded.current = true;
+  }, []);
   const logoInput = useRef<HTMLInputElement>(null);
   const [heartbeat, setHeartbeat] = useState<HeartbeatPayload | null>(null);
   const [heartbeatRefresh, setHeartbeatRefresh] = useState(0);
   const clients = workspaceClients;
   const client = clients[Math.min(selected, Math.max(0, clients.length - 1))] ?? { name: "", slug: "", leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced" };
-  const [workspaceDraft, setWorkspaceDraft] = useState<{
-    name: string; slug: string; brief: string; timezone: string; website: string; messagingDocUrl: string;
-    anthropicModel: string; systemPrompt: string; apiKey: string; brainFolder: string;
-    slackInternal: string; slackExternal: string; slackInternalOnly: boolean; granolaTitleMatch: string;
-    slackExtra: string[]; granolaExtra: string[]; airtableBaseId: string; clayDncWebhookUrl: string;
-  }>({ name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", slackInternalOnly: false, granolaTitleMatch: "", slackExtra: [], granolaExtra: [], airtableBaseId: "", clayDncWebhookUrl: "" });
+  const [workspaceDraft, setWorkspaceDraft] = useState<WorkspaceDraft>(emptyDraft);
+  /** The draft as it was when the editor opened (or last saved). A save sends only what differs from it. */
+  const [draftBaseline, setDraftBaseline] = useState<WorkspaceDraft>(emptyDraft);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [workspacePassword, setWorkspacePassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -227,45 +250,137 @@ export default function AdminPage() {
   }, [workspaceClients, workspaceStorageReady]);
   useEffect(() => {
     if (!workspaceOpen || !client) return;
-    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft({ name: client.name, slug: client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", slackInternalOnly: Boolean(client.guardrails?.slack_internal_only), granolaTitleMatch: client.granolaTitleMatch ?? "", slackExtra: client.slackExtraChannelIds ?? [], granolaExtra: client.granolaExtraTitleMatches ?? [], airtableBaseId: client.airtableBaseId ?? "", clayDncWebhookUrl: client.clayDncWebhookUrl ?? "" });
+    // A new workspace starts with no slug: it is derived from the name on save. The placeholder slug it
+    // carries in the list is only a local key until then.
+    const initial: WorkspaceDraft = { name: client.name, slug: client.isNew ? "" : client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", slackInternalOnly: Boolean(client.guardrails?.slack_internal_only), granolaTitleMatch: client.granolaTitleMatch ?? "", slackExtra: client.slackExtraChannelIds ?? [], granolaExtra: client.granolaExtraTitleMatches ?? [], airtableBaseId: client.airtableBaseId ?? "", clayDncWebhookUrl: client.clayDncWebhookUrl ?? "" };
+    /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft(initial);
+    setDraftBaseline(initial);
+    setWorkspaceNotice("");
+    setLogoStatus("");
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
-    const next: ClientWorkspace = { name: "", slug: `workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
+    const next: ClientWorkspace = { name: "", slug: `new-workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
     setWorkspaceError("");
     setSaved(false);
     setWorkspaceClients((current) => [...current, next]);
     setSelected(clients.length);
     setWorkspaceOpen(true);
   };
+  /*
+   * What a save sends: on a create, everything; on an update, only the fields this form changed.
+   *
+   * The form used to send every field as it was when the page loaded, guardrails and brief included, so
+   * saving a Slack channel here quietly reverted an ICP prompt or a brief edited on the AI screen since.
+   * The server merges guardrail keys into what it holds, and anything not in this payload it leaves alone.
+   */
+  const fieldChanged = (field: keyof WorkspaceDraft) => JSON.stringify(workspaceDraft[field]) !== JSON.stringify(draftBaseline[field]);
+  const nextSlug = workspaceSlug(workspaceDraft.slug) || (client.isNew ? workspaceSlug(workspaceDraft.name) : "");
+  const slugRenamed = !client.isNew && fieldChanged("slug") && nextSlug !== client.slug;
+  const buildWorkspacePayload = (full: boolean): Record<string, unknown> => {
+    const body: Record<string, unknown> = {};
+    const put = (field: keyof WorkspaceDraft, key: string, value: unknown) => { if (full || fieldChanged(field)) body[key] = value; };
+    put("name", "name", workspaceDraft.name.trim());
+    if (full || slugRenamed) body.slug = nextSlug;
+    put("brief", "clientBrief", workspaceDraft.brief);
+    put("timezone", "timezone", workspaceDraft.timezone || "America/New_York");
+    put("website", "websiteUrl", workspaceDraft.website);
+    put("brainFolder", "brainFolder", workspaceDraft.brainFolder);
+    put("slackInternal", "slackInternalChannelId", workspaceDraft.slackInternal);
+    put("slackExternal", "slackExternalChannelId", workspaceDraft.slackExternal);
+    put("granolaTitleMatch", "granolaTitleMatch", workspaceDraft.granolaTitleMatch);
+    put("slackExtra", "slackExtraChannelIds", workspaceDraft.slackExtra);
+    put("granolaExtra", "granolaExtraTitleMatches", workspaceDraft.granolaExtra);
+    put("airtableBaseId", "airtableBaseId", workspaceDraft.airtableBaseId);
+    put("clayDncWebhookUrl", "clayDncWebhookUrl", workspaceDraft.clayDncWebhookUrl);
+    put("anthropicModel", "anthropicModel", workspaceDraft.anthropicModel || null);
+    put("systemPrompt", "systemPrompt", workspaceDraft.systemPrompt || null);
+    // Kept in guardrails with the client's other switches, so they need no column of their own. Only the
+    // keys that changed are sent; the server merges them into the stored object.
+    const guardrails: Record<string, unknown> = {};
+    if (full || fieldChanged("messagingDocUrl")) guardrails.messaging_doc_url = workspaceDraft.messagingDocUrl.trim();
+    if (full || fieldChanged("slackInternalOnly")) guardrails.slack_internal_only = workspaceDraft.slackInternalOnly;
+    if (Object.keys(guardrails).length) body.guardrails = guardrails;
+    if (workspaceDraft.apiKey.trim()) body.heyreachApiKey = workspaceDraft.apiKey.trim();
+    const accent = accentOverrides[client.slug];
+    if (full) body.accentColor = accent ?? client.tone;
+    else if (accent && accent !== client.tone) body.accentColor = accent;
+    // A logo chosen before the first save rides along with the create; after that it saves on its own.
+    const pendingLogo = logos[client.slug];
+    if (full && pendingLogo && pendingLogo.startsWith("data:")) body.logoUrl = pendingLogo;
+    return body;
+  };
+  const workspaceDirty = workspaceOpen && Object.keys(buildWorkspacePayload(false)).length > 0;
   const saveWorkspaceChanges = async () => {
-    setSaving(true);
+    if (saving) return;
     setSaved(false);
     setWorkspaceError("");
+    setWorkspaceNotice("");
     const normalizedName = workspaceDraft.name.trim();
-    const normalizedSlug = workspaceDraft.slug.trim() || normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || client.slug;
-    const logoUrl = logos[client.slug] ?? client.logoUrl ?? "";
+    if (isNewWorkspace && !normalizedName) { setWorkspaceError("Give the workspace a name first."); return; }
+    if (!nextSlug) { setWorkspaceError("The slug needs at least one letter or number."); return; }
+    const body = buildWorkspacePayload(isNewWorkspace);
+    // The slug is the last segment of the HeyReach webhook URL, which lives in HeyReach's dashboard, not
+    // ours. Renaming it here silently moves the address replies arrive at.
+    if (slugRenamed && client.webhookUrl && !window.confirm(`Changing the slug from "${client.slug}" to "${nextSlug}" changes this client's HeyReach webhook URL. HeyReach keeps sending replies to the old address until the new one is pasted into HeyReach, and those replies are lost. Change the slug anyway?`)) return;
+    if (!isNewWorkspace && !Object.keys(body).length) { showSavedConfirmation(); return; }
     const mutationIdentity = isNewWorkspace ? { create: true } : { id: client.id, previousSlug: client.slug };
-    // Kept in guardrails with the client's other switches, so it needs no column of its own.
-    const nextGuardrails = { ...(client.guardrails ?? {}), messaging_doc_url: workspaceDraft.messagingDocUrl.trim(), slack_internal_only: workspaceDraft.slackInternalOnly };
-    const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, name: normalizedName, slug: normalizedSlug, clientBrief: workspaceDraft.brief, timezone: workspaceDraft.timezone || "America/New_York", websiteUrl: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: workspaceDraft.slackInternal, slackExternalChannelId: workspaceDraft.slackExternal, granolaTitleMatch: workspaceDraft.granolaTitleMatch, slackExtraChannelIds: workspaceDraft.slackExtra, granolaExtraTitleMatches: workspaceDraft.granolaExtra, airtableBaseId: workspaceDraft.airtableBaseId, clayDncWebhookUrl: workspaceDraft.clayDncWebhookUrl, anthropicModel: workspaceDraft.anthropicModel || null, systemPrompt: workspaceDraft.systemPrompt || null, ...(workspaceDraft.apiKey.trim() ? { heyreachApiKey: workspaceDraft.apiKey.trim() } : {}), logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone, guardrails: nextGuardrails }) }).catch(() => null);
-    if (!response?.ok) {
-      const detail = await response?.json().catch(() => ({}));
-      setWorkspaceError(String(detail?.error ?? "Could not save this workspace. Check Supabase and try again."));
-      setSaved(false);
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...mutationIdentity, ...body }) }).catch(() => null);
+      const payload = await response?.json().catch(() => ({}));
+      if (!response?.ok || payload?.ok === false) {
+        setWorkspaceError(typeof payload?.error === "string" && payload.error ? payload.error : response ? `Could not save this workspace (${response.status}).` : "Could not reach the server. Nothing was saved.");
+        return;
+      }
+      const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] as Record<string, unknown> | undefined : undefined;
+      const oldSlug = client.slug;
+      const savedSlug = String(savedRow?.slug ?? body.slug ?? oldSlug);
+      const savedGuardrails = savedRow?.guardrails && typeof savedRow.guardrails === "object" ? savedRow.guardrails as Record<string, unknown> : null;
+      const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
+      const savedLogo = logos[oldSlug] ?? client.logoUrl;
+      const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: String(savedRow?.name ?? normalizedName), slug: savedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: String(savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked ?? "")), keyConfigured: Boolean(savedRow?.key_configured ?? keyWasSaved), timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaTitleMatch: String(savedRow?.granola_title_match ?? workspaceDraft.granolaTitleMatch), slackExtraChannelIds: asTextList(savedRow?.slack_extra_channel_ids ?? workspaceDraft.slackExtra), granolaExtraTitleMatches: asTextList(savedRow?.granola_extra_title_matches ?? workspaceDraft.granolaExtra), airtableBaseId: String(savedRow?.airtable_base_id ?? workspaceDraft.airtableBaseId), clayDncWebhookUrl: String(savedRow?.clay_dnc_webhook_url ?? workspaceDraft.clayDncWebhookUrl), anthropicModel: workspaceDraft.anthropicModel, systemPrompt: workspaceDraft.systemPrompt, tone: typeof body.accentColor === "string" ? body.accentColor : item.tone, logoUrl: savedLogo, webhookUrl: String(savedRow?.webhook_url ?? item.webhookUrl ?? ""), guardrails: savedGuardrails ?? { ...(item.guardrails ?? {}), ...((body.guardrails as Record<string, unknown> | undefined) ?? {}) }, isNew: false } : item);
+      // Per-slug local state follows the client to its new slug.
+      if (savedSlug !== oldSlug) {
+        if (logos[oldSlug]) setLogos((current) => ({ ...current, [savedSlug]: current[oldSlug] }));
+        if (accentOverrides[oldSlug]) setAccentOverrides((current) => ({ ...current, [savedSlug]: current[oldSlug] }));
+      }
+      setWorkspaceClients(next);
+      const savedDraft = { ...workspaceDraft, apiKey: "", slug: savedSlug };
+      setWorkspaceDraft(savedDraft);
+      setDraftBaseline(savedDraft);
+      cacheWorkspaces(next);
+      window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
+      if (slugRenamed && savedRow?.webhook_url) setWorkspaceNotice(`Slug changed. Paste the new webhook URL into HeyReach: ${String(savedRow.webhook_url)}`);
+      showSavedConfirmation();
+    } finally {
       setSaving(false);
-      return;
     }
-    const payload = await response.json().catch(() => ({}));
-    const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] : null;
-    const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
-    const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: normalizedName, slug: normalizedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked), keyConfigured: savedRow?.key_configured ?? keyWasSaved, timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaTitleMatch: String(savedRow?.granola_title_match ?? workspaceDraft.granolaTitleMatch), slackExtraChannelIds: asTextList(savedRow?.slack_extra_channel_ids ?? workspaceDraft.slackExtra), granolaExtraTitleMatches: asTextList(savedRow?.granola_extra_title_matches ?? workspaceDraft.granolaExtra), airtableBaseId: String(savedRow?.airtable_base_id ?? workspaceDraft.airtableBaseId), clayDncWebhookUrl: String(savedRow?.clay_dnc_webhook_url ?? workspaceDraft.clayDncWebhookUrl), anthropicModel: workspaceDraft.anthropicModel, tone: accentOverrides[client.slug] ?? item.tone, logoUrl, guardrails: nextGuardrails, isNew: false } : item);
-    setWorkspaceClients(next);
-    setWorkspaceDraft((draft) => ({ ...draft, apiKey: "" }));
-    cacheWorkspaces(next);
-    window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
-    setSaving(false);
-    showSavedConfirmation();
   };
+  const confirmDiscard = () => !workspaceDirty || window.confirm("This client has unsaved changes. Leave without saving them?");
+  /** Closes the editor after checking for unsaved edits. A never-saved new workspace is dropped from the list. */
+  const leaveEditor = () => {
+    if (!workspaceOpen) return true;
+    if (!confirmDiscard()) return false;
+    if (client.isNew) {
+      setWorkspaceClients((current) => current.filter((item) => !item.isNew));
+      setSelected(0);
+    }
+    setWorkspaceError("");
+    setWorkspaceNotice("");
+    setLogoStatus("");
+    setWorkspaceOpen(false);
+    return true;
+  };
+  const goToSection = (section: string) => {
+    if (!leaveEditor()) return;
+    setActive(section);
+  };
+  useEffect(() => {
+    if (!workspaceDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [workspaceDirty]);
   const removeWorkspace = async () => {
     const response = await fetch("/api/admin/workspaces", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, slug: client.slug }) }).catch(() => null);
     if (!response?.ok) { setPasswordError("Could not delete this workspace from Supabase."); return; }
@@ -291,7 +406,10 @@ export default function AdminPage() {
     .filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   useEffect(() => {
-    window.localStorage.setItem("reply-radar-admin-accent-overrides", JSON.stringify(accentOverrides));
+    if (!accentOverridesLoaded.current) return;
+    try {
+      window.localStorage.setItem("reply-radar-admin-accent-overrides", JSON.stringify(accentOverrides));
+    } catch { /* quota or private mode: overrides are a convenience */ }
   }, [accentOverrides]);
   useEffect(() => {
     if (active !== "heartbeat") return;
@@ -451,18 +569,46 @@ export default function AdminPage() {
   const setAccentColor = (value: string) =>
     setAccentOverrides((current) => ({ ...current, [client.slug]: value }));
   const chooseLogo = () => logoInput.current?.click();
+  /*
+   * A logo upload saves the logo and nothing else.
+   *
+   * It used to post a rebuilt workspace from whatever the list held, and the server wrote every field it
+   * was not sent as empty, so changing a logo wiped the client's guardrails (ICP, follow-up and reply
+   * prompts) and system prompt. It also never looked at the answer, so a failed upload looked saved.
+   */
   const handleLogo = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || file.size > 2 * 1024 * 1024) return;
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_LOGO_BYTES) {
+      setWorkspaceError(`That logo is ${(file.size / (1024 * 1024)).toFixed(1)}MB. The limit is 2MB.`);
+      return;
+    }
+    setWorkspaceError("");
+    const target = client;
+    const previous = logos[target.slug] ?? target.logoUrl ?? "";
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onerror = () => setWorkspaceError("That logo could not be read.");
+    reader.onload = async () => {
       const logoUrl = String(reader.result);
-      setLogos((current) => ({ ...current, [client.slug]: logoUrl }));
-      const next = workspaceClients.map((item, index) => index === selected ? { ...item, logoUrl } : item);
-      setWorkspaceClients(next);
-      cacheWorkspaces(next);
-      window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
-      void fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: client.id, previousSlug: client.slug, name: client.name, slug: client.slug, clientBrief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", websiteUrl: client.website ?? "", brainFolder: client.brainFolder ?? "", anthropicModel: client.anthropicModel ?? null, logoUrl, accentColor: accentOverrides[client.slug] ?? client.tone }) });
+      const apply = (value: string) => {
+        setLogos((current) => ({ ...current, [target.slug]: value }));
+        setWorkspaceClients((current) => current.map((item) => (item.slug === target.slug ? { ...item, logoUrl: value } : item)));
+      };
+      apply(logoUrl);
+      if (target.isNew) { setLogoStatus("Saves with the workspace"); return; }
+      setLogoStatus("Saving logo…");
+      try {
+        const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: target.id, previousSlug: target.slug, logoUrl }) });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) throw new Error(typeof payload?.error === "string" && payload.error ? payload.error : `The logo could not be saved (${response.status}).`);
+        setLogoStatus("Logo saved");
+        window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
+      } catch (error) {
+        apply(previous);
+        setLogoStatus("");
+        setWorkspaceError(error instanceof Error ? `The logo was not saved. ${error.message}` : "The logo was not saved.");
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -503,7 +649,7 @@ export default function AdminPage() {
                 ...(active === "workspaces"
                   ? workspaceOpen
                     ? [
-                        { label: "Client directory", href: "/admin", onClick: (event: React.MouseEvent) => { event.preventDefault(); setWorkspaceOpen(false); } },
+                        { label: "Client directory", href: "/admin", onClick: (event: React.MouseEvent) => { event.preventDefault(); leaveEditor(); } },
                         { label: client.name || "New workspace" },
                       ]
                     : [{ label: "Client directory" }]
@@ -519,19 +665,19 @@ export default function AdminPage() {
               <div className="admin-nav-caption">CONFIGURATION</div>
               <button
                 className={active === "workspaces" ? "active" : ""}
-                onClick={() => { setActive("workspaces"); setWorkspaceOpen(false); }}
+                onClick={() => goToSection("workspaces")}
               >
                 <span>▦</span>Client directory
               </button>
               <button
                 className={active === "ai-hub" ? "active" : ""}
-                onClick={() => setActive("ai-hub")}
+                onClick={() => goToSection("ai-hub")}
               >
                 <span>✦</span>AI
               </button>
               <button
                 className={active === "granola" ? "active" : ""}
-                onClick={() => setActive("granola")}
+                onClick={() => goToSection("granola")}
               >
                 <span>◉</span>Granola keys
               </button>
@@ -543,7 +689,7 @@ export default function AdminPage() {
                 <button
                   key={id}
                   className={active === id ? "active" : ""}
-                  onClick={() => setActive(id)}
+                  onClick={() => goToSection(id)}
                 >
                   <span>{icon}</span>
                   {label}
@@ -592,6 +738,7 @@ export default function AdminPage() {
                 </button>}
               </div>}
               {workspaceError && active === "workspaces" && <p className="form-error" role="alert">{workspaceError}</p>}
+              {workspaceNotice && active === "workspaces" && workspaceOpen && <p className="slack-channel-note" role="status">{workspaceNotice}</p>}
               {active === "heartbeat" && <HeartbeatView heartbeat={heartbeat} onRefresh={() => { setHeartbeat(null); setHeartbeatRefresh((value) => value + 1); }} />}
               {active === "feedback" && <FeedbackView />}
               {active === "audit" && <AuditView />}
@@ -623,7 +770,7 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>}
-                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => { setWorkspaceError(""); setWorkspaceOpen(false); }}>← Back to directory</button><button className="primary-button" onClick={saveWorkspaceChanges} disabled={saving}>{saving ? "Saving…" : saved ? "Saved ✓" : "Save changes"}</button></div>}
+                  {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => { leaveEditor(); }}>← Back to directory</button><button className="primary-button" onClick={saveWorkspaceChanges} disabled={saving}>{saving ? "Saving…" : saved ? "Saved ✓" : "Save changes"}</button></div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
                       <div className="panel-heading">
@@ -690,7 +837,7 @@ export default function AdminPage() {
                         </button>
                       </div>
                       <div className="panel-actions">
-                        <button className="text-button" onClick={() => setActive("audit")}>
+                        <button className="text-button" onClick={() => goToSection("audit")}>
                           View event log →
                         </button>
                       </div>
@@ -701,7 +848,6 @@ export default function AdminPage() {
                           <h2>Client profile</h2>
                           <p>This context powers scoring and reply drafts.</p>
                         </div>
-                        <span className="saved-dot">● Auto-saved</span>
                       </div>
                       <label className="field-label">
                         DISPLAY NAME
@@ -730,7 +876,8 @@ export default function AdminPage() {
                       <div className="field-row">
                         <label className="field-label">
                           WORKSPACE SLUG
-                          <input value={workspaceDraft.slug} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slug: event.target.value }))} placeholder="Enter workspace slug" />
+                          <input value={workspaceDraft.slug} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slug: typedSlug(event.target.value) }))} placeholder={workspaceSlug(workspaceDraft.name) || "Enter workspace slug"} />
+                          {slugRenamed && client.webhookUrl && <small className="slack-channel-note">Changing the slug changes the HeyReach webhook URL. Paste the new one into HeyReach after saving.</small>}
                         </label>
                         <label className="field-label">
                           QC BRAIN FOLDER
@@ -762,7 +909,7 @@ export default function AdminPage() {
                   </div>}
                     {workspaceOpen && <div className="client-config-sections">
                     <section className="admin-panel client-config-section" id="client-slack">
-                      <div className="panel-heading"><div><h2>Slack channels</h2><p>Where this client&apos;s briefs are read and posted.</p></div><span className="saved-dot">● Auto-saved</span></div>
+                      <div className="panel-heading"><div><h2>Slack channels</h2><p>Where this client&apos;s briefs are read and posted.</p></div></div>
                       <div className="field-row">
                         <label className="field-label">
                           MAIN · INTERNAL CHANNEL ID
@@ -794,7 +941,7 @@ export default function AdminPage() {
                       />
                     </section>
                     <section className="admin-panel client-config-section" id="client-granola">
-                      <div className="panel-heading"><div><h2>Call transcripts</h2><p>Which Granola meeting belongs to this client.</p></div><span className="saved-dot">● Auto-saved</span></div>
+                      <div className="panel-heading"><div><h2>Call transcripts</h2><p>Which Granola meeting belongs to this client.</p></div></div>
                       <label className="field-label">
                         MAIN CALL · MEETING TITLE CONTAINS
                         <input value={workspaceDraft.granolaTitleMatch} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, granolaTitleMatch: event.target.value }))} placeholder={workspaceDraft.name || "Bluevia"} />
@@ -815,7 +962,7 @@ export default function AdminPage() {
                       {extraCallNote && <p className="slack-channel-note">{extraCallNote}</p>}
                     </section>
                     <section className="admin-panel client-config-section" id="client-airtable">
-                      <div className="panel-heading"><div><h2>Airtable base</h2><p>Which base this client&apos;s action items are written to.</p></div><span className="saved-dot">● Auto-saved</span></div>
+                      <div className="panel-heading"><div><h2>Airtable base</h2><p>Which base this client&apos;s action items are written to.</p></div></div>
                       <label className="field-label">
                         CLIENT BASE
                         {/* The guess is the placeholder option, not the value. Selecting it is the
@@ -841,7 +988,7 @@ export default function AdminPage() {
                       {buildNote && <p className="slack-channel-note">{buildNote}</p>}
                     </section>
                     <section className="admin-panel client-config-section" id="client-clay">
-                      <div className="panel-heading"><div><h2>Clay DNC webhook</h2><p>Where the QC bot pushes do-not-contact companies for this client.</p></div><span className="saved-dot">● Auto-saved</span></div>
+                      <div className="panel-heading"><div><h2>Clay DNC webhook</h2><p>Where the QC bot pushes do-not-contact companies for this client.</p></div></div>
                       <label className="field-label">
                         CLAY DNC WEBHOOK URL
                         <input value={workspaceDraft.clayDncWebhookUrl} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, clayDncWebhookUrl: event.target.value }))} placeholder="https://api.clay.com/v3/sources/webhook/…" type="url" />
@@ -849,7 +996,7 @@ export default function AdminPage() {
                       <p className="slack-channel-note">In this client&apos;s Clay DNC table, add an &ldquo;Import from Webhook&rdquo; source, set it to dedupe on the domain column, and paste its URL here. Leave blank and DNC adds still land in QC Command&apos;s own list — they just won&apos;t reach Clay.</p>
                     </section>
                     <section className="admin-panel client-config-section" id="client-theme">
-                      <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div><span className="saved-dot">● Auto-saved</span></div>
+                      <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div>{logoStatus && <span className="saved-dot">{logoStatus}</span>}</div>
                       <div className="logo-drop">{workspaceLogo ? <img className="logo-sample" src={workspaceLogo} alt={`${client.name} logo`} /> : <div className="logo-sample" style={{ background: accentColor }}>{client.name[0] || "?"}</div>}<div><strong>Upload client logo</strong><small>SVG, PNG, JPG · max 2MB</small></div><button className="secondary-button" type="button" onClick={chooseLogo}>Choose file</button><input ref={logoInput} type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={handleLogo} /></div>
                       <label className="field-label">CLIENT ACCENT<input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} /></label>
                     </section>
@@ -1283,6 +1430,8 @@ function GranolaKeysView() {
   };
 
   const removeKey = async (id: string) => {
+    const label = keys.find((key) => key.id === id)?.label;
+    if (!window.confirm(`Remove ${label ? `the Granola key "${label}"` : "this Granola key"}? Calls only this key can see stop reaching the briefs.`)) return;
     setBusyId(id);
     await fetch(`/api/granola/keys?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => null);
     setBusyId("");
@@ -1481,10 +1630,11 @@ function FeedbackView() {
   const [logComment, setLogComment] = useState("");
   const [logStatus, setLogStatus] = useState("");
   const [posting, setPosting] = useState(false);
-  const [author, setAuthor] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return window.localStorage.getItem(FEEDBACK_AUTHOR_KEY) ?? "";
-  });
+  const [author, setAuthor] = useState("");
+  // Read after mount: an initializer that reads localStorage renders differently on the server.
+  useLayoutEffect(() => {
+    try { setAuthor(window.localStorage.getItem(FEEDBACK_AUTHOR_KEY) ?? ""); } catch { /* storage unavailable */ }
+  }, []);
 
   const load = async () => {
     try {
@@ -1561,7 +1711,7 @@ function FeedbackView() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) throw new Error(payload.error || "The update could not be saved.");
-      window.localStorage.setItem(FEEDBACK_AUTHOR_KEY, author.trim());
+      try { window.localStorage.setItem(FEEDBACK_AUTHOR_KEY, author.trim()); } catch { /* remembering the name is a convenience */ }
       if (payload.item) setItems((current) => current.map((row) => (row.id === item.id ? payload.item : row)));
       else await load();
       setLogOpen("");
@@ -2041,9 +2191,16 @@ function AiHubView() {
   const [replyPrompt, setReplyPrompt] = useState("");
   const [clientSaving, setClientSaving] = useState(false);
   const [clientSaved, setClientSaved] = useState(false);
+  const [clientError, setClientError] = useState("");
+  const [clientLoading, setClientLoading] = useState(false);
+  /** The client whose context the fields belong to, read synchronously so a late answer can be told apart. */
+  const selectedClientRef = useRef("");
   // Opened straight on the prompt when the Slack hub linked here, because that link exists for one reason.
-  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "clients" | "slack-log">(() =>
-    typeof window !== "undefined" && window.location.hash === "#ai-morning-brief" ? "prompts" : "overview");
+  // Read after mount: the hash is not there on the server, so an initializer rendered two different pages.
+  const [activeTab, setActiveTab] = useState<"overview" | "prompts" | "clients" | "slack-log">("overview");
+  useLayoutEffect(() => {
+    if (window.location.hash === "#ai-morning-brief") setActiveTab("prompts");
+  }, []);
   const [savedTemplates, setSavedTemplates] = useState<Array<{ id: string; kind: string; name: string; summary: string; prompt: string }>>([]);
 
   // The browser's own hash scroll fires before this tab's panels exist, so it lands on nothing and the
@@ -2068,6 +2225,9 @@ function AiHubView() {
   };
 
   const deleteTemplate = async (id: string) => {
+    const name = savedTemplates.find((template) => template.id === id)?.name;
+    // Saved templates are shared by every client's picker, so a stray click here is felt everywhere.
+    if (!window.confirm(`Delete the saved template${name ? ` "${name}"` : ""} for every client? Prompts already saved on a client keep their text.`)) return;
     // Optimistic, then reconciled from the server — a delete that failed would otherwise leave the
     // card gone from the page but still there for everyone else.
     setSavedTemplates((previous) => previous.filter((template) => template.id !== id));
@@ -2080,27 +2240,63 @@ function AiHubView() {
     ...savedTemplates.filter((template) => template.kind === kind).map((template) => ({ id: template.id, name: template.name, summary: template.summary, prompt: template.prompt, saved: true })),
   ];
 
+  /*
+   * The global read fills the prompts tab; a per-client read fills only that client's fields.
+   *
+   * Both used to set everything, so clicking a client reloaded the global prompts over unsaved edits, and
+   * clicking two clients quickly let the slower answer land last: client A's brief shown, and then saved,
+   * under client B. A per-client answer is now dropped unless that client is still the one selected.
+   */
   const loadConfig = (workspace?: string) => {
     const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
     fetch(`/api/ai/config${query}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((payload: AiConfig) => {
+        if (workspace) {
+          if (selectedClientRef.current !== workspace) return;
+          if (Array.isArray(payload.workspaces)) setConfig((current) => (current ? { ...current, workspaces: payload.workspaces } : payload));
+          if (payload.workspaceAi) {
+            setClientBrief(payload.workspaceAi.brief);
+            // A client with nothing stored is shown the same defaults the scoring routes fall back to,
+            // so the page always displays the prompt the AI is actually running rather than a blank box
+            // standing in for a default nobody can read.
+            setIcpPrompt(payload.workspaceAi.icpPrompt || defaultIcpPrompt());
+            setFollowUpPrompt(payload.workspaceAi.followUpPrompt || defaultFollowUpPrompt());
+            setFollowUpThreshold(Number(payload.workspaceAi.followUpThreshold ?? 50));
+            setReplyPrompt(payload.workspaceAi.replyPrompt);
+          } else {
+            setClientError("This client's AI context could not be loaded. Pick it again to retry.");
+          }
+          setClientLoading(false);
+          return;
+        }
         setConfig(payload);
         setGlobalPrompt(String(payload.globalSentimentPrompt ?? ""));
         setIcpDoc(String(payload.icpDocPrompt ?? ""));
         setBriefPrompt(String(payload.morningBriefPrompt ?? ""));
-        if (payload.workspaceAi) {
-          setClientBrief(payload.workspaceAi.brief);
-          // A client with nothing stored is shown the same defaults the scoring routes fall back to,
-          // so the page always displays the prompt the AI is actually running rather than a blank box
-          // standing in for a default nobody can read.
-          setIcpPrompt(payload.workspaceAi.icpPrompt || defaultIcpPrompt());
-          setFollowUpPrompt(payload.workspaceAi.followUpPrompt || defaultFollowUpPrompt());
-          setFollowUpThreshold(Number(payload.workspaceAi.followUpThreshold ?? 50));
-          setReplyPrompt(payload.workspaceAi.replyPrompt);
-        }
       })
-      .catch(() => null);
+      .catch(() => {
+        if (workspace && selectedClientRef.current === workspace) {
+          setClientLoading(false);
+          setClientError("This client's AI context could not be loaded. Pick it again to retry.");
+        }
+      });
+  };
+
+  /** Switching clients empties the fields first, so nothing of the last client can be shown or saved here. */
+  const selectClient = (slug: string) => {
+    if (slug === selectedClientRef.current && !clientError) return;
+    selectedClientRef.current = slug;
+    setSelectedClient(slug);
+    setClientBrief("");
+    setIcpPrompt("");
+    setFollowUpPrompt("");
+    setFollowUpThreshold(50);
+    setReplyPrompt("");
+    setClientSaved(false);
+    setClientError("");
+    setClientLoading(true);
+    loadConfig(slug);
   };
 
   useEffect(() => { loadConfig(); void loadSavedTemplates(); }, []);
@@ -2144,9 +2340,6 @@ function AiHubView() {
     return () => { clearInterval(interval); document.removeEventListener("visibilitychange", onVisible); };
   }, []);
 
-  useEffect(() => {
-    if (selectedClient) loadConfig(selectedClient);
-  }, [selectedClient]);
 
   /**
    * "Saved ✓" now means saved.
@@ -2205,16 +2398,40 @@ function AiHubView() {
     setTimeout(() => setBriefSaved(false), 2500);
   };
 
+  /*
+   * "Saved ✓" only when the server says so, and never stuck on "Saving…".
+   *
+   * A box still holding the built-in default is saved as blank, which the scorers read as "use the
+   * default". Saving the default's text instead froze it as this client's custom prompt, so a later
+   * improvement to the default never reached them.
+   */
   const saveClientAi = async () => {
-    if (!selectedClient) return;
+    if (!selectedClient || clientSaving || clientLoading) return;
+    const workspace = selectedClient;
     setClientSaving(true);
-    await fetch("/api/ai/config", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "save_workspace_ai", workspace: selectedClient, brief: clientBrief, icpPrompt, followUpPrompt, replyPrompt, followUpThreshold }),
-    });
-    setClientSaving(false);
-    setClientSaved(true);
-    setTimeout(() => setClientSaved(false), 2500);
+    setClientSaved(false);
+    setClientError("");
+    try {
+      const response = await fetch("/api/ai/config", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "save_workspace_ai", workspace, brief: clientBrief,
+          icpPrompt: icpPrompt.trim() === defaultIcpPrompt().trim() ? "" : icpPrompt,
+          followUpPrompt: followUpPrompt.trim() === defaultFollowUpPrompt().trim() ? "" : followUpPrompt,
+          replyPrompt, followUpThreshold,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !payload?.ok) throw new Error(payload?.error || `Could not save (${response.status}).`);
+      if (selectedClientRef.current === workspace) {
+        setClientSaved(true);
+        setTimeout(() => setClientSaved(false), 2500);
+      }
+    } catch (error) {
+      if (selectedClientRef.current === workspace) setClientError(error instanceof Error && error.message !== "Failed to fetch" ? error.message : "Could not reach the server. Nothing was saved.");
+    } finally {
+      setClientSaving(false);
+    }
   };
 
   const selectedWs = config?.workspaces?.find((ws) => ws.slug === selectedClient);
@@ -2384,7 +2601,7 @@ function AiHubView() {
         <aside className="ai-client-sidebar">
           <div className="admin-nav-caption">CLIENT AI CONTEXT</div>
           {config?.workspaces?.map((ws) => (
-            <button key={ws.slug} className={`admin-nav-client-button ${selectedClient === ws.slug ? "active" : ""}`} onClick={() => setSelectedClient(ws.slug)}>
+            <button key={ws.slug} className={`admin-nav-client-button ${selectedClient === ws.slug ? "active" : ""}`} onClick={() => selectClient(ws.slug)}>
               <i style={ws.logoUrl ? undefined : { background: ws.accentColor || "var(--accent)" }}>{ws.logoUrl ? <img src={ws.logoUrl} alt="" /> : (ws.name?.[0] ?? "?")}</i>
               <span>{ws.name}</span>
               {ws.hasBrief && <b>●</b>}
@@ -2395,9 +2612,10 @@ function AiHubView() {
           {!selectedClient ? <div className="ai-client-empty"><p>Select a client to configure their AI context, ICP prompt, follow-up rules, and reply prompt.</p></div> : <>
             <div className="ai-client-header">
               <h2>{selectedWs?.logoUrl ? <img src={selectedWs.logoUrl} alt="" className="admin-client-heading-logo" /> : <span className="admin-client-heading-logo" style={{ background: selectedWs?.accentColor || "var(--accent)" }}>{selectedWs?.name?.[0] ?? "?"}</span>}{selectedWs?.name ?? selectedClient}</h2>
-              <button className="primary-button" onClick={saveClientAi} disabled={clientSaving}>{clientSaving ? "Saving…" : clientSaved ? "Saved ✓" : "Save changes"}</button>
+              <button className="primary-button" onClick={saveClientAi} disabled={clientSaving || clientLoading}>{clientSaving ? "Saving…" : clientSaved ? "Saved ✓" : "Save changes"}</button>
             </div>
-            <div className="client-config-sections">
+            {clientError && <p className="form-error" role="alert">{clientError}</p>}
+            {clientLoading ? <Skeleton variant="list" count={4} label="Loading client context" /> : <div className="client-config-sections">
               <section className="admin-panel client-config-section">
                 <div className="panel-heading"><div><h2>Client brief & documents</h2><p>Give the AI all the context about this client. This feeds into ICP scoring, follow-up scoring, and reply drafts.</p></div></div>
                 {/* Deep, not tall-ish. What goes in here is the output of /client-summary in the QC
@@ -2432,7 +2650,7 @@ function AiHubView() {
                 <label className="field-label">FOLLOW-UP PROMPT<textarea value={followUpPrompt} onChange={(event) => setFollowUpPrompt(event.target.value)} placeholder="Describe what should make a conversation urgent to follow up on, and what should keep it quiet." rows={12} style={{ minHeight: 240 }} /></label>
                 <label className="field-label">FOLLOW-UP ALERT THRESHOLD<span className="threshold-row"><input type="range" min={0} max={100} step={5} value={followUpThreshold} onChange={(event) => setFollowUpThreshold(Number(event.target.value))} /><b>{followUpThreshold}</b></span><small className="threshold-hint">Only show the &ldquo;follow-up recommended&rdquo; box when a lead scores at or above this. Higher = less noise.</small></label>
               </section>
-            </div>
+            </div>}
           </>}
         </div>
       </div>

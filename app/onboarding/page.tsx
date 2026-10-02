@@ -58,17 +58,26 @@ export default function OnboardingDirectoryPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [showCompleted, setShowCompleted] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
+  // A failed load used to fall through to "No clients yet", which reads as every client having vanished.
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
       try {
         const response = await fetch("/api/onboarding/clients", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
+        if (cancelled) return;
         if (response.ok && Array.isArray(payload.clients)) setClients(payload.clients);
-      } catch { /* leave the empty state */ }
-      setLoading(false);
+        else setLoadError(response.status === 401 ? "Your session has expired. Sign in again to see the clients." : typeof payload?.error === "string" && payload.error ? payload.error : `The clients could not be loaded (${response.status}).`);
+      } catch {
+        if (!cancelled) setLoadError("Could not reach the server.");
+      }
+      if (!cancelled) setLoading(false);
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [loadAttempt]);
 
   const addClient = async () => {
     const trimmed = name.trim();
@@ -141,7 +150,10 @@ export default function OnboardingDirectoryPage() {
             return (
               <>
                 {loading && <Skeleton variant="list" count={8} label="Loading onboarding" />}
-                {!loading && clients.length === 0 && (
+                {!loading && loadError && (
+                  <div className="onb-directory"><div className="onb-empty" role="alert">{loadError} <button type="button" className="secondary-button" onClick={() => { setLoading(true); setLoadError(""); setLoadAttempt((n) => n + 1); }}>Try again</button></div></div>
+                )}
+                {!loading && !loadError && clients.length === 0 && (
                   <div className="onb-directory"><div className="onb-empty">No clients yet. Add your first one to start its checklist.</div></div>
                 )}
                 {active.length > 0 && (

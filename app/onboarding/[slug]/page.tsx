@@ -94,6 +94,7 @@ function ReplyRadarSetup({ slug, onConfig, client, onLogoSaved }: { slug: string
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [copied, setCopied] = useState(false);
 
   const loadConfig = async (): Promise<RRConfig | null> => {
@@ -137,17 +138,25 @@ function ReplyRadarSetup({ slug, onConfig, client, onLogoSaved }: { slug: string
     if (saving) return;
     setSaving(true);
     setSaved(false);
+    setSaveError("");
     const body: Record<string, string> = { website: form.website, messagingDoc: form.messagingDoc, slackInternal: form.slackInternal, slackExternal: form.slackExternal, airtableBaseId: form.airtableBaseId, crmProvider: form.crmProvider };
     if (form.heyreachApiKey.trim()) body.heyreachApiKey = form.heyreachApiKey.trim();
     if (form.crmApiKey.trim()) body.crmApiKey = form.crmApiKey.trim();
     try {
       const response = await fetch(`/api/onboarding/reply-radar/${encodeURIComponent(slug)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-      if (response.ok) {
-        setSaved(true);
-        setForm((f) => ({ ...f, heyreachApiKey: "" }));
-        const fresh = await loadConfig();
-        if (fresh) setCfg(fresh);
+      // A refused save (a channel that is another client's, a malformed Airtable id) used to leave the
+      // button saying nothing at all, which reads as saved.
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        setSaveError(typeof payload?.error === "string" && payload.error ? payload.error : `Could not save the setup (${response.status}).`);
+        return;
       }
+      setSaved(true);
+      setForm((f) => ({ ...f, heyreachApiKey: "", crmApiKey: "" }));
+      const fresh = await loadConfig().catch(() => null);
+      if (fresh) setCfg(fresh);
+    } catch {
+      setSaveError("Could not reach the server. Nothing was saved; try again.");
     } finally {
       setSaving(false);
     }
@@ -210,6 +219,7 @@ function ReplyRadarSetup({ slug, onConfig, client, onLogoSaved }: { slug: string
           <div className="rr-actions">
             <button className="primary-button" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save setup"}</button>
             {saved && <span className="rr-saved">Saved.</span>}
+            {saveError && <span className="onb-error" role="alert">{saveError}</span>}
           </div>
         </div>
       )}
@@ -250,7 +260,16 @@ export default function OnboardingChecklistPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [marking, setMarking] = useState(false);
+  /** Tasks with a checkoff in flight. Each is disabled until its own answer comes back. */
+  const [pending, setPending] = useState<Set<string>>(() => new Set());
+  const [toggleError, setToggleError] = useState("");
+  const tasksRef = useRef<Task[]>([]);
+  // The same set, read synchronously: a state updater runs later, so it cannot tell this call whether
+  // another checkoff is still in flight.
+  const pendingRef = useRef<Set<string>>(new Set());
   const [slack, setSlack] = useState({ slackInternal: "", slackExternal: "" });
   /** Per-task Slack send feedback: which task is sending, and which just sent. */
   const [slackBusy, setSlackBusy] = useState<string | null>(null);
@@ -275,21 +294,36 @@ export default function OnboardingChecklistPage() {
     }
   };
 
+  // A 401 or a 500 used to leave a blank page: not loading, not "not found", and no client to draw. Any
+  // failure other than a genuine 404 now says what happened and offers to try again.
   useEffect(() => {
     if (!slug) return;
+    let cancelled = false;
+    setLoading(true);
+    setLoadError("");
     void (async () => {
       try {
         const response = await fetch(`/api/onboarding/clients/${encodeURIComponent(slug)}`, { cache: "no-store" });
+        if (cancelled) return;
         if (response.status === 404) { setNotFound(true); setLoading(false); return; }
         const payload = await response.json().catch(() => ({}));
+        if (cancelled) return;
         if (response.ok && payload.client) {
           setClient(payload.client);
           setTasks(Array.isArray(payload.tasks) ? payload.tasks : []);
+        } else if (response.status === 401) {
+          setLoadError("Your session has expired. Sign in again to see this checklist.");
+        } else {
+          setLoadError(typeof payload?.error === "string" && payload.error ? payload.error : `The checklist could not be loaded (${response.status}).`);
         }
-      } catch { /* leave loading */ }
-      setLoading(false);
+      } catch {
+        if (!cancelled) setLoadError("Could not reach the server.");
+      }
+      if (!cancelled) setLoading(false);
     })();
-  }, [slug]);
+    return () => { cancelled = true; };
+  }, [slug, loadAttempt]);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
 
   const progress = useMemo(() => computeProgress(tasks), [tasks]);
   const groups = useMemo(() => groupTasks(tasks) as Group[], [tasks]);
@@ -303,14 +337,41 @@ export default function OnboardingChecklistPage() {
     return buckets.filter((b) => b.items.length);
   }, [groups]);
 
+  /*
+   * One checkoff at a time per task, and a failure undoes only that task.
+   *
+   * This used to snapshot the whole list before the request and restore it on failure, so ticking two
+   * boxes quickly and having the first fail also unticked the second, which had saved. The server's
+   * progress comes back with each answer; when it disagrees with the page once nothing else is in flight,
+   * the list is re-read rather than trusted.
+   */
   const toggle = async (task: Task, next: boolean) => {
-    const before = tasks;
+    if (pendingRef.current.has(task.id)) return;
+    setToggleError("");
+    pendingRef.current.add(task.id);
+    setPending(new Set(pendingRef.current));
     setTasks((current) => current.map((t) => (t.id === task.id ? { ...t, isDone: next } : t)));
+    let serverProgress: { doneLeaves: number; totalLeaves: number } | null = null;
+    let failed = false;
     try {
       const response = await fetch("/api/onboarding/tasks", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: task.id, isDone: next }) });
-      if (!response.ok) { setTasks(before); return; }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        failed = true;
+        setToggleError(typeof payload?.error === "string" && payload.error ? `${task.title}: ${payload.error}` : `${task.title} could not be updated.`);
+      } else if (payload?.progress) {
+        serverProgress = payload.progress;
+      }
     } catch {
-      setTasks(before);
+      failed = true;
+      setToggleError(`${task.title} could not be updated. Check the connection and try again.`);
+    }
+    if (failed) setTasks((current) => current.map((t) => (t.id === task.id ? { ...t, isDone: !next } : t)));
+    pendingRef.current.delete(task.id);
+    setPending(new Set(pendingRef.current));
+    if (serverProgress && !pendingRef.current.size) {
+      const local = computeProgress(tasksRef.current.map((t) => (t.id === task.id ? { ...t, isDone: next } : t)));
+      if (local.doneLeaves !== serverProgress.doneLeaves || local.totalLeaves !== serverProgress.totalLeaves) await reload();
     }
   };
 
@@ -348,6 +409,12 @@ export default function OnboardingChecklistPage() {
         <main className="onboarding-shell">
           {loading && <Skeleton variant="list" count={9} label="Loading checklist" />}
           {notFound && !loading && <div className="onb-empty">That client is not in the onboarding hub. <Link href="/onboarding" style={{ color: "var(--accent)" }}>Back</Link>.</div>}
+          {loadError && !loading && !client && (
+            <div className="onb-empty" role="alert">
+              {loadError}{" "}
+              {loadError.startsWith("Your session") ? <a href={`/login?next=${encodeURIComponent(`/onboarding/${slug}`)}`} style={{ color: "var(--accent)" }}>Sign in</a> : <button type="button" className="secondary-button" onClick={() => setLoadAttempt((n) => n + 1)}>Try again</button>}
+            </div>
+          )}
 
           {client && (
             <>
@@ -376,6 +443,8 @@ export default function OnboardingChecklistPage() {
 
               {slack.slackExternal && <ClientUpdatePanel slug={slug} clientName={client.name} />}
 
+              {toggleError && <div className="onb-error" role="alert">{toggleError}</div>}
+
               {sections.map((section) => (
                 <div className="onb-group" key={section.name}>
                   <div className="onb-group-head">{section.name}</div>
@@ -393,7 +462,7 @@ export default function OnboardingChecklistPage() {
                               type="checkbox"
                               className={`onb-checkbox ${hasChildren ? "derived" : ""}`}
                               checked={rowDone}
-                              disabled={hasChildren}
+                              disabled={hasChildren || pending.has(group.id)}
                               onChange={(e) => { if (!hasChildren) void toggle(group, e.target.checked); }}
                               aria-label={group.title}
                             />
@@ -411,6 +480,7 @@ export default function OnboardingChecklistPage() {
                                 type="checkbox"
                                 className="onb-checkbox"
                                 checked={child.isDone}
+                                disabled={pending.has(child.id)}
                                 onChange={(e) => void toggle(child, e.target.checked)}
                                 aria-label={child.title}
                               />

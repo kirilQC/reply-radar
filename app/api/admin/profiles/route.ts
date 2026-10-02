@@ -38,9 +38,17 @@ export async function GET() {
   const profiles = await profilesResponse.json(); const links = await linksResponse.json(); const workspaces = await workspacesResponse.json();
   if (!profilesResponse.ok) return slimJson({ ok: false, error: JSON.stringify(profiles) }, { status: profilesResponse.status });
   const workspaceById = new Map((Array.isArray(workspaces) ? workspaces : []).map((item: { id: string; name: string; slug: string }) => [item.id, item]));
+  // Names for display (the dashboard and inbox read `clients` as names), and slugs alongside them as the
+  // identity the editor saves back. Two clients can share a display name; they cannot share a slug.
   const byProfile = new Map<string, string[]>();
-  for (const link of Array.isArray(links) ? links : []) { const workspace = workspaceById.get(link.workspace_id); if (workspace) byProfile.set(link.profile_id, [...(byProfile.get(link.profile_id) ?? []), workspace.name || workspace.slug]); }
-  return slimJson({ ok: true, photoColumnAvailable: profilesIncludePhoto, profiles: (Array.isArray(profiles) ? profiles : []).map((item: { id: string; name: string; avatar_url?: string; title?: string; linkedin_url?: string; created_at: string }) => ({ slug: item.id, name: item.name, photo: item.avatar_url ?? null, title: item.title ?? "", linkedinUrl: item.linkedin_url ?? "", role: item.title || "Teammate", clients: byProfile.get(item.id) ?? [], createdAt: item.created_at })) });
+  const slugsByProfile = new Map<string, string[]>();
+  for (const link of Array.isArray(links) ? links : []) {
+    const workspace = workspaceById.get(link.workspace_id);
+    if (!workspace) continue;
+    byProfile.set(link.profile_id, [...(byProfile.get(link.profile_id) ?? []), workspace.name || workspace.slug]);
+    slugsByProfile.set(link.profile_id, [...(slugsByProfile.get(link.profile_id) ?? []), workspace.slug]);
+  }
+  return slimJson({ ok: true, photoColumnAvailable: profilesIncludePhoto, profiles: (Array.isArray(profiles) ? profiles : []).map((item: { id: string; name: string; avatar_url?: string; title?: string; linkedin_url?: string; created_at: string }) => ({ slug: item.id, name: item.name, photo: item.avatar_url ?? null, title: item.title ?? "", linkedinUrl: item.linkedin_url ?? "", role: item.title || "Teammate", clients: byProfile.get(item.id) ?? [], clientSlugs: slugsByProfile.get(item.id) ?? [], createdAt: item.created_at })) });
 }
 
 export async function POST(request: Request) {
@@ -77,10 +85,17 @@ export async function POST(request: Request) {
   const savedProfile = Array.isArray(rows) ? rows[0] : rows;
   const profileId = savedProfile?.id ?? id;
   if (profileId) {
+    // The client list is read before the old assignments are cleared: a failed read used to leave the
+    // profile with no clients at all.
+    const workspaceRows = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&slug=neq.misc&order=name.asc`, { headers: headers(key), cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (!Array.isArray(workspaceRows)) return NextResponse.json({ ok: false, error: "The profile was saved, but the client list could not be read, so its client access was left as it was. Save again to retry.", profile: savedProfile }, { status: 502 });
     await fetch(`${url}/rest/v1/rr_profile_workspaces?profile_id=eq.${encodeURIComponent(profileId)}`, { method: "DELETE", headers: { ...headers(key), Prefer: "return=minimal" } });
-    const workspaceRows = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&slug=neq.misc&order=name.asc`, { headers: headers(key), cache: "no-store" }).then((r) => r.json()).catch(() => []);
-    const wanted = new Set(Array.isArray(payload.clients) ? payload.clients : []);
-    const links = (Array.isArray(workspaceRows) ? workspaceRows : []).filter((item: { name: string; slug: string }) => wanted.has(item.name) || wanted.has(item.slug)).map((item: { id: string }) => ({ profile_id: profileId, workspace_id: item.id }));
+    // Matched by slug or id. Matching by display name gave a profile access to every client that shared
+    // the name, and lost access when a client was renamed. Names are still accepted from a browser that
+    // has not reloaded since this changed, and only when it sent no slugs at all.
+    const bySlug = Array.isArray(payload.clientSlugs);
+    const wanted = new Set((bySlug ? payload.clientSlugs : Array.isArray(payload.clients) ? payload.clients : []).map((entry: unknown) => String(entry ?? "")).filter(Boolean));
+    const links = (Array.isArray(workspaceRows) ? workspaceRows : []).filter((item: { id: string; name: string; slug: string }) => (bySlug ? wanted.has(item.slug) || wanted.has(item.id) : wanted.has(item.name) || wanted.has(item.slug))).map((item: { id: string }) => ({ profile_id: profileId, workspace_id: item.id }));
     if (links.length) {
       const linkResponse = await fetch(`${url}/rest/v1/rr_profile_workspaces`, { method: "POST", headers: { ...headers(key), Prefer: "return=minimal" }, body: JSON.stringify(links) });
       if (!linkResponse.ok) return NextResponse.json({ ok: false, error: await linkResponse.text() }, { status: linkResponse.status });

@@ -51,9 +51,13 @@ export function publicBaseUrl(request?: Request): string {
   return "";
 }
 
-/** Where HeyReach should post this client's replies. */
+/**
+ * Where HeyReach should post this client's replies. Encoded because the slug is a path segment: a slug
+ * saved before slugs were normalised can still hold a space or a slash, and an unencoded one would point
+ * HeyReach at a different route entirely.
+ */
 export const webhookUrlFor = (slug: unknown, request?: Request) =>
-  `${publicBaseUrl(request)}/api/webhooks/heyreach/${String(slug ?? "")}`;
+  `${publicBaseUrl(request)}/api/webhooks/heyreach/${encodeURIComponent(String(slug ?? ""))}`;
 
 /**
  * Whether a webhook URL already on a workspace still points at us.
@@ -72,3 +76,42 @@ export const isOurWebhookUrl = (value: unknown, base: string) => {
     return false;
   }
 };
+
+/**
+ * A workspace slug in the one shape every part of the app expects: lowercase letters, digits and single
+ * hyphens, nothing at either end.
+ *
+ * The slug is a path segment in the HeyReach webhook URL, a key in the brain link and a query parameter
+ * all over the app, so a space or an uppercase letter typed into the admin form used to become a webhook
+ * address that only worked when somebody encoded it by hand. Applied on the client as the field is typed
+ * and again on the server, because the server is the one that stores it.
+ */
+export const workspaceSlug = (value: unknown) =>
+  String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+/**
+ * Where the login page may send somebody after a correct password: a path on this site, or "/".
+ *
+ * `next` arrives from the query string already decoded, so `?next=/%5Cevil.com` reads as `/\evil.com`,
+ * which a browser treats as `//evil.com` and leaves the site. A prefix check on the raw string cannot see
+ * that, so the value is resolved against our own origin and only kept if it is still ours and still a
+ * single-slash path. Backslashes and control characters are refused outright, because browsers rewrite
+ * both before resolving and the rewrite is where these tricks live.
+ */
+export function safeNextPath(next: string | null | undefined, origin: string): string {
+  const raw = String(next ?? "");
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
+  if (raw.includes("\\") || [...raw].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f)) return "/";
+  try {
+    const home = new URL(origin);
+    const resolved = new URL(raw, home);
+    if (resolved.origin !== home.origin) return "/";
+    if (!resolved.pathname.startsWith("/") || resolved.pathname.startsWith("//")) return "/";
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return "/";
+  }
+}

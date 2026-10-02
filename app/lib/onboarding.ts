@@ -16,6 +16,7 @@
 
 import { postMessage, slackConfigured } from "./slack";
 import { normalizeChannelId } from "./slack-channel";
+import { firstChannelClash, type ChannelOwner } from "./channel-clash";
 import {
   slugify,
   computeProgress,
@@ -335,8 +336,20 @@ export async function saveReplyRadarConfig(slug: string, input: { website?: stri
   }
   if (str(input.crmApiKey).trim()) record.crm_api_key_ciphertext = str(input.crmApiKey).trim();
   if (!Object.keys(record).length) return { ok: true };
+  // The same rule the admin console enforces, through the same helper: this panel writes the same two
+  // columns, and used to let one client's channel be saved as another's without a word.
+  const ownChannels = [record.slack_internal_channel_id, record.slack_external_channel_id].filter((c): c is string => typeof c === "string" && Boolean(c));
+  if (ownChannels.length) {
+    const othersResponse = await fetch(`${url}/rest/v1/rr_workspaces?select=id,slug,name,slack_internal_channel_id,slack_external_channel_id&slug=neq.misc`, { headers: authHeaders(key), cache: "no-store" }).catch(() => null);
+    if (!othersResponse || !othersResponse.ok) return { ok: false, error: "Could not check the Slack channels against the other clients. Nothing was saved; try again." };
+    const others = (await othersResponse.json().catch(() => [])) as ChannelOwner[];
+    const clash = firstChannelClash(ownChannels, Array.isArray(others) ? others : [], (row) => str(row.id) === str(w.id));
+    if (clash) return { ok: false, error: clash };
+  }
   const response = await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(str(w.id))}`, { method: "PATCH", headers: authHeaders(key), body: JSON.stringify(record) });
-  return response.ok ? { ok: true } : { ok: false, error: "Could not save the QC Command setup." };
+  if (response.ok) return { ok: true };
+  const detail = (await response.json().catch(() => null)) as { message?: unknown } | null;
+  return { ok: false, error: typeof detail?.message === "string" && detail.message ? `Could not save the QC Command setup: ${detail.message}` : "Could not save the QC Command setup." };
 }
 
 // ── Add a client ───────────────────────────────────────────────────────────────────────────────────────
@@ -347,9 +360,34 @@ export async function saveReplyRadarConfig(slug: string, input: { website?: stri
  * then the children with `parent_id` remapped through that match. Positions and sections are carried across
  * verbatim, so the client's list opens in the same ranked order the template is in.
  */
+/**
+ * Insert checklist rows, skipping any template step this client already has.
+ *
+ * Two people opening a fresh client at the same moment both saw an empty checklist and both snapshotted
+ * it, and the client ended up with every step twice. With the unique index from
+ * 20261002_onboarding_tasks_unique_step.sql in place, `ignore-duplicates` makes the loser's insert a no-op.
+ * Until that migration has run, PostgREST refuses `on_conflict` for want of a matching constraint, and
+ * the plain insert below is the old behaviour, still narrowed by the re-check in snapshotTemplate.
+ */
+async function insertTasks(url: string, key: string, payload: unknown[]): Promise<Response> {
+  const guarded = await fetch(`${url}/rest/v1/rr_onboarding_tasks?on_conflict=workspace_id,template_step_id`, {
+    method: "POST",
+    headers: { ...authHeaders(key), Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify(payload),
+  });
+  if (guarded.ok) return guarded;
+  const detail = await guarded.clone().text().catch(() => "");
+  if (!/42P10|on conflict|unique or exclusion constraint/i.test(detail)) return guarded;
+  return fetch(`${url}/rest/v1/rr_onboarding_tasks`, { method: "POST", headers: authHeaders(key, true), body: JSON.stringify(payload) });
+}
+
 async function snapshotTemplate(url: string, key: string, workspaceId: string): Promise<void> {
   const steps = (await rows(url, key, `rr_onboarding_template_steps?select=*&is_active=eq.true&order=position.asc`)).map(templateFromRow);
   if (!steps.length) return;
+  // Checked again right before writing: the caller's "is it empty?" read happened a template read ago,
+  // which is the window a second tab opening the same client lands in.
+  const already = await rows(url, key, `rr_onboarding_tasks?select=id&workspace_id=eq.${encodeURIComponent(workspaceId)}&limit=1`);
+  if (already.length) return;
   const parents = steps.filter((s) => !s.parentId);
   const children = steps.filter((s) => s.parentId);
 
@@ -362,9 +400,7 @@ async function snapshotTemplate(url: string, key: string, workspaceId: string): 
     description: s.description,
     position: s.position,
   }));
-  const inserted = parentPayload.length
-    ? await fetch(`${url}/rest/v1/rr_onboarding_tasks`, { method: "POST", headers: authHeaders(key, true), body: JSON.stringify(parentPayload) })
-    : null;
+  const inserted = parentPayload.length ? await insertTasks(url, key, parentPayload) : null;
   // Do not swallow a failed snapshot. This is exactly the write that failed silently — a missing column
   // rejected every row and left the checklist empty with nothing in the logs to say why. Surfacing it here
   // means the next schema problem is a line in the Vercel logs rather than a fortnight of "why is it empty".
@@ -372,10 +408,16 @@ async function snapshotTemplate(url: string, key: string, workspaceId: string): 
     const detail = await inserted.text().catch(() => "");
     console.error("reply_radar_onboarding_snapshot_failed", { workspaceId, status: inserted.status, detail: detail.slice(0, 300) });
   }
-  const insertedRows: Row[] = inserted && inserted.ok ? await inserted.json().catch(() => []) : [];
-  // template step id → the new task id, so a child can find its freshly-created parent.
+  if (!inserted || !inserted.ok) return;
+  // template step id → the parent task id, so a child can find its parent. Read back rather than taken
+  // from the insert's response: an ignored duplicate is not in that response, and its children still
+  // need the parent the other writer created.
+  const parentRows = await rows(url, key, `rr_onboarding_tasks?select=id,template_step_id&workspace_id=eq.${encodeURIComponent(workspaceId)}&parent_id=is.null&order=created_at.asc`);
   const taskIdByTemplateId = new Map<string, string>();
-  for (const row of insertedRows) taskIdByTemplateId.set(str(row.template_step_id), str(row.id));
+  for (const row of parentRows) {
+    const stepId = str(row.template_step_id);
+    if (stepId && !taskIdByTemplateId.has(stepId)) taskIdByTemplateId.set(stepId, str(row.id));
+  }
 
   const childPayload = children
     .map((s) => {
@@ -392,9 +434,7 @@ async function snapshotTemplate(url: string, key: string, workspaceId: string): 
       };
     })
     .filter(Boolean);
-  if (childPayload.length) {
-    await fetch(`${url}/rest/v1/rr_onboarding_tasks`, { method: "POST", headers: authHeaders(key, true), body: JSON.stringify(childPayload) });
-  }
+  if (childPayload.length) await insertTasks(url, key, childPayload);
 }
 
 /**
