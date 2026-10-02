@@ -55,6 +55,23 @@ export async function POST(request: Request) {
   // rather than on the way out, because pasting the URL out of the address bar is the common case.
   if ("slackInternalChannelId" in payload) record.slack_internal_channel_id = normalizeChannelId(payload.slackInternalChannelId) || null;
   if ("slackExternalChannelId" in payload) record.slack_external_channel_id = normalizeChannelId(payload.slackExternalChannelId) || null;
+  // A client's internal and external channels belong to that client alone. Coraa's external channel was
+  // once saved as Vitalic's internal one, and every Coraa brief came out as a Vitalic brief. Extras are
+  // exempt: one context channel shared by several clients is deliberate.
+  const ownChannels = [record.slack_internal_channel_id, record.slack_external_channel_id].filter((c): c is string => typeof c === "string" && Boolean(c));
+  if (ownChannels.length) {
+    const others = await fetch(`${url}/rest/v1/rr_workspaces?select=id,slug,name,slack_internal_channel_id,slack_external_channel_id&slug=neq.misc`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" }).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+    const selfId = typeof payload.id === "string" ? payload.id.trim() : "";
+    const selfSlug = String(payload.previousSlug || payload.slug || "");
+    for (const other of Array.isArray(others) ? others : []) {
+      if ((selfId && other.id === selfId) || (!selfId && other.slug === selfSlug)) continue;
+      const clash = ownChannels.find((c) => c === other.slack_internal_channel_id || c === other.slack_external_channel_id);
+      if (clash) {
+        const role = clash === other.slack_internal_channel_id ? "internal" : "external";
+        return NextResponse.json({ ok: false, error: `That Slack channel is already ${other.name || other.slug}'s ${role} channel. Each client needs its own internal and external channel, otherwise its morning brief reads the other client's conversation.` }, { status: 409 });
+      }
+    }
+  }
   // Stored as the cleaned list rather than as typed, so the same string is matched against whether it
   // arrived as "@webrix.ai, foo@webrix.ai" or a comma-free paste. Anything that is not a domain is dropped
   // here instead of quietly matching every meeting at brief time.
