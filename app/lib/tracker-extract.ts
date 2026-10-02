@@ -117,7 +117,7 @@ Return JSON and nothing else: an object with one key, "items", holding an array.
 If the brief raises nothing to work on, return {"items": []}.`;
 
 /**
- * One extra model call. Returns an empty list rather than throwing.
+ * One extra model call. Returns an empty list and an error rather than throwing.
  *
  * The brief has already been posted by the time this runs, and a failure here must not turn a
  * delivered brief into a failed one. The caller reports the reason and the next run tries again with
@@ -171,7 +171,15 @@ export async function extractTrackerItems(
     const text = Array.isArray(payload?.content)
       ? payload.content.filter((part: { type?: string }) => part?.type === "text").map((part: { text?: string }) => String(part.text ?? "")).join("").trim()
       : "";
-    return { items: parseTrackerItems(text, names), error: "" };
+    /*
+     * A cut-off or unreadable reply is a failure, not an empty board. Both callers treat `items: []`
+     * with no error as "the brief raised nothing", which starts removing tracker rows; a reply that ran
+     * out of tokens mid-array or came back as prose says nothing about the board at all.
+     */
+    if (payload?.stop_reason === "max_tokens") return { items: [], error: "The extraction ran out of room before it finished, so the tracker was left as it was." };
+    const items = parseTrackerReply(text, names);
+    if (!items) return { items: [], error: "The extraction did not come back as readable JSON, so the tracker was left as it was." };
+    return { items, error: "" };
   } catch (error) {
     return { items: [], error: error instanceof Error ? error.message : "The extraction call failed." };
   }
@@ -185,11 +193,20 @@ export async function extractTrackerItems(
  * morning. Better one missing row than a tracker that grows a copy of it three times a week.
  */
 export function parseTrackerItems(text: string, names: Map<string, string> = new Map()): TrackerItem[] {
+  return parseTrackerReply(text, names) ?? [];
+}
+
+/**
+ * The same as `parseTrackerItems`, except that a reply which is not JSON with an `items` array comes
+ * back as `null` instead of `[]`, so the extraction can tell "nothing to file" from "could not read it".
+ */
+export function parseTrackerReply(text: string, names: Map<string, string> = new Map()): TrackerItem[] | null {
   // Models fence JSON in markdown perhaps one run in ten, and a fenced object is not a malformed one.
   const body = text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
   let parsed: unknown = null;
-  try { parsed = JSON.parse(body); } catch { return []; }
-  const rows = Array.isArray((parsed as { items?: unknown })?.items) ? (parsed as { items: unknown[] }).items : [];
+  try { parsed = JSON.parse(body); } catch { return null; }
+  if (!Array.isArray((parsed as { items?: unknown })?.items)) return null;
+  const rows = (parsed as { items: unknown[] }).items;
   const items: TrackerItem[] = [];
   const seen = new Set<string>();
   for (const row of rows) {

@@ -64,12 +64,19 @@ export async function PATCH(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as { id?: unknown };
-  const id = String(body?.id ?? "").trim();
-  if (!id) return NextResponse.json({ ok: false, error: "Missing id." }, { status: 400 });
-  const person = (await listAssistants()).find((p) => p.id === id);
-  if (!person) return NextResponse.json({ ok: false, error: "No such assistant." }, { status: 404 });
-  const result = await sendPersonalBrief(person);
-  if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
-  return NextResponse.json({ ok: true, clients: result.clients });
+  // Every failure comes back as JSON. An uncaught throw from the model or Slack used to surface as a bare
+  // 500 page, which the worker and the "Send now" button could only report as "failed" with no reason.
+  try {
+    const body = (await request.json().catch(() => ({}))) as { id?: unknown };
+    const id = String(body?.id ?? "").trim();
+    if (!id) return NextResponse.json({ ok: false, error: "Missing id." }, { status: 400 });
+    const person = (await listAssistants()).find((p) => p.id === id);
+    if (!person) return NextResponse.json({ ok: false, error: "No such assistant." }, { status: 404 });
+    const result = await sendPersonalBrief(person);
+    // 409 for a send that was skipped because another one holds the claim: nothing broke, nothing was sent.
+    if (!result.ok) return NextResponse.json({ ok: false, error: result.error, busy: Boolean(result.busy) }, { status: result.busy ? 409 : 400 });
+    return NextResponse.json({ ok: true, clients: result.clients });
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "The note could not be sent." }, { status: 500 });
+  }
 }

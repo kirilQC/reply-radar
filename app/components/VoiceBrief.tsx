@@ -98,7 +98,21 @@ export default function VoiceBrief({
     setInterim("");
   }, []);
 
-  useEffect(() => () => recogniser.current?.stop(), []);
+  /*
+   * On unmount, stop for good. A bare stop() fires onend with `stopping` still false, and onend reads
+   * that as a browser pause and restarts the microphone for a panel that no longer exists. The handlers
+   * are dropped too, so a result that arrives after unmount does not set state on a dead component.
+   */
+  useEffect(() => () => {
+    stopping.current = true;
+    const instance = recogniser.current;
+    recogniser.current = null;
+    if (!instance) return;
+    instance.onend = null;
+    instance.onresult = null;
+    instance.onerror = null;
+    instance.stop();
+  }, []);
 
   const start = () => {
     const Recogniser = recogniserClass();

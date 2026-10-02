@@ -74,19 +74,61 @@ async function hubspotBatchRead(token: string, object: string, ids: string[], pr
   for (let i = 0; i < ids.length; i += 100) {
     const inputs = ids.slice(i, i + 100).map((id) => ({ id }));
     if (!inputs.length) continue;
-    const body = await hubspot(token, `/crm/v3/objects/${object}/batch/read`, { method: "POST", body: JSON.stringify({ properties, inputs }) }).catch(() => ({}) as Record<string, unknown>);
+    // A failed batch throws rather than reading as "no contacts". Swallowed, it left every deal in that
+    // batch with nobody on it, and the sync then filed those deals as "not QC" over a confirmed match.
+    const body = await hubspot(token, `/crm/v3/objects/${object}/batch/read`, { method: "POST", body: JSON.stringify({ properties, inputs }) });
     for (const record of (body.results as Array<Record<string, unknown>> | undefined) ?? []) map.set(str(record.id), record);
   }
   return map;
 }
 
-async function fetchHubspotDeals(token: string): Promise<CrmDeal[]> {
+/** One HubSpot stage, as the pipelines endpoint describes it. */
+type HubspotStage = { label: string; kind: "won" | "lost" | "open"; pipeline: string; pipelineLabel: string; order: number; pipelineOrder: number };
+
+/** Won, lost or open from HubSpot's own stage metadata, which outranks anything read from the label. */
+function hubspotStageKind(row: Record<string, unknown>): "won" | "lost" | "open" {
+  const meta = (row.metadata as Record<string, unknown> | undefined) ?? {};
+  if (str(meta.isClosed) === "true") return Number(meta.probability) >= 1 ? "won" : "lost";
+  return stageKind(str(row.label));
+}
+
+/**
+ * Every deal stage in every pipeline, by stage id.
+ *
+ * `dealstage` on a HubSpot deal is the stage's internal id ("appointmentscheduled", or a number in a
+ * custom pipeline), never its label. Stored as it came, the board's columns (labels) never matched a
+ * deal, and a custom pipeline's lost stage, being a number, read as open.
+ */
+async function hubspotStages(token: string): Promise<Map<string, HubspotStage>> {
+  const body = await hubspot(token, "/crm/v3/pipelines/deals", { method: "GET" });
+  const map = new Map<string, HubspotStage>();
+  const pipelines = (body.results as Array<Record<string, unknown>> | undefined) ?? [];
+  // The default pipeline's stages first, the rest in the order HubSpot lists them.
+  const ordered = [...pipelines].sort((a, b) => (str(a.id) === "default" ? -1 : 0) - (str(b.id) === "default" ? -1 : 0));
+  ordered.forEach((pipeline, pipelineOrder) => {
+    for (const row of (pipeline.stages as Array<Record<string, unknown>> | undefined) ?? []) {
+      const id = str(row.id);
+      if (!id) continue;
+      map.set(id, {
+        label: str(row.label) || id,
+        kind: hubspotStageKind(row),
+        pipeline: str(pipeline.id),
+        pipelineLabel: str(pipeline.label),
+        order: Number(row.displayOrder ?? 0),
+        pipelineOrder,
+      });
+    }
+  });
+  return map;
+}
+
+async function fetchHubspotDeals(token: string): Promise<{ deals: CrmDeal[]; complete: boolean }> {
   const raw: Array<Record<string, unknown>> = [];
   let after = "";
   for (let page = 0; page < 50; page += 1) {
     const params = new URLSearchParams({
       limit: "100",
-      properties: "dealname,amount,dealstage,pipeline,closedate,hs_is_closed_won,deal_currency_code",
+      properties: "dealname,amount,dealstage,pipeline,closedate,hs_is_closed_won,hs_is_closed,deal_currency_code",
       associations: "contacts,companies",
     });
     if (after) params.set("after", after);
@@ -95,6 +137,11 @@ async function fetchHubspotDeals(token: string): Promise<CrmDeal[]> {
     after = str(((body.paging as Record<string, unknown> | undefined)?.next as Record<string, unknown> | undefined)?.after);
     if (!after) break;
   }
+  // Still a next page after the cap means some deals were never read, so absence proves nothing.
+  const complete = !after;
+  // Without the stage names a deal can still be stored, just under its raw stage id, so a pipelines
+  // read that fails degrades the labels rather than failing the whole sync.
+  const stages = await hubspotStages(token).catch(() => new Map<string, HubspotStage>());
 
   const assocIds = (deal: Record<string, unknown>, kind: string): string[] => {
     const results = (((deal.associations as Record<string, unknown> | undefined)?.[kind] as Record<string, unknown> | undefined)?.results as Array<Record<string, unknown>> | undefined) ?? [];
@@ -112,7 +159,7 @@ async function fetchHubspotDeals(token: string): Promise<CrmDeal[]> {
     hubspotBatchRead(token, "companies", [...companyIds], ["domain", "name"]),
   ]);
 
-  return raw.map((deal) => {
+  const deals = raw.map((deal): CrmDeal => {
     const props = (deal.properties as Record<string, unknown> | undefined) ?? {};
     const dealContacts: CrmContact[] = assocIds(deal, "contacts")
       .map((id) => contacts.get(id))
@@ -123,15 +170,26 @@ async function fetchHubspotDeals(token: string): Promise<CrmDeal[]> {
       });
     const company = assocIds(deal, "companies").map((id) => companies.get(id)).find(Boolean);
     const companyProps = (company?.properties as Record<string, unknown> | undefined) ?? {};
-    const stage = str(props.dealstage);
+    const stageId = str(props.dealstage);
+    const known = stages.get(stageId);
+    const stage = known?.label || stageId;
+    // HubSpot's own closed flags first, then the stage's metadata, and only then the label.
+    const status: CrmDeal["status"] =
+      str(props.hs_is_closed_won) === "true"
+        ? "won"
+        : str(props.hs_is_closed) === "true"
+          ? "lost"
+          : known
+            ? known.kind
+            : statusFromStage(stage);
     return {
       externalId: str(deal.id),
       name: str(props.dealname),
       amount: props.amount != null && str(props.amount) !== "" ? Number(props.amount) : null,
       currency: str(props.deal_currency_code),
       stage,
-      pipeline: str(props.pipeline),
-      status: statusFromStage(stage, str(props.hs_is_closed_won) === "true"),
+      pipeline: known?.pipelineLabel || str(props.pipeline),
+      status,
       closeDate: toIsoDate(props.closedate),
       owner: "",
       contacts: dealContacts,
@@ -141,6 +199,7 @@ async function fetchHubspotDeals(token: string): Promise<CrmDeal[]> {
       raw: deal,
     };
   });
+  return { deals, complete };
 }
 
 // ── Attio ──────────────────────────────────────────────────────────────────────────────────────────
@@ -222,14 +281,18 @@ async function attioPeople(token: string, ids: string[]): Promise<Map<string, Cr
   return map;
 }
 
-async function fetchAttioDeals(token: string): Promise<CrmDeal[]> {
+async function fetchAttioDeals(token: string): Promise<{ deals: CrmDeal[]; complete: boolean }> {
   const records: Array<Record<string, unknown>> = [];
   let offset = 0;
+  let complete = false;
   for (let page = 0; page < 40; page += 1) {
     const body = await attio(token, `/v2/objects/deals/records/query`, { method: "POST", body: JSON.stringify({ limit: 500, offset }) });
     const batch = (body.data as Array<Record<string, unknown>> | undefined) ?? [];
     records.push(...batch);
-    if (batch.length < 500) break;
+    if (batch.length < 500) {
+      complete = true;
+      break;
+    }
     offset += batch.length;
   }
 
@@ -249,7 +312,7 @@ async function fetchAttioDeals(token: string): Promise<CrmDeal[]> {
     attioCompanies(token, [...companyIds]),
   ]);
 
-  return records.map((record) => {
+  const deals = records.map((record): CrmDeal => {
     const id = str(((record.id as Record<string, unknown> | undefined)?.record_id) ?? record.id);
     const stage = attioValue(record, "stage");
     const contacts = attioReferenceIds(record, "associated_people").map((pid) => people.get(pid)).filter((c): c is CrmContact => Boolean(c));
@@ -277,6 +340,7 @@ async function fetchAttioDeals(token: string): Promise<CrmDeal[]> {
       raw: record,
     };
   });
+  return { deals, complete };
 }
 
 /** Company records by id → name, domain and logo, resolved from the deal's company reference. */
@@ -382,21 +446,20 @@ async function fetchAttioPipeline(token: string): Promise<Pipeline> {
  */
 async function fetchHubspotPipeline(token: string): Promise<Pipeline> {
   try {
-    const body = await hubspot(token, "/crm/v3/pipelines/deals", { method: "GET" });
-    const pipelines = (body.results as Array<Record<string, unknown>> | undefined) ?? [];
-    const chosen = pipelines.find((p) => str(p.id) === "default") ?? pipelines[0];
-    const raw = ((chosen?.stages as Array<Record<string, unknown>> | undefined) ?? [])
-      .slice()
-      .sort((a, b) => Number(a.displayOrder ?? 0) - Number(b.displayOrder ?? 0));
-    const stages = raw.map((row) => {
-      const title = str(row.label);
-      const meta = (row.metadata as Record<string, unknown> | undefined) ?? {};
-      const kind: "won" | "lost" | "open" =
-        str(meta.isClosed) === "true"
-          ? Number(meta.probability) >= 1 ? "won" : "lost"
-          : stageKind(title);
-      return { title, kind, color: null };
-    }).filter((stage) => stage.title);
+    // Every pipeline's stages, the default's first and each in its own display order, so a deal in a
+    // second pipeline lands in its own column rather than in "Other". Two pipelines that share a stage
+    // name share a column.
+    const all = [...(await hubspotStages(token)).values()].sort(
+      (a, b) => a.pipelineOrder - b.pipelineOrder || a.order - b.order,
+    );
+    const seen = new Set<string>();
+    const stages: PipelineStage[] = [];
+    for (const stage of all) {
+      const key = stage.label.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      stages.push({ title: stage.label, kind: stage.kind, color: null });
+    }
     return { stages, discoveredAt: new Date().toISOString() };
   } catch {
     return { stages: [], discoveredAt: new Date().toISOString() };
@@ -410,10 +473,20 @@ export async function fetchPipeline(provider: CrmProvider, token: string): Promi
   return { stages: [], discoveredAt: new Date().toISOString() };
 }
 
-/** Pull all of a client's deals from their CRM. Throws with the provider's own message on a failure. */
-export async function fetchDeals(provider: CrmProvider, token: string): Promise<CrmDeal[]> {
+/**
+ * Pull all of a client's deals from their CRM. Throws with the provider's own message on a failure.
+ *
+ * `complete` is false when the page cap was reached with more still to read. Only a complete pull can
+ * say a deal is gone from the CRM; a capped one just did not get that far.
+ */
+export async function fetchDealsWithStatus(provider: CrmProvider, token: string): Promise<{ deals: CrmDeal[]; complete: boolean }> {
   if (!token) throw new Error("No CRM API key is saved for this client.");
   if (provider === "hubspot") return fetchHubspotDeals(token);
   if (provider === "attio") return fetchAttioDeals(token);
   throw new Error(`Unknown CRM provider "${provider}".`);
+}
+
+/** Pull all of a client's deals from their CRM. Throws with the provider's own message on a failure. */
+export async function fetchDeals(provider: CrmProvider, token: string): Promise<CrmDeal[]> {
+  return (await fetchDealsWithStatus(provider, token)).deals;
 }

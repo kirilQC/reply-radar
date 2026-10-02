@@ -32,9 +32,31 @@ import { parseBlocks, spansToText } from "./markdown-blocks.mjs";
  * body pasted into a cell will, and one unquoted comma shifts every column after it.
  */
 export function csvField(value) {
-  const text = value === null || value === undefined ? "" : String(value);
+  const raw = value === null || value === undefined ? "" : String(value);
+  const text = defuseFormula(raw);
   return /[",\n\r]|^\s|\s$/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
+
+/*
+ * A cell that starts with = + - @ (or a tab or carriage return, which some spreadsheets skip before
+ * reading the rest as a formula) is run as a formula when the file is opened. Lead names, company
+ * names and reply text all come from strangers, so `=HYPERLINK(...)` in a LinkedIn headline would
+ * otherwise execute on the laptop of whoever opened the export. A leading apostrophe is the standard
+ * defuse: the spreadsheet shows the text as typed. Plain numbers such as -12 or +3.5% are left alone,
+ * because they are not formulas and a prefixed one stops adding up.
+ */
+const FORMULA_START = /^[=+\-@\t\r]/;
+const PLAIN_NUMBER = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?%?$/i;
+export function defuseFormula(text) {
+  const value = String(text ?? "");
+  return FORMULA_START.test(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
+}
+
+/**
+ * The UTF-8 byte-order mark. Without it Excel opens a CSV as the local code page, and every accented
+ * name and em dash in it comes out as mojibake. Spreadsheets that do not need it ignore it.
+ */
+export const CSV_BOM = "\uFEFF";
 
 const row = (fields) => fields.map(csvField).join(",");
 
@@ -47,7 +69,7 @@ const row = (fields) => fields.map(csvField).join(",");
  * the list — it is a very good imitation of it, and nobody looking at the file would be able to tell.
  */
 export const rowsToCsv = (head, records) =>
-  [row(head), ...(Array.isArray(records) ? records : []).map(row)].join("\n");
+  CSV_BOM + [row(head), ...(Array.isArray(records) ? records : []).map(row)].join("\n");
 
 /**
  * The rows hidden inside a block, or `null` if it holds none.
@@ -127,7 +149,7 @@ export function answerToCsv({ question = "", answer = "", askedAt = "" } = {}) {
       lines.push(row(grid.head));
       for (const cells of grid.rows) lines.push(row(cells));
     });
-    return lines.join("\n");
+    return CSV_BOM + lines.join("\n");
   }
 
   lines.push(row(["Answer"]));
@@ -136,7 +158,7 @@ export function answerToCsv({ question = "", answer = "", askedAt = "" } = {}) {
     else if (block.kind === "list") for (const item of block.items) lines.push(row([spansToText(item.spans)]));
     else if (block.kind === "code") for (const line of block.text.split("\n")) lines.push(row([line]));
   }
-  return lines.join("\n");
+  return CSV_BOM + lines.join("\n");
 }
 
 /**

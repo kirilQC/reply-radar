@@ -228,20 +228,21 @@ export async function ingestDncFromClay(payload: unknown): Promise<{ ok: boolean
   const dkey = company ? dncKey(company) : domain;
   if (!dkey) return { ok: false, error: "Nothing to key the row on." };
   const reason = flatPick(body, ["reason", "note", "notes"]);
+  const addedBy = flatPick(body, ["added_by", "addedby", "owner"]);
 
+  /*
+   * Only the fields Clay actually sent. A merge-duplicates upsert updates every column in the body, so
+   * sending `reason: null` because Clay's table has no reason column wiped the reason (and the bot's
+   * "added by") that the original add stored, every time Clay echoed the row back with its domain.
+   */
+  const rowBody: Row = { workspace_id: client.id, client: client.name, company: company || domain, key: dkey, source: "clay", clay_synced: true };
+  if (domain) rowBody.domain = domain;
+  if (reason) rowBody.reason = reason;
+  if (addedBy) rowBody.added_by = addedBy;
   const response = await fetch(`${url}/rest/v1/rr_dnc?on_conflict=workspace_id,key`, {
     method: "POST",
     headers: { ...authHeaders(key, true), Prefer: "resolution=merge-duplicates,return=representation" },
-    body: JSON.stringify({
-      workspace_id: client.id,
-      client: client.name,
-      company: company || domain,
-      domain: domain || null,
-      key: dkey,
-      reason: reason || null,
-      source: "clay",
-      clay_synced: true,
-    }),
+    body: JSON.stringify(rowBody),
   });
   if (!response.ok) return { ok: false, error: "Could not store the row." };
   // Report back whether this client has a brain folder — the gate on the DNC→brain write — so a missing one
@@ -296,6 +297,53 @@ export async function syncDncToBrain(workspaceId: string, clientName: string): P
   await writeBrainFile({ path, text, summary: `Update ${clientName} DNC (${entries.length})`, author: "QC Command" }).catch(() => {});
 }
 
+/*
+ * Clay pushes a table one row per request, so a 300-row resync is 300 webhook calls, and each used to
+ * schedule its own brain sync: 300 reads of the whole list and as many GitHub reads racing each other.
+ * Coalesce per client instead. The first call waits a moment for the burst to land, then syncs; any call
+ * arriving while that is pending or running just marks the client dirty and shares the same promise, and a
+ * dirty client gets exactly one more pass once the current one ends, so the last row is never left out.
+ * Per instance only, which is fine: the file is only committed when it changed, so two instances that
+ * both sync produce one commit, not two.
+ */
+const DNC_BRAIN_SETTLE_MS = 5_000;
+const brainSyncs = new Map<string, { promise: Promise<void>; dirty: boolean }>();
+
+export function scheduleDncBrainSync(workspaceId: string, clientName: string, settleMs = DNC_BRAIN_SETTLE_MS): Promise<void> {
+  const running = brainSyncs.get(workspaceId);
+  if (running) {
+    running.dirty = true;
+    return running.promise;
+  }
+  const state = { promise: Promise.resolve(), dirty: false };
+  state.promise = (async () => {
+    try {
+      await sleep(settleMs);
+      do {
+        state.dirty = false;
+        await syncDncToBrain(workspaceId, clientName).catch(() => {});
+      } while (state.dirty);
+    } finally {
+      brainSyncs.delete(workspaceId);
+    }
+  })();
+  brainSyncs.set(workspaceId, state);
+  return state.promise;
+}
+
+/**
+ * A value for a PostgREST filter, quoted so a comma, parenthesis or dot in a company name cannot break
+ * out of an `or=(...)` list. Inside double quotes only `"` and `\` need escaping.
+ */
+export function pgQuote(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/** An `ilike` pattern that matches the value exactly, case-insensitively: its own wildcards are escaped. */
+function exactIlike(value: string): string {
+  return value.replace(/\*/g, "").replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 /** Everything on a client's DNC, newest first. */
 export async function listDnc(clientRef: string): Promise<{ ok: boolean; error?: string; client?: string; entries?: DncEntry[]; total?: number; link?: string | null }> {
   const { url, key } = config();
@@ -307,17 +355,42 @@ export async function listDnc(clientRef: string): Promise<{ ok: boolean; error?:
   return { ok: true, client: client.name, entries, total: entries.length, link: dncBrainLink(wsRow?.brain_folder) };
 }
 
-/** Take a company or domain back off a client's DNC (our mirror only — Clay is left to the client to prune). */
-export async function removeFromDnc(clientRef: string, companyOrDomain: string): Promise<{ ok: boolean; error?: string; removed?: number; total?: number; link?: string | null }> {
+export type DncRemoveResult = {
+  ok: boolean;
+  error?: string;
+  removed?: number;
+  total?: number;
+  link?: string | null;
+  /** Rows that only partly match the term. Nothing is deleted when these are all there is. */
+  candidates?: Array<{ company: string; domain: string | null }>;
+};
+
+/**
+ * Take a company or domain back off a client's DNC (our mirror only — Clay is left to the client to prune).
+ *
+ * Exact matches only: the normalized company key, or the domain compared case-insensitively. This used
+ * to delete every row whose name or domain merely contained the term, so "removing Acme" also took Acme
+ * Health and acmecorp.io off the list, which for a do-not-contact list means contacting them. When the
+ * term only partly matches, nothing is deleted and the near misses come back so the caller can ask which.
+ */
+export async function removeFromDnc(clientRef: string, companyOrDomain: string): Promise<DncRemoveResult> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const client = await resolveWorkspace(clientRef);
   if (!client) return { ok: false, error: `No single client matches "${clientRef}".` };
   const term = str(companyOrDomain).trim();
   if (!term) return { ok: false, error: "Name or domain to remove is required." };
-  // Match on the normalized-name key, or a loose company/domain contains, so a name or a domain both work.
-  const key1 = dncKey(term);
-  const filter = `workspace_id=eq.${encodeURIComponent(client.id)}&or=(key.eq.${encodeURIComponent(key1)},company.ilike.*${encodeURIComponent(term)}*,domain.ilike.*${encodeURIComponent(term)}*)`;
+  const workspace = `workspace_id=eq.${encodeURIComponent(client.id)}`;
+  const nameKey = dncKey(term);
+  const domain = cleanDomain(term);
+  const exact = [
+    nameKey ? `key.eq.${pgQuote(nameKey)}` : "",
+    // A row Clay pushed with no company name is keyed on its domain.
+    domain ? `key.eq.${pgQuote(domain)}` : "",
+    domain ? `domain.ilike.${pgQuote(exactIlike(domain))}` : "",
+  ].filter(Boolean);
+  if (!exact.length) return { ok: false, error: "Name or domain to remove is required." };
+  const filter = `${workspace}&or=${encodeURIComponent(`(${exact.join(",")})`)}`;
   const response = await fetch(`${url}/rest/v1/rr_dnc?${filter}`, { method: "DELETE", headers: { ...authHeaders(key), Prefer: "return=representation" } });
   if (!response.ok) return { ok: false, error: "Could not remove that entry." };
   const deleted = (await response.json().catch(() => [])) as Row[];
@@ -325,6 +398,26 @@ export async function removeFromDnc(clientRef: string, companyOrDomain: string):
   // A removal changes the list, so refresh the brain file and re-count.
   if (removed) await syncDncToBrain(client.id, client.name).catch(() => {});
   const wsRow = (await rows(url, key, `rr_workspaces?select=brain_folder&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0];
-  const total = (await rows(url, key, `rr_dnc?select=id&workspace_id=eq.${encodeURIComponent(client.id)}`)).length;
-  return { ok: true, removed, total, link: dncBrainLink(wsRow?.brain_folder) };
+  const all = await rows(url, key, `rr_dnc?select=company,domain&${workspace}`);
+  if (removed) return { ok: true, removed, total: all.length, link: dncBrainLink(wsRow?.brain_folder) };
+
+  // Nothing matched exactly: look for near misses in code rather than with a wildcard filter, so the term
+  // never has to survive PostgREST's pattern syntax.
+  const needle = term.toLowerCase();
+  const candidates = all
+    .map((row) => ({ company: str(row.company), domain: orNull(row.domain) }))
+    .filter((row) => row.company.toLowerCase().includes(needle) || (row.domain ?? "").toLowerCase().includes(needle) || (nameKey && dncKey(row.company).includes(nameKey)))
+    .slice(0, 20);
+  if (candidates.length) {
+    const list = candidates.map((c) => (c.domain ? `${c.company} (${c.domain})` : c.company)).join(", ");
+    return {
+      ok: false,
+      removed: 0,
+      total: all.length,
+      link: dncBrainLink(wsRow?.brain_folder),
+      candidates,
+      error: `Nothing on the DNC is exactly "${term}", so nothing was removed. Close matches: ${list}. Ask which one to remove and call again with its exact name or domain.`,
+    };
+  }
+  return { ok: true, removed: 0, total: all.length, link: dncBrainLink(wsRow?.brain_folder) };
 }

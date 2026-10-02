@@ -14,7 +14,7 @@
  * URL is pasted into Clay. This route sits under /api/webhooks, which the auth gate leaves open for machines.
  */
 import { NextResponse, after } from "next/server";
-import { ingestDncFromClay, syncDncToBrain } from "../../../lib/dnc";
+import { ingestDncFromClay, scheduleDncBrainSync } from "../../../lib/dnc";
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -37,12 +37,14 @@ export async function POST(request: Request) {
   }
   const result = await ingestDncFromClay(payload);
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 422 });
-  // Refresh the client's brain DNC file after the 200, so Clay's per-row POSTs stay fast. The file is only
-  // re-committed when its contents actually changed, so a re-sent row does not create an empty commit.
+  // Refresh the client's brain DNC file after the 200, so Clay's per-row POSTs stay fast. Coalesced per
+  // client: a table resync is one POST per row, and each one running its own sync meant hundreds of
+  // overlapping brain reads for a single change. The rows of a burst share one sync (plus one trailing
+  // pass for rows that landed while it ran).
   if (result.workspaceId && result.client && result.brainFolder) {
     const wid = result.workspaceId;
     const name = result.client;
-    after(() => syncDncToBrain(wid, name).catch(() => {}));
+    after(() => scheduleDncBrainSync(wid, name).catch(() => {}));
   }
   // A missing brain folder is the one reason the DNC would not reach the brain — say so plainly in the reply.
   const note = result.brainFolder

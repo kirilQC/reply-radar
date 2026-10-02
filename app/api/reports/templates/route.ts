@@ -70,8 +70,15 @@ export async function POST(request: Request) {
 
     const existing = await readSaved();
     // Saving under a name already in use replaces it, so correcting a template a teammate is already
-    // running is one action rather than a delete followed by a re-save.
+    // running is one action rather than a delete followed by a re-save. Templates are shared, though, so
+    // the replace has to be asked for: without `overwrite`, a clash comes back as a conflict the page
+    // turns into a confirm, rather than silently swapping out a prompt somebody else is relying on.
     const match = existing.find((template) => template.name.toLowerCase() === name.toLowerCase());
+    if (match && body.overwrite !== true)
+      return NextResponse.json(
+        { ok: false, conflict: true, error: `A template called "${match.name}" already exists.` },
+        { status: 409 },
+      );
     const template = normaliseTemplate({
       id: match?.id || `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       name,

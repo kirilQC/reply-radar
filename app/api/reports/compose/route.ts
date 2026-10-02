@@ -421,12 +421,13 @@ ${JSON.stringify(digests.length === 1 ? digests[0] : digests, null, 2)}`;
   const requestedModel = resolveModel(text(body.model) || process.env.ANTHROPIC_MODEL || FALLBACK_MODEL);
   let model = requestedModel;
 
-  // 1200 is comfortably above the ~350 words of JSON this can return. The narrative and message are
-  // both capped by the prompt, so the ceiling exists to stop a runaway, not to shape the output.
+  // 2000 is well above the ~350 words of JSON this can return. The narrative and message are both capped
+  // by the prompt, so the ceiling exists to stop a runaway, not to shape the output. It was 1200, and a
+  // long prompt plus a greeting and close could brush it, which cut the JSON off mid-string.
   const requestBody = (m: string) =>
     JSON.stringify({
       model: m,
-      max_tokens: 1200,
+      max_tokens: 2000,
       ...temperatureField(m, 0),
       system: COMPOSE_SYSTEM_PROMPT,
       messages: [{ role: "user", content: userContent }],
@@ -465,14 +466,33 @@ ${JSON.stringify(digests.length === 1 ? digests[0] : digests, null, 2)}`;
     const content = Array.isArray(payload.content) ? payload.content : [];
     const raw = text(object(content.find((item) => object(item).type === "text")).text);
 
-    // The model is asked for bare JSON but sometimes fences it. Falling back to the raw text as the
-    // narrative keeps a usable report on the screen rather than an error, which matters because the
-    // numbers — the part that must be right — never came from the model in the first place.
+    /*
+     * A reply that was cut off or is not JSON is an error, not a narrative. This used to fall back to
+     * the raw text as both the narrative and the email, which put half a JSON object, braces and all,
+     * into the message a client was about to be sent. The page keeps the report on screen and says the
+     * email could not be written, which is the truth. Fences are still stripped, since a fenced object
+     * is not a malformed one.
+     */
+    const failCompose = async (summary: string) => {
+      await writeAuditEvent(
+        { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY },
+        {
+          actor: "anthropic",
+          action: "report.compose_failed",
+          entityType: "report",
+          details: { source: "anthropic", status: "failed", model, durationMs, summary },
+        },
+      );
+      return NextResponse.json({ ok: false, error: summary }, { status: 502 });
+    };
+    if (payload.stop_reason === "max_tokens") return failCompose("The write-up ran past its length limit and came back cut off. Try again, or shorten the prompt.");
     let parsed: Json = {};
     try {
-      parsed = object(JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, "")));
+      const value = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not an object");
+      parsed = object(value);
     } catch {
-      parsed = { narrative: raw, message: raw, headline: "" };
+      return failCompose("The write-up did not come back in the expected format. Try again.");
     }
 
     await writeAuditEvent(

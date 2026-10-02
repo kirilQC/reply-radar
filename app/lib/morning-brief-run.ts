@@ -367,7 +367,9 @@ export async function writeBrief(systemPrompt: string, userContent: string, mode
     throw new Error(`Anthropic refused the request: ${detail}`);
   }
   // A brief cut off by the token limit is never posted: retry once with twice the room.
-  if (payload?.stop_reason === "max_tokens" && maxTokens < MAX_OUTPUT_TOKENS * 4) return writeBrief(systemPrompt, userContent, model, maxTokens * 2);
+  // `< 2x` rather than `< 4x`: the old bound let 2000 retry to 4000 and then again to 8000, a third full
+  // model call inside the brief's time budget for a reply that had already run long twice.
+  if (payload?.stop_reason === "max_tokens" && maxTokens < MAX_OUTPUT_TOKENS * 2) return writeBrief(systemPrompt, userContent, model, maxTokens * 2);
   if (payload?.stop_reason === "max_tokens") throw new Error("The brief ran past its length limit twice; not posting a cut-off brief.");
   const text = Array.isArray(payload?.content)
     ? payload.content.filter((part: Row) => part?.type === "text").map((part: Row) => String(part.text ?? "")).join("").trim()

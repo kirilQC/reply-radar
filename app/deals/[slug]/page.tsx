@@ -159,9 +159,15 @@ export default function ClientDealsPage() {
      */
     let stages = pipeline.stages;
     if (stages.length === 0) {
-      const seen: string[] = [];
-      for (const d of deals) if (d.stage && !seen.some((t) => norm(t) === norm(d.stage!))) seen.push(d.stage);
-      stages = seen.map((title) => ({ title, kind: /won/i.test(title) ? "won" : /lost|dead/i.test(title) ? "lost" : "open", color: null }));
+      const seen: Deal[] = [];
+      for (const d of deals) if (d.stage && !seen.some((s) => norm(s.stage!) === norm(d.stage!))) seen.push(d);
+      // The deal's own status (from the CRM's closed flags) colours the column, not a guess from its name:
+      // a custom stage called "Gone quiet" is lost, and nothing in those words says so.
+      stages = seen.map((d) => ({
+        title: d.stage!,
+        kind: d.status === "won" || d.status === "lost" ? d.status : /won/i.test(d.stage!) ? "won" : /lost|dead/i.test(d.stage!) ? "lost" : "open",
+        color: null,
+      }));
     }
 
     const buckets = new Map<string, Deal[]>();

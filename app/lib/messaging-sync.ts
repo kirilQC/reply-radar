@@ -28,7 +28,7 @@ import { brainConfigured, brainTree, writeBrainFile } from "./brain";
 import { fetchMessagingTabs, googleDocsConfigured } from "./google-docs";
 import { brainFolderFor } from "../../shared/brain-link.mjs";
 import { clientsIn } from "../../shared/brain-structure.mjs";
-import { messagingTabBrainDoc, unsyncedTabs } from "../../shared/google-doc.mjs";
+import { messagingTabBrainDoc, parseDocId, unsyncedTabs } from "../../shared/google-doc.mjs";
 
 type Guardrails = Record<string, unknown>;
 
@@ -106,6 +106,34 @@ async function rememberSyncedTabs(workspace: SyncWorkspace, tabIds: string[]): P
   }).catch(() => null);
 }
 
+/** The stored form of a synced tab: the doc it belongs to and its id within that doc. */
+export const syncedTabKey = (docId: string, tabId: string) => `${docId}:${tabId}`;
+
+/**
+ * The synced tab ids that belong to this doc, and the stored list rewritten in the keyed form.
+ *
+ * Google numbers tabs per document ("t.0" is the first tab of every doc), so a bare tab id said nothing
+ * about which doc it came from: pointing a client at a new messaging doc skipped every tab whose id the
+ * old doc had already used, which for most docs is all of them. Entries are now `docId:tabId`. A bare
+ * entry predates that and can only have come from the doc set at the time, which is taken to be this one,
+ * so it still counts here and is rewritten into this doc's keyed form.
+ */
+export function syncedTabsForDoc(stored: string[], docId: string): { forDoc: string[]; entries: string[] } {
+  const prefix = `${docId}:`;
+  const forDoc: string[] = [];
+  const entries: string[] = [];
+  for (const raw of stored.map(String)) {
+    if (raw.includes(":")) {
+      entries.push(raw);
+      if (raw.startsWith(prefix)) forDoc.push(raw.slice(prefix.length));
+    } else {
+      entries.push(syncedTabKey(docId, raw));
+      forDoc.push(raw);
+    }
+  }
+  return { forDoc, entries: [...new Set(entries)] };
+}
+
 /**
  * File one workspace's net-new messaging tabs into its brain folder.
  *
@@ -127,16 +155,21 @@ export async function syncMessagingDoc(workspace: SyncWorkspace): Promise<Messag
   if (!folder) return { ...base, note: `No QC Brain folder matches ${workspace.name || "this client"}.` };
 
   const tabs = await fetchMessagingTabs(workspace.docUrl);
-  const pending = unsyncedTabs(tabs, workspace.syncedTabs);
+  const docId = String(parseDocId(workspace.docUrl) || workspace.docUrl);
+  const { forDoc, entries } = syncedTabsForDoc(workspace.syncedTabs, docId);
+  const pending = unsyncedTabs(tabs, forDoc);
 
   const filedIds: string[] = [];
   for (const tab of pending) {
     const { path, text } = messagingTabBrainDoc(folder, tab);
     await writeBrainFile({ path, text, summary: `Campaign messaging: ${workspace.name} — ${tab.title}`, author: "QC Command" });
-    filedIds.push(tab.tabId);
+    filedIds.push(syncedTabKey(docId, tab.tabId));
   }
 
-  if (filedIds.length) await rememberSyncedTabs(workspace, [...workspace.syncedTabs, ...filedIds]);
+  // Written back even with nothing new filed when old bare ids were migrated, so they are pinned to
+  // this doc before the URL can change under them.
+  const migrated = entries.length !== workspace.syncedTabs.length || entries.some((entry, index) => entry !== workspace.syncedTabs[index]);
+  if (filedIds.length || migrated) await rememberSyncedTabs(workspace, [...entries, ...filedIds]);
   return { ...base, filed: filedIds.length, skipped: tabs.length - pending.length };
 }
 

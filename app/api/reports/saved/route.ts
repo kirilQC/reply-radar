@@ -55,7 +55,10 @@ export async function GET(request: Request) {
     }
 
     let filter = "";
-    if (workspaceSlug && workspaceSlug !== "all") {
+    // `combined` is the "All clients" archive: reports filed under no single client. Asked for by name
+    // because "all" already means "no filter" to the directory, which needs every client's rows.
+    if (text(params.get("scope")) === "combined") filter = "&workspace_id=is.null";
+    else if (workspaceSlug && workspaceSlug !== "all") {
       const workspaces = await db(`rr_workspaces?select=id&slug=eq.${encodeURIComponent(workspaceSlug)}&limit=1`);
       const rows = (await workspaces.json().catch(() => [])) as Json[];
       const workspaceId = text(rows[0]?.id);
@@ -64,9 +67,20 @@ export async function GET(request: Request) {
       filter = `&workspace_id=eq.${encodeURIComponent(workspaceId)}`;
     }
 
-    const response = await db(`rr_reports?select=${LIST_COLUMNS}${filter}&order=generated_at.desc&limit=200`);
+    /*
+     * Paged. A flat 200 across every client meant a client whose reports were older than the 200 newest
+     * in the whole agency showed an empty archive. One extra row is asked for so the page knows whether
+     * there is more without a count query.
+     */
+    const limit = Math.min(200, Math.max(1, Number(params.get("limit")) || 200));
+    const offset = Math.max(0, Math.floor(Number(params.get("offset")) || 0));
+    const response = await db(
+      `rr_reports?select=${LIST_COLUMNS}${filter}&order=generated_at.desc,id.desc&limit=${limit + 1}&offset=${offset}`,
+    );
     if (!response.ok) throw new Error(`Supabase ${response.status}`);
-    return NextResponse.json({ ok: true, reports: await response.json().catch(() => []) });
+    const rows = (await response.json().catch(() => [])) as Json[];
+    const list = Array.isArray(rows) ? rows : [];
+    return NextResponse.json({ ok: true, reports: list.slice(0, limit), hasMore: list.length > limit });
   } catch (error) {
     // A missing table is the expected state until the migration is run, and it should read as an empty
     // archive with an explanation rather than a broken page.
@@ -146,6 +160,38 @@ export async function POST(request: Request) {
             ? `${error.message} — if rr_reports is missing, run supabase/migrations/20260812_rr_reports.sql.`
             : "Could not save the report.",
       },
+      { status: 502 },
+    );
+  }
+}
+
+/**
+ * Re-files the parts of a saved report a person can change after it was generated: the email and the
+ * snapshot that holds the written sections and the copy. Everything else about an archived report is
+ * history and is not accepted here.
+ */
+export async function PATCH(request: Request) {
+  const id = text(new URL(request.url).searchParams.get("id"));
+  if (!id) return NextResponse.json({ ok: false, error: "id required" }, { status: 400 });
+  const body = (await request.json().catch(() => ({}))) as Json;
+  const patch: Json = {};
+  if (typeof body.messageText === "string") patch.message_text = body.messageText.trim() || null;
+  if (body.data && typeof body.data === "object" && !Array.isArray(body.data)) patch.data = body.data;
+  if (typeof body.title === "string" && body.title.trim()) patch.title = body.title.trim();
+  if (!Object.keys(patch).length) return NextResponse.json({ ok: false, error: "Nothing to update." }, { status: 400 });
+  try {
+    const response = await db(`rr_reports?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
+    });
+    if (!response.ok) throw new Error(`Supabase ${response.status}`);
+    const updated = (await response.json().catch(() => [])) as Json[];
+    if (!updated.length) return NextResponse.json({ ok: false, error: "That report no longer exists." }, { status: 404 });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Could not update the report." },
       { status: 502 },
     );
   }

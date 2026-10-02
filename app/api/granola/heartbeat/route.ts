@@ -80,14 +80,23 @@ function postedNoteIdsFrom(rows: unknown): Set<string> {
   const ids = new Set<string>();
   for (const row of Array.isArray(rows) ? (rows as Row[]) : []) {
     if (String(row.status ?? "") === "error") continue;
+    // The read below selects the id on its own as `noteId`; the nested path is kept for a full row.
     const signals = (row.signals ?? {}) as Row;
     const sources = (signals.sources ?? {}) as Row;
     const call = (sources.call ?? {}) as Row;
-    const noteId = String(call.noteId ?? "").trim();
+    const noteId = String(row.noteId ?? call.noteId ?? "").trim();
     if (noteId) ids.add(noteId);
   }
   return ids;
 }
+
+/*
+ * How far back to look for posted analyses. A call is only ever a candidate while it is inside the call
+ * window, and its analysis was posted after it happened, so anything older cannot match. One day of slack
+ * for time zones. This replaced "the newest 500 rows", which needed no window but read every signals blob
+ * in full, and stopped covering two weeks once there were enough clients.
+ */
+const POSTED_LOOKBACK_DAYS = CALL_WINDOW_DAYS + 1;
 
 export async function GET() {
   const checkedAt = new Date().toISOString();
@@ -107,7 +116,16 @@ export async function GET() {
     const [workspaceRows, briefRows, keys] = await Promise.all([
       read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match,call_analysis_enabled&slug=neq.misc&order=name.asc")
         .catch(() => read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match&slug=neq.misc&order=name.asc")),
-      read(`rr_slack_briefs?select=signals,status&automation=eq.call_analysis&order=created_at.desc&limit=500`).catch(() => []),
+      /*
+       * No fallback to an empty list. A failed read here made every call look unposted, so the worker
+       * re-posted every client's latest recap; it now fails the poll instead, and the next hour retries.
+       * Only the note id is selected, not the whole signals blob it sits in.
+       */
+      read(
+        `rr_slack_briefs?select=status,noteId:signals->sources->call->>noteId&automation=eq.call_analysis&created_at=gte.${encodeURIComponent(
+          new Date(now.getTime() - POSTED_LOOKBACK_DAYS * 86_400_000).toISOString(),
+        )}&order=created_at.desc&limit=5000`,
+      ),
       granolaKeys(read),
     ]);
 

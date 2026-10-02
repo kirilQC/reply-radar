@@ -32,6 +32,7 @@ import {
   type SectionId,
 } from "../lib/report-templates";
 import { packPages, paginate, suggestTrim } from "../../shared/report-pagination.mjs";
+import { defuseFormula } from "../../shared/answer-export.mjs";
 import "./reports.css";
 import Skeleton from "../components/Skeleton";
 
@@ -248,6 +249,28 @@ const formatRunDate = (value: string, timeZone = "America/New_York") =>
 const num = (value: number) => Math.round(value).toLocaleString();
 const pct = (value: number) => `${value.toFixed(1)}%`;
 
+/**
+ * Everything the email is written from, as one string. A plain function rather than only a hook so a
+ * reopened report can record the signature of what it was filed with before its state has rendered.
+ */
+const signatureOf = (sections: Record<string, string>, metrics: Iterable<CampaignMetricId>, includeBestReplies: boolean) =>
+  JSON.stringify({ sections, metrics: [...metrics].sort(), includeBestReplies });
+
+/** How many archived reports are fetched per page when one client's archive is open. */
+const CLIENT_ARCHIVE_PAGE = 100;
+
+/** Copies values into the boxes that are still empty, and names the boxes it left alone. */
+const fillEmptyOnly = (current: Record<string, string>, values: Record<string, string>) => {
+  const next = { ...current };
+  const kept: string[] = [];
+  for (const [id, value] of Object.entries(values)) {
+    if (!String(value ?? "").trim()) continue;
+    if (current[id]?.trim()) kept.push(id);
+    else next[id] = value;
+  }
+  return { next, kept };
+};
+
 export default function ReportsPage() {
   /**
    * Three screens, in the order the work happens: pick the client, pick the report, read the report.
@@ -420,6 +443,69 @@ export default function ReportsPage() {
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState("");
 
+  /*
+   * Which compose request is the current one. A Regenerate (or an auto-rewrite) can start while an
+   * earlier compose is still out, and whichever answered last used to win, so a slow answer about the
+   * previous report could overwrite the email for the new one. Every request takes a number; only the
+   * latest is allowed to touch state.
+   */
+  const composeSeq = useRef(0);
+  /**
+   * The run signature an automatic rewrite last failed on. The debounce re-arms whenever composing
+   * flips back to false, so without this a failing compose retried every second and a half forever.
+   * It is retried when the inputs change or when somebody clicks to try again.
+   */
+  const [composeFailedFor, setComposeFailedFor] = useState("");
+
+  /*
+   * The archive row for the report on screen, so edits made after it was filed reach the archive too.
+   * `filedData` is the snapshot as last saved; `filedKey` is what the editable parts looked like then.
+   */
+  const [filedId, setFiledId] = useState("");
+  const filedData = useRef<Record<string, unknown> | null>(null);
+  const filedKey = useRef("");
+  /**
+   * Set when a reopened report's template has since been deleted. Regenerating it would quietly run a
+   * different report under the old title, so the button is withheld instead.
+   */
+  const [regenerateBlocked, setRegenerateBlocked] = useState(false);
+  /** The boxes a dictation or transcript fill left alone because something was already typed in them. */
+  const [fillKept, setFillKept] = useState<string[]>([]);
+
+  /*
+   * One client's archive, paged from the server. The directory still reads the agency-wide list for its
+   * per-client counts, but that list stops at the newest 200, so a client whose reports were all older
+   * than that used to open onto an empty archive.
+   */
+  const [clientSaved, setClientSaved] = useState<SavedReport[] | null>(null);
+  const [clientSavedMore, setClientSavedMore] = useState(false);
+  const [clientSavedLoading, setClientSavedLoading] = useState(false);
+  const clientSavedFor = useRef("");
+
+  const loadClientSaved = useCallback(async (slug: string, offset = 0) => {
+    clientSavedFor.current = slug;
+    if (!slug) {
+      setClientSaved(null);
+      setClientSavedMore(false);
+      return;
+    }
+    setClientSavedLoading(true);
+    try {
+      const scope = slug === "all" ? "scope=combined" : `workspaceSlug=${encodeURIComponent(slug)}`;
+      const response = await fetch(`/api/reports/saved?${scope}&limit=${CLIENT_ARCHIVE_PAGE}&offset=${offset}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      // Somebody may have opened another client while this was out; its answer is not this client's.
+      if (clientSavedFor.current !== slug) return;
+      const rows = Array.isArray(payload.reports) ? (payload.reports as SavedReport[]) : [];
+      setClientSaved((current) => (offset && current ? [...current, ...rows.filter((row) => !current.some((had) => had.id === row.id))] : rows));
+      setClientSavedMore(Boolean(payload.hasMore));
+    } catch {
+      if (clientSavedFor.current === slug && !offset) setClientSaved(null);
+    } finally {
+      if (clientSavedFor.current === slug) setClientSavedLoading(false);
+    }
+  }, []);
+
   const refreshSaved = useCallback(async () => {
     try {
       const response = await fetch("/api/reports/saved", { cache: "no-store" });
@@ -429,7 +515,9 @@ export default function ReportsPage() {
     } catch {
       setSaved([]);
     }
-  }, []);
+    // The open client's own archive is a separate, paged list, so it has to be refreshed with it.
+    if (clientSavedFor.current) await loadClientSaved(clientSavedFor.current);
+  }, [loadClientSaved]);
 
   const refreshTemplates = useCallback(async () => {
     try {
@@ -463,18 +551,27 @@ export default function ReportsPage() {
    * Asks HeyReach what this client is running. Selection defaults to the active campaigns, so someone
    * who never touches the list still gets the honest answer to "what is live?".
    */
-  const loadCampaigns = useCallback(async (slug: string) => {
+  /*
+   * Which client the campaign list on screen was asked for. Switching clients while HeyReach is slow
+   * used to let the first client's answer land last and replace the second client's list, so a report
+   * could go out naming another client's campaigns. An answer for anyone else is dropped.
+   */
+  const campaignsFor = useRef("");
+  const loadCampaigns = useCallback(async (slug: string, pick?: string[]) => {
     if (!slug) return;
+    campaignsFor.current = slug;
     setCampaignsLoading(true);
     setCampaignsNote("");
     try {
       const response = await fetch(`/api/reports/campaigns?workspace=${encodeURIComponent(slug)}`, { cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
+      if (campaignsFor.current !== slug) return;
       if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not read the campaign list.");
       const clients = Array.isArray(payload.clients) ? (payload.clients as Array<Record<string, unknown>>) : [];
       const rows = clients.flatMap((row) => (Array.isArray(row.campaigns) ? (row.campaigns as LiveCampaign[]) : []));
       setLiveCampaigns(rows);
-      setCampaignPick(new Set(rows.filter((row) => row.state === "active").map((row) => row.id)));
+      // A reopened report brings the campaigns it was run over, so regenerating it covers the same ones.
+      setCampaignPick(new Set(pick ?? rows.filter((row) => row.state === "active").map((row) => row.id)));
       const unavailable = clients.filter((row) => !row.available);
       setCampaignsNote(
         unavailable.length
@@ -482,11 +579,12 @@ export default function ReportsPage() {
           : "",
       );
     } catch (err) {
+      if (campaignsFor.current !== slug) return;
       setLiveCampaigns([]);
       setCampaignPick(new Set());
       setCampaignsNote(err instanceof Error ? err.message : "Could not read the campaign list.");
     } finally {
-      setCampaignsLoading(false);
+      if (campaignsFor.current === slug) setCampaignsLoading(false);
     }
   }, []);
 
@@ -501,6 +599,8 @@ export default function ReportsPage() {
 
   /** Campaigns belong to one client, so changing client has to drop them rather than carry them over. */
   const clearCampaigns = () => {
+    campaignsFor.current = "";
+    setCampaignsLoading(false);
     setLiveCampaigns([]);
     setCampaignPick(new Set());
     setCampaignsNote("");
@@ -527,6 +627,15 @@ export default function ReportsPage() {
     setComposedFrom("");
     setMessageEdited(false);
     setError("");
+    // Anything still being written belongs to the report that is going away.
+    composeSeq.current += 1;
+    setComposing(false);
+    setComposeFailedFor("");
+    setFiledId("");
+    filedData.current = null;
+    filedKey.current = "";
+    setRegenerateBlocked(false);
+    setFillKept([]);
   };
 
   const openTemplate = (chosen: ReportTemplate) => {
@@ -561,6 +670,9 @@ export default function ReportsPage() {
     // Each client's archive starts from the top, rather than inheriting how far somebody
     // had scrolled through the previous one.
     setSavedShown(SAVED_PAGE_SIZE);
+    setClientSaved(null);
+    setClientSavedMore(false);
+    loadClientSaved(slug);
     setView("hub");
   };
 
@@ -590,6 +702,7 @@ export default function ReportsPage() {
     setWorkspaceSlug("");
     setComposerOpen(false);
     clearCampaigns();
+    loadClientSaved("");
     setView("clients");
   };
 
@@ -614,10 +727,12 @@ export default function ReportsPage() {
    */
   const clientReports = useMemo(
     () =>
+      // The client's own paged list once it has arrived; the slice of the agency-wide list until then.
+      clientSaved ??
       saved.filter((row) =>
         workspaceSlug === "all" ? !row.workspace_id : Boolean(activeWorkspace) && row.workspace_id === activeWorkspace?.id,
       ),
-    [saved, workspaceSlug, activeWorkspace],
+    [clientSaved, saved, workspaceSlug, activeWorkspace],
   );
 
   /** When each template was last run for this client — the answer to "have we sent this already?". */
@@ -645,18 +760,27 @@ export default function ReportsPage() {
     setTemplateBusy(true);
     setTemplateError("");
     try {
-      const response = await fetch("/api/reports/templates", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name,
-          summary: draftSummary.trim(),
-          prompt,
-          defaultPeriod: draftPeriod,
-          output: draftOutput,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
+      const send = (overwrite: boolean) =>
+        fetch("/api/reports/templates", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name,
+            summary: draftSummary.trim(),
+            prompt,
+            defaultPeriod: draftPeriod,
+            output: draftOutput,
+            overwrite,
+          }),
+        });
+      let response = await send(false);
+      let payload = await response.json().catch(() => ({}));
+      // Templates are shared, so replacing one under the same name changes it for everybody. Asked, not assumed.
+      if (response.status === 409 && payload.conflict) {
+        if (!window.confirm(`A template called "${name}" already exists and everyone uses it. Replace it with this one?`)) return;
+        response = await send(true);
+        payload = await response.json().catch(() => ({}));
+      }
       if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not save the template.");
       await refreshTemplates();
       setComposerOpen(false);
@@ -743,11 +867,39 @@ export default function ReportsPage() {
    *
    * Everything is passed in rather than read from state. This runs at the tail of `generate`, before
    * React has re-rendered with the report it just fetched, so the state still holds the *previous*
-   * report — reading it here would file the wrong document under the right name.
+   * report — reading it here would file the wrong document under the right name. The written sections
+   * are passed for the same reason: compose seeds the greeting and close into them, and the `written`
+   * this closure holds is from before that, so the archive used to get the boxes without them.
    */
   const fileReport = useCallback(
-    async (data: ReportData, copy: Composed | null, layout: SectionId[][], sectionIds: SectionId[]) => {
+    async (
+      data: ReportData,
+      copy: Composed | null,
+      layout: SectionId[][],
+      sectionIds: SectionId[],
+      sections: Record<string, string>,
+    ) => {
       setSaving(true);
+      const snapshot: Record<string, unknown> = {
+        report: data,
+        pages: layout,
+        reportTitle,
+        preparedBy,
+        notes,
+        written: sections,
+        prompt: runPrompt,
+        composed: copy,
+        theme,
+        // The run's choices, so a reopened report renders its campaign lines the way they were sent
+        // and Regenerate repeats the same report rather than whatever the screen happened to hold.
+        templateId: template?.id || BUILD_YOUR_OWN_ID,
+        period: data.period,
+        customSince: period === "custom" ? customSince : "",
+        customUntil: period === "custom" ? customUntil : "",
+        campaignMetrics: [...campaignMetrics],
+        includeBestReplies,
+        campaignIds: liveCampaigns.length ? [...campaignPick] : null,
+      };
       try {
         const response = await fetch("/api/reports/saved", {
           method: "POST",
@@ -766,17 +918,7 @@ export default function ReportsPage() {
             // `written` and `prompt` are part of the document, not settings: reopening a report has to
             // show the recap the client actually read, and the prompt explains why the copy reads as
             // it does even after the template has been edited since.
-            data: {
-              report: data,
-              pages: layout,
-              reportTitle,
-              preparedBy,
-              notes,
-              written,
-              prompt: runPrompt,
-              composed: copy,
-              theme,
-            },
+            data: snapshot,
             // The cover sheet, which every printed report gets and no layout lists. The archive row is what
             // the directory prints as "3 pages", so it has to count sheets rather than entries.
             pageEstimate: layout.length + 1,
@@ -786,6 +928,13 @@ export default function ReportsPage() {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.ok) throw new Error(payload.error || "Could not save the report.");
         setSavedNotice("Saved to the archive.");
+        // Remembered so that edits made from here on are filed against this row rather than lost.
+        const id = String(payload.report?.id || "");
+        if (id) {
+          filedData.current = snapshot;
+          filedKey.current = JSON.stringify({ messageText: copy?.message || "", written: sections, composed: copy });
+          setFiledId(id);
+        }
         refreshSaved();
       } catch (err) {
         // Kept out of `error`, which may already be carrying a warning about the write-up. Losing the
@@ -795,7 +944,24 @@ export default function ReportsPage() {
         setSaving(false);
       }
     },
-    [workspaceSlug, activeWorkspace, template, reportTitle, preparedBy, notes, written, runPrompt, theme, refreshSaved],
+    [
+      workspaceSlug,
+      activeWorkspace,
+      template,
+      reportTitle,
+      preparedBy,
+      notes,
+      runPrompt,
+      theme,
+      period,
+      customSince,
+      customUntil,
+      campaignMetrics,
+      includeBestReplies,
+      liveCampaigns,
+      campaignPick,
+      refreshSaved,
+    ],
   );
 
   /**
@@ -806,9 +972,20 @@ export default function ReportsPage() {
    * left the email describing those campaigns the old way — and the two stayed at odds until somebody
    * happened to type something.
    */
+  /**
+   * Dictation and pasted transcripts fill the boxes that are still empty. They used to overwrite all of
+   * them, so a recap somebody had typed and then topped up by voice came back as the model's version.
+   */
+  const fillSections = useCallback(
+    (values: Record<string, string>) => {
+      setWritten((current) => fillEmptyOnly(current, values).next);
+      setFillKept(fillEmptyOnly(written, values).kept);
+    },
+    [written],
+  );
+
   const runSignature = useCallback(
-    (sections: Record<string, string>) =>
-      JSON.stringify({ sections, metrics: [...campaignMetrics].sort(), includeBestReplies }),
+    (sections: Record<string, string>) => signatureOf(sections, campaignMetrics, includeBestReplies),
     [campaignMetrics, includeBestReplies],
   );
 
@@ -820,8 +997,14 @@ export default function ReportsPage() {
    * of state here would sometimes compose against the previous one.
    */
   const composeCopy = useCallback(
-    async (data: ReportData, sections: Record<string, string>, chosen: ReportTemplate): Promise<Composed | null> => {
+    async (
+      data: ReportData,
+      sections: Record<string, string>,
+      chosen: ReportTemplate,
+    ): Promise<{ copy: Composed; sections: Record<string, string> } | null> => {
       const signature = runSignature(sections);
+      const seq = ++composeSeq.current;
+      const current = () => seq === composeSeq.current;
       setComposing(true);
       try {
         const response = await fetch("/api/reports/compose", {
@@ -845,12 +1028,16 @@ export default function ReportsPage() {
           }),
         });
         const payload = await response.json().catch(() => ({}));
+        // A newer compose (or a different report) has started since; this answer is about the past.
+        if (!current()) return null;
         if (!response.ok || !payload.ok) {
           // The report itself is valid and on screen; only the copy failed. Saying so beats replacing a
           // working document with an error, and it still gets archived — without the write-up.
           setError(`The email could not be written: ${payload.error || response.status}. The report itself is fine.`);
+          setComposeFailedFor(signature);
           return null;
         }
+        setComposeFailedFor("");
         const copy: Composed = {
           headline: String(payload.headline || ""),
           narrative: String(payload.narrative || ""),
@@ -886,12 +1073,14 @@ export default function ReportsPage() {
         } else {
           setComposedFrom(signature);
         }
-        return copy;
+        return { copy, sections: { ...sections, ...fill } };
       } catch (err) {
+        if (!current()) return null;
         setError(`The email could not be written: ${err instanceof Error ? err.message : "the request failed"}.`);
+        setComposeFailedFor(signature);
         return null;
       } finally {
-        setComposing(false);
+        if (current()) setComposing(false);
       }
     },
     [runPrompt, includeBestReplies, campaignMetrics, runSignature],
@@ -905,6 +1094,10 @@ export default function ReportsPage() {
     setLoading(true);
     setError("");
     setSavedNotice("");
+    // Edits from here on belong to the report about to be generated, not the one being replaced.
+    setFiledId("");
+    filedData.current = null;
+    setRegenerateBlocked(false);
     // A new pull is a new document, so it must not inherit the layout of a report reopened from the
     // archive — the rendered pages and the filed pages have to be the same thing.
     setSavedLayout(null);
@@ -930,11 +1123,11 @@ export default function ReportsPage() {
 
       // Only a template carries a prompt, so only a template gets written copy. Build-your-own keeps
       // the deterministic summary that is computed from the numbers.
-      const copy = template ? await composeCopy(payload, written, template) : null;
+      const composedRun = template ? await composeCopy(payload, written, template) : null;
 
       // Archived without being asked. Generating a client report is the act of record; making that
       // durable should not depend on remembering to press a second button afterwards.
-      await fileReport(payload, copy, layout, orderedSections);
+      await fileReport(payload, composedRun?.copy ?? null, layout, orderedSections, composedRun?.sections ?? written);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Report generation failed");
     } finally {
@@ -967,11 +1160,44 @@ export default function ReportsPage() {
 
   useEffect(() => {
     if (!emailStale || messageEdited || composing || loading || !report || !template) return;
+    // The same inputs already failed once. Waiting for them to change (or a click) is what stops this
+    // from asking the model again every time `composing` drops back to false.
+    if (writtenKey === composeFailedFor) return;
     const timer = setTimeout(() => {
       composeCopy(report, written, template);
     }, 1500);
     return () => clearTimeout(timer);
-  }, [emailStale, messageEdited, composing, loading, report, template, written, composeCopy]);
+  }, [emailStale, messageEdited, composing, loading, report, template, written, writtenKey, composeFailedFor, composeCopy]);
+
+  /*
+   * Files edits made after the report was archived. The archive used to keep the email as the model first
+   * wrote it, so the copy that was actually sent, fixed by hand, was the one thing it did not have.
+   * Debounced so a typing burst is one write.
+   */
+  useEffect(() => {
+    if (!filedId || loading || composing || !filedData.current) return;
+    const key = JSON.stringify({ messageText, written, composed });
+    if (key === filedKey.current) return;
+    const id = filedId;
+    const timer = setTimeout(async () => {
+      const data = { ...filedData.current, written, composed: composed ? { ...composed, message: messageText } : composed };
+      try {
+        const response = await fetch(`/api/reports/saved?id=${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ messageText, data }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) throw new Error(payload.error || "the save failed.");
+        filedData.current = data;
+        filedKey.current = key;
+        setSavedNotice("Edits saved to the archive.");
+      } catch (err) {
+        setSavedNotice(`Edits not archived: ${err instanceof Error ? err.message : "the save failed."}`);
+      }
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [filedId, loading, composing, messageText, written, composed]);
 
   const downloadPdf = () => {
     if (!report || overLimit) return;
@@ -980,7 +1206,9 @@ export default function ReportsPage() {
 
   const downloadCsv = () => {
     if (!report) return;
-    const blob = new Blob([buildCsv(report)], { type: "text/csv" });
+    // The byte-order mark is what makes Excel read the file as UTF-8 rather than mangling every
+    // accented name and em dash in it.
+    const blob = new Blob(["\uFEFF", buildCsv(report)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -1003,18 +1231,39 @@ export default function ReportsPage() {
       const storedReport = snapshot.report as ReportData | undefined;
       if (!storedReport) throw new Error("That report was saved without its data snapshot.");
 
-      setTemplate(null);
+      /*
+       * The template, period and per-run choices it was run with. These used to be left as whatever the
+       * screen held, with the template cleared, so Regenerate on a reopened monthly recap ran a
+       * build-your-own report over this screen's period. Reports filed before these were stored fall
+       * back to the archive row's own template id and period.
+       */
+      const templateId = String(snapshot.templateId || row.template_id || "");
+      const storedTemplate = templates.find((option) => option.id === templateId) ?? null;
+      setTemplate(storedTemplate);
+      setRegenerateBlocked(!storedTemplate && templateId !== BUILD_YOUR_OWN_ID);
+      const storedPeriod = String(snapshot.period || row.period || storedReport.period || "") as Period;
+      if (PERIOD_OPTIONS.includes(storedPeriod)) setPeriod(storedPeriod);
+      setCustomSince(String(snapshot.customSince || (storedPeriod === "custom" ? (storedReport.since ?? "").slice(0, 10) : "")));
+      setCustomUntil(String(snapshot.customUntil || (storedPeriod === "custom" ? (storedReport.until ?? "").slice(0, 10) : "")));
+      const metricIds = new Set<string>(CAMPAIGN_METRICS.map((metric) => metric.id));
+      const storedMetrics = Array.isArray(snapshot.campaignMetrics)
+        ? (snapshot.campaignMetrics as string[]).filter((id) => metricIds.has(id)) as CampaignMetricId[]
+        : [...DEFAULT_CAMPAIGN_METRICS];
+      setCampaignMetrics(new Set(storedMetrics));
+      const storedBest = typeof snapshot.includeBestReplies === "boolean" ? snapshot.includeBestReplies : true;
+      setIncludeBestReplies(storedBest);
+      loadCampaigns(workspaceSlug, Array.isArray(snapshot.campaignIds) ? (snapshot.campaignIds as string[]) : undefined);
       setReport(storedReport);
       setReportTitle(String(snapshot.reportTitle || row.title || "Report"));
       setPreparedBy(String(snapshot.preparedBy || row.generated_by || "QC Growth"));
       setNotes(String(snapshot.notes || ""));
       // Restored from the snapshot rather than left blank: the recap and the close are the halves of
       // the report the client actually read, and a reopened report without them is a different document.
-      setWritten(
+      const storedWritten =
         snapshot.written && typeof snapshot.written === "object" && !Array.isArray(snapshot.written)
           ? (snapshot.written as Record<string, string>)
-          : {},
-      );
+          : {};
+      setWritten(storedWritten);
       setRunPrompt(String(snapshot.prompt || ""));
       // Reports filed before there was a theme have none, and `normalisePdfTheme` turns that into the
       // stylesheet's own palette — which is what those reports were printed with.
@@ -1022,10 +1271,18 @@ export default function ReportsPage() {
       setSections(new Set((Array.isArray(row.sections) ? row.sections : []) as SectionId[]));
       setSavedLayout(Array.isArray(snapshot.pages) ? (snapshot.pages as SectionId[][]) : null);
       const storedCopy = snapshot.composed as Composed | null | undefined;
+      const storedMessage = storedCopy ? String(row.message_text || storedCopy.message || "") : "";
       if (storedCopy) {
         setComposed(storedCopy);
-        setMessageText(String(row.message_text || storedCopy.message || ""));
+        setMessageText(storedMessage);
       }
+      // Recorded as already in step, so opening a filed email does not read as "your sections changed"
+      // and get rewritten behind the reader's back.
+      setComposedFrom(signatureOf(storedWritten, storedMetrics, storedBest));
+      // Edits to a reopened report are filed back against the same row.
+      filedData.current = snapshot;
+      filedKey.current = JSON.stringify({ messageText: storedMessage, written: storedWritten, composed: storedCopy ?? null });
+      setFiledId(String(row.id || id));
       setView("builder");
     } catch (err) {
       setError(err instanceof Error ? err.message : "That report could not be opened.");
@@ -1051,6 +1308,7 @@ export default function ReportsPage() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) throw new Error(payload.error || "That report could not be deleted.");
       setSaved((prev) => prev.filter((entry) => entry.id !== row.id));
+      setClientSaved((prev) => (prev ? prev.filter((entry) => entry.id !== row.id) : prev));
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "That report could not be deleted.");
@@ -1301,7 +1559,7 @@ export default function ReportsPage() {
 
             <div className="hub-group-label">
               <span>Past reports</span>
-              <span>{clientReports.length ? `${clientReports.length} on file` : "nothing yet"}</span>
+              <span>{clientReports.length ? `${clientReports.length}${clientSavedMore ? "+" : ""} on file` : clientSavedLoading ? "" : "nothing yet"}</span>
             </div>
             {clientReports.length ? (
               <div className="hub-saved-list">
@@ -1330,7 +1588,7 @@ export default function ReportsPage() {
                     </button>
                   </div>
                 ))}
-                {clientReports.length > savedShown && (
+                {clientReports.length > savedShown ? (
                   <button
                     type="button"
                     className="hub-saved-more"
@@ -1338,6 +1596,20 @@ export default function ReportsPage() {
                   >
                     View {Math.min(SAVED_PAGE_SIZE, clientReports.length - savedShown)} more
                   </button>
+                ) : (
+                  clientSavedMore && (
+                    <button
+                      type="button"
+                      className="hub-saved-more"
+                      disabled={clientSavedLoading}
+                      onClick={() => {
+                        setSavedShown((shown) => shown + SAVED_PAGE_SIZE);
+                        void loadClientSaved(workspaceSlug, clientReports.length);
+                      }}
+                    >
+                      {clientSavedLoading ? "Loading…" : "View older reports"}
+                    </button>
+                  )
                 )}
               </div>
             ) : (
@@ -1543,7 +1815,7 @@ export default function ReportsPage() {
                     label: WRITTEN_SECTION_PROMPTS[id].label,
                     placeholder: WRITTEN_SECTION_PROMPTS[id].placeholder,
                   }))}
-                  onFill={(values) => setWritten((current) => ({ ...current, ...values }))}
+                  onFill={fillSections}
                 />
                 {/* And the shorter path again: the call this recap is about already happened, and
                     every meeting tool here writes it down. Pasting that beats saying it twice. */}
@@ -1555,8 +1827,13 @@ export default function ReportsPage() {
                     label: WRITTEN_SECTION_PROMPTS[id].label,
                     placeholder: WRITTEN_SECTION_PROMPTS[id].placeholder,
                   }))}
-                  onFill={(values) => setWritten((current) => ({ ...current, ...values }))}
+                  onFill={fillSections}
                 />
+                {fillKept.length > 0 && (
+                  <div className="config-note">
+                    Kept what you had typed in {fillKept.map((id) => WRITTEN_SECTION_PROMPTS[id as keyof typeof WRITTEN_SECTION_PROMPTS]?.label ?? id).join(", ")}. Clear a box to fill it from the recording.
+                  </div>
+                )}
                 {writtenFields.map((id) => (
                   <div key={id} className="config-written">
                     <label className="config-written-label" htmlFor={`written-${id}`}>
@@ -1776,9 +2053,16 @@ export default function ReportsPage() {
                 and with a prompt box and four written sections in it the Generate button and the
                 downloads were below the fold — you had to scroll a form you had finished to leave it. */}
             <div className="config-actions">
-              <button className="config-generate" onClick={generate} disabled={loading || overLimit}>
-                {loading ? "Generating…" : composing ? "Writing…" : report ? "Regenerate report" : "Generate report"}
-              </button>
+              {/* Held while the email is being written: a second run started then raced the first, and
+                  whichever answer came back last decided which email was on screen. A reopened report
+                  whose template has since been deleted cannot be rerun as itself, so it is not offered. */}
+              {regenerateBlocked ? (
+                <div className="config-note">The template this report was built from has been deleted, so it cannot be regenerated.</div>
+              ) : (
+                <button className="config-generate" onClick={generate} disabled={loading || overLimit || composing}>
+                  {loading ? "Generating…" : composing ? "Writing…" : report ? "Regenerate report" : "Generate report"}
+                </button>
+              )}
 
               {report && (
                 <div className="config-downloads">
@@ -1795,6 +2079,12 @@ export default function ReportsPage() {
                 </div>
               )}
               {error && <div className="config-error">{error}</div>}
+              {/* Automatic rewrites stop after a failure until the inputs change, so a retry is a click. */}
+              {composeFailedFor && !composing && !loading && report && template && (
+                <button type="button" onClick={() => composeCopy(report, written, template)}>
+                  Try writing the email again
+                </button>
+              )}
               {/* Archiving happens on its own, so this reports rather than asks. It still has to be
                   visible: a save that failed is the one case where the report on screen is the only copy. */}
               {(saving || savedNotice) && (
@@ -2046,9 +2336,14 @@ function ConfigFold({
   );
 }
 
+/**
+ * One CSV cell. Campaign and lead names come from outside, so a value that a spreadsheet would run as a
+ * formula (= + - @, or a leading tab or CR) is defused with an apostrophe; see `defuseFormula`. A CR is
+ * quoted as well as a newline, since either one alone splits the row in Excel.
+ */
 function csv(value: unknown) {
-  const str = String(value ?? "").replace(/"/g, '""');
-  return /[",\n]/.test(str) ? `"${str}"` : str;
+  const str = defuseFormula(String(value ?? "")).replace(/"/g, '""');
+  return /[",\n\r]/.test(str) ? `"${str}"` : str;
 }
 
 /**

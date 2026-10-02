@@ -132,7 +132,8 @@ test("empty input yields nothing rather than throwing", () => {
 test("the CSV of a real answer has the table's rows in it", () => {
   const csv = answerToCsv({ question: "Which of Cotool's campaigns has the best reply rate?", answer: ANSWER, askedAt: "2026-08-13T10:04:00.000Z" });
   const lines = csv.split("\n");
-  assert.match(lines[0], /^Question,/);
+  // The byte-order mark leads the file so Excel reads it as UTF-8.
+  assert.match(lines[0], /^\uFEFFQuestion,/);
   assert.ok(lines.includes("Campaign,Conversations Started,Reply Rate"));
   assert.ok(lines.includes("CT50: D&R HH,19,63.2%"), "the bold row lost its text on the way to the sheet");
   assert.equal(lines.filter((line) => line.startsWith("CT")).length, 5, "every campaign row should reach the sheet");

@@ -399,6 +399,12 @@ export function planProjects(
       ...choose(choices.priority ?? [], item.priority, "Priority"),
       ...(linked ? { Campaign: [linked] } : {}),
     };
+    /*
+     * A row somebody has closed keeps its status. The brief still mentioning the item (often as the
+     * thing that just shipped) used to flip a Done row back to In Progress every morning, so the board
+     * undid the person's decision and the item could never leave it.
+     */
+    if (keep && isClosedStatus(keep.fields.Status)) delete fields.Status;
     if (keep) plan.updates.push({ id: keep.id, fields });
     else plan.creates.push({ ...fields, "First Raised": today, "Raised by Brief": true });
     for (const duplicate of duplicates) plan.deletes.push(duplicate.id);
@@ -408,7 +414,7 @@ export function planProjects(
   for (const row of mine) {
     if (claimed.has(row.id)) continue;
     // A person saying it is done outranks the wait. The wait exists for silence, not for a decision.
-    const closed = /^(done|complete|completed|cancelled|canceled)$/i.test(String((row.fields.Status as { name?: string })?.name ?? row.fields.Status ?? ""));
+    const closed = isClosedStatus(row.fields.Status);
     const age = daysBetween(row.fields["Last Seen"] ?? row.fields["First Raised"], today);
     if (closed || (age !== null && age >= staleDays)) {
       plan.deletes.push(row.id);
@@ -423,3 +429,8 @@ export function planProjects(
   return plan;
 }
 
+/** Whether a Status cell (a name, or Airtable's `{ name }` select object) is one a person closes work with. */
+export function isClosedStatus(value: unknown): boolean {
+  const name = String((value as { name?: string } | null)?.name ?? value ?? "").trim();
+  return /^(done|complete|completed|cancelled|canceled)$/i.test(name);
+}

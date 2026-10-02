@@ -90,11 +90,6 @@ export async function POST(request: Request) {
       if (!stored) return NextResponse.json({ error: "That key no longer exists." }, { status: 404 });
       const apiKey = String(stored.api_key ?? "");
       const result = await verifyKey(apiKey);
-      await rest(url, key, `${TABLE}?id=eq.${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({ last_checked_at: new Date().toISOString(), last_status: result.ok ? "ok" : "error", last_error: result.error ?? null }),
-      });
       /*
        * What this key can see, not merely whether it works.
        *
@@ -113,11 +108,35 @@ export async function POST(request: Request) {
       const PROBE_DAYS = 365;
       const cutoff = Date.now() - CALL_WINDOW_DAYS * 86_400_000;
       // Twenty pages of thirty, so a year of a busy calendar is actually read rather than its first page.
+      /*
+       * The listing's own error is kept and returned. Dropped, a key that verified but could not be listed
+       * (a rate limit, a missing scope) came back as an empty list, which the page reads as "this key has
+       * no meetings", sending somebody off to check the wrong Granola account.
+       */
+      let listError = "";
       const all = result.ok
         ? await inspectNotes([{ id, label: String(stored.label ?? ""), apiKey }], [], PROBE_DAYS, 20)
-          .then((sightings) => sightings[0]?.notes ?? [])
-          .catch(() => [])
+          .then((sightings) => {
+            listError = sightings[0]?.error ?? "";
+            return sightings[0]?.notes ?? [];
+          })
+          .catch((error: unknown) => {
+            listError = error instanceof Error ? error.message : "The meetings could not be listed.";
+            return [];
+          })
         : [];
+      // Stamped after the listing so a listing failure is stored as the key's last error: the admin page
+      // prints that line above the meeting list, which is otherwise indistinguishable from an empty one.
+      // The key itself still verified, so its status stays "ok".
+      await rest(url, key, `${TABLE}?id=eq.${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          last_checked_at: new Date().toISOString(),
+          last_status: result.ok ? "ok" : "error",
+          last_error: result.error ?? (listError ? `The key works, but its meetings could not be listed: ${listError}` : null),
+        }),
+      });
       /*
        * Whose meetings these are. A key returns its holder's notes plus every note shared with the whole
        * workspace, so three teammates' keys listing the same three meetings looked like a bug in this page —
@@ -158,6 +177,8 @@ export async function POST(request: Request) {
         ownersKnown,
         sharedInWindow: shared.filter((note) => note.startedAt >= cutoff).length,
         sharedFrom,
+        // Set when the key works but its meetings could not be listed, so the lists above are unknown, not empty.
+        listError: listError || null,
       });
     }
 

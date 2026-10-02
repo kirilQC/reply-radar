@@ -2129,7 +2129,9 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
           note: `Do NOT tell the user the company was added — it was not. ${result.client} has no Clay DNC integration set up, so DNC adds cannot work for them yet. Tell the user they need to set it up first, in two steps: (1) paste ${result.client}'s Clay DNC table webhook URL into QC Command under Admin → Clients → ${result.client} → "Clay DNC webhook"; and (2) in Clay, add an HTTP API action on that DNC table that POSTs each row back to QC Command's DNC webhook (/api/webhooks/dnc) with the client name, company and domain. Once both are in place, adding will work. IMPORTANT: if the conversation shows you have ALREADY explained these steps for this client and the user is asking again, do not repeat the steps — tell them to ask Kiril for help instead.`,
         };
       }
-      const clayReached = (result.results ?? []).some((r) => r.clay);
+      // A configured webhook is a given by this point (the not-configured case returned above), so a
+      // company that did not reach Clay means the push itself failed, not that there was nowhere to send it.
+      const clayMissed = (result.results ?? []).filter((r) => r.status !== "skipped" && !r.clay).map((r) => r.company);
       const anyPending = (result.results ?? []).some((r) => r.status !== "skipped" && !r.domain);
       return {
         client: result.client,
@@ -2138,7 +2140,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         results: result.results,
         total: result.total,
         link: result.link,
-        note: `Report back what changed with each company and its domain in parentheses when there is one. Say the running total: ${result.client}'s DNC now has ${result.total} ${result.total === 1 ? "company" : "companies"}. Include the link to the DNC list: ${result.link ?? "(no brain link — this client has no brain folder set)"}.${clayReached ? " Synced to their Clay table." : " Note it did not reach Clay (no Clay DNC webhook configured)."}${anyPending ? " For any company shown without a domain, say its domain will fill in once Clay syncs it back." : ""}`,
+        note: `Report back what changed with each company and its domain in parentheses when there is one. Say the running total: ${result.client}'s DNC now has ${result.total} ${result.total === 1 ? "company" : "companies"}. Include the link to the DNC list: ${result.link ?? "(no brain link — this client has no brain folder set)"}.${clayMissed.length ? ` Note the push to their Clay DNC table failed for ${clayMissed.join(", ")}: saved in QC Command, but not in Clay yet. Adding it again will retry the push.` : " Synced to their Clay table."}${anyPending ? " For any company shown without a domain, say its domain will fill in once Clay syncs it back." : ""}`,
       };
     }
 

@@ -228,24 +228,73 @@ export async function composePersonalBrief(person: PersonalAssistant): Promise<{
   return { ok: true, digest: framePersonalNote(str(digest)), clients: withBody.map((c) => c.client) };
 }
 
-/** Compose and DM the person their focus note, stamping last_sent_at on success. */
-export async function sendPersonalBrief(person: PersonalAssistant): Promise<{ ok: boolean; error?: string; clients?: string[] }> {
-  const composed = await composePersonalBrief(person);
-  if (!composed.ok || !composed.digest) return { ok: false, error: composed.error || "Nothing to send." };
+/*
+ * How long a claimed send blocks another. Composing reads every client's brief and calls the model, which
+ * can take minutes; the worker polls for who is due in the meantime and, with the stamp written only after
+ * the DM went out, saw the same person still due and sent them the note twice. Long enough to cover a slow
+ * compose, short enough that a failed send that could not release its claim retries within the hour.
+ */
+const SEND_CLAIM_MS = 15 * 60_000;
+
+/**
+ * Stamp last_sent_at now, but only if nobody else stamped it within the claim window. The conditional
+ * PATCH is the lock: of two sends racing for one person, exactly one gets the row back.
+ */
+async function claimSend(url: string, key: string, id: string, stamp: string): Promise<boolean> {
+  const cutoff = new Date(Date.parse(stamp) - SEND_CLAIM_MS).toISOString();
+  const or = encodeURIComponent(`(last_sent_at.is.null,last_sent_at.lt."${cutoff}")`);
+  const response = await fetch(`${url}/rest/v1/rr_slack_personal_assistants?id=eq.${encodeURIComponent(id)}&or=${or}`, {
+    method: "PATCH",
+    headers: { ...headers(key), Prefer: "return=representation" },
+    body: JSON.stringify({ last_sent_at: stamp }),
+  });
+  if (!response.ok) throw new Error(`Could not claim the send (HTTP ${response.status}).`);
+  return rowsOf(await response.json().catch(() => [])).length > 0;
+}
+
+/** Hand the claim back after a send that never reached Slack, so the next run can try again. */
+async function releaseSend(url: string, key: string, id: string, stamp: string, previous: string | null): Promise<void> {
+  await fetch(`${url}/rest/v1/rr_slack_personal_assistants?id=eq.${encodeURIComponent(id)}&last_sent_at=eq.${encodeURIComponent(stamp)}`, {
+    method: "PATCH",
+    headers: headers(key),
+    body: JSON.stringify({ last_sent_at: previous }),
+  }).catch(() => {});
+}
+
+/**
+ * Compose and DM the person their focus note.
+ *
+ * last_sent_at is stamped before anything is composed, as a claim, and handed back if the note never
+ * reached Slack. Never throws: a model or Slack failure comes back as `{ ok: false, error }`.
+ */
+export async function sendPersonalBrief(person: PersonalAssistant): Promise<{ ok: boolean; error?: string; clients?: string[]; busy?: boolean }> {
   if (!person.slackUserId.trim()) return { ok: false, error: "This assistant has no Slack user id to DM." };
-
-  const channel = await openDm(person.slackUserId);
-  if (!channel) return { ok: false, error: "Could not open a DM with that Slack user id (check the id and the bot's im:write scope)." };
-  const headerTs = await postMessage(channel, personalHeader(person.personName, person.timezone));
-  await postMessage(channel, composed.digest, headerTs);
-
   const { url, key } = config();
-  if (url && key) {
-    await fetch(`${url}/rest/v1/rr_slack_personal_assistants?id=eq.${encodeURIComponent(person.id)}`, {
-      method: "PATCH", headers: headers(key), body: JSON.stringify({ last_sent_at: new Date().toISOString() }),
-    }).catch(() => {});
+  if (!url || !key) return { ok: false, error: "Supabase is not configured." };
+
+  const stamp = new Date().toISOString();
+  try {
+    if (!(await claimSend(url, key, person.id, stamp)))
+      return { ok: false, busy: true, error: "A note for this person was sent or started in the last 15 minutes, so this one was skipped to avoid a duplicate DM." };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not claim the send." };
   }
-  return { ok: true, clients: composed.clients };
+
+  let posted = false;
+  try {
+    const composed = await composePersonalBrief(person);
+    if (!composed.ok || !composed.digest) throw new Error(composed.error || "Nothing to send.");
+    const channel = await openDm(person.slackUserId);
+    if (!channel) throw new Error("Could not open a DM with that Slack user id (check the id and the bot's im:write scope).");
+    const headerTs = await postMessage(channel, personalHeader(person.personName, person.timezone));
+    posted = true;
+    await postMessage(channel, composed.digest, headerTs);
+    return { ok: true, clients: composed.clients };
+  } catch (error) {
+    // Once the header is out the person has been messaged; releasing the claim then would send it again.
+    if (!posted) await releaseSend(url, key, person.id, stamp, person.lastSentAt);
+    return { ok: false, error: error instanceof Error ? error.message : "The note could not be sent." };
+  }
 }
 
 // ── Config store (rr_slack_personal_assistants) ────────────────────────────────────────────────────

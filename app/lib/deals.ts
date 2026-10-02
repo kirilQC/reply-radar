@@ -12,7 +12,7 @@
  * person-unique id; a shared company is "possible" and left for a human.
  */
 
-import { fetchDeals, fetchPipeline, type CrmProvider, type Pipeline } from "./crm";
+import { fetchDealsWithStatus, fetchPipeline, type CrmDeal, type CrmProvider, type Pipeline } from "./crm";
 import { campaignsForLead } from "./heyreach-api";
 import { resolveCompanyDomains } from "./company-domain";
 import { resolveWorkspace } from "./meetings";
@@ -235,7 +235,7 @@ async function gatherQcIdentity(url: string, key: string, workspaceId: string) {
  * Pull a client's deals from their CRM, attribute each, and upsert. Returns counts, or the CRM's own error so
  * the person can see whether it was a bad token or a missing scope. A re-sync updates rows in place.
  */
-export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: string; synced?: number; confirmed?: number; possible?: number }> {
+export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: string; synced?: number; confirmed?: number; possible?: number; removed?: number }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, error: "Supabase is not configured." };
   const client = await resolveWorkspace(slug);
@@ -245,12 +245,16 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
   const token = str(workspace?.crm_api_key_ciphertext);
   if (!provider || !token) return { ok: false, error: "Connect a CRM for this client first." };
 
-  let deals;
+  let deals: CrmDeal[];
+  let complete = false;
   let pipeline: Pipeline;
   try {
     // The deals and the pipeline shape are fetched together: the sync should learn how *this* client
     // organises their board at the same moment it pulls what is on it.
-    [deals, pipeline] = await Promise.all([fetchDeals(provider, token), fetchPipeline(provider, token)]);
+    let pulled: { deals: CrmDeal[]; complete: boolean };
+    [pulled, pipeline] = await Promise.all([fetchDealsWithStatus(provider, token), fetchPipeline(provider, token)]);
+    deals = pulled.deals;
+    complete = pulled.complete;
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "The CRM could not be reached." };
   }
@@ -363,12 +367,39 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
       }
     }
   }
+
+  /*
+   * Deals deleted in the CRM. The upsert only ever added and updated, so a deal removed (or merged) in
+   * HubSpot or Attio stayed on the board and in every total for good. Only a complete pull is allowed to
+   * prune: a capped one never saw the deals past the cap. An empty pull prunes nothing either, because a
+   * token that suddenly sees no deals is far likelier to be a permissions change than an emptied CRM.
+   */
+  let removed = 0;
+  if (complete && records.length) {
+    const pulledIds = new Set(records.map((record) => record.external_id));
+    const stored = await allRows(
+      url,
+      key,
+      `rr_deals?select=id,external_id&workspace_id=eq.${encodeURIComponent(client.id)}&provider=eq.${encodeURIComponent(provider)}`,
+      "id.asc",
+    );
+    const gone = stored.filter((row) => !pulledIds.has(str(row.external_id))).map((row) => str(row.id)).filter(Boolean);
+    for (let i = 0; i < gone.length; i += 100) {
+      const chunk = gone.slice(i, i + 100);
+      const response = await fetch(`${url}/rest/v1/rr_deals?id=in.(${chunk.map(encodeURIComponent).join(",")})`, {
+        method: "DELETE",
+        headers: authHeaders(key),
+      }).catch(() => null);
+      if (response?.ok) removed += chunk.length;
+      else console.error("reply_radar_deals_prune_failed", { client: client.slug, status: response?.status ?? 0 });
+    }
+  }
   await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(client.id)}`, {
     method: "PATCH",
     headers: authHeaders(key),
     body: JSON.stringify({ crm_last_synced_at: new Date().toISOString(), crm_pipeline: pipeline }),
   }).catch(() => {});
-  return { ok: true, synced: records.length, confirmed, possible };
+  return { ok: true, synced: records.length, confirmed, possible, removed };
 }
 
 /**
