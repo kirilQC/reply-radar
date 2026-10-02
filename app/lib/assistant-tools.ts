@@ -82,7 +82,7 @@ import { articlePath } from "./help-shared";
 import { publicBaseUrl } from "./public-url";
 import { DATA_TOOLS, EXPORT_TOOL, runDataTool } from "./assistant-data";
 import { INSIGHT_TOOLS, INSIGHT_TOOL_NAMES, runInsightTool } from "./scout-insights";
-import { readConfig, writeConfig } from "./app-config";
+import { readConfig, writeConfig, deleteConfig } from "./app-config";
 
 type Row = Record<string, unknown>;
 
@@ -2086,6 +2086,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     }
     case "delete_project": {
       const r = await deleteProject(text(input.id));
+      if (r.ok) await Promise.all([deleteConfig(`pm_checks:${text(input.id)}`), deleteConfig(`pm_updates:${text(input.id)}`)].map((p) => p.catch(() => {})));
       return r.ok ? { ok: true } : { ok: false, error: r.error };
     }
     case "granola_calls": {
