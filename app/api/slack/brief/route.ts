@@ -28,8 +28,9 @@
 
 import { NextResponse } from "next/server";
 import { briefHeaderText, briefTrace, briefUserContent, briefWithFooter, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
-import { BRIEF_MODEL, gatherCalls, gatherChannels, gatherLiveFigures, gatherPriorBriefs, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
+import { BRIEF_MODEL, briefChannelsOf, briefMemoryResetKey, gatherCalls, gatherChannels, gatherLiveFigures, gatherPriorBriefs, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
 import { brainContext } from "../../../lib/brain-context";
+import { writeConfig } from "../../../lib/app-config";
 import {
   alreadySentToday,
   DEFAULT_SCHEDULE,
@@ -280,6 +281,15 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    // Forget a client's past briefs as memory, e.g. after they were written from the wrong channels.
+    if (typeof body.resetMemory === "string" && body.resetMemory.trim()) {
+      const rows = await reader(url, key)(`rr_workspaces?select=id&slug=eq.${encodeURIComponent(body.resetMemory.trim())}&limit=1`).catch(() => []);
+      const id = String((Array.isArray(rows) ? (rows as Row[]) : [])[0]?.id ?? "");
+      if (!id) return NextResponse.json({ error: "That client does not exist." }, { status: 404 });
+      await writeConfig(briefMemoryResetKey(id), new Date().toISOString());
+      return NextResponse.json({ ok: true });
+    }
+
     if (typeof body.workspace === "string") {
       const response = await write(url, key, `rr_workspaces?slug=eq.${encodeURIComponent(body.workspace)}`, {
         method: "PATCH",
@@ -488,6 +498,8 @@ export async function POST(request: Request) {
     // `sources` rides along in the same column as the figures because it is the same kind of fact: what
     // the model was given. A brief that reads thinly is then explainable a week later without guessing.
     const sources = {
+      // Which channels this brief read, so a later brief can tell whether it is still the same client's memory.
+      channels: briefChannelsOf(workspace),
       internalMessages: channels.internal.messages,
       externalMessages: channels.external.messages,
       extraChannels: (channels.extraChannels ?? []).map((channel) => ({ channelId: channel.channelId, messages: channel.messages })),

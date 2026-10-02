@@ -8,6 +8,8 @@ import { writeAuditEvent } from "../../../lib/audit-log";
 import { isOurWebhookUrl, publicBaseUrl, webhookUrlFor } from "../../../lib/public-url";
 import { normalizeChannelId } from "../../../lib/slack-channel";
 import { syncMessagingDocForSlug } from "../../../lib/messaging-sync";
+import { writeConfig } from "../../../lib/app-config";
+import { briefMemoryResetKey } from "../../../lib/morning-brief-run";
 
 /**
  * The moment a client's messaging doc is present on a saved workspace, pull its tabs into the brain.
@@ -58,13 +60,21 @@ export async function POST(request: Request) {
   // A client's internal and external channels belong to that client alone. Coraa's external channel was
   // once saved as Vitalic's internal one, and every Coraa brief came out as a Vitalic brief. Extras are
   // exempt: one context channel shared by several clients is deliberate.
+  let resetBriefMemoryFor = "";
   const ownChannels = [record.slack_internal_channel_id, record.slack_external_channel_id].filter((c): c is string => typeof c === "string" && Boolean(c));
   if (ownChannels.length) {
     const others = await fetch(`${url}/rest/v1/rr_workspaces?select=id,slug,name,slack_internal_channel_id,slack_external_channel_id&slug=neq.misc`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" }).then((r) => (r.ok ? r.json() : [])).catch(() => []);
     const selfId = typeof payload.id === "string" ? payload.id.trim() : "";
     const selfSlug = String(payload.previousSlug || payload.slug || "");
     for (const other of Array.isArray(others) ? others : []) {
-      if ((selfId && other.id === selfId) || (!selfId && other.slug === selfSlug)) continue;
+      if ((selfId && other.id === selfId) || (!selfId && other.slug === selfSlug)) {
+        // The client's channels are changing: its past briefs were read from the old ones, so the next
+        // brief must not take them as memory.
+        const changed = ("slackInternalChannelId" in payload && (record.slack_internal_channel_id ?? null) !== (other.slack_internal_channel_id ?? null))
+          || ("slackExternalChannelId" in payload && (record.slack_external_channel_id ?? null) !== (other.slack_external_channel_id ?? null));
+        if (changed && other.id) resetBriefMemoryFor = String(other.id);
+        continue;
+      }
       const clash = ownChannels.find((c) => c === other.slack_internal_channel_id || c === other.slack_external_channel_id);
       if (clash) {
         const role = clash === other.slack_internal_channel_id ? "internal" : "external";
@@ -137,6 +147,7 @@ export async function POST(request: Request) {
     if (!patched.ok) return NextResponse.json({ ok: false, error: patchData || "Workspace update failed." }, { status: patched.status });
     const rows = Array.isArray(patchData) ? patchData : [];
     if (!rows.length) return NextResponse.json({ ok: false, error: "The workspace no longer exists. Refresh and try again." }, { status: 404 });
+    if (resetBriefMemoryFor) await writeConfig(briefMemoryResetKey(resetBriefMemoryFor), new Date().toISOString()).catch(() => {});
     await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.updated", entityType: "workspace", entityId: String(rows[0]?.id ?? id), details: { source: "admin", status: "success", workspaceId: rows[0]?.id ?? id, workspaceName: rows[0]?.name ?? payload.name, summary: `${rows[0]?.name ?? payload.name ?? "The client workspace"} configuration was saved successfully.` } });
     const workspaces = rows.map((row: Record<string, unknown>) => ({ ...row, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined }));
     fileMessagingAfterSave(String(rows[0]?.slug ?? payload.slug ?? ""), existingGuardrails);

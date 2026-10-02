@@ -135,6 +135,15 @@ export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<Br
  */
 const PRIOR_BRIEF_COUNT = 2;
 
+/** When set, briefs written before this moment are not read back in as memory. */
+export const briefMemoryResetKey = (workspaceId: string) => `brief_memory_reset:${workspaceId}`;
+
+/** The two channels a brief is built from, as stored on each brief so its memory can be checked later. */
+export const briefChannelsOf = (workspace: { slack_internal_channel_id?: string | null; slack_external_channel_id?: string | null }) => ({
+  internal: String(workspace.slack_internal_channel_id ?? "").trim(),
+  external: String(workspace.slack_external_channel_id ?? "").trim(),
+});
+
 /**
  * The last one or two briefs this client got, and the replies the team left underneath them.
  *
@@ -154,13 +163,27 @@ export async function gatherPriorBriefs(
 ): Promise<PriorBrief[]> {
   const timezone = workspace.timezone || "America/New_York";
   try {
+    // A brief written from different channels is not this client's memory. Coraa's external channel was
+    // once set to Vitalic's internal one, and after the fix every new brief still copied the Vitalic items
+    // forward from the last two. So briefs from before the last channel change are skipped, and so is any
+    // brief that recorded reading channels other than the ones configured now.
+    const resetAt = Date.parse(String((await readConfig(briefMemoryResetKey(String(workspace.id ?? ""))).catch(() => "")) ?? ""));
+    const since = Number.isNaN(resetAt) ? "" : `&created_at=gt.${encodeURIComponent(new Date(resetAt).toISOString())}`;
     const rows = await read(
-      `rr_slack_briefs?select=body,created_at,slack_channel_id,slack_message_ts`
+      `rr_slack_briefs?select=body,created_at,slack_channel_id,slack_message_ts,sources`
       + `&workspace_id=eq.${encodeURIComponent(workspace.id)}&automation=eq.morning_brief`
-      + `&destination=eq.internal&status=eq.success&slack_message_ts=not.is.null`
-      + `&order=created_at.desc&limit=${PRIOR_BRIEF_COUNT}`,
+      + `&destination=eq.internal&status=eq.success&slack_message_ts=not.is.null${since}`
+      + `&order=created_at.desc&limit=${PRIOR_BRIEF_COUNT + 3}`,
     ).catch(() => []);
-    const briefs = (Array.isArray(rows) ? (rows as Row[]) : []).filter((row) => String(row.body ?? "").trim());
+    const current = briefChannelsOf(workspace);
+    const briefs = (Array.isArray(rows) ? (rows as Row[]) : [])
+      .filter((row) => String(row.body ?? "").trim())
+      .filter((row) => {
+        const recorded = (row.sources as Row | null)?.channels as Row | undefined;
+        if (!recorded) return true;
+        return String(recorded.internal ?? "") === current.internal && String(recorded.external ?? "") === current.external;
+      })
+      .slice(0, PRIOR_BRIEF_COUNT);
     const todayKey = localDayKey(new Date(), timezone);
 
     return await Promise.all(briefs.map(async (row): Promise<PriorBrief> => {
