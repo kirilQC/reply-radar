@@ -611,16 +611,6 @@
 .pm-ed-cname { font-size: 22px; font-weight: 750; letter-spacing: -.02em; }
 .pm-ed-main textarea { min-height: 200px; }
 
-/* Drag to set priority order: the dragged card dims, and a teal line shows where it will land. */
-.pm-bcard { position: relative; }
-.pm-bcard-dragging { opacity: .45; }
-.pm-bcard.pm-drop-before::before,
-.pm-bcard.pm-drop-after::after { content: ""; position: absolute; left: 6px; right: 6px; height: 3px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent); z-index: 2; pointer-events: none; }
-.pm-bcard.pm-drop-before::before { top: -8px; }
-.pm-bcard.pm-drop-after::after { bottom: -8px; }
-.pm-bcard[draggable="true"] { cursor: grab; }
-.pm-bcard[draggable="true"]:active { cursor: grabbing; }
-
 /* By client: wider columns, and the card footer can hold two assignees now the client chip is gone. */
 .pm-cols-byclient .pm-bcard-foot { flex-wrap: wrap; row-gap: 8px; }
 .pm-cols-byclient .pm-bcard-owner { max-width: 48%; }
@@ -701,3 +691,48 @@
 .rn-empty .rn-doc::before { content: attr(data-placeholder); position: absolute; color: var(--muted-2); pointer-events: none; }
 .pm-ed-main textarea { min-height: 150px; }
 .pm-ed-main > .pm-f:not(.pm-f-notes) { flex: none; }
+
+/* ── Living cards ───────────────────────────────────────────────────────────────────────────────
+   Cards lift and tilt a touch under the cursor; Priority 1 breathes a soft pink glow; a task sitting
+   over a month gently pulses its red timer. */
+.pm-bcard {
+  transition: transform .22s cubic-bezier(.2, .8, .2, 1), box-shadow .22s ease, border-color .2s ease,
+    translate .34s cubic-bezier(.2, 1.3, .35, 1);
+  will-change: transform;
+}
+.pm-bcard:hover:not(.pm-bcard-source) {
+  transform: perspective(900px) translateY(-3px) rotateX(2.5deg);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .42);
+}
+.pm-bcard-p1 { animation: pm-p1-breathe 2.6s ease-in-out infinite; }
+@keyframes pm-p1-breathe {
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, #ff2d6f 30%, transparent), 0 6px 18px color-mix(in srgb, #ff2d6f 10%, transparent); }
+  50% { box-shadow: 0 0 0 1px color-mix(in srgb, #ff2d6f 60%, transparent), 0 8px 30px color-mix(in srgb, #ff2d6f 26%, transparent); }
+}
+.pm-bcard-p1:hover:not(.pm-bcard-source) { animation-play-state: paused; }
+.pm-bcard-age.pm-age-stale { animation: pm-age-pulse 1.9s ease-in-out infinite; }
+@keyframes pm-age-pulse { 0%, 100% { transform: none; } 50% { transform: scale(1.08); } }
+
+/* ── Spring reorder ─────────────────────────────────────────────────────────────────────────────
+   The dragged card is picked up (a tilted, lifted copy follows the cursor), its slot folds away, the
+   cards below the drop point spring down to open a gap its size, and the drop lands with a teal ripple. */
+.pm-bcard-ghost {
+  transform: rotate(-2deg) scale(1.03);
+  border-color: var(--accent) !important;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, .55), 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  opacity: 1 !important;
+}
+.pm-bcard-source { animation: pm-fold .2s .04s cubic-bezier(.4, 0, .2, 1) forwards; pointer-events: none; }
+@keyframes pm-fold {
+  from { max-height: var(--drag-h); opacity: .5; }
+  to { max-height: 0; opacity: 0; margin-bottom: 0; border-width: 0; padding-top: 0; padding-bottom: 0; }
+}
+.pm-bcard-landed { animation: pm-land .65s ease-out; }
+@keyframes pm-land {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 65%, transparent); border-color: var(--accent); }
+  100% { box-shadow: 0 0 0 16px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pm-bcard, .pm-bcard-p1, .pm-bcard-age, .pm-bcard-landed, .pm-bcard-source { animation: none !important; transition: none !important; }
+  .pm-bcard:hover { transform: none; }
+}

@@ -222,7 +222,7 @@ type EditorState = { mode: "new"; stage: string; clientSlug?: string; assignee?:
 type Handlers = {
   clients: BoardClient[]; multi: boolean; people: Person[]; map: Record<string, string>; addPerson: (n: string) => void; removePerson: (n: string) => void; uploadAvatar: (n: string, f: File) => void;
   openNew: (stage: string, clientSlug?: string, assignee?: string) => void; onOpen: (t: BoardTask) => void; onDelete: (id: string) => void; notifyChannel?: string;
-  onDrag: (id: string | null) => void; dragId: string | null; onMove: (id: string, stage: string) => void; onSetDay: (id: string, date: string) => void;
+  onDrag: (id: string | null, height?: number) => void; dragId: string | null; dragH: number; landedId: string | null; onMove: (id: string, stage: string) => void; onSetDay: (id: string, date: string) => void;
   /** Drop the dragged task before (or after) `targetId` within the list `ids`, i.e. reorder that column. */
   onReorder: (ids: string[], targetId: string, after: boolean) => void;
   dropHint: { id: string; after: boolean } | null; setDropHint: (h: { id: string; after: boolean } | null) => void;
@@ -234,7 +234,31 @@ const clientOptsOf = (clients: BoardClient[]): Opt[] => clients.map((c) => ({ va
 const stageOpts: Opt[] = STAGES.map((s) => ({ value: s.key, label: s.label, color: s.color }));
 const prioOpts: Opt[] = [{ value: "", label: "None" }, ...PRIORITIES.map((p) => ({ value: p.key, label: p.label, color: p.color }))];
 
-function Card({ t, h, column }: { t: BoardTask; h: Handlers; column?: string[] }) {
+/**
+ * Where the dragged card would land in a column, as an index into the column without the dragged card,
+ * or -1 when nothing is being dragged within this column.
+ */
+function insertionIndex(column: string[] | undefined, h: Handlers): number {
+  if (!column || !h.dragId || !column.includes(h.dragId) || !h.dropHint) return -1;
+  const rest = column.filter((id) => id !== h.dragId);
+  const at = rest.indexOf(h.dropHint.id);
+  return at < 0 ? -1 : at + (h.dropHint.after ? 1 : 0);
+}
+/** A picked-up copy of the card for the drag image: slightly larger and tilted, with a lifted shadow. */
+function liftedDragImage(e: React.DragEvent<HTMLElement>) {
+  const node = e.currentTarget;
+  const rect = node.getBoundingClientRect();
+  const wrap = document.createElement("div");
+  wrap.style.cssText = `position:fixed;top:-2000px;left:-2000px;padding:24px;width:${rect.width + 48}px;pointer-events:none;`;
+  const ghost = node.cloneNode(true) as HTMLElement;
+  ghost.classList.add("pm-bcard-ghost");
+  ghost.style.width = `${rect.width}px`;
+  wrap.appendChild(ghost);
+  document.body.appendChild(wrap);
+  try { e.dataTransfer.setDragImage(wrap, e.clientX - rect.left + 24, e.clientY - rect.top + 24); } catch { /* older browsers keep the default image */ }
+  window.setTimeout(() => wrap.remove(), 0);
+}
+function Card({ t, h, column, shift }: { t: BoardTask; h: Handlers; column?: string[]; shift?: boolean }) {
   const s = stageOf(t.stage);
   const pr = prioOf(t.priority);
   const client = h.clients.find((c) => c.slug === t.clientSlug);
@@ -242,15 +266,19 @@ function Card({ t, h, column }: { t: BoardTask; h: Handlers; column?: string[] }
   const openBlockers = blockerList(t.blocker).filter((b) => !b.resolved);
   return (
     <div
-      className={`pm-bcard ${t.priority === "p1" ? "pm-bcard-p1" : ""} ${h.dragId === t.id ? "pm-bcard-dragging" : ""} ${h.dropHint?.id === t.id ? (h.dropHint.after ? "pm-drop-after" : "pm-drop-before") : ""}`}
+      className={`pm-bcard ${t.priority === "p1" ? "pm-bcard-p1" : ""} ${h.dragId === t.id ? "pm-bcard-source" : ""} ${shift ? "pm-bcard-shift" : ""} ${h.landedId === t.id ? "pm-bcard-landed" : ""}`}
+      style={{ ["--drag-h" as string]: `${h.dragH}px`, ...(shift ? { translate: `0 ${h.dragH + 10}px` } : {}) } as React.CSSProperties}
+      data-shift={shift ? h.dragH + 10 : 0}
       draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("id", t.id); h.onDrag(t.id); }}
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("id", t.id); liftedDragImage(e); h.onDrag(t.id, e.currentTarget.getBoundingClientRect().height); }}
       onDragEnd={() => { h.onDrag(null); h.setDropHint(null); }}
       onDragOver={column ? (e) => {
         if (!h.dragId || h.dragId === t.id || !column.includes(h.dragId)) return;
         e.preventDefault(); e.stopPropagation();
+        // Measured where the card sits without its spring shift, so opening the gap can't flip the answer.
         const r = e.currentTarget.getBoundingClientRect();
-        const after = e.clientY > r.top + r.height / 2;
+        const top = r.top - Number(e.currentTarget.dataset.shift || 0);
+        const after = e.clientY > top + r.height / 2;
         if (h.dropHint?.id !== t.id || h.dropHint.after !== after) h.setDropHint({ id: t.id, after });
       } : undefined}
       onDrop={column ? (e) => {
@@ -295,7 +323,7 @@ function KanbanView({ byStage, h }: { byStage: Record<string, BoardTask[]>; h: H
       {STAGES.map((s) => (
         <div className="pm-col" key={s.key} onDragOver={(e) => e.preventDefault()} onDrop={() => h.dragId && h.onMove(h.dragId, s.key)}>
           <div className="pm-colh"><span className={`pm-stg ${s.cls}`}><span className="d" />{s.label}</span></div>
-          {byStage[s.key].map((t) => <Card key={t.id} t={t} h={h} column={byStage[s.key].map((x) => x.id)} />)}
+          {(() => { const ids = byStage[s.key].map((x) => x.id); const at = insertionIndex(ids, h); const rest = ids.filter((id) => id !== h.dragId); return byStage[s.key].map((t) => <Card key={t.id} t={t} h={h} column={ids} shift={at >= 0 && t.id !== h.dragId && rest.indexOf(t.id) >= at} />); })()}
           {s.key === "todo" && <button type="button" className="pm-add" onClick={() => h.openNew("todo")}>+ Add</button>}
         </div>
       ))}
@@ -379,7 +407,7 @@ function ColumnList({ label, logo, tasks, onAdd, h, reorderable, extra }: { labe
   return (
     <div className="pm-col">
       <div className="pm-colh pm-colh-big">{logo}<b>{label}</b>{extra}</div>
-      {tasks.map((t) => <Card key={t.id} t={t} h={h} column={reorderable ? ids : undefined} />)}
+      {(() => { const at = reorderable ? insertionIndex(ids, h) : -1; const rest = ids.filter((id) => id !== h.dragId); return tasks.map((t) => <Card key={t.id} t={t} h={h} column={reorderable ? ids : undefined} shift={at >= 0 && t.id !== h.dragId && rest.indexOf(t.id) >= at} />); })()}
       <button type="button" className="pm-add" onClick={onAdd}>+ Add</button>
     </div>
   );
@@ -669,6 +697,9 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
   const [sort, setSort] = useState<SortKey>("manual");
   const [editor, setEditor] = useState<EditorState>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [dragH, setDragH] = useState(0);
+  const [landedId, setLandedId] = useState<string | null>(null);
+  const onDrag = (id: string | null, height?: number) => { setDragId(id); if (typeof height === "number") setDragH(Math.round(height)); };
   const [dropHint, setDropHint] = useState<{ id: string; after: boolean } | null>(null);
   // Positions set by dragging, applied straight away while the PATCHes go out.
   const [rank, setRank] = useState<Record<string, number>>({});
@@ -705,6 +736,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
   /** Puts the dragged task before/after the target, renumbers that column 0..n, and saves the new positions. */
   const reorder = (ids: string[], targetId: string, after: boolean) => {
     const moving = dragId; setDropHint(null); setDragId(null);
+    if (moving) { setLandedId(moving); window.setTimeout(() => setLandedId((cur) => (cur === moving ? null : cur)), 700); }
     if (!moving || moving === targetId) return;
     const rest = ids.filter((id) => id !== moving);
     const at = rest.indexOf(targetId);
@@ -721,7 +753,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
     }
   };
   const create = (slug: string, f: NewFields) => onCreate(slug, { ...f, week: multi && week ? week : undefined });
-  const h: Handlers = { clients, multi, people, map, addPerson, removePerson, uploadAvatar, openNew: (stage, clientSlug, assignee) => setEditor({ mode: "new", stage, clientSlug, assignee }), onOpen: (t) => setEditor({ mode: "edit", task: t }), onDelete, notifyChannel, onDrag: setDragId, dragId, onMove, onSetDay, onReorder: reorder, dropHint, setDropHint };
+  const h: Handlers = { clients, multi, people, map, addPerson, removePerson, uploadAvatar, openNew: (stage, clientSlug, assignee) => setEditor({ mode: "new", stage, clientSlug, assignee }), onOpen: (t) => setEditor({ mode: "edit", task: t }), onDelete, notifyChannel, onDrag, dragId, dragH, landedId, onMove, onSetDay, onReorder: reorder, dropHint, setDropHint };
   const byStage = useMemo(() => { const m: Record<string, BoardTask[]> = {}; for (const s of STAGES) m[s.key] = []; for (const t of visible) (m[t.stage] || m.todo).push(t); return m; }, [visible]);
   const views: [View, string][] = order.filter((v) => v !== "byclient" || multi).map((v) => ALL_VIEWS.find(([k]) => k === v)!);
 
