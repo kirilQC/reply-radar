@@ -283,6 +283,7 @@ async function runAndReply(opts: {
     // hand it the mention token so "Kiril will look into it" actually pings him.
     const supportOwner = (process.env.SUPPORT_OWNER_SLACK_ID || "").trim();
     const extraParts: string[] = [];
+    extraParts.push("In Slack the message must stand on its own even when a file is attached (attachments can fail): lead with the counts and breakdown, then name the top 5 to 10 rows inline (name, company, the one fact that matters), then say the full list is in the attached file.");
     extraParts.push(`You are talking to ${askerName || "a QC team member"}${askedBy ? ` (Slack user <@${askedBy}>)` : ""}. If you file a support ticket, record submittedBy as their name.`);
     if (surface === "dm") extraParts.push("This is a private, one-to-one direct message: you are this person's own QC Command assistant, with your full set of tools available. Answer for them alone — there is no channel audience reading along.");
     if (supportOwner) extraParts.push(`When you tell someone Kiril will look into a support issue, refer to him as <@${supportOwner}> so he is actually notified.`);

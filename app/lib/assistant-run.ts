@@ -289,7 +289,7 @@ Rules that change the answer:
 - Active means running AND still contacting new leads. HeyReach reports a campaign as in progress while leads already in the sequence finish, so a campaign with no pending leads left is finished in every sense the client cares about, whatever HeyReach says.
 - Averages across clients mislead. Some clients get twenty replies a day and some get one; the mean of those describes nobody. Give the range, or the per-client figures, or say which client you mean.
 - Reply rates from the HeyReach tools are already percentages. Do not convert them again.
-- HeyReach data is live. Every HeyReach tool hits HeyReach the moment you call it — there is no cache — so its figures are current as of that call, and each HeyReach result carries a \`pulledAt\` field already formatted as a clock time, e.g. "7:55 PM EST". When your answer reports HeyReach's own numbers — campaign status, per-campaign or workspace counts, senders, lists, rates — end it with a short stamp: \`_HeyReach data pulled @ 7:55 PM EST_\`, using the \`pulledAt\` value verbatim. Take the latest \`pulledAt\` among the HeyReach calls behind the answer. Print it exactly as given — never convert the time, never append or explain a timezone, never say a client's timezone is unknown; the stamp is complete as delivered. This stamp is for HeyReach's live figures only; QC Command's own database counts do not get it.
+- HeyReach data is live. Every HeyReach tool hits HeyReach the moment you call it — there is no cache — so its figures are current as of that call, and each HeyReach result carries a \`pulledAt\` field already formatted as a clock time, e.g. "7:55 PM EST". When your answer reports HeyReach's own numbers — campaign status, per-campaign or workspace counts, senders, lists, rates — end it with a short stamp: \`_HeyReach data pulled @ 7:55 PM EST_\`, using the \`pulledAt\` value verbatim. Take the latest \`pulledAt\` among the HeyReach calls behind the answer. Print it exactly as given — never convert the time, never append or explain a timezone, never say a client's timezone is unknown; the stamp is complete as delivered. This stamp is for HeyReach's live figures only; QC Command's own database counts and stored campaign stats (messaging_performance, meetings_by_campaign) do not get it. If no result behind the answer has a pulledAt, write no stamp at all.
 - replyRatePercent is HeyReach's own reply rate. You do not know its denominator, so never present it as a share of conversations started, messages sent or leads contacted, and never put it in a table column next to a count that implies one. If you want a rate against a specific denominator, compute it from the raw counts and say which two numbers you divided.
 - QC Command's judgement of a conversation is three fields and no others: sentiment (positive, neutral or negative) on the latest inbound message, followUpUrgency (0-10) on that same message, and leadScore on the person, which is how well they fit the client's ideal customer. There is no overall conversation score and no tier. Do not describe one, do not say a ranking is unavailable without one, and do not promise one is coming.
 - A null judgement means that row was never analysed. It is not a zero, not a low score, and not a queue that will clear if you wait — some conversations are simply never analysed. Rank by the rows that do have values, say how many did not, and never tell someone to check back later.
@@ -635,7 +635,9 @@ export async function runAgent(opts: {
     if (!calls.length) {
       // Only hand over a merged CSV when the answer is actually offering one. "How is Willow doing?"
       // gathered a long reply list along the way, and attaching it to a status answer was noise.
-      if (/\b(csv|attached|spreadsheet|download|full list)\b/i.test(said)) flushDatasets();
+      // An offer ("want it as a CSV?") is not a hand-over; only statements that a file comes with the answer are.
+      const statements = said.split(/(?<=[.!?])\s+/).filter((sentence) => !/\?\s*$/.test(sentence)).join(" ");
+      if (/\b(attached|attaching|in the (csv|spreadsheet|file)|the csv (below|has)|full list is)\b/i.test(statements)) flushDatasets();
       return {
         reply: said,
         steps,
@@ -686,7 +688,7 @@ export async function runAgent(opts: {
           // client's own timezone is unknown, narrating the gap. Only plain objects are stamped; the
           // HeyReach tools all return objects, so this reaches every one without reshaping arrays.
           const stamped =
-            name.startsWith("heyreach_") && rest && typeof rest === "object" && !Array.isArray(rest)
+            (name.startsWith("heyreach_") || name === "sending_runway" || name === "client_scorecard") && rest && typeof rest === "object" && !Array.isArray(rest)
               ? { ...(rest as Row), pulledAt: easternStamp() }
               : rest;
           if (file) emit({ type: "file", name: file.name, mime: file.mime, content: file.content });

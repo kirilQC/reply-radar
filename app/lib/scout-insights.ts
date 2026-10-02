@@ -501,8 +501,14 @@ async function meetingsByCampaign(input: Row) {
   const agg = new Map<string, Row>();
   let matchedFromLead = 0; let unattributed = 0;
   const unattributedByClient: Record<string, number> = {};
+  // The same person logged more than once (a reschedule, a double entry) is one meeting.
+  const seenPeople = new Set<string>();
+  let duplicates = 0;
   for (const m of meetings) {
     const ws = text(m.workspace_id); const client = byId.get(ws)!;
+    const who = `${ws}|${slugOf(text(m.invitee_linkedin)) || normName(text(m.invitee_name))}`;
+    if (who.split("|")[1] && seenPeople.has(who)) { duplicates += 1; continue; }
+    seenPeople.add(who);
     let names = text(m.campaign);
     if (!names) {
       names = bySlug.get(`${ws}|${slugOf(text(m.invitee_linkedin))}`) ?? byName.get(`${ws}|${normName(text(m.invitee_name))}`) ?? "";
@@ -521,7 +527,7 @@ async function meetingsByCampaign(input: Row) {
     .sort((a, b) => num(b.meetings) - num(a.meetings) || num(b.meetingsPer100Accepted) - num(a.meetingsPer100Accepted));
   return {
     window: allTime ? "all time" : w,
-    meetings: meetings.length, attributed: meetings.length - unattributed, attributedFromLeadRecord: matchedFromLead, unattributed, unattributedByClient,
+    meetings: meetings.length - duplicates, duplicateEntriesMerged: duplicates, attributed: meetings.length - duplicates - unattributed, attributedFromLeadRecord: matchedFromLead, unattributed, unattributedByClient,
     note: "A meeting's campaign is the one typed on it in the Meetings tab, or else the first QC campaign the matched lead was in. Sent/accepted/replies are the campaign's lifetime HeyReach numbers.",
     campaigns: rows,
   };
