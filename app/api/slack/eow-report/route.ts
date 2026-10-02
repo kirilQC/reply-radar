@@ -273,9 +273,25 @@ function reportHeader(clientName: string, timeZone: string): string {
  * page with this client and the same template open, to edit or regenerate it there.
  */
 function emailBlocks(body: string, slug: string, read: { live: boolean; internal: number | null; external: number | null; call: string | null }): unknown[] {
-  // One block per paragraph group: Slack folds a long single block behind "Show more", which hid the recap.
-  const quote = (text: string) => text.split("\n").map((line) => (line.trim() ? `> ${line}` : ">")).join("\n");
-  const chunks = body.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean).map((part) => quote(part).slice(0, 2900));
+  // Rich text, not mrkdwn sections: Slack folds any section past about five lines behind "Show more", which
+  // hid the recap. Rich text shows in full and still has real bullets and bold.
+  const inline = (line: string) => line.split(/(\*[^*\n]+\*)/).filter(Boolean).map((part) =>
+    /^\*[^*]+\*$/.test(part) ? { type: "text", text: part.slice(1, -1), style: { bold: true } } : { type: "text", text: part });
+  const elements: unknown[] = [];
+  let lines: string[] = [];
+  let bullets: string[] = [];
+  const flushLines = () => { if (lines.length) elements.push({ type: "rich_text_section", elements: lines.flatMap((l, n) => [...inline(l), ...(n < lines.length - 1 ? [{ type: "text", text: "\n" }] : [])]) }); lines = []; };
+  const flushBullets = () => { if (bullets.length) elements.push({ type: "rich_text_list", style: "bullet", elements: bullets.map((b) => ({ type: "rich_text_section", elements: inline(b) })) }); bullets = []; };
+  for (const raw of body.split("\n")) {
+    const line = raw.trimEnd();
+    const bullet = line.match(/^\s*[-•]\s+(.*)$/);
+    if (bullet && !/^-\s*QC Growth$/.test(line.trim())) { flushLines(); bullets.push(bullet[1]); continue; }
+    flushBullets();
+    if (!line.trim()) { if (lines.length) lines.push(""); continue; }
+    if (lines.length && lines[lines.length - 1] === "") { lines.pop(); flushLines(); }
+    lines.push(line);
+  }
+  flushLines(); flushBullets();
   const sources = [
     read.live ? "HeyReach live" : "HeyReach (stored figures)",
     read.internal === null ? "" : `internal channel (${read.internal} msgs)`,
@@ -284,7 +300,7 @@ function emailBlocks(body: string, slug: string, read: { live: boolean; internal
   ].filter(Boolean).join("  ·  ");
   const base = publicBaseUrl() || "https://www.replyradar.dev";
   return [
-    ...chunks.map((text) => ({ type: "section", text: { type: "mrkdwn", text } })),
+    { type: "rich_text", elements },
     { type: "context", elements: [{ type: "mrkdwn", text: `Written from: ${sources}` }] },
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "Edit in Reports" }, url: `${base}/reports?client=${encodeURIComponent(slug)}&template=weekly-recap`, action_id: "eow_edit" }] },
   ];
