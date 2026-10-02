@@ -46,7 +46,8 @@ const initials = (name: string) =>
   name
     .split(/\s+/)
     .filter(Boolean)
-    .map((part) => part[0])
+    // Letters only: "Elizabeth (Lizzie) Siegle" was "E(".
+    .map((part) => part.replace(/[^\p{L}\p{N}]/gu, "")[0] ?? "")
     .join("")
     .slice(0, 2)
     .toUpperCase() || "?";
@@ -159,6 +160,83 @@ const age = (value: unknown) => {
   return `${Math.floor(seconds / 86400)}d`;
 };
 
+/**
+ * The message columns the inbox reads, and nothing else. `select=*` dragged every message's full
+ * `raw_data` (the whole HeyReach webhook payload) across from Supabase only for this route to look at
+ * its `reply_radar` key — sender, campaign, sentiment and the cached draft all live there, and so does
+ * everything `dedupeMessages` and the origin classifier read. Selecting that one key keeps the
+ * database leg of the hottest route proportional to what it uses.
+ */
+const MESSAGE_COLUMNS = "id,conversation_id,body,direction,sent_at,reply_radar:raw_data->reply_radar";
+/** Puts the narrowed `reply_radar` column back where every reader expects it: under `raw_data`. */
+const withRawData = (row: Row): Row =>
+  row.raw_data && typeof row.raw_data === "object"
+    ? row
+    : { ...row, raw_data: row.reply_radar && typeof row.reply_radar === "object" ? { reply_radar: row.reply_radar } : {} };
+/** How much of the latest message rides along on a list row. Nothing on the page shows more. */
+const PREVIEW_CHARS = 280;
+const truncate = (value: string, max: number) => (value.length > max ? `${value.slice(0, max - 1)}…` : value);
+
+/**
+ * One conversation's thread and the facts derived from it, shared by the list and the single-thread
+ * read so both describe a conversation identically (same dedupe, same author names, same "latest
+ * inbound" row the per-reply AI state is read from).
+ */
+function describeThread(messageRows: Row[], lead: Row) {
+  const leadRaw = lead.raw_data && typeof lead.raw_data === "object" ? (lead.raw_data as Row) : {};
+  const newestRawMessages = [...messageRows].reverse().map((message) => message.raw_data);
+  const senderName = senderNameFrom(...newestRawMessages, leadRaw);
+  const campaign = campaignFrom(...newestRawMessages, leadRaw);
+  const thread = messageRows.map((message) => ({
+    id: message.id,
+    body: message.body,
+    direction: message.direction,
+    sentAt: message.sent_at,
+    authorName:
+      message.direction === "outbound"
+        ? senderName
+        : String(lead.name || "Unknown lead"),
+  }));
+  const latestInboundRow = [...messageRows].reverse().find((row) => row.direction === "inbound");
+  const latestInboundRaw = latestInboundRow?.raw_data && typeof latestInboundRow.raw_data === "object" ? latestInboundRow.raw_data as Row : {};
+  const sentimentData = nested(latestInboundRaw, "reply_radar");
+  return { leadRaw, senderName, campaign, thread, sentimentData };
+}
+
+/**
+ * One conversation's full thread, plus the cached draft for its latest reply — the detail the list
+ * leaves out. Read with the same columns, dedupe and author naming as the list.
+ */
+async function readThread(url: string, key: string, conversationId: string) {
+  const [conversation] = await query(
+    url,
+    key,
+    `rr_conversations?select=*&id=eq.${encodeURIComponent(conversationId)}&limit=1`,
+  );
+  if (!conversation) return { ok: false, conversationId, thread: [], error: "Conversation not found." };
+  const [leadRows, messages] = await Promise.all([
+    conversation.lead_id
+      ? query(url, key, `rr_leads?select=*&id=eq.${encodeURIComponent(String(conversation.lead_id))}&limit=1`)
+      : Promise.resolve([] as Row[]),
+    queryPaged(
+      url,
+      key,
+      `rr_messages?select=${MESSAGE_COLUMNS}&conversation_id=eq.${encodeURIComponent(conversationId)}&order=sent_at.asc,id.asc`,
+    ).then((rows) => rows.map(withRawData)),
+  ]);
+  const { thread, sentimentData } = describeThread(dedupeMessages(messages), leadRows[0] ?? {});
+  return {
+    ok: true,
+    conversationId,
+    thread,
+    cachedDraft: String(sentimentData.cached_draft ?? "") || null,
+    cachedReason: String(sentimentData.cached_reason ?? "") || null,
+    analyzedAt: String(sentimentData.analyzed_at ?? "") || null,
+    lastMessageAt: conversation.last_message_at ?? null,
+    lastRefreshedAt: conversation.last_refreshed_at ?? null,
+  };
+}
+
 export async function GET(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -169,6 +247,11 @@ export async function GET(request: Request) {
     );
   try {
     const params = new URL(request.url).searchParams;
+    // `?conversationId=` reads one conversation's full thread. The list below deliberately carries no
+    // message bodies (they were ~3.5MB of every inbox load), so the page asks for a thread here only
+    // when a conversation is opened.
+    const conversationId = (params.get("conversationId") ?? "").trim();
+    if (conversationId) return slimJson(await readThread(url, key, conversationId));
     const requested =
       params
         .get("workspaces")
@@ -232,8 +315,8 @@ export async function GET(request: Request) {
         queryPaged(
           url,
           key,
-          `rr_messages?select=*&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc,id.asc`,
-        ),
+          `rr_messages?select=${MESSAGE_COLUMNS}&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc,id.asc`,
+        ).then((rows) => rows.map(withRawData)),
       ),
       // The team's inbox tags on these conversations. Never fails the inbox: an account without the tags
       // table yet (migration not run) reads as no tags rather than a 500 on the whole queue.
@@ -284,40 +367,20 @@ export async function GET(request: Request) {
       return false;
     }).map((conversation) => {
       const lead = leadById.get(String(conversation.lead_id)) ?? {};
-      const leadRaw =
-        lead.raw_data && typeof lead.raw_data === "object"
-          ? (lead.raw_data as Row)
-          : {};
-      const metadata = nested(leadRaw, "reply_radar");
-      const enrichment = nested(metadata, "ai_ark");
       const workspace =
         workspaceById.get(String(conversation.workspace_id)) ?? {};
       const messageRows = messagesByConversation.get(String(conversation.id)) ?? [];
-      const newestRawMessages = [...messageRows]
-        .reverse()
-        .map((message) => message.raw_data);
-      const senderName = senderNameFrom(...newestRawMessages, leadRaw);
-      const campaign = campaignFrom(...newestRawMessages, leadRaw);
-      const thread = messageRows.map((message) => ({
-        id: message.id,
-        body: message.body,
-        direction: message.direction,
-        sentAt: message.sent_at,
-        authorName:
-          message.direction === "outbound"
-            ? senderName
-            : String(lead.name || "Unknown lead"),
-      }));
+      const { leadRaw, senderName, campaign, thread, sentimentData } = describeThread(messageRows, lead);
+      const metadata = nested(leadRaw, "reply_radar");
+      const enrichment = nested(metadata, "ai_ark");
       const latest = thread.at(-1);
       const latestReply = thread
         .filter((message) => message.direction === "inbound")
         .at(-1);
-      const latestInboundRow = [...messageRows].reverse().find((row) => row.direction === "inbound");
-      const latestInboundRaw = latestInboundRow?.raw_data && typeof latestInboundRow.raw_data === "object" ? latestInboundRow.raw_data as Row : {};
-      const sentimentData = nested(latestInboundRaw, "reply_radar");
+      // The page keys per-reply AI state on "the newest message that is not ours" — the same test it
+      // used to run over the whole thread — so the list hands it that message's id and time.
+      const latestNotOurs = [...thread].reverse().find((message) => message.direction !== "outbound");
       const sentiment = ["positive", "neutral", "negative"].includes(String(sentimentData.sentiment).toLowerCase()) ? String(sentimentData.sentiment).toLowerCase() : null;
-      const cachedDraft = String(sentimentData.cached_draft ?? "");
-      const cachedReason = String(sentimentData.cached_reason ?? "");
       const analyzedAt = String(sentimentData.analyzed_at ?? "");
       const name = normalizePersonName(lead.name);
       // Prefer the cached AI follow-up score; fall back to the heuristic until it is scored.
@@ -375,7 +438,7 @@ export async function GET(request: Request) {
         reason: String(
           conversation.score_reason || "New reply received from HeyReach.",
         ),
-        preview: String(latest?.body || ""),
+        preview: truncate(String(latest?.body || ""), PREVIEW_CHARS),
         age: age(conversation.last_message_at),
         lastMessageAt: conversation.last_message_at,
         latestReplyAt: latestReply?.sentAt ?? conversation.last_message_at,
@@ -383,14 +446,20 @@ export async function GET(request: Request) {
           .length,
         avatar: "#3c365e",
         sentiment,
-        cachedDraft: cachedDraft || null,
-        cachedReason: cachedReason || null,
+        // The cached draft and its reason are not on the list: only the open conversation uses them, and
+        // they are some of the longest text a row has. They come with the thread (`?conversationId=`).
+        // `analyzedAt` stays, because whether a reply has been analysed is a list-level fact.
         analyzedAt: analyzedAt || null,
         followUpUrgency,
         followUpReason,
         followUpAnalyzedAt: cachedFollowUpAt || null,
         lastRefreshedAt: conversation.last_refreshed_at ?? null,
-        messages: thread,
+        // What the list needs from the thread, without the thread itself: who spoke last (the ✓ and the
+        // "needs reply" count), which reply the AI state belongs to, and how long the thread is.
+        lastDirection: latest ? String(latest.direction) : null,
+        latestInboundId: latestNotOurs ? String(latestNotOurs.id) : null,
+        latestInboundAt: latestNotOurs?.sentAt ?? null,
+        messageCount: thread.length,
       };
     });
     // Some clients wire their HeyReach to track every conversation they have, including their own inbound and

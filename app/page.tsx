@@ -66,6 +66,11 @@ type Lead = {
   latestReplyAt?: string | null;
   lastRefreshedAt?: string | null;
   tags?: string[];
+  /**
+   * The thread. Empty on a row straight from the list: /api/inbox no longer ships message bodies, and
+   * the open conversation's thread is read from /api/inbox?conversationId= (see `ensureThread`).
+   * `threadLoaded` says these are the full, current messages rather than an empty or stale placeholder.
+   */
   messages: Array<{
     id: string;
     body: string;
@@ -73,6 +78,20 @@ type Lead = {
     sentAt: string;
     authorName: string;
   }>;
+  threadLoaded?: boolean;
+  /** Direction of the newest message, from the list, for rows whose thread is not loaded. */
+  lastDirection?: string | null;
+  /** The newest message that is not ours (id and time), which per-reply AI state is keyed on. */
+  latestInboundId?: string | null;
+  latestInboundAt?: string | null;
+  messageCount?: number;
+};
+/** What /api/inbox?conversationId= adds to a list row: the full thread and the draft cached for its latest reply. */
+type ThreadDetail = {
+  messages: Lead["messages"];
+  cachedDraft: string | null;
+  cachedReason: string | null;
+  analyzedAt: string | null;
 };
 /** A shared inbox tag. Mirrors app/lib/inbox-tags.ts, declared here so the client never imports the server lib. */
 type InboxTag = { id: string; name: string; color: string };
@@ -335,11 +354,25 @@ const followUpBand = (score: number): "hot" | "warm" | "cold" | "nurture" => {
  * same message; the id only breaks ties when the timestamp is missing.
  */
 const latestInboundKey = (lead: Lead) => {
-  const latest = [...lead.messages].reverse().find((message) => message.direction !== "outbound");
+  // A loaded thread is the authority; a list row carries the same message's id and time instead.
+  const latest = lead.messages.length
+    ? [...lead.messages].reverse().find((message) => message.direction !== "outbound")
+    : lead.latestInboundId || lead.latestInboundAt
+      ? { id: String(lead.latestInboundId ?? ""), sentAt: String(lead.latestInboundAt ?? "") }
+      : undefined;
   if (!latest) return "";
   const time = Date.parse(latest.sentAt);
   return Number.isNaN(time) ? `id:${latest.id}` : `at:${time}`;
 };
+/** Who sent the newest message: the loaded thread when there is one, otherwise what the list said. */
+const lastDirectionOf = (lead: Lead) =>
+  lead.messages.length ? lead.messages.at(-1)?.direction : lead.lastDirection ?? undefined;
+/** List rows arrive without a thread; give each an empty one so every `messages` read stays safe. */
+const asListLeads = (rows: unknown[]): Lead[] =>
+  rows.map((row) => {
+    const lead = row as Lead;
+    return { ...lead, messages: Array.isArray(lead.messages) ? lead.messages : [] };
+  });
 const mergeInboxLeads = (previous: Lead[], incoming: Lead[]): Lead[] => {
   if (!previous.length) return incoming;
   const byId = new Map(previous.map((lead) => [lead.id, lead]));
@@ -357,6 +390,22 @@ const mergeInboxLeads = (previous: Lead[], incoming: Lead[]): Lead[] => {
       merged.cachedDraft = old.cachedDraft;
       merged.cachedReason = old.cachedReason;
     }
+    // The list no longer carries the draft text (it comes with the thread), so a draft already on
+    // screen for this same reply is kept rather than blanked by a list reload.
+    if (sameReply && !merged.cachedDraft && old.cachedDraft) {
+      merged.cachedDraft = old.cachedDraft;
+      merged.cachedReason = old.cachedReason;
+    }
+    // A thread already loaded is kept while it is at least as new as what the list reports; a list
+    // that has seen a newer message leaves the thread unloaded so the open view reads it again.
+    if (old.threadLoaded) {
+      const oldAt = Date.parse(String(old.lastMessageAt ?? ""));
+      const newAt = Date.parse(String(lead.lastMessageAt ?? ""));
+      if (Number.isNaN(newAt) || (!Number.isNaN(oldAt) && oldAt >= newAt)) {
+        merged.messages = old.messages;
+        merged.threadLoaded = true;
+      }
+    }
     if ((merged.leadScore === null || merged.leadScore === undefined) && old.leadScore !== null && old.leadScore !== undefined) {
       merged.leadScore = old.leadScore;
       merged.icpReason = old.icpReason;
@@ -372,8 +421,9 @@ const mergeInboxLeads = (previous: Lead[], incoming: Lead[]): Lead[] => {
 /**
  * The last inbox payload, parked for the next visit.
  *
- * One key, not one per client. A lead carries its whole message history, so a snapshot per scope
- * would put fourteen copies of the queue into a 5MB budget and start throwing quota errors; storing
+ * One key, not one per client. Rows are stored without their threads (the list no longer carries
+ * them, and a thread loaded since is stripped below), but a snapshot per scope would still put
+ * fourteen copies of the queue into a 5MB budget and start throwing quota errors; storing
  * the scope *inside* the single record instead means the newest one always wins and a mismatch just
  * falls back to the blank wait we had before. Switching clients therefore gets no snapshot, which is
  * the right trade: the complaint was about returning to the inbox tab, not about client hopping.
@@ -392,7 +442,9 @@ const readInboxSnapshot = (scope: string): Lead[] | null => {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { scope?: string; leads?: Lead[] };
     if (parsed?.scope !== scope || !Array.isArray(parsed.leads) || !parsed.leads.length) return null;
-    return parsed.leads;
+    // Snapshots written before the list went thread-less still hold whole threads; drop them so a
+    // restored row never passes for a loaded one.
+    return parsed.leads.map((lead) => ({ ...lead, messages: [], threadLoaded: false }));
   } catch {
     return null;
   }
@@ -402,7 +454,8 @@ const writeInboxSnapshot = (scope: string, leads: Lead[]) => {
   // a route that briefly returns nothing would leave every later visit staring at a blank queue.
   if (!leads.length) return;
   try {
-    window.localStorage.setItem(inboxSnapshotKey, JSON.stringify({ scope, leads: leads.slice(0, inboxSnapshotRows) }));
+    const rows = leads.slice(0, inboxSnapshotRows).map((lead) => ({ ...lead, messages: [], threadLoaded: false }));
+    window.localStorage.setItem(inboxSnapshotKey, JSON.stringify({ scope, leads: rows }));
   } catch {
     /* quota, or private browsing — the snapshot is an optimisation, never a requirement */
   }
@@ -552,6 +605,14 @@ function Icon({ name }: { name: string }) {
     </svg>
   );
 }
+/**
+ * A blank the draft model left for a person to fill ("(insert time here)", "[link]"). Sending one to a lead
+ * is the most embarrassing mistake the composer can make, so the Send button stays off until it is filled.
+ */
+const unfilledPlaceholder = (text: string): string | null =>
+  text.match(/\((?:insert|add|your|enter)[^)]{0,40}\)|\[(?:insert|add|your|enter|link|time|date|name)[^\]]{0,40}\]/i)?.[0] ?? null;
+
+
 export default function Home() {
   return <DashboardHome />;
 }
@@ -699,12 +760,12 @@ export function InboxPage() {
         // yet, so `generateAiReview` below would otherwise see the thread from before this refresh and
         // draft a reply to a conversation that has already moved on.
         const before = leads.find((lead) => lead.id === convId);
-        const refreshedLead = before && thread ? { ...before, messages: thread } : null;
+        const refreshedLead = before && thread ? { ...before, messages: thread, threadLoaded: true } : null;
         // Update only this conversation's messages in-place
         if (thread) {
           setLeads((prev) => prev.map((lead) =>
             lead.id === convId
-              ? { ...lead, messages: thread, lastRefreshedAt: result.lastRefreshedAt ?? new Date().toISOString() }
+              ? { ...lead, messages: thread, threadLoaded: true, lastRefreshedAt: result.lastRefreshedAt ?? new Date().toISOString() }
               : lead,
           ));
         }
@@ -1025,7 +1086,7 @@ export function InboxPage() {
             String(payload.error ?? "Inbox could not be loaded."),
           );
         const incoming: Lead[] = Array.isArray(payload.conversations)
-          ? payload.conversations
+          ? asListLeads(payload.conversations)
           : [];
         setLeads((previous) => mergeInboxLeads(previous, incoming));
         writeInboxSnapshot(inboxSnapshotScope, incoming);
@@ -1090,10 +1151,10 @@ export function InboxPage() {
     nextAppearance = appearance,
   ) => {
     const payload = { layout: nextLayout, appearance: nextAppearance };
-    window.localStorage.setItem(
-      layoutStorageKey(layoutScope),
-      JSON.stringify({ layout: nextLayout }),
-    );
+    // Guarded: a storage error here used to throw before the server save below, so preferences were lost.
+    try {
+      window.localStorage.setItem(layoutStorageKey(layoutScope), JSON.stringify({ layout: nextLayout }));
+    } catch { /* storage full or blocked: the server copy below still saves */ }
     // Appearance is stored once, without a scope, because it applies to the whole site.
     writeCachedAppearance(nextAppearance);
     // Apply the same settings to the document immediately so they remain global
@@ -1386,6 +1447,7 @@ export function InboxPage() {
                     return {
                       ...lead,
                       messages: update.thread,
+                      threadLoaded: true,
                       lastRefreshedAt: update.lastRefreshedAt,
                     };
                   }),
@@ -1451,7 +1513,7 @@ export function InboxPage() {
     const positiveRate = filtered.length ? ((positiveCount / filtered.length) * 100).toFixed(1) : "0.0";
     // Leads awaiting our reply — last message from them, not from us. Uses `filtered`
     // so the count matches the inbox view the user is currently looking at.
-    const needsReplyCount = filtered.filter((l) => l.messages.at(-1)?.direction === "inbound").length;
+    const needsReplyCount = filtered.filter((l) => lastDirectionOf(l) === "inbound").length;
     const values: Record<string, { value: string; sub: string; label?: string }> = {
       needsAction: { value: String(filtered.length), sub: `Conversations ${filterLabel}` },
       hotConversations: { value: String(positiveCount), sub: `Positive replies ${filterLabel}` },
@@ -1548,7 +1610,77 @@ export function InboxPage() {
     replies: 0,
     avatar: "var(--panel-2)",
     messages: [],
+    threadLoaded: true,
   };
+  /**
+   * The full thread for one conversation, read on demand.
+   *
+   * The inbox list used to carry every conversation's whole thread (~3.5MB on each load) although only
+   * the open one is ever read. Now the list is thread-less and this fetches a thread when it is needed:
+   * on opening a conversation, and before anything that sends the thread to a model. Concurrent asks
+   * for the same conversation share one request. The result is folded into `leads`, so the open view,
+   * the AI draft and the follow-up score all read the same messages, and a refresh or a send that
+   * landed first is never overwritten by an older read.
+   */
+  const threadRequestsRef = useRef(new Map<string, Promise<ThreadDetail | null>>());
+  const ensureThread = (conversationId: string): Promise<ThreadDetail | null> => {
+    const known = leadsRef.current.find((lead) => lead.id === conversationId);
+    if (known?.threadLoaded) {
+      return Promise.resolve({
+        messages: known.messages,
+        cachedDraft: known.cachedDraft ?? null,
+        cachedReason: known.cachedReason ?? null,
+        analyzedAt: known.analyzedAt ?? null,
+      });
+    }
+    const inFlight = threadRequestsRef.current.get(conversationId);
+    if (inFlight) return inFlight;
+    const request = fetch(`/api/inbox?conversationId=${encodeURIComponent(conversationId)}`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload): ThreadDetail | null => {
+        if (!payload?.ok || !Array.isArray(payload.thread)) return null;
+        const detail: ThreadDetail = {
+          messages: payload.thread as Lead["messages"],
+          cachedDraft: payload.cachedDraft ? String(payload.cachedDraft) : null,
+          cachedReason: payload.cachedReason ? String(payload.cachedReason) : null,
+          analyzedAt: payload.analyzedAt ? String(payload.analyzedAt) : null,
+        };
+        setLeads((prev) => prev.map((lead) => {
+          // A refresh that finished first holds a thread at least as new as this read.
+          if (lead.id !== conversationId || lead.threadLoaded) return lead;
+          // A reply sent before the thread arrived is kept until the stored thread includes it.
+          const pendingSent = lead.messages.filter((message) =>
+            message.id.startsWith("sent-") &&
+            !detail.messages.some((stored) => stored.direction === "outbound" && String(stored.body).trim() === message.body.trim()),
+          );
+          return {
+            ...lead,
+            messages: [...detail.messages, ...pendingSent],
+            threadLoaded: true,
+            cachedDraft: lead.cachedDraft || detail.cachedDraft,
+            cachedReason: lead.cachedReason || detail.cachedReason,
+            analyzedAt: lead.analyzedAt || detail.analyzedAt,
+          };
+        }));
+        return detail;
+      })
+      .catch(() => null)
+      .finally(() => {
+        threadRequestsRef.current.delete(conversationId);
+      });
+    threadRequestsRef.current.set(conversationId, request);
+    return request;
+  };
+  // Load the open conversation's thread. Keyed on `threadLoaded` as well as the id, so a list reload
+  // that has seen a newer message (and so dropped the stale thread) reads it again.
+  const [threadFailedId, setThreadFailedId] = useState("");
+  useEffect(() => {
+    if (current.id === "empty" || current.threadLoaded) return;
+    const conversationId = current.id;
+    void ensureThread(conversationId).then((detail) => {
+      setThreadFailedId((failed) => (detail ? (failed === conversationId ? "" : failed) : conversationId));
+    });
+  }, [current.id, current.threadLoaded]);
   const latestInboundMessageId = [...current.messages]
     .reverse()
     .find((message) => message.direction !== "outbound")?.id;
@@ -1577,15 +1709,30 @@ export function InboxPage() {
       const container = el.closest(".thread");
       if (container) container.scrollTop = container.scrollHeight;
     });
-  }, [current.id]);
+    // The thread now arrives after the selection does, so scroll again once it has landed.
+  }, [current.id, current.threadLoaded]);
   const selectedWorkspaceSlug = current.clientSlug || clientParam || "";
   /**
    * `target` is for callers that already hold a newer copy of the lead than this render's `current`
    * (a refresh that has just replaced the thread). Everyone else analyses what is on screen.
    */
   const generateAiReview = async (ai = workspaceAi, forceRegenerate = false, target?: Lead) => {
-    const subject = target ?? current;
-    if (!subject.messages.length || subject.id === "empty") return;
+    const base = target ?? current;
+    if (base.id === "empty") return;
+    // The list carries no thread, and the model must see the whole one, so read it first if needed.
+    const detail = base.threadLoaded ? null : await ensureThread(base.id);
+    if (!base.threadLoaded && !detail) return;
+    const subject: Lead = detail
+      ? {
+          ...base,
+          messages: detail.messages,
+          threadLoaded: true,
+          cachedDraft: base.cachedDraft || detail.cachedDraft,
+          cachedReason: base.cachedReason || detail.cachedReason,
+          analyzedAt: base.analyzedAt || detail.analyzedAt,
+        }
+      : base;
+    if (!subject.messages.length) return;
     const conversationId = subject.id;
     // Check for cached data: use it if the latest inbound message hasn't changed since analysis
     if (!forceRegenerate && subject.cachedDraft && subject.analyzedAt) {
@@ -1665,6 +1812,7 @@ export function InboxPage() {
                   { id: `sent-${sentAt}`, body: message, direction: "outbound", sentAt, authorName: lead.senderName },
                 ],
                 lastMessageAt: sentAt,
+                lastDirection: "outbound",
                 preview: message,
               }
             : lead,
@@ -1727,9 +1875,12 @@ export function InboxPage() {
             .catch(() => null);
         }
         // Follow-up score: cached against the latest reply, so it only recomputes on a new reply.
-        if (current.messages.length && !current.followUpAnalyzedAt && !scoredRef.current.followUp.has(conversationId)) {
+        // The thread comes from `ensureThread`, since the list row no longer carries it.
+        if (!current.followUpAnalyzedAt && !scoredRef.current.followUp.has(conversationId)) void ensureThread(conversationId).then((detail) => {
+          const thread = detail?.messages ?? [];
+          if (!thread.length || scoredRef.current.followUp.has(conversationId)) return;
           scoredRef.current.followUp.add(conversationId);
-          void fetch("/api/ai/follow-up-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, followUpPrompt: ai.followUpPrompt, sentiment: current.sentiment, thread: current.messages }) })
+          void fetch("/api/ai/follow-up-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId, workspaceId: ai.id || selectedWorkspaceSlug, workspaceName: current.client, leadName: current.name, followUpPrompt: ai.followUpPrompt, sentiment: current.sentiment, thread }) })
             .then((r) => r.json())
             .then((d) => {
               if (!d.ok) return;
@@ -1741,7 +1892,7 @@ export function InboxPage() {
                 : l));
             })
             .catch(() => null);
-        }
+        });
       }).catch(() => null);
     return () => { cancelled = true; };
     // The selected conversation is the intentional refresh boundary.
@@ -2408,7 +2559,7 @@ export function InboxPage() {
                   )}
                   {!inboxLoading && !inboxError && filtered.length === 0 && (
                     <p className="empty-state">
-                      No conversations have arrived for this inbox yet.
+                      {search.trim() ? `No conversations match "${search.trim()}".` : "No conversations have arrived for this inbox yet."}
                     </p>
                   )}
                   {visibleLeads.map((lead) => (
@@ -2435,7 +2586,7 @@ export function InboxPage() {
                         <div>
                           <strong className="lead-name">
                             <span className="lead-name-text">{lead.name}</span>
-                            {lead.messages.at(-1)?.direction === "outbound" && (
+                            {lastDirectionOf(lead) === "outbound" && (
                               <span
                                 className="responded-check"
                                 title="You've already replied to this thread"
@@ -2585,7 +2736,7 @@ export function InboxPage() {
                         <div className="detail-name-line">
                           <h3>
                             {current.name}
-                            {current.messages.at(-1)?.direction === "outbound" && (
+                            {lastDirectionOf(current) === "outbound" && (
                               <span
                                 className="responded-check detail-responded-check"
                                 title="You've already replied to this thread"
@@ -2610,7 +2761,7 @@ export function InboxPage() {
                           </button>
                         </div>
                         <p>
-                          {current.role} at {current.company}
+                          {[current.role, current.company].filter(Boolean).join(" at ")}
                         </p>
                         <div className="detail-profile-links">
                           {current.profileUrl && (
@@ -2742,7 +2893,11 @@ export function InboxPage() {
                       ))
                     ) : (
                       <p className="empty-state">
-                        No conversation messages are available yet.
+                        {current.threadLoaded
+                          ? "No conversation messages are available yet."
+                          : threadFailedId === current.id
+                            ? "This conversation could not be loaded. Refresh it to try again."
+                            : "Loading conversation…"}
                       </p>
                     )}
                     <div ref={threadEndRef} />
@@ -2754,7 +2909,7 @@ export function InboxPage() {
                         <button type="button" onClick={() => void generateAiReview(workspaceAi, true)} disabled={aiLoading}>{aiLoading ? "Generating…" : "Regenerate ↻"}</button>
                       </div>
                     </div>
-                    {current.messages.at(-1)?.direction === "outbound" && !composeAnyway ? (
+                    {lastDirectionOf(current) === "outbound" && !composeAnyway ? (
                       <button
                         type="button"
                         className="composer-replied-state"
@@ -2805,11 +2960,14 @@ export function InboxPage() {
                           className="send-button"
                           type="button"
                           onClick={() => setArmed(current.id)}
-                          disabled={sending || !aiDraft.trim() || current.id === "empty"}
-                          title={aiDraft.trim() ? "Review and confirm before this goes out" : "There is nothing written to send"}
+                          disabled={sending || !aiDraft.trim() || current.id === "empty" || Boolean(unfilledPlaceholder(aiDraft))}
+                          title={unfilledPlaceholder(aiDraft) ? `Fill in ${unfilledPlaceholder(aiDraft)} before sending` : aiDraft.trim() ? "Review and confirm before this goes out" : "There is nothing written to send"}
                         >
                           Send reply
                         </button>
+                        {unfilledPlaceholder(aiDraft) && (
+                          <p className="composer-senderror">Fill in {unfilledPlaceholder(aiDraft)} before sending.</p>
+                        )}
                       </div>
                     )}
                   </div>
