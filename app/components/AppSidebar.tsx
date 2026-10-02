@@ -5,7 +5,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BrandIcon, BrandWordmark } from "./BrandMark";
 import HelpMascot from "./HelpMascot";
@@ -105,13 +105,18 @@ export default function AppSidebar() {
     query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
   }, []);
-  const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string; logoUrl?: string }>>(() => {
-    if (typeof window === "undefined") return [];
+  // Starts empty, exactly as the server rendered it, and the cached list is applied in a layout effect
+  // (before the first paint). Reading localStorage in the initializer made the browser's first render
+  // differ from the server's on every page, which React reports as a hydration error (#418) and answers by
+  // throwing away the server HTML and redrawing everything.
+  const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string; logoUrl?: string }>>([]);
+  useLayoutEffect(() => {
     try {
       const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved) setSidebarClients(JSON.parse(saved));
+    } catch { /* keep the empty list until the fetch lands */ }
+  }, []);
   const [clientsLoading, setClientsLoading] = useState(true);
   // The dashboard is where you go to pick something, so the nav is open; everywhere else you
   // are already working in the page and the nav is out of the way. Each context remembers its
@@ -129,12 +134,9 @@ export default function AppSidebar() {
   // Help always opens with the rail folded: the article list is its own navigation, and the reading
   // column wants every pixel. It can still be expanded for the visit; it just doesn't stay that way.
   const forceCollapsed = pathname.startsWith("/help");
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === "undefined") return !home;
-    if (forceCollapsed) return true;
-    const stored = window.localStorage.getItem(collapseKey);
-    return stored ? stored === "collapsed" : !home;
-  });
+  // The server's answer first (it cannot see the stored choice); the stored choice is applied before paint
+  // by the layout effect below.
+  const [collapsed, setCollapsed] = useState(() => forceCollapsed || !home);
   useEffect(() => {
     // URL selection is client-only state for static navigation.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -167,11 +169,13 @@ export default function AppSidebar() {
     window.addEventListener("reply-radar-workspaces-changed", onStorage);
     return () => { window.removeEventListener("storage", onStorage); window.removeEventListener("reply-radar-workspaces-changed", onStorage); };
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     // Navigating between pages does not remount this, so the new context's default has to be
-    // re-read rather than inherited from the page we came from.
+    // re-read rather than inherited from the page we came from. A layout effect, so the stored choice is
+    // on screen before the first paint.
     if (forceCollapsed) { setCollapsed(true); return; }
-    const stored = window.localStorage.getItem(collapseKey);
+    let stored: string | null = null;
+    try { stored = window.localStorage.getItem(collapseKey); } catch { /* storage blocked: use the default */ }
     setCollapsed(stored ? stored === "collapsed" : !home);
   }, [collapseKey, home, forceCollapsed]);
   // Marks the few hundred milliseconds of a real collapse/expand, so the logo's crossfade runs then and
@@ -187,10 +191,7 @@ export default function AppSidebar() {
     // Written here rather than in an effect so a route change cannot save the previous
     // page's state against the new page's key.
     if (forceCollapsed) return;
-    window.localStorage.setItem(
-      collapseKey,
-      next ? "collapsed" : "expanded",
-    );
+    try { window.localStorage.setItem(collapseKey, next ? "collapsed" : "expanded"); } catch { /* storage blocked */ }
   };
   return (
     <>

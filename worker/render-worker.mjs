@@ -26,8 +26,16 @@ if (!supabaseUrl || !serviceRoleKey) {
 
 const headers = { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, "content-type": "application/json" };
 
+// Every database call has a ceiling. Without one, a single hung PostgREST connection would freeze whichever
+// loop made it (and with it the heartbeat) until Render restarted the process.
+const SUPABASE_TIMEOUT_MS = 30_000;
+
 async function supabase(path, options = {}) {
-  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, { ...options, headers: { ...headers, ...(options.headers || {}) } });
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...options,
+    headers: { ...headers, ...(options.headers || {}) },
+    signal: options.signal || AbortSignal.timeout(SUPABASE_TIMEOUT_MS),
+  });
   const body = await response.text();
   if (!response.ok) throw new Error(`Supabase ${response.status}: ${body}`);
   if (!body.trim()) return null;
@@ -35,7 +43,7 @@ async function supabase(path, options = {}) {
 }
 
 async function checkHeyReach(apiKey) {
-  const response = await fetch(`${heyreachBase}/auth/CheckApiKey`, { headers: { "X-API-KEY": apiKey, accept: "application/json" } });
+  const response = await fetch(`${heyreachBase}/auth/CheckApiKey`, { headers: { "X-API-KEY": apiKey, accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
   const body = await response.text();
   const contentType = response.headers.get("content-type") || "unknown content type";
   if (!response.ok) throw new Error(`HeyReach ${response.status} (${contentType}): ${body.slice(0, 500) || "empty response"}`);
@@ -88,7 +96,10 @@ async function syncWorkspace(workspace) {
     status = "failed";
     errorText = error instanceof Error ? error.message : "Workspace sync failed";
   }
-  await writeSyncRun({ workspace_id: workspace.id, run_type: "workspace-sync", source: "render-worker", status, started_at: startedAt, finished_at: new Date().toISOString(), records_seen: recordsSeen, records_written: 0, error_text: errorText });
+  // A failed log write must not abort the cycle: the sync itself already happened, and losing one log
+  // row is far cheaper than every later client in the loop going unchecked.
+  await writeSyncRun({ workspace_id: workspace.id, run_type: "workspace-sync", source: "render-worker", status, started_at: startedAt, finished_at: new Date().toISOString(), records_seen: recordsSeen, records_written: 0, error_text: errorText })
+    .catch((error) => console.warn("reply_radar_sync_run_log_failed", { workspace: workspace.slug, reason: error instanceof Error ? error.message : String(error) }));
   // The error key is omitted when there is nothing wrong: Render's log viewer flags any line
   // containing "error" as a failure, so `error: null` painted every healthy sync run red.
   console.info("reply_radar_workspace_sync", { workspace: workspace.slug, status, ...(errorText ? { error: errorText } : {}) });
@@ -262,9 +273,17 @@ async function refreshAllConversations() {
     // Two filters: not-recently-refreshed AND not-dormant. Dormant threads (last
     // message older than 30d) rarely change and would eat the daily budget for
     // rows that actually move.
-    const conversations = await supabase(
-      `rr_conversations?select=id,lead_id,account_id,heyreach_conversation_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&or=(last_refreshed_at.is.null,last_refreshed_at.lt.${encodeURIComponent(cutoff)})&last_message_at=gte.${encodeURIComponent(dormantCutoff)}&order=last_refreshed_at.asc.nullsfirst&limit=${REFRESH_BATCH_SIZE}`,
-    );
+    // Caught per client: one failed read used to abort the refresh for every client after it.
+    let conversations;
+    try {
+      conversations = await supabase(
+        `rr_conversations?select=id,lead_id,account_id,heyreach_conversation_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&or=(last_refreshed_at.is.null,last_refreshed_at.lt.${encodeURIComponent(cutoff)})&last_message_at=gte.${encodeURIComponent(dormantCutoff)}&order=last_refreshed_at.asc.nullsfirst&limit=${REFRESH_BATCH_SIZE}`,
+      );
+    } catch (error) {
+      totalErrors++;
+      console.warn("reply_radar_conversation_refresh_workspace_error", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
     if (!conversations || !conversations.length) continue;
 
     for (const conv of conversations) {
@@ -298,12 +317,10 @@ async function purgeInboundLeads() {
   if (!appBaseUrl) return;
   const startedAt = new Date().toISOString();
   try {
-    const response = await fetch(`${appBaseUrl}/api/database/purge`, {
+    const response = await appFetch("/api/database/purge", {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify({ confirm: true }),
-      signal: AbortSignal.timeout(120_000),
-    });
+    }, 120_000);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`purge ${response.status}: ${String(payload.error || "").slice(0, 200)}`);
     const deleted = payload.deleted || {};
@@ -368,24 +385,46 @@ let missingBaseUrlWarned = false;
 // Slug of the client the previous cycle ran out of budget on, so the next cycle resumes there
 // rather than restarting at the first client and starving the rest of the list forever.
 let aiWorkspaceCursor = "";
+/** PostgREST returns at most this many rows per request, whatever `limit` asks for. */
+const SUPABASE_PAGE_SIZE = 1000;
+/**
+ * conversation id → when its AI pass last failed. A conversation the draft route keeps rejecting (a
+ * thread too long for the model, a lead row that no longer exists) used to be picked first every cycle,
+ * since it is the newest reply and still needs work, and so held a batch slot forever. Three hours is
+ * long enough to stop that and short enough that a transient Anthropic outage clears the same day.
+ * In memory on purpose: a restart giving every conversation a fresh try is harmless.
+ */
+const AI_FAILURE_BACKOFF_MS = 3 * 60 * 60 * 1000;
+const aiFailedAt = new Map();
 
 const radarOf = (rawData) => {
   const raw = rawData && typeof rawData === "object" ? rawData : {};
   return raw.reply_radar && typeof raw.reply_radar === "object" ? raw.reply_radar : {};
 };
 
-async function appPost(path, body, { timeoutMs = 90_000, cron = false } = {}) {
-  const headers = { "content-type": "application/json" };
-  // The deals sync routes sit behind the login gate; the worker authorises the same way Vercel cron
-  // does — a CRON_SECRET bearer the middleware recognises (see isCron in middleware.ts).
+// How long the worker waits on the app. A route that runs a model (a brief, a report, a recap) can
+// legitimately take minutes; a GET that only lists what is due should answer quickly.
+const APP_MODEL_TIMEOUT_MS = 300_000;
+const APP_LIST_TIMEOUT_MS = 60_000;
+
+/**
+ * Every call the worker makes to the app goes through here.
+ *
+ * The bearer is the same CRON_SECRET the middleware recognises for Vercel cron (see isCron in
+ * middleware.ts). It used to be sent only to the routes already behind the login gate; sending it on
+ * every call means the rest of the worker-facing routes can be locked down later without a worker
+ * deploy having to land first. With no CRON_SECRET set nothing changes: no header is sent.
+ */
+function appFetch(path, init = {}, timeoutMs = APP_LIST_TIMEOUT_MS) {
+  const appHeaders = { ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers || {}) };
   const secret = process.env.CRON_SECRET?.trim();
-  if (cron && secret) headers.authorization = `Bearer ${secret}`;
-  const response = await fetch(`${appBaseUrl}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  if (secret) appHeaders.authorization = `Bearer ${secret}`;
+  return fetch(`${appBaseUrl}${path}`, { ...init, headers: appHeaders, signal: AbortSignal.timeout(timeoutMs) });
+}
+
+// `cron` is still accepted so existing callers read the same, but the bearer is now sent on every call.
+async function appPost(path, body, { timeoutMs = 90_000 } = {}) {
+  const response = await appFetch(path, { method: "POST", body: JSON.stringify(body) }, timeoutMs);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`${path} ${response.status}: ${String(payload.error || "").slice(0, 200)}`);
   return payload;
@@ -445,9 +484,20 @@ async function conversationsNeedingAi(workspace) {
   // attribution that any message may carry. Batched small with an explicit ceiling, because
   // PostgREST caps rows per request and a truncated page here would hide a conversation's newest
   // reply and stall it out of the sweep every cycle.
-  const allMessages = await chunked(candidates.map((c) => c.id), 20, (batch) =>
-    supabase(`rr_messages?select=conversation_id,direction,sent_at,raw_data&conversation_id=in.(${batch.join(",")})&order=sent_at.desc&limit=5000`),
-  );
+  //
+  // The ceiling is PostgREST's, not ours: a request for 5,000 rows comes back with 1,000 and no error,
+  // and since the order is newest first it was each batch's oldest messages that went missing, which
+  // is exactly the first message the origin check needs. So each batch is paged until a short page.
+  // The id tie-breaker keeps the order stable across pages when two messages share a timestamp.
+  const allMessages = await chunked(candidates.map((c) => c.id), 20, async (batch) => {
+    const rows = [];
+    for (let offset = 0; ; offset += SUPABASE_PAGE_SIZE) {
+      const page = await supabase(`rr_messages?select=conversation_id,direction,sent_at,raw_data&conversation_id=in.(${batch.join(",")})&order=sent_at.desc,id.desc&offset=${offset}&limit=${SUPABASE_PAGE_SIZE}`);
+      if (page) rows.push(...page);
+      if (!page || page.length < SUPABASE_PAGE_SIZE) break;
+    }
+    return rows;
+  });
   const messagesByConversation = new Map();
   const latestInbound = new Map();
   for (const row of allMessages) {
@@ -468,6 +518,8 @@ async function conversationsNeedingAi(workspace) {
 
   const work = [];
   for (const conv of candidates) {
+    // Recently failed: set aside so the slot goes to a conversation that can actually be worked.
+    if (Date.now() - (aiFailedAt.get(String(conv.id)) ?? 0) < AI_FAILURE_BACKOFF_MS) continue;
     const latest = latestInbound.get(String(conv.id));
     if (!latest) continue;
     const radar = radarOf(latest.raw_data);
@@ -559,6 +611,8 @@ async function runAiPipeline() {
   }
   const startedAt = new Date().toISOString();
   const deadline = Date.now() + AI_CYCLE_BUDGET_MS;
+  // Expired set-asides are dropped so the map cannot grow for the life of the process.
+  for (const [id, at] of aiFailedAt) if (Date.now() - at >= AI_FAILURE_BACKOFF_MS) aiFailedAt.delete(id);
   const workspaces = (await supabase("rr_workspaces?select=id,slug,name,client_brief,anthropic_model,custom_system_prompt,guardrails&order=created_at.asc")) || [];
   // Start at the client the previous cycle ran out of budget on and wrap around from there, so a
   // large backlog at the top of the list cannot keep the clients below it permanently unprocessed.
@@ -601,8 +655,10 @@ async function runAiPipeline() {
         const lead = leadsById.get(String(item.conv.lead_id || ""));
         steps += await runAiForConversation(workspace, item, String((lead && lead.name) || ""));
         processed++;
+        aiFailedAt.delete(String(item.conv.id));
       } catch (error) {
         errors++;
+        aiFailedAt.set(String(item.conv.id), Date.now());
         console.warn("reply_radar_ai_pipeline_error", { workspace: workspace.slug, conversation: item.conv.id, error: error instanceof Error ? error.message : String(error) });
       }
       if (Date.now() - lastHeartbeat >= 60_000) {
@@ -942,6 +998,7 @@ async function pruneSyncRuns() {
     const response = await fetch(`${supabaseUrl}/rest/v1/rr_sync_runs?${query}`, {
       method: "DELETE",
       headers: { ...headers, Prefer: "return=minimal,count=exact" },
+      signal: AbortSignal.timeout(SUPABASE_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`Supabase ${response.status}: ${(await response.text()).slice(0, 300)}`);
     // PostgREST reports the affected count in the Content-Range header as `*/N`.
@@ -1016,6 +1073,20 @@ async function heyReachCampaignPages(apiKey) {
   return items;
 }
 
+/**
+ * What is already stored for a client's campaigns, paged because PostgREST returns 1,000 rows at most
+ * and a row missing here would have its copy and its carried-forward figures written as nulls.
+ */
+async function storedCampaignStats(workspaceId) {
+  const rows = [];
+  for (let offset = 0; ; offset += SUPABASE_PAGE_SIZE) {
+    const page = await supabase(`rr_campaign_stats?select=campaign_id,first_touch,follow_up,sequence_steps,sequence_fetched_at,connections_sent,connections_accepted,replies,messages_started&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=campaign_id.asc&offset=${offset}&limit=${SUPABASE_PAGE_SIZE}`);
+    if (page) rows.push(...page);
+    if (!page || page.length < SUPABASE_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 /** `rr_campaign_stats` for one client: the campaign list joined to the lifetime rollup. */
 async function collectCampaignStats(workspace) {
   const apiKey = workspace.heyreach_api_key_ciphertext;
@@ -1026,16 +1097,27 @@ async function collectCampaignStats(workspace) {
       // Pinned to 2020 for the same reason the API route pins it: these are lifetime totals, and a
       // rollup with no date range comes back empty rather than all-time.
       body: JSON.stringify({ accountIds: [], campaignIds: [], startDate: "2020-01-01T00:00:00.000Z", endDate: new Date().toISOString() }),
-    }).catch(() => null),
-    supabase(`rr_campaign_stats?select=campaign_id,first_touch,follow_up,sequence_steps,sequence_fetched_at&workspace_id=eq.${encodeURIComponent(workspace.id)}&limit=2000`),
+    }).catch((error) => {
+      console.warn("reply_radar_analytics_rollup_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }),
+    storedCampaignStats(workspace.id),
   ]);
   // A client's own pre-engagement campaigns share this API key. Dropped at the edge, as everywhere
   // else, so nothing downstream can count them as our work.
   const ours = ourCampaigns(campaigns, (row) => row.name);
   if (!ours.length) return 0;
 
+  /*
+   * Whether the lifetime rollup actually came back. It is tolerated when it fails, so the campaign list
+   * and copy still get stored, but a failed rollup used to be read as "every campaign has zero sends,
+   * zero accepts, zero replies" and written over the real figures, with the run logged as a success.
+   * The analytics page then showed a client's whole history wiped out until the next day's pass. When
+   * it is missing, the four rollup columns are carried forward from what was stored instead.
+   */
+  const rollupOk = Array.isArray(rollup?.overallStats);
   const statsById = new Map();
-  for (const row of Array.isArray(rollup?.overallStats) ? rollup.overallStats : []) {
+  for (const row of rollupOk ? rollup.overallStats : []) {
     statsById.set(String(row.campaignId ?? ""), row);
   }
   const storedById = new Map((stored || []).map((row) => [String(row.campaign_id), row]));
@@ -1063,7 +1145,7 @@ async function collectCampaignStats(workspace) {
   }
 
   const now = new Date().toISOString();
-  const rows = ours.map((campaign) => {
+  const mapped = ours.map((campaign) => {
     const id = String(campaign.id);
     const stats = statsById.get(id) || {};
     const progress = campaign.progressStats && typeof campaign.progressStats === "object" ? campaign.progressStats : {};
@@ -1080,10 +1162,10 @@ async function collectCampaignStats(workspace) {
       leads_pending: Number(progress.totalUsersPending || 0),
       leads_in_progress: Number(progress.totalUsersInProgress || 0),
       leads_finished: Number(progress.totalUsersFinished || 0),
-      connections_sent: Number(stats.connectionsSent || 0),
-      connections_accepted: Number(stats.connectionsAccepted || 0),
-      replies: Number(stats.totalMessageReplies || 0) + Number(stats.totalInmailReplies || 0),
-      messages_started: Number(stats.totalMessageStarted || 0) + Number(stats.totalInmailStarted || 0),
+      connections_sent: rollupOk ? Number(stats.connectionsSent || 0) : Number(previous.connections_sent || 0),
+      connections_accepted: rollupOk ? Number(stats.connectionsAccepted || 0) : Number(previous.connections_accepted || 0),
+      replies: rollupOk ? Number(stats.totalMessageReplies || 0) + Number(stats.totalInmailReplies || 0) : Number(previous.replies || 0),
+      messages_started: rollupOk ? Number(stats.totalMessageStarted || 0) + Number(stats.totalInmailStarted || 0) : Number(previous.messages_started || 0),
       // Carried forward rather than omitted. An upsert has to send the same keys for every row, so a
       // row without these would write nulls over copy a previous pass had already read.
       first_touch: fetched ? fetched.firstTouch || null : previous.first_touch ?? null,
@@ -1093,6 +1175,10 @@ async function collectCampaignStats(workspace) {
       refreshed_at: now,
     };
   });
+  // One row per campaign. HeyReach's paging is offset-based, so a campaign created mid-read can shift
+  // another onto the next page and it comes back twice; Postgres refuses an upsert that touches the
+  // same key twice, and that one duplicate would fail the whole client's batch. The later copy wins.
+  const rows = [...new Map(mapped.map((row) => [row.campaign_id, row])).values()];
 
   await supabase("rr_campaign_stats?on_conflict=workspace_id,campaign_id", {
     method: "POST",
@@ -1220,6 +1306,9 @@ async function staleAnalyticsWorkspace() {
   return oldest.workspace;
 }
 
+/** A requested pass still `running` after this long is treated as abandoned and closed as an error. */
+const ANALYTICS_RUNNING_TIMEOUT_MS = 30 * 60 * 1000;
+
 /** PATCHes one `rr_sync_runs` row. Used to move a requested refresh through its states. */
 function patchSyncRun(id, patch) {
   return supabase(`rr_sync_runs?id=eq.${encodeURIComponent(String(id))}`, {
@@ -1241,6 +1330,20 @@ function patchSyncRun(id, patch) {
  * that throws from being retried on every cycle for the next two days.
  */
 async function queuedAnalyticsRequest() {
+  /*
+   * Close requests left at `running`. A worker restarted mid-pass (every deploy restarts it) never
+   * reaches the line that finishes its row, and a `running` row keeps the page's progress bar up and the
+   * refresh button disabled for as long as it exists. Safe to sweep here: the analytics loop is the only
+   * thing that runs a requested pass and it is sequential, so when this runs no pass of this process is
+   * in flight. Thirty minutes is several times the longest pass, measured from when the press was made.
+   */
+  const stuckBefore = new Date(Date.now() - ANALYTICS_RUNNING_TIMEOUT_MS).toISOString();
+  await supabase(`rr_sync_runs?run_type=eq.analytics&status=eq.running&started_at=lt.${encodeURIComponent(stuckBefore)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ status: "error", finished_at: new Date().toISOString(), error_text: "Timed out: the sync was still running after 30 minutes, most likely because the worker restarted mid-pass. Press Sync now to try again." }),
+  }).catch((error) => console.warn("reply_radar_analytics_stuck_sweep_failed", { error: error instanceof Error ? error.message : String(error) }));
+
   const queued = await supabase("rr_sync_runs?select=id,workspace_id&run_type=eq.analytics&status=eq.queued&workspace_id=not.is.null&order=started_at.asc&limit=1");
   const request = queued?.[0];
   if (!request) return null;
@@ -1269,19 +1372,41 @@ async function queuedAnalyticsRequest() {
 // When the table is missing, check again an hour later rather than never (it gets created by hand).
 let outreachTableMissingAt = 0;
 async function syncOutreach(workspace) {
-  if (outreachTableMissingAt && Date.now() - outreachTableMissingAt < 60 * 60 * 1000) return 0;
+  if (outreachTableMissingAt && Date.now() - outreachTableMissingAt < 60 * 60 * 1000) return { written: 0, errors: 0 };
   const apiKey = workspace.heyreach_api_key_ciphertext;
   const campaigns = ourCampaigns(await heyReachCampaignPages(apiKey), (row) => row.name);
   let written = 0;
+  // Campaigns that could not be read or written in full. Counted rather than thrown so one bad
+  // campaign does not cost every campaign after it, and reported so a partial log is never a success.
+  let errors = 0;
+  const readPage = (campaign, offset) => heyReachFetch(apiKey, "campaign/GetLeadsFromCampaign", {
+    method: "POST",
+    body: JSON.stringify({ campaignId: campaign.id, offset, limit: 100, timeFilter: "Everywhere" }),
+  }, 30_000);
   for (const campaign of campaigns) {
     for (let offset = 0; offset < 20_000; offset += 100) {
-      const page = await heyReachFetch(apiKey, "campaign/GetLeadsFromCampaign", {
-        method: "POST",
-        body: JSON.stringify({ campaignId: campaign.id, offset, limit: 100, timeFilter: "Everywhere" }),
-      }, 30_000).catch(() => null);
+      /*
+       * A failed page used to come back as null and read as the end of the list, so a single 429 or
+       * slow response quietly truncated the campaign and the pass still said it had worked. It gets one
+       * more try after a pause (long enough for HeyReach's 2-second rate window to roll over), and if
+       * that fails too this campaign stops here and is counted as an error.
+       */
+      let page;
+      try {
+        page = await readPage(campaign, offset);
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        try {
+          page = await readPage(campaign, offset);
+        } catch (error) {
+          errors += 1;
+          console.warn("reply_radar_outreach_page_failed", { workspace: workspace.slug, campaign: String(campaign.id), offset, error: error instanceof Error ? error.message : String(error) });
+          break;
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, 200));
       const items = Array.isArray(page?.items) ? page.items : [];
-      const rows = items
+      const mapped = items
         .filter((lead) => (lead.leadConnectionStatus && lead.leadConnectionStatus !== "None") || (lead.leadMessageStatus && lead.leadMessageStatus !== "None"))
         .map((lead) => {
           const p = lead.linkedInUserProfile || {};
@@ -1305,6 +1430,9 @@ async function syncOutreach(workspace) {
             synced_at: new Date().toISOString(),
           };
         });
+      // One row per lead: Postgres rejects an upsert that touches the same key twice, and one repeated
+      // lead in a page would otherwise fail the whole page. The later copy wins.
+      const rows = [...new Map(mapped.map((row) => [row.heyreach_lead_id, row])).values()];
       if (rows.length) {
         try {
           await supabase("rr_outreach?on_conflict=workspace_id,campaign_id,heyreach_lead_id", {
@@ -1317,16 +1445,19 @@ async function syncOutreach(workspace) {
           if (/PGRST205|404|does not exist/i.test(String(error))) {
             outreachTableMissingAt = Date.now();
             console.warn("reply_radar_outreach_table_missing", { hint: "run supabase/migrations/20261002_rr_outreach.sql" });
-            return 0;
+            return { written: 0, errors: 0 };
           }
-          throw error;
+          // Any other write failure stops this campaign only; the rest of the client is still worth having.
+          errors += 1;
+          console.warn("reply_radar_outreach_write_failed", { workspace: workspace.slug, campaign: String(campaign.id), offset, error: error instanceof Error ? error.message : String(error) });
+          break;
         }
       }
       const total = Number(page?.totalCount || 0);
       if (items.length < 100 || (total && offset + 100 >= total)) break;
     }
   }
-  return written;
+  return { written, errors };
 }
 
 /**
@@ -1349,8 +1480,8 @@ async function backfillOutreach() {
     outreachBackfillTried.add(workspace.id);
     if (has?.length) continue;
     try {
-      const reached = await syncOutreach(workspace);
-      console.info("reply_radar_outreach_backfilled", { workspace: workspace.slug, rows: reached });
+      const { written, errors } = await syncOutreach(workspace);
+      console.info("reply_radar_outreach_backfilled", { workspace: workspace.slug, rows: written, ...(errors ? { failedCampaigns: errors } : {}) });
     } catch (error) {
       console.warn("reply_radar_outreach_backfill_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
     }
@@ -1374,8 +1505,9 @@ async function collectAnalytics() {
     days = await collectDailyStats(workspace);
     // The outreach log rides the same daily pass; a failure here must not lose the stats above.
     try {
-      const reached = await syncOutreach(workspace);
-      if (reached) console.info("reply_radar_outreach_synced", { workspace: workspace.slug, rows: reached });
+      const { written, errors } = await syncOutreach(workspace);
+      if (written) console.info("reply_radar_outreach_synced", { workspace: workspace.slug, rows: written });
+      if (errors) console.warn("reply_radar_outreach_partial", { workspace: workspace.slug, failedCampaigns: errors });
     } catch (error) {
       console.warn("reply_radar_outreach_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
     }
@@ -1433,15 +1565,31 @@ async function analyticsLoop() {
  * It also means a single hung client costs one cycle rather than the whole morning.
  */
 
+/**
+ * "kind:id" → when a scheduled send last failed or ended without a clear answer. Skipped for six hours,
+ * the same rule the call recaps use.
+ *
+ * The per-pass `tried` set only stops a tight loop inside one pass; the loop starts a fresh pass every
+ * minute, so a send that kept failing was retried sixty times an hour. For a DM that is the worst case:
+ * a call that timed out after Slack had already posted looks like a failure, the person is still due,
+ * and they get the same message again every minute. In memory on purpose: a restart gives each one
+ * fresh try, which is the right amount of retrying for something a person reads.
+ */
+const SCHEDULED_SEND_BACKOFF_MS = 6 * 60 * 60 * 1000;
+const scheduledSendFailedAt = new Map();
+// Briefs and EOW reports are due within a day, so a failure retries after 45 minutes; a personal DM that
+// failed may already have half-posted, so it waits the full backoff before trying again.
+const backingOff = (kind, id) => Date.now() - (scheduledSendFailedAt.get(`${kind}:${id}`) ?? 0) < (kind === "personal" ? SCHEDULED_SEND_BACKOFF_MS : 45 * 60 * 1000);
+
 async function sendDueBrief(tried = new Set()) {
   if (!appBaseUrl) return false;
 
-  const listed = await fetch(`${appBaseUrl}/api/slack/brief`, { cache: "no-store" }).catch(() => null);
+  const listed = await appFetch("/api/slack/brief", { cache: "no-store" }, APP_LIST_TIMEOUT_MS).catch(() => null);
   if (!listed?.ok) return false;
   const payload = await listed.json().catch(() => null);
-  // Anything already tried in this pass is skipped, so a brief that keeps failing is retried on the next
-  // pass a minute later rather than in a tight loop.
-  const due = Array.isArray(payload?.due) ? payload.due.filter((slug) => typeof slug === "string" && slug && !tried.has(slug)) : [];
+  // Anything already tried in this pass is skipped, so a brief that keeps failing is not retried in a
+  // tight loop, and one that failed recently is set aside for six hours rather than retried every pass.
+  const due = Array.isArray(payload?.due) ? payload.due.filter((slug) => typeof slug === "string" && slug && !tried.has(slug) && !backingOff("brief", slug)) : [];
   if (!due.length) return false;
 
   // Only the first. The next cycle re-asks, and by then this one has a row in `rr_slack_briefs` and is
@@ -1451,13 +1599,13 @@ async function sendDueBrief(tried = new Set()) {
   const startedAt = new Date().toISOString();
   const destination = typeof payload?.schedule?.destination === "string" ? payload.schedule.destination : "test";
   try {
-    const response = await fetch(`${appBaseUrl}/api/slack/brief`, {
+    const response = await appFetch("/api/slack/brief", {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify({ workspace: slug, destination }),
-    });
+    }, APP_MODEL_TIMEOUT_MS);
     const result = await response.json().catch(() => ({}));
     const failed = !response.ok || result?.ok === false;
+    if (failed) scheduledSendFailedAt.set(`brief:${slug}`, Date.now());
     console.info("reply_radar_morning_brief_sent", { slug, destination, posted: Boolean(result?.posted), remaining: due.length - 1 });
     // Logged against the worker rather than the client, because the app already wrote the brief row.
     // This row answers a different question: did the schedule fire, and did the call to it come back.
@@ -1473,6 +1621,7 @@ async function sendDueBrief(tried = new Set()) {
       error_text: failed ? String(result?.error || `HTTP ${response.status}`).slice(0, 500) : null,
     });
   } catch (error) {
+    scheduledSendFailedAt.set(`brief:${slug}`, Date.now());
     console.error("reply_radar_morning_brief_failed", { slug, error: String(error) });
     await writeSyncRun({
       workspace_id: null,
@@ -1520,23 +1669,25 @@ async function processDueColdCallJobs() {
 async function sendDuePersonalBrief(tried = new Set()) {
   if (!appBaseUrl) return false;
 
-  const listed = await fetch(`${appBaseUrl}/api/slack/personal`, { cache: "no-store" }).catch(() => null);
+  const listed = await appFetch("/api/slack/personal", { cache: "no-store" }, APP_LIST_TIMEOUT_MS).catch(() => null);
   if (!listed?.ok) return false;
   const payload = await listed.json().catch(() => null);
-  const due = Array.isArray(payload?.due) ? payload.due.filter((id) => typeof id === "string" && id && !tried.has(id)) : [];
+  // A person whose last send failed or timed out is set aside for six hours: a timeout can mean the DM
+  // already went, and retrying every minute is how somebody gets the same message thirty times.
+  const due = Array.isArray(payload?.due) ? payload.due.filter((id) => typeof id === "string" && id && !tried.has(id) && !backingOff("personal", id)) : [];
   if (!due.length) return false;
 
   const id = due[0];
   tried.add(id);
   const startedAt = new Date().toISOString();
   try {
-    const response = await fetch(`${appBaseUrl}/api/slack/personal`, {
+    const response = await appFetch("/api/slack/personal", {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify({ id }),
-    });
+    }, APP_MODEL_TIMEOUT_MS);
     const result = await response.json().catch(() => ({}));
     const failed = !response.ok || result?.ok === false;
+    if (failed) scheduledSendFailedAt.set(`personal:${id}`, Date.now());
     console.info("reply_radar_personal_brief_sent", { id, ok: !failed, remaining: due.length - 1 });
     await writeSyncRun({
       workspace_id: null,
@@ -1550,6 +1701,7 @@ async function sendDuePersonalBrief(tried = new Set()) {
       error_text: failed ? String(result?.error || `HTTP ${response.status}`).slice(0, 500) : null,
     });
   } catch (error) {
+    scheduledSendFailedAt.set(`personal:${id}`, Date.now());
     console.error("reply_radar_personal_brief_failed", { id, error: String(error) });
     await writeSyncRun({
       workspace_id: null, run_type: "personal_brief", source: "render-worker", status: "error",
@@ -1562,43 +1714,40 @@ async function sendDuePersonalBrief(tried = new Set()) {
 }
 
 /**
- * The End-of-Week report, on the same one-per-cycle pattern as the morning brief.
+ * The End-of-Week report, one client at a time on the scheduled-sends loop beside the morning brief.
  *
  * A sibling automation with its own schedule (`eow_report` in `rr_slack_automations`, Fridays 1pm ET by
  * default) and its own opt-in flag, so it is asked and dispatched separately. The route's GET does all the
- * schedule and readiness maths — the worker cannot import TypeScript and must not keep a second copy of the
- * rules — and this only POSTs the first slug it is handed. The route logs the report row; this logs whether
+ * schedule and readiness maths (the worker cannot import TypeScript and must not keep a second copy of the
+ * rules) and this only POSTs the first slug it is handed. The route logs the report row; this logs whether
  * the schedule fired, same split as the brief.
  *
- * Heavier than a brief (generate + compose + two Slack posts), which is why one per cycle matters more
- * here: the next cycle re-asks, and by then the client has a row and is no longer due, so a full roster
- * drains itself over the following cycles without this file holding any state.
+ * It used to go one client per main cycle, and a main cycle can take a quarter of an hour, so a large
+ * roster could still be draining after midnight on Friday, by which point the route no longer calls
+ * anyone due and the rest of the reports were simply never sent. On the drain they go back to back, still
+ * never two at once (each is generate + compose + two Slack posts), and the route still decides who is due.
  */
-const EOW_REPORT_LOOP_MS = 60 * 1000;
-let lastEowReportRun = 0;
+async function sendDueEowReport(tried = new Set()) {
+  if (!appBaseUrl) return false;
 
-async function sendDueEowReport() {
-  if (!appBaseUrl) return;
-  if (Date.now() - lastEowReportRun < EOW_REPORT_LOOP_MS) return;
-  lastEowReportRun = Date.now();
-
-  const listed = await fetch(`${appBaseUrl}/api/slack/eow-report`, { cache: "no-store" }).catch(() => null);
-  if (!listed?.ok) return;
+  const listed = await appFetch("/api/slack/eow-report", { cache: "no-store" }, APP_LIST_TIMEOUT_MS).catch(() => null);
+  if (!listed?.ok) return false;
   const payload = await listed.json().catch(() => null);
-  const due = Array.isArray(payload?.due) ? payload.due.filter((slug) => typeof slug === "string" && slug) : [];
-  if (!due.length) return;
+  const due = Array.isArray(payload?.due) ? payload.due.filter((slug) => typeof slug === "string" && slug && !tried.has(slug) && !backingOff("eow", slug)) : [];
+  if (!due.length) return false;
 
   const slug = due[0];
+  tried.add(slug);
   const startedAt = new Date().toISOString();
   const destination = typeof payload?.schedule?.destination === "string" ? payload.schedule.destination : "internal";
   try {
-    const response = await fetch(`${appBaseUrl}/api/slack/eow-report`, {
+    const response = await appFetch("/api/slack/eow-report", {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify({ workspace: slug, destination }),
-    });
+    }, APP_MODEL_TIMEOUT_MS);
     const result = await response.json().catch(() => ({}));
     const failed = !response.ok || result?.ok === false;
+    if (failed) scheduledSendFailedAt.set(`eow:${slug}`, Date.now());
     console.info("reply_radar_eow_report_sent", { slug, destination, posted: Boolean(result?.posted), remaining: due.length - 1 });
     await writeSyncRun({
       workspace_id: null,
@@ -1612,6 +1761,7 @@ async function sendDueEowReport() {
       error_text: failed ? String(result?.error || `HTTP ${response.status}`).slice(0, 500) : null,
     });
   } catch (error) {
+    scheduledSendFailedAt.set(`eow:${slug}`, Date.now());
     console.error("reply_radar_eow_report_failed", { slug, error: String(error) });
     await writeSyncRun({
       workspace_id: null,
@@ -1625,6 +1775,8 @@ async function sendDueEowReport() {
       error_text: String(error).slice(0, 500),
     });
   }
+  // Sent or failed, this one was handled: ask again straight away for the next.
+  return true;
 }
 
 // ── Granola heartbeat and call analysis ─────────────────────────────
@@ -1653,7 +1805,7 @@ async function runGranolaHeartbeat() {
   lastGranolaHeartbeatRun = Date.now();
 
   const startedAt = new Date().toISOString();
-  const listed = await fetch(`${appBaseUrl}/api/granola/heartbeat`, { cache: "no-store" }).catch(() => null);
+  const listed = await appFetch("/api/granola/heartbeat", { cache: "no-store" }, APP_LIST_TIMEOUT_MS).catch(() => null);
   if (!listed) return;
   const payload = await listed.json().catch(() => null);
   // Outside the window the app polls nothing and stores nothing; the worker matches it and does not log a
@@ -1692,11 +1844,10 @@ async function runGranolaHeartbeat() {
     let failed = true;
     let errorText = null;
     try {
-      const response = await fetch(`${appBaseUrl}/api/slack/call-analysis`, {
+      const response = await appFetch("/api/slack/call-analysis", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ workspace: slug, destination: "internal" }),
-      });
+      }, APP_MODEL_TIMEOUT_MS);
       const result = await response.json().catch(() => ({}));
       failed = !response.ok || result?.ok === false || !result?.posted;
       errorText = failed ? `${slug}: ${String(result?.error || `HTTP ${response.status}`)}`.slice(0, 500) : null;
@@ -1725,10 +1876,13 @@ async function runGranolaHeartbeat() {
 
 async function runOnce() {
   const cycleStarted = new Date().toISOString();
-  await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "running", started_at: cycleStarted, records_seen: 0, records_written: 0 });
+  // Heartbeat writes are logging: a failed one is warned about and the cycle carries on, rather than
+  // a Supabase hiccup on a log row skipping every task below it.
+  const logFailed = (error) => console.warn("reply_radar_heartbeat_write_failed", { reason: error instanceof Error ? error.message : String(error) });
+  await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "running", started_at: cycleStarted, records_seen: 0, records_written: 0 }).catch(logFailed);
   const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&order=created_at.asc");
   for (const workspace of workspaces) await syncWorkspace(workspace);
-  await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "success", started_at: cycleStarted, finished_at: new Date().toISOString(), records_seen: workspaces.length, records_written: 0 });
+  await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "success", started_at: cycleStarted, finished_at: new Date().toISOString(), records_seen: workspaces.length, records_written: 0 }).catch(logFailed);
 
   // Run conversation refresh every ~2.4h (10 batches/day × 5 conversations = 50/workspace/day)
   if (Date.now() - lastRefreshRun >= REFRESH_LOOP_MS) {
@@ -1771,9 +1925,7 @@ async function runOnce() {
   // Advance any running cold-call fetch/enrich job (fetch campaign leads → enrich profile/phone/ICP).
   try { await processDueColdCallJobs(); } catch (error) { console.error("reply_radar_coldcall_cycle_failed", error); }
 
-  // At most one client's EOW report per cycle, on its own Friday-afternoon schedule. Same one-per-cycle
-  // drain as the brief; the route does the schedule and readiness maths and this only dispatches.
-  try { await sendDueEowReport(); } catch (error) { console.error("reply_radar_eow_report_cycle_failed", error); }
+  // EOW reports are sent from scheduledSendsLoop, beside the morning brief, not once per main cycle.
 
   // Every hour, in working hours: ask Granola what calls it can see and post an analysis for any it has
   // not posted before. Its own timer, so it runs on the hour independently of the brief's daily cadence.
@@ -1785,7 +1937,7 @@ async function runOnce() {
 }
 
 /**
- * Scheduled briefs on their own loop, sent back to back.
+ * Scheduled briefs (and the Friday EOW reports) on their own loop, sent back to back.
  *
  * They used to go one per main cycle, but a main cycle also reconciles a client (up to 7 min), syncs a
  * CRM (up to 4 min) and runs the AI pipeline (up to 10 min), so a cycle could take a quarter of an hour
@@ -1810,6 +1962,7 @@ async function scheduledSendsLoop() {
   for (;;) {
     await drain("morning_brief", sendDueBrief);
     await drain("personal_brief", sendDuePersonalBrief);
+    await drain("eow_report", sendDueEowReport);
     await new Promise((resolve) => setTimeout(resolve, SCHEDULED_SEND_IDLE_MS));
   }
 }

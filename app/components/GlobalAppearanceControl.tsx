@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import AppearancePanel, { type AppearancePrefs } from "./AppearancePanel";
 import {
   identityKey,
@@ -32,11 +32,14 @@ const applyAppearance = (appearance: AppearancePrefs) => {
 };
 
 export default function GlobalAppearanceControl() {
-  const [appearance, setAppearance] = useState<AppearancePrefs>(() => {
-    if (typeof window === "undefined") return defaults;
+  // Defaults first, as the server rendered them; the cached look is applied before paint (see below), so the
+  // browser's first render matches the server's and React does not discard the page (hydration error #418).
+  const [appearance, setAppearance] = useState<AppearancePrefs>(defaults);
+  useLayoutEffect(() => {
     const stored = readCachedAppearance();
-    return stored ? { ...defaults, ...stored, accent: accentOf(stored) } : defaults;
-  });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (stored) setAppearance({ ...defaults, ...stored, accent: accentOf(stored) });
+  }, []);
   const [open, setOpen] = useState(false);
 
   useEffect(() => { applyAppearance(appearance); }, [appearance]);

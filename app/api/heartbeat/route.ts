@@ -2,6 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
+import { AUTH_COOKIE, authConfigured, sessionToken, timingSafeEqual } from "../../lib/auth";
 import { GRANOLA_DOWN_SECONDS, GRANOLA_TIMEZONE, granolaHeartbeatState } from "../../lib/granola-heartbeat";
 import { DEFAULT_MODEL } from "../../../shared/anthropic-model.mjs";
 import { slimImages } from "../../lib/image-refs";
@@ -27,7 +28,30 @@ const safeJson = async (response: Response): Promise<unknown> => {
   }
 };
 
-export async function GET() {
+/** Whether this caller is a logged-in person or the worker. Anyone else gets only the up/down answer. */
+async function isTrustedCaller(request: Request): Promise<boolean> {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (secret && request.headers.get("authorization") === `Bearer ${secret}`) return true;
+  const cookie = (request.headers.get("cookie") ?? "").split(/;\s*/).find((part) => part.startsWith(`${AUTH_COOKIE}=`))?.slice(AUTH_COOKIE.length + 1) ?? "";
+  return authConfigured() && Boolean(cookie) && timingSafeEqual(decodeURIComponent(cookie), await sessionToken());
+}
+
+/** Stored settings with anything that works as a credential masked, for the logged-in health view. */
+function maskSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(maskSecrets);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) =>
+      [k, /key|secret|token|password|webhook/i.test(k) && v ? "[configured, hidden]" : maskSecrets(v)]));
+  }
+  return value;
+}
+
+export async function GET(incoming: Request) {
+  // The heartbeat is reachable without a login so an uptime monitor can ping it. Unauthenticated callers
+  // used to get every client's full record (briefs, guardrails, channel ids); they now get only the verdict.
+  if (!(await isTrustedCaller(incoming))) {
+    return NextResponse.json({ status: "ok", checkedAt: new Date().toISOString() }, { headers: { "cache-control": "no-store" } });
+  }
   const checkedAt = new Date().toISOString();
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -591,7 +615,7 @@ export async function GET() {
         recentRuns,
         recentEvents,
         raw: {
-          ...row,
+          ...(maskSecrets(row) as Record<string, unknown>),
           heyreach_api_key_ciphertext: keyConfigured
             ? "[configured — hidden]"
             : null,
