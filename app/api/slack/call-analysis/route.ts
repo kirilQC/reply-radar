@@ -37,7 +37,7 @@ import {
   isDueNow,
   type BriefSchedule,
 } from "../../../lib/morning-brief-schedule";
-import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
+import { postMessage, probeChannel, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
 
 /** One model call plus a transcript fetch, comfortably inside Hobby's ceiling — see the brief's note. */
 export const maxDuration = 180;
@@ -290,6 +290,14 @@ export async function POST(request: Request) {
     if (destination === "external") {
       channelId = String(workspace.slack_external_channel_id ?? "").trim();
       if (!channelId) return NextResponse.json({ error: `${workspace.name} has no external channel id. Add one on their configuration page.` }, { status: 400 });
+    }
+    // Check the channel before spending a model call on a recap that cannot be delivered. A deleted or
+    // private-without-the-bot channel fails here in a second, with the client named, instead of after the write.
+    if (channelId && slackConfigured()) {
+      const probe = await probeChannel("internal", channelId).catch(() => null);
+      if (probe && !probe.canPost) {
+        return NextResponse.json({ ok: false, posted: false, error: `${workspace.name}: Slack channel ${channelId} can't be posted to (${probe.postError}). Fix it on the client's configuration page.` }, { status: 409 });
+      }
     }
     if (channelId && !slackConfigured()) {
       return NextResponse.json({ error: `${SLACK_TOKEN_ENV} is not set, so nothing can be posted to Slack.` }, { status: 400 });

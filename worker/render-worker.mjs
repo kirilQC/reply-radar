@@ -1644,6 +1644,8 @@ async function sendDueEowReport() {
  */
 const GRANOLA_HEARTBEAT_LOOP_MS = 60 * 60 * 1000;
 let lastGranolaHeartbeatRun = 0;
+/** slug → when its recap last failed to post; skipped for six hours so it cannot block the queue. */
+const callAnalysisFailedAt = new Map();
 
 async function runGranolaHeartbeat() {
   if (!appBaseUrl) return;
@@ -1678,19 +1680,33 @@ async function runGranolaHeartbeat() {
     error_text: payload?.ok === false ? String(payload?.error || "Granola heartbeat failed").slice(0, 500) : null,
   }).catch((error) => console.warn("reply_radar_granola_heartbeat_log_failed", { reason: String(error) }));
 
-  // One new call per cycle: the newest unposted call goes now, the rest are picked up on following hours.
+  // Up to four recaps per cycle. A client whose post fails (a deleted channel, a private channel without the
+  // bot) is set aside for six hours instead of being retried first every hour, which used to block every
+  // other client's recap behind it.
   if (!newCalls.length) return;
-  const slug = newCalls[0];
-  const postStartedAt = new Date().toISOString();
-  try {
-    const response = await fetch(`${appBaseUrl}/api/slack/call-analysis`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workspace: slug, destination: "internal" }),
-    });
-    const result = await response.json().catch(() => ({}));
-    const failed = !response.ok || result?.ok === false;
-    console.info("reply_radar_call_analysis_sent", { slug, destination: "internal", posted: Boolean(result?.posted), remaining: newCalls.length - 1 });
+  let sent = 0;
+  for (const slug of newCalls) {
+    if (sent >= 4) break;
+    if (Date.now() - (callAnalysisFailedAt.get(slug) ?? 0) < 6 * 60 * 60 * 1000) continue;
+    const postStartedAt = new Date().toISOString();
+    let failed = true;
+    let errorText = null;
+    try {
+      const response = await fetch(`${appBaseUrl}/api/slack/call-analysis`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspace: slug, destination: "internal" }),
+      });
+      const result = await response.json().catch(() => ({}));
+      failed = !response.ok || result?.ok === false || !result?.posted;
+      errorText = failed ? `${slug}: ${String(result?.error || `HTTP ${response.status}`)}`.slice(0, 500) : null;
+      console.info("reply_radar_call_analysis_sent", { slug, destination: "internal", posted: Boolean(result?.posted) });
+    } catch (error) {
+      errorText = `${slug}: ${String(error)}`.slice(0, 500);
+      console.error("reply_radar_call_analysis_failed", { slug, error: String(error) });
+    }
+    if (failed) callAnalysisFailedAt.set(slug, Date.now());
+    else sent += 1;
     await writeSyncRun({
       workspace_id: null,
       run_type: "call_analysis",
@@ -1700,21 +1716,8 @@ async function runGranolaHeartbeat() {
       finished_at: new Date().toISOString(),
       records_seen: newCalls.length,
       records_written: failed ? 0 : 1,
-      error_text: failed ? String(result?.error || `HTTP ${response.status}`).slice(0, 500) : null,
-    });
-  } catch (error) {
-    console.error("reply_radar_call_analysis_failed", { slug, error: String(error) });
-    await writeSyncRun({
-      workspace_id: null,
-      run_type: "call_analysis",
-      source: "render-worker",
-      status: "error",
-      started_at: postStartedAt,
-      finished_at: new Date().toISOString(),
-      records_seen: newCalls.length,
-      records_written: 0,
-      error_text: String(error).slice(0, 500),
-    });
+      error_text: errorText,
+    }).catch(() => {});
   }
 }
 
