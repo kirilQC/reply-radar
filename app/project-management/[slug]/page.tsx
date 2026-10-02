@@ -72,7 +72,7 @@ export default function ClientProjects() {
           </div>
           {err && <div className="pm-err">⚠ {err}</div>}
           {loading ? <Skeleton variant="board" label="Loading tasks" /> : (
-            <div className="rr-appear"><ProjectBoard tasks={tasks} clients={client ? [client] : []} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} /></div>
+            <div className="rr-appear"><ProjectBoard rosterScope={`client:${slug}`} tasks={tasks} clients={client ? [client] : []} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} /></div>
           )}
         </main>
       </section>

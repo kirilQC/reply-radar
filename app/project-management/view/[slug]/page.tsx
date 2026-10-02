@@ -98,7 +98,7 @@ export default function GroupView() {
               </div>
               {err && <div className="pm-err">⚠ {err}</div>}
               {loading ? <Skeleton variant="board" count={5} label="Loading tasks" /> : (
-                <div className="rr-appear"><ProjectBoard tasks={tasks} clients={members} defaultView="table" notifyChannel={view?.slackChannelId || ""} onWeekChange={setWeekBadge} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} /></div>
+                <div className="rr-appear"><ProjectBoard rosterScope={`view:${slug}`} tasks={tasks} clients={members} defaultView="table" notifyChannel={view?.slackChannelId || ""} onWeekChange={setWeekBadge} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} /></div>
               )}
             </>
           )}

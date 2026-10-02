@@ -328,7 +328,6 @@ function columnDropProps(column: string[], h: Handlers, fallback?: () => void) {
 function Card({ t, h, column, slide = 0 }: { t: BoardTask; h: Handlers; column?: string[]; slide?: -1 | 0 | 1 }) {
   const s = stageOf(t.stage);
   const pr = prioOf(t.priority);
-  const client = h.clients.find((c) => c.slug === t.clientSlug);
   const owners = ownerList(t.owner);
   const openBlockers = blockerList(t.blocker).filter((b) => !b.resolved);
   return (
@@ -375,8 +374,8 @@ function Card({ t, h, column, slide = 0 }: { t: BoardTask; h: Handlers; column?:
         )}
         {openBlockers.length > 0 && <div className="pm-bcard-block" title={openBlockers.map((b) => `${b.owner || "someone"}: ${b.text}`).join("\n")}>⛔ Waiting on {openBlockers[0].owner ? `${openBlockers[0].owner}${openBlockers[0].text ? ` · ${openBlockers[0].text}` : ""}` : openBlockers[0].text || "someone"}{openBlockers.length > 1 ? ` +${openBlockers.length - 1} more` : ""}</div>}
         <div className="pm-bcard-foot">
-          {client && !h.hideClient && <span className="pm-bcard-client"><span className="pm-bcard-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span>{client.name}</span>}
-          {owners.length > 0 && (h.hideClient && owners.length <= 2
+          {/* No client chip on cards: the board, column or view already says whose task it is. */}
+          {owners.length > 0 && (owners.length <= 2
             ? owners.map((o) => <span className="pm-bcard-owner" key={o}><Avatar name={o} map={h.map} />{o}</span>)
             : <span className="pm-bcard-owner"><Avatar name={owners[0]} map={h.map} />{owners.length === 1 ? owners[0] : `${owners.length} people`}</span>)}
           {t.created_at && (() => { const tone = ageTone(t.created_at, t.stage); return <span className={`pm-bcard-age ${tone ? `pm-age-${tone}` : ""}`} title={`Added ${fmtEst(t.created_at)}${tone ? ` · ${ageNote[tone]}` : ""}`}>⏱ {sittingFor(t.created_at)}</span>; })()}
@@ -774,8 +773,10 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
 }
 
 const SORTS: [SortKey, string][] = [["manual", "Manual order"], ["priority", "Priority"], ["due", "Due date"], ["status", "Status"], ["title", "Task name"], ["assignee", "Assignee"]];
-export default function ProjectBoard({ tasks, clients, defaultView, notifyChannel, onCreate, onUpdate, onDelete, onMove, onSetDay, onWeekChange }: {
+export default function ProjectBoard({ tasks, clients, defaultView, notifyChannel, rosterScope = "", onCreate, onUpdate, onDelete, onMove, onSetDay, onWeekChange }: {
   tasks: BoardTask[]; clients: BoardClient[]; defaultView?: View; notifyChannel?: string;
+  /** Whose assignee roster this board uses: `client:<slug>` or `view:<slug>`. Each board keeps its own. */
+  rosterScope?: string;
   onCreate: (clientSlug: string, fields: NewFields) => void; onUpdate: (id: string, fields: Record<string, unknown>) => void; onDelete: (id: string) => void; onMove: (id: string, stage: string) => void; onSetDay: (id: string, date: string) => void; onWeekChange?: (label: string | null) => void;
 }) {
   const multi = clients.length > 1;
@@ -791,15 +792,50 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
   // Positions set by dragging, applied straight away while the PATCHes go out.
   const [rank, setRank] = useState<Record<string, number>>({});
   const [people, setPeople] = useState<Person[]>([]);
+  const [legacy, setLegacy] = useState<Person[]>([]);
   const [week, setWeek] = useState<string>("");
   const [weeks, setWeeks] = useState<string[]>([]);
-  const map = useMemo(() => { const m: Record<string, string> = {}; for (const p of people) if (p.avatarUrl) m[p.name] = p.avatarUrl; return m; }, [people]);
+  // Faces: this board's roster first, then the old shared roster for anyone not added here yet.
+  const map = useMemo(() => { const m: Record<string, string> = {}; for (const p of legacy) if (p.avatarUrl) m[p.name] = p.avatarUrl; for (const p of people) if (p.avatarUrl) m[p.name] = p.avatarUrl; return m; }, [people, legacy]);
 
   useEffect(() => {
     try { const v = localStorage.getItem("pm-view") as View | null; const ok = v && ALL_VIEWS.some(([k]) => k === v) && (v !== "byclient" || multi); if (v && ok) setView(v); else if (defaultView) setView(defaultView); } catch { /* ignore */ }
     try { const o = JSON.parse(localStorage.getItem("pm-view-order") || "[]") as View[]; if (Array.isArray(o) && o.length) setOrder([...o.filter((v) => ALL_VIEWS.some(([k]) => k === v)), ...ALL_VIEWS.map(([k]) => k).filter((k) => !o.includes(k))]); } catch { /* ignore */ }
   }, [defaultView, multi]);
-  useEffect(() => { void fetch("/api/project-management/people", { cache: "no-store" }).then((r) => r.json()).then((p) => setPeople(Array.isArray(p.people) ? p.people : [])).catch(() => {}); }, []);
+  const peopleUrl = (extra = "") => `/api/project-management/people?scope=${encodeURIComponent(rosterScope)}${extra}`;
+  const [rosterLoaded, setRosterLoaded] = useState(false);
+  useEffect(() => {
+    void fetch(peopleUrl(), { cache: "no-store" }).then((r) => r.json()).then((p) => {
+      setPeople(Array.isArray(p.people) ? p.people : []);
+      setLegacy(Array.isArray(p.legacy) ? p.legacy : []);
+      setRosterLoaded(true);
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rosterScope]);
+  /*
+   * First time a board's own roster is used, it starts with whoever is already assigned on its tasks
+   * (keeping the photo or mascot they had), so nothing on the board loses its face. Added one at a time:
+   * the roster is one stored list, and parallel writes would drop each other.
+   */
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!rosterLoaded || seeded.current || !rosterScope || !tasks.length) return;
+    seeded.current = true;
+    const have = new Set(people.map((p) => p.name.toLowerCase()));
+    const names = new Set<string>();
+    for (const t of tasks) { for (const o of ownerList(t.owner)) names.add(o); for (const b of blockerList(t.blocker)) if (b.owner) names.add(b.owner); }
+    const missing = [...names].filter((n) => !have.has(n.toLowerCase()));
+    if (!missing.length) return;
+    void (async () => {
+      let latest: Person[] | null = null;
+      for (const name of missing) {
+        const avatarUrl = legacy.find((l) => l.name.toLowerCase() === name.toLowerCase())?.avatarUrl || undefined;
+        const r = await fetch("/api/project-management/people", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: rosterScope, name, avatarUrl, keepName: true }) }).then((x) => x.json()).catch(() => null);
+        if (r?.people) latest = r.people;
+      }
+      if (latest) setPeople(latest);
+    })();
+  }, [rosterLoaded, rosterScope, tasks, people, legacy]);
   useEffect(() => { if (!multi) return; void fetch("/api/project-management/weeks", { cache: "no-store" }).then((r) => r.json()).then((p) => setWeeks(Array.isArray(p.weeks) ? p.weeks : [])).catch(() => {}); }, [multi]);
   useEffect(() => { onWeekChange?.(multi && week ? weekDisplay(week) : null); }, [week, multi, onWeekChange]);
 
@@ -807,9 +843,11 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
   const reorderViews = (keys: View[]) => { setOrder(keys); try { localStorage.setItem("pm-view-order", JSON.stringify(keys)); } catch { /* ignore */ } };
   const setMascot = (name: string, id: string) => setAvatar(name, `mascot:${id}`);
   const addPerson = (rawName: string) => {
-    const name = cleanPersonName(rawName); if (!name) return; setPeople((p) => (p.some((x) => x.name.toLowerCase() === name.toLowerCase()) ? p : [...p, { name, avatarUrl: null }].sort((a, z) => a.name.localeCompare(z.name)))); void fetch("/api/project-management/people", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) }).catch(() => {}); };
-  const removePerson = (name: string) => { setPeople((p) => p.filter((x) => x.name !== name)); void fetch(`/api/project-management/people?name=${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => {}); };
-  const setAvatar = (name: string, url: string) => { setPeople((p) => { const found = p.find((x) => x.name === name); if (found) return p.map((x) => (x.name === name ? { ...x, avatarUrl: url } : x)); return [...p, { name, avatarUrl: url }].sort((a, z) => a.name.localeCompare(z.name)); }); void fetch("/api/project-management/people", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, avatarUrl: url }) }).catch(() => {}); };
+    const name = cleanPersonName(rawName); if (!name) return; setPeople((p) => (p.some((x) => x.name.toLowerCase() === name.toLowerCase()) ? p : [...p, { name, avatarUrl: null }].sort((a, z) => a.name.localeCompare(z.name))));
+    // The server gives a new teammate a mascot; take its answer so the face shows straight away.
+    void fetch("/api/project-management/people", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: rosterScope, name }) }).then((r) => r.json()).then((r) => { if (Array.isArray(r?.people)) setPeople(r.people); }).catch(() => {}); };
+  const removePerson = (name: string) => { setPeople((p) => p.filter((x) => x.name !== name)); void fetch(peopleUrl(`&name=${encodeURIComponent(name)}`), { method: "DELETE" }).catch(() => {}); };
+  const setAvatar = (name: string, url: string) => { setPeople((p) => { const found = p.find((x) => x.name === name); if (found) return p.map((x) => (x.name === name ? { ...x, avatarUrl: url } : x)); return [...p, { name, avatarUrl: url }].sort((a, z) => a.name.localeCompare(z.name)); }); void fetch("/api/project-management/people", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: rosterScope, name, avatarUrl: url, keepName: true }) }).catch(() => {}); };
   const uploadAvatar = (name: string, file: File) => { const fd = new FormData(); fd.append("file", file); void fetch("/api/project-management/upload-logo", { method: "POST", body: fd }).then((r) => r.json()).then((r) => { if (r.ok && r.logoUrl) setAvatar(name, r.logoUrl); }).catch(() => {}); };
   const addWeek = (label: string) => { setWeeks((w) => (w.some((x) => x.toLowerCase() === label.toLowerCase()) ? w : [...w, label])); setWeek(label); void fetch("/api/project-management/weeks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ week: label }) }).catch(() => {}); };
   const removeWeek = (label: string) => { setWeeks((w) => w.filter((x) => x !== label)); if (week === label) setWeek(""); void fetch(`/api/project-management/weeks?week=${encodeURIComponent(label)}`, { method: "DELETE" }).catch(() => {}); };
