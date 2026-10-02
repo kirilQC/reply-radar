@@ -1292,23 +1292,22 @@ async function collectAnalytics() {
  * spreads a full roster over about half an hour, which for an 8am brief is 8am to 8:30 — invisible.
  * It also means a single hung client costs one cycle rather than the whole morning.
  */
-const BRIEF_LOOP_MS = 60 * 1000;
-let lastBriefRun = 0;
 
-async function sendDueBrief() {
-  if (!appBaseUrl) return;
-  if (Date.now() - lastBriefRun < BRIEF_LOOP_MS) return;
-  lastBriefRun = Date.now();
+async function sendDueBrief(tried = new Set()) {
+  if (!appBaseUrl) return false;
 
   const listed = await fetch(`${appBaseUrl}/api/slack/brief`, { cache: "no-store" }).catch(() => null);
-  if (!listed?.ok) return;
+  if (!listed?.ok) return false;
   const payload = await listed.json().catch(() => null);
-  const due = Array.isArray(payload?.due) ? payload.due.filter((slug) => typeof slug === "string" && slug) : [];
-  if (!due.length) return;
+  // Anything already tried in this pass is skipped, so a brief that keeps failing is retried on the next
+  // pass a minute later rather than in a tight loop.
+  const due = Array.isArray(payload?.due) ? payload.due.filter((slug) => typeof slug === "string" && slug && !tried.has(slug)) : [];
+  if (!due.length) return false;
 
   // Only the first. The next cycle re-asks, and by then this one has a row in `rr_slack_briefs` and is
   // no longer due — so the queue drains itself without this file holding any state about it.
   const slug = due[0];
+  tried.add(slug);
   const startedAt = new Date().toISOString();
   const destination = typeof payload?.schedule?.destination === "string" ? payload.schedule.destination : "test";
   try {
@@ -1347,6 +1346,8 @@ async function sendDueBrief() {
       error_text: String(error).slice(0, 500),
     });
   }
+  // Sent or failed, this one was handled: ask again straight away for the next.
+  return true;
 }
 
 const COLDCALL_LOOP_MS = 60 * 1000;
@@ -1370,26 +1371,23 @@ async function processDueColdCallJobs() {
   }
 }
 
-const PERSONAL_LOOP_MS = 60 * 1000;
-let lastPersonalRun = 0;
 
 /**
  * The personal assistant: one per-person focus DM per cycle, on the same drain-itself pattern as the brief.
  * The route decides who is due (schedule + not-sent-today) and stamps last_sent_at on the person's row, so
  * the next cycle no longer sees them due.
  */
-async function sendDuePersonalBrief() {
-  if (!appBaseUrl) return;
-  if (Date.now() - lastPersonalRun < PERSONAL_LOOP_MS) return;
-  lastPersonalRun = Date.now();
+async function sendDuePersonalBrief(tried = new Set()) {
+  if (!appBaseUrl) return false;
 
   const listed = await fetch(`${appBaseUrl}/api/slack/personal`, { cache: "no-store" }).catch(() => null);
-  if (!listed?.ok) return;
+  if (!listed?.ok) return false;
   const payload = await listed.json().catch(() => null);
-  const due = Array.isArray(payload?.due) ? payload.due.filter((id) => typeof id === "string" && id) : [];
-  if (!due.length) return;
+  const due = Array.isArray(payload?.due) ? payload.due.filter((id) => typeof id === "string" && id && !tried.has(id)) : [];
+  if (!due.length) return false;
 
   const id = due[0];
+  tried.add(id);
   const startedAt = new Date().toISOString();
   try {
     const response = await fetch(`${appBaseUrl}/api/slack/personal`, {
@@ -1419,6 +1417,8 @@ async function sendDuePersonalBrief() {
       error_text: String(error).slice(0, 500),
     });
   }
+  // Sent or failed, this one was handled: ask again straight away for the next.
+  return true;
 }
 
 /**
@@ -1632,12 +1632,7 @@ async function runOnce() {
    */
   try { await collectAnalytics(); } catch (error) { console.error("reply_radar_analytics_cycle_failed", error); }
 
-  // At most one client's brief per cycle, and before the AI pipeline: a brief that is due at 8am is
-  // time-sensitive in a way the pipeline is not, and the pipeline's budget can hold a cycle open.
-  try { await sendDueBrief(); } catch (error) { console.error("reply_radar_morning_brief_cycle_failed", error); }
 
-  // One person's personal focus DM per cycle, same drain-itself pattern as the brief.
-  try { await sendDuePersonalBrief(); } catch (error) { console.error("reply_radar_personal_brief_cycle_failed", error); }
 
   // Advance any running cold-call fetch/enrich job (fetch campaign leads → enrich profile/phone/ICP).
   try { await processDueColdCallJobs(); } catch (error) { console.error("reply_radar_coldcall_cycle_failed", error); }
@@ -1655,8 +1650,39 @@ async function runOnce() {
   try { await runAiPipeline(); } catch (error) { console.error("reply_radar_ai_pipeline_failed", error); }
 }
 
+/**
+ * Scheduled briefs on their own loop, sent back to back.
+ *
+ * They used to go one per main cycle, but a main cycle also reconciles a client (up to 7 min), syncs a
+ * CRM (up to 4 min) and runs the AI pipeline (up to 10 min), so a cycle could take a quarter of an hour
+ * and 30 clients' 8am briefs were still trickling out at 9:30. Here the queue drains as fast as the route
+ * answers: one brief at a time (never two at once, so Slack, Granola and Anthropic are not hit in
+ * parallel), the next straight after, then a minute's rest once nothing is due. The route still decides
+ * who is due, and each sent brief is no longer due, so a restart mid-drain just picks up where it was.
+ */
+const SCHEDULED_SEND_IDLE_MS = 60 * 1000;
+const SCHEDULED_SEND_MAX_PER_PASS = 60;
+
+async function drain(label, send) {
+  const tried = new Set();
+  for (let sent = 0; sent < SCHEDULED_SEND_MAX_PER_PASS; sent += 1) {
+    let more = false;
+    try { more = await send(tried); } catch (error) { console.error(`reply_radar_${label}_cycle_failed`, error); }
+    if (!more) return;
+  }
+}
+
+async function scheduledSendsLoop() {
+  for (;;) {
+    await drain("morning_brief", sendDueBrief);
+    await drain("personal_brief", sendDuePersonalBrief);
+    await new Promise((resolve) => setTimeout(resolve, SCHEDULED_SEND_IDLE_MS));
+  }
+}
+
 async function main() {
   console.info("reply_radar_worker_started", { pollIntervalSeconds: pollIntervalMs / 1000 });
+  scheduledSendsLoop().catch((error) => console.error("reply_radar_scheduled_sends_loop_failed", error));
   for (;;) {
     try { await runOnce(); } catch (error) { console.error("reply_radar_worker_cycle_failed", error); }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));

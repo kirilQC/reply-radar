@@ -1462,7 +1462,7 @@ test("gatherPriorBriefs reads only delivered internal briefs, newest first, and 
   // an empty answer is the ordinary result for a client's first brief.
   assert.match(runFile, /export async function gatherPriorBriefs/);
   assert.match(runFile, /destination=eq\.internal&status=eq\.success&slack_message_ts=not\.is\.null/);
-  assert.match(runFile, /order=created_at\.desc&limit=\$\{PRIOR_BRIEF_COUNT\}/);
+  assert.match(runFile, /order=created_at\.desc&limit=\$\{PRIOR_BRIEF_COUNT \+ 3\}/);
   assert.match(runFile, /await threadReplies\(channelId, ts\)/);
   // The read is guarded and the whole function is wrapped, so unreadable Slack degrades to an empty list.
   assert.match(runFile, /\}\s*catch\s*\{\s*return \[\];\s*\}/);
