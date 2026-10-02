@@ -5234,7 +5234,6 @@ body.light-mode .brain-icp {
   .profile-card-grid,
   .workspace-cards,
   .workspace-directory-list,
-  .tracked-clients,
   .theme-presets {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
@@ -5306,15 +5305,12 @@ body.light-mode .brain-icp {
 }
 
 @media (max-width: 480px) {
-  /* Below this a two-column stat card is mostly padding. */
-  .metrics,
-  .dashboard-stats-grid,
-  .dashboard-client-grid,
+  /* Cards that carry a name and a line of detail need the full width. Small number tiles and logo
+     cards stay two across (see the iPhone block at the end of this file). */
   .dashboard-profile-grid,
   .profile-card-grid,
   .workspace-cards,
-  .workspace-directory-list,
-  .tracked-clients {
+  .workspace-directory-list {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
@@ -6769,3 +6765,117 @@ body.light-mode .brain-icp {
 @media (prefers-reduced-motion: reduce) { .mcp-history, .mcp-history li, .mcp-jump, .mcp-history-scrim { animation: none !important; } }
 .scout-hello { display: flex; align-items: center; gap: 14px; }
 .scout-hello .mascot { flex: none; }
+
+/* ── iPhone pass (Chrome on iOS, ~390px) ──────────────────────────────────────────────────────
+   A tab-by-tab check at phone width. Each rule below fixes something that overlapped, clipped or
+   stacked into a needlessly long scroll. */
+@media (max-width: 760px) {
+  /* The hamburger is fixed, so once the page scrolled it floated over headings and cards. A sticky,
+     opaque topbar gives it a home: content now slides under the bar instead of under the button. */
+  .main-area > .topbar,
+  .dash-has-network > .topbar {
+    position: sticky !important;
+    top: 0;
+    z-index: 3;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+
+  /* Small number tiles and logo cards read fine two across; one per row made every page a long
+     scroll of mostly empty boxes. */
+  .metrics,
+  .dashboard-stats-grid,
+  .dashboard-client-grid,
+  .analytics-kpis,
+  .analytics-client-grid,
+  .client-grid,
+  .jev-directory {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+  .analytics-kpi strong,
+  .analytics-kpi .analytics-kpi-value {
+    font-size: 26px !important;
+  }
+
+  /* The inbox client strip: a row of round logos that should wrap, not stack one per line. */
+  .tracked-clients {
+    display: flex !important;
+    flex-wrap: wrap;
+    width: 100% !important;
+    gap: 7px;
+  }
+
+  /* Segmented controls: short labels on one line each; the row scrolls sideways if it runs out. */
+  .segmented {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .segmented::-webkit-scrollbar {
+    display: none;
+  }
+  .segmented button,
+  .inbox-analytics-range button {
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+  .inbox-daterange {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+  .inbox-daterange input[type="date"] {
+    min-width: 0;
+    flex: 1 1 130px;
+  }
+
+  /* QC Brain packs a search field, a status line and a GitHub link into the topbar; on a phone the
+     status and the link wrapped into tall stacks. The search keeps the room. */
+  .top-actions .brain-warm,
+  .top-actions .brain-repo-link {
+    display: none !important;
+  }
+  .top-actions .brain-search-input {
+    min-width: 0;
+    flex: 1 1 auto;
+    width: auto !important;
+  }
+  .topbar:has(.brain-search-input) .top-actions {
+    flex: 1;
+    min-width: 0;
+    margin-left: 8px;
+  }
+  .brain-grid > * {
+    min-width: 0;
+  }
+  .brain-client strong,
+  .brain-client span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Scout has its own composer pinned to the bottom, and the help bubble sat on its send button.
+     On the Scout page the bubble is redundant anyway: this is the full version of it. */
+  body:has(.mcp-page) .hw {
+    display: none !important;
+  }
+  body:has(.mcp-page) {
+    padding-bottom: 0 !important;
+  }
+
+  /* The call script tab hung 38px off the screen edge over the call list. */
+  .cc-scriptdrawer {
+    width: 100vw !important;
+  }
+  .cc-scripttab {
+    padding: 12px 7px;
+    left: -30px;
+  }
+
+  /* Database rows: the arrow dropped onto its own line under the name. */
+  .database-row {
+    align-items: center;
+  }
+}

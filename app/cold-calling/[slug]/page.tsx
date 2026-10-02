@@ -449,7 +449,7 @@ function CallScriptDrawer({ slug, initial }: { slug: string; initial: string }) 
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { setText(initial); }, [initial]);
-  useEffect(() => { try { setOpen(localStorage.getItem("cc-script-open") === "1"); } catch { /* ignore */ } }, []);
+  useEffect(() => { try { if (window.innerWidth > 760) setOpen(localStorage.getItem("cc-script-open") === "1"); } catch { /* ignore */ } }, []);
 
   const onChange = (v: string) => {
     setText(v); setState("saving");
