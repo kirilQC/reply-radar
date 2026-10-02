@@ -298,6 +298,11 @@ function emailBlocks(body: string, slug: string, read: { live: boolean; internal
     flushBullets();
     if (!line.trim()) { if (lines.length) lines.push(""); continue; }
     if (lines.length && lines[lines.length - 1] === "") { lines.pop(); flushLines(true); }
+    // Headings (a wholly bold line) always start a new paragraph with a gap, and the subject line always
+    // stands apart, whether or not the model left blank lines around them.
+    const heading = /^\*[^*]+\*$/.test(line.trim());
+    if (heading && lines.length) flushLines(true);
+    else if (lines.length === 1 && /^\*Subject/i.test(lines[0])) flushLines(true);
     lines.push(line);
   }
   flushLines(); flushBullets();
