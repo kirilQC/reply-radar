@@ -673,3 +673,30 @@
 .pm-peek-meta { display: flex; gap: 12px; margin-top: 3px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .pm-peek-senders { margin-top: 3px; font-size: 11px; color: var(--muted-2); }
 .pm-peek-tag { margin-left: 7px; padding: 1px 6px; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: .03em; color: #e0a83d; background: color-mix(in srgb, #e0a83d 14%, transparent); vertical-align: 1px; }
+
+/* Context / notes fills the left side of the task, and is a rich-text editor (app/components/RichNotes). */
+.pm-ed-main .pm-f-notes { flex: 1; min-height: 0; }
+.pm-f-notes .rn { flex: 1; display: flex; flex-direction: column; min-height: 340px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, #151821); overflow: hidden; transition: border-color .15s; }
+.pm-f-notes .rn:focus-within { border-color: var(--accent); }
+.rn-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--border-soft, var(--border)); background: color-mix(in srgb, var(--panel) 60%, transparent); }
+.rn-btn { min-width: 28px; height: 28px; padding: 0 7px; display: inline-grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; transition: background .12s, color .12s; }
+.rn-btn:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.rn-btn.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.rn-sep { width: 1px; height: 16px; margin: 0 4px; background: var(--border); }
+.rn-link { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; }
+.rn-link input { width: 220px; height: 28px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; font-size: 12.5px; }
+.rn-link input:focus { outline: none; border-color: var(--accent); }
+.rn-link button { height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--accent); color: var(--accent-ink, #0b0c10); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.rn-body { flex: 1; overflow-y: auto; cursor: text; position: relative; }
+.rn-doc { min-height: 100%; padding: 12px 14px; outline: none; font-size: 13.5px; line-height: 1.6; color: var(--text); }
+.rn-doc > * + * { margin-top: .55em; }
+.rn-doc p { margin: 0; }
+.rn-doc h2 { margin: .7em 0 .2em; font-size: 17px; font-weight: 750; letter-spacing: -.01em; }
+.rn-doc h3 { margin: .6em 0 .15em; font-size: 14.5px; font-weight: 700; }
+.rn-doc h2:first-child, .rn-doc h3:first-child { margin-top: 0; }
+.rn-doc ul, .rn-doc ol { margin: .2em 0; padding-left: 1.35em; }
+.rn-doc li > p { margin: 0; }
+.rn-doc li + li { margin-top: .15em; }
+.rn-doc a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.rn-empty .rn-doc::before { content: attr(data-placeholder); position: absolute; color: var(--muted-2); pointer-events: none; }
+.pm-ed-main textarea { min-height: 150px; }

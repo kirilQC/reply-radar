@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import RichNotes, { plainNotes } from "../components/RichNotes";
 
 export type LinkItem = { url: string; title?: string };
 export type Blocker = { owner?: string; text?: string; resolved?: boolean; resolvedAt?: string };
@@ -266,7 +267,7 @@ function Card({ t, h, column }: { t: BoardTask; h: Handlers; column?: string[] }
       </div>
       <div className="pm-bcard-body">
         <div className="pm-bcard-title">{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}</div>
-        {t.context && <div className="pm-bcard-ctx">{t.context}</div>}
+        {t.context && <div className="pm-bcard-ctx">{plainNotes(t.context)}</div>}
         {(t.checks?.list || t.checks?.messaging) && (
           <div className="pm-bcard-checks">
             <span className={t.checks?.list ? "on" : ""}>{t.checks?.list ? "✓" : "○"} Contact list</span>
@@ -627,7 +628,7 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
         </div>
         <div className="pm-ed-body">
           <div className="pm-ed-main">
-            <div className="pm-f"><span>Context / notes</span><textarea rows={8} value={context} placeholder="Everything about this task…" onChange={(e) => setContext(e.target.value)} /></div>
+            <div className="pm-f pm-f-notes"><span>Context / notes</span><RichNotes value={context} onChange={setContext} /></div>
             <div className="pm-f"><span>Links &amp; files</span><div className="pm-links">
               {links.map((l, i) => <div className="pm-link" key={i}><a href={l.url} target="_blank" rel="noreferrer">{linkLabel(l)}</a><button type="button" onClick={() => setLinks((p) => p.filter((_, j) => j !== i))}>✕</button></div>)}
               <div className="pm-link-add pm-link-add2"><input value={nTitle} placeholder="Title (optional)" onChange={(e) => setNTitle(e.target.value)} /><input value={nUrl} placeholder="Paste a URL…" onChange={(e) => setNUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLink(); } }} /><button type="button" onClick={addLink}>Add</button></div>
