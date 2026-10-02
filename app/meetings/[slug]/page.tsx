@@ -73,8 +73,29 @@ function Avatar({ src, name, className }: { src: string | null; name: string | n
   return <span className={className}>{initialsOf(name)}</span>;
 }
 
+/**
+ * A booking that arrived with a date but no time ("October 14 2026") is stored at midnight. Shown as a local
+ * time it read "Oct 13 · 7:00 PM" in US time zones: the wrong day, and a time nobody chose. Such meetings are
+ * shown as their date only, read in the zone they were stored in.
+ */
+function dateOnly(meeting: Meeting): Date | null {
+  if (!meeting.meetingAt || !meeting.whenText || /\d{1,2}:\d{2}|\b[ap]\.?m\b/i.test(meeting.whenText)) return null;
+  const date = new Date(meeting.meetingAt);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+const dateOnlyZone = (date: Date) => (date.getUTCHours() === 0 && date.getUTCMinutes() === 0 ? "UTC" : "America/New_York");
+
+/** "CPO ; CPO" (the webhook repeats the field) as "CPO". */
+const cleanTitle = (title: string | null) =>
+  title ? [...new Set(title.split(/\s*;\s*/).map((part) => part.trim()).filter(Boolean))].join(", ") : title;
+
 /** The short date/time shown on the left rail of each row. */
 function whenParts(meeting: Meeting): { top: string; bottom: string; tbd: boolean } {
+  const day = dateOnly(meeting);
+  if (day) {
+    const timeZone = dateOnlyZone(day);
+    return { top: day.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone }), bottom: `Time TBC · ${day.toLocaleDateString(undefined, { year: "numeric", timeZone })}`, tbd: false };
+  }
   if (meeting.meetingAt) {
     const date = new Date(meeting.meetingAt);
     if (!Number.isNaN(date.getTime())) {
@@ -90,6 +111,8 @@ function whenParts(meeting: Meeting): { top: string; bottom: string; tbd: boolea
 
 /** The full, human date used inside the expanded detail. */
 function fullWhen(meeting: Meeting): string {
+  const day = dateOnly(meeting);
+  if (day) return `${day.toLocaleDateString(undefined, { weekday: "short", month: "long", day: "numeric", year: "numeric", timeZone: dateOnlyZone(day) })} · time to be confirmed`;
   if (meeting.meetingAt) {
     const date = new Date(meeting.meetingAt);
     if (!Number.isNaN(date.getTime())) {
@@ -166,7 +189,7 @@ function Detail({ meeting, history, onDelete, onEnrich, enriching }: { meeting: 
         <Avatar src={meeting.inviteePhotoUrl} name={meeting.inviteeName || meeting.inviteeEmail} className="mtg-avatar" />
         <div className="mtg-identity-main">
           <strong>{meeting.inviteeName || meeting.inviteeEmail || "Unnamed invitee"}</strong>
-          <span className="mtg-identity-sub">{[meeting.inviteeTitle, meeting.companyName].filter(Boolean).join(" · ") || "Role and company not recorded"}</span>
+          <span className="mtg-identity-sub">{[cleanTitle(meeting.inviteeTitle), meeting.companyName].filter(Boolean).join(" · ") || "Role and company not recorded"}</span>
           {meeting.inviteeHeadline && <span className="mtg-identity-headline">{meeting.inviteeHeadline}</span>}
         </div>
         <div className="mtg-identity-facts">
@@ -417,7 +440,7 @@ export default function ClientMeetingsPage() {
                         <Avatar src={meeting.inviteePhotoUrl} name={meeting.inviteeName || meeting.inviteeEmail} className="mtg-row-avatar" />
                         <div className="mtg-who">
                           <strong>{meeting.inviteeName || meeting.inviteeEmail || "Unnamed invitee"}</strong>
-                          <span className="mtg-sub">{[meeting.inviteeTitle, meeting.companyName].filter(Boolean).join(" · ") || "—"}</span>
+                          <span className="mtg-sub">{[cleanTitle(meeting.inviteeTitle), meeting.companyName].filter(Boolean).join(" · ") || "—"}</span>
                           <div className="mtg-meta">
                             {meeting.campaign && <span className="mtg-chip">{meeting.campaign}</span>}
                             {meeting.host && <span>with {meeting.host}</span>}
