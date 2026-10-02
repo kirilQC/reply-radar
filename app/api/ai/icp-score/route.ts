@@ -59,7 +59,8 @@ export async function POST(request: Request) {
   const company = object(enrichment.company);
   const leadContext = [
     `Name: ${lead.name ?? "Unknown"}`,
-    lead.title ? `Title: ${lead.title}` : null,
+    // rr_leads stores the job title as `role`; `title` never existed, so scores were made without it.
+    (lead.role || lead.title || enrichment.title) ? `Title: ${lead.role || lead.title || enrichment.title}` : null,
     lead.company ? `Company: ${lead.company}` : null,
     enrichment.headline ? `Headline: ${enrichment.headline}` : null,
     enrichment.industry ? `Industry: ${enrichment.industry}` : null,
@@ -101,6 +102,11 @@ export async function POST(request: Request) {
   } catch {
     icpScore = 0;
     icpReason = "Could not parse ICP score.";
+  }
+  // A failed or unreadable call is not a score of 0: saving it would cache 0 forever (the cache check above
+  // never re-scores a lead that has one). Report the failure and let the next open try again.
+  if (!aiRes?.ok || icpReason === "Could not parse ICP score.") {
+    return NextResponse.json({ ok: false, error: "ICP scoring failed; nothing was saved.", icpScore: null }, { status: 502 });
   }
 
   // Save permanently to lead's raw_data

@@ -493,7 +493,8 @@ async function streamTurn(
   // spends its first seconds thinking and gets killed mid-sentence. Historical thinking blocks already in
   // `messages` are accepted with thinking off; the API only requires them while it is on.
   // Sonnet 5.5 takes adaptive thinking with an effort level rather than a fixed token budget.
-  const thinking = finalTurn ? { type: "disabled" as const } : { type: "adaptive" as const };
+  // Sonnet 5.5 spells "no thinking" between_tools; it rejects "disabled" with a 400, which failed every timed-out run.
+  const thinking = finalTurn ? { type: "between_tools" as const } : { type: "adaptive" as const };
   const requestInit: RequestInit = {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },

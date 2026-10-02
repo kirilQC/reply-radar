@@ -11,7 +11,7 @@
  * consistent. If it fails or is slow, the original answer goes out unchanged.
  */
 
-import { DEFAULT_MODEL } from "../../shared/anthropic-model.mjs";
+import { DEFAULT_MODEL, temperatureField } from "../../shared/anthropic-model.mjs";
 
 const SYSTEM = `You lay out answers for Slack. You receive a finished answer from an analytics assistant. Rewrite it into exactly this shape, and output only the rewritten answer:
 
@@ -52,14 +52,17 @@ export async function relayoutForSlack(answer: string, question: string, timeout
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model: DEFAULT_MODEL,
-        max_tokens: 1500,
+        max_tokens: 2500,
+        ...temperatureField(DEFAULT_MODEL, 0),
         system: SYSTEM,
         messages: [{ role: "user", content: `Question: ${question || "(not given)"}\n\nAnswer to lay out:\n\n${answer}` }],
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) return answer;
-    const payload = (await response.json()) as { content?: Array<{ type: string; text?: string }> };
+    const payload = (await response.json()) as { content?: Array<{ type: string; text?: string }>; stop_reason?: string };
+    // A rewrite cut off by the token limit is never used in place of the full answer.
+    if (payload.stop_reason === "max_tokens") return answer;
     const text = (payload.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
     // A rewrite that lost the bold verdict or came back empty is not used.
     return text.startsWith("**") ? text : answer;
