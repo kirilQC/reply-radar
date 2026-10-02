@@ -18,6 +18,27 @@ import { Markdown } from "tiptap-markdown";
 
 type Props = { value: string; onChange: (markdown: string) => void; placeholder?: string; className?: string; uploadUrl?: string };
 
+/**
+ * Every line its own paragraph. Notes written before the editor existed (and notes saved by its first
+ * version) separate lines with single line breaks, which the editor read as soft breaks inside one big
+ * paragraph: bulleting or heading one line then changed all of them. Hard breaks (`\` + newline) and
+ * lone newlines between ordinary lines become paragraph breaks; list items and their nesting are left as
+ * they are.
+ */
+const isListLine = (line: string) => /^\s*(?:[-*+]|\d+[.)])\s/.test(line);
+export const normalizeNotes = (md: string): string => {
+  const lines = String(md ?? "").replace(/\r\n?/g, "\n").replace(/\\\n/g, "\n").replace(/ {2,}\n/g, "\n").split("\n");
+  const out: string[] = [];
+  lines.forEach((line, i) => {
+    out.push(line);
+    const next = lines[i + 1];
+    if (next === undefined || !line.trim() || !next.trim()) return;
+    if (isListLine(line) && (isListLine(next) || /^\s{2,}\S/.test(next))) return;
+    out.push("");
+  });
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+};
+
 const markdownOf = (editor: Editor): string =>
   ((editor.storage as unknown as { markdown?: { getMarkdown: () => string } }).markdown?.getMarkdown() ?? "").trim();
 
@@ -70,9 +91,9 @@ export default function RichNotes({ value, onChange, placeholder = "Everything a
         heading: { levels: [2, 3] },
         link: { openOnClick: false, autolink: true, linkOnPaste: true, HTMLAttributes: { target: "_blank", rel: "noreferrer" } },
       }),
-      Markdown.configure({ html: true, breaks: true, linkify: true, transformPastedText: true, tightLists: true }),
+      Markdown.configure({ html: true, breaks: false, linkify: true, transformPastedText: true, tightLists: true }),
     ],
-    content: value,
+    content: normalizeNotes(value),
     editorProps: {
       attributes: { class: "rn-doc", "data-placeholder": placeholder },
       // Paste or drop files straight into the notes to attach them.
@@ -87,7 +108,7 @@ export default function RichNotes({ value, onChange, placeholder = "Everything a
   // Keep in step if the task underneath changes while the editor is open.
   useEffect(() => {
     if (!editor || editor.isFocused) return;
-    if (markdownOf(editor) !== (value || "").trim()) editor.commands.setContent(value || "");
+    if (markdownOf(editor) !== normalizeNotes(value || "")) editor.commands.setContent(normalizeNotes(value || ""));
   }, [editor, value]);
 
   const [, force] = useState(0);

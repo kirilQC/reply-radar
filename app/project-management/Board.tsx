@@ -33,7 +33,7 @@ const STAGES = [
   { key: "launched", label: "Launched", cls: "launch", color: "#7c6cf0" },
   { key: "other", label: "Other", cls: "other", color: "#9a8cf0" },
 ];
-const PRIORITIES = [{ key: "p1", label: "Priority 1", color: "#ff2d6f" }, { key: "high", label: "High", color: "#e5484d" }, { key: "medium", label: "Medium", color: "#f2913d" }, { key: "low", label: "Low", color: "#e6c229" }];
+const PRIORITIES = [{ key: "p1", label: "Priority", color: "#ff2d6f" }, { key: "high", label: "High", color: "#e5484d" }, { key: "medium", label: "Medium", color: "#f2913d" }, { key: "low", label: "Low", color: "#e6c229" }];
 const ALL_VIEWS: [View, string][] = [["kanban", "Kanban"], ["byclient", "By client"], ["individuals", "Individuals"], ["table", "Table"], ["swimlanes", "Swimlanes"]];
 const stageOf = (k: string) => STAGES.find((x) => x.key === k) ?? STAGES[0];
 const prioOf = (k?: string | null) => PRIORITIES.find((x) => x.key === k) ?? null;
@@ -767,7 +767,7 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
             <div className="pm-f"><span>Blockers</span><div className="pm-ed-blockers"><BlockerCell blockers={blockers} people={people} map={map} addPerson={addPerson} onChange={setBlockers} /></div></div>
           </div>
         </div>
-        <div className="pm-modal-foot">{!isNew ? <button type="button" className="pm-del" onClick={() => { onDelete(task!.id); onClose(); }}>Delete</button> : <span />}<span className="pm-autosave-note">{isNew ? "Saved when you close, if it has a title" : snapshot !== initial.current ? "Unsaved changes · saved when you close" : "Changes save automatically when you close"}</span><button type="button" className="pm-save" onClick={save}>{isNew ? "Create task" : "Save"}</button></div>
+        <div className="pm-modal-foot">{!isNew ? <button type="button" className="pm-del" onClick={() => { onDelete(task!.id); onClose(); }}>Delete</button> : <span />}<button type="button" className="pm-save" onClick={save}>{isNew ? "Create task" : "Save"}</button></div>
       </div>
     </div>
   );
