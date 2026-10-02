@@ -104,7 +104,8 @@ export function answerToBlocks(markdown, opts = {}) {
           const asks = JSON.parse(body.join("\n"));
           for (const ask of (Array.isArray(asks) ? asks : []).slice(0, 3)) {
             const label = plain(typeof ask === "string" ? ask : ask?.label);
-            if (label) buttons.push({ type: "button", text: { type: "plain_text", text: label.slice(0, 75), emoji: true }, action_id: `${ASK_ACTION}_${buttons.length}`, value: label.slice(0, 1900) });
+            const shown = label.length > 40 ? `${label.slice(0, 39).replace(/\s+\S*$/, "")}…` : label;
+            if (label) buttons.push({ type: "button", text: { type: "plain_text", text: shown, emoji: true }, action_id: `${ASK_ACTION}_${buttons.length}`, value: label.slice(0, 1900) });
           }
         } catch { /* not JSON: ignore */ }
       } else if (["chart", "map", "cards", "timeline", "export"].includes(lang)) {
@@ -126,7 +127,7 @@ export function answerToBlocks(markdown, opts = {}) {
       const numbered = /^\s*\d+[.)]/.test(line);
       run.forEach((item, n) => {
         const { marker, head, detail } = splitItem(item);
-        const lead = marker ? `${marker}  ` : numbered ? `${n + 1}.  ` : "•  ";
+        const lead = marker ? `${marker}  ` : numbered ? `${n + 1}.  ` : "";
         blocks.push(section(`${lead}${mrk(head)}`));
         if (detail) blocks.push(context(mrk(detail)));
       });

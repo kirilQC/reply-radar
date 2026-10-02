@@ -39,7 +39,7 @@ Rules:
 - A comparison of two or three things may use a small table instead of items (at most 3 columns, short cells).
 - No paragraphs. Caveats collapse into the one italic footer line, or are dropped if they don't change the answer.
 - Keep [label](url) links that point to QC Command, at most two, each on its own line.
-- actions: 1 to 3 follow-ups the person would plausibly ask next, written as what they would type ("All 12 as a CSV", "Same view for Kuddo"). Turn any "Want me to…?" offer in the original into these.
+- actions: 1 to 3 follow-ups the person would plausibly ask next, each under 40 characters, written as what they would type ("All 12 as a CSV", "Same view for Kuddo"). Turn any "Want me to…?" offer in the original into these.
 - Keep a \`\`\`export block from the original unchanged at the very end if there is one.
 - If the original is an error, a refusal or a one-line answer, return it unchanged.`;
 
