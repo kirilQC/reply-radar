@@ -895,7 +895,9 @@ export default function AnalyticsPage() {
     .sort((a, b) => b.count - a.count);
   const launchedTotal = launchedThisMonth.reduce((sum, row) => sum + row.count, 0);
   const launchedMax = Math.max(...launchedThisMonth.map((row) => row.count), 1);
-  const thisMonthLabel = asOf.toLocaleDateString("en-US", { month: "long" });
+  // No month name until figures arrive: the epoch fallback reads as January on the server (UTC) and
+  // December in a US browser, which broke hydration.
+  const thisMonthLabel = updatedAt ? asOf.toLocaleDateString("en-US", { month: "long" }) : "This month";
   // The dates are stamped server-side so the bars stay labelled with real days rather than
   // "6d ago" offsets that quietly went wrong once the window grew past a week.
   const trendLabels = data.trendLabels ?? [];
