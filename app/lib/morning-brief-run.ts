@@ -87,12 +87,12 @@ const MAX_EXTRA_CHANNELS = 3;
  * prompt: the two named channels are where our team and the client respectively commit to things, and an
  * extra channel is somewhere a useful thing was mentioned once.
  */
-export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<BriefInputs, "internal" | "external" | "extraChannels">> {
+export async function gatherChannels(workspace: BriefWorkspace, windowDays = BRIEF_WINDOW_DAYS): Promise<Pick<BriefInputs, "internal" | "external" | "extraChannels">> {
   const timezone = workspace.timezone || "America/New_York";
   const readChannel = async (channelId: string) => {
     if (!channelId) return { channelId: "", messages: 0, raw: 0, threads: 0, replies: 0, capped: false, text: "", people: [] };
     try {
-      const history = await channelHistory(channelId, BRIEF_WINDOW_DAYS, BRIEF_MAX_MESSAGES, { skipOwnPosts: true });
+      const history = await channelHistory(channelId, windowDays, BRIEF_MAX_MESSAGES, { skipOwnPosts: true });
       const names = await resolveUserNames(history.messages.map((message) => message.author));
       return {
         channelId,

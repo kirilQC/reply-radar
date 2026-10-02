@@ -266,6 +266,9 @@ function reportHeader(clientName: string, timeZone: string): string {
   return `*${clientName} ${shortDate(timeZone)} EOW Report*`;
 }
 
+/** The EOW report reads the last week of Slack and only a call from this week. */
+const EOW_WINDOW_DAYS = 7;
+
 export async function POST(request: Request) {
   const credential = credentials();
   if (!credential) return NextResponse.json({ error: "Supabase not configured" }, { status: 503 });
@@ -317,12 +320,17 @@ export async function POST(request: Request) {
     const live = await gatherLiveFigures(String((found as Row).heyreach_api_key_ciphertext ?? ""));
     const [signals, channels, call, brain] = await Promise.all([
       gatherSignals(read, workspace, live),
-      gatherChannels(workspace),
+      gatherChannels(workspace, EOW_WINDOW_DAYS),
       gatherCalls(read, workspace),
       brainContext(workspace),
     ]);
+    // A weekly report uses this week's call only; an older one would be reported as this week's news.
+    const thisWeeksCall = call.call && (call.call.ageDays === null || call.call.ageDays <= EOW_WINDOW_DAYS) ? call.call : null;
+    const callReason = call.call && !thisWeeksCall
+      ? `There was no call with this client this week (the last one was ${call.call.ageDays} days ago). Do not report anything from it as this week's.`
+      : call.callReason;
 
-    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason, brain: brain.block };
+    const inputs = { signals, ...channels, call: thisWeeksCall, callReason, brain: brain.block };
     const content = eowReportUserContent(workspace, inputs);
     const slackBody = truncateForSlack(await writeBrief(DEFAULT_EOW_REPORT_PROMPT, content));
     const header = reportHeader(clientName, timeZone);

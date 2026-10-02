@@ -22,7 +22,6 @@
  */
 
 import {
-  BRIEF_WINDOW_DAYS,
   CLIENT_BRIEF_CHARS,
   signalsAsText,
   type BriefChannel,
@@ -109,11 +108,12 @@ export function eowReportUserContent(workspace: BriefWorkspace, inputs: BriefInp
   const brief = String(workspace.client_brief ?? "").trim();
 
   const channelSection = (channel: BriefChannel, label: string) => {
+    const days = 7;
     if (!channel.channelId) return `# The ${label} channel\n\nNo ${label} channel is configured for this client.`;
     if (channel.error) return `# The ${label} channel\n\nThis channel could not be read: ${channel.error}`;
-    if (!channel.messages) return `# The ${label} channel\n\nNothing has been said in this channel in the last ${BRIEF_WINDOW_DAYS} days.`;
+    if (!channel.messages) return `# The ${label} channel\n\nNothing has been said in this channel in the last ${days} days.`;
     const threads = channel.threads ? `, including ${channel.replies ?? 0} replies across ${channel.threads} threads` : "";
-    return `# The ${label} channel (last ${BRIEF_WINDOW_DAYS} days, every message${threads})\n\nIndented lines beginning ↳ are replies inside the thread on the message above them, in order. A reply is where the real answer usually is.\n\n${channel.text}`;
+    return `# The ${label} channel (last ${days} days, every message${threads})\n\nIndented lines beginning ↳ are replies inside the thread on the message above them, in order. A reply is where the real answer usually is.\n\n${channel.text}`;
   };
 
   const callSection = (() => {
