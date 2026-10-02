@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { GRANOLA_DOWN_SECONDS, GRANOLA_TIMEZONE, granolaHeartbeatState } from "../../lib/granola-heartbeat";
+import { DEFAULT_MODEL } from "../../../shared/anthropic-model.mjs";
 
 type Row = Record<string, unknown>;
 const ageSeconds = (value: unknown) =>
@@ -141,7 +142,8 @@ export async function GET() {
     usageStart.setHours(0, 0, 0, 0);
     const anthropicStarted = Date.now();
     const anthropicCheck = process.env.ANTHROPIC_API_KEY
-      ? fetch("https://api.anthropic.com/v1/models?limit=1", {
+      ? // The configured default model itself, not just "the key works": a wrong or retired model name fails here.
+      fetch(`https://api.anthropic.com/v1/models/${DEFAULT_MODEL}`, {
           headers: {
             "x-api-key": process.env.ANTHROPIC_API_KEY,
             "anthropic-version": "2023-06-01",

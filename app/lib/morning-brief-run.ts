@@ -30,9 +30,10 @@ import { findClientCalls, type ClientCall, type GranolaKey } from "./granola";
 import { ALL_STATUSES, campaignStatusFor } from "./heyreach-campaigns";
 import { campaignFunnelFor, dailyStatsFor } from "./heyreach-campaign-metrics";
 import { readConfig } from "./app-config";
+import { DEFAULT_MODEL, temperatureField } from "../../shared/anthropic-model.mjs";
 
 /** Exported so the trace can name the model that was actually asked, rather than a second copy of it. */
-export const BRIEF_MODEL = "claude-sonnet-4-6";
+export const BRIEF_MODEL = DEFAULT_MODEL;
 /**
  * A brief is 200–450 words by design, so this is headroom rather than a target. It has to be headroom:
  * a brief cut off mid-sentence loses the last action item, and the last one is the one nobody else knew
@@ -354,7 +355,7 @@ export async function writeBrief(systemPrompt: string, userContent: string, mode
       max_tokens: MAX_OUTPUT_TOKENS,
       // Not zero: the same figures every Monday would otherwise produce nearly the same sentences, and
       // a brief that reads as boilerplate stops being read even when the contents changed.
-      temperature: 0.3,
+      ...temperatureField(model, 0.3),
       system: systemPrompt,
       messages: [{ role: "user", content: userContent }],
     }),

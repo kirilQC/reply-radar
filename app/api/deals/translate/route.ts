@@ -9,8 +9,9 @@
  * English, in order, so the drawer can show a translated view with a note that it is translated.
  */
 import { NextResponse } from "next/server";
+import { DEFAULT_MODEL, temperatureField } from "../../../../shared/anthropic-model.mjs";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = DEFAULT_MODEL;
 
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 4000,
-        temperature: 0,
+        ...temperatureField(MODEL, 0),
         system: "You translate outreach messages to natural English. Return ONLY a JSON array of strings, one per input message, in the same order. If a message is already English, return it unchanged. No commentary.",
         messages: [{ role: "user", content: `Translate each message to English:\n\n${numbered}` }],
       }),

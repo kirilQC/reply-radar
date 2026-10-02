@@ -3,7 +3,7 @@
 
 import { writeAuditEvent } from "./audit-log";
 import { briefedSystemPrompt } from "./client-context";
-import { resolveModel, temperatureField } from "../../shared/anthropic-model.mjs";
+import { resolveModel, temperatureField, DEFAULT_MODEL } from "../../shared/anthropic-model.mjs";
 import { mergeMessageRadar } from "./message-radar";
 
 type SupabaseConfig = { url: string; key: string };
@@ -151,8 +151,8 @@ export async function classifyLatestReply(
   if (!meta?.force && ["positive", "neutral", "negative"].includes(String(latestRadar.sentiment).toLowerCase())) { console.log(`[sentiment] Already classified as ${latestRadar.sentiment} for ${conversationId}`); return; }
 
   const systemPrompt = await getConfiguredPrompt(workspaceId);
-  // resolveModel swaps any retired id (old haiku, Opus 4.1, …) for its live replacement before the API call.
-  const model = resolveModel(process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001");
+  // resolveModel only lets allowlisted models through; anything else becomes DEFAULT_MODEL (Sonnet 5.5).
+  const model = resolveModel(process.env.ANTHROPIC_MODEL);
   const userContent = rows.map((row) => `${row.direction}: ${String(row.body ?? "")}`).join("\n");
   const startTime = Date.now();
 

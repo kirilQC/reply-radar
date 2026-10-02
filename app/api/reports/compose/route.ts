@@ -14,7 +14,7 @@
  * words. Digesting here also means what the model sees is defined in one place.
  */
 import { NextResponse } from "next/server";
-import { resolveModel, temperatureField } from "../../../../shared/anthropic-model.mjs";
+import { resolveModel, temperatureField, DEFAULT_MODEL } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import {
   COMPOSE_SYSTEM_PROMPT,
@@ -24,7 +24,7 @@ import {
 
 type Json = Record<string, unknown>;
 
-const FALLBACK_MODEL = "claude-haiku-4-5-20251001";
+const FALLBACK_MODEL = DEFAULT_MODEL;
 /**
  * How every email ends, without exception.
  *

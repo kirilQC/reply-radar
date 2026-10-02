@@ -37,9 +37,10 @@
  * produced and simply not kept, because the reader's page working matters more than the saving.
  */
 import { checkRender, cleanRender } from "../../shared/brain-render.mjs";
+import { DEFAULT_MODEL, temperatureField } from "../../shared/anthropic-model.mjs";
 
 /** Sonnet, for the same reason the MCP tab uses it: this is judgement, not classification. */
-const MODEL = "claude-sonnet-4-6";
+const MODEL = DEFAULT_MODEL;
 const TABLE = "rr_brain_renders";
 export const RENDER_MIGRATION = "supabase/migrations/20260814_rr_brain_renders.sql";
 
@@ -297,7 +298,7 @@ async function askForLayout(path: string, text: string): Promise<BrainRender> {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 16_000,
-      temperature: 0,
+      ...temperatureField(MODEL, 0),
       system: SYSTEM,
       messages: [{ role: "user", content: `File: ${path}\n\n---\n\n${source}` }],
     }),

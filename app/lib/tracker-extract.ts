@@ -26,8 +26,9 @@
  * a short title gets a short sentence. The cap below is the backstop for when it does not.
  */
 import type { BriefSignals } from "./morning-brief";
+import { DEFAULT_MODEL, temperatureField } from "../../shared/anthropic-model.mjs";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = DEFAULT_MODEL;
 const MAX_OUTPUT_TOKENS = 2_000;
 const REQUEST_TIMEOUT_MS = 40_000;
 
@@ -159,7 +160,7 @@ export async function extractTrackerItems(
         // Zero here, unlike the brief. The brief is written to be read and the same figures every week
         // should not produce the same sentences; this is a transcription, and variation in it is the
         // same item coming back under a different key and landing as a second row.
-        temperature: 0,
+        ...temperatureField(model, 0),
         system: EXTRACT_PROMPT,
         messages: [{ role: "user", content }],
       }),

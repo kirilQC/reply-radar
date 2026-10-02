@@ -24,12 +24,12 @@
  * pasted in as text, so none reaches it in that case either.
  */
 import { NextResponse } from "next/server";
-import { resolveModel, temperatureField } from "../../../../shared/anthropic-model.mjs";
+import { resolveModel, temperatureField, DEFAULT_MODEL } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
 
 type Json = Record<string, unknown>;
 
-const FALLBACK_MODEL = "claude-haiku-4-5-20251001";
+const FALLBACK_MODEL = DEFAULT_MODEL;
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 const object = (value: unknown): Json =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : {};

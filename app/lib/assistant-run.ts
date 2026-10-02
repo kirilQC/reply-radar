@@ -22,6 +22,7 @@
 import { TOOLS, runTool, takeFile } from "./assistant-tools";
 import { bigListToDataset, exportDatasets, parseCsv, type DatasetStore } from "./assistant-data";
 import { publicBaseUrl } from "./public-url";
+import { DEFAULT_MODEL } from "../../shared/anthropic-model.mjs";
 import {
   applyStreamEvent as applyEvent,
   createStreamState,
@@ -31,15 +32,10 @@ import {
 } from "../../shared/anthropic-stream.mjs";
 
 /**
- * Sonnet rather than the Haiku the rest of the app uses.
- *
- * Everything else here is one-shot classification — score this lead, draft this reply — where Haiku
- * is the right call. This is an agentic loop that has to choose tools, notice that an answer looks
- * wrong and go back for more, and the difference in that specific ability is large enough to change
- * whether the feature works at all. It also runs a handful of times a day, not once per inbound
- * message, so the cost profile is completely different.
+ * The app-wide default (Sonnet 5.5, `shared/anthropic-model.mjs`). Scout and QC Bot use adaptive thinking
+ * on it; every other feature makes plain one-shot calls on the same model.
  */
-export const MODEL = "claude-sonnet-5-5";
+export const MODEL = DEFAULT_MODEL;
 /**
  * Deliberately generous. A question like "analyse every campaign we have ever launched" is one round
  * per client to get metrics, more to check status and senders, and more again to read the replies

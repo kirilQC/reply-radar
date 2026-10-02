@@ -2,7 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
-import { resolveModel, temperatureField } from "../../../../shared/anthropic-model.mjs";
+import { resolveModel, temperatureField, DEFAULT_MODEL } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { clientContext, withClientContext } from "../../../lib/client-context";
 import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
@@ -160,7 +160,7 @@ export async function POST(request: Request) {
   const thread = Array.isArray(body.thread) ? body.thread : [];
   const instruction = typeof body.instruction === "string" ? body.instruction : "";
   const mode = body.mode === "analyze" ? "analyze" : "draft";
-  const FALLBACK_MODEL = "claude-haiku-4-5-20251001";
+  const FALLBACK_MODEL = DEFAULT_MODEL;
   const requestedModel = resolveModel(typeof body.model === "string" && body.model ? body.model : process.env.ANTHROPIC_MODEL || FALLBACK_MODEL);
   let model = requestedModel;
 

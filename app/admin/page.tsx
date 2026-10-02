@@ -14,6 +14,7 @@ import { airtableBaseFor } from "../../shared/airtable-link.mjs";
 import { looksLikeChannelId, normalizeChannelId } from "../lib/slack-channel";
 import { parseTitleNeedles, describeNeedles } from "../lib/granola-match";
 import Skeleton from "../components/Skeleton";
+import { ACTIVE_MODELS, DEFAULT_MODEL } from "../../shared/anthropic-model.mjs";
 
 /** What the breadcrumb calls each configuration section. */
 const adminSectionLabels: Record<string, string> = {
@@ -878,11 +879,8 @@ export default function AdminPage() {
                       {/* Only models confirmed active are offered — a retired one (e.g. Opus 4.1) fails every
                           request with not_found_error. Bound so the choice actually saves; blank = the default. */}
                       <select value={workspaceDraft.anthropicModel} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, anthropicModel: event.target.value }))}>
-                        <option value="">Default (claude-sonnet-4-6)</option>
-                        <option>claude-opus-5</option>
-                        <option>claude-sonnet-5</option>
-                        <option>claude-sonnet-4-6</option>
-                        <option>claude-haiku-4-5-20251001</option>
+                        <option value="">Default ({DEFAULT_MODEL})</option>
+                        {ACTIVE_MODELS.filter((m) => m !== DEFAULT_MODEL).map((m) => <option key={m}>{m}</option>)}
                       </select>
                     </label>
                     <label className="field-label">

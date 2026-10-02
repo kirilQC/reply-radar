@@ -30,8 +30,9 @@
  */
 import { parseFrame, splitFrames } from "../../shared/anthropic-stream.mjs";
 import { readConfig } from "./app-config";
+import { DEFAULT_MODEL, temperatureField } from "../../shared/anthropic-model.mjs";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = DEFAULT_MODEL;
 export const ICP_DOC_PROMPT_KEY = "icp_doc_prompt";
 
 /**
@@ -185,7 +186,7 @@ export async function writeIcpDoc({
     body: JSON.stringify({
       model: MODEL,
       max_tokens: CHUNK_OUTPUT,
-      temperature: 0.2,
+      ...temperatureField(MODEL, 0.2),
       system: prompt,
       messages,
       stream: true,

@@ -23,6 +23,7 @@ import { clientContext } from "./client-context";
 import { brainContext } from "./brain-context";
 import { readConfig, writeConfig } from "./app-config";
 import { CONTACT_REVIEW_SCHEMA, REVIEW_SCHEMA, contactReviewItem, parseContactReview, mergeNamedTags, normalizeIcp, parseReview, reviewItem, parseTagEntries, otherSample, parseSuggestions, normalizeQuestionSet, titlePoolQuestion, normalizeTagSet, parseGeneratedQuestionSet, parseGeneratedTagSet, parseTagList, toWireQuestions } from "../../shared/jev.mjs";
+import { DEFAULT_MODEL as CLAUDE_DEFAULT_MODEL, OPENROUTER_DEFAULT_MODEL, temperatureField } from "../../shared/anthropic-model.mjs";
 
 type Row = Record<string, unknown>;
 export type JevQuestion = { key: string; label: string; type: "noul" | "choice"; instructions: string; criteria?: Record<string, string>; pass: boolean | string[]; kind?: "must" | "exclude" | "signal" | "key"; neutral?: string[] };
@@ -34,7 +35,7 @@ export type JevAnswer = { type: string; noul?: number; choice?: string; probabil
 
 const DEFAULT_MODEL = "jev-1.13";
 const DEFAULT_BASE_URL = "https://openrouter.ai/api";
-const GENERATOR_MODEL = "claude-sonnet-4-6";
+const GENERATOR_MODEL = CLAUDE_DEFAULT_MODEL;
 /** Jev answers in ~70–500ms; anything past this is a stuck connection, not a slow answer. */
 const REQUEST_TIMEOUT_MS = 20_000;
 /** 429 and 529 are TypeSafe's "back off and retry"; five tries with backoff rides out a burst. */
@@ -251,11 +252,11 @@ async function askSonnet(system: string, content: string, maxTokens = 6_000): Pr
   if (!openrouter && !anthropic) return { ok: false, error: "Neither OPENROUTER_API_KEY nor ANTHROPIC_API_KEY is set." };
   try {
     if (openrouter) {
-      const model = process.env.JEV_BUILD_MODEL || "anthropic/claude-sonnet-5";
+      const model = process.env.JEV_BUILD_MODEL || OPENROUTER_DEFAULT_MODEL;
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: { "content-type": "application/json", Authorization: `Bearer ${openrouter}` },
-        body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0, messages: [{ role: "system", content: system }, { role: "user", content }] }),
+        body: JSON.stringify({ model, max_tokens: maxTokens, ...temperatureField(model, 0), messages: [{ role: "system", content: system }, { role: "user", content }] }),
         signal: AbortSignal.timeout(150_000),
       });
       const payload = await response.json().catch(() => ({}));
@@ -265,7 +266,7 @@ async function askSonnet(system: string, content: string, maxTokens = 6_000): Pr
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": anthropic!, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: GENERATOR_MODEL, max_tokens: maxTokens, temperature: 0, system, messages: [{ role: "user", content }] }),
+      body: JSON.stringify({ model: GENERATOR_MODEL, max_tokens: maxTokens, ...temperatureField(GENERATOR_MODEL, 0), system, messages: [{ role: "user", content }] }),
       signal: AbortSignal.timeout(150_000),
     });
     const payload = await response.json().catch(() => ({}));
@@ -438,7 +439,7 @@ export async function evaluateOne(state: unknown, questions: JevQuestion[] | { w
 /* ── Suggesting new tags from "Other" ── */
 
 /** Strong enough to design a taxonomy; reached through OpenRouter like the rest of the pipeline. */
-const SUGGEST_MODEL = () => process.env.JEV_SUGGEST_MODEL || "anthropic/claude-sonnet-5";
+const SUGGEST_MODEL = () => process.env.JEV_SUGGEST_MODEL || OPENROUTER_DEFAULT_MODEL;
 
 const SUGGEST_PROMPT = `You extend the category set a fast classifier (TypeSafe's Jev) uses to tag a company list for QC Growth, a B2B outbound agency. After a run, these companies landed in "Other" — none of the current tags fit. Propose NEW tags that would catch them.
 
@@ -471,7 +472,7 @@ export async function suggestTags(slug: string, items: unknown[]): Promise<{ ok:
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: SUGGEST_MODEL(), temperature: 0, max_tokens: 4_000, messages: [{ role: "system", content: SUGGEST_PROMPT }, { role: "user", content }] }),
+      body: JSON.stringify({ model: SUGGEST_MODEL(), ...temperatureField(SUGGEST_MODEL(), 0), max_tokens: 4_000, messages: [{ role: "system", content: SUGGEST_PROMPT }, { role: "user", content }] }),
       signal: AbortSignal.timeout(55_000),
     });
     const payload = await response.json().catch(() => ({}));
@@ -512,7 +513,7 @@ export async function describeTags(slug: string, labels: string[], allLabels: st
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: SUGGEST_MODEL(), temperature: 0, max_tokens: 3_000, messages: [{ role: "system", content: DESCRIBE_PROMPT }, { role: "user", content }] }),
+      body: JSON.stringify({ model: SUGGEST_MODEL(), ...temperatureField(SUGGEST_MODEL(), 0), max_tokens: 3_000, messages: [{ role: "system", content: DESCRIBE_PROMPT }, { role: "user", content }] }),
       signal: AbortSignal.timeout(50_000),
     });
     const payload = await response.json().catch(() => ({}));
@@ -530,7 +531,7 @@ export async function describeTags(slug: string, labels: string[], allLabels: st
 
 /* ── Claude review of Other / Needs review ── */
 
-const REVIEW_MODEL = () => process.env.JEV_REVIEW_MODEL || "anthropic/claude-sonnet-5";
+const REVIEW_MODEL = () => process.env.JEV_REVIEW_MODEL || OPENROUTER_DEFAULT_MODEL;
 
 const REVIEW_PROMPT = `You are the second opinion on a company list for QC Growth, a B2B outbound agency. A fast classifier (Jev) could not confidently place these companies in the client's tag set: it put them in "Other" or was unsure between tags. Look at each company properly and place it.
 
@@ -578,7 +579,7 @@ async function reviewOnce(tags: JevTagSet, batch: Array<{ i: number; profile: un
       headers: { "content-type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({
         model: REVIEW_MODEL(),
-        temperature: 0,
+        ...temperatureField(REVIEW_MODEL(), 0),
         // ~250 tokens a company with its reason; room for a long one.
         max_tokens: Math.min(8_000, 450 * batch.length + 600),
         response_format: { type: "json_schema", json_schema: { name: "placements", strict: true, schema: REVIEW_SCHEMA } },
@@ -650,7 +651,7 @@ export async function reviewContacts(slug: string, items: Array<{ i: number; pro
       headers: { "content-type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({
         model: REVIEW_MODEL(),
-        temperature: 0,
+        ...temperatureField(REVIEW_MODEL(), 0),
         max_tokens: Math.min(8_000, 350 * batch.length + 600),
         response_format: { type: "json_schema", json_schema: { name: "decisions", strict: true, schema: CONTACT_REVIEW_SCHEMA } },
         messages: [
