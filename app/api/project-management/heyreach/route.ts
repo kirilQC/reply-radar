@@ -31,9 +31,9 @@ export async function GET(request: Request) {
   const live = await gatherLiveFigures(String(workspace.heyreach_api_key_ciphertext));
   if (!live.available) return NextResponse.json({ ok: false, error: live.reason || "HeyReach could not be reached." }, { status: 502 });
 
-  // Running campaigns with leads left, plus ones HeyReach's API reports as paused that still have leads
-  // left. HeyReach has reported campaigns as PAUSED that its own dashboard shows active (Ema's EM031 pair,
-  // 2026-10-02), so they are shown, tagged, rather than hidden.
+  // Running campaigns with leads left, plus paused ones that still have leads left (tagged), so a paused
+  // campaign someone forgot to restart is visible. (Ema's "missing" campaigns were really EM031v2, which
+  // the campaign-code check used to drop; see shared/campaign-code.mjs.)
   const shown = live.campaigns.filter((c) => c.isActive || (/PAUS|HOLD/i.test(c.status) && c.pending > 0));
   const campaigns = shown
     .map((c) => ({
@@ -45,8 +45,10 @@ export async function GET(request: Request) {
       paused: !c.isActive,
     }))
     .sort((a, b) => Number(a.paused) - Number(b.paused) || b.pending - a.pending);
-  const pending = campaigns.reduce((sum, c) => sum + c.pending, 0);
-  const senderCount = new Set(shown.flatMap((c) => c.senderIds)).size;
+  // Totals count running campaigns only; paused ones are listed for context but aren't sending.
+  const running = shown.filter((c) => c.isActive);
+  const pending = running.reduce((sum, c) => sum + c.pending, 0);
+  const senderCount = new Set(running.flatMap((c) => c.senderIds)).size;
   return NextResponse.json({
     ok: true,
     connected: true,

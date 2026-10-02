@@ -451,7 +451,7 @@ function HeyReachPeek({ slug, name }: { slug: string; name: string }) {
           <div className="pm-peek-list">
             {d.campaigns.map((c) => (
               <div className="pm-peek-row" key={c.name}>
-                <div className="pm-peek-name">{c.name}{c.paused && <span className="pm-peek-tag" title="HeyReach's API reports this campaign as paused. It still has leads left.">Paused in HeyReach</span>}</div>
+                <div className="pm-peek-name">{c.name}{c.paused && <span className="pm-peek-tag" title="Paused in HeyReach. It still has leads left, but isn't counted in the totals.">Paused</span>}</div>
                 <div className="pm-peek-meta">
                   <span>{c.pending.toLocaleString()} pending</span>
                   <span className={c.daysLeft != null && c.daysLeft <= 3 ? "warn" : ""}>{c.daysLeft == null ? "no senders" : `${c.daysLeft} day${c.daysLeft === 1 ? "" : "s"} left`}</span>
