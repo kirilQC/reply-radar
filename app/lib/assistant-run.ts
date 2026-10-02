@@ -485,9 +485,8 @@ async function streamTurn(
   // there is the difference between a compose turn that fits inside the platform ceiling and one that
   // spends its first seconds thinking and gets killed mid-sentence. Historical thinking blocks already in
   // `messages` are accepted with thinking off; the API only requires them while it is on.
-  const thinking = finalTurn
-    ? { type: "disabled" as const }
-    : { type: "enabled" as const, budget_tokens: THINKING_BUDGET };
+  // Sonnet 5.5 takes adaptive thinking with an effort level rather than a fixed token budget.
+  const thinking = finalTurn ? { type: "disabled" as const } : { type: "adaptive" as const };
   const requestInit: RequestInit = {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
@@ -501,6 +500,7 @@ async function streamTurn(
       // Temperature is deliberately unset: extended thinking requires the default, and leaving it unset on
       // the final turn too keeps behaviour consistent.
       thinking,
+      ...(finalTurn ? {} : { output_config: { effort: "medium" } }),
       stream: true,
     }),
     cache: "no-store",
