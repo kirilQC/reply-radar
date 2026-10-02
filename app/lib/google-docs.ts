@@ -72,13 +72,13 @@ const base64url = (input: Buffer | string): string =>
  * rather than cached, because a sync runs a few times a day at most and a token cache would be a second
  * thing to get wrong for no measurable saving.
  */
-async function accessToken(account: ServiceAccount): Promise<string> {
+async function accessToken(account: ServiceAccount, scope = "https://www.googleapis.com/auth/documents.readonly"): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const claim = base64url(
     JSON.stringify({
       iss: account.clientEmail,
-      scope: "https://www.googleapis.com/auth/documents.readonly",
+      scope,
       aud: "https://oauth2.googleapis.com/token",
       iat: now,
       exp: now + 3600,
@@ -139,4 +139,45 @@ export async function fetchMessagingTabs(docUrlOrId: string): Promise<DocTab[]> 
   }
   const doc = (await response.json().catch(() => ({}))) as { tabs?: unknown[] };
   return flattenDocTabs(doc.tabs ?? []) as DocTab[];
+}
+
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+
+export type DriveFile = { id: string; name: string; type: string; modified: string; owner: string; url: string };
+
+/**
+ * Drive files the service account can see (anything shared with its email, or with a shared drive it is in)
+ * whose name or text matches `query`. Newest first.
+ */
+export async function searchDrive(query: string, limit = 25): Promise<DriveFile[]> {
+  const account = serviceAccount();
+  if (!account) throw new Error("Google isn't connected (GOOGLE_SERVICE_ACCOUNT_KEY is not set).");
+  const token = await accessToken(account, DRIVE_SCOPE);
+  const safe = query.replace(/\\/g, " ").replace(/'/g, "\\'");
+  const q = safe.trim() ? `(name contains '${safe}' or fullText contains '${safe}') and trashed = false` : "trashed = false";
+  const params = new URLSearchParams({
+    q, pageSize: String(Math.min(100, limit)), orderBy: "modifiedTime desc",
+    fields: "files(id,name,mimeType,modifiedTime,webViewLink,owners(displayName))",
+    includeItemsFromAllDrives: "true", supportsAllDrives: "true", corpora: "allDrives",
+  });
+  const response = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, { headers: { authorization: `Bearer ${token}` }, cache: "no-store" });
+  const data = (await response.json().catch(() => ({}))) as { files?: Array<Record<string, unknown>>; error?: { message?: string } };
+  if (!response.ok) throw new Error(data.error?.message || `Drive search failed (${response.status}). The Drive API may need enabling for the service account's project.`);
+  return (data.files ?? []).map((f) => ({
+    id: String(f.id ?? ""), name: String(f.name ?? ""),
+    type: String(f.mimeType ?? "").replace("application/vnd.google-apps.", ""),
+    modified: String(f.modifiedTime ?? "").slice(0, 10),
+    owner: Array.isArray(f.owners) ? String((f.owners[0] as Record<string, unknown>)?.displayName ?? "") : "",
+    url: String(f.webViewLink ?? ""),
+  }));
+}
+
+/** A Sheet (or any Google file) shared with the service account, exported as text, e.g. text/csv. */
+export async function exportDriveFile(fileId: string, mimeType: string): Promise<string> {
+  const account = serviceAccount();
+  if (!account) throw new Error("Google isn't connected.");
+  const token = await accessToken(account, DRIVE_SCOPE);
+  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent(mimeType)}`, { headers: { authorization: `Bearer ${token}` }, cache: "no-store" });
+  if (!response.ok) throw new Error(`Drive export failed (${response.status}).`);
+  return response.text();
 }

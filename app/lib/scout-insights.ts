@@ -19,7 +19,7 @@
 
 import { campaignStatusFor, ALL_STATUSES } from "./heyreach-campaigns";
 import { dailyStatsFor } from "./heyreach-campaign-metrics";
-import { fetchMessagingTabs, googleDocsConfigured } from "./google-docs";
+import { fetchMessagingTabs, googleDocsConfigured, searchDrive, exportDriveFile } from "./google-docs";
 import { brainConfigured, brainTree } from "./brain";
 import { brainFolderFor } from "../../shared/brain-link.mjs";
 import { clientsIn, clientSkeleton } from "../../shared/brain-structure.mjs";
@@ -396,8 +396,10 @@ async function googleDoc(input: Row) {
   if (sheet) {
     const gid = /[#&?]gid=(\d+)/.exec(url)?.[1] ?? "0";
     const r = await fetch(`https://docs.google.com/spreadsheets/d/${sheet[1]}/export?format=csv&gid=${gid}`, { cache: "no-store", redirect: "follow" });
-    if (!r.ok || /text\/html/i.test(r.headers.get("content-type") ?? "")) throw new Error("That sheet isn't readable. It needs to be shared as 'anyone with the link can view'.");
-    const csv = await r.text();
+    let csv = "";
+    if (r.ok && !/text\/html/i.test(r.headers.get("content-type") ?? "")) csv = await r.text();
+    else if (googleDocsConfigured()) csv = await exportDriveFile(sheet[1], "text/csv").catch(() => ""); // private, but shared with QC's Google account (first tab only)
+    if (!csv) throw new Error("That sheet isn't readable. Share it with 'anyone with the link can view', or with QC's Google service account.");
     const lines = csv.split(/\r?\n/);
     return { kind: "sheet", rows: lines.length - 1, csv: lines.slice(0, 400).join("\n"), truncated: lines.length > 400 };
   }
@@ -406,6 +408,17 @@ async function googleDoc(input: Row) {
   const budget = 40_000; let used = 0;
   return {
     kind: "doc", tabs: tabs.map((t) => { const room = Math.max(0, budget - used); const md = t.markdown.slice(0, room); used += md.length; return { title: t.title, text: md, truncated: md.length < t.markdown.length }; }),
+  };
+}
+
+/* ── google_drive_search ───────────────────────────────────────────────────────────────────────── */
+
+async function googleDriveSearch(input: Row) {
+  if (!googleDocsConfigured()) throw new Error("Google isn't connected (GOOGLE_SERVICE_ACCOUNT_KEY is not set). Reach out to Kiril.");
+  const files = await searchDrive(text(input.query), num(input.limit) || 25);
+  return {
+    note: "Only files shared with QC's Google service account (or a shared drive it belongs to) are visible. Open a Doc or Sheet with google_doc using its url.",
+    files,
   };
 }
 
@@ -646,6 +659,11 @@ export const INSIGHT_TOOLS: ToolDefinition[] = [
     input_schema: { type: "object", properties: { clients: { type: "array", items: { type: "string" } }, withinDays: { type: "integer" } } },
   },
   {
+    name: "google_drive_search",
+    description: "Search Google Drive by file name or text, newest first. Returns name, type (document, spreadsheet, folder, pdf...), last modified, owner and link. Use for 'find the X deck / sheet / doc', 'what's in Drive for client Y'. Then open a result with google_doc.",
+    input_schema: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer" } }, required: ["query"] },
+  },
+  {
     name: "google_doc",
     description: "Read a Google Doc (every tab, as text) or a Google Sheet (as CSV) from its link. Pass client instead of url to open that client's messaging doc. Docs and sheets need to be shared 'anyone with the link'. Use this whenever someone pastes a Google link or asks about a client's messaging doc.",
     input_schema: { type: "object", properties: { url: { type: "string" }, client: { type: "string" } } },
@@ -664,6 +682,7 @@ export async function runInsightTool(name: string, input: Row): Promise<unknown>
     case "outreach_people": return outreachPeople(input);
     case "sender_performance": return senderPerformance(input);
     case "reply_texts": return replyTexts(input);
+    case "google_drive_search": return googleDriveSearch(input);
     case "meetings_by_campaign": return meetingsByCampaign(input);
     case "sending_runway": return sendingRunway(input);
     default: throw new Error(`Unknown tool ${name}.`);
