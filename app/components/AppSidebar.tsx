@@ -5,7 +5,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BrandIcon, BrandWordmark } from "./BrandMark";
 import HelpMascot from "./HelpMascot";
@@ -174,9 +174,16 @@ export default function AppSidebar() {
     const stored = window.localStorage.getItem(collapseKey);
     setCollapsed(stored ? stored === "collapsed" : !home);
   }, [collapseKey, home, forceCollapsed]);
+  // Marks the few hundred milliseconds of a real collapse/expand, so the logo's crossfade runs then and
+  // never on a plain page load.
+  const [railAnim, setRailAnim] = useState(false);
+  const railAnimTimer = useRef<number | undefined>(undefined);
   const toggle = () => {
     const next = !collapsed;
     setCollapsed(next);
+    setRailAnim(true);
+    window.clearTimeout(railAnimTimer.current);
+    railAnimTimer.current = window.setTimeout(() => setRailAnim(false), 450);
     // Written here rather than in an effect so a route change cannot save the previous
     // page's state against the new page's key.
     if (forceCollapsed) return;
@@ -210,6 +217,7 @@ export default function AppSidebar() {
       />
       <aside
         className={`sidebar app-sidebar ${collapsed && !drawerLayout ? "sidebar-collapsed" : ""} ${navOpen ? "sidebar-open" : ""}`}
+        data-rail-anim={railAnim ? "" : undefined}
       >
       <div className="brand-row">
         {/*

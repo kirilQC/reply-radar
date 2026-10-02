@@ -421,10 +421,14 @@ html:not(.hydrated) body{visibility:hidden}
      fade so the swap doesn't snap. */
   .app-sidebar .brand-row { transition: padding .34s var(--rail-ease); }
   .app-sidebar.sidebar-collapsed .brand-row { padding-left: 10px; padding-right: 10px; }
-  .app-sidebar .brand-toggle .sidebar-label { animation: rail-fade .22s ease .1s both; }
+  /* Only while the rail is actually being toggled (data-rail-anim, set by AppSidebar for a moment).
+     Every page renders its own sidebar, so an animation on the logo itself replayed on every tab
+     switch and made the logo blink. */
+  .app-sidebar[data-rail-anim] .brand-toggle .sidebar-label { animation: rail-fade .22s ease .1s both; }
   .app-sidebar.sidebar-collapsed .brand-toggle .sidebar-label { display: none; }
   .app-sidebar .brand-toggle .brand-mark.brand-mark-grid { display: none; }
-  .app-sidebar.sidebar-collapsed .brand-toggle .brand-mark.brand-mark-grid { display: grid; animation: rail-fade .22s ease both; }
+  .app-sidebar.sidebar-collapsed .brand-toggle .brand-mark.brand-mark-grid { display: grid; }
+  .app-sidebar.sidebar-collapsed[data-rail-anim] .brand-toggle .brand-mark.brand-mark-grid { animation: rail-fade .22s ease both; }
 
   @media (prefers-reduced-motion: reduce) {
     .app-sidebar, .app-sidebar * { transition-duration: .01s !important; transition-delay: 0s !important; }

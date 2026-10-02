@@ -20,7 +20,7 @@ const ICON_RATIO = 170 / 165;
 export function BrandIcon({ size = 22, className }: { size?: number; className?: string }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img className={`brand-icon ${className ?? ""}`} src="/brand/qc-command-icon.png" alt="" aria-hidden width={Math.round(size * ICON_RATIO)} height={size} />
+    <img className={`brand-icon ${className ?? ""}`} src="/brand/qc-command-icon.png" decoding="sync" fetchPriority="high" alt="" aria-hidden width={Math.round(size * ICON_RATIO)} height={size} />
   );
 }
 
@@ -29,9 +29,9 @@ export function BrandWordmark({ height = 22, className }: { height?: number; cla
   return (
     <span className={`brand-wordmark ${className ?? ""}`} role="img" aria-label="QC Command">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img className="brand-wordmark-dark" src="/brand/qc-command-wordmark-dark.png" alt="" width={width} height={height} />
+      <img className="brand-wordmark-dark" src="/brand/qc-command-wordmark-dark.png" decoding="sync" fetchPriority="high" alt="" width={width} height={height} />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img className="brand-wordmark-light" src="/brand/qc-command-wordmark-light.png" alt="" width={width} height={height} />
+      <img className="brand-wordmark-light" src="/brand/qc-command-wordmark-light.png" decoding="sync" alt="" width={width} height={height} />
     </span>
   );
 }
