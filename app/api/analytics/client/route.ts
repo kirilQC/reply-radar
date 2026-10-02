@@ -33,15 +33,28 @@ function config() {
   return { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
 }
 
-async function get(path: string): Promise<Row[]> {
+/** The one place this route talks to anything: Supabase's REST endpoint, reads and RPC calls alike. */
+async function rest(path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) {
   const { url, key } = config();
-  if (!url || !key) return [];
-  const response = await fetch(`${url}/rest/v1/${path}`, {
-    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  if (!url || !key) return null;
+  return fetch(`${url}/rest/v1/${path}`, {
+    method: init.method,
+    headers: { apikey: key, Authorization: `Bearer ${key}`, ...init.headers },
+    body: init.body,
     cache: "no-store",
   });
+}
+
+async function getResponse(path: string, extraHeaders: Record<string, string> = {}) {
+  const response = await rest(path, { headers: extraHeaders });
+  if (!response) return null;
   if (!response.ok) throw new Error(`Supabase request failed (${response.status})`);
-  return (await response.json()) as Row[];
+  return response;
+}
+
+async function get(path: string): Promise<Row[]> {
+  const response = await getResponse(path);
+  return response ? (await response.json()) as Row[] : [];
 }
 
 /**
@@ -49,18 +62,114 @@ async function get(path: string): Promise<Row[]> {
  * PostgREST response is capped, so a bare read of a big table quietly returns only the first slice and
  * drops the rest, which is what let a busy client's newest conversations (and their recent replies) fall
  * out of the count. The caller must pass an explicit `order` so the offset windows stay stable.
+ *
+ * The first page asks for the exact total, so the remaining pages go out together instead of one after
+ * another. They are assembled exactly as the sequential walk would have: offset order, stopping at the
+ * first short or empty page, continuing one at a time if the last one came back full.
  */
 async function getAll(path: string, pageSize = 1000): Promise<Row[]> {
   const all: Row[] = [];
   const separator = path.includes("?") ? "&" : "?";
-  for (let offset = 0; ; offset += pageSize) {
-    const page = await get(`${path}${separator}limit=${pageSize}&offset=${offset}`);
+  const pagePath = (offset: number) => `${path}${separator}limit=${pageSize}&offset=${offset}`;
+  const firstResponse = await getResponse(pagePath(0), { Prefer: "count=exact" });
+  if (!firstResponse) return all;
+  const total = Number(String(firstResponse.headers.get("content-range") ?? "").split("/")[1]);
+  const first = (await firstResponse.json()) as Row[];
+  if (first.length === 0) return all;
+  all.push(...first);
+  if (first.length < pageSize) return all;
+  let offset = pageSize;
+  if (Number.isFinite(total) && total > pageSize) {
+    const offsets: number[] = [];
+    for (let next = pageSize; next < total; next += pageSize) offsets.push(next);
+    const pages = await Promise.all(offsets.map((next) => get(pagePath(next))));
+    for (const page of pages) {
+      if (page.length === 0) return all;
+      all.push(...page);
+      if (page.length < pageSize) return all;
+      offset += pageSize;
+    }
+  }
+  for (; ; offset += pageSize) {
+    const page = await get(pagePath(offset));
     if (page.length === 0) break;
     all.push(...page);
     if (page.length < pageSize) break;
   }
   return all;
 }
+
+/**
+ * This client's inbound replies, reduced to what the page reads: per campaign name and sentiment, how
+ * many, and how many in the last week. Plus the conversation count.
+ *
+ * `rr_analytics_client_replies` does the grouping in Postgres
+ * (`supabase/migrations/20261002_rr_analytics_overview.sql`); without it, the conversations and their
+ * inbound messages are paged in as before and grouped here. Either way the name and sentiment are the
+ * raw stored strings, and the trimming and lower-casing happen in one place below.
+ */
+type ReplyGroup = { campaign: unknown; sentiment: unknown; recent: boolean; count: number };
+let clientRpcMissingUntil = 0;
+async function replyGroupsRpc(workspaceId: string, weekAgo: number): Promise<{ conversations: number; groups: ReplyGroup[] } | null> {
+  if (Date.now() < clientRpcMissingUntil) return null;
+  try {
+    const response = await rest("rpc/rr_analytics_client_replies", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ p_workspace_id: workspaceId, p_week_ago: new Date(weekAgo).toISOString() }),
+    });
+    if (!response) return null;
+    if (response.status === 404) { clientRpcMissingUntil = Date.now() + 5 * 60_000; return null; }
+    if (!response.ok) { console.warn(`[analytics/client] rr_analytics_client_replies failed (${response.status}); reading rows instead.`); return null; }
+    const payload = (await response.json().catch(() => null)) as Row | null;
+    // Anything not shaped like this function's answer is treated as no answer at all, never as zeros.
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.groups) || !Number.isFinite(Number(payload.conversations))) {
+      console.warn("[analytics/client] rr_analytics_client_replies returned an unexpected shape; reading rows instead.");
+      return null;
+    }
+    const groups = payload.groups as Row[];
+    return {
+      conversations: num(payload?.conversations),
+      groups: groups.map((row) => ({ campaign: row.campaign ?? null, sentiment: row.sentiment ?? null, recent: row.recent === true, count: num(row.n) })),
+    };
+  } catch (error) {
+    console.warn("[analytics/client] rr_analytics_client_replies unavailable; reading rows instead.", error);
+    return null;
+  }
+}
+
+async function replyGroupsRows(workspaceId: string, weekAgo: number): Promise<{ conversations: number; groups: ReplyGroup[] }> {
+  const conversations = await getAll(`rr_conversations?select=id&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=id.asc`);
+  /*
+   * Inbound messages, with the two fields needed lifted out of the JSON by PostgREST rather than
+   * downloaded whole. `raw_data` on a message is the entire stored HeyReach payload; selecting it to
+   * read one string out of it is how the analytics route came to move megabytes to count sentiments.
+   */
+  const conversationIds = conversations.map((row) => String(row.id)).filter(Boolean);
+  const inbound = await queryByIds(conversationIds, 20, async (batch) =>
+    getAll(
+      `rr_messages?select=sent_at,sentiment:raw_data->reply_radar->>sentiment,campaign:raw_data->reply_radar->campaign->>name` +
+        `&direction=eq.inbound&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc,conversation_id.asc`,
+    ),
+  );
+  const groups = new Map<string, ReplyGroup>();
+  for (const message of inbound) {
+    const recent = Date.parse(String(message.sent_at ?? "")) >= weekAgo;
+    const key = JSON.stringify([message.campaign ?? null, message.sentiment ?? null, recent]);
+    const group = groups.get(key) ?? { campaign: message.campaign ?? null, sentiment: message.sentiment ?? null, recent, count: 0 };
+    group.count += 1;
+    groups.set(key, group);
+  }
+  return { conversations: conversationIds.length, groups: [...groups.values()] };
+}
+
+/**
+ * A finished answer per client, kept briefly so a page left open, a second tab or a teammate on the
+ * same client does not redo the read. The page adds `?fresh=1` while a refresh it asked for is in
+ * flight, so the sync progress it shows is never served from here.
+ */
+const CLIENT_TTL_MS = 30_000;
+const clientCache = new Map<string, { expires: number; body: unknown }>();
 
 /** The last `days` calendar days, oldest first, as `YYYY-MM-DD`. */
 function dayKeys(days: number) {
@@ -76,6 +185,9 @@ export async function GET(request: Request) {
   if (!url || !key) return slimJson({ ok: false, status: "not_configured" }, { status: 503 });
   const slug = new URL(request.url).searchParams.get("client")?.trim() ?? "";
   if (!slug) return slimJson({ ok: false, status: "no_client" }, { status: 400 });
+  const fresh = new URL(request.url).searchParams.get("fresh") === "1";
+  const cached = clientCache.get(slug);
+  if (!fresh && cached && cached.expires > Date.now()) return slimJson(cached.body);
 
   try {
     const workspaces = await get(`rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=eq.${encodeURIComponent(slug)}&limit=1`);
@@ -83,13 +195,15 @@ export async function GET(request: Request) {
     if (!workspace) return slimJson({ ok: false, status: "not_found" }, { status: 404 });
     const workspaceId = String(workspace.id);
 
-    const [campaignRows, dailyRows, conversations, runs] = await Promise.all([
+    const weekAgo = Date.now() - 7 * 86_400_000;
+    const [campaignRows, dailyRows, replies, runs] = await Promise.all([
       get(`rr_campaign_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=launched_at.desc.nullslast&limit=2000`),
       // Only the window being drawn. Asking for everything oldest-first hit Supabase's 1,000-row cap
       // (a row per sender per day adds up fast), so a long-running client like Bluevia got June's rows
       // and none from the last fortnight, and every chart read 0.
       getAll(`rr_daily_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&day=gte.${dayKeys(14)[0]}&order=day.asc,sender_id.asc`),
-      getAll(`rr_conversations?select=id&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=id.asc`),
+      // Conversations and their inbound replies, reduced — read alongside the rest rather than after.
+      replyGroupsRpc(workspaceId, weekAgo).then((result) => result ?? replyGroupsRows(workspaceId, weekAgo)),
       /*
        * The last few collection passes for this client, which is what the page's progress bar is made
        * of. `/api/analytics/client/refresh` queues a row here and the worker moves it queued → running
@@ -98,30 +212,18 @@ export async function GET(request: Request) {
       get(`rr_sync_runs?select=status,started_at,finished_at,error_text&workspace_id=eq.${encodeURIComponent(workspaceId)}&run_type=eq.analytics&order=started_at.desc&limit=4`),
     ]);
 
-    /*
-     * Inbound messages, with the two fields needed lifted out of the JSON by PostgREST rather than
-     * downloaded whole. `raw_data` on a message is the entire stored HeyReach payload; selecting it to
-     * read one string out of it is how the analytics route came to move megabytes to count sentiments.
-     */
-    const conversationIds = conversations.map((row) => String(row.id)).filter(Boolean);
-    const inbound = await queryByIds(conversationIds, 20, async (batch) =>
-      getAll(
-        `rr_messages?select=conversation_id,sent_at,sentiment:raw_data->reply_radar->>sentiment,campaign:raw_data->reply_radar->campaign->>name` +
-          `&direction=eq.inbound&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc,conversation_id.asc`,
-      ),
-    );
-
     const positiveByCampaign = new Map<string, number>();
     const repliesByCampaign = new Map<string, number>();
-    const weekAgo = Date.now() - 7 * 86_400_000;
     let replies7d = 0;
-    for (const message of inbound) {
-      const campaign = String(message.campaign ?? "").trim().toLowerCase();
-      if (Date.parse(String(message.sent_at ?? "")) >= weekAgo) replies7d += 1;
+    let repliesSynced = 0;
+    for (const group of replies.groups) {
+      const campaign = String(group.campaign ?? "").trim().toLowerCase();
+      repliesSynced += group.count;
+      if (group.recent) replies7d += group.count;
       if (!campaign) continue;
-      repliesByCampaign.set(campaign, (repliesByCampaign.get(campaign) ?? 0) + 1);
-      if (String(message.sentiment ?? "").toLowerCase() === "positive") {
-        positiveByCampaign.set(campaign, (positiveByCampaign.get(campaign) ?? 0) + 1);
+      repliesByCampaign.set(campaign, (repliesByCampaign.get(campaign) ?? 0) + group.count);
+      if (String(group.sentiment ?? "").toLowerCase() === "positive") {
+        positiveByCampaign.set(campaign, (positiveByCampaign.get(campaign) ?? 0) + group.count);
       }
     }
 
@@ -245,7 +347,7 @@ export async function GET(request: Request) {
       return state !== "queued" && state !== "running";
     });
 
-    return slimJson({
+    const body = {
       ok: true,
       status: campaigns.length ? "live" : "no_data",
       workspace: {
@@ -262,9 +364,9 @@ export async function GET(request: Request) {
       senderCap,
       // What the inbox holds, as distinct from what HeyReach counted. The gap is the point: it is the
       // difference between every reply the campaign ever got and the ones we are working.
-      repliesSynced: inbound.length,
+      repliesSynced,
       replies7d,
-      conversations: conversationIds.length,
+      conversations: replies.conversations,
       collectedAt: refreshed.length ? new Date(Math.max(...refreshed)).toISOString() : null,
       sync: {
         // `queued` means the worker has not picked it up yet, `running` means it is mid-pass, and
@@ -275,7 +377,9 @@ export async function GET(request: Request) {
         lastFinishedAt: settled?.finished_at ? String(settled.finished_at) : null,
         lastError: settled?.error_text ? String(settled.error_text) : null,
       },
-    });
+    };
+    clientCache.set(slug, { expires: Date.now() + CLIENT_TTL_MS, body });
+    return slimJson(body);
   } catch (error) {
     return slimJson({ ok: false, status: "error", error: error instanceof Error ? error.message : "Client analytics unavailable" }, { status: 502 });
   }

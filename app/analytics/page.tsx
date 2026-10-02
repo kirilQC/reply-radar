@@ -296,9 +296,13 @@ export default function AnalyticsPage() {
     let live = true;
     let pending = false;
     let lastFetch = 0;
-    const load = () => {
+    /*
+     * `fresh` while a refresh this tab asked for is outstanding: the route keeps answers for half a
+     * minute, and the progress bar must see the worker's queued → running → done as it happens.
+     */
+    const load = (fresh = false) => {
       lastFetch = Date.now();
-      return fetch(`/api/analytics/client?client=${encodeURIComponent(slug)}`, { cache: "no-store" })
+      return fetch(`/api/analytics/client?client=${encodeURIComponent(slug)}${fresh ? "&fresh=1" : ""}`, { cache: "no-store" })
       .then((response) => response.json())
       .then((payload: ClientAnalytics) => {
         if (!live) return;
@@ -352,8 +356,10 @@ export default function AnalyticsPage() {
      * once a day — and the fast cadence applies only while a refresh this tab asked for is outstanding.
      */
     const timer = window.setInterval(() => {
+      // A background tab polls nothing; the next tick after it comes back catches up.
+      if (document.visibilityState === "hidden") return;
       const watching = pending || Date.now() - askedAt.current < REFRESH_PATIENCE_MS;
-      if (Date.now() - lastFetch >= (watching ? CLIENT_POLL_ACTIVE_MS : CLIENT_POLL_IDLE_MS)) void load();
+      if (Date.now() - lastFetch >= (watching ? CLIENT_POLL_ACTIVE_MS : CLIENT_POLL_IDLE_MS)) void load(watching);
     }, CLIENT_POLL_TICK_MS);
     return () => { live = false; window.clearInterval(timer); };
   }, [routeReady, selectedSlug]);
@@ -380,11 +386,18 @@ export default function AnalyticsPage() {
      * The stamp is stored with it and put straight into the "updated HH:MM" label already in the
      * hero, so a restored snapshot says how old it is instead of pretending to be live.
      */
+    /**
+     * The ETag of the figures on screen. Sent back on every poll, so when nothing has changed the route
+     * answers 304 with no body instead of the whole payload again.
+     */
+    let etag = "";
+    let lastFetch = 0;
     try {
       const cached = window.localStorage.getItem(snapshotKey);
       if (cached) {
-        const parsed = JSON.parse(cached) as { at?: number; data?: AnalyticsData };
+        const parsed = JSON.parse(cached) as { at?: number; data?: AnalyticsData; etag?: string };
         if (parsed?.data && typeof parsed.data === "object") {
+          etag = typeof parsed.etag === "string" ? parsed.etag : "";
           // The one extra render this costs is the entire point of the snapshot — it is what turns
           // an empty shell into last visit's figures. `set-state-in-effect` exists to catch render
           // loops, and this runs once on mount from a value that cannot change.
@@ -402,7 +415,14 @@ export default function AnalyticsPage() {
     const load = () => {
       if (inFlight) return Promise.resolve();
       inFlight = true;
-      return fetch("/api/analytics", { cache: "no-store" }).then((response) => response.json()).then((payload: AnalyticsData & { ok?: boolean }) => {
+      lastFetch = Date.now();
+      return fetch("/api/analytics", { cache: "no-store", headers: etag ? { "If-None-Match": etag } : {} }).then(async (response) => {
+      if (response.status === 304) {
+        setUpdatedAt(new Date());
+        return;
+      }
+      const responseTag = response.headers.get("etag") ?? "";
+      const payload = (await response.json()) as AnalyticsData & { ok?: boolean };
       // A failed poll keeps the figures already on screen. Replacing them with an error payload blanked a
       // working page for 30 seconds every time HeyReach or Supabase hiccuped.
       if (payload?.ok === false) {
@@ -410,6 +430,7 @@ export default function AnalyticsPage() {
         return;
       }
       setData(payload);
+      etag = responseTag;
       const at = Date.now();
       setUpdatedAt(new Date(at));
       // Only an answer with figures in it is kept, judged on content rather than on a status
@@ -418,14 +439,24 @@ export default function AnalyticsPage() {
       // every later visit. Campaign metrics are the spine of everything below, so their presence is
       // the honest test of whether this payload is worth keeping.
       if (Array.isArray(payload?.campaignMetrics) && payload.campaignMetrics.length) {
-        try { window.localStorage.setItem(snapshotKey, JSON.stringify({ at, data: payload })); } catch { /* quota or private mode */ }
+        try { window.localStorage.setItem(snapshotKey, JSON.stringify({ at, data: payload, etag: responseTag })); } catch { /* quota or private mode */ }
       }
     }).catch(() => setData((current) => (current.campaignMetrics?.length ? current : { status: "error" })))
         .finally(() => { inFlight = false; });
     };
     void load();
-    const timer = window.setInterval(load, 30_000);
-    return () => window.clearInterval(timer);
+    /*
+     * Every thirty seconds, but only while the tab is being looked at. A hidden tab skips its polls and
+     * catches up the moment it is shown again, if the last answer is older than a poll.
+     */
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void load();
+    }, 30_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() - lastFetch >= 30_000) void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
   }, [routeReady, selectedSlug]);
 
   const workspaces = data.workspaceDetails ?? [];
