@@ -778,3 +778,4 @@
 .lu-track i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .15s linear; }
 .lu-time { font: 600 11px ui-monospace, monospace; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
 @media (prefers-reduced-motion: reduce) { .lu-rec-dot, .lu-rec-wave i { animation: none; } }
+.pm-ed-side > .pm-f, .pm-ed-side > .pm-f-row { flex: none; }
