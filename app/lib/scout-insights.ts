@@ -23,7 +23,7 @@ import { fetchMessagingTabs, googleDocsConfigured } from "./google-docs";
 import { brainConfigured, brainTree } from "./brain";
 import { brainFolderFor } from "../../shared/brain-link.mjs";
 import { clientsIn, clientSkeleton } from "../../shared/brain-structure.mjs";
-import { ourCampaigns } from "../../shared/campaign-code.mjs";
+import { ourCampaigns, campaignCode } from "../../shared/campaign-code.mjs";
 import { sendingDaysLeft } from "../../shared/sending-runway.mjs";
 import { listOnboardingClients } from "./onboarding";
 
@@ -211,11 +211,18 @@ const BOOKING_LINK = /(calendly\.com|cal\.com\/|savvycal\.com|tidycal\.com|zcal\
 const slugOf = (url: string) => (/linkedin\.com\/in\/([^/?#]+)/i.exec(url)?.[1] ?? "").toLowerCase();
 const normName = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
 
+function tally(rows: Row[], key: (r: Row) => string) {
+  const m: Record<string, number> = {};
+  for (const r of rows) { const k = key(r); m[k] = (m[k] ?? 0) + 1; }
+  return Object.fromEntries(Object.entries(m).sort((a, b) => b[1] - a[1]));
+}
+
 async function followUpList(input: Row) {
   const all = await allClients();
   const picked = text(input.client) ? pickClients(all, [text(input.client)]) : all;
   const staleDays = Math.max(1, Math.min(60, num(input.staleDays) || 3));
   const includeNegative = input.includeNegative === true;
+  const wantSentiment = strings(input.sentiment).map((x) => x.toLowerCase());
   const wantCategories = strings(input.category ?? input.categories).map((c) => c.toLowerCase());
   // Threads older than this are dead in practice; they're counted, not listed, unless asked for.
   const maxDays = Math.max(7, Math.min(3650, num(input.maxDaysSince) || 90));
@@ -259,6 +266,7 @@ async function followUpList(input: Row) {
     if (!category) continue;
     if (daysSinceLast > maxDays) { olderSkipped += 1; continue; }
     if (wantCategories.length && !wantCategories.includes(category)) continue;
+    if (wantSentiment.length && !wantSentiment.includes(sentiment ?? "unknown")) continue;
     if (category === "they_replied_we_havent") counts.theyRepliedWeHavent += 1;
     if (category === "went_quiet_after_our_reply") counts.wentQuietAfterOurReply += 1;
     if (category === "sent_booking_link_no_meeting") counts.sentBookingLinkNoMeeting += 1;
@@ -279,7 +287,12 @@ async function followUpList(input: Row) {
     staleDays, maxDaysSince: maxDays, olderThanWindowNotListed: olderSkipped,
     ...(wantCategories.length ? { onlyCategories: wantCategories } : {}),
     definitions: "they_replied_we_havent: the lead sent the last message. sent_booking_link_no_meeting: we sent a booking link (Calendly etc.) after their last reply, no meeting is recorded for them, and it has been at least staleDays. went_quiet_after_our_reply: they replied at some point, we answered, they went silent for at least staleDays and have no meeting. Negative leads are excluded unless includeNegative. Meetings are matched by LinkedIn profile or name against the Meetings tab.",
-    counts: { total: out.length, ...counts, ofThoseNotBooked: out.filter((r) => !r.meetingBooked).length },
+    ...(wantSentiment.length ? { onlySentiment: wantSentiment } : {}),
+    counts: {
+      total: out.length, ...counts, ofThoseNotBooked: out.filter((r) => !r.meetingBooked).length,
+      bySentiment: tally(out, (r) => text(r.sentiment) || "unknown"),
+      byClient: tally(out, (r) => text(r.client)),
+    },
     leads: out,
   };
 }
@@ -324,10 +337,15 @@ async function clientReadiness(input: Row) {
       granolaCalls: c.granola ? `matches "${c.granola}"` : "matches the client name", airtable: c.airtable ? "linked" : "not linked", morningBrief: c.morningBrief ? "on" : "off",
     };
   });
+  const noDoc = new Set(rows.filter((r) => r.messagingDoc === "missing").map((r) => r.client));
+  const noIcp = new Set(rows.filter((r) => text((r.brainDocs as Row).ICP) !== "written").map((r) => r.client));
   return {
-    note: "The messaging doc is a link saved on the client in QC Command (Configuration), not a brain file. Brain docs under 700 bytes are flagged as placeholders.",
+    note: "The messaging doc is a link saved on the client in QC Command (Configuration), not a brain file. Brain docs under 700 bytes are flagged as placeholders. The three missing* groups below are exclusive and already computed: quote them as-is, do not re-derive them.",
     summary: {
       clients: rows.length,
+      missingBothDocAndIcp: [...noDoc].filter((n) => noIcp.has(n)),
+      missingMessagingDocOnly: [...noDoc].filter((n) => !noIcp.has(n)),
+      missingIcpOnly: [...noIcp].filter((n) => !noDoc.has(n)),
       missingMessagingDoc: rows.filter((r) => r.messagingDoc === "missing").map((r) => r.client),
       missingIcp: rows.filter((r) => text((r.brainDocs as Row).ICP) !== "written").map((r) => r.client),
       onboardingIncomplete: rows.filter((r) => /%/.test(text(r.onboarding)) && !/^100%/.test(text(r.onboarding))).map((r) => r.client),
@@ -440,6 +458,96 @@ async function outreachPeople(input: Row) {
   };
 }
 
+/* ── meetings_by_campaign ──────────────────────────────────────────────────────────────────────── */
+
+async function meetingsByCampaign(input: Row) {
+  const all = await allClients();
+  const picked = strings(input.clients ?? input.client).length ? pickClients(all, strings(input.clients ?? input.client)) : all;
+  const byId = new Map(picked.map((c) => [c.id, c]));
+  const allTime = !text(input.from) && !text(input.to);
+  const w = windowOf(input.from, input.to, 3650);
+  const meetings = (await dbAll(`rr_meetings?select=workspace_id,invitee_name,invitee_linkedin,company_name,campaign,status,created_at,meeting_at${allTime ? "" : `&created_at=gte.${w.from}&created_at=lt.${endExclusive(w.to)}`}&order=created_at.asc`))
+    .filter((m) => byId.has(text(m.workspace_id)) && !/cancel/i.test(text(m.status)));
+  // A meeting with no campaign typed on it: find the lead it belongs to and use the campaign they were in.
+  const unlabelled = meetings.filter((m) => !text(m.campaign));
+  const wsIds = [...new Set(unlabelled.map((m) => text(m.workspace_id)))];
+  const leads = wsIds.length ? await dbAll(`rr_leads?select=workspace_id,name,linkedin_profile_url,campaign_names&workspace_id=in.(${wsIds.join(",")})&campaign_names=not.is.null&order=id.asc`).catch(() => [] as Row[]) : [];
+  const bySlug = new Map<string, string>(); const byName = new Map<string, string>();
+  for (const l of leads) {
+    const names = text(l.campaign_names); if (!names) continue;
+    const slug = slugOf(text(l.linkedin_profile_url)); if (slug) bySlug.set(`${text(l.workspace_id)}|${slug}`, names);
+    byName.set(`${text(l.workspace_id)}|${normName(text(l.name))}`, names);
+  }
+  const codeOf = (name: string) => (campaignCode(name) as string | null)?.toUpperCase() ?? null;
+  const stats = await dbAll(`rr_campaign_stats?select=workspace_id,name,connections_sent,connections_accepted,replies&workspace_id=in.(${picked.map((c) => c.id).join(",")})&order=campaign_id.asc`);
+  const statByCode = new Map<string, Row>();
+  for (const st of stats) { const code = codeOf(text(st.name)); if (code) statByCode.set(`${text(st.workspace_id)}|${code}`, st); }
+  const agg = new Map<string, Row>();
+  let matchedFromLead = 0; let unattributed = 0;
+  const unattributedByClient: Record<string, number> = {};
+  for (const m of meetings) {
+    const ws = text(m.workspace_id); const client = byId.get(ws)!;
+    let names = text(m.campaign);
+    if (!names) {
+      names = bySlug.get(`${ws}|${slugOf(text(m.invitee_linkedin))}`) ?? byName.get(`${ws}|${normName(text(m.invitee_name))}`) ?? "";
+      if (names) matchedFromLead += 1;
+    }
+    const first = names.split(/[,;|]/).map((x) => x.trim()).find((x) => codeOf(x)) ?? "";
+    const code = codeOf(first);
+    if (!code) { unattributed += 1; unattributedByClient[client.name] = (unattributedByClient[client.name] ?? 0) + 1; continue; }
+    const key = `${ws}|${code}`;
+    const st = statByCode.get(key);
+    const a = agg.get(key) ?? { client: client.name, campaign: st ? text(st.name) : first, meetings: 0, sent: st ? num(st.connections_sent) : null, accepted: st ? num(st.connections_accepted) : null, replies: st ? num(st.replies) : null, people: [] as string[] };
+    a.meetings = num(a.meetings) + 1; (a.people as string[]).push(text(m.invitee_name) || text(m.company_name));
+    agg.set(key, a);
+  }
+  const rows = [...agg.values()].map((a): Row => ({ ...a, meetingsPer100Accepted: a.accepted ? Math.round((num(a.meetings) / num(a.accepted)) * 1000) / 10 : null, meetingsPerReply: a.replies ? Math.round((num(a.meetings) / num(a.replies)) * 100) / 100 : null }))
+    .sort((a, b) => num(b.meetings) - num(a.meetings) || num(b.meetingsPer100Accepted) - num(a.meetingsPer100Accepted));
+  return {
+    window: allTime ? "all time" : w,
+    meetings: meetings.length, attributed: meetings.length - unattributed, attributedFromLeadRecord: matchedFromLead, unattributed, unattributedByClient,
+    note: "A meeting's campaign is the one typed on it in the Meetings tab, or else the first QC campaign the matched lead was in. Sent/accepted/replies are the campaign's lifetime HeyReach numbers.",
+    campaigns: rows,
+  };
+}
+
+/* ── reply_texts ───────────────────────────────────────────────────────────────────────────────── */
+
+/** What leads actually wrote, across a real window, for objection / theme / tone questions. */
+async function replyTexts(input: Row) {
+  const all = await allClients();
+  const picked = strings(input.clients ?? input.client).length ? pickClients(all, strings(input.clients ?? input.client)) : all;
+  const byId = new Map(picked.map((c) => [c.id, c]));
+  const w = windowOf(input.from, input.to, 90);
+  const wantSentiment = strings(input.sentiment).map((x) => x.toLowerCase());
+  const limit = Math.max(20, Math.min(600, num(input.limit) || 250));
+  const contains = text(input.contains).toLowerCase();
+  const msgs = await dbAll(`rr_messages?select=conversation_id,sent_at,body,sentiment:raw_data->reply_radar->>sentiment&direction=eq.inbound&sent_at=gte.${w.from}&sent_at=lt.${endExclusive(w.to)}&order=sent_at.desc`);
+  const convs = await dbByIds((ids) => `rr_conversations?select=id,workspace_id&id=in.(${ids.join(",")})&order=id.asc`, [...new Set(msgs.map((m) => text(m.conversation_id)))]);
+  const wsOf = new Map(convs.map((c) => [text(c.id), text(c.workspace_id)]));
+  const seen = new Set<string>();
+  const matching: Row[] = [];
+  for (const m of msgs) {
+    const client = byId.get(wsOf.get(text(m.conversation_id)) ?? ""); if (!client) continue;
+    const sentiment = text(m.sentiment).toLowerCase() || "unknown";
+    if (wantSentiment.length && !wantSentiment.includes(sentiment)) continue;
+    const body = text(m.body).replace(/\s+/g, " ").trim();
+    if (body.length < 12) continue; // "thanks", emoji, accept-only noise
+    if (contains && !body.toLowerCase().includes(contains)) continue;
+    const key = `${text(m.conversation_id)}|${body.slice(0, 60)}`; if (seen.has(key)) continue; seen.add(key);
+    matching.push({ client: client.name, day: text(m.sent_at).slice(0, 10), sentiment, text: body.slice(0, 220) });
+  }
+  // Spread the sample across the whole window rather than only the newest days.
+  const step = Math.max(1, matching.length / limit);
+  const sample = matching.length <= limit ? matching : Array.from({ length: limit }, (_, i) => matching[Math.floor(i * step)]);
+  return {
+    window: w, totalMatchingReplies: matching.length, returned: sample.length,
+    bySentiment: tally(matching, (r) => text(r.sentiment)), byClient: tally(matching, (r) => text(r.client)),
+    note: matching.length > sample.length ? `An evenly spaced sample of ${sample.length} of ${matching.length} replies across the whole window. Say so when you generalise.` : "Every matching reply in the window.",
+    replies: sample,
+  };
+}
+
 /* ── sender_performance ────────────────────────────────────────────────────────────────────────── */
 
 async function senderPerformance(input: Row) {
@@ -500,7 +608,7 @@ export const INSIGHT_TOOLS: ToolDefinition[] = [
   {
     name: "follow_up_list",
     description: "THE tool for 'who needs a follow-up', 'which leads haven't booked', 'who did we send a Calendly to that never booked', 'who went quiet'. Reads every conversation for a client (or all clients) and sorts the ones that need action into: they_replied_we_havent (ball is with us), sent_booking_link_no_meeting (we sent a booking link after their last reply and no meeting is recorded), went_quiet_after_our_reply (they engaged, we answered, silence for staleDays+). Each row says whether a meeting is booked. Negative leads are left out unless includeNegative. Returns counts by category plus every lead (long lists become one CSV).",
-    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name. Omit for all clients." }, category: { type: "array", items: { type: "string", enum: ["they_replied_we_havent", "sent_booking_link_no_meeting", "went_quiet_after_our_reply"] }, description: "Only these groups, when the question is about one (e.g. booking link sent but not booked)." }, staleDays: { type: "integer", description: "Days of silence before someone counts as gone quiet. Default 3." }, maxDaysSince: { type: "integer", description: "Leave out threads quieter than this many days. Default 90; they are still counted." }, includeNegative: { type: "boolean" } } },
+    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name. Omit for all clients." }, category: { type: "array", items: { type: "string", enum: ["they_replied_we_havent", "sent_booking_link_no_meeting", "went_quiet_after_our_reply"] }, description: "Only these groups, when the question is about one (e.g. booking link sent but not booked)." }, staleDays: { type: "integer", description: "Days of silence before someone counts as gone quiet. Default 3." }, maxDaysSince: { type: "integer", description: "Leave out threads quieter than this many days. Default 90; they are still counted." }, includeNegative: { type: "boolean" }, sentiment: { type: "array", items: { type: "string", enum: ["positive", "neutral", "negative", "unknown"] }, description: "Only leads whose last reply had this sentiment, e.g. ['positive'] for 'positive replies we haven't answered'." } } },
   },
   {
     name: "client_readiness",
@@ -516,6 +624,16 @@ export const INSIGHT_TOOLS: ToolDefinition[] = [
     name: "outreach_people",
     description: "THE tool for 'who have we contacted / reached out to' at the person level, for every client, with dates: 'every CISO we contacted', 'VPs of Sales we reached out to in September', 'everyone at Stripe we contacted for Cotool', 'who did campaign CT049 reach'. Filters: titleContains (pass every spelling and acronym at once, e.g. [\"VP of Sales\", \"VP Sales\", \"Vice President of Sales\", \"VP, Sales\"]), companyContains, campaignContains, clients, from/to (contact date, YYYY-MM-DD), acceptedOnly. Returns unique people (deduped by LinkedIn) with title, company, client, last contacted date, campaigns and sender, plus counts by client. Long lists become one CSV.",
     input_schema: { type: "object", properties: { clients: { type: "array", items: { type: "string" } }, titleContains: { type: "array", items: { type: "string" } }, companyContains: { type: "array", items: { type: "string" } }, campaignContains: { type: "array", items: { type: "string" } }, acceptedOnly: { type: "boolean" }, ...DATE_ARGS } },
+  },
+  {
+    name: "meetings_by_campaign",
+    description: "Which campaigns produce booked meetings: meetings per campaign (from the Meetings tab, falling back to the lead's campaign when the meeting has none typed), joined with each campaign's sent / accepted / replies and meetings per 100 accepted. THE tool for 'which campaigns drive meetings', 'what messaging books calls', 'meetings by campaign', 'attribution'. Omit from/to for all time.",
+    input_schema: { type: "object", properties: { clients: { type: "array", items: { type: "string" } }, ...DATE_ARGS } },
+  },
+  {
+    name: "reply_texts",
+    description: "What leads actually wrote back: reply texts across any window (default last 90 days), for one, several or all clients, filtered by sentiment or a phrase, sampled evenly across the window. THE tool for 'most common objections', 'what are people saying about X', 'why are leads saying no', 'themes in positive replies'. Group the texts into themes yourself and give counts from the sample.",
+    input_schema: { type: "object", properties: { clients: { type: "array", items: { type: "string" } }, sentiment: { type: "array", items: { type: "string", enum: ["positive", "neutral", "negative", "unknown"] } }, contains: { type: "string", description: "Only replies containing this phrase." }, limit: { type: "integer", description: "Max replies returned (default 250)." }, ...DATE_ARGS } },
   },
   {
     name: "sender_performance",
@@ -545,6 +663,8 @@ export async function runInsightTool(name: string, input: Row): Promise<unknown>
     case "google_doc": return googleDoc(input);
     case "outreach_people": return outreachPeople(input);
     case "sender_performance": return senderPerformance(input);
+    case "reply_texts": return replyTexts(input);
+    case "meetings_by_campaign": return meetingsByCampaign(input);
     case "sending_runway": return sendingRunway(input);
     default: throw new Error(`Unknown tool ${name}.`);
   }
