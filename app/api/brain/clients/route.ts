@@ -24,6 +24,8 @@ import { NextResponse } from "next/server";
 import { BRAIN_URL, brainClientActivity, brainConfigured, brainFile, brainLastTouched, brainTree } from "../../../lib/brain";
 import { workspacesByFolder, type BrainWorkspace } from "../../../lib/brain-workspaces";
 import { BRAIN_AREAS, briefSummary, clientLabel, clientLogoIn, clientSkeleton, clientsIn, coverage, fileTitle, groupByFolder } from "../../../../shared/brain-structure.mjs";
+import { slimImages } from "../../../lib/image-refs";
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
 
 /**
  * A logo the browser can actually load, or nothing.
@@ -50,7 +52,7 @@ export async function GET(request: Request) {
   if (!brainConfigured()) {
     // A specific instruction, not a generic failure. This is the one setup step the feature needs and
     // whoever hits this screen is the person who can do it.
-    return NextResponse.json(
+    return slimJson(
       {
         ok: false,
         repoUrl: BRAIN_URL,
@@ -72,9 +74,9 @@ export async function GET(request: Request) {
     // folder for the same reason a client's extras are: thirty loose filenames is the file tree again.
     if (area) {
       const known = BRAIN_AREAS.find((entry: { prefix: string }) => entry.prefix === area);
-      if (!known) return NextResponse.json({ ok: false, error: "That is not an area of the brain." }, { status: 400 });
+      if (!known) return slimJson({ ok: false, error: "That is not an area of the brain." }, { status: 400 });
       const inside = paths.filter((path) => path.startsWith(area));
-      return NextResponse.json({
+      return slimJson({
         ok: true,
         repoUrl: BRAIN_URL,
         area: {
@@ -90,7 +92,7 @@ export async function GET(request: Request) {
     if (only) {
       const skeleton = clientSkeleton(only, paths) as Skeleton;
       if (!skeleton.docs.some((doc) => doc.present) && !skeleton.extras.length) {
-        return NextResponse.json({ ok: false, error: `There is nothing under clients/${only} in the brain.` }, { status: 404 });
+        return slimJson({ ok: false, error: `There is nothing under clients/${only} in the brain.` }, { status: 404 });
       }
       // The brief's opening paragraph, so the page can say who this client is before anyone opens
       // anything. One extra file fetch, cached like every other, and only on a client's own page.
@@ -108,7 +110,7 @@ export async function GET(request: Request) {
       ]);
       const workspace = linked.get(skeleton.client);
       const { summary, facts } = briefSummary(brief?.text ?? "") as { summary: string; facts: { label: string; value: string }[] };
-      return NextResponse.json({
+      return slimJson({
         ok: true,
         repoUrl: BRAIN_URL,
         client: {
@@ -167,9 +169,9 @@ export async function GET(request: Request) {
       files: paths.filter((path) => path.startsWith(area.prefix)).length,
     }));
 
-    return NextResponse.json({ ok: true, repoUrl: BRAIN_URL, clients, areas });
+    return slimJson({ ok: true, repoUrl: BRAIN_URL, clients, areas });
   } catch (error) {
-    return NextResponse.json(
+    return slimJson(
       { ok: false, repoUrl: BRAIN_URL, error: error instanceof Error ? error.message : "The QC Brain could not be read." },
       { status: 502 },
     );
