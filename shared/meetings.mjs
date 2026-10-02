@@ -125,6 +125,7 @@ export function normalizeMeeting(payload) {
   const body = payload && typeof payload === "object" ? payload : {};
   const flat = flatten(body);
   const get = (...aliases) => pick(flat, aliases);
+  const dedupeParts = (value) => (typeof value === "string" && value.includes(";") ? [...new Set(value.split(/\s*;\s*/).map((part) => part.trim()).filter(Boolean))].join(", ") : value);
 
   const whenRaw = get(
     "meeting_at", "meeting_date", "meeting_datetime", "meeting_date_time", "meeting_time",
@@ -140,7 +141,8 @@ export function normalizeMeeting(payload) {
       invitee_name: get("invitee_name", "name", "invitee", "lead_name", "full_name", "attendee"),
       invitee_email: get("invitee_email", "email", "lead_email"),
       invitee_linkedin: get("invitee_linkedin", "linkedin", "lead_linkedin", "linkedin_url", "person_linkedin"),
-      invitee_title: get("invitee_title", "title", "lead_title", "job_title"),
+      // The booking flow joins two copies of the title with ";" ("CPO ; CPO"); keep each distinct part once.
+      invitee_title: dedupeParts(get("invitee_title", "title", "lead_title", "job_title")),
       invitee_location: get("invitee_location", "lead_location", "person_location", "location"),
       invitee_headline: get("invitee_headline", "lead_headline", "headline"),
       company_name: get("company_name", "company", "organization"),
