@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
+import PhotoOr from "../components/PhotoOr";
 import { DEFAULT_LEAD_SORT, LEAD_SORTS } from "../lib/lead-sort";
 
 type Workspace = {
@@ -238,6 +239,13 @@ export default function DatabasePage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Escape closes the lead drawer, as it does every other panel.
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setSelectedId(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId]);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTab, setDetailTab] = useState<"overview" | "activity">(
@@ -644,11 +652,7 @@ export default function DatabasePage() {
                           lead.workspace?.accentColor || "var(--accent)",
                       }}
                     >
-                      {lead.photoUrl ? (
-                        <img src={lead.photoUrl} alt="" />
-                      ) : (
-                        initials(lead.name)
-                      )}
+                      <PhotoOr src={lead.photoUrl} fallback={initials(lead.name)} />
                     </i>
                     <span>
                       <strong>{lead.name}</strong>
@@ -780,13 +784,9 @@ export default function DatabasePage() {
           <aside className="database-drawer" aria-label="Lead details">
             <div className="database-drawer-head">
               <div>
-                {selectedSummary?.photoUrl ? (
-                  <i>
-                    <img src={selectedSummary.photoUrl} alt="" />
-                  </i>
-                ) : (
-                  <i>{initials(selectedSummary?.name || "")}</i>
-                )}
+                <i>
+                  <PhotoOr src={selectedSummary?.photoUrl} fallback={initials(selectedSummary?.name || "")} />
+                </i>
                 <span>
                   <h2>{selectedSummary?.name || "Loading…"}</h2>
                 </span>
@@ -1438,11 +1438,7 @@ function LeadActivity({
                   >
                     {inbound && (
                       <span>
-                        {leadPhoto ? (
-                          <img src={leadPhoto} alt="" />
-                        ) : (
-                          initials(leadName)
-                        )}
+                        <PhotoOr src={leadPhoto} fallback={initials(leadName)} />
                       </span>
                     )}
                     <small className="message-author">
