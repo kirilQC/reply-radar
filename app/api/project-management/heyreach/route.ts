@@ -50,5 +50,7 @@ export async function GET(request: Request) {
     perSenderDaily: DAILY_CONNECTIONS_PER_SENDER,
     total: { pending, senders: senderCount, daysLeft: sendingDaysLeft(pending, senderCount) },
     campaigns,
+    // Everything else HeyReach listed, so a campaign that should be here but isn't can be explained.
+    others: live.campaigns.filter((c) => !c.isActive && !/FINISHED|DRAFT|CANCEL|FAILED/i.test(c.status)).map((c) => ({ name: c.name, status: c.status, pending: c.pending })),
   });
 }

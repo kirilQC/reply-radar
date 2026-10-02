@@ -273,7 +273,7 @@ function Card({ t, h, column }: { t: BoardTask; h: Handlers; column?: string[] }
             <span className={t.checks?.messaging ? "on" : ""}>{t.checks?.messaging ? "✓" : "○"} Messaging</span>
           </div>
         )}
-        {openBlockers.length > 0 && <div className="pm-bcard-block" title={openBlockers.map((b) => `${b.owner || "someone"}: ${b.text}`).join("\n")}>⛔ Waiting on {openBlockers[0].owner || "someone"}{openBlockers.length > 1 ? ` +${openBlockers.length - 1} more` : ""}{openBlockers[0].text ? ` — ${openBlockers[0].text}` : ""}</div>}
+        {openBlockers.length > 0 && <div className="pm-bcard-block" title={openBlockers.map((b) => `${b.owner || "someone"}: ${b.text}`).join("\n")}>⛔ Waiting on {openBlockers[0].owner ? `${openBlockers[0].owner}${openBlockers[0].text ? ` · ${openBlockers[0].text}` : ""}` : openBlockers[0].text || "someone"}{openBlockers.length > 1 ? ` +${openBlockers.length - 1} more` : ""}</div>}
         <div className="pm-bcard-foot">
           {client && !h.hideClient && <span className="pm-bcard-client"><span className="pm-bcard-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span>{client.name}</span>}
           {owners.length > 0 && (h.hideClient && owners.length <= 2
@@ -346,7 +346,6 @@ function HeyReachPeek({ slug, name }: { slug: string; name: string }) {
         : <>
           <div className="pm-peek-total">
             <div><strong>{d.total?.pending.toLocaleString()}</strong><small>leads pending</small></div>
-            <div><strong>{d.total?.senders}</strong><small>sender{d.total?.senders === 1 ? "" : "s"}</small></div>
             <div className={d.total?.daysLeft != null && d.total.daysLeft <= 3 ? "warn" : ""}><strong>{d.total?.daysLeft ?? "–"}</strong><small>days of sending</small></div>
           </div>
           <div className="pm-peek-list">
