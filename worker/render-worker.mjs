@@ -1329,11 +1329,41 @@ async function syncOutreach(workspace) {
   return written;
 }
 
+/**
+ * A client whose outreach log is still empty (the table is new, or the client is) is filled in the idle
+ * time between daily passes rather than waiting up to a day for its turn. Each client is tried once per
+ * worker run, so one with no campaigns does not get picked forever.
+ */
+const outreachBackfillTried = new Set();
+async function backfillOutreach() {
+  if (outreachTableMissingAt && Date.now() - outreachTableMissingAt < 60 * 60 * 1000) return false;
+  const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&heyreach_api_key_ciphertext=not.is.null&order=created_at.asc");
+  for (const workspace of workspaces ?? []) {
+    if (outreachBackfillTried.has(workspace.id)) continue;
+    let has;
+    try {
+      has = await supabase(`rr_outreach?select=workspace_id&workspace_id=eq.${encodeURIComponent(String(workspace.id))}&limit=1`);
+    } catch {
+      return false; // table not there yet
+    }
+    outreachBackfillTried.add(workspace.id);
+    if (has?.length) continue;
+    try {
+      const reached = await syncOutreach(workspace);
+      console.info("reply_radar_outreach_backfilled", { workspace: workspace.slug, rows: reached });
+    } catch (error) {
+      console.warn("reply_radar_outreach_backfill_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+  return false;
+}
+
 async function collectAnalytics() {
   // Asked-for refreshes go ahead of the daily rotation — somebody is watching a progress bar.
   const request = await queuedAnalyticsRequest();
   const workspace = request?.workspace ?? (await staleAnalyticsWorkspace());
-  if (!workspace) return false;
+  if (!workspace) return backfillOutreach();
   const startedAt = new Date().toISOString();
   let campaigns = 0;
   let days = 0;
