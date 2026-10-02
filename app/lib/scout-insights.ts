@@ -216,6 +216,10 @@ async function followUpList(input: Row) {
   const picked = text(input.client) ? pickClients(all, [text(input.client)]) : all;
   const staleDays = Math.max(1, Math.min(60, num(input.staleDays) || 3));
   const includeNegative = input.includeNegative === true;
+  const wantCategories = strings(input.category ?? input.categories).map((c) => c.toLowerCase());
+  // Threads older than this are dead in practice; they're counted, not listed, unless asked for.
+  const maxDays = Math.max(7, Math.min(3650, num(input.maxDaysSince) || 90));
+  let olderSkipped = 0;
   const byId = new Map(picked.map((c) => [c.id, c]));
   const convs = await dbAll(`rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction${picked.length === all.length ? "" : `&workspace_id=in.(${picked.map((c) => c.id).join(",")})`}&order=id.asc`);
   const convIds = convs.map((c) => text(c.id));
@@ -253,6 +257,8 @@ async function followUpList(input: Row) {
     else if (ourReplyAfterTheirs.length && !booked && daysSinceLast >= staleDays) category = "went_quiet_after_our_reply";
     if (linkMsg && !booked && !category && daysSinceLast >= staleDays) category = "sent_booking_link_no_meeting";
     if (!category) continue;
+    if (daysSinceLast > maxDays) { olderSkipped += 1; continue; }
+    if (wantCategories.length && !wantCategories.includes(category)) continue;
     if (category === "they_replied_we_havent") counts.theyRepliedWeHavent += 1;
     if (category === "went_quiet_after_our_reply") counts.wentQuietAfterOurReply += 1;
     if (category === "sent_booking_link_no_meeting") counts.sentBookingLinkNoMeeting += 1;
@@ -270,7 +276,8 @@ async function followUpList(input: Row) {
   out.sort((a, b) => order[text(a.category)] - order[text(b.category)] || num(b.followUpUrgency) - num(a.followUpUrgency) || num(a.daysSinceLastMessage) - num(b.daysSinceLastMessage));
   return {
     scope: picked.length === all.length ? "all clients" : picked.map((c) => c.name).join(", "),
-    staleDays,
+    staleDays, maxDaysSince: maxDays, olderThanWindowNotListed: olderSkipped,
+    ...(wantCategories.length ? { onlyCategories: wantCategories } : {}),
     definitions: "they_replied_we_havent: the lead sent the last message. sent_booking_link_no_meeting: we sent a booking link (Calendly etc.) after their last reply, no meeting is recorded for them, and it has been at least staleDays. went_quiet_after_our_reply: they replied at some point, we answered, they went silent for at least staleDays and have no meeting. Negative leads are excluded unless includeNegative. Meetings are matched by LinkedIn profile or name against the Meetings tab.",
     counts: { total: out.length, ...counts, ofThoseNotBooked: out.filter((r) => !r.meetingBooked).length },
     leads: out,
@@ -384,6 +391,55 @@ async function googleDoc(input: Row) {
   };
 }
 
+/* ── outreach_people ───────────────────────────────────────────────────────────────────────────── */
+
+async function outreachPeople(input: Row) {
+  const all = await allClients();
+  const picked = strings(input.clients ?? input.client).length ? pickClients(all, strings(input.clients ?? input.client)) : all;
+  const nameOf = new Map(all.map((c) => [c.id, c.name]));
+  const titles = strings(input.titleContains);
+  const companies = strings(input.companyContains);
+  const campaigns = strings(input.campaignContains);
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(text(input.from)) ? text(input.from) : "";
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(text(input.to)) ? text(input.to) : "";
+  const ors = (field: string, terms: string[]) => (terms.length ? `&or=(${terms.map((t) => `${field}.ilike.*${encodeURIComponent(t.replace(/[(),*]/g, " "))}*`).join(",")})` : "");
+  const filters = [
+    picked.length === all.length ? "" : `&workspace_id=in.(${picked.map((c) => c.id).join(",")})`,
+    from ? `&last_action_at=gte.${from}` : "",
+    to ? `&last_action_at=lt.${endExclusive(to)}` : "",
+    input.acceptedOnly === true ? "&connection_status=ilike.*accept*" : "",
+  ].join("");
+  // Title, company and campaign each OR across their terms; PostgREST allows one or= per request, so the
+  // extra ones are applied here after fetching.
+  const path = `rr_outreach?select=workspace_id,full_name,title,company,location,linkedin_url,campaign_name,sender_name,connection_status,message_status,last_action_at${filters}${ors("title", titles)}&order=last_action_at.desc.nullslast,heyreach_lead_id.asc`;
+  let rowsOut: Row[];
+  try { rowsOut = await dbAll(path, 40_000); }
+  catch (error) {
+    if (/PGRST205|404|does not exist/i.test(String(error))) throw new Error("The outreach log (rr_outreach) hasn't been created yet, so contacted-people questions can't be answered for every client. Use search_outreach (Cotool and Hetz only) and say so; reach out to Kiril to finish the setup.");
+    throw error;
+  }
+  const has = (v: unknown, terms: string[]) => !terms.length || terms.some((t) => text(v).toLowerCase().includes(t.toLowerCase()));
+  const filtered = rowsOut.filter((r) => has(r.company, companies) && has(r.campaign_name, campaigns));
+  // One row per person (LinkedIn URL), keeping their most recent contact and every campaign they were in.
+  const people = new Map<string, Row>();
+  for (const r of filtered) {
+    const key = text(r.linkedin_url).toLowerCase() || `${text(r.full_name)}|${text(r.company)}`.toLowerCase();
+    const seen = people.get(key);
+    if (!seen) people.set(key, { name: text(r.full_name), title: text(r.title), company: text(r.company), location: text(r.location), client: nameOf.get(text(r.workspace_id)) ?? "unknown client", lastContacted: text(r.last_action_at).slice(0, 10), campaigns: text(r.campaign_name), sender: text(r.sender_name), connection: text(r.connection_status), linkedin: text(r.linkedin_url) });
+    else if (!text(seen.campaigns).includes(text(r.campaign_name))) seen.campaigns = `${text(seen.campaigns)}; ${text(r.campaign_name)}`;
+  }
+  const list = [...people.values()];
+  const byClient: Row = {};
+  for (const p of list) byClient[text(p.client)] = num(byClient[text(p.client)]) + 1;
+  const covered = new Set(rowsOut.map((r) => text(r.workspace_id)));
+  return {
+    filters: { clients: picked.length === all.length ? "all" : picked.map((c) => c.name), titleContains: titles, companyContains: companies, campaignContains: campaigns, contactedFrom: from || null, contactedTo: to || null },
+    uniquePeople: list.length, contacts: filtered.length, byClient,
+    note: `Dates are when HeyReach last acted on the person (connection request or message). Clients with nothing in the log yet: ${picked.filter((c) => !covered.has(c.id)).map((c) => c.name).join(", ") || "none"}.`,
+    people: list,
+  };
+}
+
 /* ── Registry ──────────────────────────────────────────────────────────────────────────────────── */
 
 const DATE_ARGS = {
@@ -400,7 +456,7 @@ export const INSIGHT_TOOLS: ToolDefinition[] = [
   {
     name: "follow_up_list",
     description: "THE tool for 'who needs a follow-up', 'which leads haven't booked', 'who did we send a Calendly to that never booked', 'who went quiet'. Reads every conversation for a client (or all clients) and sorts the ones that need action into: they_replied_we_havent (ball is with us), sent_booking_link_no_meeting (we sent a booking link after their last reply and no meeting is recorded), went_quiet_after_our_reply (they engaged, we answered, silence for staleDays+). Each row says whether a meeting is booked. Negative leads are left out unless includeNegative. Returns counts by category plus every lead (long lists become one CSV).",
-    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name. Omit for all clients." }, staleDays: { type: "integer", description: "Days of silence before someone counts as gone quiet. Default 3." }, includeNegative: { type: "boolean" } } },
+    input_schema: { type: "object", properties: { client: { type: "string", description: "Client name. Omit for all clients." }, category: { type: "array", items: { type: "string", enum: ["they_replied_we_havent", "sent_booking_link_no_meeting", "went_quiet_after_our_reply"] }, description: "Only these groups, when the question is about one (e.g. booking link sent but not booked)." }, staleDays: { type: "integer", description: "Days of silence before someone counts as gone quiet. Default 3." }, maxDaysSince: { type: "integer", description: "Leave out threads quieter than this many days. Default 90; they are still counted." }, includeNegative: { type: "boolean" } } },
   },
   {
     name: "client_readiness",
@@ -411,6 +467,11 @@ export const INSIGHT_TOOLS: ToolDefinition[] = [
     name: "messaging_performance",
     description: "THE tool for 'which messaging works best', 'best hook', 'which connection request gets accepted most', across one client, several, or all clients. Ranks QC campaigns (with enough volume) by replies per accepted connection and by acceptance rate, each with the actual connection-request note and first message text. Use this before heyreach_campaign_sequence.",
     input_schema: { type: "object", properties: { client: { type: "string" }, clients: { type: "array", items: { type: "string" } }, minSent: { type: "integer", description: "Minimum requests sent to be ranked. Default 50." } } },
+  },
+  {
+    name: "outreach_people",
+    description: "THE tool for 'who have we contacted / reached out to' at the person level, for every client, with dates: 'every CISO we contacted', 'VPs of Sales we reached out to in September', 'everyone at Stripe we contacted for Cotool', 'who did campaign CT049 reach'. Filters: titleContains (pass every spelling and acronym at once, e.g. [\"VP of Sales\", \"VP Sales\", \"Vice President of Sales\", \"VP, Sales\"]), companyContains, campaignContains, clients, from/to (contact date, YYYY-MM-DD), acceptedOnly. Returns unique people (deduped by LinkedIn) with title, company, client, last contacted date, campaigns and sender, plus counts by client. Long lists become one CSV.",
+    input_schema: { type: "object", properties: { clients: { type: "array", items: { type: "string" } }, titleContains: { type: "array", items: { type: "string" } }, companyContains: { type: "array", items: { type: "string" } }, campaignContains: { type: "array", items: { type: "string" } }, acceptedOnly: { type: "boolean" }, ...DATE_ARGS } },
   },
   {
     name: "google_doc",
@@ -428,6 +489,7 @@ export async function runInsightTool(name: string, input: Row): Promise<unknown>
     case "client_readiness": return clientReadiness(input);
     case "messaging_performance": return messagingPerformance(input);
     case "google_doc": return googleDoc(input);
+    case "outreach_people": return outreachPeople(input);
     default: throw new Error(`Unknown tool ${name}.`);
   }
 }

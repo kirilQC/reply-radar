@@ -1256,6 +1256,78 @@ async function queuedAnalyticsRequest() {
   return { workspace, requestId: String(request.id) };
 }
 
+/**
+ * rr_outreach for one client: every person QC's campaigns have contacted, with when, by whom and in which
+ * campaign. This is what lets Scout answer "every VP of Sales we contacted in September" for any client;
+ * the older qc_outreach log only ever held Cotool and Hetz, with no dates.
+ *
+ * HeyReach's GetLeadsFromCampaign pages through a campaign's leads (100 at a time) with their connection
+ * and message status and lastActionTime. Only people actually reached (a connection request or message
+ * went out) are stored. Paced to ~5 requests a second, under HeyReach's 15 per 2 seconds. A missing table
+ * (the migration not run yet) is logged once and skipped, never fatal to the analytics pass.
+ */
+let outreachTableMissing = false;
+async function syncOutreach(workspace) {
+  if (outreachTableMissing) return 0;
+  const apiKey = workspace.heyreach_api_key_ciphertext;
+  const campaigns = ourCampaigns(await heyReachCampaignPages(apiKey), (row) => row.name);
+  let written = 0;
+  for (const campaign of campaigns) {
+    for (let offset = 0; offset < 20_000; offset += 100) {
+      const page = await heyReachFetch(apiKey, "campaign/GetLeadsFromCampaign", {
+        method: "POST",
+        body: JSON.stringify({ campaignId: campaign.id, offset, limit: 100, timeFilter: "Everywhere" }),
+      }, 30_000).catch(() => null);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const items = Array.isArray(page?.items) ? page.items : [];
+      const rows = items
+        .filter((lead) => (lead.leadConnectionStatus && lead.leadConnectionStatus !== "None") || (lead.leadMessageStatus && lead.leadMessageStatus !== "None"))
+        .map((lead) => {
+          const p = lead.linkedInUserProfile || {};
+          return {
+            workspace_id: workspace.id,
+            campaign_id: String(campaign.id),
+            heyreach_lead_id: String(lead.id),
+            campaign_name: campaign.name || null,
+            linkedin_url: p.profileUrl || null,
+            full_name: [p.firstName, p.lastName].filter(Boolean).join(" ") || null,
+            title: p.position || p.headline?.slice(0, 200) || null,
+            company: p.companyName || null,
+            location: p.location || null,
+            sender_name: lead.linkedInSenderFullName || null,
+            connection_status: lead.leadConnectionStatus || null,
+            message_status: lead.leadMessageStatus || null,
+            campaign_status: lead.leadCampaignStatus || null,
+            added_at: lead.creationTime || null,
+            last_action_at: lead.lastActionTime || lead.finishedTime || null,
+            finished_at: lead.finishedTime || null,
+            synced_at: new Date().toISOString(),
+          };
+        });
+      if (rows.length) {
+        try {
+          await supabase("rr_outreach?on_conflict=workspace_id,campaign_id,heyreach_lead_id", {
+            method: "POST",
+            headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify(rows),
+          });
+          written += rows.length;
+        } catch (error) {
+          if (/PGRST205|404|does not exist/i.test(String(error))) {
+            outreachTableMissing = true;
+            console.warn("reply_radar_outreach_table_missing", { hint: "run supabase/migrations/20261002_rr_outreach.sql" });
+            return 0;
+          }
+          throw error;
+        }
+      }
+      const total = Number(page?.totalCount || 0);
+      if (items.length < 100 || (total && offset + 100 >= total)) break;
+    }
+  }
+  return written;
+}
+
 async function collectAnalytics() {
   // Asked-for refreshes go ahead of the daily rotation — somebody is watching a progress bar.
   const request = await queuedAnalyticsRequest();
@@ -1269,6 +1341,13 @@ async function collectAnalytics() {
     campaigns = await collectCampaignStats(workspace);
     await touchHeartbeat();
     days = await collectDailyStats(workspace);
+    // The outreach log rides the same daily pass; a failure here must not lose the stats above.
+    try {
+      const reached = await syncOutreach(workspace);
+      if (reached) console.info("reply_radar_outreach_synced", { workspace: workspace.slug, rows: reached });
+    } catch (error) {
+      console.warn("reply_radar_outreach_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
+    }
     console.info("reply_radar_analytics_collected", { workspace: workspace.slug, campaigns, dailyRows: days, requested: Boolean(request) });
   } catch (error) {
     errorText = error instanceof Error ? error.message : "Analytics collection failed";
