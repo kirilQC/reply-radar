@@ -31,6 +31,7 @@ import { after } from "next/server";
 import { listAssistants, personalClientDirectory } from "../../../lib/personal-brief";
 import { markdownToPdf, wantsPdf, reportSummary } from "../../../../shared/simple-pdf.mjs";
 import { answerToBlocks, ASK_ACTION } from "../../../../shared/slack-blocks.mjs";
+import { relayoutForSlack } from "../../../lib/slack-relayout";
 import { MODEL, runAgent, type AgentEvent, type AgentResult, type Turn } from "../../../lib/assistant-run";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import {
@@ -290,14 +291,7 @@ async function runAndReply(opts: {
     // hand it the mention token so "Kiril will look into it" actually pings him.
     const supportOwner = (process.env.SUPPORT_OWNER_SLACK_ID || "").trim();
     const extraParts: string[] = [];
-    extraParts.push(`Slack layout. This section overrides the "Answer shape" rules above wherever they differ. Your answer is laid out as a card, so write it in exactly this shape and nothing else:
-1. First line: the verdict in bold, one sentence, under 120 characters, carrying the key number. ("**286 positive replies are waiting on us. 12 need an answer today.**")
-2. Optional: a \`\`\`stats block with 2 to 4 tiles, only when the answer has several figures. Short labels.
-3. Detail: at most 5 list items (8 for a list someone asked for). Each item is "- **Name or subject**, short context · one-line detail". When items are things to act on, start each with 🔴 (today), 🟡 (this week) or 🟢 (fine / for info). Never "Label: value · Label: value" rows; write the row the way a person would. A table only when it has at most 3 short columns.
-4. No paragraphs over two lines, no section of caveats. Put the date range, sources and the one caveat that matters in a single final line in italics.
-5. Links to QC Command go on their own line as [Open X](url); they become buttons.
-6. End with a \`\`\`actions block holding a JSON array of 1 to 3 short follow-up requests the person is likely to want next, phrased as what they would type ("All 12 as a CSV", "Same view for Kuddo"). Never end with a "Want me to…?" question; the buttons are the offer.
-The message must stand on its own even when a file is attached (attachments can fail): the counts and the top rows are always in the message.`);
+    extraParts.push("In Slack the message must stand on its own even when a file is attached (attachments can fail): give the counts and name the top rows inline.");
     extraParts.push(`You are talking to ${askerName || "a QC team member"}${askedBy ? ` (Slack user <@${askedBy}>)` : ""}. If you file a support ticket, record submittedBy as their name.`);
     if (surface === "dm") extraParts.push("This is a private, one-to-one direct message: you are this person's own QC Command assistant, with your full set of tools available. Answer for them alone — there is no channel audience reading along.");
     // "My clients" means the roster on this person's personal assistant, when they have one.
@@ -331,7 +325,8 @@ The message must stand on its own even when a file is attached (attachments can 
             : "";
       // A PDF report: the thread gets the headline and the file, not the whole report twice.
       const pdfAsked = Boolean(result.reply && wantsPdf(result.reply));
-      const source = result.reply ? (pdfAsked ? reportSummary(result.reply) : result.reply) : "";
+      // The finished answer is laid out into the house card shape by one short pass (figures untouched).
+      const source = result.reply ? (pdfAsked ? reportSummary(result.reply) : await relayoutForSlack(result.reply, question || lastUserText(messages))) : "";
       const answer = source ? toSlackText(source) : "I couldn't find an answer to that.";
       // The total time the whole run took, shown once on the answer — the live per-beat clock was on the
       // progress message, which is now deleted, so this is the only duration the thread keeps.
