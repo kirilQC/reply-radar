@@ -64,5 +64,5 @@ export function supportsTemperature(requested) {
 export function temperatureField(model, temperature) {
   if (supportsTemperature(model)) return { temperature };
   const id = typeof model === "string" ? model : "";
-  return id.startsWith("claude-") ? { thinking: { type: "disabled" } } : {};
+  return id.startsWith("claude-") ? { thinking: { type: "between_tools" } } : {};
 }
