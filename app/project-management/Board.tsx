@@ -225,7 +225,7 @@ type Handlers = {
   openNew: (stage: string, clientSlug?: string, assignee?: string) => void; onOpen: (t: BoardTask) => void; onDelete: (id: string) => void; notifyChannel?: string;
   onDrag: (id: string | null, height?: number) => void; dragId: string | null; dragH: number; landedId: string | null; onMove: (id: string, stage: string) => void; onSetDay: (id: string, date: string) => void;
   /** Drop the dragged task before (or after) `targetId` within the list `ids`, i.e. reorder that column. */
-  onReorder: (ids: string[], targetId: string, after: boolean) => void;
+  onReorder: (ids: string[], targetId: string, after: boolean, movingId?: string) => void;
   dropHint: { id: string; after: boolean } | null; setDropHint: (h: { id: string; after: boolean } | null) => void;
   /** In the By client view the column header already names the client. */
   hideClient?: boolean;
@@ -239,9 +239,18 @@ const prioOpts: Opt[] = [{ value: "", label: "None" }, ...PRIORITIES.map((p) => 
  * Where the dragged card would land in a column, as an index into the column without the dragged card,
  * or -1 when nothing is being dragged within this column.
  */
+/**
+ * The card being dragged, recorded the instant the drag starts. React state is updated a tick later (so the
+ * drag image is captured first), and a quick drag can be over before that state lands; drop decisions read
+ * this instead so they never depend on timing.
+ */
+const activeDrag: { id: string | null } = { id: null };
+const draggingId = (h: Handlers) => activeDrag.id ?? h.dragId;
+
 function insertionIndex(column: string[] | undefined, h: Handlers): number {
-  if (!column || !h.dragId || !column.includes(h.dragId) || !h.dropHint) return -1;
-  const rest = column.filter((id) => id !== h.dragId);
+  const id = draggingId(h);
+  if (!column || !id || !column.includes(id) || !h.dropHint) return -1;
+  const rest = column.filter((x) => x !== id);
   const at = rest.indexOf(h.dropHint.id);
   return at < 0 ? -1 : at + (h.dropHint.after ? 1 : 0);
 }
@@ -268,7 +277,7 @@ function liftedDragImage(e: React.DragEvent<HTMLElement>) {
 function slideFor(column: string[], id: string, h: Handlers): -1 | 0 | 1 {
   const at = insertionIndex(column, h);
   if (at < 0 || id === h.dragId) return 0;
-  const src = column.indexOf(h.dragId as string);
+  const src = column.indexOf(draggingId(h) as string);
   const i = column.indexOf(id);
   if (i < src) return i >= at ? 1 : 0; // dragged card moving up past it: it moves down
   return i - 1 < at ? -1 : 0; // dragged card moving down past it: it moves up into the freed slot
@@ -280,12 +289,13 @@ function slideFor(column: string[], id: string, h: Handlers): -1 | 0 | 1 {
  */
 function columnDropProps(column: string[], h: Handlers, fallback?: () => void) {
   return {
-    onDragOver: (e: React.DragEvent) => { if (h.dragId && (column.includes(h.dragId) || fallback)) e.preventDefault(); },
+    onDragOver: (e: React.DragEvent) => { const id = draggingId(h); if (id && (column.includes(id) || fallback)) e.preventDefault(); },
     onDrop: (e: React.DragEvent) => {
-      if (!h.dragId) return;
+      const id = draggingId(h);
+      if (!id) return;
       e.preventDefault();
-      if (column.includes(h.dragId) && h.dropHint && column.includes(h.dropHint.id)) h.onReorder(column, h.dropHint.id, h.dropHint.after);
-      else if (column.includes(h.dragId)) { h.onDrag(null); h.setDropHint(null); }
+      if (column.includes(id) && h.dropHint && column.includes(h.dropHint.id)) h.onReorder(column, h.dropHint.id, h.dropHint.after, id);
+      else if (column.includes(id)) { activeDrag.id = null; h.onDrag(null); h.setDropHint(null); }
       else fallback?.();
     },
   };
@@ -302,10 +312,11 @@ function Card({ t, h, column, slide = 0 }: { t: BoardTask; h: Handlers; column?:
       style={slide ? ({ translate: `0 ${slide * (h.dragH + 10)}px` } as React.CSSProperties) : undefined}
       data-shift={slide * (h.dragH + 10)}
       draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("id", t.id); liftedDragImage(e); const height = e.currentTarget.getBoundingClientRect().height; window.setTimeout(() => h.onDrag(t.id, height), 0); }}
-      onDragEnd={() => { h.onDrag(null); h.setDropHint(null); }}
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("id", t.id); liftedDragImage(e); activeDrag.id = t.id; const height = e.currentTarget.getBoundingClientRect().height; window.setTimeout(() => h.onDrag(t.id, height), 0); }}
+      onDragEnd={() => { activeDrag.id = null; h.onDrag(null); h.setDropHint(null); }}
       onDragOver={column ? (e) => {
-        if (!h.dragId || h.dragId === t.id || !column.includes(h.dragId)) return;
+        const id = draggingId(h);
+        if (!id || id === t.id || !column.includes(id)) return;
         e.preventDefault(); e.stopPropagation();
         // Measured where the card sits without its spring shift, so opening the gap can't flip the answer.
         const r = e.currentTarget.getBoundingClientRect();
@@ -314,9 +325,12 @@ function Card({ t, h, column, slide = 0 }: { t: BoardTask; h: Handlers; column?:
         if (h.dropHint?.id !== t.id || h.dropHint.after !== after) h.setDropHint({ id: t.id, after });
       } : undefined}
       onDrop={column ? (e) => {
-        if (!h.dragId || h.dragId === t.id || !column.includes(h.dragId)) return;
+        const id = draggingId(h);
+        if (!id || id === t.id || !column.includes(id)) return;
         e.preventDefault(); e.stopPropagation();
-        h.onReorder(column, t.id, Boolean(h.dropHint?.id === t.id && h.dropHint.after));
+        const r = e.currentTarget.getBoundingClientRect();
+        const after = e.clientY > r.top - Number(e.currentTarget.dataset.shift || 0) + r.height / 2;
+        h.onReorder(column, t.id, after, id);
       } : undefined}
       onClick={() => h.onOpen(t)}
     >
@@ -353,7 +367,7 @@ function KanbanView({ byStage, h }: { byStage: Record<string, BoardTask[]>; h: H
   return (
     <div className="pm-kb">
       {STAGES.map((s) => (
-        <div className="pm-col" key={s.key} {...columnDropProps(byStage[s.key].map((x) => x.id), h, () => h.dragId && h.onMove(h.dragId, s.key))}>
+        <div className="pm-col" key={s.key} {...columnDropProps(byStage[s.key].map((x) => x.id), h, () => { const id = draggingId(h); activeDrag.id = null; if (id) h.onMove(id, s.key); })}>
           <div className="pm-colh"><span className={`pm-stg ${s.cls}`}><span className="d" />{s.label}</span></div>
           {(() => { const ids = byStage[s.key].map((x) => x.id); return byStage[s.key].map((t) => <Card key={t.id} t={t} h={h} column={ids} slide={slideFor(ids, t.id, h)} />); })()}
           {s.key === "todo" && <button type="button" className="pm-add" onClick={() => h.openNew("todo")}>+ Add</button>}
@@ -650,7 +664,7 @@ function SwimlanesView({ tasks, h }: { tasks: BoardTask[]; h: Handlers }) {
       {owners.map((owner) => (
         <div key={owner} style={{ display: "contents" }}>
           <div className="pm-swwho">{owner === "Unassigned" ? <span className="pm-av pm-av-none">?</span> : <Avatar name={owner} map={h.map} />}{owner}</div>
-          {cols.map((c) => <div className="pm-swcell" key={c.key} onDragOver={(e) => e.preventDefault()} onDrop={() => h.dragId && h.onMove(h.dragId, dropStage(c.key))}>{tasks.filter((t) => has(t, owner) && inCol(t, c.key)).map((t) => <Card key={t.id} t={t} h={h} />)}</div>)}
+          {cols.map((c) => <div className="pm-swcell" key={c.key} onDragOver={(e) => e.preventDefault()} onDrop={() => { const id = draggingId(h); activeDrag.id = null; if (id) h.onMove(id, dropStage(c.key)); }}>{tasks.filter((t) => has(t, owner) && inCol(t, c.key)).map((t) => <Card key={t.id} t={t} h={h} />)}</div>)}
         </div>
       ))}
     </div>
@@ -767,8 +781,8 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
     return sortTasks(ordered, sort);
   }, [tasks, multi, week, sort, rank]);
   /** Puts the dragged task before/after the target, renumbers that column 0..n, and saves the new positions. */
-  const reorder = (ids: string[], targetId: string, after: boolean) => {
-    const moving = dragId; setDropHint(null); setDragId(null);
+  const reorder = (ids: string[], targetId: string, after: boolean, movingId?: string) => {
+    const moving = movingId ?? activeDrag.id ?? dragId; activeDrag.id = null; setDropHint(null); setDragId(null);
     if (moving) { setLandedId(moving); window.setTimeout(() => setLandedId((cur) => (cur === moving ? null : cur)), 700); }
     if (!moving || moving === targetId) return;
     const rest = ids.filter((id) => id !== moving);
