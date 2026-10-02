@@ -40,7 +40,7 @@
  * base64 and Anthropic reads them natively, which is far better than anything we could extract here.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { identityKey } from "../lib/preference-identity";
 import HelpMascot from "../components/HelpMascot";
 import AppSidebar from "../components/AppSidebar";
@@ -435,12 +435,12 @@ const Turn = memo(function Turn({
 });
 
 export default function McpPage() {
-  const [messages, setMessages] = useState<Message[]>(readChat);
+  // Empty on the first render, as the server rendered it; the tab's saved chat, session and prompts are
+  // restored in the layout effect below, before paint. Reading storage in the initializers made the first
+  // render differ from the server's (React hydration error #418) and React redrew the whole page.
+  const [messages, setMessages] = useState<Message[]>([]);
   /** Which saved conversation this is. Kept for the tab, so a reload keeps saving into the same one. */
-  const [sessionId, setSessionId] = useState<string>(() => {
-    if (typeof window === "undefined" || handedQuestion()) return "";
-    try { return window.sessionStorage.getItem(SESSION_KEY) || ""; } catch { return ""; }
-  });
+  const [sessionId, setSessionId] = useState<string>("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sessions, setSessions] = useState<SessionMeta[] | null>(null);
   const [historyError, setHistoryError] = useState("");
@@ -477,7 +477,15 @@ export default function McpPage() {
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const [saved, setSaved] = useState<SavedPrompt[]>(readSaved);
+  const [saved, setSaved] = useState<SavedPrompt[]>([]);
+  useLayoutEffect(() => {
+    // Read before the first save effect runs, so nothing stored is lost to the empty first render.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setMessages(readChat());
+    if (!handedQuestion()) { try { setSessionId(window.sessionStorage.getItem(SESSION_KEY) || ""); } catch { /* storage blocked */ } }
+    setSaved(readSaved());
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
   const [adding, setAdding] = useState("");
   const [addingTitle, setAddingTitle] = useState("");
   const [composing, setComposing] = useState(false);
