@@ -301,7 +301,7 @@ function KanbanView({ byStage, h }: { byStage: Record<string, BoardTask[]>; h: H
     </div>
   );
 }
-type Peek = { connected: boolean; at?: string; total?: { pending: number; senders: number; daysLeft: number | null }; campaigns: Array<{ name: string; pending: number; senders: string[]; senderCount: number; daysLeft: number | null }> };
+type Peek = { connected: boolean; at?: string; total?: { pending: number; senders: number; daysLeft: number | null }; campaigns: Array<{ name: string; pending: number; senders: string[]; senderCount: number; daysLeft: number | null; paused?: boolean }> };
 const peekCache = new Map<string, { at: number; data?: Peek; error?: string }>();
 /**
  * The HeyReach mark on a client's column header. Hover it and HeyReach is asked, on the spot, for that
@@ -346,12 +346,12 @@ function HeyReachPeek({ slug, name }: { slug: string; name: string }) {
         : <>
           <div className="pm-peek-total">
             <div><strong>{d.total?.pending.toLocaleString()}</strong><small>leads pending</small></div>
-            <div className={d.total?.daysLeft != null && d.total.daysLeft <= 3 ? "warn" : ""}><strong>{d.total?.daysLeft ?? "–"}</strong><small>days of sending</small></div>
+            <div className={d.total?.daysLeft != null && d.total.daysLeft <= 3 ? "warn" : ""}><strong>{d.total?.daysLeft ?? "–"}</strong><small>days of sending left</small></div>
           </div>
           <div className="pm-peek-list">
             {d.campaigns.map((c) => (
               <div className="pm-peek-row" key={c.name}>
-                <div className="pm-peek-name">{c.name}</div>
+                <div className="pm-peek-name">{c.name}{c.paused && <span className="pm-peek-tag" title="HeyReach's API reports this campaign as paused. It still has leads left.">Paused in HeyReach</span>}</div>
                 <div className="pm-peek-meta">
                   <span>{c.pending.toLocaleString()} pending</span>
                   <span className={c.daysLeft != null && c.daysLeft <= 3 ? "warn" : ""}>{c.daysLeft == null ? "no senders" : `${c.daysLeft} day${c.daysLeft === 1 ? "" : "s"} left`}</span>

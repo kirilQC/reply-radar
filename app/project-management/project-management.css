@@ -672,3 +672,4 @@
 .pm-peek-name { font-size: 12.5px; font-weight: 700; }
 .pm-peek-meta { display: flex; gap: 12px; margin-top: 3px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .pm-peek-senders { margin-top: 3px; font-size: 11px; color: var(--muted-2); }
+.pm-peek-tag { margin-left: 7px; padding: 1px 6px; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: .03em; color: #e0a83d; background: color-mix(in srgb, #e0a83d 14%, transparent); vertical-align: 1px; }

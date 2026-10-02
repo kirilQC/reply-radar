@@ -31,18 +31,22 @@ export async function GET(request: Request) {
   const live = await gatherLiveFigures(String(workspace.heyreach_api_key_ciphertext));
   if (!live.available) return NextResponse.json({ ok: false, error: live.reason || "HeyReach could not be reached." }, { status: 502 });
 
-  const campaigns = live.campaigns
-    .filter((c) => c.isActive)
+  // Running campaigns with leads left, plus ones HeyReach's API reports as paused that still have leads
+  // left. HeyReach has reported campaigns as PAUSED that its own dashboard shows active (Ema's EM031 pair,
+  // 2026-10-02), so they are shown, tagged, rather than hidden.
+  const shown = live.campaigns.filter((c) => c.isActive || (/PAUS|HOLD/i.test(c.status) && c.pending > 0));
+  const campaigns = shown
     .map((c) => ({
       name: c.name,
       pending: c.pending,
       senders: c.senders,
       senderCount: c.senderIds.length,
       daysLeft: sendingDaysLeft(c.pending, c.senderIds.length),
+      paused: !c.isActive,
     }))
-    .sort((a, b) => b.pending - a.pending);
+    .sort((a, b) => Number(a.paused) - Number(b.paused) || b.pending - a.pending);
   const pending = campaigns.reduce((sum, c) => sum + c.pending, 0);
-  const senderCount = new Set(live.campaigns.filter((c) => c.isActive).flatMap((c) => c.senderIds)).size;
+  const senderCount = new Set(shown.flatMap((c) => c.senderIds)).size;
   return NextResponse.json({
     ok: true,
     connected: true,
@@ -51,6 +55,5 @@ export async function GET(request: Request) {
     total: { pending, senders: senderCount, daysLeft: sendingDaysLeft(pending, senderCount) },
     campaigns,
     // Everything else HeyReach listed, so a campaign that should be here but isn't can be explained.
-    others: live.campaigns.filter((c) => !c.isActive && !/FINISHED|DRAFT|CANCEL|FAILED/i.test(c.status)).map((c) => ({ name: c.name, status: c.status, pending: c.pending })),
   });
 }
