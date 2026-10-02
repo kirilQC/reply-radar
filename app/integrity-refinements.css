@@ -6799,6 +6799,24 @@ body.light-mode .brain-icp {
     font-size: 26px !important;
   }
 
+  /* An odd tile out stretches across the row rather than sitting alone in half of it. */
+  .metrics > :last-child:nth-child(odd),
+  .dashboard-stats-grid > :last-child:nth-child(odd),
+  .analytics-kpis > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  /* Tile labels ran into the status dot in the corner. */
+  .metric-card > span {
+    padding-right: 14px;
+  }
+  /* Profile cards: a 64px photo left the names squeezed into half the card. */
+  .dashboard-profile-card > i,
+  .dashboard-profile-card > i img {
+    width: 44px !important;
+    height: 44px !important;
+    flex: 0 0 44px !important;
+  }
+
   /* The inbox client strip: a row of round logos that should wrap, not stack one per line. */
   .tracked-clients {
     display: flex !important;
