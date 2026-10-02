@@ -194,12 +194,21 @@ export async function channelHistory(
   channelId: string,
   days: number,
   limit = 200,
+  options: { skipOwnPosts?: boolean } = {},
 ): Promise<{ messages: SlackMessage[]; raw: number; threads: number; replies: number }> {
   const oldest = (Date.now() - days * 24 * 60 * 60 * 1000) / 1000;
   const params = new URLSearchParams({ channel: channelId, oldest: oldest.toFixed(6), limit: String(Math.min(1000, Math.max(1, limit))) });
   const body = await call(`conversations.history?${params.toString()}`, { method: "GET" });
   const raw = Array.isArray(body.messages) ? (body.messages as RawMessage[]) : [];
-  const parents = raw.filter(isRealMessage).reverse();
+  // QC Bot's own posts (briefs, reports, analyses) are not the team talking. A brief that reads its own
+  // earlier briefs back as channel activity copies every item forward, mistakes included: Coraa's briefs
+  // kept repeating Vitalic work long after the channel mix-up behind it was fixed. Their threads go with
+  // them; replies to a past brief are read separately, as replies, by gatherPriorBriefs.
+  const self = options.skipOwnPosts ? await botIdentity() : null;
+  const isOwn = (message: RawMessage) => Boolean(self && (
+    (self.botId && String(message.bot_id ?? "") === self.botId) || (self.userId && String(message.user ?? "") === self.userId)
+  ));
+  const parents = raw.filter(isRealMessage).filter((message) => !isOwn(message)).reverse();
 
   // Only threads whose parent survived filtering, because a thread hanging off a join notice is not a
   // conversation. `reply_count` is Slack's own count, so nothing is fetched speculatively.
@@ -211,7 +220,7 @@ export async function channelHistory(
       const all = Array.isArray(thread.messages) ? (thread.messages as RawMessage[]) : [];
       // Slack returns the parent as the first element of its own thread; keeping it would print every
       // threaded message twice.
-      return all.filter((message) => String(message.ts ?? "") !== String(head.ts ?? "")).filter(isRealMessage);
+      return all.filter((message) => String(message.ts ?? "") !== String(head.ts ?? "")).filter(isRealMessage).filter((message) => !isOwn(message));
     } catch {
       // One unreadable thread must not cost the channel. The parent still carries its reply count, so
       // the transcript says a conversation happened even where its contents could not be read.

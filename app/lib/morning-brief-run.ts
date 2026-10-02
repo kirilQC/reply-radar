@@ -91,7 +91,7 @@ export async function gatherChannels(workspace: BriefWorkspace): Promise<Pick<Br
   const readChannel = async (channelId: string) => {
     if (!channelId) return { channelId: "", messages: 0, raw: 0, threads: 0, replies: 0, capped: false, text: "", people: [] };
     try {
-      const history = await channelHistory(channelId, BRIEF_WINDOW_DAYS, BRIEF_MAX_MESSAGES);
+      const history = await channelHistory(channelId, BRIEF_WINDOW_DAYS, BRIEF_MAX_MESSAGES, { skipOwnPosts: true });
       const names = await resolveUserNames(history.messages.map((message) => message.author));
       return {
         channelId,
