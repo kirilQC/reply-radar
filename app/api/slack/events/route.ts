@@ -28,6 +28,7 @@
  */
 
 import { after } from "next/server";
+import { markdownToPdf, wantsPdf } from "../../../../shared/simple-pdf.mjs";
 import { MODEL, runAgent, type AgentEvent, type AgentResult, type Turn } from "../../../lib/assistant-run";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import {
@@ -203,7 +204,7 @@ async function runAndReply(opts: {
     // A file a tool produced — a HeyReach CSV export, in practice. Held until the answer is delivered, then
     // uploaded into the same thread, so the person who asked for a list gets the list and not just its
     // description. The token stream carries nothing a Slack reader can use and is ignored.
-    const files: Array<{ name: string; content: string }> = [];
+    const files: Array<{ name: string; content: string | Uint8Array }> = [];
     // The agent's tool lifecycle, turned into ticks on the progress message.
     const emit = (agentEvent: AgentEvent) => {
       if (agentEvent.type === "file") {
@@ -310,6 +311,17 @@ async function runAndReply(opts: {
       // Any file a tool produced (a HeyReach CSV, in practice) is uploaded into the same thread after the
       // answer, so the list the person asked for actually arrives. Best-effort: a failed upload leaves a
       // one-line note rather than breaking the answer that is already posted.
+      // A report asked for as a PDF: Scout prints it in the browser, Slack gets the file built here.
+      if (result.reply && wantsPdf(result.reply)) {
+        try {
+          const day = new Date().toLocaleDateString("en-US", { timeZone: "America/New_York", month: "long", day: "numeric", year: "numeric" });
+          const heading = (/^\s*#\s+(.+)$/m.exec(result.reply)?.[1] ?? "QC report").replace(/[*_`]/g, "");
+          const slug = heading.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "qc-report";
+          files.push({ name: `${slug}.pdf`, content: markdownToPdf(result.reply, { title: heading, subtitle: `QC Command · ${day}` }) });
+        } catch (error) {
+          console.warn("slack_pdf_failed", error instanceof Error ? error.message : String(error));
+        }
+      }
       for (const file of files) {
         await uploadFile(channel, file, { threadTs, comment: `Here's *${file.name}*.` }).catch(async (error) => {
           const why = error instanceof Error ? error.message : "the upload failed";

@@ -100,22 +100,20 @@ const VISUAL_LANGS = new Set(["stats", "chart", "map", "cards", "timeline", "exp
 function stripVisualBlocks(markdown) {
   const lines = String(markdown ?? "").split("\n");
   const out = [];
-  let dropping = false;
-  for (const line of lines) {
-    const fence = line.match(/^```(\w+)?\s*$/);
-    if (fence) {
-      const lang = (fence[1] ?? "").toLowerCase();
-      if (!dropping && VISUAL_LANGS.has(lang)) {
-        dropping = true;
-        continue;
-      }
-      if (dropping) {
-        // The closing fence of a block we are dropping.
-        dropping = false;
-        continue;
-      }
+  for (let i = 0; i < lines.length; i += 1) {
+    const fence = lines[i].match(/^```(\w+)?\s*$/);
+    const lang = (fence?.[1] ?? "").toLowerCase();
+    if (!fence || !VISUAL_LANGS.has(lang)) { out.push(lines[i]); continue; }
+    const body = [];
+    for (i += 1; i < lines.length && !/^```\s*$/.test(lines[i]); i += 1) body.push(lines[i]);
+    // Stat tiles carry the headline numbers, so they become one bolded line instead of vanishing.
+    if (lang === "stats") {
+      try {
+        const spec = JSON.parse(body.join("\n"));
+        const items = Array.isArray(spec.items) ? spec.items : [];
+        if (items.length) out.push(items.map((it) => `**${it.value}** ${it.label}${it.note ? ` (${it.note})` : ""}`).join("  ·  "));
+      } catch { /* malformed tiles are dropped */ }
     }
-    if (!dropping) out.push(line);
   }
   return out.join("\n");
 }
@@ -338,6 +336,18 @@ const PROGRESS_LABELS = {
   airtable_records: "Reading Airtable records",
   airtable_create_records: "Adding rows to Airtable",
   airtable_update_records: "Updating rows in Airtable",
+  client_scorecard: "Scoring the clients",
+  follow_up_list: "Finding who needs a follow-up",
+  client_readiness: "Checking client setup",
+  messaging_performance: "Ranking the messaging",
+  outreach_people: "Searching everyone we've contacted",
+  meetings_by_campaign: "Matching meetings to campaigns",
+  reply_texts: "Reading what leads wrote back",
+  sender_performance: "Ranking the senders",
+  sending_runway: "Checking sending runway",
+  google_doc: "Reading the Google Doc",
+  google_drive_search: "Searching Google Drive",
+  find_email: "Finding emails in AI Ark",
 };
 
 /**

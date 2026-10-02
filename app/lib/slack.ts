@@ -695,13 +695,13 @@ export async function removeReaction(channelId: string, ts: string, name: string
  */
 export async function uploadFile(
   channelId: string,
-  file: { name: string; content: string },
+  file: { name: string; content: string | Uint8Array },
   opts: { threadTs?: string; comment?: string } = {},
 ): Promise<void> {
   const token = botToken();
   if (!token) throw new Error(`${SLACK_TOKEN_ENV} is not set, so no file can be uploaded to Slack.`);
 
-  const length = Buffer.byteLength(file.content, "utf8");
+  const length = typeof file.content === "string" ? Buffer.byteLength(file.content, "utf8") : file.content.byteLength;
   const query = new URLSearchParams({ filename: file.name, length: String(length) });
   const reserved = await raw(token, `files.getUploadURLExternal?${query.toString()}`, { method: "GET" });
   if (!reserved.ok) throw new Error(slackErrorText(reserved.error, reserved.status, "write"));
@@ -712,7 +712,7 @@ export async function uploadFile(
   // The bytes go to the reserved URL as multipart form data, the shape Slack's own client uses; this URL is
   // not a Slack API method, so it takes no token and returns a bare 200 rather than an `ok` envelope.
   const form = new FormData();
-  form.append("file", new Blob([file.content]), file.name);
+  form.append("file", new Blob([typeof file.content === "string" ? file.content : Buffer.from(file.content)]), file.name);
   const put = await fetch(uploadUrl, { method: "POST", body: form, cache: "no-store" });
   if (!put.ok) throw new Error(`Slack rejected the file upload (HTTP ${put.status}).`);
 
