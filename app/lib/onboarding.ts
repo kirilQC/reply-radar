@@ -84,6 +84,23 @@ async function rows(url: string, key: string, path: string): Promise<Row[]> {
   return Array.isArray(body) ? (body as Row[]) : [];
 }
 
+/**
+ * Every row a query matches, a page at a time.
+ *
+ * Supabase hands back at most 1,000 rows per request. The directory reads every client's checklist in one
+ * query, and 30 clients of ~45 steps is well past that, so clients late in the alphabet came back with no
+ * steps and showed 0% in the list while their own page showed real progress. Needs a stable `order=`.
+ */
+async function allRows(url: string, key: string, path: string, pageSize = 1000): Promise<Row[]> {
+  const out: Row[] = [];
+  for (let offset = 0; offset < 100_000; offset += pageSize) {
+    const page = await rows(url, key, `${path}&limit=${pageSize}&offset=${offset}`);
+    out.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return out;
+}
+
 function taskFromRow(row: Row): OnboardingTask {
   return {
     id: str(row.id),
@@ -134,7 +151,7 @@ export async function listOnboardingClients(): Promise<OnboardingClient[]> {
   if (!named.length) return [];
   const ids = named.map((w) => str(w.id)).filter(Boolean);
   const [taskRows, templateLeaves] = await Promise.all([
-    ids.length ? rows(url, key, `rr_onboarding_tasks?select=id,workspace_id,parent_id,is_done&workspace_id=in.(${ids.map(encodeURIComponent).join(",")})`) : Promise.resolve([] as Row[]),
+    ids.length ? allRows(url, key, `rr_onboarding_tasks?select=id,workspace_id,parent_id,is_done&workspace_id=in.(${ids.map(encodeURIComponent).join(",")})&order=id.asc`) : Promise.resolve([] as Row[]),
     templateLeafCount(url, key),
   ]);
   const byWorkspace = new Map<string, Array<{ id: string; parentId: string | null; isDone: boolean }>>();
