@@ -57,8 +57,29 @@ function isMachinePath(pathname: string): boolean {
   );
 }
 
+/**
+ * Machine paths that prove who is calling by other means (a Slack signature, a webhook secret in the path, or
+ * a liveness ping that must answer anyone). Every other machine path is the worker or a logged-in page, and
+ * should carry either the CRON_SECRET bearer or a session cookie.
+ */
+function isSelfAuthenticated(pathname: string): boolean {
+  return pathname.startsWith("/api/webhooks/") || pathname === "/api/slack/events" || pathname === "/api/heartbeat";
+}
+
+/** Phase 1 of closing the machine paths: report callers with neither credential, block nothing yet. */
+const ENFORCE_MACHINE_AUTH = process.env.ENFORCE_MACHINE_AUTH === "1";
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (isMachinePath(pathname) && !isSelfAuthenticated(pathname) && !isCron(request)) {
+    const cookie = request.cookies.get(AUTH_COOKIE)?.value ?? "";
+    const authed = authConfigured() && Boolean(cookie) && timingSafeEqual(cookie, await sessionToken());
+    if (!authed) {
+      console.warn("machine_path_unauthenticated", JSON.stringify({ path: pathname, method: request.method, ua: (request.headers.get("user-agent") ?? "").slice(0, 80) }));
+      if (ENFORCE_MACHINE_AUTH) return NextResponse.json({ ok: false, error: "Not authenticated." }, { status: 401 });
+    }
+  }
 
   if (!isAuthPath(pathname) && !isMachinePath(pathname) && !isCron(request)) {
     const cookie = request.cookies.get(AUTH_COOKIE)?.value ?? "";
