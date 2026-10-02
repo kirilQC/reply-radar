@@ -273,6 +273,23 @@ function slideFor(column: string[], id: string, h: Handlers): -1 | 0 | 1 {
   if (i < src) return i >= at ? 1 : 0; // dragged card moving up past it: it moves down
   return i - 1 < at ? -1 : 0; // dragged card moving down past it: it moves up into the freed slot
 }
+/**
+ * Lets the whole column accept the drop, not just the cards. When the cards spring apart, the natural
+ * place to let go is the gap that opened, which is the column itself; without this the browser treated
+ * that release as a cancelled drag and nothing moved.
+ */
+function columnDropProps(column: string[], h: Handlers, fallback?: () => void) {
+  return {
+    onDragOver: (e: React.DragEvent) => { if (h.dragId && (column.includes(h.dragId) || fallback)) e.preventDefault(); },
+    onDrop: (e: React.DragEvent) => {
+      if (!h.dragId) return;
+      e.preventDefault();
+      if (column.includes(h.dragId) && h.dropHint && column.includes(h.dropHint.id)) h.onReorder(column, h.dropHint.id, h.dropHint.after);
+      else if (column.includes(h.dragId)) { h.onDrag(null); h.setDropHint(null); }
+      else fallback?.();
+    },
+  };
+}
 function Card({ t, h, column, slide = 0 }: { t: BoardTask; h: Handlers; column?: string[]; slide?: -1 | 0 | 1 }) {
   const s = stageOf(t.stage);
   const pr = prioOf(t.priority);
@@ -336,7 +353,7 @@ function KanbanView({ byStage, h }: { byStage: Record<string, BoardTask[]>; h: H
   return (
     <div className="pm-kb">
       {STAGES.map((s) => (
-        <div className="pm-col" key={s.key} onDragOver={(e) => e.preventDefault()} onDrop={() => h.dragId && h.onMove(h.dragId, s.key)}>
+        <div className="pm-col" key={s.key} {...columnDropProps(byStage[s.key].map((x) => x.id), h, () => h.dragId && h.onMove(h.dragId, s.key))}>
           <div className="pm-colh"><span className={`pm-stg ${s.cls}`}><span className="d" />{s.label}</span></div>
           {(() => { const ids = byStage[s.key].map((x) => x.id); return byStage[s.key].map((t) => <Card key={t.id} t={t} h={h} column={ids} slide={slideFor(ids, t.id, h)} />); })()}
           {s.key === "todo" && <button type="button" className="pm-add" onClick={() => h.openNew("todo")}>+ Add</button>}
@@ -420,7 +437,7 @@ function HeyReachPeek({ slug, name }: { slug: string; name: string }) {
 function ColumnList({ label, logo, tasks, onAdd, h, reorderable, extra }: { label: React.ReactNode; logo?: React.ReactNode; tasks: BoardTask[]; onAdd: () => void; h: Handlers; reorderable?: boolean; extra?: React.ReactNode }) {
   const ids = tasks.map((t) => t.id);
   return (
-    <div className="pm-col">
+    <div className="pm-col" {...(reorderable ? columnDropProps(ids, h) : {})}>
       <div className="pm-colh pm-colh-big">{logo}<b>{label}</b>{extra}</div>
       {tasks.map((t) => <Card key={t.id} t={t} h={h} column={reorderable ? ids : undefined} slide={reorderable ? slideFor(ids, t.id, h) : 0} />)}
       <button type="button" className="pm-add" onClick={onAdd}>+ Add</button>
