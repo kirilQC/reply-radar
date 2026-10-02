@@ -22,13 +22,14 @@
  */
 export const ACTIVE_MODELS = [
   "claude-sonnet-5-5",
-  "claude-opus-5-5",
 ];
+// Opus 5.5 was tried and removed: it cannot answer without thinking first (only adaptive thinking is accepted),
+// so a one-shot call budgeted for its answer can be cut off. It is also twice the price.
 
 /** Every AI feature runs on this unless a client is explicitly set to another allowed model. Sonnet 5.5:
  *  the newest, cheapest current-generation model ($2 / $10 per million tokens, Oct 2026). */
 /** The thinking type that means "answer directly" on each allowlisted model. */
-const THINKING_OFF = { "claude-sonnet-5-5": "between_tools", "claude-opus-5-5": "disabled" };
+const THINKING_OFF = { "claude-sonnet-5-5": "between_tools" };
 
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
 
