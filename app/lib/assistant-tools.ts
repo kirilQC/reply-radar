@@ -54,6 +54,7 @@ import {
   listRecords as airtableList,
   updateRecords as airtableUpdate,
   deleteRecords as airtableDelete,
+  countRecords as airtableCount,
   type AirtableResult,
   type AirtableTable,
 } from "./airtable";
@@ -81,6 +82,7 @@ import { articlePath } from "./help-shared";
 import { publicBaseUrl } from "./public-url";
 import { DATA_TOOLS, EXPORT_TOOL, runDataTool } from "./assistant-data";
 import { INSIGHT_TOOLS, INSIGHT_TOOL_NAMES, runInsightTool } from "./scout-insights";
+import { readConfig, writeConfig } from "./app-config";
 
 type Row = Record<string, unknown>;
 
@@ -846,6 +848,11 @@ const BASE_TOOLS: ToolDefinition[] = [
     input_schema: { type: "object", properties: { client: { type: "string", description: "Client name or slug. Omit for the all-client directory." } } },
   },
   {
+    name: "airtable_table_sizes",
+    description: "Row counts for every table in a client's Airtable base in one call, biggest first (empty tables listed separately). THE tool for 'which Airtable table has the most records', 'how big is X's base', 'which tables are in use'. Never count tables one by one with airtable_records.",
+    input_schema: { type: "object", properties: { client: { type: "string" } }, required: ["client"] },
+  },
+  {
     name: "airtable_delete_records",
     description: "Delete rows from a table in a client's Airtable base, by record id (from airtable_records). Permanent. Only when the person explicitly asks to remove those rows; name the rows you are deleting in the answer.",
     input_schema: { type: "object", properties: { client: { type: "string" }, table: { type: "string" }, ids: { type: "array", items: { type: "string" }, description: "Airtable record ids (rec...)." } }, required: ["client", "table", "ids"] },
@@ -905,8 +912,8 @@ const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "update_project",
     description:
-      "Update a project on the board — move its stage/status, change assignees, set priority, move it to a different week, set a due date, edit the title, context or links, or reassign it to a different client. Pass the project id (get it from list_projects first). Only the fields you pass are changed. Use this to mark something in progress / paused / completed / launched, or to change any property.",
-    input_schema: { type: "object", properties: { id: { type: "string", description: "Project id from list_projects." }, title: { type: "string" }, stage: { type: "string", description: "todo | in_progress | paused | completed | launched" }, assignee: { type: "string", description: "One name, or several comma-separated. Empty string to clear." }, priority: { type: "string", description: "p1 | high | medium | low (p1 = Priority 1, most urgent), or empty string to clear" }, week: { type: "string", description: "Start date, or empty string to clear" }, due_date: { type: "string", description: "A due date, or empty string to clear" }, context: { type: "string" }, links: { type: "array", items: { type: "object", properties: { url: { type: "string" }, title: { type: "string" } }, required: ["url"] } }, reassign_client: { type: "string", description: "Move this task to another client — that client's name or slug." } }, required: ["id"] },
+      "Update a project on the board — move its stage/status, change assignees, set priority, move it to a different week, set a due date, edit the title, context or links, add / clear / remove blockers, tick the campaign checklist (contact list built, messaging created), post a Latest update, or reassign it to a different client. Link to the board only with the boardUrl list_projects returns. Pass the project id (get it from list_projects first). Only the fields you pass are changed. Use this to mark something in progress / paused / completed / launched, or to change any property.",
+    input_schema: { type: "object", properties: { id: { type: "string", description: "Project id from list_projects." }, title: { type: "string" }, stage: { type: "string", description: "todo | in_progress | paused | completed | launched" }, assignee: { type: "string", description: "One name, or several comma-separated. Empty string to clear." }, priority: { type: "string", description: "p1 | high | medium | low (p1 = Priority 1, most urgent), or empty string to clear" }, week: { type: "string", description: "Start date, or empty string to clear" }, due_date: { type: "string", description: "A due date, or empty string to clear" }, context: { type: "string" }, links: { type: "array", items: { type: "object", properties: { url: { type: "string" }, title: { type: "string" } }, required: ["url"] } }, reassign_client: { type: "string", description: "Move this task to another client — that client's name or slug." }, add_blockers: { type: "array", items: { type: "object", properties: { text: { type: "string", description: "What it's waiting on, e.g. 'waiting on client'." }, owner: { type: "string", description: "Who it's waiting on (optional)." } }, required: ["text"] } }, resolve_blockers: { type: "array", items: { type: "string" }, description: "Mark blockers cleared by their text, or ['all']." }, remove_blockers: { type: "array", items: { type: "string" }, description: "Delete blockers by their text, or ['all']." }, checklist: { type: "object", properties: { list: { type: "boolean", description: "Contact list built" }, messaging: { type: "boolean", description: "Messaging created" } } }, latest_update: { type: "string", description: "Post a written update to the task's Latest update feed." }, update_author: { type: "string", description: "Who the update is from: the person asking (one-word name)." } }, required: ["id"] },
   },
   {
     name: "delete_project",
@@ -1954,6 +1961,24 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         steps: steps.map((s) => ({ id: s.id, title: s.title, section: s.section, group: s.group })),
       };
     }
+    case "airtable_table_sizes": {
+      const { client, baseId } = await airtableBaseFor(input.client);
+      const tables = airtableData(await getBaseTables(baseId));
+      const started = Date.now();
+      const sizes: Array<{ table: string; records: number | null; note?: string }> = [];
+      // Airtable allows 5 requests a second per base: four tables at a time, and stop at 40s with what we have.
+      for (let i = 0; i < tables.length; i += 4) {
+        if (Date.now() - started > 40_000) { for (const t of tables.slice(i)) sizes.push({ table: t.name, records: null, note: "not counted (time limit)" }); break; }
+        const batch = await Promise.all(tables.slice(i, i + 4).map(async (t) => {
+          const r = await airtableCount(baseId, t);
+          return r.ok ? { table: t.name, records: r.data.count, ...(r.data.capped ? { note: `${r.data.count}+ (stopped counting)` } : {}) } : { table: t.name, records: null, note: r.error };
+        }));
+        sizes.push(...batch);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      const used = sizes.filter((s) => (s.records ?? 0) > 0).sort((a, b) => (b.records ?? 0) - (a.records ?? 0));
+      return { client: client.name, tables: tables.length, withRecords: used, empty: sizes.filter((s) => s.records === 0).map((s) => s.table), notCounted: sizes.filter((s) => s.records === null) };
+    }
     case "airtable_delete_records": {
       const { client, baseId } = await airtableBaseFor(input.client);
       const tables = airtableData(await getBaseTables(baseId));
@@ -2008,13 +2033,13 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const r = await listProjectsFor(client.slug, weekOpt);
       if (!r.ok) return { client: client.name, error: r.error };
       for (const p of r.projects ?? []) (byStage[STAGE_LABEL[p.stage] ?? "To do"]).push({ id: p.id, title: p.title, assignees: p.assignee, priority: p.priority, week: p.week, dueDate: p.dueDate, blockers: p.blockers, context: p.context, links: p.links, autoAdded: p.source !== "manual" });
-      return { client: client.name, total: r.projects?.length ?? 0, week: input.week ? text(input.week) : "all", byStage };
+      return { client: client.name, boardUrl: `${publicBaseUrl() || "https://www.replyradar.dev"}/project-management/${client.slug}`, total: r.projects?.length ?? 0, week: input.week ? text(input.week) : "all", byStage };
     }
     case "create_project": {
       const client = await resolveClient(input.client);
       const r = await createProjectFor(client.slug, { title: text(input.title), stage: text(input.stage), assignee: text(input.assignee), priority: text(input.priority), week: text(input.week), dueDate: text(input.due_date), context: text(input.context), links: Array.isArray(input.links) ? (input.links as ProjectLink[]) : [] });
       if (!r.ok) return { ok: false, error: r.error };
-      return { ok: true, client: client.name, created: r.project ? { id: r.project.id, title: r.project.title, stage: STAGE_LABEL[r.project.stage] } : null };
+      return { ok: true, client: client.name, boardUrl: `${publicBaseUrl() || "https://www.replyradar.dev"}/project-management/${client.slug}`, created: r.project ? { id: r.project.id, title: r.project.title, stage: STAGE_LABEL[r.project.stage] } : null };
     }
     case "update_project": {
       const fields: Record<string, unknown> = {};
@@ -2027,8 +2052,37 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       if (input.context !== undefined) fields.context = text(input.context);
       if (input.links !== undefined) fields.links = Array.isArray(input.links) ? (input.links as ProjectLink[]) : [];
       if (input.reassign_client !== undefined) { const dest = await resolveClient(input.reassign_client); fields.reassignSlug = dest.slug; }
-      const r = await updateProject(text(input.id), fields);
-      return r.ok ? { ok: true } : { ok: false, error: r.error };
+      const id = text(input.id);
+      const adds = rows(input.add_blockers).map((b) => ({ text: text(b.text), ...(text(b.owner) ? { owner: text(b.owner) } : {}) })).filter((b) => b.text);
+      const resolve = (Array.isArray(input.resolve_blockers) ? input.resolve_blockers : []).map((x) => text(x).toLowerCase());
+      const remove = (Array.isArray(input.remove_blockers) ? input.remove_blockers : []).map((x) => text(x).toLowerCase());
+      if (adds.length || resolve.length || remove.length) {
+        const current = rows(await db(`rr_projects?select=blocker&id=eq.${encodeURIComponent(id)}&limit=1`))[0]?.blocker;
+        let list = (Array.isArray(current) ? current : current ? [current] : []) as Array<{ text?: string; owner?: string; resolved?: boolean }>;
+        const hit = (b: { text?: string }, keys: string[]) => keys.includes("all") || keys.some((k) => String(b.text ?? "").toLowerCase().includes(k));
+        if (remove.length) list = list.filter((b) => !hit(b, remove));
+        if (resolve.length) list = list.map((b) => (hit(b, resolve) ? { ...b, resolved: true } : b));
+        list = [...list, ...adds];
+        fields.blocker = list;
+      }
+      const r = Object.keys(fields).length ? await updateProject(id, fields) : { ok: true as const, error: undefined };
+      if (!r.ok) return { ok: false, error: r.error };
+      const done: string[] = Object.keys(fields);
+      if (input.checklist && typeof input.checklist === "object") {
+        const key = `pm_checks:${id}`;
+        const prev = ((await readConfig(key).catch(() => null)) ?? {}) as Row;
+        const c = input.checklist as Row;
+        await writeConfig(key, { list: typeof c.list === "boolean" ? c.list : Boolean(prev.list), messaging: typeof c.messaging === "boolean" ? c.messaging : Boolean(prev.messaging) });
+        done.push("checklist");
+      }
+      if (text(input.latest_update)) {
+        const key = `pm_updates:${id}`;
+        const list = ((await readConfig(key).catch(() => [])) ?? []) as unknown[];
+        const item = { id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, author: text(input.update_author) || "QC Bot", text: text(input.latest_update).slice(0, 4000), at: new Date().toISOString() };
+        await writeConfig(key, [item, ...(Array.isArray(list) ? list : [])].slice(0, 200));
+        done.push("latest update");
+      }
+      return { ok: true, changed: done };
     }
     case "delete_project": {
       const r = await deleteProject(text(input.id));

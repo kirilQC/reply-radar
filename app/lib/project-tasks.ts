@@ -52,7 +52,7 @@ export async function createProjectFor(slug: string, input: { title: string; sta
   const [row] = await r.json().catch(() => []);
   return { ok: true, project: row ? shape(row) : undefined };
 }
-export async function updateProject(id: string, fields: { title?: string; stage?: string; assignee?: string | null; priority?: string | null; week?: string | null; dueDate?: string | null; context?: string | null; links?: ProjectLink[]; reassignSlug?: string; updatedBy?: string | null }): Promise<{ ok: boolean; error?: string }> {
+export async function updateProject(id: string, fields: { title?: string; stage?: string; assignee?: string | null; priority?: string | null; week?: string | null; dueDate?: string | null; context?: string | null; links?: ProjectLink[]; blocker?: Array<{ text?: string; owner?: string; resolved?: boolean }> | null; reassignSlug?: string; updatedBy?: string | null }): Promise<{ ok: boolean; error?: string }> {
   const c = creds(); if (!c) return { ok: false, error: "Supabase not configured" };
   const patch: Row = { updated_at: new Date().toISOString() };
   if (fields.updatedBy !== undefined) patch.updated_by = fields.updatedBy ? String(fields.updatedBy).slice(0, 200) : null;
@@ -64,6 +64,7 @@ export async function updateProject(id: string, fields: { title?: string; stage?
   if (fields.dueDate !== undefined) patch.due_date = fields.dueDate || null;
   if (fields.context !== undefined) patch.context = fields.context ? String(fields.context).slice(0, 5000) : null;
   if (fields.links !== undefined) patch.links = normLinks(fields.links);
+  if (fields.blocker !== undefined) { const list = (fields.blocker ?? []).filter((b) => b && (b.text || b.owner)).slice(0, 20); patch.blocker = list.length ? list : null; }
   if (fields.reassignSlug) { const wsId = await workspaceIdForSlug(fields.reassignSlug, c); if (!wsId) return { ok: false, error: `No client matches "${fields.reassignSlug}".` }; patch.workspace_id = wsId; }
   const r = await fetch(`${c.url}/rest/v1/rr_projects?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: { ...c.headers, Prefer: "return=minimal" }, body: JSON.stringify(patch) });
   return r.ok ? { ok: true } : { ok: false, error: `Update failed (${r.status}).` };

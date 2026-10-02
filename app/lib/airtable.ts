@@ -297,6 +297,22 @@ export async function listRecords(baseId: string, tableId: string): Promise<Airt
   return { ok: true, data: records.filter((record) => record.id) };
 }
 
+/** How many rows a table has, reading only its primary field; stops at `cap` (reported as capped). */
+export async function countRecords(baseId: string, table: AirtableTable, cap = 3000): Promise<AirtableResult<{ count: number; capped: boolean }>> {
+  let count = 0;
+  let offset = "";
+  const only = table.primaryFieldId ? `&fields%5B%5D=${encodeURIComponent(table.primaryFieldId)}` : "";
+  for (let page = 0; page < Math.ceil(cap / 100); page += 1) {
+    const query = `pageSize=100${only}${offset ? `&offset=${encodeURIComponent(offset)}` : ""}`;
+    const result = await airtableGet<{ records?: unknown[]; offset?: string }>(`/${encodeURIComponent(baseId)}/${encodeURIComponent(table.id)}?${query}`);
+    if (!result.ok) return result;
+    count += (result.data?.records ?? []).length;
+    offset = String(result.data?.offset ?? "");
+    if (!offset) return { ok: true, data: { count, capped: false } };
+  }
+  return { ok: true, data: { count, capped: true } };
+}
+
 export async function createRecords(baseId: string, tableId: string, rows: Record<string, unknown>[]): Promise<AirtableResult<AirtableRecord[]>> {
   return writeInBatches(rows, WRITE_BATCH, async (batch) => {
     const result = await airtableSend<{ records?: AirtableRecord[] }>("POST", `/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}`, { records: batch.map((fields) => ({ fields })) });
