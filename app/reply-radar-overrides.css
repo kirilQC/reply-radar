@@ -364,3 +364,69 @@ html:not(.hydrated) body{visibility:hidden}
 .light-mode .brand-wordmark .brand-wordmark-light { display: block; }
 .login-brand { display: flex; justify-content: center; align-items: center; width: 100%; margin-bottom: 6px; }
 .customize-reset-accent { margin-top: 6px; padding: 0; background: none; color: var(--muted); font-size: 11px; text-decoration: underline; text-align: left; }
+
+/* ── Smooth sidebar collapse (desktop) ─────────────────────────────────────────────────────────
+   The collapse used to swap layouts in one frame: labels went display:none, icons jumped to the
+   centre and grew, the logo swapped image, and section headings disappeared so everything below
+   shifted up. Now nothing moves. The rail narrows, labels fade out in place, the logo is clipped
+   down to its dot grid, and every icon keeps its position. Collapsing fades the labels first;
+   expanding widens the rail first and fades them in after. */
+@media (min-width: 761px) {
+  .app-sidebar {
+    --rail-ease: cubic-bezier(.32, .72, 0, 1);
+    overflow-x: hidden;
+    transition: width .34s var(--rail-ease), flex-basis .34s var(--rail-ease), padding .34s var(--rail-ease) !important;
+    will-change: width;
+  }
+  .app-sidebar.sidebar-collapsed { padding-left: 14px; padding-right: 14px; }
+
+  /* Rows keep their left alignment and padding; only the padding eases so icons land centred. */
+  .app-sidebar .nav-item,
+  .app-sidebar .client-directory-item {
+    white-space: nowrap;
+    overflow: hidden;
+    transition: padding .34s var(--rail-ease), background-color .15s ease, color .15s ease;
+  }
+  .app-sidebar.sidebar-collapsed .nav-item { justify-content: flex-start; padding: 0 0 0 14px; }
+  .app-sidebar.sidebar-collapsed .client-directory-item { justify-content: flex-start; padding: 8px 0 8px 8px; font-size: inherit; }
+  .app-sidebar.sidebar-collapsed .client-directory-item i { width: 28px; height: 28px; border-radius: 7px; }
+  .app-sidebar.sidebar-collapsed .client-list { display: grid; gap: 2px; margin-top: 0; }
+
+  /* Labels fade rather than vanish, and stay in the layout so nothing below them shifts. */
+  .app-sidebar .nav-item > span:not(:first-child),
+  .app-sidebar .nav-item > kbd,
+  .app-sidebar .nav-count,
+  .app-sidebar .nav-label,
+  .app-sidebar .user-chip > div:nth-child(2) {
+    transition: opacity .2s ease .12s;
+  }
+  .app-sidebar.sidebar-collapsed .nav-item > span:not(:first-child),
+  .app-sidebar.sidebar-collapsed .nav-item > kbd,
+  .app-sidebar.sidebar-collapsed .nav-count,
+  .app-sidebar.sidebar-collapsed .nav-label,
+  .app-sidebar.sidebar-collapsed .user-chip > div:nth-child(2) {
+    display: revert;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .12s ease;
+  }
+  .app-sidebar.sidebar-collapsed .nav-label { display: block; }
+  .app-sidebar.sidebar-collapsed .nav-item > span:not(:first-child) { display: inline; }
+  /* Client names are bare text beside the logo, so they fade through the text colour. */
+  .app-sidebar .client-directory-item { transition: padding .34s var(--rail-ease), color .2s ease .12s, background-color .15s ease; }
+  .app-sidebar.sidebar-collapsed .client-directory-item { color: transparent; transition: padding .34s var(--rail-ease), color .12s ease, background-color .15s ease; }
+  .app-sidebar.sidebar-collapsed .client-directory-item i { color: #fff; }
+
+  /* The logo: the wordmark's own dot grid is the collapsed mark, so the wordmark is clipped, not swapped. */
+  .app-sidebar .brand-row { transition: padding .34s var(--rail-ease); }
+  .app-sidebar.sidebar-collapsed .brand-row { padding-left: 10px; padding-right: 10px; }
+  .app-sidebar .brand-toggle { max-width: 200px; overflow: hidden; transition: max-width .34s var(--rail-ease), opacity .15s ease; }
+  .app-sidebar.sidebar-collapsed .brand-toggle { max-width: 24px; }
+  .app-sidebar .brand-toggle .brand-mark.brand-mark-grid,
+  .app-sidebar.sidebar-collapsed .brand-toggle .brand-mark.brand-mark-grid { display: none; }
+  .app-sidebar.sidebar-collapsed .brand-toggle .sidebar-label { display: inline-flex; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-sidebar, .app-sidebar * { transition-duration: .01s !important; transition-delay: 0s !important; }
+  }
+}

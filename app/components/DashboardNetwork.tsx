@@ -95,15 +95,20 @@ export default function DashboardNetwork() {
     readAccent();
     place();
     start();
-    const observer = new ResizeObserver(() => { place(); if (reduce) draw(); });
+    // Resizing the canvas reallocates it, so while the sidebar animates (a resize every frame) it waits
+    // until the size settles instead of rebuilding sixty times a second.
+    let settle = 0;
+    const replace = () => { window.clearTimeout(settle); settle = window.setTimeout(() => { place(); if (reduce) draw(); }, 140); };
+    const observer = new ResizeObserver(replace);
     observer.observe(host);
-    window.addEventListener("resize", place);
+    window.addEventListener("resize", replace);
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("reply-radar-appearance-changed", onAccent);
     return () => {
       cancelAnimationFrame(raf);
       observer.disconnect();
-      window.removeEventListener("resize", place);
+      window.clearTimeout(settle);
+      window.removeEventListener("resize", replace);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("reply-radar-appearance-changed", onAccent);
     };
