@@ -35,7 +35,7 @@ That sentence is the design brief. Everything below serves it.
 | `app/api/slack/brief/route.ts` | `GET` lists clients and what is due; `POST` writes and sends one brief. |
 | `app/slack/page.tsx` | The Slack hub: per-client cards, Generate, the schedule editor. |
 | `app/health/page.tsx` | The automation log panel, so a brief that stopped posting is visible. |
-| `worker/render-worker.mjs` (`sendDueBrief`, ~line 1253) | The scheduler. **At most one client per cycle.** |
+| `worker/render-worker.mjs` (`sendDueBrief`, ~line 1253) | The scheduler. Runs on its own loop (`scheduledSendsLoop`), one brief at a time, back to back until nothing is due. |
 | `app/lib/tracker-extract.ts` | Reads the posted brief back for its action items, as JSON. |
 | `app/lib/tracker-sync.ts` | The tracker rules: campaign lifecycle, project upsert, the stale sweep. Pure. |
 | `app/lib/tracker-sync-run.ts` | The same rules against a real base. The only half that opens a socket. |
