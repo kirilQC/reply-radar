@@ -280,15 +280,24 @@ function emailBlocks(body: string, slug: string, read: { live: boolean; internal
   const elements: unknown[] = [];
   let lines: string[] = [];
   let bullets: string[] = [];
-  const flushLines = () => { if (lines.length) elements.push({ type: "rich_text_section", elements: lines.flatMap((l, n) => [...inline(l), ...(n < lines.length - 1 ? [{ type: "text", text: "\n" }] : [])]) }); lines = []; };
-  const flushBullets = () => { if (bullets.length) elements.push({ type: "rich_text_list", style: "bullet", elements: bullets.map((b) => ({ type: "rich_text_section", elements: inline(b) })) }); bullets = []; };
+  // A blank line in the email (and the end of a list) becomes a visible gap; a heading stays tight to its list.
+  let gapBefore = false;
+  const flushLines = (gapAfter = false) => {
+    if (lines.length) {
+      const body = lines.flatMap((l, n) => [...inline(l), ...(n < lines.length - 1 ? [{ type: "text", text: "\n" }] : [])]);
+      elements.push({ type: "rich_text_section", elements: [...(gapBefore ? [{ type: "text", text: "\n" }] : []), ...body, ...(gapAfter ? [{ type: "text", text: "\n" }] : [])] });
+      gapBefore = false;
+    }
+    lines = [];
+  };
+  const flushBullets = () => { if (bullets.length) { elements.push({ type: "rich_text_list", style: "bullet", elements: bullets.map((b) => ({ type: "rich_text_section", elements: inline(b) })) }); gapBefore = true; } bullets = []; };
   for (const raw of body.split("\n")) {
     const line = raw.trimEnd();
     const bullet = line.match(/^\s*[-•]\s+(.*)$/);
     if (bullet && !/^-\s*QC Growth$/.test(line.trim())) { flushLines(); bullets.push(bullet[1]); continue; }
     flushBullets();
     if (!line.trim()) { if (lines.length) lines.push(""); continue; }
-    if (lines.length && lines[lines.length - 1] === "") { lines.pop(); flushLines(); }
+    if (lines.length && lines[lines.length - 1] === "") { lines.pop(); flushLines(true); }
     lines.push(line);
   }
   flushLines(); flushBullets();
