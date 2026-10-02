@@ -273,9 +273,9 @@ function reportHeader(clientName: string, timeZone: string): string {
  * page with this client and the same template open, to edit or regenerate it there.
  */
 function emailBlocks(body: string, slug: string, read: { live: boolean; internal: number | null; external: number | null; call: string | null }): unknown[] {
-  const quoted = body.split("\n").map((line) => (line.trim() ? `> ${line}` : ">")).join("\n");
-  const chunks: string[] = [];
-  for (let at = 0; at < quoted.length; at += 2900) chunks.push(quoted.slice(at, at + 2900));
+  // One block per paragraph group: Slack folds a long single block behind "Show more", which hid the recap.
+  const quote = (text: string) => text.split("\n").map((line) => (line.trim() ? `> ${line}` : ">")).join("\n");
+  const chunks = body.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean).map((part) => quote(part).slice(0, 2900));
   const sources = [
     read.live ? "HeyReach live" : "HeyReach (stored figures)",
     read.internal === null ? "" : `internal channel (${read.internal} msgs)`,
