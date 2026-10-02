@@ -3,11 +3,15 @@
 
 import { NextResponse } from "next/server";
 import { listOnboardingClients, addOnboardingClient } from "../../../lib/onboarding";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 // The onboarding directory: every client in the hub with its progress, and the "add new client" write.
 export async function GET() {
   const clients = await listOnboardingClients();
-  return NextResponse.json({ ok: true, clients });
+  return slimJson({ ok: true, clients });
 }
 
 export async function POST(request: Request) {

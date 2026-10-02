@@ -5,6 +5,10 @@ import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../../lib/person-name";
 import { countRows } from "../../../lib/rest-count";
 import { leadSortOrder } from "../../../lib/lead-sort";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 type Row = Record<string, unknown>;
 const field = (value: unknown, key: string) =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -152,7 +156,7 @@ export async function GET(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key)
-    return NextResponse.json(
+    return slimJson(
       { ok: false, leads: [], error: "Supabase is not configured." },
       { status: 503 },
     );
@@ -181,7 +185,7 @@ export async function GET(request: Request) {
       ? workspaces.find((workspace) => workspace.slug === workspaceSlug)
       : null;
     if (workspaceSlug && !selectedWorkspace)
-      return NextResponse.json({
+      return slimJson({
         ok: true,
         leads: [],
         workspaces,
@@ -361,7 +365,7 @@ export async function GET(request: Request) {
         // that does fetches the lead on its own from /api/database/lead/[id].
       };
     });
-    return NextResponse.json({
+    return slimJson({
       ok: true,
       leads,
       workspaces: workspaces.map((workspace) => ({
@@ -378,7 +382,7 @@ export async function GET(request: Request) {
       pageSize: limit,
     });
   } catch (error) {
-    return NextResponse.json(
+    return slimJson(
       {
         ok: false,
         leads: [],

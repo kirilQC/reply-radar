@@ -3,6 +3,10 @@
 
 import { NextResponse } from "next/server";
 import { queryByIds } from "../../../lib/chunk-query";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 type Row = Record<string, unknown>;
 const text = (v: unknown) => (typeof v === "string" ? v : "");
@@ -13,7 +17,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function GET(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return NextResponse.json({ error: "Supabase not configured" }, { status: 503 });
+  if (!url || !key) return slimJson({ error: "Supabase not configured" }, { status: 503 });
 
   const params = new URL(request.url).searchParams;
   const limit = Math.min(Number(params.get("limit") || 200), 500);
@@ -159,13 +163,13 @@ export async function GET(request: Request) {
     const totalInputTokens = generalEvents.reduce((s, e) => s + Number(e.inputTokens || 0), 0);
     const totalOutputTokens = generalEvents.reduce((s, e) => s + Number(e.outputTokens || 0), 0);
 
-    return NextResponse.json({
+    return slimJson({
       ok: true,
       events: generalEvents,
       drafts: draftEvents,
       summary: { totalCalls, successful, failed, totalInputTokens, totalOutputTokens },
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to load AI audit" }, { status: 502 });
+    return slimJson({ error: error instanceof Error ? error.message : "Failed to load AI audit" }, { status: 502 });
   }
 }

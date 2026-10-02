@@ -4,6 +4,10 @@
 import { NextResponse } from "next/server";
 import { normalizePersonName } from "../../../../lib/person-name";
 import { deleteLeadsCompletely, relatedLeadIds } from "../../../../lib/lead-deletion";
+import { slimImages } from "../../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 type Row = Record<string, unknown>;
 async function get(url: string, key: string, path: string) {
   const response = await fetch(`${url}/rest/v1/${path}`, {
@@ -22,13 +26,13 @@ export async function GET(
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key)
-    return NextResponse.json(
+    return slimJson(
       { ok: false, error: "Supabase is not configured." },
       { status: 503 },
     );
   const { leadId } = await context.params;
   if (!/^[0-9a-f-]{36}$/i.test(leadId))
-    return NextResponse.json(
+    return slimJson(
       { ok: false, error: "Invalid lead id." },
       { status: 400 },
     );
@@ -43,7 +47,7 @@ export async function GET(
       `rr_leads?select=*&id=eq.${encodeURIComponent(leadId)}&limit=1`,
     );
     if (!lead)
-      return NextResponse.json(
+      return slimJson(
         { ok: false, error: "Lead not found." },
         { status: 404 },
       );
@@ -89,7 +93,7 @@ export async function GET(
       : [];
     const normalizedLead = { ...lead, name: normalizePersonName(lead.name) };
     const normalizedRelatedLeads = relatedLeads.map((row) => ({ ...row, name: normalizePersonName(row.name) }));
-    return NextResponse.json({
+    return slimJson({
       ok: true,
       lead: normalizedLead,
       relatedLeads: normalizedRelatedLeads,
@@ -102,7 +106,7 @@ export async function GET(
         messages.length > batchSize ? offset + batchSize : null,
     });
   } catch (error) {
-    return NextResponse.json(
+    return slimJson(
       {
         ok: false,
         error:

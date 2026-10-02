@@ -10,6 +10,10 @@ import { normalizeChannelId } from "../../../lib/slack-channel";
 import { syncMessagingDocForSlug } from "../../../lib/messaging-sync";
 import { writeConfig } from "../../../lib/app-config";
 import { briefMemoryResetKey } from "../../../lib/morning-brief-run";
+import { slimImages, isImageRef } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 /**
  * The moment a client's messaging doc is present on a saved workspace, pull its tabs into the brain.
@@ -31,7 +35,7 @@ function supabaseConfig() {
 
 export async function GET(request: Request) {
   const { url, key } = supabaseConfig();
-  if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
+  if (!url || !key) return slimJson({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
   let response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,brain_folder,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids,granola_title_match,granola_extra_title_matches,airtable_base_id,clay_dnc_webhook_url,morning_brief_enabled,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&slug=neq.misc&order=name.asc`, { headers, cache: "no-store" });
   // Permit the UI to keep working while the additive migration is being run.
@@ -42,7 +46,7 @@ export async function GET(request: Request) {
   // dashboard. Anything already pointing at us is left exactly as it is.
   const base = publicBaseUrl(request);
   const workspaces = Array.isArray(rows) ? rows.map((row) => ({ ...row, webhook_url: isOurWebhookUrl(row.webhook_url, base) ? row.webhook_url : webhookUrlFor(row.slug, request), key_configured: Boolean(row.heyreach_api_key_ciphertext), ai_ark_enrichment_enabled: Boolean(row.guardrails?.ai_ark_enrichment_enabled), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined })) : rows;
-  return NextResponse.json({ ok: response.ok, workspaces, aiArkConfigured: Boolean(process.env.AI_ARK_API_KEY), aiArkEnrichmentEnabled: isAiArkEnrichmentEnabled() }, { status: response.ok ? 200 : response.status });
+  return slimJson({ ok: response.ok, workspaces, aiArkConfigured: Boolean(process.env.AI_ARK_API_KEY), aiArkEnrichmentEnabled: isAiArkEnrichmentEnabled() }, { status: response.ok ? 200 : response.status });
 }
 
 export async function POST(request: Request) {
@@ -50,7 +54,7 @@ export async function POST(request: Request) {
   if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const payload = await request.json();
   const existingGuardrails = payload.guardrails && typeof payload.guardrails === "object" && !Array.isArray(payload.guardrails) ? payload.guardrails : {};
-  const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, brain_folder: payload.brainFolder || null, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ? resolveModel(String(payload.anthropicModel)) : null, custom_system_prompt: payload.systemPrompt ?? null, logo_url: payload.logoUrl ?? null, accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null, webhook_url: webhookUrlFor(payload.slug, request), guardrails: existingGuardrails };
+  const record: Record<string, unknown> = { name: payload.name ?? "", slug: payload.slug, brain_folder: payload.brainFolder || null, client_brief: payload.clientBrief ?? null, anthropic_model: payload.anthropicModel ? resolveModel(String(payload.anthropicModel)) : null, custom_system_prompt: payload.systemPrompt ?? null, ...(isImageRef(payload.logoUrl) ? {} : { logo_url: payload.logoUrl ?? null }), accent_color: payload.accentColor ?? null, timezone: payload.timezone || "America/New_York", website_url: payload.websiteUrl ?? null, webhook_url: webhookUrlFor(payload.slug, request), guardrails: existingGuardrails };
   // Absent means "leave alone", not "clear". Every other field here is sent by the one form that owns
   // it, but the theme panel auto-saves a partial payload of its own, and a channel id silently emptied
   // by a logo upload would not be noticed until a Monday brief went nowhere. Normalised on the way in

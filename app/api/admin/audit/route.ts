@@ -2,6 +2,10 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextRequest, NextResponse } from "next/server";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 type Row = Record<string, unknown>;
 type AuditEvent = {
@@ -71,7 +75,7 @@ function webhookSummary(row: Row, workspace: string | null) {
 export async function GET(request: NextRequest) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
+  if (!url || !key) return slimJson({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const params = request.nextUrl.searchParams;
   const limit = Math.min(100, Math.max(1, Number(params.get("limit") || 25)));
   const offset = Math.max(0, Number(params.get("offset") || 0));
@@ -123,8 +127,8 @@ export async function GET(request: NextRequest) {
       .filter((event) => toTime === null || new Date(event.timestamp).getTime() <= toTime)
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     const page = filtered.slice(offset, offset + limit);
-    return NextResponse.json({ ok: true, events: page, hasMore: filtered.length > offset + limit, nextOffset: offset + page.length, generatedAt: new Date().toISOString(), filters: { sources: ["worker", "heyreach", "ai_ark", "supabase", "anthropic", "admin", "user"], statuses: ["success", "info", "warning", "error"] } });
+    return slimJson({ ok: true, events: page, hasMore: filtered.length > offset + limit, nextOffset: offset + page.length, generatedAt: new Date().toISOString(), filters: { sources: ["worker", "heyreach", "ai_ark", "supabase", "anthropic", "admin", "user"], statuses: ["success", "info", "warning", "error"] } });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Audit feed failed." }, { status: 502 });
+    return slimJson({ ok: false, error: error instanceof Error ? error.message : "Audit feed failed." }, { status: 502 });
   }
 }

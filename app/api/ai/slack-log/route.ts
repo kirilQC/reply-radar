@@ -12,6 +12,10 @@
  */
 import { NextResponse } from "next/server";
 import { resolveUserNames } from "../../../lib/slack";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 type Row = Record<string, unknown>;
 const text = (v: unknown) => (typeof v === "string" ? v : "");
@@ -20,7 +24,7 @@ const object = (v: unknown): Row => (v && typeof v === "object" && !Array.isArra
 export async function GET(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return NextResponse.json({ error: "Supabase not configured" }, { status: 503 });
+  if (!url || !key) return slimJson({ error: "Supabase not configured" }, { status: 503 });
 
   const params = new URL(request.url).searchParams;
   const limit = Math.min(Number(params.get("limit") || 200), 500);
@@ -76,12 +80,12 @@ export async function GET(request: Request) {
     const totalInputTokens = events.reduce((s, e) => s + Number(e.inputTokens || 0), 0);
     const totalOutputTokens = events.reduce((s, e) => s + Number(e.outputTokens || 0), 0);
 
-    return NextResponse.json({
+    return slimJson({
       ok: true,
       events,
       summary: { total, succeeded, failed, totalInputTokens, totalOutputTokens },
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to load Slack bot log" }, { status: 502 });
+    return slimJson({ error: error instanceof Error ? error.message : "Failed to load Slack bot log" }, { status: 502 });
   }
 }

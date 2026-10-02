@@ -3,6 +3,10 @@
 
 import { NextResponse } from "next/server";
 import { queryByIds } from "../../../lib/chunk-query";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 /**
  * Everything one client's analytics page draws, out of Supabase and nothing else.
@@ -69,14 +73,14 @@ function dayKeys(days: number) {
 
 export async function GET(request: Request) {
   const { url, key } = config();
-  if (!url || !key) return NextResponse.json({ ok: false, status: "not_configured" }, { status: 503 });
+  if (!url || !key) return slimJson({ ok: false, status: "not_configured" }, { status: 503 });
   const slug = new URL(request.url).searchParams.get("client")?.trim() ?? "";
-  if (!slug) return NextResponse.json({ ok: false, status: "no_client" }, { status: 400 });
+  if (!slug) return slimJson({ ok: false, status: "no_client" }, { status: 400 });
 
   try {
     const workspaces = await get(`rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=eq.${encodeURIComponent(slug)}&limit=1`);
     const workspace = workspaces[0];
-    if (!workspace) return NextResponse.json({ ok: false, status: "not_found" }, { status: 404 });
+    if (!workspace) return slimJson({ ok: false, status: "not_found" }, { status: 404 });
     const workspaceId = String(workspace.id);
 
     const [campaignRows, dailyRows, conversations, runs] = await Promise.all([
@@ -241,7 +245,7 @@ export async function GET(request: Request) {
       return state !== "queued" && state !== "running";
     });
 
-    return NextResponse.json({
+    return slimJson({
       ok: true,
       status: campaigns.length ? "live" : "no_data",
       workspace: {
@@ -273,6 +277,6 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    return NextResponse.json({ ok: false, status: "error", error: error instanceof Error ? error.message : "Client analytics unavailable" }, { status: 502 });
+    return slimJson({ ok: false, status: "error", error: error instanceof Error ? error.message : "Client analytics unavailable" }, { status: 502 });
   }
 }

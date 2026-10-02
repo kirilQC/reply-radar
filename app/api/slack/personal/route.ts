@@ -23,6 +23,10 @@ import {
   sendPersonalBrief,
   assistantSchedule,
 } from "../../../lib/personal-brief";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 export const maxDuration = 300;
 
@@ -32,7 +36,7 @@ export async function GET() {
   const due = people
     .filter((p) => p.enabled && p.slackUserId && p.clientSlugs.length && isDueNow(assistantSchedule(p), now) && !alreadySentToday(p.lastSentAt, assistantSchedule(p), now))
     .map((p) => p.id);
-  return NextResponse.json({ ok: true, slackConfigured: slackConfigured(), people, clients, due });
+  return slimJson({ ok: true, slackConfigured: slackConfigured(), people, clients, due });
 }
 
 export async function PATCH(request: Request) {

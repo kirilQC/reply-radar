@@ -4,6 +4,10 @@
 import { NextResponse } from "next/server";
 import { GRANOLA_DOWN_SECONDS, GRANOLA_TIMEZONE, granolaHeartbeatState } from "../../lib/granola-heartbeat";
 import { DEFAULT_MODEL } from "../../../shared/anthropic-model.mjs";
+import { slimImages } from "../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 type Row = Record<string, unknown>;
 const ageSeconds = (value: unknown) =>
@@ -96,7 +100,7 @@ export async function GET() {
     },
   ];
   if (!url || !key)
-    return NextResponse.json({
+    return slimJson({
       status: "not_configured",
       services,
       clients: [],
@@ -700,7 +704,7 @@ export async function GET() {
           .sort((a, b) => b.calls - a.calls),
       },
     };
-    return NextResponse.json({
+    return slimJson({
       status: "live",
       services,
       clients,
@@ -772,7 +776,7 @@ export async function GET() {
     services[0].status = "down";
     services[0].detail =
       error instanceof Error ? error.message : "Supabase check failed";
-    return NextResponse.json(
+    return slimJson(
       {
         status: "error",
         services,

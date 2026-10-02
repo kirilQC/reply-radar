@@ -3,13 +3,17 @@
 
 import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { slimImages, isImageRef } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 const config = () => ({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY });
 const headers = (key: string) => ({ apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" });
 
 export async function GET() {
   const { url, key } = config();
-  if (!url || !key) return NextResponse.json({ ok: false, error: "Supabase is not configured." }, { status: 503 });
+  if (!url || !key) return slimJson({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const h = headers(key);
   // Existing projects may predate any of avatar_url, title or linkedin_url. Ask for the most
   // complete row first and give up one column group at a time, so profile management stays live
@@ -32,11 +36,11 @@ export async function GET() {
     fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&slug=neq.misc&order=name.asc`, { headers: h, cache: "no-store" }),
   ]);
   const profiles = await profilesResponse.json(); const links = await linksResponse.json(); const workspaces = await workspacesResponse.json();
-  if (!profilesResponse.ok) return NextResponse.json({ ok: false, error: JSON.stringify(profiles) }, { status: profilesResponse.status });
+  if (!profilesResponse.ok) return slimJson({ ok: false, error: JSON.stringify(profiles) }, { status: profilesResponse.status });
   const workspaceById = new Map((Array.isArray(workspaces) ? workspaces : []).map((item: { id: string; name: string; slug: string }) => [item.id, item]));
   const byProfile = new Map<string, string[]>();
   for (const link of Array.isArray(links) ? links : []) { const workspace = workspaceById.get(link.workspace_id); if (workspace) byProfile.set(link.profile_id, [...(byProfile.get(link.profile_id) ?? []), workspace.name || workspace.slug]); }
-  return NextResponse.json({ ok: true, photoColumnAvailable: profilesIncludePhoto, profiles: (Array.isArray(profiles) ? profiles : []).map((item: { id: string; name: string; avatar_url?: string; title?: string; linkedin_url?: string; created_at: string }) => ({ slug: item.id, name: item.name, photo: item.avatar_url ?? null, title: item.title ?? "", linkedinUrl: item.linkedin_url ?? "", role: item.title || "Teammate", clients: byProfile.get(item.id) ?? [], createdAt: item.created_at })) });
+  return slimJson({ ok: true, photoColumnAvailable: profilesIncludePhoto, profiles: (Array.isArray(profiles) ? profiles : []).map((item: { id: string; name: string; avatar_url?: string; title?: string; linkedin_url?: string; created_at: string }) => ({ slug: item.id, name: item.name, photo: item.avatar_url ?? null, title: item.title ?? "", linkedinUrl: item.linkedin_url ?? "", role: item.title || "Teammate", clients: byProfile.get(item.id) ?? [], createdAt: item.created_at })) });
 }
 
 export async function POST(request: Request) {
@@ -52,8 +56,8 @@ export async function POST(request: Request) {
   // GET above, and for the same reason: a pending additive migration should cost you the new
   // fields, not the ability to save a profile at all.
   const writes = [
-    { ...(id ? { id } : {}), name, avatar_url: payload.photo || null, title: String(payload.title ?? "").trim() || null, linkedin_url: String(payload.linkedinUrl ?? "").trim() || null },
-    { ...(id ? { id } : {}), name, avatar_url: payload.photo || null },
+    { ...(id ? { id } : {}), name, ...(isImageRef(payload.photo) ? {} : { avatar_url: payload.photo || null }), title: String(payload.title ?? "").trim() || null, linkedin_url: String(payload.linkedinUrl ?? "").trim() || null },
+    { ...(id ? { id } : {}), name, ...(isImageRef(payload.photo) ? {} : { avatar_url: payload.photo || null }) },
     { ...(id ? { id } : {}), name },
   ];
   const write = (body: Record<string, unknown>) =>

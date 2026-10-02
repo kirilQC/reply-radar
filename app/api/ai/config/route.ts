@@ -7,6 +7,10 @@ import { DEFAULT_SENTIMENT_PROMPT } from "../../../lib/reply-sentiment";
 import { DEFAULT_ICP_DOC_PROMPT, ICP_DOC_PROMPT_KEY } from "../../../lib/brain-icp";
 import { DEFAULT_MORNING_BRIEF_PROMPT, MORNING_BRIEF_PROMPT_PREFIX, morningBriefPromptKey } from "../../../lib/morning-brief";
 import { explainConfigError, readConfig, readConfigPrefix, writeConfig } from "../../../lib/app-config";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 type Row = Record<string, unknown>;
 
@@ -27,7 +31,7 @@ async function supabase(url: string, key: string, path: string, init?: RequestIn
 export async function GET(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return NextResponse.json({ error: "Supabase not configured" }, { status: 503 });
+  if (!url || !key) return slimJson({ error: "Supabase not configured" }, { status: 503 });
 
   const params = new URL(request.url).searchParams;
   const workspace = params.get("workspace");
@@ -81,7 +85,7 @@ export async function GET(request: Request) {
       id: ws.id, name: ws.name, slug: ws.slug, logoUrl: ws.logo_url, accentColor: ws.accent_color, hasBrief: Boolean(ws.client_brief),
     })) : [];
 
-    return NextResponse.json({
+    return slimJson({
       ok: true,
       anthropic: { configured: Boolean(anthropicKey), maskedKey, model: anthropicModel },
       globalSentimentPrompt: globalPrompt,
@@ -94,7 +98,7 @@ export async function GET(request: Request) {
       workspaces: allWorkspaces,
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to load AI config" }, { status: 502 });
+    return slimJson({ error: error instanceof Error ? error.message : "Failed to load AI config" }, { status: 502 });
   }
 }
 

@@ -41,6 +41,10 @@ import { DEFAULT_EOW_REPORT_PROMPT, eowReportUserContent } from "../../../lib/eo
 import { brainContext } from "../../../lib/brain-context";
 import { truncateForSlack } from "../../../../shared/slack-agent.mjs";
 import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 /**
  * One model call plus the source reads — the same shape as a morning brief. HeyReach can cold-start near
@@ -116,7 +120,7 @@ function scheduleFrom(rows: unknown): BriefSchedule {
  */
 export async function GET() {
   const credential = credentials();
-  if (!credential) return NextResponse.json({ error: "Supabase not configured" }, { status: 503 });
+  if (!credential) return slimJson({ error: "Supabase not configured" }, { status: 503 });
   const { url, key } = credential;
   const read = reader(url, key);
 
@@ -177,7 +181,7 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({
+    return slimJson({
       ok: true,
       slack: {
         configured: slackConfigured(),
@@ -194,7 +198,7 @@ export async function GET() {
       due: workspaces.filter((workspace) => workspace.dueNow).map((workspace) => workspace.slug),
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not load the client list." }, { status: 502 });
+    return slimJson({ error: error instanceof Error ? error.message : "Could not load the client list." }, { status: 502 });
   }
 }
 

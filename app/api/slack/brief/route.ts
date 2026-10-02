@@ -45,6 +45,10 @@ import { openItems } from "../../../lib/tracker-sync";
 import { readTrackers, syncTrackers } from "../../../lib/tracker-sync-run";
 import { openProjectItems, syncProjectsFromItems, autosyncProjects } from "../../../lib/project-autosync";
 import { postMessage, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 /*
  * Sixty seconds is the ceiling and asking for more does not buy it — see the note in `brain-icp.ts`.
@@ -139,7 +143,7 @@ function scheduleFrom(rows: unknown): BriefSchedule {
  */
 export async function GET() {
   const credential = credentials();
-  if (!credential) return NextResponse.json({ error: "Supabase not configured" }, { status: 503 });
+  if (!credential) return slimJson({ error: "Supabase not configured" }, { status: 503 });
   const { url, key } = credential;
   const read = reader(url, key);
 
@@ -217,7 +221,7 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({
+    return slimJson({
       ok: true,
       // Reading and posting are reported apart because they break apart: a user token with no bot token
       // can read every channel and post to none, and a page that said "Slack: connected" would be lying
@@ -238,7 +242,7 @@ export async function GET() {
       due: workspaces.filter((workspace) => workspace.dueNow).map((workspace) => workspace.slug),
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not load the client list." }, { status: 502 });
+    return slimJson({ error: error instanceof Error ? error.message : "Could not load the client list." }, { status: 502 });
   }
 }
 

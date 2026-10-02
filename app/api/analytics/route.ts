@@ -4,6 +4,10 @@
 import { NextResponse } from "next/server";
 import { queryByIds } from "../../lib/chunk-query";
 import { ourCampaigns } from "../../../shared/campaign-code.mjs";
+import { slimImages } from "../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 type Row = Record<string, unknown>;
 type CampaignMetric = {
@@ -167,13 +171,13 @@ export const maxDuration = 120;
 
 export async function GET(request: Request) {
   const { url, key } = config();
-  if (!url || !key) return NextResponse.json({ ok: false, status: "not_configured" }, { status: 503 });
+  if (!url || !key) return slimJson({ ok: false, status: "not_configured" }, { status: 503 });
   const requested = new URL(request.url).searchParams.get("workspaces")?.split(",").filter(Boolean) ?? [];
   try {
     const workspaces = await supabase("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,logo_url,accent_color&slug=neq.misc&order=name.asc") ?? [];
     const selected = requested.length ? workspaces.filter((row) => requested.includes(String(row.slug))) : workspaces;
     const ids = selected.map((row) => String(row.id));
-    if (!ids.length) return NextResponse.json({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], trendLabels: [], averageDailyReplies: 0, queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });
+    if (!ids.length) return slimJson({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], trendLabels: [], averageDailyReplies: 0, queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });
     const filter = (batch: string[]) => batch.map(encodeURIComponent).join(",");
     // Every conversation, paged in full — never the first 1000. An explicit order keeps the offset windows
     // stable across pages; without it the pages could overlap or skip, and a truncated list here is what
@@ -330,8 +334,8 @@ export async function GET(request: Request) {
     const average = (key: "replyRate" | "acceptanceRate" | "positiveReplyRate") => campaignMetrics.length ? campaignMetrics.reduce((sum, row) => sum + row[key], 0) / campaignMetrics.length : 0;
     const campaignAverages = { replyRate: average("replyRate"), acceptanceRate: average("acceptanceRate"), positiveReplyRate: average("positiveReplyRate") };
     const workspaceDetails = selected.map((row) => ({ id: String(row.id), name: String(row.name), slug: String(row.slug), logoUrl: row.logo_url ? String(row.logo_url) : null, accentColor: row.accent_color ? String(row.accent_color) : null }));
-    return NextResponse.json({ ok: true, status: "live", totalReplies: inbound.length, messagesSent: outbound.length, activeConversations: conversations.length, replies7d: recentMessages.length, trend, trendLabels, averageDailyReplies, averageResponseMinutes, campaignMetrics, campaignAverages, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, queueMix, clientLoad, workspaces: selected.map((row) => row.name), workspaceDetails });
+    return slimJson({ ok: true, status: "live", totalReplies: inbound.length, messagesSent: outbound.length, activeConversations: conversations.length, replies7d: recentMessages.length, trend, trendLabels, averageDailyReplies, averageResponseMinutes, campaignMetrics, campaignAverages, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, queueMix, clientLoad, workspaces: selected.map((row) => row.name), workspaceDetails });
   } catch (error) {
-    return NextResponse.json({ ok: false, status: "error", error: error instanceof Error ? error.message : "Analytics unavailable" }, { status: 502 });
+    return slimJson({ ok: false, status: "error", error: error instanceof Error ? error.message : "Analytics unavailable" }, { status: 502 });
   }
 }

@@ -3,17 +3,21 @@
 
 // Every client workspace, for the Project management directory (internal — all clients, not just connected ones).
 import { NextResponse } from "next/server";
+import { slimImages } from "../../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 
 function creds() { const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY; return url && key ? { url, key, headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" } } : null; }
 
 export async function GET() {
-  const c = creds(); if (!c) return NextResponse.json({ ok: false, clients: [] }, { status: 503 });
+  const c = creds(); if (!c) return slimJson({ ok: false, clients: [] }, { status: 503 });
   const r = await fetch(`${c.url}/rest/v1/rr_workspaces?select=id,name,slug,logo_url,accent_color,slack_internal_channel_id&slug=neq.misc&order=name.asc`, { headers: c.headers, cache: "no-store" });
   const rows = r.ok ? await r.json().catch(() => []) : [];
   const clients = (Array.isArray(rows) ? rows : [])
     .filter((w: Record<string, unknown>) => String(w.name ?? "").trim())
     .map((w: Record<string, unknown>) => ({ id: String(w.id), name: String(w.name), slug: String(w.slug), logoUrl: (w.logo_url as string) || null, accentColor: (w.accent_color as string) || null, slackChannelId: (w.slack_internal_channel_id as string) || "" }));
-  return NextResponse.json({ ok: true, clients });
+  return slimJson({ ok: true, clients });
 }
 
 // Set a client's internal Slack channel id (for the per-task "send update to Slack" button).

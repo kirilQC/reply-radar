@@ -7,6 +7,10 @@ import { queryByIds } from "../../lib/chunk-query";
 import { dedupeMessages } from "../../lib/message-dedupe";
 import { assignmentsFor } from "../../lib/inbox-tags";
 import { classifyConversationOrigin } from "../../../shared/conversation-origin.mjs";
+import { slimImages } from "../../lib/image-refs";
+/** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
+const slimJson = (body: unknown, init?: ResponseInit) => NextResponse.json(slimImages(body), init);
+
 type Row = Record<string, unknown>;
 
 async function query(url: string, key: string, path: string) {
@@ -140,7 +144,7 @@ export async function GET(request: Request) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key)
-    return NextResponse.json(
+    return slimJson(
       { ok: false, conversations: [], error: "Supabase is not configured." },
       { status: 503 },
     );
@@ -179,7 +183,7 @@ export async function GET(request: Request) {
       : workspaces;
     const workspaceIds = selected.map((workspace) => String(workspace.id));
     if (!workspaceIds.length)
-      return NextResponse.json({ ok: true, conversations: [] });
+      return slimJson({ ok: true, conversations: [] });
     // Newest conversations first with an explicit ceiling — the inbox is a working queue,
     // not an archive, and an unbounded fetch grows until PostgREST truncates it silently.
     const conversations = await queryByIds(workspaceIds, 20, (batch) =>
@@ -387,9 +391,9 @@ export async function GET(request: Request) {
     if (excluded.length) console.info("reply_radar_inbox_dropped_lead_initiated", { count: excluded.length, conversationIds: excluded.slice(0, 25) });
     if (orphaned.length) console.info("reply_radar_inbox_dropped_orphaned", { count: orphaned.length, conversationIds: orphaned.slice(0, 25) });
     if (hiddenNonCampaign.length) console.info("reply_radar_inbox_hidden_non_campaign", { count: hiddenNonCampaign.length, conversationIds: hiddenNonCampaign.slice(0, 25) });
-    return NextResponse.json({ ok: true, conversations: visible, hiddenNonCampaign: hiddenNonCampaign.length });
+    return slimJson({ ok: true, conversations: visible, hiddenNonCampaign: hiddenNonCampaign.length });
   } catch (error) {
-    return NextResponse.json(
+    return slimJson(
       {
         ok: false,
         conversations: [],
