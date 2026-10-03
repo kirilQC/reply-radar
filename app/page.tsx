@@ -1521,8 +1521,8 @@ export function InboxPage() {
       replyCount7d: { value: String(totalReplies), sub: `Replies ${filterLabel}` },
       totalReplies: { value: String(totalReplies), label: `Replies ${rangeWord}`, sub: `Replies ${filterLabel}` },
       positiveRate: { value: `${positiveRate}%`, label: `Positive reply rate ${rangeWord}`, sub: `From our sentiment analysis · ${filterLabel}` },
-      avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", label: "Average reply rate", sub: "Average across campaigns" },
-      acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", label: "Average acceptance rate", sub: "Average across campaigns" },
+      avgRepliesCampaign: { value: averages ? `${averages.replyRate.toFixed(1)}%` : "—", label: "Average reply rate", sub: "All campaigns, all time" },
+      acceptanceRate: { value: averages ? `${averages.acceptanceRate.toFixed(1)}%` : "—", label: "Average acceptance rate", sub: "All campaigns, all time" },
       needsReply: { value: String(needsReplyCount), sub: `Leads waiting on us · ${filterLabel}`, label: `Number of leads needing reply ${rangeWord}` },
     };
     return { ...metric, ...(values[metric.id] ?? {}) };
@@ -3192,12 +3192,50 @@ function buildSeries(
   x: string,
   y: string,
   timeZone: string,
+  range = "all",
 ): SeriesPoint[] {
   if (x === "day" || x === "week") {
-    const span = x === "day" ? 14 : 8;
-    const step = (x === "day" ? 1 : 7) * DAY_MS;
     const today = dayStamp(new Date().toISOString(), timeZone);
     if (today === null) return [];
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      month: "short",
+      day: "numeric",
+    });
+    // The axis covers the chosen range, not a fixed 14 days: "All time" used to show only the last two
+    // weeks. It starts at the range's first day, or for "All time" at the oldest reply in view.
+    const rangeStart = graphRangeStart(range);
+    const stamps = rows
+      .map((row) => dayStamp(row.latestReplyAt || row.lastMessageAt, timeZone))
+      .filter((stamp): stamp is number => stamp !== null);
+    const first = rangeStart
+      ? dayStamp(rangeStart.toISOString(), timeZone)
+      : stamps.length
+        ? Math.min(...stamps)
+        : today - 13 * DAY_MS;
+    const days = Math.max(1, Math.round((today - (first ?? today)) / DAY_MS) + 1);
+    // Daily bars up to a month, weekly up to half a year, monthly beyond; a "by week" graph never goes daily.
+    const unit = x === "day" && days <= 31 ? "day" : days <= 182 ? "week" : "month";
+    if (unit === "month") {
+      const monthOf = (stamp: number) => new Date(stamp).toISOString().slice(0, 7);
+      const months: string[] = [];
+      for (let cursor = new Date(first ?? today); cursor.getTime() <= today; cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1))) {
+        months.push(monthOf(cursor.getTime()));
+      }
+      const byMonth = new Map(months.map((month) => [month, [] as Lead[]]));
+      for (const row of rows) {
+        const stamp = dayStamp(row.latestReplyAt || row.lastMessageAt, timeZone);
+        if (stamp !== null) byMonth.get(monthOf(stamp))?.push(row);
+      }
+      const monthLabel = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", year: "2-digit" });
+      return months.map((month) => ({
+        label: monthLabel.format(new Date(`${month}-01T00:00:00Z`)),
+        value: measureRows(byMonth.get(month) ?? [], y),
+        rows: byMonth.get(month)?.length ?? 0,
+      }));
+    }
+    const step = (unit === "day" ? 1 : 7) * DAY_MS;
+    const span = Math.max(1, Math.ceil(days / (unit === "day" ? 1 : 7)));
     const buckets = Array.from({ length: span }, (_, index) => ({
       start: today - (span - 1 - index) * step,
       rows: [] as Lead[],
@@ -3209,11 +3247,6 @@ function buildSeries(
       const index = span - 1 - stepsBack;
       if (index >= 0) buckets[index].rows.push(row);
     }
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: "UTC",
-      month: "short",
-      day: "numeric",
-    });
     return buckets.map((bucket) => ({
       label: formatter.format(new Date(bucket.start)),
       value: measureRows(bucket.rows, y),
@@ -3455,7 +3488,7 @@ function InboxAnalytics({
       <div className="inbox-graph-grid">
         {graphs.map((graph, index) => {
           const measure = graphMeasures.find((item) => item.id === graph.y);
-          const points = buildSeries(leads, graph.x, graph.y, timeZone);
+          const points = buildSeries(leads, graph.x, graph.y, timeZone, range);
           return (
             <article
               className={`inbox-graph-card kind-${graph.kind}`}

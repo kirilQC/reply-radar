@@ -1149,10 +1149,7 @@ a.database-phone-value:hover { text-decoration: underline; }
    so there is an honest count to show, and the block sits near the top of the
    table instead of being centred in a card that is a screen tall. */
 .inbox-sync-overlay {
-  place-items: start center;
-  align-content: start;
-  padding-top: 54px;
-  gap: 9px;
+  gap: 12px;
 }
 
 .inbox-sync-overlay > span {

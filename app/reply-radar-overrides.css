@@ -340,8 +340,9 @@ html:not(.hydrated) body{visibility:hidden}
 .inbox-sync-bar{display:flex;justify-content:flex-end;padding:6px 12px;color:var(--muted-2);font-size:11px;border-bottom:1px solid var(--border-soft);background:var(--panel);border-radius:10px 10px 0 0}
 .inbox-sync-label{font-variant-numeric:tabular-nums}
 .inbox-syncing .inbox-sync-label{color:var(--accent)}
-.inbox-sync-overlay{position:absolute;inset:0;background:color-mix(in srgb,var(--panel) 80%,transparent);backdrop-filter:blur(1px);z-index:5;display:grid;place-items:center;gap:10px;grid-auto-flow:row;color:var(--muted);font-size:12px;pointer-events:none;border-radius:10px}
-.inbox-sync-overlay>span{margin-top:6px}
+/* A slim strip above the list, not a veil over it: the queue stays readable and clickable while threads refresh. */
+.inbox-sync-overlay{position:relative;display:flex;align-items:center;gap:12px;padding:6px 14px;color:var(--muted);font-size:12px;pointer-events:none}
+.inbox-sync-overlay>span{margin-top:0}
 
 /* Tabs that exist before the feature does */
 .construction-shell{padding:44px 40px;display:flex;justify-content:center}
