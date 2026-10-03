@@ -37,8 +37,16 @@
  */
 
 /** The brain itself. One repo, hard-coded, because there is exactly one and there will not be two. */
+import { discardProposalBranch } from "./brain-branches";
+
 export const BRAIN_REPO = "jsbiv18/qc-growth-os";
 export const BRAIN_URL = `https://github.com/${BRAIN_REPO}`;
+
+/**
+ * A file's page on GitHub, with each path segment encoded. A raw path broke the link for any file with a
+ * space, a `#` or a `?` in its name: GitHub read the rest as an anchor or a query and opened the wrong page.
+ */
+export const brainBlobUrl = (path: string, branch = "main") => `${BRAIN_URL}/blob/${branch}/${encodePath(path)}`;
 
 const API = "https://api.github.com";
 /** The tree changes when someone adds a file, which is a few times a day at most. */
@@ -158,11 +166,17 @@ export async function brainFile(path: string): Promise<BrainDoc> {
   if (cached && cached.expires > Date.now()) return cached.doc;
   const data = (await github(`/repos/${BRAIN_REPO}/contents/${encodePath(path)}`)) as Record<string, unknown>;
   if (Array.isArray(data)) throw new Error(`${path} is a folder, not a file.`);
+  // Past 1 MB the Contents API still returns the SHA but sends `encoding: "none"` and an empty `content`, so
+  // a large call-note archive rendered as a blank page. The raw media type serves files up to 100 MB.
+  const tooBig = data.encoding === "none" || (!data.content && Number(data.size ?? 0) > 0);
+  const text = tooBig
+    ? Buffer.from(await brainRaw(path)).toString("utf8")
+    : decode(String(data.content ?? ""), String(data.encoding ?? "base64"));
   const doc: BrainDoc = {
     path,
     sha: String(data.sha ?? ""),
-    text: decode(String(data.content ?? ""), String(data.encoding ?? "base64")),
-    url: `${BRAIN_URL}/blob/main/${path}`,
+    text,
+    url: brainBlobUrl(path),
   };
   fileCache.set(path, { expires: Date.now() + FILE_CACHE_MS, doc });
   return doc;
@@ -282,7 +296,7 @@ async function brainCorpusFromTarball(paths: string[]): Promise<BrainDoc[] | nul
     // Every entry sits under one "<owner>-<repo>-<sha>/" folder.
     const path = fullName.split("/").slice(1).join("/");
     if (!wanted.has(path)) continue;
-    docs.push({ path, sha: shaByPath.get(path) ?? "", text: body.toString("utf8"), url: `${BRAIN_URL}/blob/main/${path}` });
+    docs.push({ path, sha: shaByPath.get(path) ?? "", text: body.toString("utf8"), url: brainBlobUrl(path) });
   }
   // A tarball that matched almost nothing means the layout was not what this expects; use the slow path.
   return docs.length >= paths.length * 0.9 ? docs : null;
@@ -409,29 +423,37 @@ export async function proposeBrainEdit({
     body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: baseSha }),
   });
 
-  await github(`/repos/${BRAIN_REPO}/contents/${encodePath(path)}`, {
-    method: "PUT",
-    body: JSON.stringify({
-      message: summary,
-      content: encode(text),
-      branch,
-      committer: { name: author, email: "brain@qcgrowth.com" },
-      // The SHA of the file as it was when it was opened, and omitted entirely when creating one.
-      // GitHub rejects the write if it has moved, which is the whole point — see the note at the top
-      // of this file. An empty string is not the same as absent here: it is rejected as malformed.
-      ...(sha ? { sha } : {}),
-    }),
-  });
+  let pull: Record<string, unknown>;
+  try {
+    await github(`/repos/${BRAIN_REPO}/contents/${encodePath(path)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        message: summary,
+        content: encode(text),
+        branch,
+        committer: { name: author, email: "brain@qcgrowth.com" },
+        // The SHA of the file as it was when it was opened, and omitted entirely when creating one.
+        // GitHub rejects the write if it has moved, which is the whole point — see the note at the top
+        // of this file. An empty string is not the same as absent here: it is rejected as malformed.
+        ...(sha ? { sha } : {}),
+      }),
+    });
 
-  const pull = (await github(`/repos/${BRAIN_REPO}/pulls`, {
-    method: "POST",
-    body: JSON.stringify({
-      title: summary,
-      head: branch,
-      base: baseBranch,
-      body: `Proposed from QC Command's QC Brain tab.\n\nFile: \`${path}\``,
-    }),
-  })) as Record<string, unknown>;
+    pull = (await github(`/repos/${BRAIN_REPO}/pulls`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: summary,
+        head: branch,
+        base: baseBranch,
+        body: `Proposed from QC Command's QC Brain tab.\n\nFile: \`${path}\``,
+      }),
+    })) as Record<string, unknown>;
+  } catch (error) {
+    // A stale SHA (409) or a failed pull request left a branch behind on every attempt, and nobody was ever
+    // going to find and delete them. Best effort: the original error is what the person needs to see.
+    await discardProposalBranch({ api: API, repo: BRAIN_REPO, branch, headers: headers() });
+    throw error;
+  }
 
   fileCache.delete(path);
   return { url: String(pull.html_url ?? ""), number: Number(pull.number ?? 0), branch };

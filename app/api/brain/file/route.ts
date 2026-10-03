@@ -13,7 +13,7 @@
  * round trip for something the server already had in hand.
  */
 import { NextResponse } from "next/server";
-import { BRAIN_URL, brainConfigured, brainFile, brainLastTouched } from "../../../lib/brain";
+import { brainBlobUrl, brainConfigured, brainFile, brainLastTouched } from "../../../lib/brain";
 import { campaignCodesIn, fileKind, fileTitle } from "../../../../shared/brain-structure.mjs";
 
 export async function GET(request: Request) {
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
       title: fileTitle(path),
       text: "",
       sha: "",
-      url: `${BRAIN_URL}/blob/main/${path}`,
+      url: brainBlobUrl(path),
       codes: [],
       updated: "",
     });

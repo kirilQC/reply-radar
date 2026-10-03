@@ -12,7 +12,7 @@
  * anyone asks of a search result in this repo and the path does not read as an answer at a glance.
  */
 import { NextResponse } from "next/server";
-import { BRAIN_URL, brainConfigured, brainCorpus, brainTree } from "../../../lib/brain";
+import { brainBlobUrl, brainConfigured, brainCorpus, brainTree } from "../../../lib/brain";
 import { clientLabel, clientOf, fileTitle, isReadable } from "../../../../shared/brain-structure.mjs";
 import { searchBrain } from "../../../../shared/brain-search.mjs";
 
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
         snippet: hit.snippet,
         client,
         clientLabel: client ? clientLabel(client) : "",
-        url: `${BRAIN_URL}/blob/main/${hit.path}`,
+        url: brainBlobUrl(hit.path),
       };
     });
     return NextResponse.json({ ok: true, query, results, searched: docs.length });

@@ -63,7 +63,7 @@ import { isOurCampaign } from "../../shared/campaign-code.mjs";
 import { containsAny } from "../../shared/postgrest-filter.mjs";
 import { exportFilename, rowsToCsv } from "../../shared/answer-export.mjs";
 import * as heyreach from "./heyreach-api";
-import { BRAIN_URL, brainConfigured, brainCorpus, brainFile, brainFiles, brainTree, forgetBrainTree, proposeBrainEdit } from "./brain";
+import { brainBlobUrl, brainConfigured, brainCorpus, brainFile, brainFiles, brainTree, forgetBrainTree, proposeBrainEdit } from "./brain";
 import { searchBrain } from "../../shared/brain-search.mjs";
 import { clientLabel, clientOf, clientSkeleton, clientsIn, fileKind, fileTitle, isReadable, parseSkill, skillClient } from "../../shared/brain-structure.mjs";
 import { scanChannel, resolveChannelNames, resolveUserNames, transcript, slackReadable, postMessage } from "./slack";
@@ -1593,7 +1593,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         title: hit.title,
         client: String(clientLabel(clientOf(hit.path))),
         snippet: hit.snippet,
-        url: `${BRAIN_URL}/blob/main/${hit.path}`,
+        url: brainBlobUrl(hit.path),
       }));
       return {
         query,
@@ -1609,7 +1609,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       if (!path) throw new Error("A file path is required.");
       if (path.includes("..") || path.startsWith("/")) throw new Error("That is not a path inside the brain.");
       if (!isReadable(path)) {
-        return { path, readable: false, kind: String(fileKind(path)), url: `${BRAIN_URL}/blob/main/${path}`, note: "That file is not text. Link to it rather than quoting it." };
+        return { path, readable: false, kind: String(fileKind(path)), url: brainBlobUrl(path), note: "That file is not text. Link to it rather than quoting it." };
       }
       const doc = await brainFile(path);
       return {

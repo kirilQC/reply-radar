@@ -12,7 +12,7 @@
  * every request and cached by `brainFile` anyway.
  */
 import { NextResponse } from "next/server";
-import { BRAIN_URL, brainConfigured, brainFiles, brainTree } from "../../../lib/brain";
+import { BRAIN_URL, brainBlobUrl, brainConfigured, brainFiles, brainTree } from "../../../lib/brain";
 import { clientLabel, clientsIn, parseSkill, skillClient } from "../../../../shared/brain-structure.mjs";
 
 const COMMANDS = ".claude/commands/";
@@ -32,7 +32,7 @@ export async function GET() {
       .map((doc) => {
         const parsed = parseSkill(doc.path, doc.text) as { name: string; path: string; command: string; blurb: string; lines: number };
         const client = skillClient(parsed.name, clients);
-        return { ...parsed, client, clientLabel: client ? clientLabel(client) : "", url: `${BRAIN_URL}/blob/main/${doc.path}` };
+        return { ...parsed, client, clientLabel: client ? clientLabel(client) : "", url: brainBlobUrl(doc.path) };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
 

@@ -39,6 +39,7 @@ import {
   mergeProposals,
   buildCompanyProfile,
   buildProfile,
+  decodeCsvBytes,
   duplicateIndexes,
   duplicateOf,
   estimateTokens,
@@ -352,6 +353,12 @@ export default function JevClientPage() {
   const [stale, setStale] = useState(false);
   const [enrichCfg, setEnrichCfg] = useState<{ aiArk: boolean; jina: boolean; structureModel: string; structureRpm: number; llm: boolean } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /**
+   * The one job allowed at a time, held in a ref because state is too late. `run` awaits a build check before
+   * it sets `running`, so a double click (or Run while a review was mid-write) got two jobs past the guard,
+   * each resetting and rewriting the same results. Claimed synchronously on click, released when the job ends.
+   */
+  const activeJob = useRef<"" | "run" | "review">("");
   const rafRef = useRef(0);
   const [, setVersion] = useState(0);
   const [running, setRunning] = useState(false);
@@ -476,7 +483,8 @@ export default function JevClientPage() {
     setFileError("");
     if (!/\.csv$/i.test(f.name) && f.type !== "text/csv") { setFileError("That is not a CSV file."); return; }
     try {
-      const { headers, rows } = parseCsv(await f.text(), { asArrays: true }) as { headers: string[]; rows: string[][] };
+      // Not `f.text()`, which assumes UTF-8: Excel's UTF-16 and Windows-1252 saves came in garbled.
+      const { headers, rows } = parseCsv(decodeCsvBytes(await f.arrayBuffer()), { asArrays: true }) as { headers: string[]; rows: string[][] };
       if (!rows.length) { setFileError("The file has a header row but no rows."); return; }
       const limit = mode === "companies" ? MAX_COMPANY_ROWS : MAX_ROWS;
       if (rows.length > limit) { setFileError(`The file has ${rows.length.toLocaleString()} rows; the limit for a ${mode === "companies" ? "company" : "contact"} list is ${limit.toLocaleString()}. Split it and run each part.`); return; }
@@ -647,6 +655,11 @@ export default function JevClientPage() {
    * lands: an existing tag, a proposed new tag (collected for the team to adopt), or left as it was with a reason.
    */
   const reviewWithClaude = async () => {
+    if (activeJob.current) return;
+    activeJob.current = "review";
+    try { await reviewOther(); } finally { activeJob.current = ""; }
+  };
+  const reviewOther = async () => {
     if (!file || running || review) return;
     const rows = [...results.current.entries()].filter(([, r]) => (r.status === "review" || (r.status === "tagged" && r.tag === "other")) && !r.review).map(([i]) => i);
     if (!rows.length) return;
@@ -761,6 +774,11 @@ export default function JevClientPage() {
    * contact a sentence saying why. Keep leaves a good fit good; drop removes it unless always-keep protects it.
    */
   const reviewMaybes = async (which: "borderline" | "good" = "borderline") => {
+    if (activeJob.current) return;
+    activeJob.current = "review";
+    try { await reviewContactsWith(which); } finally { activeJob.current = ""; }
+  };
+  const reviewContactsWith = async (which: "borderline" | "good") => {
     if (!file || running || review) return;
     const noun = which === "good" ? "good fits" : "maybes";
     const rows = [...results.current.entries()].filter(([, r]) => r.status === which && !r.review).map(([i]) => i);
@@ -846,6 +864,11 @@ export default function JevClientPage() {
   const requiredFields = useMemo(() => (mode === "contacts" && set?.questions.length ? [...new Set(set.questions.flatMap((q) => questionFieldRefs(q) as string[]))] : []), [mode, set]);
 
   const run = async (only?: number[]) => {
+    if (activeJob.current) return;
+    activeJob.current = "run";
+    try { await runRows(only); } finally { activeJob.current = ""; }
+  };
+  const runRows = async (only?: number[]) => {
     // Re-check the build before spending anything: a tab open across a deploy is exactly when this bites.
     let saved: QuestionSet | null = set;
     try {

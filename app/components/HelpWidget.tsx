@@ -31,7 +31,13 @@ type Message = { role: "user" | "assistant"; content: string; shots?: string[]; 
 const STORE = "reply-radar-help-chat:v2";
 const GREETED = "reply-radar-help-greeted";
 const HIDDEN_ON = ["/login"];
-const MAX_BYTES = 4_500_000;
+/**
+ * 2.9 MB a screenshot, 4 MB of them together once encoded. Base64 adds a third, and the platform refuses a
+ * request body over 4.5 MB before the route ever sees it: a 4 MB screenshot passed the old 4.5 MB check and
+ * then failed as "couldn't reach my notes", and the feedback route caps a screenshot at 4 MB encoded.
+ */
+const MAX_BYTES = 2_900_000;
+const MAX_TOTAL_CHARS = 4_000_000;
 
 const rootOf = (path: string) => {
   const first = `/${path.split("/").filter(Boolean)[0] ?? ""}`;
@@ -42,7 +48,7 @@ const rootOf = (path: string) => {
 function readImage(file: File): Promise<Shot> {
   return new Promise((resolve, reject) => {
     if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) return reject(new Error("Screenshots need to be PNG, JPG, GIF or WebP."));
-    if (file.size > MAX_BYTES) return reject(new Error("That screenshot is too big. Crop it and try again."));
+    if (file.size > MAX_BYTES) return reject(new Error(`That screenshot is ${(file.size / 1_000_000).toFixed(1)} MB; the limit is 2.9 MB. Crop it and try again.`));
     const reader = new FileReader();
     reader.onload = () => {
       const url = String(reader.result);
@@ -121,9 +127,15 @@ export default function HelpWidget() {
 
   const addShots = async (files: FileList | File[] | null) => {
     setNote("");
+    let total = shots.reduce((sum, shot) => sum + shot.data.length, 0);
     for (const file of Array.from(files ?? []).slice(0, 3)) {
       try {
         const shot = await readImage(file);
+        if (total + shot.data.length > MAX_TOTAL_CHARS) {
+          setNote("Those screenshots are too big to send together. Send one, or crop them.");
+          continue;
+        }
+        total += shot.data.length;
         setShots((prev) => [...prev, shot].slice(0, 3));
       } catch (error) {
         setNote(error instanceof Error ? error.message : "That file couldn't be added.");

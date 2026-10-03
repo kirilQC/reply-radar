@@ -40,6 +40,11 @@ export async function GET(request: Request) {
       headers: {
         "content-type": TYPES[extension],
         "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+        // An SVG is a document that can carry script, and this is served from the app's own origin. Opened
+        // directly, a committed logo could run code as QC Command; this policy lets it draw and nothing else,
+        // and nosniff stops a browser second-guessing the type of any of these.
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
+        "x-content-type-options": "nosniff",
       },
     });
   } catch {

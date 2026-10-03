@@ -79,7 +79,7 @@ type Hit = { path: string; title: string; snippet: string; client: string; clien
  * much shorter than the file — both are shown to the reader rather than acted on here. `failed` carries
  * the reason there is no layout, which is why this is one shape rather than a layout and an error.
  */
-type Layout = { path: string; markdown: string; figures: string[]; thin: boolean; failed: string; stored: boolean };
+type Layout = { path: string; markdown: string; figures: string[]; thin: boolean; truncated: boolean; failed: string; stored: boolean };
 type Row = Record<string, unknown>;
 type Skill = { name: string; path: string; command: string; blurb: string; client: string; clientLabel: string; url: string };
 
@@ -202,32 +202,61 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
    * -1 means nobody has asked yet, which is different from zero and must not read as "all done".
    */
   const [backlog, setBacklog] = useState(-1);
-  /** Fires once per mount. The effect must not start a second walk when React re-runs it in dev. */
-  const walking = useRef(false);
 
   useEffect(() => {
-    if (walking.current) return;
-    walking.current = true;
+    /**
+     * The walk ends with the page. It used to run on after the tab was left or put in the background,
+     * spending model calls for a screen nobody was looking at, and a once-per-mount ref meant the dev
+     * re-run never cleaned up the first one. Now a hidden tab waits until it is visible again, and
+     * unmounting stops it before the next pass.
+     */
+    let stopped = false;
+    let wake: (() => void) | null = null;
+    const whenVisible = () =>
+      document.visibilityState === "visible"
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            const on = () => {
+              if (!stopped && document.visibilityState !== "visible") return;
+              document.removeEventListener("visibilitychange", on);
+              wake = null;
+              resolve();
+            };
+            wake = on;
+            document.addEventListener("visibilitychange", on);
+          });
 
     // Each pass stops at its own deadline and reports what is left. `rendered` of zero is the guard
     // against looping for ever over a document that fails every time it is tried.
     const pass = async (): Promise<void> => {
-      const body = (await fetch("/api/brain/warm", { method: "POST" })
-        .then((response) => response.json())
-        .catch(() => null)) as Row | null;
-      const remaining = Number(body?.remaining ?? 0);
-      setBacklog(body?.ok ? remaining : 0);
-      if (body?.ok && remaining > 0 && Number(body.rendered ?? 0) > 0) await pass();
+      for (;;) {
+        await whenVisible();
+        if (stopped) return;
+        const body = (await fetch("/api/brain/warm", { method: "POST" })
+          .then((response) => response.json())
+          .catch(() => null)) as Row | null;
+        if (stopped) return;
+        const remaining = Number(body?.remaining ?? 0);
+        setBacklog(body?.ok ? remaining : 0);
+        if (!(body?.ok && remaining > 0 && Number(body.rendered ?? 0) > 0)) return;
+      }
     };
 
     void fetch("/api/brain/warm?check=1")
       .then((response) => response.json())
       .then((body: Row) => {
+        if (stopped) return;
         const remaining = Number(body?.remaining ?? 0);
         setBacklog(body?.ok ? remaining : 0);
         if (body?.ok && remaining > 0) return pass();
       })
-      .catch(() => setBacklog(0));
+      .catch(() => {
+        if (!stopped) setBacklog(0);
+      });
+    return () => {
+      stopped = true;
+      wake?.();
+    };
   }, []);
 
   /** The address bar, moved to match the screen. No navigation: nothing here needs re-rendering. */
@@ -242,15 +271,32 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
    * view — the view is already right — and writing state synchronously from a mount effect is the one
    * thing the compiler will not allow. Everything here lands in a promise callback.
    */
+  /**
+   * The client (or area) most recently asked for. Responses arrive in any order, and the slow campaign
+   * figures especially: clicking Willow then Bluevia could paint Willow's page or numbers over Bluevia's.
+   * A response is applied only while its key is still the one wanted.
+   */
+  const wantedKey = useRef("");
+
   const loadClient = useCallback((slug: string) => {
+    const key = `client:${slug}`;
+    wantedKey.current = key;
     json(`/api/brain/clients?client=${encodeURIComponent(slug)}`)
-      .then((body) => setDetail(body.client))
-      .catch((problem: Error) => setError(problem.message));
+      .then((body) => {
+        if (wantedKey.current === key) setDetail(body.client);
+      })
+      .catch((problem: Error) => {
+        if (wantedKey.current === key) setError(problem.message);
+      });
     // Campaign figures come from HeyReach and take seconds. Fetched alongside rather than before, so
     // the documents are readable while the numbers are still on their way.
     json(`/api/brain/campaigns?client=${encodeURIComponent(slug)}`)
-      .then((body) => setCampaigns(body.campaigns ?? []))
-      .catch(() => setCampaigns([]));
+      .then((body) => {
+        if (wantedKey.current === key) setCampaigns(body.campaigns ?? []);
+      })
+      .catch(() => {
+        if (wantedKey.current === key) setCampaigns([]);
+      });
   }, []);
 
   const showClient = useCallback(
@@ -277,13 +323,19 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
   );
 
   const openArea = useCallback((prefix: string) => {
+    const key = `area:${prefix}`;
+    wantedKey.current = key;
     setView("area");
     setArea(null);
     setOpenPath("");
     setError("");
     json(`/api/brain/clients?area=${encodeURIComponent(prefix)}`)
-      .then((body) => setArea(body.area))
-      .catch((problem: Error) => setError(problem.message));
+      .then((body) => {
+        if (wantedKey.current === key) setArea(body.area);
+      })
+      .catch((problem: Error) => {
+        if (wantedKey.current === key) setError(problem.message);
+      });
   }, []);
 
   const openSkills = useCallback(() => {
@@ -297,6 +349,7 @@ export default function BrainApp({ initialClient = "" }: { initialClient?: strin
   }, [skills.length]);
 
   const showIndex = useCallback(() => {
+    wantedKey.current = "";
     setView("index");
     setDetail(null);
     setArea(null);
@@ -676,8 +729,20 @@ function ClientHome({
   const [icp, setIcp] = useState("");
   const [writing, setWriting] = useState(false);
   const [icpError, setIcpError] = useState("");
-  const [icpSavedUrl, setIcpSavedUrl] = useState("");
   const [icpProgress, setIcpProgress] = useState(0);
+  /** The pull request a finished document was proposed as, once somebody chose to propose it. */
+  const [icpProposal, setIcpProposal] = useState<{ url: string; number: number; error: string; busy: boolean }>({ url: "", number: 0, error: "", busy: false });
+  /**
+   * Which run is current. Close used to hide the sheet while the loop kept going, so the next pass to land
+   * reopened it with a document the person had just dismissed. Each run takes a number, Close moves the
+   * number on, and a run whose number is no longer current drops whatever it receives.
+   */
+  const icpRun = useRef(0);
+  const icpAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    icpRun.current += 1;
+    icpAbort.current?.abort();
+  }, []);
 
   /**
    * Asks for the document until the server says it is finished.
@@ -689,12 +754,16 @@ function ClientHome({
    */
   const makeIcp = useCallback(async (guidance = "") => {
     if (!detail) return;
+    const run = ++icpRun.current;
+    icpAbort.current?.abort();
+    const controller = new AbortController();
+    icpAbort.current = controller;
     setWriting(true);
     setIcpError("");
     // Do NOT clear the document here — on a regenerate the old one stays on screen (dimmed under the progress
     // bar) until the new text streams in, so the user is never kicked back to the folder. A fresh run already
     // has an empty document, and the sheet now mounts on `writing` so its progress bar shows from the click.
-    setIcpSavedUrl("");
+    setIcpProposal({ url: "", number: 0, error: "", busy: false });
     setIcpProgress(6);
     try {
       let sofar = "";
@@ -704,22 +773,51 @@ function ClientHome({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ client: detail.client, sofar, chunk, guidance }),
+          signal: controller.signal,
         });
         const body = await response.json().catch(() => ({}));
+        if (run !== icpRun.current) return;
         if (!body?.ok) throw new Error(body?.error || "That document could not be written.");
         sofar = String(body.markdown ?? "");
         chunk = Number(body.chunk ?? chunk + 1);
         setIcp(sofar);
         // A rough, honest fill: it climbs with each pass and lands at 100 when the model says it is done.
         setIcpProgress(body.more ? Math.min(90, 10 + chunk * 16) : 100);
-        if (!body.more) { setIcpSavedUrl(String(body.savedUrl ?? "")); break; }
+        if (!body.more) break;
       }
     } catch (problem) {
+      if (run !== icpRun.current) return;
       setIcpError(problem instanceof Error ? problem.message : "That document could not be written.");
     } finally {
-      setWriting(false);
+      if (run === icpRun.current) setWriting(false);
     }
   }, [detail]);
+
+  /** Close: the run in flight is abandoned, not just hidden. */
+  const closeIcp = useCallback(() => {
+    icpRun.current += 1;
+    icpAbort.current?.abort();
+    setIcp("");
+    setWriting(false);
+  }, []);
+
+  /** Proposes the finished document as a pull request against the client's ICP file. Never a direct write. */
+  const proposeIcp = useCallback(async () => {
+    if (!detail || !icp.trim()) return;
+    setIcpProposal({ url: "", number: 0, error: "", busy: true });
+    try {
+      const response = await fetch("/api/brain/icp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ client: detail.client, propose: true, markdown: icp }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!body?.ok) throw new Error(body?.error || "The document could not be proposed.");
+      setIcpProposal({ url: String(body.url ?? ""), number: Number(body.number ?? 0), error: "", busy: false });
+    } catch (problem) {
+      setIcpProposal({ url: "", number: 0, error: problem instanceof Error ? problem.message : "The document could not be proposed.", busy: false });
+    }
+  }, [detail, icp]);
 
   if (!detail) return <p className="brain-quiet">Opening…</p>;
 
@@ -862,7 +960,7 @@ function ClientHome({
 
       <AskTheBrain client={detail.label} />
 
-      {(icp || writing) && <IcpSheet label={detail.label} markdown={icp} savedUrl={icpSavedUrl} writing={writing} progress={icpProgress} onRegenerate={(guidance) => void makeIcp(guidance)} onClose={() => { setIcp(""); setWriting(false); }} />}
+      {(icp || writing) && <IcpSheet label={detail.label} markdown={icp} proposal={icpProposal} onPropose={() => void proposeIcp()} writing={writing} progress={icpProgress} onRegenerate={(guidance) => void makeIcp(guidance)} onClose={closeIcp} />}
     </div>
   );
 }
@@ -931,7 +1029,7 @@ function AskTheBrain({ client }: { client?: string }) {
  * contradict each other in places, and it is going to be read as fact by whoever it is sent to. The
  * person who asked for it should see it first.
  */
-function IcpSheet({ label, markdown, savedUrl, writing, progress, onRegenerate, onClose }: { label: string; markdown: string; savedUrl?: string; writing?: boolean; progress?: number; onRegenerate?: (guidance: string) => void; onClose: () => void }) {
+function IcpSheet({ label, markdown, proposal, onPropose, writing, progress, onRegenerate, onClose }: { label: string; markdown: string; proposal: { url: string; number: number; error: string; busy: boolean }; onPropose: () => void; writing?: boolean; progress?: number; onRegenerate?: (guidance: string) => void; onClose: () => void }) {
   const [instruction, setInstruction] = useState("");
   const apply = () => {
     if (writing || !instruction.trim() || !onRegenerate) return;
@@ -941,10 +1039,17 @@ function IcpSheet({ label, markdown, savedUrl, writing, progress, onRegenerate, 
   return (
     <div className="brain-icp" role="dialog" aria-label={`ICP document for ${label}`}>
       <div className="brain-icp-bar">
-        <span className="brain-icp-name">{label} · ICP document{savedUrl && !writing ? " · saved to the brain" : ""}</span>
+        <span className="brain-icp-name">{label} · ICP document{proposal.url && !writing ? ` · proposed as pull request #${proposal.number}` : ""}</span>
         <div className="brain-icp-tools">
-          {savedUrl && !writing && (
-            <a className="brain-action" href={savedUrl} target="_blank" rel="noreferrer">Open in brain ↗</a>
+          {/* Proposed, never written: the brain's ICP is replaced only when somebody merges the pull request. */}
+          {proposal.url && !writing ? (
+            <a className="brain-action" href={proposal.url} target="_blank" rel="noreferrer">Review and merge ↗</a>
+          ) : (
+            markdown && !writing && (
+              <button className="brain-action" onClick={onPropose} disabled={proposal.busy} title="Opens a pull request against this client's ICP file. Nothing changes until it is merged.">
+                {proposal.busy ? "Proposing…" : "Propose to the brain"}
+              </button>
+            )
           )}
           <button className="brain-action is-primary" onClick={() => window.print()} disabled={writing}>
             Save as PDF
@@ -954,6 +1059,7 @@ function IcpSheet({ label, markdown, savedUrl, writing, progress, onRegenerate, 
           </button>
         </div>
       </div>
+      {proposal.error && <p className="brain-error print-hide">{proposal.error}</p>}
       {/* The customization chatbox: plain-language instructions that steer the next rewrite. */}
       <div className="brain-icp-chat print-hide">
         <input
@@ -1271,6 +1377,15 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
   const requested = useRef("");
 
   const path = doc?.path ?? "";
+  /**
+   * The path on screen, for the layout response to check against. A slow layout for the file opened before
+   * used to land after the current one and replace it, leaving the current file stuck on "Laying this out"
+   * because its own answer had already been overwritten and would not be asked for again.
+   */
+  const showingPath = useRef(path);
+  useEffect(() => {
+    showingPath.current = path;
+  }, [path]);
   const editing = session && session.path === path ? session : null;
   const proposed = pull && pull.path === path ? pull : null;
 
@@ -1294,15 +1409,18 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
       if (!body?.ok) throw new Error(body?.error || "This document could not be laid out.");
       const render = (body.render ?? {}) as Row;
       const warnings = (render.warnings ?? {}) as Row;
+      if (showingPath.current !== want) return;
       setLayouts({
         path: want,
         markdown: String(render.markdown ?? ""),
         figures: Array.isArray(warnings.figures) ? warnings.figures.map(String) : [],
         thin: warnings.thin === true,
+        truncated: warnings.truncated === true,
         failed: "",
         stored: render.stored !== false,
       });
     } catch (problem) {
+      if (showingPath.current !== want) return;
       // A failure is stored rather than retried: the original is right there, and a page that keeps
       // asking a model that just refused is a page that costs money to leave open.
       setLayouts({
@@ -1310,6 +1428,7 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
         markdown: "",
         figures: [],
         thin: false,
+        truncated: false,
         failed: problem instanceof Error ? problem.message : "This document could not be laid out.",
         stored: true,
       });
@@ -1442,6 +1561,17 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
           {layout.thin && <>This layout is much shorter than the file, so the original has more in it. </>}
           <button className="brain-doc-again" onClick={again}>
             Lay it out again
+          </button>
+        </p>
+      )}
+
+      {/* A long file is laid out from its first part only. Said in the open, because a layout that stops
+          early looks exactly like a complete one. */}
+      {layout && !layout.failed && showing && layout.truncated && (
+        <p className="brain-doc-warn">
+          This file is long, so only its first part is laid out here.{" "}
+          <button className="brain-doc-again" onClick={() => setSource(path)}>
+            Read the whole original
           </button>
         </p>
       )}

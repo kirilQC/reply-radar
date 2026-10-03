@@ -16,7 +16,7 @@
 
 import { resolveWorkspace } from "./meetings";
 import { companyKey } from "./company-domain";
-import { brainConfigured, brainFile, writeBrainFile, BRAIN_URL } from "./brain";
+import { brainBlobUrl, brainConfigured, brainFile, writeBrainFile } from "./brain";
 
 type Row = Record<string, unknown>;
 
@@ -61,7 +61,7 @@ function brainClientId(brainFolder: unknown): string {
 function dncBrainLink(brainFolder: unknown): string | null {
   const clientId = brainClientId(brainFolder);
   // /blob/HEAD/ resolves to whatever the repo's default branch is, so the link is right regardless of its name.
-  return clientId ? `${BRAIN_URL}/blob/HEAD/clients/${clientId}/account/dnc.md` : null;
+  return clientId ? brainBlobUrl(`clients/${clientId}/account/dnc.md`, "HEAD") : null;
 }
 
 function entryFromRow(row: Row): DncEntry {

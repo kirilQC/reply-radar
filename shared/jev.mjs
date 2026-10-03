@@ -42,6 +42,34 @@ const clip = (value, max) => {
 /* ═══ CSV ═══ */
 
 /**
+ * A CSV file's bytes as text, in whatever encoding Excel saved them.
+ *
+ * `File.text()` always reads UTF-8, so a list saved from Excel as "Unicode Text" (UTF-16) came in as every
+ * other character a NUL, and one saved as plain "CSV" on Windows (Windows-1252) turned every é and ’ into a
+ * replacement mark. A byte-order mark is trusted when there is one; without one, UTF-8 is tried strictly and
+ * Windows-1252 is the fallback, because a file that is not valid UTF-8 is almost always that. UTF-16 with no
+ * mark is recognised by its NULs, which no real CSV contains.
+ */
+export function decodeCsvBytes(input) {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input ?? new ArrayBuffer(0));
+  const decode = (label, from = 0, fatal = false) => new TextDecoder(label, { fatal }).decode(bytes.subarray(from));
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return decode("utf-8", 3);
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return decode("utf-16le", 2);
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return decode("utf-16be", 2);
+  const sample = bytes.subarray(0, 4096);
+  let evenNul = 0;
+  let oddNul = 0;
+  for (let k = 0; k < sample.length; k += 1) if (sample[k] === 0) { if (k % 2) oddNul += 1; else evenNul += 1; }
+  if (oddNul > sample.length / 8) return decode("utf-16le");
+  if (evenNul > sample.length / 8) return decode("utf-16be");
+  try {
+    return decode("utf-8", 0, true);
+  } catch {
+    return decode("windows-1252");
+  }
+}
+
+/**
  * RFC 4180 parsing: quoted fields, doubled quotes, commas and newlines inside quotes, CRLF, and a UTF-8 BOM.
  *
  * Hand-written because the repo takes no new dependencies, and because the naive `split(",")` is wrong on
@@ -521,6 +549,20 @@ export function buildCompanyProfile(cells, plan) {
   }) ?? {};
 }
 
+/**
+ * A URL reduced to what identifies it, for de-duplication: no scheme, no `www.` (or a LinkedIn country
+ * subdomain), lower case, no query, fragment, port or trailing slash. "WWW.Acme.com", "acme.com/" and
+ * "https://acme.com" are one company, and "www.linkedin.com/in/ada" with no scheme is the same person as
+ * "https://uk.linkedin.com/in/ada/"; each pair used to read as two rows and was charged twice.
+ */
+export function urlKey(raw) {
+  const s = String(raw ?? "").trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/^\/\//, "");
+  const cut = s.search(/[/?#]/);
+  const host = (cut < 0 ? s : s.slice(0, cut)).replace(/:\d+$/, "").replace(/\.$/, "").replace(/^www\d*\./, "").replace(/^[a-z]{2,3}\.linkedin\.com$/, "linkedin.com");
+  const rest = cut < 0 ? "" : s.slice(cut).replace(/[?#].*$/, "").replace(/\/+$/, "");
+  return host + rest;
+}
+
 /** A company row's identity for the table and de-duplication (website, then LinkedIn page, then name). */
 export function identifyCompany(cells, plan) {
   const first = (role) => plan.columns.filter((c) => c.role === role).map((c) => String(cell(cells, c)).trim()).find(Boolean) ?? "";
@@ -528,7 +570,7 @@ export function identifyCompany(cells, plan) {
   const website = clip(first("website"), 200);
   // In a company list a bare "LinkedIn" column is the company's own page, not a person's.
   const linkedin = clip(first("company_linkedin") || first("linkedin"), 300);
-  const domain = website.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/[/?#].*$/, "");
+  const domain = urlKey(website).replace(/\/.*$/, "");
   // The website is the de-duplication key before the LinkedIn page: exports fill it far more often, and two rows
   // for one company routinely differ in whether the LinkedIn column was populated.
   return { name: name || "(no name)", title: clip(valueFor(cells, plan, "company_industry"), 80), company: domain, linkedin: domain ? `https://${domain}` : linkedin };
@@ -618,7 +660,7 @@ export function duplicateOf(people) {
   const first = new Map();
   const dupes = new Map();
   people.forEach((p, i) => {
-    const url = String(p.linkedin || "").toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/[?#].*$/, "").replace(/\/+$/, "");
+    const url = urlKey(p.linkedin);
     // Name + company only counts with both present: "(no name)|Anthem" once collapsed 17,023 different contacts.
     const name = String(p.name ?? "").trim().toLowerCase();
     const company = String(p.company ?? "").trim().toLowerCase();

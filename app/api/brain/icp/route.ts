@@ -14,7 +14,7 @@
  * meet twelve call notes before the brief.
  */
 import { NextResponse } from "next/server";
-import { brainConfigured, brainFiles, brainTree, writeBrainFile } from "../../../lib/brain";
+import { brainConfigured, brainFiles, brainTree, forgetBrainTree, proposeBrainEdit } from "../../../lib/brain";
 import { ICP_MAX_CHUNKS, icpDocPrompt, writeIcpDoc } from "../../../lib/brain-icp";
 import { workspacesByFolder, type BrainWorkspace } from "../../../lib/brain-workspaces";
 import { clientLabel, clientSkeleton, fileKind } from "../../../../shared/brain-structure.mjs";
@@ -48,6 +48,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "The QC Brain is not connected. Set BRAIN_GITHUB_TOKEN." }, { status: 503 });
   }
 
+  // Saving is its own request, made only when the person presses the button. Generation used to write the
+  // finished text straight onto main over the client's existing ICP, so one click of "Generate" (or a rewrite
+  // with a careless instruction) silently replaced a curated document everyone's assistant reads.
+  if (body.propose === true) return propose(client, typeof body.markdown === "string" ? body.markdown : "");
+
   try {
     const paths = (await brainTree()).map((file) => file.path);
     const skeleton = clientSkeleton(client, paths) as Skeleton;
@@ -76,27 +81,11 @@ export async function POST(request: Request) {
       : prompt;
     const written = await writeIcpDoc({ label, sources, prompt: finalPrompt, sofar });
 
-    // The whole point: once the document is finished, write it into the client's brain folder. `written.markdown`
-    // is the full accumulated document (sofar + this chunk), so the last pass carries the complete text. The
-    // ICP slot's canonical path is account/icp.md under the client folder. A save failure does not fail the
-    // request — the page still shows the document — but its URL is returned so the user gets a link to the file.
-    let savedUrl: string | null = null;
-    if (written.done) {
-      const icpPath = skeleton.docs[1]?.found || `clients/${skeleton.client}/account/icp.md`;
-      try {
-        const saved = await writeBrainFile({ path: icpPath, text: written.markdown, summary: `ICP document for ${label}`, author: "QC Command" });
-        savedUrl = saved.url;
-      } catch {
-        /* the document is still shown; only the write-back to the repo failed */
-      }
-    }
-
     return NextResponse.json({
       ok: true,
       client: skeleton.client,
       label,
       ...written,
-      savedUrl,
       // How many more times the page may come back before it should stop asking. Counted here so the
       // limit lives with the thing that knows what a request costs.
       chunk: chunk + 1,
@@ -106,6 +95,32 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "That document could not be written." },
+      { status: 502 },
+    );
+  }
+}
+
+/**
+ * The finished document, proposed as a pull request against the client's ICP file rather than written over it.
+ *
+ * The same rail as every other edit to the brain: a person reviews it before it becomes what the team is
+ * told. The SHA comes from the tree, so a file that changed since is refused rather than overwritten, and a
+ * client with no ICP yet gets one created on the branch.
+ */
+async function propose(client: string, markdown: string) {
+  if (!markdown.trim()) return NextResponse.json({ ok: false, error: "There is no document to propose yet." }, { status: 400 });
+  try {
+    const tree = await brainTree();
+    const skeleton = clientSkeleton(client, tree.map((file) => file.path)) as Skeleton;
+    const icpPath = skeleton.docs[1]?.found || `clients/${skeleton.client}/account/icp.md`;
+    const sha = tree.find((file) => file.path === icpPath)?.sha ?? "";
+    const label = skeleton.label || String(clientLabel(client));
+    const pull = await proposeBrainEdit({ path: icpPath, text: markdown, sha, summary: `ICP document for ${label}`, author: "QC Command" });
+    forgetBrainTree();
+    return NextResponse.json({ ok: true, ...pull, path: icpPath, replaces: Boolean(sha) });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "The document could not be proposed." },
       { status: 502 },
     );
   }

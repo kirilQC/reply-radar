@@ -32,7 +32,19 @@ export const ENRICH_MODES = { auto: "Auto — only rows that need it", all: "Eve
 export function linkedinProfileUrl(raw) {
   const s = String(raw ?? "").trim();
   const m = s.match(/linkedin\.com\/in\/([^/?#\s]+)/i);
-  return m ? `https://www.linkedin.com/in/${decodeURIComponent(m[1]).replace(/\/+$/, "")}/` : "";
+  return m ? `https://www.linkedin.com/in/${safeDecode(m[1]).replace(/\/+$/, "")}/` : "";
+}
+
+/**
+ * `decodeURIComponent`, but a malformed escape ("100%-growth", a stray "%E2") gives back the raw text. It
+ * throws URIError otherwise, and one bad URL in a CSV ended the whole enrichment run.
+ */
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 /** A company website as an https URL on its bare host, or "" when the value is not a usable site. */

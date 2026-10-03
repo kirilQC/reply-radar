@@ -52,7 +52,9 @@ export async function POST(request: Request) {
 
   const path = String(body.page ?? "/").slice(0, 200);
   const page = pageRoot(path);
-  const scoutLink = `/scout?ask=${encodeURIComponent(question)}`;
+  // encodeURIComponent leaves ( and ) alone, and this link is dropped into markdown, where a ")" in the
+  // question ends the link early and the rest of the URL spills into the answer as text.
+  const scoutLink = `/scout?ask=${encodeURIComponent(question).replace(/\(/g, "%28").replace(/\)/g, "%29")}`;
 
   const messages: Turn[] = [];
   for (const raw of (Array.isArray(body.history) ? body.history : []).slice(-8)) {

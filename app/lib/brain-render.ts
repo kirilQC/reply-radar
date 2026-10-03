@@ -63,9 +63,9 @@ const RENDER_VERSION = 3;
  * Documents longer than this are laid out from their first part only.
  *
  * A handful of call-note archives run to tens of thousands of words, and asking for the whole thing
- * back costs more output tokens than one turn has. Truncating is visible in the coverage warning the
- * page shows, which is the honest outcome: the reader is told the layout is partial rather than
- * shown a shortened document that looks complete.
+ * back costs more output tokens than one turn has. The coverage check compares the layout with the cut
+ * source, so it never noticed the cut; `warnings.truncated` is what tells the reader the layout is
+ * partial rather than showing a shortened document that looks complete.
  */
 const MAX_SOURCE = 24_000;
 
@@ -84,8 +84,11 @@ export type BrainRender = {
   path: string;
   markdown: string;
   model: string;
-  /** Figures in the layout that the source does not state, and how much of its length survived. */
-  warnings: { figures: string[]; coverage: number; thin: boolean };
+  /**
+   * Figures in the layout that the source does not state, and how much of its length survived.
+   * `truncated` means only the first MAX_SOURCE characters were laid out, so the page must say so.
+   */
+  warnings: { figures: string[]; coverage: number; thin: boolean; truncated?: boolean };
   renderedAt: string;
   cached: boolean;
   /**
@@ -342,11 +345,13 @@ export async function renderBrainDoc({
   sha: string;
   force?: boolean;
 }): Promise<BrainRender> {
+  // Worked out from the text rather than stored, so layouts kept before this flag existed carry it too.
+  const truncated = text.length > MAX_SOURCE;
   if (!force) {
     const kept = await cachedRender(path, sha);
-    if (kept) return kept;
+    if (kept) return { ...kept, warnings: { ...kept.warnings, truncated } };
   }
   const made = await askForLayout(path, text);
   const stored = await keepRender(path, sha, made);
-  return { ...made, stored };
+  return { ...made, warnings: { ...made.warnings, truncated }, stored };
 }
