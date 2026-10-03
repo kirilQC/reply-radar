@@ -1968,7 +1968,7 @@ type AiConfig = {
   workspaceAi: { name: string; slug: string; brief: string; model: string; icpPrompt: string; followUpPrompt: string; replyPrompt: string; sentimentPrompt: string; morningBriefPrompt?: string; followUpThreshold?: number } | null;
   workspaces: Array<{ id: string; name: string; slug: string; logoUrl: string | null; accentColor: string | null; hasBrief: boolean }>;
 };
-type PastReplyRef = { body: string; senderName: string; leadName: string; campaignName: string };
+type PastReplyRef = { body: string; inbound?: string; senderName: string; leadName: string; campaignName: string };
 type AiAuditEvent = { id: string; timestamp: string; action: string; status: string; sentiment: string | null; inputTokens: number; outputTokens: number; durationMs: number | null; workspaceName: string | null; workspaceLogoUrl: string | null; leadName: string | null; leadPhotoUrl: string | null; conversationId?: string | null; draft?: string | null; reason?: string | null; inboundMessage?: string | null; campaignName?: string | null; leadTitle?: string | null; leadCompany?: string | null; pastReplies?: string[]; pastReplyContext?: PastReplyRef[] };
 type AiAuditData = { ok?: boolean; events: AiAuditEvent[]; drafts?: AiAuditEvent[]; summary: { totalCalls: number; successful: number; failed: number; totalInputTokens: number; totalOutputTokens: number } };
 type SlackLogEvent = { id: string; timestamp: string; action: string; surface: string; channel: string | null; askedBy: string | null; askedByName: string | null; question: string | null; outcome: string; durationMs: number | null; toolCount: number; inputTokens: number; outputTokens: number; model: string | null; error: string | null; workspaceLogoUrl: string | null };
@@ -2149,6 +2149,7 @@ function DraftFeedPanel({ events, freshIds }: { events: AiAuditEvent[]; freshIds
                                 {ref.leadName && <span><b>Lead:</b> {ref.leadName}</span>}
                                 {ref.campaignName && <span><b>Campaign:</b> {ref.campaignName}</span>}
                               </div>
+                              {ref.inbound && <p className="ai-draft-reference-inbound">{ref.inbound}</p>}
                               <p>{ref.body}</p>
                             </li>
                           ))}

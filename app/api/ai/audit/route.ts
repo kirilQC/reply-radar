@@ -139,6 +139,8 @@ export async function GET(request: Request) {
               const raw = object(entry);
               return {
                 body: text(raw.body),
+                // What the lead had said, for examples written since drafts learned from real replies.
+                inbound: text(raw.inbound),
                 senderName: text(raw.senderName),
                 leadName: text(raw.leadName),
                 campaignName: text(raw.campaignName),

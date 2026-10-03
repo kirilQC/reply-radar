@@ -219,6 +219,11 @@ export async function POST(request: Request) {
     "Answer what the lead actually said first. If they asked something, answer it directly before anything else.",
     "Do not re-pitch or repeat the opening message. Only explain the product if they asked what it is, and then in a sentence or two.",
     "At most one ask or next step.",
+    // The newest message being ours means the lead has not answered it yet; a second copy of the same
+    // offer ("grab a slot") reads as a bot. The draft becomes a light nudge instead.
+    String(thread.at(-1)?.direction ?? "").toLowerCase() === "outbound"
+      ? "The newest message in the conversation is ours and the lead has not answered it. Write a brief, light follow-up. Do not repeat or rephrase what we already said, offered or linked."
+      : "",
     "Plain words and short sentences. No buzzwords, no flattery, no filler openers.",
     avoid.length ? `Never use these phrases: ${avoid.map((p) => `"${p}"`).join(", ")}.` : "",
     "Punctuation: never use em dashes, en dashes, or a hyphen as a dash between clauses. Use a comma or a full stop instead.",

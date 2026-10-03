@@ -6957,3 +6957,11 @@ body.light-mode .brain-icp {
   white-space: nowrap;
   border: 0;
 }
+
+/* In the drafting feed, the lead message a voice example was answering, set apart from our reply. */
+.ai-draft-reference-inbound {
+  color: var(--muted);
+  font-style: italic;
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+}
