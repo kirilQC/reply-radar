@@ -321,10 +321,10 @@ export async function GET(request: Request) {
     const conversationIds = conversations.map((row) => String(row.id));
     const timed = <T,>(name: string, work: Promise<T>) => work.then((value) => { timings.push(`${name};dur=${Date.now() - mark}`); return value; });
     const [leads, messages, tagsByConversation] = await Promise.all([
-      timed("leads", queryByIds(leadIds, 40, (batch) =>
+      timed("leads", queryByIds(leadIds, 100, (batch) =>
         query(url, key, `rr_leads?select=${LEAD_COLUMNS}&id=in.(${batch.map(encodeURIComponent).join(",")})`).then((rows) => rows.map(withRawData)),
       )),
-      timed("messages", queryByIds(conversationIds, 20, (batch) =>
+      timed("messages", queryByIds(conversationIds, 50, (batch) =>
         queryPaged(
           url,
           key,

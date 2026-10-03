@@ -108,10 +108,16 @@ export async function deleteTag(id: string): Promise<InboxTag[]> {
 export async function assignmentsFor(conversationIds: string[]): Promise<Map<string, string[]>> {
   const map = new Map<string, string[]>();
   const ids = [...new Set(conversationIds.filter(Boolean))];
-  for (let i = 0; i < ids.length; i += 50) {
-    const batch = ids.slice(i, i + 50);
-    const response = await rest(`${ASSIGN_TABLE}?select=conversation_id,tag_id&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})`);
-    const rows = (await response.json().catch(() => [])) as { conversation_id?: unknown; tag_id?: unknown }[];
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += 50) batches.push(ids.slice(i, i + 50));
+  // In parallel: one after another, these 20 round trips were the slowest leg of every inbox load (~2.6s).
+  const pages = await Promise.all(
+    batches.map(async (batch) => {
+      const response = await rest(`${ASSIGN_TABLE}?select=conversation_id,tag_id&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})`);
+      return (await response.json().catch(() => [])) as { conversation_id?: unknown; tag_id?: unknown }[];
+    }),
+  );
+  for (const rows of pages) {
     for (const row of rows) {
       const conversation = String(row.conversation_id ?? "");
       const tag = String(row.tag_id ?? "");
