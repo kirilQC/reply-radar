@@ -46,11 +46,27 @@
  * @param {unknown} name The campaign name exactly as HeyReach returned it.
  * @returns {boolean}
  */
+/**
+ * The code at the start of a name, after any status label a person typed in front of it.
+ *
+ * Widened on Oct 2, 2026 after checking every campaign in the HeyReach master account. Real QC work was
+ * being dropped from campaign tables and reports for:
+ *   - a letter for a split test or batch: `EF014a`, `AH004B`, `RK004f`, `N034a`
+ *   - a hyphen after the letters: `KW-002`, `KW-001a` (every Keewano campaign, so Keewano showed nothing)
+ *   - a status typed in front: `[Finished] AH001`, `[cancelled] EF014b`, `DEPRECATED CR003`
+ * The year and spacing guards below are unchanged: `BH 2026`, `BH2026` and `Ws2025Q1` still fail.
+ */
+const CODE = /^([a-z]{1,3})[:-]?(\d{2,3})(v\d{1,2}|[a-z])?(?![a-z0-9])/i;
+const STATUS_PREFIX = /^\s*(?:\[[^\]]{1,20}\]\s*|deprecated\b[\s:-]*)+/i;
+const codePart = (name) => name.trim().replace(STATUS_PREFIX, "");
+/** "Thinkwell x QC Foundation Campaign v2": ours by name even though nobody gave it a code. */
+const MARKED_QC = /(?:^|\s)[x×]\s*QC\b/i;
+
 export function isOurCampaign(name) {
   if (typeof name !== "string") return false;
   // An optional version suffix (`EM031v2`) is a relaunch of the same campaign, and ours. Without it
   // Ema's live EM031v2 pair was read as the client's own campaigns and vanished from every figure.
-  return /^[a-z]{1,3}:?\d{2,3}(?:v\d{1,2})?(?![a-z0-9])/i.test(name.trim());
+  return CODE.test(codePart(name)) || MARKED_QC.test(name);
 }
 
 /**
@@ -75,7 +91,7 @@ export function isOurCampaign(name) {
  */
 export function campaignCode(name) {
   if (typeof name !== "string") return "";
-  const match = /^([a-z]{1,3}):?(\d{2,3})(v\d{1,2})?(?![a-z0-9])/i.exec(name.trim());
+  const match = CODE.exec(codePart(name));
   return match ? `${match[1].toUpperCase()}${match[2]}${match[3] ? match[3].toLowerCase() : ""}` : "";
 }
 

@@ -20,6 +20,17 @@ const ours = [
   "SW021: Core ICP Retarget",
   "BV003: Ops leaders",
   "MS002: Founders",
+  // Found on the Oct 2, 2026 audit of the HeyReach master account, all QC work that was being dropped.
+  "EF014a: Lovable Lookalikes BottomUp",
+  "AH004B: DevOps 1st Deg (Puneet)",
+  "RK004f: YC Batch Y22",
+  "N034a: Excess Expansion Titles",
+  "KW-002 · SF Tech Week · Track 1",
+  "KW-001a · Gaming · Track 2",
+  "[Finished] AH001: NYC Event",
+  "[cancelled] EF014b: Lovable Lookalikes TopDown",
+  "DEPRECATED CR003 Social+ LaneB Tier 2",
+  "Thinkwell x QC Foundation Campaign v2",
 ];
 
 const theirs = [
@@ -33,6 +44,10 @@ const theirs = [
   "BH Pipeline Bucket",
   "BH CISO & Security Leaders",
   "Eyal Post Engagers - Jul 2026",
+  "[MKT] Founders Social Engagers Sep-Oct",
+  "Data Outreach Sep 29",
+  "QVC outreach",
+  "Thinkwell_Test",
 ];
 
 test("campaign codes we issued are recognised", () => {
@@ -83,4 +98,11 @@ test("a versioned relaunch (EM031v2) is ours and keeps its own code", () => {
   // A version needs digits after the v, and nothing else may follow.
   assert.equal(isOurCampaign("EM031vx: nope"), false);
   assert.equal(isOurCampaign("EM031v2b: nope"), false);
+});
+
+test("a split letter, hyphen or typed status keeps its code", () => {
+  assert.equal(campaignCode("EF014a: Lovable"), "EF014a");
+  assert.equal(campaignCode("KW-002 · SF Tech Week"), "KW002");
+  assert.equal(campaignCode("[Finished] AH001: NYC Event"), "AH001");
+  assert.equal(campaignCode("DEPRECATED CR003"), "CR003");
 });
