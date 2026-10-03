@@ -173,7 +173,43 @@ const MESSAGE_COLUMNS = "id,conversation_id,body,direction,sent_at,reply_radar:r
  * HeyReach payload, and every reader here (sender, campaign, ICP, enrichment, history status) only looks
  * under `reply_radar`. `withRawData` puts it back under `raw_data`.
  */
-const LEAD_COLUMNS = "id,name,role,company,linkedin_profile_url,reply_radar:raw_data->reply_radar";
+const RR = "raw_data->reply_radar";
+const AI = `${RR}->ai_ark`;
+const LEAD_COLUMNS = [
+  "id,name,role,company,linkedin_profile_url",
+  `sender:${RR}->sender`, `campaign:${RR}->campaign`, `history_status:${RR}->history_status`,
+  `icp_score:${RR}->icp_score`, `icp_reason:${RR}->icp_reason`,
+  `ai_title:${AI}->title`, `ai_headline:${AI}->headline`, `ai_location:${AI}->location`, `ai_industry:${AI}->industry`,
+  `ai_profilePhotoSource:${AI}->profilePhotoSource`, `ai_profilePhotoUrl:${AI}->profilePhotoUrl`,
+  `ai_companyPhotoSource:${AI}->companyPhotoSource`, `ai_companyPhotoUrl:${AI}->companyPhotoUrl`,
+  `ai_company_name:${AI}->company->name`, `ai_company_summary_name:${AI}->company->summary->name`,
+  `pg0_company:${AI}->positionGroups->0->company->name`, `pg0_end:${AI}->positionGroups->0->date->end`,
+  `pg1_company:${AI}->positionGroups->1->company->name`, `pg1_end:${AI}->positionGroups->1->date->end`,
+].join(",");
+/**
+ * Rebuilds the `raw_data.reply_radar` shape every reader here expects from the narrowed columns. The AI Ark
+ * blob averages ~44KB a lead (its `raw` copy alone is half of that), which made the lead read the slowest leg
+ * of the inbox; only the handful of fields below are ever shown. Only the first two position groups are
+ * read for the current-company fallback, which applies only when no other company name exists.
+ */
+const leadFromColumns = (row: Row): Row => {
+  const ai: Row = {};
+  for (const key of ["title", "headline", "location", "industry", "profilePhotoSource", "profilePhotoUrl", "companyPhotoSource", "companyPhotoUrl"]) {
+    if (row[`ai_${key}`] !== null && row[`ai_${key}`] !== undefined) ai[key] = row[`ai_${key}`];
+  }
+  if (row.ai_company_name != null || row.ai_company_summary_name != null)
+    ai.company = { name: row.ai_company_name ?? undefined, summary: { name: row.ai_company_summary_name ?? undefined } };
+  const groups = [0, 1]
+    .filter((i) => row[`pg${i}_company`] != null || row[`pg${i}_end`] != null)
+    .map((i) => ({ company: { name: row[`pg${i}_company`] ?? undefined }, date: { end: row[`pg${i}_end`] ?? undefined } }));
+  if (groups.length) ai.positionGroups = groups;
+  const radar: Row = {};
+  for (const key of ["sender", "campaign", "history_status", "icp_score", "icp_reason"]) {
+    if (row[key] !== null && row[key] !== undefined) radar[key] = row[key];
+  }
+  if (Object.keys(ai).length) radar.ai_ark = ai;
+  return { id: row.id, name: row.name, role: row.role, company: row.company, linkedin_profile_url: row.linkedin_profile_url, raw_data: { reply_radar: radar } };
+};
 /** Puts the narrowed `reply_radar` column back where every reader expects it: under `raw_data`. */
 const withRawData = (row: Row): Row =>
   row.raw_data && typeof row.raw_data === "object"
@@ -222,7 +258,7 @@ async function readThread(url: string, key: string, conversationId: string) {
   if (!conversation) return { ok: false, conversationId, thread: [], error: "Conversation not found." };
   const [leadRows, messages] = await Promise.all([
     conversation.lead_id
-      ? query(url, key, `rr_leads?select=${LEAD_COLUMNS}&id=eq.${encodeURIComponent(String(conversation.lead_id))}&limit=1`).then((rows) => rows.map(withRawData))
+      ? query(url, key, `rr_leads?select=${LEAD_COLUMNS}&id=eq.${encodeURIComponent(String(conversation.lead_id))}&limit=1`).then((rows) => rows.map(leadFromColumns))
       : Promise.resolve([] as Row[]),
     queryPaged(
       url,
@@ -322,7 +358,7 @@ export async function GET(request: Request) {
     const timed = <T,>(name: string, work: Promise<T>) => work.then((value) => { timings.push(`${name};dur=${Date.now() - mark}`); return value; });
     const [leads, messages, tagsByConversation] = await Promise.all([
       timed("leads", queryByIds(leadIds, 100, (batch) =>
-        query(url, key, `rr_leads?select=${LEAD_COLUMNS}&id=in.(${batch.map(encodeURIComponent).join(",")})`).then((rows) => rows.map(withRawData)),
+        query(url, key, `rr_leads?select=${LEAD_COLUMNS}&id=in.(${batch.map(encodeURIComponent).join(",")})`).then((rows) => rows.map(leadFromColumns)),
       )),
       timed("messages", queryByIds(conversationIds, 50, (batch) =>
         queryPaged(
@@ -336,17 +372,6 @@ export async function GET(request: Request) {
       timed("tags", assignmentsFor(conversationIds).catch(() => new Map<string, string[]>())),
     ]);
     lap("leads_messages_tags");
-    // TEMP diagnostic: KB per reply_radar key across all leads.
-    {
-      const sizes: Record<string, number> = {};
-      for (const lead of leads) {
-        const rr = nested(lead.raw_data, "reply_radar");
-        for (const [k, v] of Object.entries(rr)) sizes[k] = (sizes[k] ?? 0) + JSON.stringify(v ?? null).length;
-        const ai = nested(rr, "ai_ark");
-        for (const [k, v] of Object.entries(ai)) sizes[`ai.${k}`] = (sizes[`ai.${k}`] ?? 0) + JSON.stringify(v ?? null).length;
-      }
-      for (const [k, v] of Object.entries(sizes).sort((a, b) => b[1] - a[1]).slice(0, 12)) timings.push(`kb_${k.replace(/[^\w.]/g, "_")};dur=${Math.round(v / 1024)}`);
-    }
     // Duplicate rows are collapsed on read so the thread is correct even before a refresh repairs the
     // records themselves. Shared with the purge, which must judge who spoke first from the same view.
     const deduped = dedupeMessages(messages);
