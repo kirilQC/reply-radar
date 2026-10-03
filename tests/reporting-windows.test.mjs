@@ -64,7 +64,12 @@ async function generate(t, body, { conversations = [], messages = [] } = {}) {
     if (path.startsWith("rr_conversations")) return json(pageOf(path, conversations));
     if (path.startsWith("rr_messages")) {
       const wanted = new Set(idsIn(path, "conversation_id"));
-      return json(pageOf(path, messages.filter((m) => wanted.has(m.conversation_id))));
+      // sent_at bounds honoured like PostgREST, so "replied before the period" reads only earlier rows.
+      const decoded = decodeURIComponent(path);
+      const gte = decoded.match(/sent_at=gte\.([^&]+)/)?.[1];
+      const lt = decoded.match(/sent_at=lt\.([^&]+)/)?.[1];
+      const inRange = (m) => (!gte || Date.parse(m.sent_at) >= Date.parse(gte)) && (!lt || Date.parse(m.sent_at) < Date.parse(lt));
+      return json(pageOf(path, messages.filter((m) => wanted.has(m.conversation_id) && inRange(m))));
     }
     return json([]);
   });
@@ -222,3 +227,15 @@ for (const route of ["../app/api/slack/brief/route.ts", "../app/api/slack/eow-re
     assert.equal(await sentToday(t, route, [{ workspace_id: "ws-1", created_at: at("2026-10-01T13:20:00Z"), status: "success", destination: "test" }]), false);
   });
 }
+
+test("a lead who first replied before the period is not one of its replied leads, as in HeyReach", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-20T16:00:00Z") });
+  const conversations = [{ id: "old", lead_id: "", workspace_id: "ws-1" }, { id: "new", lead_id: "", workspace_id: "ws-1" }];
+  const messages = [
+    { id: "m1", conversation_id: "old", direction: "inbound", body: "Earlier reply", sent_at: "2026-09-20T15:00:00Z", raw_data: {} },
+    { id: "m2", conversation_id: "old", direction: "inbound", body: "Still talking", sent_at: "2026-10-03T15:00:00Z", raw_data: {} },
+    { id: "m3", conversation_id: "new", direction: "inbound", body: "First reply", sent_at: "2026-10-04T15:00:00Z", raw_data: {} },
+  ];
+  const { payload } = await generate(t, { workspaceSlug: "willow", period: "custom", since: "2026-10-01", until: "2026-10-07" }, { conversations, messages });
+  assert.equal(payload.clients[0].summary.totalReplies, 1);
+});

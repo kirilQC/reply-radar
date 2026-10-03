@@ -253,7 +253,9 @@ export async function POST(request: Request) {
       workspaces.map(async (workspace) => {
         const apiKey = text(workspace.heyreach_api_key_ciphertext);
         const status = selectCampaigns(await campaignStatusFor(apiKey), campaignIds);
-        const ids = campaignIds ?? allCampaigns(status).map((row) => row.id);
+        // With no campaigns picked, every one of ours counts, finished ones included: a campaign that
+        // finished on Tuesday still accepted and got replies on Monday, and HeyReach counts those.
+        const ids = campaignIds ?? status.all.map((row) => row.id);
         const funnel = status.available
           ? await campaignFunnelFor(apiKey, ids, statsSince, statsUntil)
           : emptyFunnel(status.reason);
@@ -289,6 +291,26 @@ export async function POST(request: Request) {
       ),
     );
     const messages = dedupeMessages(rawMessages);
+
+    /*
+     * Leads who had already replied before the period. HeyReach counts a lead as "replied" once, on the
+     * day of their first reply, so a lead still talking to us from an earlier week is not one of this
+     * week's replied leads. Measured on Ema for Sep 26 to Oct 2: 28 leads wrote to us that week, 23 of
+     * them for the first time, and 23 is exactly what HeyReach shows. Only those first-time repliers
+     * are counted in the reply and sentiment figures; their messages still feed the timing and trends.
+     */
+    const repliedBefore = new Set<string>();
+    if (since) {
+      const active = [...new Set(messages.map((message) => text(message.conversation_id)))];
+      const earlier = await queryByIds(active, 40, (batch) =>
+        queryAll(
+          url,
+          key,
+          `rr_messages?select=conversation_id&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&direction=eq.inbound&sent_at=lt.${encodeURIComponent(since)}&order=conversation_id.asc,id.asc`,
+        ),
+      );
+      for (const row of earlier) repliedBefore.add(text(row.conversation_id));
+    }
 
     // Fetch leads for enrichment context
     const leadIds = [...new Set(conversations.map((c) => text(c.lead_id)).filter(Boolean))];
@@ -333,6 +355,7 @@ export async function POST(request: Request) {
       const sentimentByLead = new Map<string, string>();
       for (const message of [...workspaceMessages].sort((a, b) => text(a.sent_at).localeCompare(text(b.sent_at)))) {
         const leadKey = text(message.conversation_id);
+        if (repliedBefore.has(leadKey)) continue;
         const sentiment = text(radarOf(message.raw_data).sentiment).toLowerCase();
         const label = sentiment === "positive" || sentiment === "neutral" || sentiment === "negative" ? sentiment : "unclassified";
         if (sentimentByLead.get(leadKey) !== "positive") sentimentByLead.set(leadKey, label);
