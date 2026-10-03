@@ -42,15 +42,16 @@ async function queryPaged(url: string, key: string, path: string, cap = Number.P
   }
   return rows;
 }
-const initials = (name: string) =>
-  name
+const initials = (name: string) => {
+  // Letters only, first and last word: "Elizabeth (Lizzie) Siegle" is "ES", not "E(" or "EL".
+  const parts = name
     .split(/\s+/)
-    .filter(Boolean)
-    // Letters only: "Elizabeth (Lizzie) Siegle" was "E(".
-    .map((part) => part.replace(/[^\p{L}\p{N}]/gu, "")[0] ?? "")
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "?";
+    .filter((part) => !/^[(\[].*[)\]]$/.test(part))
+    .map((part) => part.replace(/[^\p{L}\p{N}]/gu, ""))
+    .filter((part) => part && !/^(dr|mr|mrs|ms|prof|phd|mba|md|cpa|jr|sr|ii|iii|iv)$/i.test(part));
+  const picked = parts.length > 1 ? [parts[0], parts[parts.length - 1]] : parts;
+  return picked.map((part) => part[0]).join("").toUpperCase() || "?";
+};
 const nested = (value: unknown, key: string) =>
   value &&
   typeof value === "object" &&
