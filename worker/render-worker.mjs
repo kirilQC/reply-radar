@@ -1050,7 +1050,13 @@ const ANALYTICS_STALENESS_MS = 2 * 60 * 60 * 1000;
  * lands against the day the request went out, not the day it was accepted.
  */
 const ANALYTICS_WINDOW_DAYS = 21;
-const ANALYTICS_PAGE_SIZE = 100;
+const ANALYTICS_PAGE_SIZE = 50;
+/**
+ * Analytics calls get more room than the inbox sync's 15s. Steadywell's and Moss's passes timed out on
+ * every attempt from Sep 13 to Oct 2 (twenty days of frozen figures), on accounts with years of history
+ * where the lifetime rollup and full campaign pages are slow to build on HeyReach's side.
+ */
+const ANALYTICS_TIMEOUT_MS = 40_000;
 /** 2,000 campaigns per client: far past the largest account seen, and a stop for a bad `totalCount`. */
 const ANALYTICS_MAX_PAGES = 20;
 /**
@@ -1067,7 +1073,7 @@ async function heyReachCampaignPages(apiKey) {
     const response = await heyReachFetch(apiKey, "campaign/GetAll", {
       method: "POST",
       body: JSON.stringify({ offset: page * ANALYTICS_PAGE_SIZE, limit: ANALYTICS_PAGE_SIZE }),
-    });
+    }, ANALYTICS_TIMEOUT_MS);
     const batch = Array.isArray(response?.items) ? response.items : [];
     items.push(...batch);
     const total = Number(response?.totalCount || 0);
@@ -1100,7 +1106,7 @@ async function collectCampaignStats(workspace) {
       // Pinned to 2020 for the same reason the API route pins it: these are lifetime totals, and a
       // rollup with no date range comes back empty rather than all-time.
       body: JSON.stringify({ accountIds: [], campaignIds: [], startDate: "2020-01-01T00:00:00.000Z", endDate: new Date().toISOString() }),
-    }).catch((error) => {
+    }, ANALYTICS_TIMEOUT_MS).catch((error) => {
       console.warn("reply_radar_analytics_rollup_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
       return null;
     }),
@@ -1222,7 +1228,7 @@ async function collectDailyStats(workspace) {
   const series = (accountIds) => heyReachFetch(apiKey, "stats/GetOverallStats", {
     method: "POST",
     body: JSON.stringify({ accountIds, campaignIds: [], startDate, endDate }),
-  });
+  }, ANALYTICS_TIMEOUT_MS);
 
   /*
    * `li_account/GetAll`, not `linkedinaccount/GetAll` — the latter is what the shape of every other
@@ -1503,9 +1509,16 @@ async function collectAnalytics() {
   let days = 0;
   let errorText = null;
   try {
-    campaigns = await collectCampaignStats(workspace);
+    /*
+     * Each step on its own. The daily series used to run only if the campaign step succeeded, so one
+     * slow campaign page threw away the day-by-day figures too, and the error never said which step
+     * failed. Now a failed step is named in the run's error and the other step still lands.
+     */
+    const failures = [];
+    campaigns = await collectCampaignStats(workspace).catch((error) => { failures.push(`campaign stats: ${error instanceof Error ? error.message : String(error)}`); return 0; });
     await touchHeartbeat();
-    days = await collectDailyStats(workspace);
+    days = await collectDailyStats(workspace).catch((error) => { failures.push(`daily stats: ${error instanceof Error ? error.message : String(error)}`); return 0; });
+    if (failures.length) throw new Error(failures.join("; "));
     // The outreach log rides the same daily pass; a failure here must not lose the stats above.
     try {
       const { written, errors } = await syncOutreach(workspace);
