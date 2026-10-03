@@ -336,6 +336,17 @@ export async function GET(request: Request) {
       timed("tags", assignmentsFor(conversationIds).catch(() => new Map<string, string[]>())),
     ]);
     lap("leads_messages_tags");
+    // TEMP diagnostic: KB per reply_radar key across all leads.
+    {
+      const sizes: Record<string, number> = {};
+      for (const lead of leads) {
+        const rr = nested(lead.raw_data, "reply_radar");
+        for (const [k, v] of Object.entries(rr)) sizes[k] = (sizes[k] ?? 0) + JSON.stringify(v ?? null).length;
+        const ai = nested(rr, "ai_ark");
+        for (const [k, v] of Object.entries(ai)) sizes[`ai.${k}`] = (sizes[`ai.${k}`] ?? 0) + JSON.stringify(v ?? null).length;
+      }
+      for (const [k, v] of Object.entries(sizes).sort((a, b) => b[1] - a[1]).slice(0, 12)) timings.push(`kb_${k.replace(/[^\w.]/g, "_")};dur=${Math.round(v / 1024)}`);
+    }
     // Duplicate rows are collapsed on read so the thread is correct even before a refresh repairs the
     // records themselves. Shared with the purge, which must judge who spoke first from the same view.
     const deduped = dedupeMessages(messages);
