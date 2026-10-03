@@ -69,6 +69,10 @@ create table if not exists rr_workspaces (
   -- the client's own CRM token, stored like the HeyReach key. See app/lib/deals.ts and shared/deal-attribution.mjs.
   crm_provider text, crm_api_key_ciphertext text, crm_last_synced_at timestamptz, crm_pipeline jsonb,
   last_webhook_received_at timestamptz, last_successful_poll_at timestamptz, last_reconciled_at timestamptz,
+  -- When the client was offboarded (Configuration > Legacy clients). Null means active. An offboarded client
+  -- is hidden from listings and skipped by automations, but nothing is deleted: webhooks keep storing its
+  -- replies and clearing this restores it.
+  offboarded_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 

@@ -109,7 +109,7 @@ export async function GET(request: Request) {
     replies(startOfWeek),
     replies(startOfMonth),
     replies(),
-    countRows(url, key, "rr_workspaces?select=id"),
+    countRows(url, key, "rr_workspaces?select=id&offboarded_at=is.null"),
     countRows(url, key, "rr_leads?select=id"),
   ]);
 

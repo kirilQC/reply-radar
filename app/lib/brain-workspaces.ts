@@ -43,15 +43,19 @@ const text = (value: unknown) => (typeof value === "string" || typeof value === 
  * Returns an empty map rather than throwing when Supabase is unreachable. The brain is readable
  * without Reply Radar's database — it is a GitHub repo — and taking the whole tab down because the
  * logos could not be fetched would be a poor trade.
+ *
+ * Offboarded (legacy) clients are left out unless `includeOffboarded` is set: the grid shows their
+ * folder as not live, while one client's own page can still find its workspace.
  */
-export async function workspacesByFolder(folders: string[]): Promise<Map<string, BrainWorkspace>> {
+export async function workspacesByFolder(folders: string[], { includeOffboarded = false }: { includeOffboarded?: boolean } = {}): Promise<Map<string, BrainWorkspace>> {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const empty = new Map<string, BrainWorkspace>();
   if (!url || !key) return empty;
 
   const select = "id,name,slug,logo_url,brain_folder,heyreach_api_key_ciphertext";
-  let response = await fetch(`${url}/rest/v1/rr_workspaces?select=${select}&order=name.asc`, {
+  const active = includeOffboarded ? "" : "&offboarded_at=is.null";
+  let response = await fetch(`${url}/rest/v1/rr_workspaces?select=${select}${active}&order=name.asc`, {
     headers: { apikey: key, Authorization: `Bearer ${key}` },
     cache: "no-store",
   }).catch(() => null);
@@ -59,7 +63,7 @@ export async function workspacesByFolder(folders: string[]): Promise<Map<string,
   // degrades to "matched by name" rather than to nothing.
   if (response && !response.ok) {
     response = await fetch(
-      `${url}/rest/v1/rr_workspaces?select=id,name,slug,logo_url,heyreach_api_key_ciphertext&order=name.asc`,
+      `${url}/rest/v1/rr_workspaces?select=id,name,slug,logo_url,heyreach_api_key_ciphertext${active}&order=name.asc`,
       { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" },
     ).catch(() => null);
   }

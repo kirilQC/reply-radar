@@ -36,7 +36,7 @@ export async function GET(request: Request) {
     // The whole folder list, not just this one, because a match is only trustworthy relative to the
     // alternatives — the rules have to be able to prefer an exact folder over a loose one.
     const folders = clientsIn((await brainTree()).map((file) => file.path)) as string[];
-    const workspace = (await workspacesByFolder(folders)).get(folder);
+    const workspace = (await workspacesByFolder(folders, { includeOffboarded: true })).get(folder);
     if (!workspace) {
       // Not an error. Half the folders in the brain are prospects and dormant accounts that were
       // never set up in Reply Radar, and a red box on all of them would train people to ignore it.

@@ -34,19 +34,41 @@ function supabaseConfig() {
   return { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
 }
 
+/**
+ * True when a PostgREST error is about the `offboarded_at` column, i.e. the migration has not run yet.
+ */
+function missingOffboardedColumn(errorText: string): boolean {
+  return /offboarded_at/i.test(errorText);
+}
+
 export async function GET(request: Request) {
   const { url, key } = supabaseConfig();
   if (!url || !key) return slimJson({ ok: false, error: "Supabase is not configured." }, { status: 503 });
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  let response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,brain_folder,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids,granola_title_match,granola_extra_title_matches,airtable_base_id,clay_dnc_webhook_url,morning_brief_enabled,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&slug=neq.misc&order=name.asc`, { headers, cache: "no-store" });
+  // Offboarded (legacy) clients are left out unless Configuration asks for everyone with ?include=all.
+  const includeAll = new URL(request.url).searchParams.get("include") === "all";
+  /*
+   * One list read with `offboarded_at` selected (and filtered on, for the default). A database without the
+   * column answers with an error naming it; the read is then repeated without it and everyone is active,
+   * so the sidebar and every page keep working while the migration waits to be run.
+   */
+  const list = async (columns: string) => {
+    const filter = includeAll ? "" : "&offboarded_at=is.null";
+    const response = await fetch(`${url}/rest/v1/rr_workspaces?select=${columns},offboarded_at&slug=neq.misc${filter}&order=name.asc`, { headers, cache: "no-store" });
+    if (response.ok) return response;
+    const errorText = await response.clone().text().catch(() => "");
+    if (!missingOffboardedColumn(errorText)) return response;
+    return fetch(`${url}/rest/v1/rr_workspaces?select=${columns}&slug=neq.misc&order=name.asc`, { headers, cache: "no-store" });
+  };
+  let response = await list("id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,brain_folder,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids,granola_title_match,granola_extra_title_matches,airtable_base_id,clay_dnc_webhook_url,morning_brief_enabled,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails");
   // Permit the UI to keep working while the additive migration is being run.
-  if (!response.ok) response = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,client_brief,anthropic_model,logo_url,accent_color,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails&slug=neq.misc&order=name.asc`, { headers, cache: "no-store" });
+  if (!response.ok) response = await list("id,name,slug,client_brief,anthropic_model,logo_url,accent_color,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails");
   const rows = await response.json();
   // Recomputed, not just read: a workspace configured before the domain moved holds the old address,
   // and the address is the one thing on this screen that somebody copies into another company's
   // dashboard. Anything already pointing at us is left exactly as it is.
   const base = publicBaseUrl(request);
-  const workspaces = Array.isArray(rows) ? rows.map((row) => ({ ...row, webhook_url: isOurWebhookUrl(row.webhook_url, base) ? row.webhook_url : webhookUrlFor(row.slug, request), key_configured: Boolean(row.heyreach_api_key_ciphertext), ai_ark_enrichment_enabled: Boolean(row.guardrails?.ai_ark_enrichment_enabled), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined })) : rows;
+  const workspaces = Array.isArray(rows) ? rows.map((row) => ({ ...row, webhook_url: isOurWebhookUrl(row.webhook_url, base) ? row.webhook_url : webhookUrlFor(row.slug, request), key_configured: Boolean(row.heyreach_api_key_ciphertext), ai_ark_enrichment_enabled: Boolean(row.guardrails?.ai_ark_enrichment_enabled), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", offboardedAt: row.offboarded_at ?? null, heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined })) : rows;
   return slimJson({ ok: response.ok, workspaces, aiArkConfigured: Boolean(process.env.AI_ARK_API_KEY), aiArkEnrichmentEnabled: isAiArkEnrichmentEnabled() }, { status: response.ok ? 200 : response.status });
 }
 
@@ -73,7 +95,7 @@ const withoutLegacyColumns = (record: Record<string, unknown>) => {
   return legacy;
 };
 
-const presentRow = (row: Record<string, unknown>) => ({ ...row, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined });
+const presentRow = (row: Record<string, unknown>) => ({ ...row, offboardedAt: row.offboarded_at ?? null, key_configured: Boolean(row.heyreach_api_key_ciphertext), heyreach_api_key_masked: row.heyreach_api_key_ciphertext ? `Saved key ••••${String(row.heyreach_api_key_ciphertext).slice(-4)}` : "", heyreach_api_key_ciphertext: undefined, webhook_secret_hash: undefined });
 
 export async function POST(request: Request) {
   const { url, key } = supabaseConfig();
@@ -187,6 +209,9 @@ export async function POST(request: Request) {
     record.clay_dnc_webhook_url = dncUrl || null;
   }
   if (typeof payload.heyreachApiKey === "string" && payload.heyreachApiKey.trim()) record.heyreach_api_key_ciphertext = payload.heyreachApiKey.trim();
+  // Offboarding hides a client and pauses its automations; nothing is deleted, and false restores it.
+  const offboardChange = !create && typeof payload.offboarded === "boolean";
+  if (offboardChange) record.offboarded_at = payload.offboarded ? new Date().toISOString() : null;
 
   if (patchFilter) {
     /*
@@ -215,7 +240,10 @@ export async function POST(request: Request) {
     const rows = Array.isArray(patchData) ? patchData : [];
     if (!rows.length) return NextResponse.json({ ok: false, error: "The workspace no longer exists. Refresh and try again." }, { status: 404 });
     if (resetBriefMemoryFor) await writeConfig(briefMemoryResetKey(resetBriefMemoryFor), new Date().toISOString()).catch(() => {});
-    await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.updated", entityType: "workspace", entityId: String(rows[0]?.id ?? id), details: { source: "admin", status: "success", workspaceId: rows[0]?.id ?? id, workspaceName: rows[0]?.name ?? payload.name, summary: `${rows[0]?.name ?? payload.name ?? "The client workspace"} configuration was saved successfully.` } });
+    if (offboardChange) {
+      const name = String(rows[0]?.name ?? "The client workspace");
+      await writeAuditEvent({ url, key }, { actor: "Admin console", action: payload.offboarded ? "workspace.offboarded" : "workspace.restored", entityType: "workspace", entityId: String(rows[0]?.id ?? id), details: { source: "admin", status: "success", workspaceId: rows[0]?.id ?? id, workspaceName: name, summary: payload.offboarded ? `${name} was offboarded. Its data is kept.` : `${name} was restored from legacy clients.` } });
+    } else await writeAuditEvent({ url, key }, { actor: "Admin console", action: "workspace.updated", entityType: "workspace", entityId: String(rows[0]?.id ?? id), details: { source: "admin", status: "success", workspaceId: rows[0]?.id ?? id, workspaceName: rows[0]?.name ?? payload.name, summary: `${rows[0]?.name ?? payload.name ?? "The client workspace"} configuration was saved successfully.` } });
     const workspaces = rows.map((row: Record<string, unknown>) => presentRow(row));
     // Only when this save touched the guardrails: a logo upload has no business starting a Docs sync.
     if (incomingGuardrails) fileMessagingAfterSave(String(rows[0]?.slug ?? ""), record.guardrails as Record<string, unknown>);

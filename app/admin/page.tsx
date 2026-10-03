@@ -20,6 +20,7 @@ import { workspaceSlug } from "../lib/public-url";
 /** What the breadcrumb calls each configuration section. */
 const adminSectionLabels: Record<string, string> = {
   workspaces: "Client directory",
+  legacy: "Legacy clients",
   "ai-hub": "AI",
   granola: "Granola keys",
   ai: "AI context",
@@ -62,6 +63,8 @@ type ClientWorkspace = {
   webhookUrl?: string;
   apiKeyMasked?: string;
   guardrails?: Record<string, unknown>;
+  /** When the client was offboarded. Set means it lives under Legacy clients. */
+  offboardedAt?: string;
 };
 
 const initialClients: ClientWorkspace[] = [];
@@ -100,7 +103,8 @@ const WORKSPACE_CACHE_KEY = "reply-radar-workspaces:v2";
  */
 function cacheWorkspaces(list: ClientWorkspace[]): void {
   try {
-    const slim = list.map(({ logoUrl: _logoUrl, apiKey: _apiKey, ...rest }) => rest);
+    // Every other page reads this cache as the active client list, so offboarded clients stay out of it.
+    const slim = list.filter((item) => !item.offboardedAt).map(({ logoUrl: _logoUrl, apiKey: _apiKey, ...rest }) => rest);
     window.localStorage.setItem(WORKSPACE_CACHE_KEY, JSON.stringify(slim));
   } catch {
     /* quota exceeded, or storage unavailable (private mode) — the cache is a convenience, not a requirement */
@@ -213,7 +217,7 @@ export default function AdminPage() {
     let cancelled = false;
     const hydrate = async () => {
       try {
-        const response = await fetch("/api/admin/workspaces", { cache: "no-store" });
+        const response = await fetch("/api/admin/workspaces?include=all", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
         if (!cancelled && response.ok && Array.isArray(payload.workspaces)) {
           const hydratedClients = payload.workspaces.map((item: Record<string, unknown>) => ({
@@ -227,6 +231,7 @@ export default function AdminPage() {
             airtableBaseId: String(item.airtable_base_id ?? ""),
             clayDncWebhookUrl: String(item.clay_dnc_webhook_url ?? ""),
             guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {},
+            offboardedAt: item.offboardedAt ? String(item.offboardedAt) : undefined,
           }));
           setWorkspaceClients(hydratedClients);
           const requestedClient = new URLSearchParams(window.location.search).get("client");
@@ -368,7 +373,9 @@ export default function AdminPage() {
     setWorkspaceError("");
     setWorkspaceNotice("");
     setLogoStatus("");
+    setOffboardConfirm(false);
     setWorkspaceOpen(false);
+    if (client.offboardedAt) setActive("legacy");
     return true;
   };
   const goToSection = (section: string) => {
@@ -394,6 +401,34 @@ export default function AdminPage() {
     setPasswordOpen(false);
     setWorkspacePassword("");
   };
+  /*
+   * Offboard or restore. Only `offboarded` is sent, so unsaved edits in the form are neither saved nor lost.
+   * Nothing is deleted either way: the client moves between the directory and Legacy clients.
+   */
+  const [offboardConfirm, setOffboardConfirm] = useState(false);
+  const [offboardBusy, setOffboardBusy] = useState("");
+  const setOffboarded = async (target: ClientWorkspace, offboarded: boolean) => {
+    if (!target.id || offboardBusy) return;
+    setOffboardBusy(target.slug);
+    setWorkspaceError("");
+    try {
+      const response = await fetch("/api/admin/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: target.id, previousSlug: target.slug, offboarded }) }).catch(() => null);
+      const payload = await response?.json().catch(() => ({}));
+      if (!response?.ok || payload?.ok === false) {
+        setWorkspaceError(typeof payload?.error === "string" && payload.error ? payload.error : offboarded ? "Could not offboard this client." : "Could not restore this client.");
+        return;
+      }
+      const savedRow = Array.isArray(payload.workspaces) ? payload.workspaces[0] as Record<string, unknown> | undefined : undefined;
+      const offboardedAt = offboarded ? String(savedRow?.offboardedAt ?? savedRow?.offboarded_at ?? new Date().toISOString()) : undefined;
+      const next = workspaceClients.map((item) => (item.id === target.id ? { ...item, offboardedAt } : item));
+      setWorkspaceClients(next);
+      cacheWorkspaces(next);
+      window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
+      setOffboardConfirm(false);
+    } finally {
+      setOffboardBusy("");
+    }
+  };
   const requestRemoveWorkspace = () => { setPasswordError(""); setWorkspacePassword(""); setPasswordOpen(true); };
   const confirmRemoveWorkspace = async () => {
     // Type-to-confirm on the client's own name, not a password: the site already sits behind the login gate,
@@ -403,7 +438,11 @@ export default function AdminPage() {
   };
   const isNewWorkspace = Boolean(client.isNew);
   const visibleClients = clients
+    .filter((item) => !item.offboardedAt)
     .filter((item) => item.name.toLowerCase().includes(clientSearch.toLowerCase()) || item.slug.includes(clientSearch.toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  const legacyClients = clients
+    .filter((item) => item.offboardedAt)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   useEffect(() => {
     if (!accentOverridesLoaded.current) return;
@@ -649,7 +688,7 @@ export default function AdminPage() {
                 ...(active === "workspaces"
                   ? workspaceOpen
                     ? [
-                        { label: "Client directory", href: "/admin", onClick: (event: React.MouseEvent) => { event.preventDefault(); leaveEditor(); } },
+                        { label: client.offboardedAt ? "Legacy clients" : "Client directory", href: "/admin", onClick: (event: React.MouseEvent) => { event.preventDefault(); leaveEditor(); } },
                         { label: client.name || "New workspace" },
                       ]
                     : [{ label: "Client directory" }]
@@ -668,6 +707,12 @@ export default function AdminPage() {
                 onClick={() => goToSection("workspaces")}
               >
                 <span>▦</span>Client directory
+              </button>
+              <button
+                className={active === "legacy" ? "active" : ""}
+                onClick={() => goToSection("legacy")}
+              >
+                <span>◌</span>Legacy clients{legacyClients.length ? <b>{legacyClients.length}</b> : null}
               </button>
               <button
                 className={active === "ai-hub" ? "active" : ""}
@@ -714,9 +759,11 @@ export default function AdminPage() {
                                   ? "Feedback"
                                   : active === "audit"
                                     ? "Audit log"
-                                    : "System health"}
+                                    : active === "legacy"
+                                      ? "Legacy clients"
+                                      : "System health"}
                   </h1>
-                  {!(active === "workspaces" && workspaceOpen) && active !== "workspaces" && active !== "audit" && active !== "feedback" && <p>
+                  {!(active === "workspaces" && workspaceOpen) && active !== "workspaces" && active !== "audit" && active !== "feedback" && active !== "legacy" && <p>
                     {active === "ai"
                           ? "Tune the Anthropic drafting context for every client."
                           : active === "scoring"
@@ -737,7 +784,26 @@ export default function AdminPage() {
                   + Add workspace
                 </button>}
               </div>}
-              {workspaceError && active === "workspaces" && <p className="form-error" role="alert">{workspaceError}</p>}
+              {workspaceError && (active === "workspaces" || active === "legacy") && <p className="form-error" role="alert">{workspaceError}</p>}
+              {active === "legacy" && <div className="workspace-directory">
+                <div className="workspace-directory-list">
+                  {legacyClients.map((item) => {
+                    const index = clients.findIndex((candidate) => candidate.slug === item.slug);
+                    return (
+                      <div key={item.slug} className="workspace-card legacy-client-card">
+                        <button className="legacy-client-open" onClick={() => { setSelected(index); setActive("workspaces"); setWorkspaceOpen(true); }}>
+                          <i className="workspace-directory-logo" style={item.logoUrl ? undefined : { background: item.tone }}>
+                            {item.logoUrl ? <img src={item.logoUrl} alt={`${item.name} logo`} /> : (item.name || "?")[0]}
+                          </i>
+                          <span><strong>{item.name || "Unnamed workspace"}</strong><small>Offboarded {item.offboardedAt ? new Date(item.offboardedAt).toLocaleDateString() : ""}</small></span>
+                        </button>
+                        <button className="secondary-button" disabled={offboardBusy === item.slug} onClick={() => setOffboarded(item, false)}>{offboardBusy === item.slug ? "Restoring…" : "Restore"}</button>
+                      </div>
+                    );
+                  })}
+                  {!legacyClients.length && <div className="workspace-directory-empty">No offboarded clients.</div>}
+                </div>
+              </div>}
               {workspaceNotice && active === "workspaces" && workspaceOpen && <p className="slack-channel-note" role="status">{workspaceNotice}</p>}
               {active === "heartbeat" && <HeartbeatView heartbeat={heartbeat} onRefresh={() => { setHeartbeat(null); setHeartbeatRefresh((value) => value + 1); }} />}
               {active === "feedback" && <FeedbackView />}
@@ -770,6 +836,7 @@ export default function AdminPage() {
                     {!visibleClients.length && <div className="workspace-directory-empty">No clients match your search.</div>}
                     </div>
                   </div>}
+                  {workspaceOpen && client.offboardedAt && <div className="legacy-client-banner" role="status"><span>Offboarded {new Date(client.offboardedAt).toLocaleDateString()}. Hidden and paused, data kept.</span><button className="secondary-button" disabled={Boolean(offboardBusy)} onClick={() => setOffboarded(client, false)}>{offboardBusy ? "Restoring…" : "Restore client"}</button></div>}
                   {workspaceOpen && <div className="workspace-editor-toolbar"><button className="secondary-button" onClick={() => { leaveEditor(); }}>← Back to directory</button><button className="primary-button" onClick={saveWorkspaceChanges} disabled={saving}>{saving ? "Saving…" : saved ? "Saved ✓" : "Save changes"}</button></div>}
                   {workspaceOpen && <div className="admin-grid">
                     <section className="admin-panel">
@@ -1001,7 +1068,12 @@ export default function AdminPage() {
                       <label className="field-label">CLIENT ACCENT<input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} /></label>
                     </section>
                   </div>}
-                  {workspaceOpen && <div className="workspace-config-footer"><div className="workspace-created-meta">Created {client.createdAt ? new Date(client.createdAt).toLocaleDateString() : "—"}</div>{!isNewWorkspace && <button className="remove-workspace-button" onClick={requestRemoveWorkspace}>Remove workspace</button>}</div>}
+                  {workspaceOpen && <div className="workspace-config-footer"><div className="workspace-created-meta">Created {client.createdAt ? new Date(client.createdAt).toLocaleDateString() : "—"}</div>{!isNewWorkspace && <div className="workspace-footer-actions">{!client.offboardedAt && <button className="secondary-button" onClick={() => setOffboardConfirm(true)}>Offboard client</button>}<button className="remove-workspace-button" onClick={requestRemoveWorkspace}>Remove workspace</button></div>}</div>}
+                  {workspaceOpen && offboardConfirm && !client.offboardedAt && <div className="offboard-confirm" role="alertdialog" aria-labelledby="offboard-confirm-title">
+                    <strong id="offboard-confirm-title">Offboard {client.name || "this client"}?</strong>
+                    <p>It leaves every list and automation. All data is kept and you can restore it from Legacy clients.</p>
+                    <div className="delete-confirm-actions"><button className="secondary-button" onClick={() => setOffboardConfirm(false)}>Cancel</button><button className="primary-button" disabled={Boolean(offboardBusy)} onClick={() => setOffboarded(client, true)}>{offboardBusy ? "Offboarding…" : "Offboard"}</button></div>
+                  </div>}
                 </>
               )}
               {active === "ai-hub" && <AiHubView />}

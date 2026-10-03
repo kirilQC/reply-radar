@@ -12,7 +12,7 @@ function creds() { const url = process.env.SUPABASE_URL, key = process.env.SUPAB
 
 export async function GET() {
   const c = creds(); if (!c) return slimJson({ ok: false, clients: [] }, { status: 503 });
-  const r = await fetch(`${c.url}/rest/v1/rr_workspaces?select=id,name,slug,logo_url,accent_color,slack_internal_channel_id&slug=neq.misc&order=name.asc`, { headers: c.headers, cache: "no-store" });
+  const r = await fetch(`${c.url}/rest/v1/rr_workspaces?select=id,name,slug,logo_url,accent_color,slack_internal_channel_id&slug=neq.misc&offboarded_at=is.null&order=name.asc`, { headers: c.headers, cache: "no-store" });
   const rows = r.ok ? await r.json().catch(() => []) : [];
   const clients = (Array.isArray(rows) ? rows : [])
     .filter((w: Record<string, unknown>) => String(w.name ?? "").trim())

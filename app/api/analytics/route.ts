@@ -539,8 +539,9 @@ async function compute(requested: string[]): Promise<CachedAnswer> {
     return { expires: Date.now() + RESPONSE_TTL_MS, body: text, etag: `"${createHash("sha1").update(text).digest("base64url")}"`, status };
   };
   try {
-    const workspaces = await supabase("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,logo_url,accent_color&slug=neq.misc&order=name.asc") ?? [];
-    const selected = requested.length ? workspaces.filter((row) => requested.includes(String(row.slug))) : workspaces;
+    const workspaces = await supabase("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,logo_url,accent_color,offboarded_at&slug=neq.misc&order=name.asc") ?? [];
+    // Offboarded (legacy) clients only when a request names them.
+    const selected = requested.length ? workspaces.filter((row) => requested.includes(String(row.slug))) : workspaces.filter((row) => !row.offboarded_at);
     const ids = selected.map((row) => String(row.id));
     if (!ids.length) return finish({ ok: true, status: "no_data", workspaces: [], totalReplies: 0, replies7d: 0, trend: [], trendLabels: [], averageDailyReplies: 0, queueMix: { hot: 0, warm: 0, nurture: 0 }, clientLoad: [] });
     const now = Date.now();

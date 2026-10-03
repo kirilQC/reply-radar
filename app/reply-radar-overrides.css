@@ -441,3 +441,8 @@ html:not(.hydrated) body{visibility:hidden}
 .uf-sub-item.uf-sub-more{color:var(--accent);font-weight:650;border-top:1px solid var(--border-soft);margin-top:4px;padding-top:9px}
 
 @keyframes rail-fade { from { opacity: 0; } to { opacity: 1; } }
+/* Offboarded (legacy) clients: the list in Configuration, the editor banner and the offboard confirmation. */
+.workspace-footer-actions{display:flex;align-items:center;gap:10px}.workspace-footer-actions .secondary-button{height:38px}
+.legacy-client-card{display:flex;align-items:center;gap:12px;min-height:78px;padding:12px 14px}.legacy-client-open{display:flex;align-items:center;gap:12px;flex:1;min-width:0;background:transparent;color:var(--text);text-align:left;padding:0}.legacy-client-open>span{display:flex;flex-direction:column;gap:4px;min-width:0}.legacy-client-open strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.legacy-client-open small{color:var(--muted-2);font-size:10px}.legacy-client-card:hover{border-color:var(--accent)}
+.legacy-client-banner{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--panel-2);color:var(--muted);font-size:12px}
+.offboard-confirm{margin-top:14px;padding:16px 18px;border:1px solid var(--border);border-radius:8px;background:var(--panel)}.offboard-confirm strong{display:block;font-size:14px;margin-bottom:6px}.offboard-confirm p{margin:0 0 12px;color:var(--muted);font-size:12px}

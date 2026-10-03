@@ -230,7 +230,7 @@ export async function POST(request: Request) {
     const workspaces = await query(
       url,
       key,
-      `rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,website_url,client_brief,heyreach_api_key_ciphertext${workspaceSlug && workspaceSlug !== "all" ? `&slug=eq.${encodeURIComponent(workspaceSlug)}` : ""}&slug=neq.misc&order=name.asc`,
+      `rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,website_url,client_brief,heyreach_api_key_ciphertext${workspaceSlug && workspaceSlug !== "all" ? `&slug=eq.${encodeURIComponent(workspaceSlug)}` : "&offboarded_at=is.null"}&slug=neq.misc&order=name.asc`,
     );
     if (!workspaces.length)
       return NextResponse.json({ ok: false, error: "No matching client." }, { status: 404 });

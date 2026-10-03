@@ -271,7 +271,7 @@ export async function GET(incoming: Request) {
       slackApiResult,
       airtableResult,
     ] = await Promise.all([
-      request("rr_workspaces?select=*&slug=neq.misc&order=name.asc"),
+      request("rr_workspaces?select=*&slug=neq.misc&offboarded_at=is.null&order=name.asc"),
       request("rr_sync_runs?select=*&order=started_at.desc&limit=25"),
       request("rr_webhook_events?select=*&order=received_at.desc&limit=25"),
       request(""),

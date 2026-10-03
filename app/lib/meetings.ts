@@ -140,31 +140,38 @@ export async function resolveWorkspace(nameOrSlug: string): Promise<Workspace | 
   if (!url || !key) return null;
   const wanted = str(nameOrSlug).trim().toLowerCase();
   if (!wanted) return null;
-  const all = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=neq.misc&order=name.asc`)).map((row) => ({
+  const everyone = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,offboarded_at&slug=neq.misc&order=name.asc`)).map((row) => ({
     id: str(row.id),
     name: str(row.name).trim(),
     slug: str(row.slug).trim(),
     logoUrl: orNull(row.logo_url),
     accentColor: orNull(row.accent_color),
+    offboarded: Boolean(row.offboarded_at),
   }))
     // A workspace with neither a name nor a slug cannot be what anyone meant.
     .filter((w) => w.name || w.slug);
-  const exact = all.filter((w) => (w.slug && w.slug.toLowerCase() === wanted) || (w.name && w.name.toLowerCase() === wanted));
-  if (exact.length === 1) return exact[0];
+  const isExact = (w: { name: string; slug: string }) => (w.slug && w.slug.toLowerCase() === wanted) || (w.name && w.name.toLowerCase() === wanted);
+  const strip = ({ id, name, slug, logoUrl, accentColor }: (typeof everyone)[number]): Workspace => ({ id, name, slug, logoUrl, accentColor });
+  // An offboarded (legacy) client is found by its exact name or slug only, never by a partial guess.
+  const all = everyone.filter((w) => !w.offboarded);
+  const exact = all.filter(isExact);
+  if (exact.length === 1) return strip(exact[0]);
+  const legacy = everyone.filter((w) => w.offboarded && isExact(w));
+  if (!exact.length && legacy.length === 1) return strip(legacy[0]);
   // Match either way: what was sent may be shorter than the stored name ("ema" → "Ema Health") OR longer
   // ("Ema Health" → a workspace named "Ema"). Ambiguity (more than one) still returns null rather than guess.
   // An empty string is contained in everything, so a blank name or slug would match every request; treat
   // empty as never matching.
   const contains = (a: string, b: string) => Boolean(a && b) && (a.includes(b) || b.includes(a));
   const partial = all.filter((w) => contains(w.name.toLowerCase(), wanted) || contains(w.slug.toLowerCase(), wanted));
-  return partial.length === 1 ? partial[0] : null;
+  return partial.length === 1 ? strip(partial[0]) : null;
 }
 
 /** Every client with a meeting count, how many are still upcoming, and the next/most-recent times. */
 export async function listMeetingClients(): Promise<MeetingClient[]> {
   const { url, key } = config();
   if (!url || !key) return [];
-  const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=neq.misc&order=name.asc`)).filter((w) => str(w.name).trim());
+  const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=neq.misc&offboarded_at=is.null&order=name.asc`)).filter((w) => str(w.name).trim());
   if (!workspaces.length) return [];
   const meetings = await allRows(url, key, `rr_meetings?select=workspace_id,meeting_at,status`, "id.asc");
   const now = Date.now();

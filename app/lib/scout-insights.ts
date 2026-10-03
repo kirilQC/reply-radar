@@ -72,20 +72,29 @@ async function dbByIds(build: (ids: string[]) => string, ids: string[]): Promise
 }
 
 type Client = { id: string; name: string; slug: string; apiKey: string; guardrails: Row; brief: string; brainFolder: string; internal: string; external: string; granola: string; airtable: string; morningBrief: boolean };
+/**
+ * Offboarded (legacy) clients from the last read. Never in `allClients()`, so "all clients" means active
+ * ones; `pickClients` still finds one when it is named exactly.
+ */
+let legacyClients: Client[] = [];
 async function allClients(): Promise<Client[]> {
-  const rows = await db("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,guardrails,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,airtable_base_id,morning_brief_enabled&slug=neq.misc&order=name.asc");
-  return rows.filter((r) => text(r.name)).map((r) => ({
+  const rows = await db("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,guardrails,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,airtable_base_id,morning_brief_enabled,offboarded_at&slug=neq.misc&order=name.asc");
+  const toClient = (r: Row): Client => ({
     id: text(r.id), name: text(r.name), slug: text(r.slug), apiKey: text(r.heyreach_api_key_ciphertext),
     guardrails: (r.guardrails && typeof r.guardrails === "object" ? r.guardrails : {}) as Row,
     brief: text(r.client_brief), brainFolder: text(r.brain_folder), internal: text(r.slack_internal_channel_id), external: text(r.slack_external_channel_id),
     granola: text(r.granola_title_match), airtable: text(r.airtable_base_id), morningBrief: Boolean(r.morning_brief_enabled),
-  }));
+  });
+  const named = rows.filter((r) => text(r.name));
+  legacyClients = named.filter((r) => r.offboarded_at).map(toClient);
+  return named.filter((r) => !r.offboarded_at).map(toClient);
 }
 function pickClients(all: Client[], wanted: string[]): Client[] {
   if (!wanted.length) return all;
   return wanted.map((w) => {
     const q = w.toLowerCase();
-    const hit = all.find((c) => c.slug.toLowerCase() === q || c.name.toLowerCase() === q) ?? all.filter((c) => c.name.toLowerCase().includes(q) || c.slug.toLowerCase().includes(q))[0];
+    const exact = (c: Client) => c.slug.toLowerCase() === q || c.name.toLowerCase() === q;
+    const hit = all.find(exact) ?? legacyClients.find(exact) ?? all.filter((c) => c.name.toLowerCase().includes(q) || c.slug.toLowerCase().includes(q))[0];
     if (!hit) throw new Error(`There is no client called "${w}". The clients are: ${all.map((c) => c.name).join(", ")}.`);
     return hit;
   });
@@ -457,7 +466,7 @@ async function googleDriveSearch(input: Row) {
 async function outreachPeople(input: Row) {
   const all = await allClients();
   const picked = strings(input.clients ?? input.client).length ? pickClients(all, strings(input.clients ?? input.client)) : all;
-  const nameOf = new Map(all.map((c) => [c.id, c.name]));
+  const nameOf = new Map([...all, ...picked].map((c) => [c.id, c.name]));
   const titles = strings(input.titleContains);
   const companies = strings(input.companyContains);
   const campaigns = strings(input.campaignContains);

@@ -345,13 +345,15 @@ export async function GET(request: Request) {
     const workspaces = await query(
       url,
       key,
-      "rr_workspaces?select=id,name,slug,accent_color,logo_url&slug=neq.misc&order=name.asc",
+      "rr_workspaces?select=id,name,slug,accent_color,logo_url,offboarded_at&slug=neq.misc&order=name.asc",
     );
+    // Offboarded (legacy) clients stay out of the all-clients inbox, but a request that names one still
+    // reads its conversations.
     const selected = requested.length
       ? workspaces.filter((workspace) =>
           requested.includes(String(workspace.slug)),
         )
-      : workspaces;
+      : workspaces.filter((workspace) => !workspace.offboarded_at);
     const workspaceIds = selected.map((workspace) => String(workspace.id));
     if (!workspaceIds.length)
       return slimJson({ ok: true, conversations: [] });

@@ -104,7 +104,7 @@ export async function GET(request: Request) {
       // came off with them. Every command is still listed under Skills.
       const [touched, linked, brief, activity] = await Promise.all([
         brainLastTouched(skeleton.docs.map((doc) => doc.found).filter(Boolean)),
-        workspacesByFolder(folderNames),
+        workspacesByFolder(folderNames, { includeOffboarded: true }),
         briefPath ? brainFile(briefPath).catch(() => null) : Promise.resolve(null),
         brainClientActivity(skeleton.client).catch(() => ({ latestItem: "", latestDate: "", since: "" })),
       ]);

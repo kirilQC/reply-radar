@@ -410,7 +410,7 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
 export async function syncAllConnectedDeals(): Promise<{ ok: boolean; results: Array<{ client: string; synced?: number; confirmed?: number; error?: string }> }> {
   const { url, key } = config();
   if (!url || !key) return { ok: false, results: [] };
-  const workspaces = await rows(url, key, `rr_workspaces?select=slug,name&crm_provider=not.is.null`);
+  const workspaces = await rows(url, key, `rr_workspaces?select=slug,name&crm_provider=not.is.null&offboarded_at=is.null`);
   const results: Array<{ client: string; synced?: number; confirmed?: number; error?: string }> = [];
   for (const w of workspaces) {
     const result = await syncDeals(str(w.slug));
@@ -423,7 +423,7 @@ export async function syncAllConnectedDeals(): Promise<{ ok: boolean; results: A
 export async function listDealClients(): Promise<DealClient[]> {
   const { url, key } = config();
   if (!url || !key) return [];
-  const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,crm_provider,crm_last_synced_at&slug=neq.misc&order=name.asc`)).filter((w) => str(w.name).trim());
+  const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,crm_provider,crm_last_synced_at&slug=neq.misc&offboarded_at=is.null&order=name.asc`)).filter((w) => str(w.name).trim());
   if (!workspaces.length) return [];
   const ids = workspaces.map((w) => str(w.id)).filter(Boolean);
   const dealRows = ids.length ? await allRows(url, key, `rr_deals?select=id,workspace_id,amount,attribution&workspace_id=in.(${ids.map(encodeURIComponent).join(",")})`, "id.asc") : [];

@@ -180,7 +180,8 @@ async function db(path: string): Promise<unknown> {
 
 /* ── Clients ─────────────────────────────────────────────────────────────────────────────────── */
 
-type Client = { id: string; name: string; slug: string; timezone: string; createdAt: string; apiKey: string };
+/** `offboarded`: a legacy client. Found only when named exactly, and left out of every list. */
+type Client = { id: string; name: string; slug: string; timezone: string; createdAt: string; apiKey: string; offboarded: boolean };
 
 // The workspace list is read by resolveClient and a dozen tools, several times within one assistant turn, and
 // it barely changes. A short TTL cache turns that back into one fetch per warm instance every half-minute
@@ -191,7 +192,7 @@ const CLIENTS_TTL_MS = 30_000;
 async function clients(): Promise<Client[]> {
   if (clientsCache && Date.now() - clientsCache.at < CLIENTS_TTL_MS) return clientsCache.value;
   const raw = rows(
-    await db("rr_workspaces?select=id,name,slug,timezone,created_at,heyreach_api_key_ciphertext&order=name.asc"),
+    await db("rr_workspaces?select=id,name,slug,timezone,created_at,heyreach_api_key_ciphertext,offboarded_at&order=name.asc"),
   );
   const value = raw.map((row) => ({
     id: text(row.id),
@@ -200,6 +201,7 @@ async function clients(): Promise<Client[]> {
     timezone: text(row.timezone) || "America/New_York",
     createdAt: text(row.created_at),
     apiKey: text(row.heyreach_api_key_ciphertext),
+    offboarded: Boolean(row.offboarded_at),
   }));
   clientsCache = { at: Date.now(), value };
   return value;
@@ -215,10 +217,14 @@ async function clients(): Promise<Client[]> {
  */
 async function resolveClient(name: unknown): Promise<Client> {
   const wanted = text(name).toLowerCase();
-  const all = await clients();
+  const everyone = await clients();
+  // An offboarded client answers to its exact name or slug only; guesses and lists are active clients.
+  const all = everyone.filter((c) => !c.offboarded);
   if (!wanted) throw new Error(`Name a client. The clients are: ${all.map((c) => c.name).join(", ")}.`);
   const exact = all.filter((c) => c.slug.toLowerCase() === wanted || c.name.toLowerCase() === wanted);
   if (exact.length === 1) return exact[0];
+  const legacy = everyone.filter((c) => c.offboarded && (c.slug.toLowerCase() === wanted || c.name.toLowerCase() === wanted));
+  if (legacy.length === 1 && !exact.length) return legacy[0];
   const partial = all.filter(
     (c) => c.name.toLowerCase().includes(wanted) || c.slug.toLowerCase().includes(wanted),
   );
@@ -264,7 +270,7 @@ async function airtableBaseFor(name: unknown): Promise<{ client: Client; baseId:
   if (named) {
     // A synthetic client so the rest of the Airtable path is unchanged; it has no workspace row, so its
     // id and HeyReach key are blank — nothing in the Airtable tools reads them.
-    const client: Client = { id: "", name: named.name, slug: named.key, timezone: "America/New_York", createdAt: "", apiKey: "" };
+    const client: Client = { id: "", name: named.name, slug: named.key, timezone: "America/New_York", createdAt: "", apiKey: "", offboarded: false };
     return { client, baseId: named.baseId };
   }
   const client = await resolveClient(name);
@@ -1013,8 +1019,8 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
   if (INSIGHT_TOOL_NAMES.has(name)) return runInsightTool(name, input);
   switch (name) {
     case "list_clients": {
-      const all = await clients();
-      return all.map(({ apiKey, id, ...rest }) => ({ ...rest, heyreachConnected: Boolean(apiKey), id }));
+      const all = (await clients()).filter((c) => !c.offboarded);
+      return all.map(({ apiKey, id, name, slug, timezone, createdAt }) => ({ name, slug, timezone, createdAt, heyreachConnected: Boolean(apiKey), id }));
     }
 
     case "client_summary": {
@@ -1050,7 +1056,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         since || until
           ? countRows(url, key, `rr_messages?select=id&direction=eq.inbound${window}`)
           : Promise.resolve(null),
-        countRows(url, key, "rr_workspaces?select=id"),
+        countRows(url, key, "rr_workspaces?select=id&offboarded_at=is.null"),
       ]);
       return {
         leads,
@@ -1820,7 +1826,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const select = "name,slug,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids";
       const rows_ = text(input.client).trim()
         ? rows(await db(`rr_workspaces?select=${select}&id=eq.${encodeURIComponent((await resolveClient(input.client)).id)}&limit=1`))
-        : rows(await db(`rr_workspaces?select=${select}&order=name.asc`));
+        : rows(await db(`rr_workspaces?select=${select}&offboarded_at=is.null&order=name.asc`));
       const extrasOf = (row: Row) => (Array.isArray(row.slack_extra_channel_ids) ? row.slack_extra_channel_ids : []).map((entry) => text(entry)).filter(Boolean);
       const ids = new Set<string>();
       for (const row of rows_) {

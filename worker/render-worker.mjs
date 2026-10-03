@@ -613,7 +613,7 @@ async function runAiPipeline() {
   const deadline = Date.now() + AI_CYCLE_BUDGET_MS;
   // Expired set-asides are dropped so the map cannot grow for the life of the process.
   for (const [id, at] of aiFailedAt) if (Date.now() - at >= AI_FAILURE_BACKOFF_MS) aiFailedAt.delete(id);
-  const workspaces = (await supabase("rr_workspaces?select=id,slug,name,client_brief,anthropic_model,custom_system_prompt,guardrails&order=created_at.asc")) || [];
+  const workspaces = (await supabase("rr_workspaces?select=id,slug,name,client_brief,anthropic_model,custom_system_prompt,guardrails&offboarded_at=is.null&order=created_at.asc")) || [];
   // Start at the client the previous cycle ran out of budget on and wrap around from there, so a
   // large backlog at the top of the list cannot keep the clients below it permanently unprocessed.
   // A cursor naming a client that no longer exists resolves to -1 and falls back to the start.
@@ -952,7 +952,7 @@ async function syncDueDealsWorkspace() {
   const due = new Date(Date.now() - DEALS_SYNC_INTERVAL_MS).toISOString();
   // One connected client per cycle: whichever has a CRM but no sync in the last day, oldest first. The
   // whole connected roster is worked off one per cycle, the same drain reconcile and analytics use.
-  const workspaces = await supabase(`rr_workspaces?select=slug&crm_provider=not.is.null&or=(crm_last_synced_at.is.null,crm_last_synced_at.lt.${encodeURIComponent(due)})&order=crm_last_synced_at.asc.nullsfirst&limit=1`);
+  const workspaces = await supabase(`rr_workspaces?select=slug&crm_provider=not.is.null&offboarded_at=is.null&or=(crm_last_synced_at.is.null,crm_last_synced_at.lt.${encodeURIComponent(due)})&order=crm_last_synced_at.asc.nullsfirst&limit=1`);
   const workspace = (workspaces || [])[0];
   if (!workspace || !workspace.slug) return;
   await appPost("/api/deals/sync", { client: workspace.slug }, { timeoutMs: DEALS_SYNC_BUDGET_MS, cron: true });
@@ -1293,7 +1293,8 @@ async function collectDailyStats(workspace) {
 
 /** The client whose stored analytics are oldest, or one that has none at all. */
 async function staleAnalyticsWorkspace() {
-  const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&heyreach_api_key_ciphertext=not.is.null&order=created_at.asc");
+  // Offboarded clients are not collected; their stored analytics stay as they were.
+  const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&heyreach_api_key_ciphertext=not.is.null&offboarded_at=is.null&order=created_at.asc");
   if (!workspaces || !workspaces.length) return null;
   /*
    * Freshness is when this worker last *tried* a client (its newest analytics run), not when that client's
@@ -1477,7 +1478,7 @@ async function syncOutreach(workspace) {
 const outreachBackfillTried = new Set();
 async function backfillOutreach() {
   if (outreachTableMissingAt && Date.now() - outreachTableMissingAt < 60 * 60 * 1000) return false;
-  const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&heyreach_api_key_ciphertext=not.is.null&order=created_at.asc");
+  const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&heyreach_api_key_ciphertext=not.is.null&offboarded_at=is.null&order=created_at.asc");
   for (const workspace of workspaces ?? []) {
     if (outreachBackfillTried.has(workspace.id)) continue;
     let has;
@@ -1896,7 +1897,9 @@ async function runOnce() {
   // a Supabase hiccup on a log row skipping every task below it.
   const logFailed = (error) => console.warn("reply_radar_heartbeat_write_failed", { reason: error instanceof Error ? error.message : String(error) });
   await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "running", started_at: cycleStarted, records_seen: 0, records_written: 0 }).catch(logFailed);
-  const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&order=created_at.asc");
+  // The HeyReach health poll skips offboarded clients. Reconcile and conversation refresh do not: replies
+  // can still arrive for them and are stored.
+  const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&offboarded_at=is.null&order=created_at.asc");
   for (const workspace of workspaces) await syncWorkspace(workspace);
   await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "success", started_at: cycleStarted, finished_at: new Date().toISOString(), records_seen: workspaces.length, records_written: 0 }).catch(logFailed);
 

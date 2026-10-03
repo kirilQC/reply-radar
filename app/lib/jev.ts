@@ -91,7 +91,7 @@ const shapeClient = (row: Row, set?: JevQuestionSet | null): JevClient => ({
 });
 
 export async function listJevClients(): Promise<JevClient[]> {
-  const rows = (await workspaceRows("slug=neq.misc&order=name.asc")).filter((row) => text(row.name));
+  const rows = (await workspaceRows("slug=neq.misc&offboarded_at=is.null&order=name.asc")).filter((row) => text(row.name));
   const sets = await Promise.all(rows.map((row) => loadQuestionSet(text(row.slug)).catch(() => null)));
   return rows.map((row, i) => shapeClient(row, sets[i]));
 }

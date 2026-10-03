@@ -115,7 +115,7 @@ async function syncIdentityRollup(config: SupabaseConfig, profileUrl: string) {
  */
 export type IngestOrigin = "webhook" | "reconciliation";
 
-export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; name?: string | null; slug?: string | null; heyreach_api_key_ciphertext?: string | null }, payload: JsonObject, origin: IngestOrigin = "webhook") {
+export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: { id: string; name?: string | null; slug?: string | null; heyreach_api_key_ciphertext?: string | null; offboarded_at?: string | null }, payload: JsonObject, origin: IngestOrigin = "webhook") {
   const lead = object(payload.lead);
   const webhookCampaign = object(payload.campaign);
   const suppliedConversationId = text(payload.conversation_id) || text(payload.correlation_id);
@@ -249,7 +249,8 @@ export async function ingestHeyReachWebhook(config: SupabaseConfig, workspace: {
     const existingRaw = object(existingLead?.raw_data);
     const existingMetadata = object(existingRaw.reply_radar);
     const cachedEnrichment = await findCachedEnrichment(config, profileUrl, existingRaw);
-    const enrichmentEnabled = isAiArkEnrichmentEnabled();
+    // An offboarded client's replies are still stored, but no paid enrichment is run for them.
+    const enrichmentEnabled = isAiArkEnrichmentEnabled() && !workspace.offboarded_at;
     let enrichmentError = "";
     const aiArk = cachedEnrichment
       ? cachedEnrichment

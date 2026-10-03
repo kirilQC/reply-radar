@@ -33,7 +33,7 @@ export async function GET() {
   const profilesIncludePhoto = profilesResponse.ok && attempt < 2;
   const [linksResponse, workspacesResponse] = await Promise.all([
     fetch(`${url}/rest/v1/rr_profile_workspaces?select=profile_id,workspace_id`, { headers: h, cache: "no-store" }),
-    fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&slug=neq.misc&order=name.asc`, { headers: h, cache: "no-store" }),
+    fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&slug=neq.misc&offboarded_at=is.null&order=name.asc`, { headers: h, cache: "no-store" }),
   ]);
   const profiles = await profilesResponse.json(); const links = await linksResponse.json(); const workspaces = await workspacesResponse.json();
   if (!profilesResponse.ok) return slimJson({ ok: false, error: JSON.stringify(profiles) }, { status: profilesResponse.status });
@@ -87,9 +87,12 @@ export async function POST(request: Request) {
   if (profileId) {
     // The client list is read before the old assignments are cleared: a failed read used to leave the
     // profile with no clients at all.
-    const workspaceRows = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&slug=neq.misc&order=name.asc`, { headers: headers(key), cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const workspaceRows = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug&slug=neq.misc&offboarded_at=is.null&order=name.asc`, { headers: headers(key), cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     if (!Array.isArray(workspaceRows)) return NextResponse.json({ ok: false, error: "The profile was saved, but the client list could not be read, so its client access was left as it was. Save again to retry.", profile: savedProfile }, { status: 502 });
-    await fetch(`${url}/rest/v1/rr_profile_workspaces?profile_id=eq.${encodeURIComponent(profileId)}`, { method: "DELETE", headers: { ...headers(key), Prefer: "return=minimal" } });
+    // Only links to active clients are replaced. An offboarded client is not in the picker, so its link is
+    // left as it is and comes back with the client on restore.
+    const activeIds = workspaceRows.map((item: { id: string }) => encodeURIComponent(String(item.id))).filter(Boolean);
+    if (activeIds.length) await fetch(`${url}/rest/v1/rr_profile_workspaces?profile_id=eq.${encodeURIComponent(profileId)}&workspace_id=in.(${activeIds.join(",")})`, { method: "DELETE", headers: { ...headers(key), Prefer: "return=minimal" } });
     // Matched by slug or id. Matching by display name gave a profile access to every client that shared
     // the name, and lost access when a client was renamed. Names are still accepted from a browser that
     // has not reloaded since this changed, and only when it sent no slugs at all.

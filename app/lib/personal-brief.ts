@@ -101,8 +101,9 @@ const BRIEF_COLUMNS = "id,name,slug,timezone,client_brief,brain_folder,slack_int
  * be produced comes back with an empty body and is simply left out of the note.
  */
 async function briefBodyForClient(read: (path: string) => Promise<unknown>, slug: string): Promise<{ client: string; body: string }> {
-  const rows = await read(`rr_workspaces?select=${BRIEF_COLUMNS},slack_extra_channel_ids,granola_extra_title_matches&slug=eq.${encodeURIComponent(slug)}&limit=1`)
-    .catch(() => read(`rr_workspaces?select=${BRIEF_COLUMNS}&slug=eq.${encodeURIComponent(slug)}&limit=1`));
+  // An offboarded client is not found here, so it drops out of the note like any client with no brief.
+  const rows = await read(`rr_workspaces?select=${BRIEF_COLUMNS},slack_extra_channel_ids,granola_extra_title_matches&slug=eq.${encodeURIComponent(slug)}&offboarded_at=is.null&limit=1`)
+    .catch(() => read(`rr_workspaces?select=${BRIEF_COLUMNS}&slug=eq.${encodeURIComponent(slug)}&offboarded_at=is.null&limit=1`));
   const found = rowsOf(rows)[0];
   if (!found) return { client: slug, body: "" };
   const workspace = found as BriefWorkspace;
@@ -351,6 +352,6 @@ export async function personalClientDirectory(): Promise<Array<{ id: string; nam
   const { url, key } = config();
   if (!url || !key) return [];
   const read = reader(url, key);
-  const rows = rowsOf(await read(`rr_workspaces?select=id,name,slug,logo_url&order=name.asc`).catch(() => []));
+  const rows = rowsOf(await read(`rr_workspaces?select=id,name,slug,logo_url&offboarded_at=is.null&order=name.asc`).catch(() => []));
   return rows.filter((r) => str(r.name).trim()).map((r) => ({ id: str(r.id), name: str(r.name), slug: str(r.slug), logoUrl: str(r.logo_url) || null }));
 }

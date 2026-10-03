@@ -94,7 +94,7 @@ export async function listColdCallClients(): Promise<ColdCallClient[]> {
   if (!url || !key) return [];
   // Include clients with a HeyReach connection, plus the "Misc" workspace (a home for imported/custom lists,
   // which has no HeyReach key on purpose).
-  const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,heyreach_api_key_ciphertext&order=name.asc`))
+  const workspaces = (await rows(url, key, `rr_workspaces?select=id,name,slug,logo_url,accent_color,heyreach_api_key_ciphertext&offboarded_at=is.null&order=name.asc`))
     .filter((w) => str(w.name).trim() && (str(w.heyreach_api_key_ciphertext).trim() || str(w.slug) === "misc"));
   // Count with cheap header-only queries — pulling every lead's raw_data across all clients times out.
   // "Callable" ≈ has a phone or was pulled in for cold calling (cold_campaign is set); both are real columns.

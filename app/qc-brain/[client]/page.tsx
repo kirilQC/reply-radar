@@ -34,7 +34,7 @@ async function folderFor(name: string) {
   try {
     const folders = clientsIn((await brainTree()).map((file) => file.path)) as string[];
     if (folders.includes(name)) return name;
-    for (const [folder, workspace] of await workspacesByFolder(folders)) {
+    for (const [folder, workspace] of await workspacesByFolder(folders, { includeOffboarded: true })) {
       if (workspace.slug === name) return folder;
     }
   } catch {

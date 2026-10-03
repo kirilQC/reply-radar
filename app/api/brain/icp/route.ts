@@ -66,7 +66,7 @@ export async function POST(request: Request) {
     const [prompt, docs, linked] = await Promise.all([
       icpDocPrompt(),
       brainFiles(wanted, 6),
-      workspacesByFolder([skeleton.client]).catch(() => new Map<string, BrainWorkspace>()),
+      workspacesByFolder([skeleton.client], { includeOffboarded: true }).catch(() => new Map<string, BrainWorkspace>()),
     ]);
     // `brainFiles` returns whatever it managed to read, in whatever order the workers finished. The
     // requested order is the meaningful one, so it is restored here rather than relied upon there.

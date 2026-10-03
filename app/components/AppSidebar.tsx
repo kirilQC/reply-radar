@@ -152,7 +152,12 @@ export default function AppSidebar() {
           setSidebarClients(fresh);
           // Guarded on its own: a full or blocked store throwing here used to fall into the catch below,
           // which then painted the stale cache over the fresh list that had just been set.
+          // When the list changed (a client added, renamed or offboarded elsewhere), pages that drew from
+          // the cache are told to read it again, so an offboarded client does not linger on them.
+          let changed = false;
+          try { changed = window.localStorage.getItem("reply-radar-workspaces:v2") !== JSON.stringify(fresh); } catch { /* unreadable store */ }
           try { window.localStorage.setItem("reply-radar-workspaces:v2", JSON.stringify(fresh)); } catch { /* cache is optional */ }
+          if (changed) window.dispatchEvent(new Event("reply-radar-workspaces-changed"));
           setClientsLoading(false);
           return;
         }

@@ -19,9 +19,13 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" };
   try {
     const lookupColumn = isUuid(workspaceId) ? "id" : "slug";
-    const lookup = await fetch(`${url}/rest/v1/rr_workspaces?select=id,name,slug,webhook_secret_hash,heyreach_api_key_ciphertext&${lookupColumn}=eq.${encodeURIComponent(workspaceId)}&limit=1`, { headers, cache: "no-store" });
+    const lookupWith = (columns: string) => fetch(`${url}/rest/v1/rr_workspaces?select=${columns}&${lookupColumn}=eq.${encodeURIComponent(workspaceId)}&limit=1`, { headers, cache: "no-store" });
+    // Replies must never be lost to a missing column: without the offboarded_at migration the lookup is
+    // repeated without it and the client counts as active.
+    let lookup = await lookupWith("id,name,slug,webhook_secret_hash,heyreach_api_key_ciphertext,offboarded_at");
+    if (!lookup.ok) lookup = await lookupWith("id,name,slug,webhook_secret_hash,heyreach_api_key_ciphertext");
     if (!lookup.ok) return NextResponse.json({ ok: false, stage: "workspace_lookup", error: (await lookup.text()).slice(0, 1_000) }, { status: 502 });
-    const rows = await lookup.json() as Array<{ id: string; name?: string | null; slug?: string | null; webhook_secret_hash?: string | null; heyreach_api_key_ciphertext?: string | null }>;
+    const rows = await lookup.json() as Array<{ id: string; name?: string | null; slug?: string | null; webhook_secret_hash?: string | null; heyreach_api_key_ciphertext?: string | null; offboarded_at?: string | null }>;
     const workspace = rows[0];
     if (!workspace) return NextResponse.json({ ok: false }, { status: 404 });
     // Secret verification is intentionally kept server-side. Existing installations may
@@ -31,8 +35,9 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
       return NextResponse.json({ ok: true, validation: true, workspace: workspaceId, history: "skipped_for_synthetic_test" }, { status: 200 });
     }
     const result = await ingestHeyReachWebhook({ url, key }, workspace, payload as Record<string, unknown>);
-    // Discarded ingests never wrote a conversation row, so there is nothing to classify.
-    if (!("discarded" in result) && result.conversationId) {
+    // Discarded ingests never wrote a conversation row, so there is nothing to classify. An offboarded
+    // client's reply is stored but not classified.
+    if (!("discarded" in result) && result.conversationId && !workspace.offboarded_at) {
       after(() => classifyLatestReply({ url, key }, result.conversationId, workspace.slug ?? workspaceId, { workspaceName: workspace.name ?? undefined }).catch(() => undefined));
     }
     console.info("heyreach_webhook_processed", { workspaceId, ...result });

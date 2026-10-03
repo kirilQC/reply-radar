@@ -191,14 +191,21 @@ export async function GET(request: Request) {
     );
     const offset = decodeCursor(params.get("cursor"));
     const order = leadSortOrder(params.get("sort"));
-    const workspaces = await get(
+    const everyWorkspace = await get(
       url,
       key,
-      "rr_workspaces?select=id,name,slug,logo_url,accent_color&slug=neq.misc&order=name.asc",
+      "rr_workspaces?select=id,name,slug,logo_url,accent_color,offboarded_at&slug=neq.misc&order=name.asc",
     );
+    // The client filter and the all-clients list are active clients only. An offboarded (legacy) client's
+    // leads are still readable when its slug is asked for by name.
+    const workspaces = everyWorkspace.filter((workspace) => !workspace.offboarded_at);
+    const legacyIds = everyWorkspace.filter((workspace) => workspace.offboarded_at).map((workspace) => encodeURIComponent(String(workspace.id)));
     const selectedWorkspace = workspaceSlug
-      ? workspaces.find((workspace) => workspace.slug === workspaceSlug)
+      ? everyWorkspace.find((workspace) => workspace.slug === workspaceSlug)
       : null;
+    const scopeFilter = selectedWorkspace
+      ? `workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}`
+      : legacyIds.length ? `workspace_id=not.in.(${legacyIds.join(",")})` : "";
     if (workspaceSlug && !selectedWorkspace)
       return slimJson({
         ok: true,
@@ -208,9 +215,7 @@ export async function GET(request: Request) {
         nextCursor: null,
       });
     const filters = [
-      selectedWorkspace
-        ? `workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}`
-        : "",
+      scopeFilter,
       search
         ? `or=(name.ilike.*${encodeURIComponent(search)}*,company.ilike.*${encodeURIComponent(search)}*,role.ilike.*${encodeURIComponent(search)}*,linkedin_id.ilike.*${encodeURIComponent(search)}*)`
         : "",
@@ -253,7 +258,7 @@ export async function GET(request: Request) {
     // The cursor is left out either way: it narrows to "everything after this page", which is a
     // paging detail, not something the reader is filtering by.
     const countFilters = [
-      selectedWorkspace ? `workspace_id=eq.${encodeURIComponent(String(selectedWorkspace.id))}` : "",
+      scopeFilter,
       search ? `or=(name.ilike.*${encodeURIComponent(search)}*,company.ilike.*${encodeURIComponent(search)}*,role.ilike.*${encodeURIComponent(search)}*,linkedin_id.ilike.*${encodeURIComponent(search)}*)` : "",
     ].filter(Boolean).join("&");
     const totalLeads = metadataFiltering
@@ -284,7 +289,7 @@ export async function GET(request: Request) {
         )
       : [];
     const workspaceById = new Map(
-      workspaces.map((workspace) => [String(workspace.id), workspace]),
+      everyWorkspace.map((workspace) => [String(workspace.id), workspace]),
     );
     const leads = page.map((lead) => {
       const raw =

@@ -114,8 +114,8 @@ export async function GET() {
   const read = reader(url, key);
   try {
     const [workspaceRows, briefRows, keys] = await Promise.all([
-      read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match,call_analysis_enabled&slug=neq.misc&order=name.asc")
-        .catch(() => read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match&slug=neq.misc&order=name.asc")),
+      read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match,call_analysis_enabled&slug=neq.misc&offboarded_at=is.null&order=name.asc")
+        .catch(() => read("rr_workspaces?select=id,name,slug,timezone,slack_internal_channel_id,slack_external_channel_id,granola_title_match&slug=neq.misc&offboarded_at=is.null&order=name.asc")),
       /*
        * No fallback to an empty list. A failed read here made every call look unposted, so the worker
        * re-posted every client's latest recap; it now fails the poll instead, and the next hour retries.

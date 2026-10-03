@@ -37,7 +37,7 @@ export async function GET() {
   const read = reader(url, key);
   try {
     const [workspaceRows, keys] = await Promise.all([
-      read("rr_workspaces?select=name,slug,granola_title_match&slug=neq.misc&order=name.asc"),
+      read("rr_workspaces?select=name,slug,granola_title_match&slug=neq.misc&offboarded_at=is.null&order=name.asc"),
       granolaKeys(read),
     ]);
     const clients = (Array.isArray(workspaceRows) ? (workspaceRows as Row[]) : [])

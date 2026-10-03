@@ -62,7 +62,8 @@ function supabase() {
 async function loadSyncWorkspaces(slug?: string): Promise<SyncWorkspace[]> {
   const { url, key } = supabase();
   if (!url || !key) return [];
-  const filter = slug ? `&slug=eq.${encodeURIComponent(slug)}` : "";
+  // The nightly sweep skips offboarded clients; a sync asked for by slug still runs.
+  const filter = slug ? `&slug=eq.${encodeURIComponent(slug)}` : "&offboarded_at=is.null";
   const response = await fetch(
     `${url}/rest/v1/rr_workspaces?select=id,name,slug,brain_folder,guardrails&order=name.asc${filter}`,
     { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" },
