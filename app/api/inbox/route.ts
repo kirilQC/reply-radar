@@ -186,13 +186,34 @@ const LEAD_COLUMNS = [
   `pg0_company:${AI}->positionGroups->0->company->name`, `pg0_end:${AI}->positionGroups->0->date->end`,
   `pg1_company:${AI}->positionGroups->1->company->name`, `pg1_end:${AI}->positionGroups->1->date->end`,
 ].join(",");
+const CARD_COLUMNS = "id,name,role,company,linkedin_profile_url,inbox_card";
+/**
+ * Pulling 19 paths out of each lead's compressed raw_data made Postgres unpack the whole blob once per
+ * path, so the lead read stayed slow however little it returned. `inbox_card` is a stored generated column
+ * holding just those fields. Until the migration runs, the path read is used; a missing column is
+ * remembered for five minutes so every load doesn't pay for a failed request first.
+ */
+let cardMissingUntil = 0;
+async function readLeads(url: string, key: string, filter: string): Promise<Row[]> {
+  if (Date.now() >= cardMissingUntil) {
+    try {
+      return (await query(url, key, `rr_leads?select=${CARD_COLUMNS}&${filter}`)).map(leadFromColumns);
+    } catch (error) {
+      if (!/inbox_card/.test(String(error))) throw error;
+      cardMissingUntil = Date.now() + 5 * 60_000;
+    }
+  }
+  return (await query(url, key, `rr_leads?select=${LEAD_COLUMNS}&${filter}`)).map(leadFromColumns);
+}
 /**
  * Rebuilds the `raw_data.reply_radar` shape every reader here expects from the narrowed columns. The AI Ark
  * blob averages ~44KB a lead (its `raw` copy alone is half of that), which made the lead read the slowest leg
  * of the inbox; only the handful of fields below are ever shown. Only the first two position groups are
  * read for the current-company fallback, which applies only when no other company name exists.
  */
-const leadFromColumns = (row: Row): Row => {
+const leadFromColumns = (input: Row): Row => {
+  // `inbox_card` (migration 20261003_rr_leads_inbox_card) carries the same keys precomputed on write.
+  const row: Row = input.inbox_card && typeof input.inbox_card === "object" ? { ...input, ...(input.inbox_card as Row) } : input;
   const ai: Row = {};
   for (const key of ["title", "headline", "location", "industry", "profilePhotoSource", "profilePhotoUrl", "companyPhotoSource", "companyPhotoUrl"]) {
     if (row[`ai_${key}`] !== null && row[`ai_${key}`] !== undefined) ai[key] = row[`ai_${key}`];
@@ -258,7 +279,7 @@ async function readThread(url: string, key: string, conversationId: string) {
   if (!conversation) return { ok: false, conversationId, thread: [], error: "Conversation not found." };
   const [leadRows, messages] = await Promise.all([
     conversation.lead_id
-      ? query(url, key, `rr_leads?select=${LEAD_COLUMNS}&id=eq.${encodeURIComponent(String(conversation.lead_id))}&limit=1`).then((rows) => rows.map(leadFromColumns))
+      ? readLeads(url, key, `id=eq.${encodeURIComponent(String(conversation.lead_id))}&limit=1`)
       : Promise.resolve([] as Row[]),
     queryPaged(
       url,
@@ -358,7 +379,7 @@ export async function GET(request: Request) {
     const timed = <T,>(name: string, work: Promise<T>) => work.then((value) => { timings.push(`${name};dur=${Date.now() - mark}`); return value; });
     const [leads, messages, tagsByConversation] = await Promise.all([
       timed("leads", queryByIds(leadIds, 100, (batch) =>
-        query(url, key, `rr_leads?select=${LEAD_COLUMNS}&id=in.(${batch.map(encodeURIComponent).join(",")})`).then((rows) => rows.map(leadFromColumns)),
+        readLeads(url, key, `id=in.(${batch.map(encodeURIComponent).join(",")})`),
       )),
       timed("messages", queryByIds(conversationIds, 50, (batch) =>
         queryPaged(
