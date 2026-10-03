@@ -31,6 +31,7 @@
 import { parseFrame, splitFrames } from "../../shared/anthropic-stream.mjs";
 import { readConfig } from "./app-config";
 import { DEFAULT_MODEL, temperatureField } from "../../shared/anthropic-model.mjs";
+import { stripDashes } from "../../shared/no-dashes.mjs";
 
 const MODEL = DEFAULT_MODEL;
 export const ICP_DOC_PROMPT_KEY = "icp_doc_prompt";
@@ -69,7 +70,7 @@ const CHUNK_BUDGET_MS = 240_000;
 /** A guard on the loop, not a feature: a document this long means the model is not converging. */
 const MAX_CHUNKS = 4;
 
-export const DEFAULT_ICP_DOC_PROMPT = `You are writing the ideal customer profile document for one client of a B2B outbound growth agency. You will be given every file the agency holds on that client — the brief, the ICP notes, personas, tone of voice, engagement rules, call notes, CRM exports, whatever exists. Some of it will be contradictory, out of date or half-written.
+export const DEFAULT_ICP_DOC_PROMPT = `You are writing the ideal customer profile document for one client of a B2B outbound growth agency. You will be given every file the agency holds on that client: the brief, the ICP notes, personas, tone of voice, engagement rules, call notes, CRM exports, whatever exists. Some of it will be contradictory, out of date or half-written.
 
 Write the document somebody would want on the first day of working on this account: three to five pages that say who we target, why they buy, how we speak to them and what we do not do.
 
@@ -77,24 +78,25 @@ Write the document somebody would want on the first day of working on this accou
 
 Use these sections, in this order, with a level-2 heading each. Drop a section only if the files say nothing at all about it, and if you drop one, say so in the closing section.
 
-1. **Who they are** — the client company in a short paragraph: what they sell, to whom, how they make money, what makes them different from the obvious alternative.
-2. **Who we target** — the ideal customer profile as a table: industry or vertical, company size, geography, tech or tooling, and any hard qualifier. One row per attribute, with the criterion and, where the files give one, the reason it matters.
-3. **The people we message** — one subsection per persona: their title, what they are measured on, what they already believe, and the line that gets a reply from them. Use a table when the personas are directly comparable.
-4. **Why they buy** — the pains, triggers and the value the client actually delivers, in the client's own framing rather than a generic one. Name the competitor or status quo we are displacing where the files identify it.
-5. **How we speak to them** — tone, vocabulary to use, vocabulary to avoid, message length, whether the first touch pitches. Quote the client's own phrasing where the files provide it.
-6. **What we do not do** — exclusions, do-not-contact rules, banned claims, compliance limits, industries or accounts that are off limits. Put each hard rule in its own blockquote, because these are the ones that cost money when broken.
-7. **What is running** — the campaigns, tracks or sequences the files describe, and any results they state. A table if there is more than one.
-8. **Gaps** — what a person working this account still needs and the files do not answer. Be specific: "no do-not-contact list has been written" is useful, "more research needed" is not.
+1. **Who they are**: the client company in a short paragraph: what they sell, to whom, how they make money, what makes them different from the obvious alternative.
+2. **Who we target**: the ideal customer profile as a table: industry or vertical, company size, geography, tech or tooling, and any hard qualifier. One row per attribute, with the criterion and, where the files give one, the reason it matters.
+3. **The people we message**: one subsection per persona: their title, what they are measured on, what they already believe, and the line that gets a reply from them. Use a table when the personas are directly comparable.
+4. **Why they buy**: the pains, triggers and the value the client actually delivers, in the client's own framing rather than a generic one. Name the competitor or status quo we are displacing where the files identify it.
+5. **How we speak to them**: tone, vocabulary to use, vocabulary to avoid, message length, whether the first touch pitches. Quote the client's own phrasing where the files provide it.
+6. **What we do not do**: exclusions, do-not-contact rules, banned claims, compliance limits, industries or accounts that are off limits. Put each hard rule in its own blockquote, because these are the ones that cost money when broken.
+7. **What is running**: the campaigns, tracks or sequences the files describe, and any results they state. A table if there is more than one.
+8. **Gaps**: what a person working this account still needs and the files do not answer. Be specific: "no do-not-contact list has been written" is useful, "more research needed" is not.
 
 ## Rules
 
 - Everything in this document must come from the files. No industry knowledge, no benchmarks, no invented figures, no illustrative examples, no advice about what the client should do.
 - Never change a number, a company name, a title or a campaign code. Copy them exactly.
 - Where the files disagree, say so in one sentence and prefer the more recent or more specific file.
-- Where the files are silent, say they are silent. An honest gap is worth more than a plausible paragraph — this document will be read as fact by people who will not check it.
+- Where the files are silent, say they are silent. An honest gap is worth more than a plausible paragraph, because this document will be read as fact by people who will not check it.
+- Never use em dashes or en dashes.
 - Write in plain declarative sentences. No filler, no "in today's competitive landscape", no restating the section heading as a first line.
 - Formatting: level-2 headings for sections, level-3 for subsections, markdown tables, bullets and blockquotes. No fenced code blocks, no HTML, no images.
-- Start with a level-1 heading naming the client and the document, then a one-paragraph summary before the first section. Nothing else before it — no preamble, no note about what you were given.`;
+- Start with a level-1 heading naming the client and the document, then a one-paragraph summary before the first section. Nothing else before it: no preamble, no note about what you were given.`;
 
 /** The stored instructions, or the ones above if nobody has changed them. */
 export async function icpDocPrompt(): Promise<string> {
@@ -235,7 +237,7 @@ export async function writeIcpDoc({
     }
   }
 
-  const markdown = `${written}${fresh}`;
+  const markdown = stripDashes(`${written}${fresh}`);
   if (!markdown.trim()) throw new Error("The model returned nothing to show.");
   // `end_turn` is the only reason that means finished. `max_tokens` and a cancelled read both mean
   // there is more to write, and an empty chunk means the model had nothing left to add anyway.

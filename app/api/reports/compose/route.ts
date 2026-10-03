@@ -16,6 +16,7 @@
 import { NextResponse } from "next/server";
 import { resolveModel, temperatureField, DEFAULT_MODEL } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { stripDashes } from "../../../../shared/no-dashes.mjs";
 import {
   COMPOSE_SYSTEM_PROMPT,
   DEFAULT_CAMPAIGN_METRICS,
@@ -464,7 +465,7 @@ ${JSON.stringify(digests.length === 1 ? digests[0] : digests, null, 2)}`;
     }
 
     const content = Array.isArray(payload.content) ? payload.content : [];
-    const raw = text(object(content.find((item) => object(item).type === "text")).text);
+    const raw = stripDashes(text(object(content.find((item) => object(item).type === "text")).text));
 
     /*
      * A reply that was cut off or is not JSON is an error, not a narrative. This used to fall back to

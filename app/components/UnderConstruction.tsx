@@ -31,7 +31,7 @@ export default function UnderConstruction({ title, purpose }: { title: string; p
             <span className="construction-badge">Under construction</span>
             <h1>{title}</h1>
             <p>{purpose}</p>
-            <p className="construction-note">Nothing to do here yet — this tab is a placeholder for it.</p>
+            <p className="construction-note">Nothing to do here yet. This tab is a placeholder for it.</p>
           </div>
         </main>
       </section>

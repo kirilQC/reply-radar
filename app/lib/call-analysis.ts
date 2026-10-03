@@ -78,7 +78,7 @@ What happens next and when: the next call, a deadline somebody named, a thing to
 
 ## Rules
 
-- **Never use an em dash or an en dash.** Not one, anywhere. No \`—\`, no \`–\`. They are the clearest tell a machine wrote this. Use a comma, a colon, a semicolon, brackets, or two sentences.
+- **Never use an em dash or an en dash.** Not one, anywhere. No em dash (U+2014), no en dash (U+2013). They are the clearest tell a machine wrote this. Use a comma, a colon, a semicolon, brackets, or two sentences.
 - **Keep every line short.** One point, one line. The detail sub-bullet is a single clause, not a sentence. If it needs a paragraph, it is two points and you should pick the one that matters.
 - Do not invent detail the transcript does not contain. A machine transcription gets names and product terms wrong, so where a word is clearly garbled, use the nearest sensible reading from the client context rather than quoting the garble.
 - Do not open with a title, a date or a greeting. Open on the first section heading. Do not close with a summary or a question. End on your last point.

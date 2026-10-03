@@ -188,7 +188,7 @@ function ViewEditor({ view, clients, onClose, onSaved }: { view: ViewDef | null;
               <input className="pm-logo-urlin" value={logoUrl} placeholder="or paste an image URL" onChange={(e) => setLogoUrl(e.target.value)} />
             </div>
           </div>
-          <label className="pm-f"><span>Internal Slack channel ID <em style={{ fontWeight: 400, color: "var(--muted-2)" }}>· optional</em></span><input value={channel} placeholder="e.g. C0123ABCD — the team channel for this group" onChange={(e) => setChannel(e.target.value)} /></label>
+          <label className="pm-f"><span>Internal Slack channel ID <em style={{ fontWeight: 400, color: "var(--muted-2)" }}>· optional</em></span><input value={channel} placeholder="e.g. C0123ABCD, the team channel for this group" onChange={(e) => setChannel(e.target.value)} /></label>
           <div className="pm-f"><span>Clients in this view</span>
             <div className="pm-member-grid">
               {clients.map((c) => (

@@ -2607,7 +2607,7 @@ export function InboxPage() {
                                   type="button"
                                   className={`lead-tag ${tagFilter === tag.id ? "lead-tag-on" : ""}`}
                                   style={{ color: tag.color, background: `${tag.color}22`, borderColor: `${tag.color}${tagFilter === tag.id ? "" : "55"}` }}
-                                  title={tagFilter === tag.id ? `Showing only “${tag.name}” — click to clear` : `Filter to “${tag.name}”`}
+                                  title={tagFilter === tag.id ? `Showing only “${tag.name}”, click to clear` : `Filter to “${tag.name}”`}
                                   onClick={(event) => { event.stopPropagation(); setTagFilter(tagFilter === tag.id ? "" : tag.id); setSelectedId(""); }}
                                 >
                                   {tag.name}
@@ -3120,15 +3120,15 @@ const dayStamp = (value: string | null | undefined, timeZone: string) => {
 };
 const icpBandLabel = (score: number | null | undefined) => {
   if (typeof score !== "number" || Number.isNaN(score)) return "Unscored";
-  if (score >= 80) return "80–100";
-  if (score >= 60) return "60–79";
-  if (score >= 40) return "40–59";
+  if (score >= 80) return "80 to 100";
+  if (score >= 60) return "60 to 79";
+  if (score >= 40) return "40 to 59";
   return "Under 40";
 };
 const orderedBuckets: Record<string, string[]> = {
   sentiment: ["Positive", "Neutral", "Negative", "Unscored"],
   urgency: ["Hot", "Warm", "Cold", "Nurture", "Unscored"],
-  icp: ["80–100", "60–79", "40–59", "Under 40", "Unscored"],
+  icp: ["80 to 100", "60 to 79", "40 to 59", "Under 40", "Unscored"],
 };
 const bucketToneClass: Record<string, string> = {
   Positive: "tone-good",
@@ -3482,7 +3482,7 @@ function InboxAnalytics({
       )}
       {graphs.length === 0 && (
         <p className="analytics-empty">
-          No graphs yet — add a preset or build your own.
+          No graphs yet. Add a preset or build your own.
         </p>
       )}
       <div className="inbox-graph-grid">

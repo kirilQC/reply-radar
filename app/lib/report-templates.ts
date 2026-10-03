@@ -80,7 +80,7 @@ export const WRITTEN_SECTION_PROMPTS: Record<WrittenSectionId, { label: string; 
   recap: {
     label: "Recap",
     placeholder:
-      "The opening paragraph, in your words. Anything the numbers cannot say — meetings booked, who you spoke to, how the week actually went.",
+      "The opening paragraph, in your words. Anything the numbers cannot say: meetings booked, who you spoke to, how the week actually went.",
   },
   "what-we-did": {
     label: "What we did this week",
@@ -102,7 +102,7 @@ export const WRITTEN_SECTION_PROMPTS: Record<WrittenSectionId, { label: string; 
   "deal-progress": {
     label: "Deal progress",
     placeholder:
-      "Where the opportunities we sourced now stand — moved to proposal, gone quiet, signed, lost. One line each, with the company named.",
+      "Where the opportunities we sourced now stand: moved to proposal, gone quiet, signed, lost. One line each, with the company named.",
   },
   priorities: {
     label: "Priorities for next week",
@@ -125,13 +125,13 @@ export type SectionDef = { id: SectionId; label: string; blurb: string; alwaysOn
  * never asked, and every figure that needed a denominator now carries one in its own caption.
  */
 export const SECTIONS: SectionDef[] = [
-  { id: "intro", label: "Intro", blurb: "The opening line — written for you, then yours to edit" },
+  { id: "intro", label: "Intro", blurb: "The opening line, written for you, then yours to edit" },
   { id: "recap", label: "Recap", blurb: "Your own opening paragraph, typed before generating" },
   { id: "executive-summary", label: "Executive summary", blurb: "Auto-written narrative from the numbers" },
   {
     id: "metrics",
     label: "Performance metrics",
-    blurb: "Replies, positives, acceptance and reply rates — selected campaigns only",
+    blurb: "Replies, positives, acceptance and reply rates for selected campaigns only",
   },
   { id: "kpis", label: "Headline KPIs", blurb: "Replies, positive rate, hot leads, avg per day" },
   { id: "sentiment", label: "Sentiment breakdown", blurb: "Positive / neutral / negative split with %" },
@@ -146,7 +146,7 @@ export const SECTIONS: SectionDef[] = [
   {
     id: "best-replies",
     label: "Best replies from this week",
-    blurb: "The five strongest replies, pulled for you — name, title, company, what they said",
+    blurb: "The five strongest replies, pulled for you: name, title, company, what they said",
   },
   { id: "senders", label: "Sender leaderboard", blurb: "Top LinkedIn accounts by reply volume" },
   { id: "top-leads", label: "Top leads", blurb: "Highest ICP scores with role, company, reason" },
@@ -158,7 +158,7 @@ export const SECTIONS: SectionDef[] = [
   {
     id: "deal-progress",
     label: "Deal progress",
-    blurb: "Where the deals we sourced now stand — your own list, since it lives in their CRM",
+    blurb: "Where the deals we sourced now stand: your own list, since it lives in their CRM",
   },
   { id: "priorities", label: "Priorities for next week", blurb: "Your own list of what happens next" },
   { id: "warm-close", label: "Warm close", blurb: "Your own sign-off" },
@@ -400,17 +400,18 @@ export const COMPOSE_SYSTEM_PROMPT = `You write client-facing reporting copy for
 
 Rules that override any other instruction:
 - Use ONLY the numbers in the supplied data. Never invent, estimate or extrapolate a figure.
+- Never use em dashes or en dashes.
 - If the data is empty or a metric is zero, say so plainly. Do not dress it up.
 - Never promise future results.
 - Short sentences. No marketing adjectives ("incredible", "amazing", "game-changing") and no filler
   ("it's worth noting that", "we're excited to share", "as you can see").
-- Refer to the client by name, and to replies as replies — not "leads" unless describing a lead.
+- Refer to the client by name, and to replies as replies, not "leads" unless describing a lead.
 
 "narrative" is a page in a document. It carries no greeting and no sign-off.
 
 YOU DO NOT WRITE THE EMAIL. You write the blocks of it that come from the data, and the app assembles
-the email around them. The account manager's own sections — their recap, what they did, their
-priorities, their sign-off — are printed word for word exactly as typed, and you never see your output
+the email around them. The account manager's own sections (their recap, what they did, their
+priorities, their sign-off) are printed word for word exactly as typed, and you never see your output
 next to theirs. So:
 - Do not repeat, summarise, tidy, expand on or rephrase anything they wrote. It is already in the email.
 - Do not contradict it either. If they say a campaign was paused, do not call it live.
@@ -420,16 +421,16 @@ Write plain text. Markdown only for emphasis inside a bullet. No tables, no head
 any supplied to you. Emoji only if the account manager used one in their own words.
 
 Return ONLY a JSON object, no prose around it, in exactly this shape. Return an empty string or an empty
-array for any block the data cannot support — never a placeholder:
+array for any block the data cannot support, never a placeholder:
 {
   "headline": "one line, max 70 characters, the single most important fact",
   "narrative": "the executive summary for the PDF, 90-150 words, 2 short paragraphs",
   "subject": "the email subject line, no 'Subject:' prefix",
   "greeting": "the opening line, warm and human. Omit entirely if the account manager wrote their own intro",
   "recapBullets": ["one fact each, with its number, as a fragment. No leading dash"],
-  "campaignBullets": ["[] unless live campaign status was unavailable — see below"],
+  "campaignBullets": ["[] unless live campaign status was unavailable (see below)"],
   "priorityBullets": ["only if the account manager left their priorities blank. Otherwise []"],
-  "close": "one line of warm close. No name and no sign-off — the app signs every email itself"
+  "close": "one line of warm close. No name and no sign-off: the app signs every email itself"
 }
 
 The campaign lines are written by the app, not by you. It has the exact figures for each campaign and the
@@ -442,7 +443,7 @@ export const BUILT_IN_TEMPLATES: ReportTemplate[] = [
   {
     id: "weekly-recap",
     name: "Tarsi's EOW Report Template",
-    summary: "The Friday EOW email — recap, active campaigns, priorities. Modelled on the recaps that land.",
+    summary: "The Friday EOW email: recap, active campaigns, priorities. Modelled on the recaps that land.",
     defaultPeriod: "weekly",
     // This one is a mail, not a deck. The sections still exist behind it for anyone who wants the PDF.
     output: "email",
@@ -464,34 +465,34 @@ questions: what happened, and what's next.
 
 "subject": {Client} <> QC {M/D} EOW recap
 
-"greeting": one line — warm, human, specific to the week: the season, a holiday, an event they were at.
+"greeting": one line, warm, human, specific to the week: the season, a holiday, an event they were at.
 
 "recapBullets": three to five, and this is the heart of it.
 - One fact each, with its number, written as a fragment rather than a sentence.
 - Order by signal: replies and the positive share of them first, then connection requests sent and
   accepted with the acceptance rate, then the campaign that did the most work, named.
 - Name people. "Rory's Social Signals campaign drove 11 of them" beats "one campaign performed well".
-- Attribute a win to something repeatable — the second follow-up, an event list, a rewritten opener —
+- Attribute a win to something repeatable (the second follow-up, an event list, a rewritten opener)
   rather than to luck.
 - A number that moved the wrong way gets one bullet and one clause of cause, then you move on. No
-  apology, and no bullet whose subject is the fall — see TONE below.
+  apology, and no bullet whose subject is the fall. See TONE below.
 
 "campaignBullets": []. The app prints the campaign lines itself, with whichever figures the account
 manager ticked for this report. The only time you fill this is when live campaign status was unavailable,
-and then it is the single bullet "Campaign status: [confirm in HeyReach]" — never infer that a campaign is
+and then it is the single bullet "Campaign status: [confirm in HeyReach]". Never infer that a campaign is
 live from reply activity, because a campaign with no replies looks identical to one switched off.
 - What still belongs to you is the cause: if a campaign finished or was paused and that explains a dip,
   say so in a recap bullet, where the number it explains already is.
 
-"priorityBullets": two to four — what launches, what is waiting on the client's review, what is blocked
+"priorityBullets": two to four: what launches, what is waiting on the client's review, what is blocked
 on them, with an owner where the data gives you one. Return [] if the account manager wrote their own
 priorities; theirs are used instead of yours, unedited.
 
-"close": one line of warm close — a next step we are taking, or something specific to look forward to. Not
+"close": one line of warm close: a next step we are taking, or something specific to look forward to. Not
 a sign-off: the app signs every email as QC Growth, so a name here would be signed twice. Never a proposal
 to sit down and work out what went wrong.
 
-TONE — the client's confidence in the work is part of what they are paying for:
+TONE: the client's confidence in the work is part of what they are paying for:
 - Never write a sentence whose subject is a problem. Not "the dip", not "the drop", not "a slower week",
   not "unfortunately", not "something to look at", and never "let's dig into". The client is reading a
   report on work they commissioned; they must not be the person being told bad news about it.
@@ -511,7 +512,7 @@ RULES:
   {
     id: "all-time-exec",
     name: "All-time executive summary",
-    summary: "The whole relationship in three pages — for QBRs, renewals and exec updates.",
+    summary: "The whole relationship in three pages, for QBRs, renewals and exec updates.",
     defaultPeriod: "all-time",
     output: "pdf",
     builtIn: true,
@@ -523,7 +524,7 @@ RULES:
       ["top-leads"],
     ],
     prompt: `This is an all-time executive summary covering the entire engagement to date. The reader is
-a senior stakeholder — often the person who approves the budget — who has not been following week to
+a senior stakeholder (often the person who approves the budget) who has not been following week to
 week.
 
 Emphasis, in order:
@@ -533,7 +534,7 @@ Emphasis, in order:
 4. How many genuinely high-fit leads (ICP 75+) the engagement has surfaced.
 
 The email is a covering note for the attached PDF, not the report itself. Put the whole of it in
-"recapBullets" — four or five, opening with the single most important number and ending with what the
+"recapBullets": four or five, opening with the single most important number and ending with what the
 client should look at first in the PDF. Leave "campaignBullets" and "priorityBullets" empty.`,
   },
 ];

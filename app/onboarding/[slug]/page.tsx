@@ -73,7 +73,7 @@ function ClientLogoCard({ slug, name, logoUrl, accentColor, onSaved }: { slug: s
       </span>
       <div className="onb-logo-body">
         <h3>Client logo</h3>
-        <p>Upload an image or paste a URL — it shows on every {name} badge across the app.</p>
+        <p>Upload an image or paste a URL. It shows on every {name} badge across the app.</p>
         <div className="onb-logo-actions">
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => void uploadFile(e.target.files?.[0] ?? undefined)} />
           <button type="button" className="onb-logo-upload" disabled={busy} onClick={() => fileRef.current?.click()}>Upload image</button>
@@ -185,10 +185,10 @@ function ReplyRadarSetup({ slug, onConfig, client, onLogoSaved }: { slug: string
               onSaved={(u) => onLogoSaved?.(u)} />
           )}
           <div className="rr-grid">
-            {field("HeyReach API key", <input type="password" value={form.heyreachApiKey} placeholder={cfg?.keyConfigured ? `Saved ${cfg.keyMasked} — leave blank to keep` : "Paste the client's HeyReach key"} onChange={(e) => setForm((f) => ({ ...f, heyreachApiKey: e.target.value }))} />)}
+            {field("HeyReach API key", <input type="password" value={form.heyreachApiKey} placeholder={cfg?.keyConfigured ? `Saved ${cfg.keyMasked}, leave blank to keep` : "Paste the client's HeyReach key"} onChange={(e) => setForm((f) => ({ ...f, heyreachApiKey: e.target.value }))} />)}
             {field("Airtable base", (
               <select value={form.airtableBaseId} onChange={(e) => setForm((f) => ({ ...f, airtableBaseId: e.target.value }))}>
-                <option value="">— pick a base —</option>
+                <option value="">Pick a base</option>
                 {bases.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             ))}
@@ -198,14 +198,14 @@ function ReplyRadarSetup({ slug, onConfig, client, onLogoSaved }: { slug: string
             {field("Slack external ID", <input value={form.slackExternal} placeholder="C0123ABCD" onChange={(e) => setForm((f) => ({ ...f, slackExternal: e.target.value }))} />)}
           </div>
           <div className="rr-field rr-field-optional">
-            <label htmlFor="rr-crm-provider">Client CRM API key <em>optional — not required to complete</em></label>
+            <label htmlFor="rr-crm-provider">Client CRM API key <em>optional, not required to complete</em></label>
             <div className="rr-crm-row">
               <select id="rr-crm-provider" value={form.crmProvider} onChange={(e) => setForm((f) => ({ ...f, crmProvider: e.target.value }))}>
                 <option value="">No CRM</option>
                 <option value="hubspot">HubSpot</option>
                 <option value="attio">Attio</option>
               </select>
-              <input type="password" value={form.crmApiKey} placeholder={cfg?.crmConfigured ? "Saved — leave blank to keep" : "Paste the client's CRM key"} onChange={(e) => setForm((f) => ({ ...f, crmApiKey: e.target.value }))} />
+              <input type="password" value={form.crmApiKey} placeholder={cfg?.crmConfigured ? "Saved, leave blank to keep" : "Paste the client's CRM key"} onChange={(e) => setForm((f) => ({ ...f, crmApiKey: e.target.value }))} />
             </div>
           </div>
           {cfg?.webhookUrl && (

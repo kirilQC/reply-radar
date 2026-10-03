@@ -35,10 +35,10 @@ function fromRow(row: Row): ClientTemplate {
 // The shortlist a brand-new workspace starts with, so the panel is never empty on first use. Seeded into
 // the table once (when it has no rows), after which they are ordinary editable/deletable rows.
 const DEFAULTS: { label: string; body: string }[] = [
-  { label: "Kickoff — we're live", body: "Hi team 👋 We've officially kicked off {client}'s outbound program. Our team is building the target lists and first campaigns now — we'll keep you posted as things go live." },
-  { label: "Campaigns launched", body: "Quick update — your first campaigns for {client} are now live and messages are going out. We'll share early numbers as replies start coming in." },
-  { label: "First replies in", body: "Good news — the first replies are coming in for {client}. We're qualifying them now and will surface anything that looks like a real opportunity." },
-  { label: "Weekly check-in", body: "Weekly update: campaigns for {client} are running smoothly. Here's where things stand this week — happy to jump on a call if you'd like to dig into anything." },
+  { label: "Kickoff: we're live", body: "Hi team 👋 We've officially kicked off {client}'s outbound program. Our team is building the target lists and first campaigns now, and we'll keep you posted as things go live." },
+  { label: "Campaigns launched", body: "Quick update: your first campaigns for {client} are now live and messages are going out. We'll share early numbers as replies start coming in." },
+  { label: "First replies in", body: "Good news: the first replies are coming in for {client}. We're qualifying them now and will surface anything that looks like a real opportunity." },
+  { label: "Weekly check-in", body: "Weekly update: campaigns for {client} are running smoothly. Here's where things stand this week. Happy to jump on a call if you'd like to dig into anything." },
   { label: "Blank message", body: "" },
 ];
 

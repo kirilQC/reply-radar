@@ -6,6 +6,7 @@ import { resolveModel, temperatureField, DEFAULT_MODEL } from "../../../../share
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { clientContext, withClientContext } from "../../../lib/client-context";
 import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
+import { stripDashes } from "../../../../shared/no-dashes.mjs";
 
 type Row = Record<string, unknown>;
 const object = (v: unknown): Row => v && typeof v === "object" && !Array.isArray(v) ? v as Row : {};
@@ -225,7 +226,7 @@ export async function POST(request: Request) {
   const noFabricationRule =
     "\n\nNever invent facts. Do not state availability, dates, times, prices, deadlines, numbers, links, documents, names or commitments unless they appear explicitly in the conversation above or in the client context. Where the reply needs a detail only the sender can supply, leave a short bracketed placeholder in its place — for example \"I'm free (insert time here)\", \"pricing starts at (insert price here)\", \"here's the (insert link here)\" — and write the rest of the sentence around it normally. Placeholders are expected and preferred over a plausible guess. Never fill a placeholder with an example value.\n";
 
-  const userContent = `${mode === "analyze" ? `Return ONLY valid JSON with three string fields: draft (a concise, professional reply the sender could use), ${reasonInstruction}, and sentiment (exactly positive, neutral, or negative). Do not use markdown. ` : ""}${noFabricationRule}${regenerateNudge}${toneContext}${instruction}\n\nConversation:\n${thread.map((item: { direction?: string; body?: string }) => `${item.direction ?? "message"}: ${item.body ?? ""}`).join("\n")}`;
+  const userContent = `${mode === "analyze" ? `Return ONLY valid JSON with three string fields: draft (a concise, professional reply the sender could use), ${reasonInstruction}, and sentiment (exactly positive, neutral, or negative). Do not use markdown. ` : ""}${noFabricationRule}\n\nNever use em dashes or en dashes.${regenerateNudge}${toneContext}${instruction}\n\nConversation:\n${thread.map((item: { direction?: string; body?: string }) => `${item.direction ?? "message"}: ${item.body ?? ""}`).join("\n")}`;
 
   const requestBody = (m: string) => JSON.stringify({
     model: m,
@@ -248,7 +249,7 @@ export async function POST(request: Request) {
     const payload = await response.json().catch(() => ({}));
     const durationMs = Date.now() - t0;
     console.log(`[ai-draft] model=${model} status=${response.status} pastReplies=${pastReplies.length}`);
-    const text = payload?.content?.find((item: { type?: string }) => item.type === "text")?.text ?? "";
+    const text = stripDashes(String(payload?.content?.find((item: { type?: string }) => item.type === "text")?.text ?? ""));
     let analysis: { draft?: string; reason?: string; sentiment?: string } = {};
     if (mode === "analyze") {
       try { analysis = JSON.parse(text.replace(/^```json\s*|\s*```$/g, "")); } catch { analysis = { draft: text, reason: "This lead sent a new reply that is ready for review." }; }

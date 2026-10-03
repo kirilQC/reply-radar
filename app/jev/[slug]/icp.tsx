@@ -85,7 +85,7 @@ export function IcpBox({ icp, brief, busy, disabled, onBuild, json, onImport }: 
           <div className="jev-icp-size">
             <span>Company size</span>
             <input className="jev-input" inputMode="numeric" value={sizeMin} onChange={(e) => setSizeMin(e.target.value.replace(/[^0-9]/g, ""))} disabled={disabled} placeholder="min" aria-label="Minimum employees" />
-            <em>–</em>
+            <em>to</em>
             <input className="jev-input" inputMode="numeric" value={sizeMax} onChange={(e) => setSizeMax(e.target.value.replace(/[^0-9]/g, ""))} disabled={disabled} placeholder="max" aria-label="Maximum employees" />
             <em>employees</em>
           </div>

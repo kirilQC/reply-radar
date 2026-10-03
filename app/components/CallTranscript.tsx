@@ -86,8 +86,8 @@ export default function CallTranscript({
         <div>
           <strong>Fill from a call transcript</strong>
           <em>
-            Paste the weekly sync. It fills the {sections.length} section{sections.length === 1 ? "" : "s"} below —
-            you review before anything is written.
+            Paste the weekly sync. It fills the {sections.length} section{sections.length === 1 ? "" : "s"} below,
+            and you review before anything is written.
           </em>
         </div>
         <button type="button" className="call-transcript-toggle" onClick={() => setOpen((current) => !current)}>
@@ -101,7 +101,7 @@ export default function CallTranscript({
             className="call-transcript-box"
             value={transcript}
             onChange={(event) => setTranscript(event.target.value)}
-            placeholder="Paste the whole transcript, speaker labels and all. Timestamps are fine — they are ignored."
+            placeholder="Paste the whole transcript, speaker labels and all. Timestamps are fine, they are ignored."
           />
           <div className="call-transcript-actions">
             <button type="button" className="call-transcript-fill" onClick={() => void fill()} disabled={!enough || filling}>
@@ -123,7 +123,7 @@ export default function CallTranscript({
               {words
                 ? enough
                   ? `${words.toLocaleString()} words`
-                  : `${words} words — paste more of the call`
+                  : `${words} words. Paste more of the call`
                 : "Speaker labels help it tell your side from theirs."}
             </span>
           </div>

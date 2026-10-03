@@ -96,7 +96,7 @@ export function weeklyCallBrainDoc(
     front.join("\n"),
     "---",
     "",
-    `# ${input.call.title || "Weekly call"} — ${callDate}`,
+    `# ${input.call.title || "Weekly call"}: ${callDate}`,
     "",
     "## Recap",
     "",

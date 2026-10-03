@@ -177,7 +177,7 @@ function QuestionEditor({ value, onChange }: { value: QuestionSet; onChange: (v:
                       <input type="checkbox" checked={passList.includes(key)} onChange={(e) => setQ(idx, { pass: e.target.checked ? [...passList, key] : passList.filter((k) => k !== key), neutral: (q.neutral ?? []).filter((k) => k !== key) })} />
                       <span>fit</span>
                     </label>
-                    <label className="jev-fit-check" title="Can't tell — counts for nothing either way">
+                    <label className="jev-fit-check" title="Can't tell. Counts for nothing either way">
                       <input type="checkbox" checked={(q.neutral ?? []).includes(key)} onChange={(e) => setQ(idx, { neutral: e.target.checked ? [...(q.neutral ?? []), key] : (q.neutral ?? []).filter((k) => k !== key), pass: passList.filter((k) => k !== key) })} />
                       <span>?</span>
                     </label>
@@ -234,7 +234,7 @@ function QuestionList({ set, missing }: { set: QuestionSet; missing: Record<stri
             </div>
           )}
           {missing[q.key] && (
-            <div className="jev-gap">Most contacts in this file have no {missing[q.key].map((f) => `\`${f}\``).join(", ")} — Jev will be answering this one blind.</div>
+            <div className="jev-gap">Most contacts in this file have no {missing[q.key].map((f) => `\`${f}\``).join(", ")}, so Jev will be answering this one blind.</div>
           )}
         </li>
       ))}
@@ -279,7 +279,7 @@ function ColumnPanel({ file, onChange, disabled }: { file: LoadedFile; onChange:
   const sampleOf = (idx: number) => { for (const cells of file.rows.slice(0, PLAN_SAMPLE)) { const v = (cells[idx] ?? "").trim(); if (v) return v.length > 70 ? `${v.slice(0, 70)}…` : v; } return ""; };
   const groups: [string, PlanColumn[]][] = [
     ["Sent to Jev", file.plan.columns.filter((c) => c.role !== "ignore" && !IDENTITY.has(c.role))],
-    [file.mode === "companies" ? "Identifies the company — used to spot duplicates, never sent" : "Identifies the person — shown here, never sent", file.plan.columns.filter((c) => IDENTITY.has(c.role))],
+    [file.mode === "companies" ? "Identifies the company: used to spot duplicates, never sent" : "Identifies the person: shown here, never sent", file.plan.columns.filter((c) => IDENTITY.has(c.role))],
     ["Ignored", file.plan.columns.filter((c) => c.role === "ignore")],
   ];
   const [used, identity, ignored] = groups.map(([, cols]) => cols.length);
@@ -646,7 +646,7 @@ export default function JevClientPage() {
       if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Saving descriptions failed (${response.status}).` }); return; }
       setTags(payload.set);
       const missing = payload.set.tags.filter((t: { description: string; key: string }) => !t.description && t.key !== "other").length;
-      setNotice({ kind: missing ? "info" : "ok", text: `Saved ${payload.set.tags.length} tags with descriptions${missing ? ` — ${missing} still have none${failed ? " (some batches failed; build again to retry just those)" : ""}` : ""}. Check them below before running.` });
+      setNotice({ kind: missing ? "info" : "ok", text: `Saved ${payload.set.tags.length} tags with descriptions${missing ? `. ${missing} still have none${failed ? " (some batches failed; build again to retry just those)" : ""}` : ""}. Check them below before running.` });
     } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
   };
 
@@ -679,7 +679,7 @@ export default function JevClientPage() {
           const items = batch.map((i) => ({ i, profile: enrichedRef.current.get(i)?.profile ?? file.profiles[i], top: results.current.get(i)?.top }));
           const response = await fetch("/api/jev/tags/review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, items }) }).catch(() => null);
           const payload = response ? await response.json().catch(() => ({})) : {};
-          if (response?.status === 429 && attempt < 5) { pushLog("warn", `OpenRouter rate limit — holding ${batch.length} companies for 20s`); await new Promise((r) => setTimeout(r, 20_000)); continue; }
+          if (response?.status === 429 && attempt < 5) { pushLog("warn", `OpenRouter rate limit, holding ${batch.length} companies for 20s`); await new Promise((r) => setTimeout(r, 20_000)); continue; }
           if (!response?.ok || !payload.ok) { failed += batch.length; lastError = String(payload?.error ?? `HTTP ${response?.status ?? "no response"}`); pushLog("error", `Claude review failed for ${batch.length} companies: ${lastError}`); break; }
           cost += Number(payload.cost) || 0;
           for (const o of payload.results ?? []) {
@@ -706,7 +706,7 @@ export default function JevClientPage() {
     setProposals(merged.map((m) => ({ label: m.label, description: m.description, count: m.rows.length, examples: m.rows.slice(0, 5).map((i) => file.people[i]?.name ?? "") })));
     setReview(null);
     const placed = [...outcomes.values()].filter((o) => o.kind !== "unplaced").length;
-    setNotice({ kind: failed ? "info" : "ok", text: `Claude reviewed ${rows.length.toLocaleString()} companies — placed ${placed.toLocaleString()}${merged.length ? `, proposing ${merged.length} new tag${merged.length === 1 ? "" : "s"}` : ""}${failed ? `; ${failed} could not be reviewed (${lastError}) — click Review again to retry them` : ""} · ${money(cost)}` });
+    setNotice({ kind: failed ? "info" : "ok", text: `Claude reviewed ${rows.length.toLocaleString()} companies: placed ${placed.toLocaleString()}${merged.length ? `, proposing ${merged.length} new tag${merged.length === 1 ? "" : "s"}` : ""}${failed ? `; ${failed} could not be reviewed (${lastError}). Click Review again to retry them` : ""} · ${money(cost)}` });
     setCollapsed(false);
   };
 
@@ -720,7 +720,7 @@ export default function JevClientPage() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
       setTags(payload.set); setProposals(null);
-      setNotice({ kind: "ok", text: `Added ${chosen.length} tag${chosen.length === 1 ? "" : "s"} to the tag set — future runs will use them.` });
+      setNotice({ kind: "ok", text: `Added ${chosen.length} tag${chosen.length === 1 ? "" : "s"} to the tag set. Future runs will use them.` });
     } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
     finally { setBusy(""); }
   };
@@ -748,7 +748,7 @@ export default function JevClientPage() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
       setSet(payload.set);
-      setNotice({ kind: "ok", text: reviewBrief ? "Review instructions saved — Claude's next review follows them." : "Review instructions cleared." });
+      setNotice({ kind: "ok", text: reviewBrief ? "Review instructions saved. Claude's next review follows them." : "Review instructions cleared." });
     } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
     finally { setBusy(""); }
   };
@@ -762,7 +762,7 @@ export default function JevClientPage() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) { setNotice({ kind: "error", text: payload.error || `Save failed (${response.status}).` }); return; }
       setSet(payload.set);
-      setNotice({ kind: "ok", text: scoring === "weighted" ? "Weighted scoring — must-haves are gates, every other question counts equally. Run again to apply." : "Must-pass scoring — must-haves and exclusions can drop a contact. Run again to apply." });
+      setNotice({ kind: "ok", text: scoring === "weighted" ? "Weighted scoring: must-haves are gates, every other question counts equally. Run again to apply." : "Must-pass scoring: must-haves and exclusions can drop a contact. Run again to apply." });
       if (file) resetResults(file);
     } catch { setNotice({ kind: "error", text: "Could not reach the server." }); }
     finally { setBusy(""); }
@@ -795,7 +795,7 @@ export default function JevClientPage() {
           const items = batch.map((i) => ({ i, profile: enrichedRef.current.get(i)?.profile ?? file.profiles[i], scores: results.current.get(i)?.scores, keep: results.current.get(i)?.keep ?? null }));
           const response = await fetch("/api/jev/review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client: slug, items, stage: which }) }).catch(() => null);
           const payload = response ? await response.json().catch(() => ({})) : {};
-          if (response?.status === 429 && attempt < 5) { pushLog("warn", `OpenRouter rate limit — holding ${batch.length} contacts for 20s`); await new Promise((r) => setTimeout(r, 20_000)); continue; }
+          if (response?.status === 429 && attempt < 5) { pushLog("warn", `OpenRouter rate limit, holding ${batch.length} contacts for 20s`); await new Promise((r) => setTimeout(r, 20_000)); continue; }
           if (!response?.ok || !payload.ok) { failed += batch.length; lastError = String(payload?.error ?? `HTTP ${response?.status ?? "no response"}`); pushLog("error", `Claude review failed for ${batch.length} contacts: ${lastError}`); break; }
           cost += Number(payload.cost) || 0;
           for (const o of payload.results ?? []) {
@@ -818,7 +818,7 @@ export default function JevClientPage() {
       }
     }));
     setReview(null);
-    setNotice({ kind: failed ? "info" : "ok", text: `Claude reviewed ${rows.length.toLocaleString()} ${noun} — kept ${kept.toLocaleString()}, dropped ${dropped.toLocaleString()}${failed ? `; ${failed} could not be reviewed (${lastError}) — click again to retry` : ""} · ${money(cost)}` });
+    setNotice({ kind: failed ? "info" : "ok", text: `Claude reviewed ${rows.length.toLocaleString()} ${noun}: kept ${kept.toLocaleString()}, dropped ${dropped.toLocaleString()}${failed ? `; ${failed} could not be reviewed (${lastError}). Click again to retry` : ""} · ${money(cost)}` });
   };
 
   const saveTags = async () => {
@@ -881,7 +881,7 @@ export default function JevClientPage() {
        */
       if (probe?.set?.questions?.length) {
         saved = probe.set as QuestionSet;
-        if (saved.updatedAt !== set?.updatedAt) { setSet(saved); setNotice({ kind: "info", text: "The saved screening questions had changed since this page loaded, so the run uses the saved ones — shown above." }); }
+        if (saved.updatedAt !== set?.updatedAt) { setSet(saved); setNotice({ kind: "info", text: "The saved screening questions had changed since this page loaded, so the run uses the saved ones, shown above." }); }
       }
     } catch { /* offline checks fall through to the run's own errors */ }
     if (!file || running || !(file.mode === "companies" ? tags?.tags.length : saved?.questions.length)) return;
@@ -927,7 +927,7 @@ export default function JevClientPage() {
     }, targets);
     if (fatal) setRunError(fatal);
     if (controller.signal.aborted) pushLog("warn", "Stopped by hand");
-    else pushLog("ok", `Run finished — ${results.current.size.toLocaleString()} rows settled`);
+    else pushLog("ok", `Run finished: ${results.current.size.toLocaleString()} rows settled`);
     stages.current = new Map();
     abortRef.current = null;
     setRunning(false); setTiming((t) => (t ? { ...t, end: Date.now() } : t)); flush();
@@ -1039,7 +1039,7 @@ export default function JevClientPage() {
    */
   const decisionHeaders = (questions: Question[]) => [
     "Jev verdict", "Jev fit score", "Jev reason", "Jev note", "Always-keep match", "Claude review",
-    ...questions.flatMap((q) => [`Jev: ${q.label} — answer`, `Jev: ${q.label} — fit %`, `Jev: ${q.label} — confidence`]),
+    ...questions.flatMap((q) => [`Jev: ${q.label} (answer)`, `Jev: ${q.label} (fit %)`, `Jev: ${q.label} (confidence)`]),
   ];
   const decisionCells = (questions: Question[], r: Result | undefined) => [
     r ? STATUS_LABEL[r.status] : "Not checked",
@@ -1188,8 +1188,8 @@ export default function JevClientPage() {
                             <button type="button" className={set.scoring !== "weighted" ? "on" : ""} onClick={() => void setScoring("gates")} disabled={running || Boolean(busy)}>Must-pass</button>
                           </div>
                           {set.scoring === "weighted"
-                            ? <span>Must-haves are gates, never votes · Key questions must pass for Good fit · every other question counts equally · Good fit: average ≥ {Math.round(set.thresholds.keep * 100)}% · Maybe: {Math.round(set.thresholds.drop * 100)}–{Math.round(set.thresholds.keep * 100)}% (kept) · Out: below {Math.round(set.thresholds.drop * 100)}%</span>
-                            : <span>Good fit: every must-have ≥ {Math.round(set.thresholds.keep * 100)}% · Dropped: a must-have &lt; {Math.round(set.thresholds.drop * 100)}%, an exclusion ≥ 80% sure{set.icp && (set.icp.sizeMin || set.icp.sizeMax) ? `, or outside ${set.icp.sizeMin ?? 0}–${set.icp.sizeMax ?? "any"} employees` : ""}</span>}
+                            ? <span>Must-haves are gates, never votes · Key questions must pass for Good fit · every other question counts equally · Good fit: average ≥ {Math.round(set.thresholds.keep * 100)}% · Maybe: {Math.round(set.thresholds.drop * 100)} to {Math.round(set.thresholds.keep * 100)}% (kept) · Out: below {Math.round(set.thresholds.drop * 100)}%</span>
+                            : <span>Good fit: every must-have ≥ {Math.round(set.thresholds.keep * 100)}% · Dropped: a must-have &lt; {Math.round(set.thresholds.drop * 100)}%, an exclusion ≥ 80% sure{set.icp && (set.icp.sizeMin || set.icp.sizeMax) ? `, or outside ${set.icp.sizeMin ?? 0} to ${set.icp.sizeMax ?? "any"} employees` : ""}</span>}
                           <span>{" · "}Good fit needs most questions answered, not can&apos;t-tell{set.updatedAt ? ` · saved ${new Date(set.updatedAt).toLocaleString()}` : ""}</span>
                         </div>
                         <KeepTermsField key={`keep-${set.updatedAt ?? ""}`} value={set.keepTerms ?? []} disabled={running || Boolean(busy)} onSave={(t) => void saveKeepTerms(t)} />
@@ -1259,7 +1259,7 @@ export default function JevClientPage() {
                         {estimate && <span><b>~{estimate.perRow}</b> tokens / row</span>}
                         {estimate && <span>est. <b>{money(estimate.cost)}</b></span>}
                         {/* A run once skipped 17,023 of 17,097 rows as duplicates without a word; this many is a column problem. */}
-                        {file.duplicates.size > total * 0.2 && <span className="jev-warn-line">{Math.round((file.duplicates.size / total) * 100)}% of rows read as duplicates — check the name and LinkedIn columns below before running.</span>}
+                        {file.duplicates.size > total * 0.2 && <span className="jev-warn-line">{Math.round((file.duplicates.size / total) * 100)}% of rows read as duplicates. Check the name and LinkedIn columns below before running.</span>}
                       </div>
                       <details className="jev-peek">
                         <summary>What Jev sees for row 1</summary>
@@ -1358,7 +1358,7 @@ export default function JevClientPage() {
                     {file.mode === "companies" && Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => (
                       <button key={k} className={`jev-filter tag ${filter === `tag:${k}` ? "on" : ""}`} onClick={() => setFilter(`tag:${k}`)}>{tagLabel(k)} <b>{n.toLocaleString()}</b></button>
                     ))}
-                    {filteredCount > VISIBLE_ROWS && <span className="jev-hint">Showing {filter === "all" && done ? "the latest" : "the first"} {VISIBLE_ROWS} of {filteredCount.toLocaleString()} — downloads include every row.</span>}
+                    {filteredCount > VISIBLE_ROWS && <span className="jev-hint">Showing {filter === "all" && done ? "the latest" : "the first"} {VISIBLE_ROWS} of {filteredCount.toLocaleString()}. Downloads include every row.</span>}
                   </div>
                   <div className="jev-table">
                     <div className={`jev-tr jev-th ${file.mode === "companies" ? "is-co" : ""}`}>

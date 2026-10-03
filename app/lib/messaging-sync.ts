@@ -162,7 +162,7 @@ export async function syncMessagingDoc(workspace: SyncWorkspace): Promise<Messag
   const filedIds: string[] = [];
   for (const tab of pending) {
     const { path, text } = messagingTabBrainDoc(folder, tab);
-    await writeBrainFile({ path, text, summary: `Campaign messaging: ${workspace.name} — ${tab.title}`, author: "QC Command" });
+    await writeBrainFile({ path, text, summary: `Campaign messaging: ${workspace.name} · ${tab.title}`, author: "QC Command" });
     filedIds.push(syncedTabKey(docId, tab.tabId));
   }
 

@@ -282,7 +282,7 @@ function companySizeLabel(summary: Row): string | null {
   const range = obj(staff.range);
   const start = str(range.start).trim();
   const end = str(range.end).trim();
-  if (start || end) return `${start || "?"}–${end || "?"} employees`;
+  if (start || end) return `${start || "?"} to ${end || "?"} employees`;
   if (staff.total) return `${Number(staff.total).toLocaleString()} employees`;
   return null;
 }

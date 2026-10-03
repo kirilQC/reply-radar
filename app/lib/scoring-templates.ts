@@ -144,13 +144,13 @@ export const FOLLOW_UP_TEMPLATES: ScoringTemplate[] = [
 The single most important question is whose turn it is. If the most recent message is from the lead, we are the ones holding the conversation up.
 
 Score higher when:
-- The lead sent the most recent message and it has gone unanswered — the longer it has sat, the higher the score.
+- The lead sent the most recent message and it has gone unanswered. The longer it has sat, the higher the score.
 - The lead asked a direct question, requested information, or raised an objection that we never addressed.
 - The lead agreed to something (a call, an intro, a document) and is waiting for us to make it happen.
 - The reply was warm or positive and the momentum is now at risk of being wasted.
 
 Score lower or zero when:
-- We sent the most recent message and the lead simply has not answered yet — that is their turn, not ours.
+- We sent the most recent message and the lead simply has not answered yet. That is their turn, not ours.
 - The lead declined clearly, asked us to stop, or said they are not interested.
 - The lead asked for contact at a specific later date that has not arrived yet.
 
@@ -192,7 +192,7 @@ Score higher when:
 - The lead was interested but blocked by budget or timing, and enough time has passed that the block may be gone.
 
 Score lower or zero when:
-- The lead named a window that has not arrived yet — the correct action is to wait, not to message.
+- The lead named a window that has not arrived yet. The correct action is to wait, not to message.
 - The lead never expressed interest, so there is no timing to revisit.
 - The lead said no outright rather than not yet.
 
@@ -214,7 +214,7 @@ Score higher when:
 Score lower when:
 - The lead never replied with anything substantive, so there is nothing to revive.
 - The lead declined, unsubscribed, or asked us to stop.
-- The conversation is still active, with a message from either side in the last few days — this template is for cold threads, not live ones.
+- The conversation is still active, with a message from either side in the last few days. This template is for cold threads, not live ones.
 - The silence is so old, or the engagement so thin, that a revival would read as a cold approach.
 
 Score 0 when the thread is either still live or not worth reopening.`,

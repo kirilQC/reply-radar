@@ -141,7 +141,7 @@ export function checkoffMessage({ clientName, taskTitle, parentTitle, doneBy, do
   const client = clean(clientName) || "This client";
   const step = clean(parentTitle) ? `${clean(parentTitle)} › *${clean(taskTitle)}*` : `*${clean(taskTitle)}*`;
   const by = clean(doneBy) ? `  ·  _${clean(doneBy)}_` : "";
-  return `:white_check_mark:  *${client}* — ${step}  ·  ${doneLeaves}/${totalLeaves} (${pct}%)${by}`;
+  return `:white_check_mark:  *${client}*: ${step}  ·  ${doneLeaves}/${totalLeaves} (${pct}%)${by}`;
 }
 
 /**
@@ -152,5 +152,5 @@ export function checkoffMessage({ clientName, taskTitle, parentTitle, doneBy, do
 export function completionMessage({ clientName, totalLeaves, doneBy }) {
   const client = clean(clientName) || "This client";
   const by = clean(doneBy) ? `  ·  _${clean(doneBy)}_` : "";
-  return `:tada:  *${client}* is fully onboarded — all ${totalLeaves} steps complete.${by}`;
+  return `:tada:  *${client}* is fully onboarded, all ${totalLeaves} steps complete.${by}`;
 }

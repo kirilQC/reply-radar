@@ -32,6 +32,7 @@ import { listAssistants, personalClientDirectory } from "../../../lib/personal-b
 import { markdownToPdf, wantsPdf, reportSummary } from "../../../../shared/simple-pdf.mjs";
 import { answerToBlocks, ASK_ACTION } from "../../../../shared/slack-blocks.mjs";
 import { relayoutForSlack } from "../../../lib/slack-relayout";
+import { stripDashes } from "../../../../shared/no-dashes.mjs";
 import { MODEL, runAgent, type AgentEvent, type AgentResult, type Turn } from "../../../lib/assistant-run";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import {
@@ -171,7 +172,7 @@ async function runAndReply(opts: {
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    await postMessage(channel, "I can't reach the model right now — `ANTHROPIC_API_KEY` is not set.", threadTs).catch(() => {});
+    await postMessage(channel, "I can't reach the model right now: `ANTHROPIC_API_KEY` is not set.", threadTs).catch(() => {});
     return;
   }
 
@@ -185,7 +186,7 @@ async function runAndReply(opts: {
     // the old post-once behaviour rather than losing the answer.
     let statusTs = "";
     try {
-      statusTs = await postMessage(channel, ":mag: _On it — Searching QC Command…_", threadTs);
+      statusTs = await postMessage(channel, ":mag: _On it. Searching QC Command…_", threadTs);
     } catch {
       /* posting failed; fall back to a single post at the end */
     }
@@ -321,12 +322,12 @@ async function runAndReply(opts: {
         result.stopReason === "max_tokens"
           ? "\n\n_This answer hit the length limit. Ask for a narrower slice to see the rest._"
           : result.outOfTime
-            ? `\n\n_Answered from ${result.steps.length} lookup${result.steps.length === 1 ? "" : "s"} before the time limit — ask for a narrower slice to let me look further._`
+            ? `\n\n_Answered from ${result.steps.length} lookup${result.steps.length === 1 ? "" : "s"} before the time limit. Ask for a narrower slice to let me look further._`
             : "";
       // A PDF report: the thread gets the headline and the file, not the whole report twice.
       const pdfAsked = Boolean(result.reply && wantsPdf(result.reply));
       // The finished answer is laid out into the house card shape by one short pass (figures untouched).
-      const source = result.reply ? (pdfAsked ? reportSummary(result.reply) : await relayoutForSlack(result.reply, question || lastUserText(messages))) : "";
+      const source = result.reply ? stripDashes(pdfAsked ? reportSummary(result.reply) : await relayoutForSlack(result.reply, question || lastUserText(messages))) : "";
       const answer = source ? toSlackText(source) : "I couldn't find an answer to that.";
       // The total time the whole run took, shown once on the answer — the live per-beat clock was on the
       // progress message, which is now deleted, so this is the only duration the thread keeps.
@@ -420,7 +421,7 @@ async function answerMention(event: Row): Promise<void> {
 
   const question = cleanMention(str(event.text));
   if (!question) {
-    await postMessage(channel, "Ask me a question in the same message you mention me — for example, _how did Cotool do this week?_", threadTs).catch(() => {});
+    await postMessage(channel, "Ask me a question in the same message you mention me, for example _how did Cotool do this week?_", threadTs).catch(() => {});
     return;
   }
 

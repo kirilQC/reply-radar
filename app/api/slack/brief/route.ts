@@ -505,7 +505,7 @@ export async function POST(request: Request) {
      */
     const pm: Row = { attempted: false, reason: "", created: 0, updated: 0, completed: 0 };
     const pmRemaining = startedAt + maxDuration * 1_000 - Date.now();
-    if (!posted) pm.reason = "Preview — the internal board is only updated on a real send.";
+    if (!posted) pm.reason = "Preview: the internal board is only updated on a real send.";
     else if (pmRemaining < TRACKER_BUDGET_MS) pm.reason = "The brief used the time budget, so the board sync was left for the next run.";
     else if (extracted && !extracted.error) {
       Object.assign(pm, await syncProjectsFromItems(workspace.slug, extracted.items, "morning_brief"));

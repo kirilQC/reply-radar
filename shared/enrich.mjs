@@ -24,7 +24,7 @@ const clip = (value, max) => {
   return s.length > max ? `${s.slice(0, max).trimEnd()}…` : s;
 };
 
-export const ENRICH_MODES = { auto: "Auto — only rows that need it", all: "Every row with a URL", off: "Off — CSV data only" };
+export const ENRICH_MODES = { auto: "Auto: only rows that need it", all: "Every row with a URL", off: "Off: CSV data only" };
 
 /* ═══ Where to scrape ═══ */
 

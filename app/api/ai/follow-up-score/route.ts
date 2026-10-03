@@ -7,6 +7,7 @@ import { writeAuditEvent } from "../../../lib/audit-log";
 import { briefedSystemPrompt } from "../../../lib/client-context";
 import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
 import { defaultFollowUpPrompt } from "../../../lib/scoring-templates";
+import { stripDashes } from "../../../../shared/no-dashes.mjs";
 
 // An Anthropic scoring call can run past the 15s default; give it room so scoring is not killed mid-call.
 export const maxDuration = 60;
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
 
   const durationMs = Date.now() - t0;
   const payload = aiRes?.ok ? await aiRes.json().catch(() => ({})) : {};
-  const text = payload?.content?.find((item: { type?: string }) => item.type === "text")?.text ?? "";
+  const text = stripDashes(String(payload?.content?.find((item: { type?: string }) => item.type === "text")?.text ?? ""));
   const inputTokens = payload?.usage?.input_tokens ?? 0;
   const outputTokens = payload?.usage?.output_tokens ?? 0;
 

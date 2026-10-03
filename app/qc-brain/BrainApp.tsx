@@ -1065,7 +1065,7 @@ function IcpSheet({ label, markdown, proposal, onPropose, writing, progress, onR
         <input
           className="brain-icp-chat-input"
           value={instruction}
-          placeholder="Tell it what to change — e.g. “make it two pages, drop the exclusions, lead with the trigger signals”"
+          placeholder="Tell it what to change, e.g. “make it two pages, drop the exclusions, lead with the trigger signals”"
           onChange={(event) => setInstruction(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter") apply(); }}
           disabled={writing}
@@ -1086,7 +1086,7 @@ function IcpSheet({ label, markdown, proposal, onPropose, writing, progress, onR
           <div className="brain-icp-writing">
             <div className="brain-icp-spinner" />
             <p>Writing the ICP document…</p>
-            <small>This can take a minute — it reads the client&apos;s whole brain folder.</small>
+            <small>This can take a minute. It reads the client&apos;s whole brain folder.</small>
           </div>
         )}
       </div>
@@ -1541,8 +1541,8 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
           Proposed as pull request #{proposed.number}.{" "}
           <a href={proposed.url} target="_blank" rel="noreferrer">
             Review and merge it
-          </a>{" "}
-          — nothing changes for the team until you do.
+          </a>
+          . Nothing changes for the team until you do.
         </p>
       )}
 
@@ -1617,7 +1617,7 @@ function Reader({ doc, error, campaigns }: { doc: FileDoc | null; error: string;
           {editing.error && <p className="brain-error">{editing.error}</p>}
           <p className="brain-editor-note">
             This opens a pull request rather than saving. Everyone&apos;s Claude Code reads this repository, so a
-            change here becomes what the whole team is told — it gets reviewed first.
+            change here becomes what the whole team is told, so it gets reviewed first.
           </p>
         </div>
       ) : (
@@ -1827,7 +1827,7 @@ function Results({ hits, searching, onOpen }: { hits: Hit[]; searching: boolean;
   if (!hits.length) {
     return (
       <p className="brain-quiet">
-        {searching ? "Searching the whole repository…" : "Nothing matched. Every word has to appear somewhere — try fewer."}
+        {searching ? "Searching the whole repository…" : "Nothing matched. Every word has to appear somewhere. Try fewer."}
       </p>
     );
   }

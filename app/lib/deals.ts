@@ -301,7 +301,7 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
     const hit = deal.contacts.find((c) => c.linkedin && heyreach.has(c.linkedin));
     const heyreachInputs = deal.contacts.map((c) => c.linkedin).filter(Boolean);
     const heyreachStep = {
-      check: "HeyReach — did QC ever message this person",
+      check: "HeyReach: did QC ever message this person",
       input: heyreachInputs.join(", ") || "no LinkedIn on the deal's contacts",
       matched: Boolean(hit),
       detail: hit ? `HeyReach confirms ${hit.name || "this contact"} in ${heyreach.get(hit.linkedin!)}` : (heyreachInputs.length ? "HeyReach has no record of these profiles" : (heyreachKey ? "nothing to look up" : "no HeyReach key connected")),
@@ -311,7 +311,7 @@ export async function syncDeals(slug: string): Promise<{ ok: boolean; error?: st
           attribution: "confirmed" as const,
           matchedBy: "heyreach",
           campaign: heyreach.get(hit.linkedin!) || "",
-          reason: `${hit.name || "This contact"} was contacted in ${heyreach.get(hit.linkedin!)} — confirmed by HeyReach.`,
+          reason: `${hit.name || "This contact"} was contacted in ${heyreach.get(hit.linkedin!)}, confirmed by HeyReach.`,
           evidence: { linkedin: hit.linkedin, source: "heyreach" },
           leadId: "",
           companyLogo: "",

@@ -276,7 +276,7 @@ test("verdictFor: a score with vetoes — musts drop on a clear fail, exclusions
   assert.ok(Math.abs(ranked.score - 0.5) < 1e-9);
   // With no must-have at all, the average decides.
   const signalsOnly = normalizeQuestionSet({ questions: [{ label: "A", type: "noul", instructions: "?", kind: "signal" }, { label: "B", type: "noul", instructions: "?", kind: "signal" }] }).questions;
-  assert.equal(verdictFor(signalsOnly, { a: { noul: 0.5 }, b: { noul: 0.5 } }, t).reason, "Score 50% — weakest: A");
+  assert.equal(verdictFor(signalsOnly, { a: { noul: 0.5 }, b: { noul: 0.5 } }, t).reason, "Score 50% · weakest: A");
   // A question left unanswered never silently passes a contact.
   assert.equal(verdictFor(questions, { main_job: { noul: 0.95 }, owns_purchasing: { noul: 0.9 } }, t).verdict, "borderline");
 });
@@ -314,7 +314,7 @@ test("ICP: title pool question is built verbatim, company size is checked in cod
   assert.equal(sizeCheck(icp, { listed_company_profile: { employees: "5001-10000" } }), "outside");
   assert.equal(sizeCheck(icp, { listed_company_profile: {} }), null);
   const v = verdictFor(normalizeQuestionSet({ questions: [q] }).questions, { target_role: { probabilities: { administrator: 0.9 } } }, undefined, { icp, profile: { listed_company_profile: { employees: "10001+" } } });
-  assert.equal(v.reason, "Company size outside 10–1000 employees");
+  assert.equal(v.reason, "Company size outside 10 to 1000 employees");
   assert.equal(normalizeIcp({}), null);
 });
 
@@ -469,7 +469,7 @@ test("weighted scoring: every question counts the same, one fail never eliminate
   assert.ok(Math.abs(carried.score - (0.2 + 0.9 + 0.8 + 0.95) / 4) < 1e-9);
   const maybe = verdictFor(questions, { any_medicare_connection: { noul: 0.5 }, employer_runs_medicare_business: { noul: 0.4 }, own_role_handles_it: { noul: 0.2 }, outside_healthcare: { noul: 0.1 } }, t, ctx);
   assert.equal(maybe.verdict, "borderline");
-  assert.match(maybe.reason, /^Maybe — score 50%, weakest: Own role handles it/);
+  assert.match(maybe.reason, /^Maybe · score 50%, weakest: Own role handles it/);
   const out = verdictFor(questions, { any_medicare_connection: { noul: 0.1 }, employer_runs_medicare_business: { noul: 0.1 }, own_role_handles_it: { noul: 0.1 }, outside_healthcare: { noul: 0.9 } }, t, ctx);
   assert.equal(out.verdict, "bad");
   const icp = normalizeIcp({ sizeMin: 100 });
@@ -605,7 +605,7 @@ test("key question: required for a good fit, never drops anyone alone; good fits
   // "Associate Director of Operations" with an MA past and headline: the current role is unproven, so a maybe.
   const linda = verdictFor(questions, { director: { noul: 0.9 }, current_role_works_on_ma: unsure, past_roles: yes, headline: yes }, t, ctx);
   assert.equal(linda.verdict, "borderline");
-  assert.equal(linda.reason, "Maybe — can't tell: Current role works on MA");
+  assert.equal(linda.reason, "Maybe · can't tell: Current role works on MA");
   assert.equal(verdictFor(questions, { director: { noul: 0.9 }, current_role_works_on_ma: no, past_roles: yes, headline: yes }, t, ctx).verdict, "borderline");
   const dawn = verdictFor(questions, { director: { noul: 0.99 }, current_role_works_on_ma: yes, past_roles: unsure, headline: yes }, t, ctx);
   assert.equal(dawn.verdict, "good");

@@ -23,20 +23,20 @@ const object = (value: unknown): Row =>
  * boundary cases are the whole problem — "sounds interesting" and "send me some info" have to be shown
  * as neutral or they get read as wins.
  */
-const DEFAULT_SENTIMENT_PROMPT = `You are classifying the lead's LATEST inbound reply in a LinkedIn conversation run by an outbound growth agency. The agency messaged the lead first — the lead is replying to a cold pitch, so ordinary politeness costs them nothing and means nothing.
+const DEFAULT_SENTIMENT_PROMPT = `You are classifying the lead's LATEST inbound reply in a LinkedIn conversation run by an outbound growth agency. The agency messaged the lead first; the lead is replying to a cold pitch, so ordinary politeness costs them nothing and means nothing.
 
 Your default answer is NEUTRAL. Most replies to cold outreach are neutral. Move off NEUTRAL only when the reply gives you something concrete to point at: real forward movement (positive) or real refusal (negative). A reply being warm, long, or on-topic is not interest.
 
-STEP 1 — Does the latest reply contain a forward step the lead is offering or accepting? A forward step is one of:
+STEP 1: Does the latest reply contain a forward step the lead is offering or accepting? A forward step is one of:
 - accepting or proposing a meeting, call, or demo, or offering their availability
 - giving an email, phone number, or calendar link so things can continue
 - asking a question whose answer only matters to someone weighing a purchase (price, scope, timeline, how it would work for their team, contract terms, proof or case studies)
 - naming a specific colleague to bring in, or saying they are forwarding it to a named person or team who owns the decision
-- asking us to send the deck, the pricing, the trial, the details — and saying who it is for or what they want to see
+- asking us to send the deck, the pricing, the trial, the details, and saying who it is for or what they want to see
 - committing to a dated next step of their own ("I'll review this weekend and come back Monday")
 If yes, the answer is POSITIVE. If no, POSITIVE is not available to you no matter how enthusiastic the wording is.
 
-STEP 2 — Is the lead refusing or closing the conversation? Signals:
+STEP 2: Is the lead refusing or closing the conversation? Signals:
 - declining outright ("not interested", "no thanks", "we'll pass")
 - asking to stop, be removed, or be unsubscribed, or telling us not to message again
 - annoyance, hostility, sarcasm, or calling it spam
@@ -46,24 +46,24 @@ STEP 2 — Is the lead refusing or closing the conversation? Signals:
 - saying no to the specific ask with nothing offered instead
 If yes, the answer is NEGATIVE.
 
-STEP 3 — Everything else is NEUTRAL: friendly but empty, curious but uncommitted, or deferred without a date.
+STEP 3: Everything else is NEUTRAL: friendly but empty, curious but uncommitted, or deferred without a date.
 
-CALIBRATION — real shapes of reply, and the correct label for each.
+CALIBRATION: real shapes of reply, and the correct label for each.
 
 POSITIVE:
 - "Sure, Thursday afternoon works. Send an invite." -> positive
-- "Happy to chat — jane@acme.com is best for me." -> positive
+- "Happy to chat, jane@acme.com is best for me." -> positive
 - "What does pricing look like for a team of 40?" -> positive
 - "This is timely. How quickly could you start?" -> positive
-- "Not me, but Priya runs demand gen — I'll introduce you." -> positive
+- "Not me, but Priya runs demand gen. I'll introduce you." -> positive
 - "Send the deck and I'll take it to our ops lead this week." -> positive
 - "Yes let's do it, here's my calendar link." -> positive
 
-NEUTRAL — note how warm several of these sound:
+NEUTRAL: note how warm several of these sound:
 - "Thanks for reaching out!" -> neutral
 - "Interesting, thanks for sharing." -> neutral
 - "Sounds interesting." -> neutral (interest with nothing attached to it is still neutral)
-- "Cool — what do you guys do exactly?" -> neutral (asking who we are, not how it would work for them)
+- "Cool, what do you guys do exactly?" -> neutral (asking who we are, not how it would work for them)
 - "Let me think about it." -> neutral
 - "Circle back with me in Q3." -> neutral
 - "We're heads down on a launch, maybe later in the year." -> neutral
@@ -75,7 +75,7 @@ NEUTRAL — note how warm several of these sound:
 - "Nice to connect!" / "Thanks for the add" -> neutral
 - "Good luck with it." -> neutral
 - "Not the right time for us." -> neutral (timing, not a rejection of the idea)
-- "Send me some info I guess." -> neutral (grudging, no owner, no date — this is not a request for the deck)
+- "Send me some info I guess." -> neutral (grudging, no owner, no date; this is not a request for the deck)
 - A long friendly reply about their own company that never engages with the offer -> neutral
 
 NEGATIVE:

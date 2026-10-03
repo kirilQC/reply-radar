@@ -178,11 +178,11 @@ async function scrapeSites(h: Hooks, rows: number[], onSource: (i: number, s: So
         const i = Number(line.i); seen.add(i); st.active -= 1;
         if (line.ok) {
           st.done += 1;
-          h.onLog("ok", `Read ${String(line.url).replace(/^https:\/\//, "")} — ${Number(line.chars).toLocaleString()} chars${Array.isArray(line.pages) && line.pages.length > 1 ? " (home + about)" : ""}${line.via === "jina" ? " via Jina" : ""}`);
+          h.onLog("ok", `Read ${String(line.url).replace(/^https:\/\//, "")}: ${Number(line.chars).toLocaleString()} chars${Array.isArray(line.pages) && line.pages.length > 1 ? " (home + about)" : ""}${line.via === "jina" ? " via Jina" : ""}`);
           onSource(i, { kind: "website", url: String(line.url), title: String(line.title ?? ""), description: String(line.description ?? ""), text: String(line.text ?? ""), chars: Number(line.chars) || 0, pages: line.pages as string[], via: String(line.via ?? "") });
         } else {
           st.failed += 1;
-          h.onLog("warn", `Couldn't read ${String(line.url ?? h.targetOf(i)).replace(/^https:\/\//, "")} — ${line.error}`);
+          h.onLog("warn", `Couldn't read ${String(line.url ?? h.targetOf(i)).replace(/^https:\/\//, "")}: ${line.error}`);
           onFail(i, `Couldn't read the website: ${line.error}`);
         }
         h.onChange();
@@ -218,7 +218,7 @@ async function lookupContacts(h: Hooks, rows: number[], onEnriched: (i: number, 
           onEnriched(i, { profile, filled, evidence: aiArkEvidence(facts), source: { kind: "aiark", url: String(line.url), via: "aiark" }, structured: facts, cost: null });
         } else {
           st.failed += 1;
-          onFail(i, line.error === "not in AI Ark" ? "Not in AI Ark — judged on the list's own data" : `AI Ark lookup failed: ${line.error}`);
+          onFail(i, line.error === "not in AI Ark" ? "Not in AI Ark, judged on the list's own data" : `AI Ark lookup failed: ${line.error}`);
         }
         h.onChange();
       });
@@ -228,7 +228,7 @@ async function lookupContacts(h: Hooks, rows: number[], onEnriched: (i: number, 
       for (const i of batch) if (!seen.has(i)) { seen.add(i); st.active -= 1; st.failed += 1; onFail(i, `AI Ark lookup failed: ${message}`); }
     }
     for (const i of batch) if (!seen.has(i)) { st.active -= 1; st.failed += 1; onFail(i, "The AI Ark lookup did not come back."); }
-    h.onLog(found ? "ok" : "warn", `AI Ark — ${found} of ${batch.length} contacts found${batch.length - found ? `, ${batch.length - found} not in AI Ark` : ""} · ${found * AI_ARK_CREDITS_PER_PERSON} credits`);
+    h.onLog(found ? "ok" : "warn", `AI Ark: ${found} of ${batch.length} contacts found${batch.length - found ? `, ${batch.length - found} not in AI Ark` : ""} · ${found * AI_ARK_CREDITS_PER_PERSON} credits`);
     h.onChange();
   });
 }
@@ -260,11 +260,11 @@ async function structure(h: Hooks, items: Array<{ i: number; source: Source }>, 
             const { profile, filled } = mergeStructured(h.mode, h.profileOf(i), structured) as { profile: unknown; filled: string[] };
             const { text: _text, record: _record, ...source } = item.source;
             void _text; void _record;
-            h.onLog(filled.length ? "ok" : "warn", `Structured ${h.nameOf(i)} — ${filled.length ? `${filled.length} field${filled.length === 1 ? "" : "s"} (${filled.join(", ")})` : "nothing usable in the source"}`);
+            h.onLog(filled.length ? "ok" : "warn", `Structured ${h.nameOf(i)}: ${filled.length ? `${filled.length} field${filled.length === 1 ? "" : "s"} (${filled.join(", ")})` : "nothing usable in the source"}`);
             onDone(i, { profile, filled, evidence: evidenceOf(structured), source, structured, cost: Number.isFinite(c) ? c : null });
           } else {
             st.failed += 1;
-            h.onLog("error", `Couldn't structure ${h.nameOf(i)} — ${line.error}`);
+            h.onLog("error", `Couldn't structure ${h.nameOf(i)}: ${line.error}`);
             onFail(i, `Structuring failed: ${line.error}`);
           }
           h.onChange();
@@ -279,7 +279,7 @@ async function structure(h: Hooks, items: Array<{ i: number; source: Source }>, 
         waits += 1;
         limiter.pause(hit.retryAfterMs);
         st.waitUntil = Date.now() + hit.retryAfterMs;
-        h.onLog("warn", `OpenRouter rate limit — holding ${batch.length} rows for ${Math.round(hit.retryAfterMs / 1000)}s`);
+        h.onLog("warn", `OpenRouter rate limit, holding ${batch.length} rows for ${Math.round(hit.retryAfterMs / 1000)}s`);
         h.onChange();
         continue;
       }
@@ -312,17 +312,17 @@ async function runChunk(h: Hooks, chunk: number[]) {
     const route = afterFirstPass(h.mode, r?.ok ? r : null, h.missingOf(i, h.profileOf(i)), h.enrichMode);
     if (route === "decided" || route === "ruled_out") {
       if (route === "ruled_out") ruledOut += 1; else decided += 1;
-      settle({ i, result: r ?? { ok: false, error: "No answer" }, first: r, enriched: false, note: route === "ruled_out" ? "Ruled out on the list's own data — not scraped" : "" });
+      settle({ i, result: r ?? { ok: false, error: "No answer" }, first: r, enriched: false, note: route === "ruled_out" ? "Ruled out on the list's own data, not scraped" : "" });
     } else if (!h.targetOf(i)) {
       noTarget += 1;
       settle({ i, result: r ?? { ok: false, error: "No answer" }, first: r, enriched: false, note: h.mode === "companies" ? "Needs more data, but the row has no website to read" : "Needs more data, but the row has no LinkedIn profile URL" });
     } else if (h.mode === "contacts" && !h.aiArk) {
       noTarget += 1;
-      settle({ i, result: r ?? { ok: false, error: "No answer" }, first: r, enriched: false, note: "Needs more data — AI Ark is not set up (AI_ARK_API_KEY)" });
+      settle({ i, result: r ?? { ok: false, error: "No answer" }, first: r, enriched: false, note: "Needs more data. AI Ark is not set up (AI_ARK_API_KEY)" });
     } else toScrape.push(i);
   }
   if (fresh.length && h.enrichMode !== "all") {
-    h.onLog("info", `First pass on ${fresh.length} rows — ${decided} decided, ${ruledOut} ruled out, ${toScrape.length} to enrich${noTarget ? `, ${noTarget} need data but can't be scraped` : ""}`);
+    h.onLog("info", `First pass on ${fresh.length} rows: ${decided} decided, ${ruledOut} ruled out, ${toScrape.length} to enrich${noTarget ? `, ${noTarget} need data but can't be scraped` : ""}`);
   }
   h.stats.scrape.skipped += decided + ruledOut + noTarget;
   h.stats.scrape.queued += toScrape.length; h.onChange();
@@ -361,7 +361,7 @@ export async function runPipeline(h: Hooks, rows: number[]): Promise<{ fatal?: s
   for (let k = 0; k < rows.length; k += size) chunks.push(rows.slice(k, k + size));
   let next = 0;
   let fatal: string | undefined;
-  h.onLog("info", `Run started — ${rows.length.toLocaleString()} rows, enrichment ${h.enrichMode === "auto" ? "only where needed" : h.enrichMode === "all" ? "on every row" : "off"}`);
+  h.onLog("info", `Run started: ${rows.length.toLocaleString()} rows, enrichment ${h.enrichMode === "auto" ? "only where needed" : h.enrichMode === "all" ? "on every row" : "off"}`);
   await Promise.all(Array.from({ length: Math.min(LANES[h.mode], chunks.length) }, async () => {
     while (!fatal && !h.signal.aborted && next < chunks.length) {
       try { await runChunk(h, chunks[next++]); } catch (error) {

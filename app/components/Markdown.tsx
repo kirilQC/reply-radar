@@ -254,7 +254,7 @@ function Territory({ block }: { block: Extract<Block, { kind: "map" }> }) {
             className="md-map-tile"
             data-tone={state.tone || undefined}
             style={{ gridRow: state.row, gridColumn: state.column }}
-            title={[state.label || state.code, state.note].filter(Boolean).join(" — ")}
+            title={[state.label || state.code, state.note].filter(Boolean).join(": ")}
           >
             {state.code}
           </span>

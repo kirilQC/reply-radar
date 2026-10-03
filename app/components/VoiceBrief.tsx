@@ -202,7 +202,7 @@ export default function VoiceBrief({
           <strong>Talk it through</strong>
           <em>
             Speak for a minute about the week. It fills the {sections.length} section
-            {sections.length === 1 ? "" : "s"} below — you review before anything is written.
+            {sections.length === 1 ? "" : "s"} below, and you review before anything is written.
           </em>
         </div>
         {listening ? (

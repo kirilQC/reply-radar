@@ -44,7 +44,7 @@ export function TagList({ set, collapsed, counts }: { set: TagSet; collapsed: bo
         {set.tags.map((t) => (
           <li key={t.key}>
             <strong>{t.label}</strong>
-            {t.description ? <span>{t.description}</span> : <span className="jev-muted">No description — Jev has only the name to go on.</span>}
+            {t.description ? <span>{t.description}</span> : <span className="jev-muted">No description. Jev has only the name to go on.</span>}
           </li>
         ))}
       </ol>
@@ -103,7 +103,7 @@ export function SuggestPanel({ suggestions, outOfScope, busy, onAdd, onDismiss, 
           <button className="primary-button" onClick={() => onAdd(chosen)} disabled={busy || !chosen.length}>{busy ? "Adding…" : `Add ${chosen.length} tag${chosen.length === 1 ? "" : "s"}`}</button>
         </div>
       </div>
-      {suggestions.length === 0 && <div className="jev-empty small">No new tag would group these — they look genuinely outside the market.</div>}
+      {suggestions.length === 0 && <div className="jev-empty small">No new tag would group these. They look genuinely outside the market.</div>}
       <ol className="jev-suggest-list">
         {suggestions.map((s, k) => (
           <li key={k} className={picked[k] ? "on" : ""}>

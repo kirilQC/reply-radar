@@ -1658,7 +1658,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const summary = text(input.summary);
       if (!path || path.includes("..") || path.startsWith("/")) throw new Error("That is not a path inside the brain.");
       if (fileKind(path) !== "doc") throw new Error("Only markdown files can be proposed through here.");
-      if (!summary) throw new Error("A one-line summary is required — it becomes the pull request title.");
+      if (!summary) throw new Error("A one-line summary is required. It becomes the pull request title.");
       // An empty body would be a deletion dressed up as an edit, and a model that lost its place
       // mid-thought is far likelier than someone genuinely asking to empty a file.
       if (!body.trim()) throw new Error("The new contents are empty. Deleting a file is done in GitHub, deliberately.");
@@ -1816,7 +1816,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     }
 
     case "slack_channels": {
-      if (!slackReadable()) throw new Error("Slack reading is not configured — neither a Slack user nor bot token is set.");
+      if (!slackReadable()) throw new Error("Slack reading is not configured: neither a Slack user nor bot token is set.");
       const select = "name,slug,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids";
       const rows_ = text(input.client).trim()
         ? rows(await db(`rr_workspaces?select=${select}&id=eq.${encodeURIComponent((await resolveClient(input.client)).id)}&limit=1`))
@@ -1843,7 +1843,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     }
 
     case "slack_scan": {
-      if (!slackReadable()) throw new Error("Slack reading is not configured — neither a Slack user nor bot token is set.");
+      if (!slackReadable()) throw new Error("Slack reading is not configured: neither a Slack user nor bot token is set.");
       const client = await resolveClient(input.client);
       const ws = rows(await db(`rr_workspaces?select=slack_internal_channel_id,slack_external_channel_id&id=eq.${encodeURIComponent(client.id)}&limit=1`))[0] ?? {};
       const choice = text(input.channel).trim().toLowerCase() || "internal";

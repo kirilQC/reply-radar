@@ -42,7 +42,7 @@ async function rest(path: string, init?: RequestInit) {
         return null;
       }
     })();
-    const because = [parsed?.message, parsed?.hint].filter(Boolean).join(" — ") || detail.slice(0, 200);
+    const because = [parsed?.message, parsed?.hint].filter(Boolean).join(". ") || detail.slice(0, 200);
     throw new Error(`Supabase ${TABLE} ${response.status}${because ? `: ${because}` : ""}`);
   }
   return response;
@@ -121,6 +121,6 @@ export function explainConfigError(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message : "";
   if (!message) return fallback;
   return /does not exist|schema cache|relation/i.test(message)
-    ? `${message} — run ${APP_CONFIG_MIGRATION} in the Supabase SQL editor.`
+    ? `${message}. Run ${APP_CONFIG_MIGRATION} in the Supabase SQL editor.`
     : message;
 }

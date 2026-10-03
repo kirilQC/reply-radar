@@ -482,7 +482,7 @@ export default function DatabasePage() {
     const name = entry.name || entry.profileKey;
     if (
       !window.confirm(
-        `Unblock ${name}? Their old conversations were deleted and do not come back — this only means their next reply will be stored again.`,
+        `Unblock ${name}? Their old conversations were deleted and do not come back. This only means their next reply will be stored again.`,
       )
     )
       return;
@@ -780,7 +780,7 @@ export default function DatabasePage() {
               ) : (
                 <>
                   <p>
-                    {blocked.length} profile{blocked.length === 1 ? "" : "s"} refused at ingestion — their
+                    {blocked.length} profile{blocked.length === 1 ? "" : "s"} refused at ingestion: their
                     replies are discarded instead of appearing in the inbox. Unblocking does not restore
                     deleted conversations; it only means the next reply is stored again.
                   </p>
@@ -981,7 +981,7 @@ function LeadOverview({
   const staffRange = asObject(staff.range);
   const companySize =
     staffRange.start || staffRange.end
-      ? `${display(staffRange.start || "?")}–${display(staffRange.end || "?")} employees`
+      ? `${display(staffRange.start || "?")} to ${display(staffRange.end || "?")} employees`
       : staff.total
         ? `${Number(staff.total).toLocaleString()} known employees`
         : "";
@@ -1141,7 +1141,7 @@ function LeadOverview({
             <>
               <p className="database-block-note">
                 {profileUrl
-                  ? "Block them as well if they are not a lead at all — a friend of the client, a recruiter, anyone whose replies keep coming back after a delete. Blocking deletes these records and refuses every future reply from this profile."
+                  ? "Block them as well if they are not a lead at all: a friend of the client, a recruiter, anyone whose replies keep coming back after a delete. Blocking deletes these records and refuses every future reply from this profile."
                   : "Blocking needs a LinkedIn profile URL to recognise this person by next time, and this record does not have one. Deleting is all that is available."}
               </p>
               <button className="database-block-lead-button" onClick={onBlock} disabled={!profileUrl}>
@@ -1205,7 +1205,7 @@ function RetryEnrichmentButton({ leadId }: { leadId: string }) {
     const response = await fetch("/api/ai/enrich", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ leadId }) }).catch(() => null);
     const payload = await response?.json().catch(() => ({}));
     setEnriching(false);
-    setResult(response?.ok ? "Enriched successfully — reload to see updates." : String(payload?.error ?? "Enrichment failed."));
+    setResult(response?.ok ? "Enriched successfully. Reload to see updates." : String(payload?.error ?? "Enrichment failed."));
     if (response?.ok) setTimeout(() => setResult(""), 5000);
   };
   return (
@@ -1362,7 +1362,7 @@ function ExperienceTimeline({
                     >
                       <h4>{display(role.title || role.name)}</h4>
                       <p className="database-role-dates">
-                        {monthYear(start)} – {monthYear(end)}
+                        {monthYear(start)} to {monthYear(end)}
                         {start ? ` · ${durationBetween(start, end)}` : ""}
                       </p>
                     </div>
@@ -1371,7 +1371,7 @@ function ExperienceTimeline({
               ) : (
                 <div className="database-role">
                   <p className="database-role-dates">
-                    {monthYear(groupDate.start)} – {monthYear(groupDate.end)}
+                    {monthYear(groupDate.start)} to {monthYear(groupDate.end)}
                     {groupDate.start
                       ? ` · ${durationBetween(groupDate.start, groupDate.end)}`
                       : ""}

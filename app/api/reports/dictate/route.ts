@@ -26,6 +26,7 @@
 import { NextResponse } from "next/server";
 import { resolveModel, temperatureField, DEFAULT_MODEL } from "../../../../shared/anthropic-model.mjs";
 import { writeAuditEvent } from "../../../lib/audit-log";
+import { stripDashes } from "../../../../shared/no-dashes.mjs";
 
 type Json = Record<string, unknown>;
 
@@ -45,6 +46,8 @@ const object = (value: unknown): Json =>
 const MAX_TRANSCRIPT = 60_000;
 
 const SYSTEM_PROMPT = `You sort a spoken brief from an account manager into the written sections of a client report.
+
+Never use em dashes or en dashes.
 
 Rules, in order of importance:
 1. Use only what the speaker actually said. Never add a fact, a number, a name, a date or a commitment that is not in the transcript.
@@ -66,6 +69,8 @@ Reply with bare JSON and nothing else: an object whose keys are exactly the sect
  * commits us to work nobody agreed to do. Everything else is the same discipline as dictation.
  */
 const CALL_PROMPT = `You read the transcript of a weekly sync call between an agency account manager and their client, and sort what was said into the written sections of the client report.
+
+Never use em dashes or en dashes.
 
 Rules, in order of importance:
 1. Use only what was actually said on the call. Never add a fact, a number, a name, a date or a commitment that is not in the transcript.
@@ -166,7 +171,7 @@ ${transcript}
     }
 
     const content = Array.isArray(payload.content) ? payload.content : [];
-    const raw = text(object(content.find((item) => object(item).type === "text")).text);
+    const raw = stripDashes(text(object(content.find((item) => object(item).type === "text")).text));
     // Bare JSON was asked for, but a fenced block is a common enough answer to be worth surviving.
     const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
     let parsed: Json = {};

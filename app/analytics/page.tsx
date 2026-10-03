@@ -90,8 +90,8 @@ const durationLabel = (days: number) => {
 const sortOptions = [
   { id: "launch-desc", label: "Newest launch" },
   { id: "launch-asc", label: "Oldest launch" },
-  { id: "name-asc", label: "Name A–Z" },
-  { id: "name-desc", label: "Name Z–A" },
+  { id: "name-asc", label: "Name A to Z" },
+  { id: "name-desc", label: "Name Z to A" },
   { id: "reply-desc", label: "Highest reply rate" },
   { id: "reply-asc", label: "Lowest reply rate" },
   { id: "accept-desc", label: "Highest acceptance rate" },

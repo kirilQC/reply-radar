@@ -50,6 +50,7 @@ import Markdown from "../components/Markdown";
 import { answerHasRows, answerToCsv, exportFilename } from "../../shared/answer-export.mjs";
 // The same wire format the route reads from Anthropic, so the same two helpers parse it.
 import { parseFrame, splitFrames } from "../../shared/anthropic-stream.mjs";
+import { stripDashes } from "../../shared/no-dashes.mjs";
 import Skeleton from "../components/Skeleton";
 
 /**
@@ -288,7 +289,7 @@ const Timeline = memo(
             return (
               <li className="mcp-thought" key={index}>
                 <span className="mcp-thought-mark" aria-hidden="true" />
-                <p>{entry.text}</p>
+                <p>{stripDashes(entry.text)}</p>
               </li>
             );
           }
@@ -297,7 +298,7 @@ const Timeline = memo(
           if (entry.kind === "note") {
             return (
               <li className="mcp-note" key={index}>
-                <Markdown>{entry.text}</Markdown>
+                <Markdown>{stripDashes(entry.text)}</Markdown>
               </li>
             );
           }
@@ -396,7 +397,7 @@ const Turn = memo(function Turn({
 
       {message.role === "assistant" ? (
         <Markdown onExport={onExport} exportKey={index} offer={offer}>
-          {message.content}
+          {stripDashes(message.content)}
         </Markdown>
       ) : (
         <div className="mcp-body">{message.content}</div>
@@ -1301,7 +1302,7 @@ export default function McpPage() {
                     <b>{elapsed(seconds)}</b>
                   </div>
                   <Timeline entries={live.entries} live />
-                  {shownAnswer && <Markdown live>{shownAnswer}</Markdown>}
+                  {shownAnswer && <Markdown live>{stripDashes(shownAnswer)}</Markdown>}
                 </article>
               )}
               <div ref={endRef} />

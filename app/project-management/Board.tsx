@@ -635,7 +635,7 @@ function BlockerCell({ blockers, people, map, onChange, addPerson }: { blockers?
       <div className="pm-blocker-list">
         {list.map((b, i) => (
           <div className={`pm-blocker-row ${b.resolved ? "done" : ""}`} key={i}>
-            <button type="button" className={`pm-blocker-check ${b.resolved ? "on" : ""}`} title={b.resolved ? `Cleared${b.owner ? ` — ${b.owner}` : ""} · click to reopen` : "Mark this blocker cleared"} onClick={(e) => { e.stopPropagation(); toggleAt(i); }}>{b.resolved ? "✓" : ""}</button>
+            <button type="button" className={`pm-blocker-check ${b.resolved ? "on" : ""}`} title={b.resolved ? `Cleared${b.owner ? ` by ${b.owner}` : ""} · click to reopen` : "Mark this blocker cleared"} onClick={(e) => { e.stopPropagation(); toggleAt(i); }}>{b.resolved ? "✓" : ""}</button>
             <button type="button" className="pm-blocker-body" onClick={(e) => { e.stopPropagation(); openEditor(i); }}>{b.owner ? <Avatar name={b.owner} map={map} /> : null}<span className="pm-blocker-text">{b.text || "(blocker)"}</span></button>
           </div>
         ))}

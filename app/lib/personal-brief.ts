@@ -148,7 +148,7 @@ THIS NOTE IS FOR ${first.toUpperCase()} ALONE. It is not the team brief. Include
 Your job is triage, not a recap. Surface only the few things that actually need ${first} today, grouped by client, in priority order.
 
 FORMAT — follow it exactly:
-- Give each client that has something for ${first} its name on its own line, prefixed with two hash marks and a space, exactly like this: ## Steadywell — nothing else on that line, do not bold it.
+- Give each client that has something for ${first} its name on its own line, prefixed with two hash marks and a space, exactly like this: ## Steadywell. Nothing else on that line, do not bold it.
 - Under each client, list its items as a numbered list, one per line: 1., 2., 3. Terse fragments, never full sentences. At most three per client.
 - The exact shape:
 
@@ -207,7 +207,7 @@ function personalHeader(personName: string, timezone: string): string {
   } catch {
     dateLabel = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date());
   }
-  return `*Good morning ${firstNameOf(personName)} — your focus for ${dateLabel}*  :sunrise:`;
+  return `*Good morning ${firstNameOf(personName)}, your focus for ${dateLabel}*  :sunrise:`;
 }
 
 /** Build the person's focus note across their clients. Returns the digest text, or an error. */

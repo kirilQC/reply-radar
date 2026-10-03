@@ -12,6 +12,7 @@
 import { NextResponse } from "next/server";
 import { runAgent, type Turn } from "../../../lib/assistant-run";
 import { HELP_PAGES, pageLabel } from "../../../lib/help-shared";
+import { stripDashes } from "../../../../shared/no-dashes.mjs";
 
 export const maxDuration = 120;
 
@@ -23,8 +24,6 @@ const pageRoot = (path: string) => {
   const first = `/${String(path || "/").split("?")[0].split("/").filter(Boolean)[0] ?? ""}`;
   return HELP_PAGES.some((page) => page.path === first) ? first : "/";
 };
-
-const noDashes = (text: string) => text.replace(/\s*[—–]\s*/g, ", ");
 
 const bubbleRules = (page: string, path: string, scoutLink: string) => `You are answering inside Scout's small help bubble in the corner of QC Command, not the Scout tab. The person is on the ${pageLabel(page) || "Dashboard"} page (${path}).
 
@@ -85,7 +84,7 @@ export async function POST(request: Request) {
       deadlineMs: 55_000,
       emit: (event) => { if (event.type === "file") files.push(event.name); },
     });
-    let answer = noDashes(result.reply.trim());
+    let answer = stripDashes(result.reply.trim());
     if (!answer) answer = `I couldn't finish that here. [Open the full answer in Scout →](${scoutLink})\n\nIf it still doesn't work, reach out to Kiril.`;
     // A tool built a file the bubble cannot show: the full version lives in the Scout tab.
     if (files.length && !answer.includes("/scout?ask=")) answer += `\n\n[Open the full answer in Scout →](${scoutLink})`;

@@ -328,7 +328,7 @@ export async function POST(request: Request) {
       const campaigns = new Map<string, { name: string; replies: number; positive: number; negative: number }>();
       for (const message of workspaceMessages) {
         const campaign = object(radarOf(message.raw_data).campaign);
-        const name = text(campaign.name) || "— Unattributed —";
+        const name = text(campaign.name) || "Unattributed";
         const bucket = campaigns.get(name) || { name, replies: 0, positive: 0, negative: 0 };
         bucket.replies += 1;
         const sentiment = text(radarOf(message.raw_data).sentiment).toLowerCase();
@@ -367,7 +367,7 @@ export async function POST(request: Request) {
       const senders = new Map<string, { name: string; replies: number; positive: number }>();
       for (const message of workspaceMessages) {
         const sender = object(radarOf(message.raw_data).sender);
-        const name = text(sender.name) || "— Unassigned —";
+        const name = text(sender.name) || "Unassigned";
         const bucket = senders.get(name) || { name, replies: 0, positive: 0 };
         bucket.replies += 1;
         if (text(radarOf(message.raw_data).sentiment).toLowerCase() === "positive") bucket.positive += 1;

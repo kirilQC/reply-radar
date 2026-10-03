@@ -201,9 +201,9 @@ export async function POST(request: Request) {
         // to know the table they are about to forward is missing its tail.
         const cut =
           result.stopReason === "max_tokens"
-            ? "\n\n---\n\n*This answer was cut off at the length limit. Ask for a narrower slice — one client, or a shorter period — to see the rest.*"
+            ? "\n\n---\n\n*This answer was cut off at the length limit. Ask for a narrower slice (one client, or a shorter period) to see the rest.*"
             : result.outOfTime
-              ? `\n\n---\n\n*Answered from ${result.steps.length} lookup${result.steps.length === 1 ? "" : "s"} — the time limit for one question was reached, so it stopped researching to write this. Ask for a narrower slice to let it look further.*`
+              ? `\n\n---\n\n*Answered from ${result.steps.length} lookup${result.steps.length === 1 ? "" : "s"}. The time limit for one question was reached, so it stopped researching to write this. Ask for a narrower slice to let it look further.*`
               : "";
         send({
           type: "done",

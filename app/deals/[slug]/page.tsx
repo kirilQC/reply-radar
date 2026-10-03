@@ -449,7 +449,7 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
 
         {(deal.attribution !== "none" || deal.dismissed) && (
           <div className={`dd-attr ${deal.dismissed ? "dismissed" : deal.attribution}`}>
-            <b>{deal.dismissed ? "Dismissed — not a QC deal" : deal.attribution === "confirmed" ? "Attributed to QC" : "Possible QC deal"}</b>
+            <b>{deal.dismissed ? "Dismissed: not a QC deal" : deal.attribution === "confirmed" ? "Attributed to QC" : "Possible QC deal"}</b>
             {!deal.dismissed && deal.attributionReason && <p>{deal.attributionReason}</p>}
             {!deal.dismissed && deal.matchedValue && (
               <div className="dd-matched">
@@ -472,13 +472,13 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
               ) : deal.attribution === "possible" ? (
                 <>
                   <button className="dd-review-btn verify" onClick={() => void review("confirmed")} disabled={saving}>
-                    {saving ? "Saving…" : "✓ Verify — this is a QC deal"}
+                    {saving ? "Saving…" : "✓ Verify: this is a QC deal"}
                   </button>
                   <button className="dd-review-btn dismiss" onClick={() => void review("dismissed")} disabled={saving}>Not a QC deal</button>
                 </>
               ) : (
                 <button className="dd-review-btn dismiss" onClick={() => void review("dismissed")} disabled={saving}>
-                  {saving ? "Saving…" : "Not a QC deal — remove attribution"}
+                  {saving ? "Saving…" : "Not a QC deal, remove attribution"}
                 </button>
               )}
             </div>
@@ -530,7 +530,7 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
                 </dl>
               </div>
             ) : (
-              <p className="dd-nolead">No QC lead is matched to this deal, so there is no conversation to show. The attribution is company-level — confirm the person in the CRM to link it.</p>
+              <p className="dd-nolead">No QC lead is matched to this deal, so there is no conversation to show. The attribution is company-level. Confirm the person in the CRM to link it.</p>
             )}
 
             {detail && detail.messages.length > 0 && (
@@ -562,7 +562,7 @@ function DealDrawer({ deal, money, onClose, onOverride }: { deal: Deal; money: (
 }
 
 const MATCH_LABEL: Record<string, string> = {
-  heyreach: "HeyReach — a QC message on record",
+  heyreach: "HeyReach: a QC message on record",
   email: "Contact email",
   linkedin: "Contact LinkedIn",
   "name+company": "Contact name at a QC-worked company (review)",

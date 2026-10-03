@@ -55,7 +55,7 @@ export const CAMPAIGN_TABLE_SPEC: TrackerTableSpec = {
     "One row per outbound campaign, matching the numbered lead tables. The morning brief moves a row through Sent for Approval, Active, Paused and Finished, and writes the final figures when it finishes. Action items live in Project Tracker.",
   fields: [
     { stage: "base", name: "Title", type: "singleLineText" },
-    { stage: "base", name: "Campaign Code", type: "singleLineText", description: "BV001, W007 and so on — the code that joins this row to its lead table." },
+    { stage: "base", name: "Campaign Code", type: "singleLineText", description: "BV001, W007 and so on: the code that joins this row to its lead table." },
     {
       stage: "base",
       name: "Status",
@@ -72,7 +72,7 @@ export const CAMPAIGN_TABLE_SPEC: TrackerTableSpec = {
       },
     },
     { stage: "base", name: "Owner", type: "singleLineText", description: "Who owns this, as a name. Set by hand or by the morning brief." },
-    { stage: "base", name: "Assignee", type: "singleCollaborator", description: "The real Airtable person. Set by hand — the brief never guesses this." },
+    { stage: "base", name: "Assignee", type: "singleCollaborator", description: "The real Airtable person. Set by hand, the brief never guesses this." },
     { stage: "base", name: "Priority", type: "singleSelect", options: PRIORITY_CHOICES },
     { stage: "base", name: "Launch Date", type: "date", options: localDate, description: "The day the campaign went live, as HeyReach dates it. The timeline's start date. Written once and left alone after." },
     { stage: "base", name: "Notes", type: "multilineText" },
@@ -159,7 +159,7 @@ export const PROJECT_TABLE_SPEC: TrackerTableSpec = {
       stage: "base",
       name: "Detail",
       type: "multilineText",
-      description: "The evidence the brief gave for raising this — what was said, by whom, and what has not happened since.",
+      description: "The evidence the brief gave for raising this: what was said, by whom, and what has not happened since.",
     },
     {
       stage: "base",
@@ -181,7 +181,7 @@ export const PROJECT_TABLE_SPEC: TrackerTableSpec = {
       name: "First Raised",
       type: "date",
       options: localDate,
-      description: "When this was first said. What ages an item — not the date the brief noticed it.",
+      description: "When this was first said. What ages an item, not the date the brief noticed it.",
     },
     { stage: "base", name: "Due Date", type: "date", options: localDate },
     {
@@ -204,9 +204,9 @@ export const PROJECT_TABLE_SPEC: TrackerTableSpec = {
       type: "checkbox",
       options: { icon: "check", color: "greenBright" },
       description:
-        "Ticked by the morning brief on rows it created. The brief will only ever update rows with this ticked — untick it to make a row permanently yours.",
+        "Ticked by the morning brief on rows it created. The brief will only ever update rows with this ticked. Untick it to make a row permanently yours.",
     },
-    { stage: "base", name: "Assignee", type: "singleCollaborator", description: "The real Airtable person. Set by hand — the brief never guesses this." },
+    { stage: "base", name: "Assignee", type: "singleCollaborator", description: "The real Airtable person. Set by hand, the brief never guesses this." },
     // Made last and from this side only. Airtable writes the other half of the pair onto Campaign
     // Tracker itself, so asking for it from both sides is how a base ends up with two link fields.
     { stage: "link", name: "Campaign", type: "multipleRecordLinks", description: "The campaign this concerns, when it concerns one." },
@@ -224,11 +224,11 @@ export const WEEKLY_CALLS_TABLE_SPEC: TrackerTableSpec = {
     "One row per weekly call, filed by the call analysis. Each row is a meeting: its date, who was on it, how long it ran, and the recap the model wrote. A re-run of the same call updates its row rather than adding a second, keyed on Call ID. Group a view by Call Date to read the weeks in order.",
   fields: [
     { stage: "base", name: "Title", type: "singleLineText", description: "The call, as Granola titled it." },
-    { stage: "base", name: "Call Date", type: "date", options: localDate, description: "The day the call was on — not the day the recap was filed." },
+    { stage: "base", name: "Call Date", type: "date", options: localDate, description: "The day the call was on, not the day the recap was filed." },
     { stage: "base", name: "Attendees", type: "singleLineText", description: "Who was on the call, by name." },
     { stage: "base", name: "Host", type: "singleLineText", description: "Whose call it was." },
     { stage: "base", name: "Duration (min)", type: "number", options: wholeNumber, description: "How long the call ran, in minutes." },
-    { stage: "base", name: "Recap", type: "multilineText", description: "The recap the model wrote, in plain text — the Slack formatting stripped out so it reads in a cell." },
+    { stage: "base", name: "Recap", type: "multilineText", description: "The recap the model wrote, in plain text, with the Slack formatting stripped out so it reads in a cell." },
     {
       stage: "base",
       name: "Transcript",

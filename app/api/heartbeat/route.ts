@@ -364,7 +364,7 @@ export async function GET(incoming: Request) {
       services[1].status = "down";
       services[1].detail = `Connected, but ${anthropicFailed24h} of ${anthropicCalls24h} Anthropic calls failed in the last 24h (reply drafts, scoring, sentiment). Check the model configured for the affected client.`;
     } else if (services[1].status === "healthy" && anthropicFailed24h > 0) {
-      services[1].detail = `Live API request succeeded — ${anthropicSucceeded24h} of ${anthropicCalls24h} calls succeeded in the last 24h.`;
+      services[1].detail = `Live API request succeeded: ${anthropicSucceeded24h} of ${anthropicCalls24h} calls succeeded in the last 24h.`;
     }
     services[2].status = services[2].configured ? "healthy" : "down";
     services[2].detail = services[2].configured
@@ -497,7 +497,7 @@ export async function GET(incoming: Request) {
       state: granolaState.state,
       inWindow: granolaState.inWindow,
       timezone: GRANOLA_TIMEZONE,
-      windowLabel: "5:00 AM – 8:00 PM Eastern, every day",
+      windowLabel: "5:00 AM to 8:00 PM Eastern, every day",
       downThresholdSeconds: GRANOLA_DOWN_SECONDS,
       pollIntervalLabel: "Every hour",
       readable: granolaHeartbeatResult.response.ok,
@@ -537,7 +537,7 @@ export async function GET(incoming: Request) {
       granolaState.state === "down"
         ? "No Granola poll has been recorded for over six hours during working hours."
         : granolaState.state === "idle"
-          ? "Paused outside working hours (5 AM – 8 PM Eastern)."
+          ? "Paused outside working hours (5 AM to 8 PM Eastern)."
           : granolaState.state === "starting"
             ? "Waiting for the first hourly poll."
             : `Last poll ${granola.callsFound} call(s) across ${granola.clientsChecked} client(s).`;
@@ -599,8 +599,8 @@ export async function GET(incoming: Request) {
           : webhookHealthy
             ? "Replies are reaching QC Command."
             : webhookAgeSeconds === null
-              ? "Webhook down — no reply has ever arrived."
-              : "Webhook down — no reply has arrived for more than one week.",
+              ? "Webhook down: no reply has ever arrived."
+              : "Webhook down: no reply has arrived for more than one week.",
         pollStatus: pollHealthy
           ? "The background check ran recently."
           : pollAgeSeconds === null
@@ -617,10 +617,10 @@ export async function GET(incoming: Request) {
         raw: {
           ...(maskSecrets(row) as Record<string, unknown>),
           heyreach_api_key_ciphertext: keyConfigured
-            ? "[configured — hidden]"
+            ? "[configured, hidden]"
             : null,
           webhook_secret_hash: row.webhook_secret_hash
-            ? "[configured — hidden]"
+            ? "[configured, hidden]"
             : null,
         },
       };

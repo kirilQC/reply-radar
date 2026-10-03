@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   if (!summary) {
     // The summary becomes the commit message and the pull request title, so it is the only thing a
     // reviewer sees before they open the diff. An empty one makes the review list unreadable.
-    return NextResponse.json({ ok: false, error: "Say what changed — it becomes the title of the pull request." }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Say what changed. It becomes the title of the pull request." }, { status: 400 });
   }
   if (!text.trim()) {
     return NextResponse.json({ ok: false, error: "The document is empty. Deleting a file is done in GitHub, deliberately." }, { status: 400 });

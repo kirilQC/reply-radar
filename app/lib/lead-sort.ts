@@ -37,14 +37,14 @@ export const LEAD_SORTS: readonly LeadSort[] = [
   { id: "added-asc", label: "First added", order: "created_at.asc" },
   { id: "replies-desc", label: "Most replies", order: "reply_count.desc.nullslast,created_at.desc" },
   { id: "replies-asc", label: "Fewest replies", order: "reply_count.asc.nullslast,created_at.desc" },
-  { id: "name-asc", label: "Lead A–Z", order: "name.asc.nullslast,created_at.desc" },
-  { id: "name-desc", label: "Lead Z–A", order: "name.desc.nullslast,created_at.desc" },
-  { id: "client-asc", label: "Client A–Z", order: "client_names.asc.nullslast,created_at.desc" },
-  { id: "client-desc", label: "Client Z–A", order: "client_names.desc.nullslast,created_at.desc" },
-  { id: "campaign-asc", label: "Campaign A–Z", order: "campaign_names.asc.nullslast,created_at.desc" },
-  { id: "campaign-desc", label: "Campaign Z–A", order: "campaign_names.desc.nullslast,created_at.desc" },
-  { id: "sender-asc", label: "Sender A–Z", order: "sender_names.asc.nullslast,created_at.desc" },
-  { id: "sender-desc", label: "Sender Z–A", order: "sender_names.desc.nullslast,created_at.desc" },
+  { id: "name-asc", label: "Lead A to Z", order: "name.asc.nullslast,created_at.desc" },
+  { id: "name-desc", label: "Lead Z to A", order: "name.desc.nullslast,created_at.desc" },
+  { id: "client-asc", label: "Client A to Z", order: "client_names.asc.nullslast,created_at.desc" },
+  { id: "client-desc", label: "Client Z to A", order: "client_names.desc.nullslast,created_at.desc" },
+  { id: "campaign-asc", label: "Campaign A to Z", order: "campaign_names.asc.nullslast,created_at.desc" },
+  { id: "campaign-desc", label: "Campaign Z to A", order: "campaign_names.desc.nullslast,created_at.desc" },
+  { id: "sender-asc", label: "Sender A to Z", order: "sender_names.asc.nullslast,created_at.desc" },
+  { id: "sender-desc", label: "Sender Z to A", order: "sender_names.desc.nullslast,created_at.desc" },
 ];
 
 /** The default, and the one the dropdown shows as its placeholder rather than as an entry. */

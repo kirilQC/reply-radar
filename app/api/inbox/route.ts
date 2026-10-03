@@ -115,35 +115,35 @@ const computeFollowUp = (thread: { direction: string; sentAt: unknown; body: str
   // Pattern: Lead replied positively but we haven't followed up
   if (latest.direction === "inbound" && sentiment === "positive" && ageDays >= 1) {
     urgency = Math.min(100, 70 + ageDays * 3);
-    reason = `Positive reply ${Math.floor(ageDays)}d ago — awaiting your follow-up.`;
+    reason = `Positive reply ${Math.floor(ageDays)}d ago, awaiting your follow-up.`;
   }
   // Pattern: Lead asked to be contacted later
   else if (latestInboundBody.match(/later|next (month|quarter|year)|few months|circle back|reach out.*(later|again)|not (right )?now|bad time|busy/)) {
     const delayDays = latestInboundBody.match(/next year/) ? 180 : latestInboundBody.match(/next quarter/) ? 60 : latestInboundBody.match(/next month|few months/) ? 30 : 14;
     if (inboundAgeDays >= delayDays) {
       urgency = Math.min(100, 60 + (inboundAgeDays - delayDays) * 2);
-      reason = `Said "${latestInboundBody.length > 60 ? latestInboundBody.slice(0, 57) + "…" : latestInboundBody}" ${Math.floor(inboundAgeDays)}d ago — window to re-engage.`;
+      reason = `Said "${latestInboundBody.length > 60 ? latestInboundBody.slice(0, 57) + "…" : latestInboundBody}" ${Math.floor(inboundAgeDays)}d ago, a window to re-engage.`;
     }
   }
   // Pattern: No-show — they agreed to meet but went silent
   else if (latestInboundBody.match(/sure|sounds good|let'?s do it|book|schedule|set up|calendar/) && ageDays >= 3) {
     urgency = Math.min(100, 65 + ageDays * 2);
-    reason = `Agreed to meet ${Math.floor(inboundAgeDays)}d ago but went silent — possible no-show.`;
+    reason = `Agreed to meet ${Math.floor(inboundAgeDays)}d ago but went silent. Possible no-show.`;
   }
   // Pattern: Neutral reply sitting unanswered
   else if (latest.direction === "inbound" && sentiment === "neutral" && ageDays >= 2) {
     urgency = Math.min(100, 40 + ageDays * 2);
-    reason = `Neutral reply ${Math.floor(ageDays)}d ago — opportunity to re-engage.`;
+    reason = `Neutral reply ${Math.floor(ageDays)}d ago, an opportunity to re-engage.`;
   }
   // Pattern: We sent outbound, no reply in 7+ days
   else if (latest.direction === "outbound" && ageDays >= 7 && inboundMessages.length > 0) {
     urgency = Math.min(100, 30 + ageDays);
-    reason = `No reply in ${Math.floor(ageDays)}d after your last message — consider a nudge.`;
+    reason = `No reply in ${Math.floor(ageDays)}d after your last message. Consider a nudge.`;
   }
   // Pattern: Stale conversation with prior engagement
   else if (inboundMessages.length > 0 && ageDays >= 14) {
     urgency = Math.min(100, 25 + ageDays * 0.5);
-    reason = `Conversation went cold ${Math.floor(ageDays)}d ago after ${inboundMessages.length} replies — worth revisiting.`;
+    reason = `Conversation went cold ${Math.floor(ageDays)}d ago after ${inboundMessages.length} replies. Worth revisiting.`;
   }
 
   if (!reason) return { followUpUrgency: 0, followUpReason: null };

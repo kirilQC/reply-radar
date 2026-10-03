@@ -6,6 +6,7 @@ import { resolveModel, temperatureField, DEFAULT_MODEL } from "../../../../share
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { clientContext, withClientContext } from "../../../lib/client-context";
 import { defaultIcpPrompt } from "../../../lib/scoring-templates";
+import { stripDashes } from "../../../../shared/no-dashes.mjs";
 
 type Row = Record<string, unknown>;
 const object = (v: unknown): Row => v && typeof v === "object" && !Array.isArray(v) ? v as Row : {};
@@ -89,7 +90,7 @@ export async function POST(request: Request) {
 
   const durationMs = Date.now() - t0;
   const payload = aiRes?.ok ? await aiRes.json().catch(() => ({})) : {};
-  const text = payload?.content?.find((item: { type?: string }) => item.type === "text")?.text ?? "";
+  const text = stripDashes(String(payload?.content?.find((item: { type?: string }) => item.type === "text")?.text ?? ""));
   const inputTokens = payload?.usage?.input_tokens ?? 0;
   const outputTokens = payload?.usage?.output_tokens ?? 0;
 

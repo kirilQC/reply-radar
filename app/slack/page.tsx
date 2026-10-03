@@ -428,7 +428,7 @@ export default function SlackPage() {
                   <span>Hourly Granola heartbeat</span>
                 </div>
                 <div className="brief-schedule">
-                  <p className="brief-schedule-note">Polls every Granola key each hour, 5:00 AM – 8:00 PM Eastern. A new call is analysed and posted to the client&rsquo;s internal channel within the hour it is found. Enable a client below to include it.</p>
+                  <p className="brief-schedule-note">Polls every Granola key each hour, 5:00 AM to 8:00 PM Eastern. A new call is analysed and posted to the client&rsquo;s internal channel within the hour it is found. Enable a client below to include it.</p>
                 </div>
               </>
             ) : (
@@ -657,7 +657,7 @@ export default function SlackPage() {
                           )}
                           {step.excerpts.map((piece) => (
                             <details className="brief-trace-excerpt" key={piece.label}>
-                              <summary>{piece.label} — {piece.chars.toLocaleString("en-US")} characters</summary>
+                              <summary>{piece.label}: {piece.chars.toLocaleString("en-US")} characters</summary>
                               <pre>{piece.text}</pre>
                             </details>
                           ))}

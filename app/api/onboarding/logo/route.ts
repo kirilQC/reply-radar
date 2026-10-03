@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const file = form.get("file");
     if (!slug) return NextResponse.json({ ok: false, error: "slug required" }, { status: 400 });
     if (file instanceof File && file.size > 0) {
-      if (file.size > 5_000_000) return NextResponse.json({ ok: false, error: "Image is over 5MB — please use a smaller file." }, { status: 400 });
+      if (file.size > 5_000_000) return NextResponse.json({ ok: false, error: "Image is over 5MB. Please use a smaller file." }, { status: 400 });
       // Make sure the bucket exists (public), then upsert the file.
       await fetch(`${url}/storage/v1/bucket`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ id: BUCKET, name: BUCKET, public: true, file_size_limit: 5_242_880 }) }).catch(() => {});
       const type = file.type || "image/png";

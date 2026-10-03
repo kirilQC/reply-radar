@@ -769,7 +769,7 @@ async function reportOn(env: string, token: string, role: SlackActor): Promise<T
     .catch(() => ({ ok: false, error: "unreachable", status: 0 }));
   if (!body.ok) {
     const hint = String(body.error) === "not_allowed_token_type" && !token.startsWith("xoxb-") && !token.startsWith("xoxp-")
-      ? ` This is not a bot or user token — those start xoxb- or xoxp-.`
+      ? ` This is not a bot or user token. Those start xoxb- or xoxp-.`
       : "";
     return { env, role, present: true, prefix, kind: "", identity: "", workspace: "", ok: false, error: `${slackErrorText(body.error, body.status, role)}${hint}` };
   }

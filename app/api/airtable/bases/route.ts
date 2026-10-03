@@ -16,7 +16,7 @@ export async function GET() {
   if (!isAirtableConfigured()) {
     // The one setup step, said as the step. Whoever is looking at the picker is the person who can do it.
     return NextResponse.json(
-      { ok: false, bases: [], error: "Airtable is not connected yet. Add AIRTABLE_API_KEY in Vercel — a personal access token with data.records:read, data.records:write and schema.bases:read — and redeploy, because Vercel only gives a new variable to a new deployment." },
+      { ok: false, bases: [], error: "Airtable is not connected yet. Add AIRTABLE_API_KEY in Vercel (a personal access token with data.records:read, data.records:write and schema.bases:read) and redeploy, because Vercel only gives a new variable to a new deployment." },
       { status: 503 },
     );
   }

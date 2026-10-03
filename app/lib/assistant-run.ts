@@ -23,6 +23,7 @@ import { TOOLS, runTool, takeFile } from "./assistant-tools";
 import { bigListToDataset, capToolResult, exportDatasets, parseCsv, type DatasetStore } from "./assistant-data";
 import { publicBaseUrl } from "./public-url";
 import { DEFAULT_MODEL } from "../../shared/anthropic-model.mjs";
+import { stripDashes } from "../../shared/no-dashes.mjs";
 import {
   applyStreamEvent as applyEvent,
   createStreamState,
@@ -225,6 +226,7 @@ Answer shape — the rule that matters most:
 - Then three to five bullets of evidence, each one fact with its number (and the change vs the previous period when you have it). No bullet without a number.
 - Then, only if it earns its place, one table, stats block or chart.
 - Close with one short line offering the next level of detail, naming what you could dig into ("Want the per-campaign breakdown or the leads behind the 12?"). For a list answer, the one CSV line replaces this.
+- Never use em dashes or en dashes.
 - Caveats go last and take one line. Never open with a caveat, a methodology note, a note about missing setup, or "Here's the full picture".
 - Comparisons name a winner and say on what and by how much. "Both have 100+" is not an answer; get the exact figures (client_scorecard) or say plainly which number you could not get.
 - Status, comparison and "how is X doing" answers stay under about 150 words before any table. Depth is offered, not dumped.
@@ -436,24 +438,24 @@ Weekly reports use Tarsi's EOW recap format, and only that, unless they ask for 
   \`\`\`
   Subject: {Client} <> QC {M/D} EOW recap
 
-  {one warm greeting line — the season, a holiday, an event; e.g. "Week one of September, and the campaigns are live."}
+  {one warm greeting line: the season, a holiday, an event; e.g. "Week one of September, and the campaigns are live."}
 
   *Recap from this week*
-  - {fact with its number, as a short fragment — e.g. "8 replies, 1 positive — 13% positive rate"}
+  - {fact with its number, as a short fragment, e.g. "8 replies, 1 positive, 13% positive rate"}
   - {e.g. "Lyna Wais's BV010 campaign at 33% positive on 3 replies"}
   - {e.g. "17 connection requests accepted of 43 sent, 10.9% acceptance rate"}
   - {e.g. "1,665 leads pending across three active campaigns"}
 
   *Active campaigns*
-  - {Campaign name} — {N} replies · {sender name(s), comma-separated} · {N} days of sending left
-  - {Campaign name} — {N} replies · {sender name(s)} · {N} days of sending left
+  - {Campaign name} · {N} replies · {sender name(s), comma-separated} · {N} days of sending left
+  - {Campaign name} · {N} replies · {sender name(s)} · {N} days of sending left
 
-  {one warm close line — a next step or something to look forward to}
+  {one warm close line: a next step or something to look forward to}
 
   - QC Growth
   \`\`\`
 - Recap bullets are FRAGMENTS, three to five, one fact and its number each — never a sentence, never two clauses of explanation. Order by signal: replies and their positive share first, then connections sent/accepted with the acceptance rate, then the campaign that did the most work, named. No "which speaks to…", no "another booking without hand-holding" — just the fact.
-- Active-campaign lines are ONE LINE each, in the "Name — N replies · senders · N days of sending left" format above. Never a vertical block with "Replies (wk):", "Senders:", "Days left:" labels. If a campaign has worked through its list, say so in one short line instead of a block.
+- Active-campaign lines are ONE LINE each, in the "Name · N replies · senders · N days of sending left" format above. Never a vertical block with "Replies (wk):", "Senders:", "Days left:" labels. If a campaign has worked through its list, say so in one short line instead of a block.
 - No emoji anywhere — not on priorities, not on campaigns. Bold sparingly (a name or a headline number), never a bolded phrase in every bullet.
 - Priorities are optional: include a short "*Priorities*" list of two to four plain bullets only when something genuinely needs the client to act (a question to answer, a booked meeting, a campaign out of leads). Omit the section entirely if there is nothing — the example above has none.
 - Banned, no matter how a skill or the reader's phrasing implies otherwise: an "Executive Summary" heading, a stat-by-stat "Campaign Performance Snapshot" block, per-sender tables, quoted or translated replies, a "top replies this week" section, and any message-level detail. If you are about to write one of these, stop — that is not Tarsi's format.
@@ -636,7 +638,7 @@ export async function runAgent(opts: {
       const statements = said.split(/(?<=[.!?])\s+/).filter((sentence) => !/\?\s*$/.test(sentence)).join(" ");
       if (/\b(attached|attaching|in the (csv|spreadsheet|file)|the csv (below|has)|full list is)\b/i.test(statements)) flushDatasets();
       return {
-        reply: said,
+        reply: stripDashes(said),
         steps,
         usage: { inputTokens, outputTokens },
         stopReason,
@@ -696,7 +698,7 @@ export async function runAgent(opts: {
         } catch (error) {
           const detail = error instanceof Error ? error.message : "The tool failed.";
           steps.push({ tool: name, input, ok: false, detail });
-          emit({ type: "tool_done", tool: name, ok: false, detail });
+          emit({ type: "tool_done", tool: name, ok: false, detail: stripDashes(detail) });
           // Reported as a result, not an error: this is usually a recoverable mistake — a client name
           // that does not exist, a date window with only one end — and the next turn fixes it.
           return { type: "tool_result", tool_use_id: text(call.id), content: detail, is_error: true };

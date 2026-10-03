@@ -514,7 +514,7 @@ export default function AdminPage() {
     if (airtableError) return airtableError;
     if (!workspaceDraft.airtableBaseId) {
       if (guessedBase.how === "ambiguous") return `${guessedBase.candidates.length} bases match this name (${guessedBase.candidates.map((base) => base.name).join(", ")}). Pick the right one above.`;
-      if (guessedBase.baseId) return `${guessedBase.name} looks like this client's base. Pick it above to confirm — nothing is written to Airtable until a base is chosen here.`;
+      if (guessedBase.baseId) return `${guessedBase.name} looks like this client's base. Pick it above to confirm. Nothing is written to Airtable until a base is chosen here.`;
       return airtableBases.length ? "No base matches this name. Pick this client's base above, or leave it unset to write nothing to Airtable." : "No Airtable bases have been listed yet.";
     }
     if (trackerState === "checking") return "Checking the tables in that base.";
@@ -536,11 +536,11 @@ export default function AdminPage() {
     const internal = normalizeChannelId(workspaceDraft.slackInternal);
     const external = normalizeChannelId(workspaceDraft.slackExternal);
     const wrong = [internal && !looksLikeChannelId(internal) ? "internal" : "", external && !looksLikeChannelId(external) ? "external" : ""].filter(Boolean);
-    if (wrong.length) return `That does not look like a channel id (${wrong.join(" and ")}). Open the channel in Slack, choose View channel details, and copy the id from the bottom — or paste the channel URL here and the id will be read out of it.`;
-    if (internal && internal === external) return "Both fields hold the same channel. The internal channel is where the team talks and the external one is shared with the client — briefs written for one are not safe to post in the other.";
+    if (wrong.length) return `That does not look like a channel id (${wrong.join(" and ")}). Open the channel in Slack, choose View channel details, and copy the id from the bottom, or paste the channel URL here and the id will be read out of it.`;
+    if (internal && internal === external) return "Both fields hold the same channel. The internal channel is where the team talks and the external one is shared with the client. Briefs written for one are not safe to post in the other.";
     if (internal && external) return "The internal channel is read for what the team committed to. The external channel is read for anything the client asked that nobody answered. The QC Command bot has to be invited to both.";
     if (internal && !external && workspaceDraft.slackInternalOnly) return "Internal channel only, as ticked above. The morning brief can be switched on without an external channel.";
-    if (internal && !external) return "Only the internal channel is set. The morning brief can't be switched on until the external channel is added — or tick the box above if this client doesn't have one.";
+    if (internal && !external) return "Only the internal channel is set. The morning brief can't be switched on until the external channel is added, or tick the box above if this client doesn't have one.";
     if (internal || external) return `Only the ${internal ? "internal" : "external"} channel is set. A brief will still be written, but it will be missing whatever the other channel would have told it.`;
     return "Briefs need at least one channel. Paste the channel id, or the channel URL, and the id will be read out of it.";
   })();
@@ -861,10 +861,10 @@ export default function AdminPage() {
                         <label className="field-label">
                           TIMEZONE
                           <select value={workspaceDraft.timezone} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, timezone: event.target.value }))}>
-                            <option value="America/New_York">Eastern Time — New York (default)</option>
-                            <option value="America/Chicago">Central Time — Chicago</option>
-                            <option value="America/Los_Angeles">Pacific Time — Los Angeles</option>
-                            <option value="Pacific/Honolulu">Hawaii Time — Honolulu</option>
+                            <option value="America/New_York">Eastern Time, New York (default)</option>
+                            <option value="America/Chicago">Central Time, Chicago</option>
+                            <option value="America/Los_Angeles">Pacific Time, Los Angeles</option>
+                            <option value="Pacific/Honolulu">Hawaii Time, Honolulu</option>
                             <option value="Europe/London">London</option>
                           </select>
                         </label>
@@ -883,7 +883,7 @@ export default function AdminPage() {
                           QC BRAIN FOLDER
                           <select value={workspaceDraft.brainFolder} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, brainFolder: event.target.value }))}>
                             <option value="">
-                              {guessedFolder.folder ? `Matched automatically — clients/${guessedFolder.folder}` : "No folder matched this name"}
+                              {guessedFolder.folder ? `Matched automatically: clients/${guessedFolder.folder}` : "No folder matched this name"}
                             </option>
                             {brainFolders.map((folder) => (
                               <option key={folder} value={folder}>clients/{folder}</option>
@@ -899,8 +899,8 @@ export default function AdminPage() {
                           ? `This workspace is pinned to clients/${workspaceDraft.brainFolder} in the QC Brain. Its context, campaign figures and logo are joined there.`
                           : guessedFolder.folder
                             ? guessedFolder.how === "loose"
-                              ? `Guessed from the name — clients/${guessedFolder.folder}. The names are close but not identical, so it is worth confirming.`
-                              : `Matched on the ${guessedFolder.how === "slug" ? "slug" : "display name"} — clients/${guessedFolder.folder}. Pick a folder above only if that is wrong.`
+                              ? `Guessed from the name: clients/${guessedFolder.folder}. The names are close but not identical, so it is worth confirming.`
+                              : `Matched on the ${guessedFolder.how === "slug" ? "slug" : "display name"}: clients/${guessedFolder.folder}. Pick a folder above only if that is wrong.`
                             : brainFolders.length
                               ? "Nothing in the QC Brain matches this name. Pick the folder this client is written up in, if there is one."
                               : "The QC Brain has not been reached, so folders cannot be listed yet."}
@@ -971,8 +971,8 @@ export default function AdminPage() {
                         <select value={workspaceDraft.airtableBaseId} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, airtableBaseId: event.target.value }))}>
                           <option value="">
                             {guessedBase.how === "ambiguous"
-                              ? `${guessedBase.candidates.length} bases match — choose one`
-                              : guessedBase.baseId ? `Not set — ${guessedBase.name} looks right` : "Not set — nothing written to Airtable"}
+                              ? `${guessedBase.candidates.length} bases match. Choose one`
+                              : guessedBase.baseId ? `Not set. ${guessedBase.name} looks right` : "Not set. Nothing written to Airtable"}
                           </option>
                           {airtableBases.map((base) => (
                             <option key={base.id} value={base.id}>{base.name}</option>
@@ -993,7 +993,7 @@ export default function AdminPage() {
                         CLAY DNC WEBHOOK URL
                         <input value={workspaceDraft.clayDncWebhookUrl} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, clayDncWebhookUrl: event.target.value }))} placeholder="https://api.clay.com/v3/sources/webhook/…" type="url" />
                       </label>
-                      <p className="slack-channel-note">In this client&apos;s Clay DNC table, add an &ldquo;Import from Webhook&rdquo; source, set it to dedupe on the domain column, and paste its URL here. Leave blank and DNC adds still land in QC Command&apos;s own list — they just won&apos;t reach Clay.</p>
+                      <p className="slack-channel-note">In this client&apos;s Clay DNC table, add an &ldquo;Import from Webhook&rdquo; source, set it to dedupe on the domain column, and paste its URL here. Leave blank and DNC adds still land in QC Command&apos;s own list, they just won&apos;t reach Clay.</p>
                     </section>
                     <section className="admin-panel client-config-section" id="client-theme">
                       <div className="panel-heading"><div><h2>Theme & logo</h2><p>Brand this client's workspace without changing other clients.</p></div>{logoStatus && <span className="saved-dot">{logoStatus}</span>}</div>
@@ -1262,7 +1262,7 @@ function HeartbeatView({ heartbeat, onRefresh }: { heartbeat: HeartbeatPayload |
         <div className="health-actions"><div className="segmented-control"><button className={detail === "basic" ? "active" : ""} onClick={() => setDetail("basic")}>Basic view</button><button className={detail === "advanced" ? "active" : ""} onClick={() => setDetail("advanced")}>Advanced view</button></div><button className="secondary-button" onClick={onRefresh}>Refresh checks ↻</button></div>
       </div>
       <div className="heartbeat-service-grid">{(heartbeat?.services ?? []).map((service) => <div className="heartbeat-service admin-panel" key={service.id}><i className={service.configured ? "heartbeat-ok" : "heartbeat-missing"} /><div><strong>{service.label}</strong><small>{service.configured ? "Ready to use" : "Needs setup"}</small><small>{service.explanation}</small></div></div>)}</div>
-      <section className="admin-panel"><div className="panel-heading"><div><h2>Worker heartbeat</h2><p>The worker is a robot helper that wakes up, checks every client, and reports what happened.</p></div><span className={`health-state ${heartbeat?.worker?.status === "running" ? "ready" : "missing"}`}>{heartbeat?.worker?.status === "running" ? "Running" : "Needs attention"}</span></div><div className="heartbeat-log-list"><div><strong>Did the helper check in?</strong><span>{heartbeat?.worker ? `Yes — ${formatAge(heartbeat.worker.ageSeconds)}` : "No check-in found yet"}</span></div><div><strong>How many clients did it check?</strong><span>{heartbeat?.worker?.workspacesSeen ?? 0}</span></div><div><strong>Did it finish normally?</strong><span>{heartbeat?.worker?.error ? `No — ${heartbeat.worker.error}` : heartbeat?.worker ? "No error was reported" : "Waiting for the first run"}</span></div></div>{detail === "advanced" && <details className="diagnostic-details" open><summary>Worker timestamps, counters, recent runs, and raw row</summary><pre>{JSON.stringify(heartbeat?.worker ?? null, null, 2)}</pre></details>}</section>
+      <section className="admin-panel"><div className="panel-heading"><div><h2>Worker heartbeat</h2><p>The worker is a robot helper that wakes up, checks every client, and reports what happened.</p></div><span className={`health-state ${heartbeat?.worker?.status === "running" ? "ready" : "missing"}`}>{heartbeat?.worker?.status === "running" ? "Running" : "Needs attention"}</span></div><div className="heartbeat-log-list"><div><strong>Did the helper check in?</strong><span>{heartbeat?.worker ? `Yes, ${formatAge(heartbeat.worker.ageSeconds)}` : "No check-in found yet"}</span></div><div><strong>How many clients did it check?</strong><span>{heartbeat?.worker?.workspacesSeen ?? 0}</span></div><div><strong>Did it finish normally?</strong><span>{heartbeat?.worker?.error ? `No: ${heartbeat.worker.error}` : heartbeat?.worker ? "No error was reported" : "Waiting for the first run"}</span></div></div>{detail === "advanced" && <details className="diagnostic-details" open><summary>Worker timestamps, counters, recent runs, and raw row</summary><pre>{JSON.stringify(heartbeat?.worker ?? null, null, 2)}</pre></details>}</section>
       <section className={`admin-panel ai-ark-health ${heartbeat?.aiArk?.status === "attention" || heartbeat?.aiArk?.status === "not_configured" ? "has-alert" : ""}`}><div className="panel-heading"><div><h2>AI Ark enrichment</h2><p>We compare real API calls with recently stored LinkedIn leads. More than five failures triggers an alert.</p></div><span className={`health-state ${heartbeat?.aiArk?.status === "healthy" ? "ready" : heartbeat?.aiArk?.status === "disabled" ? "neutral" : "missing"}`}>{heartbeat?.aiArk?.status === "healthy" ? "Healthy" : heartbeat?.aiArk?.status === "disabled" ? "Globally disabled" : "Needs attention"}</span></div><p className="ai-ark-health-explanation">{heartbeat?.aiArk?.explanation ?? "Waiting for the first check."}</p><div className="heartbeat-kid-grid ai-ark-health-grid"><div className={heartbeat?.aiArk?.configured || !heartbeat?.aiArk?.enabled ? "ok" : "bad"}><b>{heartbeat?.aiArk?.configured || !heartbeat?.aiArk?.enabled ? "✓" : "!"}</b><span><strong>Global switch and key</strong><small>{heartbeat?.aiArk?.enabled ? heartbeat?.aiArk?.configured ? "Enabled and configured." : "Enabled, but the API key is missing." : "Disabled in Vercel."}</small></span></div><div className={(heartbeat?.aiArk?.failures24h ?? 0) > 5 ? "bad" : "ok"}><b>{(heartbeat?.aiArk?.failures24h ?? 0) > 5 ? "!" : "✓"}</b><span><strong>Calls · last 24 hours</strong><small>{heartbeat?.aiArk?.successes24h ?? 0} successful · {heartbeat?.aiArk?.failures24h ?? 0} failed</small></span></div><div className={(heartbeat?.aiArk?.unenrichedLeads24h ?? 0) > 5 ? "bad" : "ok"}><b>{(heartbeat?.aiArk?.unenrichedLeads24h ?? 0) > 5 ? "!" : "✓"}</b><span><strong>Missing enrichment</strong><small>{heartbeat?.aiArk?.unenrichedLeads24h ?? 0} recent LinkedIn lead(s)</small></span></div></div>{detail === "advanced" && <details className="diagnostic-details" open><summary>AI Ark failures, counts, and raw run records</summary><pre>{JSON.stringify(heartbeat?.aiArk ?? null, null, 2)}</pre></details>}</section>
       <section className="admin-panel"><div className="panel-heading"><div><h2>Client connection heartbeat</h2><p>Each client needs three things: a key, incoming webhook replies, and a recent background poll.</p></div></div><div className="heartbeat-client-list">{heartbeat?.clients?.length ? heartbeat.clients.map((item) => {
         const keyHealthy = item.keyConfigured;
@@ -1478,15 +1478,15 @@ function GranolaKeysView() {
                   {/* A key that sees only other people's notes is a key that will never find its holder's calls. */}
                   {sightings[key.id].ownersKnown && sightings[key.id].totalInYear > 0 && sightings[key.id].ownInYear === 0 && (
                     <p className="granola-key-error">
-                      None of these {sightings[key.id].totalInYear} meetings are {key.label || "this person"}&apos;s own — they are notes shared with the whole workspace, which every key sees. This key can&apos;t see {key.label || "their"}&apos;s calls: it is likely missing the &ldquo;Personal notes&rdquo; scope, is a workspace key, or is from a different Granola login. Replace it with a personal API key from {key.label || "their"}&apos;s own Granola account (Settings → Connectors → API keys → Create new key), with the &ldquo;Personal notes&rdquo; scope ticked.
+                      None of these {sightings[key.id].totalInYear} meetings are {key.label || "this person"}&apos;s own. They are notes shared with the whole workspace, which every key sees. This key can&apos;t see {key.label || "their"}&apos;s calls: it is likely missing the &ldquo;Personal notes&rdquo; scope, is a workspace key, or is from a different Granola login. Replace it with a personal API key from {key.label || "their"}&apos;s own Granola account (Settings → Connectors → API keys → Create new key), with the &ldquo;Personal notes&rdquo; scope ticked.
                     </p>
                   )}
                   {sightings[key.id].meetings.length === 0 ? (
                     <p className="granola-key-meetings-empty">
                       No meetings in the last {sightings[key.id].windowDays || 14} days.
                       {sightings[key.id].olderMeetings.length > 0
-                        ? ` But this key does see ${sightings[key.id].olderMeetings.length} older meeting${sightings[key.id].olderMeetings.length === 1 ? "" : "s"} — it's just been quiet lately, not empty.`
-                        : ` And none in the last year either — this key's Granola account has no recordings (likely the wrong login).`}
+                        ? ` But this key does see ${sightings[key.id].olderMeetings.length} older meeting${sightings[key.id].olderMeetings.length === 1 ? "" : "s"}. It's just been quiet lately, not empty.`
+                        : ` And none in the last year either. This key's Granola account has no recordings (likely the wrong login).`}
                     </p>
                   ) : (
                     <ul>
@@ -1501,7 +1501,7 @@ function GranolaKeysView() {
                   {/* Teammates' workspace-visible notes come back on this key too; they are theirs, so counted, not listed. */}
                   {sightings[key.id].sharedInWindow > 0 && (
                     <p className="granola-key-shared">
-                      + {sightings[key.id].sharedInWindow} shared by {sightings[key.id].sharedFrom.slice(0, 3).join(", ")}{sightings[key.id].sharedFrom.length > 3 ? ` +${sightings[key.id].sharedFrom.length - 3}` : ""} — visible to everyone in the workspace, not {key.label || "this person"}&apos;s own
+                      + {sightings[key.id].sharedInWindow} shared by {sightings[key.id].sharedFrom.slice(0, 3).join(", ")}{sightings[key.id].sharedFrom.length > 3 ? ` +${sightings[key.id].sharedFrom.length - 3}` : ""}, visible to everyone in the workspace, not {key.label || "this person"}&apos;s own
                     </p>
                   )}
                   {sightings[key.id].meetings.length === 0 && sightings[key.id].olderMeetings.length > 0 && (
@@ -1764,7 +1764,7 @@ function FeedbackView() {
               {submitting ? "Sending…" : "Submit"}
             </button>
           </div>
-          {sent && <p className="feedback-sent" role="status">Thanks — that landed.</p>}
+          {sent && <p className="feedback-sent" role="status">Thanks, that landed.</p>}
         </div>
       </section>
       <section className="admin-panel">
@@ -1947,7 +1947,7 @@ function AuditView() {
         <button className={`audit-group-toggle ${expanded ? "expanded" : ""}`} onClick={() => setExpandedGroups((current) => { const next = new Set(current); if (next.has(groupKey)) next.delete(groupKey); else next.add(groupKey); return next; })}>
           <time>{new Date(item.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" })}</time>
           <div className="audit-source"><i /><span><strong>worker</strong><small>{item.events.length} syncs</small></span></div>
-          <div className="audit-description"><strong>workspace sync batch</strong><p>{clients.length} client{clients.length !== 1 ? "s" : ""} synced successfully{clients.length ? ` — ${clients.join(", ")}` : ""}</p></div>
+          <div className="audit-description"><strong>workspace sync batch</strong><p>{clients.length} client{clients.length !== 1 ? "s" : ""} synced successfully{clients.length ? `: ${clients.join(", ")}` : ""}</p></div>
           <span className="audit-status success">success</span>
           <span className="audit-group-chevron">▾</span>
         </button>
@@ -2037,7 +2037,7 @@ function TemplatePicker({ templates, value, onPick, onSave, onDelete }: {
             <p>{value.trim() ? "Keeps it in this list for every client." : "Write a prompt below first."}</p>
           </button>}
     </div>
-    <small className="template-picker-hint">Pick one to fill the box below, then edit it freely — any change makes it a custom prompt for this client. Editing and saving changes is enough to use a custom prompt; only save it as a template if other clients should be able to pick it too.</small>
+    <small className="template-picker-hint">Pick one to fill the box below, then edit it freely. Any change makes it a custom prompt for this client. Editing and saving changes is enough to use a custom prompt; only save it as a template if other clients should be able to pick it too.</small>
   </div>;
 }
 
@@ -2513,7 +2513,7 @@ function AiHubView() {
     {activeTab === "slack-log" && <>
       <div className="admin-grid">
         <section className="admin-panel">
-          <div className="panel-heading"><div><h2>QC Bot activity</h2><p>Every question answered over Slack — mentions, DMs, and thread replies.</p></div></div>
+          <div className="panel-heading"><div><h2>QC Bot activity</h2><p>Every question answered over Slack: mentions, DMs, and thread replies.</p></div></div>
           <div className="ai-hub-kpis">
             <div className="ai-hub-kpi"><span>Total runs</span><strong>{slackLog?.summary?.total ?? "—"}</strong></div>
             <div className="ai-hub-kpi"><span>Answered</span><strong>{slackLog?.summary?.succeeded ?? "—"}</strong></div>
@@ -2621,7 +2621,7 @@ function AiHubView() {
                 {/* Deep, not tall-ish. What goes in here is the output of /client-summary in the QC
                     Growth OS, which runs to thousands of words — six rows made a correct paste look
                     like a mistake, and the first instinct on seeing a full box overflow is to trim it. */}
-                <label className="field-label">CLIENT BRIEF<textarea value={clientBrief} onChange={(event) => setClientBrief(event.target.value)} placeholder="Paste the output of /client-summary from the QC Growth OS. Longer is better — every ICP score, follow-up score and draft for this client reads it." rows={18} style={{ minHeight: 380 }} /></label>
+                <label className="field-label">CLIENT BRIEF<textarea value={clientBrief} onChange={(event) => setClientBrief(event.target.value)} placeholder="Paste the output of /client-summary from the QC Growth OS. Longer is better: every ICP score, follow-up score and draft for this client reads it." rows={18} style={{ minHeight: 380 }} /></label>
                 {briefLength > 0 && <p className="brief-count">{briefLength.toLocaleString()} characters{briefLength > 24000 ? " · only the first 24,000 reach the AI" : ""}</p>}
                 <button className="upload-zone" type="button"><span style={{ fontSize: 20 }}>＋</span><div><strong>Upload client documents</strong><small>PDF, DOCX, TXT · stored in Supabase Storage</small></div></button>
               </section>
@@ -2636,7 +2636,7 @@ function AiHubView() {
                   ? <div className="locked-explainer">
                       <p>Fill in the <strong>client brief</strong> above first. ICP scoring judges how well a lead fits <em>this client</em>, so the AI needs to know what they sell and who they sell it to before any score means anything.</p>
                       <div className="locked-progress"><i style={{ width: `${Math.min(100, Math.round((briefLength / MIN_CLIENT_BRIEF_LENGTH) * 100))}%` }} /></div>
-                      <small>{briefLength} of {MIN_CLIENT_BRIEF_LENGTH} characters written — {MIN_CLIENT_BRIEF_LENGTH - briefLength} to go.</small>
+                      <small>{briefLength} of {MIN_CLIENT_BRIEF_LENGTH} characters written, {MIN_CLIENT_BRIEF_LENGTH - briefLength} to go.</small>
                     </div>
                   : <>
                       <TemplatePicker templates={templatesFor("icp")} value={icpPrompt} onPick={setIcpPrompt} onSave={(name) => saveTemplate("icp", name, icpPrompt)} onDelete={(id) => void deleteTemplate(id)} />

@@ -73,7 +73,7 @@ export default function PersonalAssistants({ onBack }: { onBack: () => void }) {
     try {
       const response = await fetch("/api/slack/personal", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) });
       const payload = await response.json().catch(() => ({}));
-      if (response.ok && payload.ok) setNote(`Sent — pulled together ${Array.isArray(payload.clients) ? payload.clients.length : 0} client${(payload.clients?.length ?? 0) === 1 ? "" : "s"}.`);
+      if (response.ok && payload.ok) setNote(`Sent. Pulled together ${Array.isArray(payload.clients) ? payload.clients.length : 0} client${(payload.clients?.length ?? 0) === 1 ? "" : "s"}.`);
       else setError(payload?.error || "Could not send.");
     } catch { setError("Could not reach the server."); }
     setBusy(""); await load();

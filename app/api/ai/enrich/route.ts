@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     if (!lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
 
     const profileUrl = String(lead.linkedin_profile_url ?? "").trim();
-    if (!profileUrl) return NextResponse.json({ error: "Lead has no LinkedIn profile URL — enrichment requires one" }, { status: 400 });
+    if (!profileUrl) return NextResponse.json({ error: "Lead has no LinkedIn profile URL. Enrichment requires one" }, { status: 400 });
 
     const existingRaw = lead.raw_data && typeof lead.raw_data === "object" ? lead.raw_data as Row : {};
     const replyRadar = existingRaw.reply_radar && typeof existingRaw.reply_radar === "object" ? existingRaw.reply_radar as Row : {};

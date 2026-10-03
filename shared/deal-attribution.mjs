@@ -205,7 +205,7 @@ export function attributeDeal(deal, qc) {
   step("Company domain vs QC campaigns", domain || "no domain on the deal", Boolean(domainHit), domainHit ? `${domain} is a company QC campaigned into` : (domain ? "domain not in any QC campaign" : "nothing to match on"));
   if (domainHit) {
     const info = byDomain.get(domain) ?? { campaign: "", companyLogo: "" };
-    return { attribution: "possible", matchedBy: "domain", campaign: info.campaign || "", reason: `${deal?.companyName || domain} is a company QC campaigned into${info.campaign ? ` (${info.campaign})` : ""}, but no specific person on this deal matched — worth a look.`, evidence: { domain }, leadId: info.leadId || "", companyLogo: info.companyLogo || "", trace };
+    return { attribution: "possible", matchedBy: "domain", campaign: info.campaign || "", reason: `${deal?.companyName || domain} is a company QC campaigned into${info.campaign ? ` (${info.campaign})` : ""}, but no specific person on this deal matched. Worth a look.`, evidence: { domain }, leadId: info.leadId || "", companyLogo: info.companyLogo || "", trace };
   }
 
   // 4 — The last resort: a company or a person's name. Names collide (two "John Smith"s, two "Acme"s),
@@ -223,7 +223,7 @@ export function attributeDeal(deal, qc) {
   step("Contact name + company vs QC leads", contacts.map((c) => c.name).filter(Boolean).join(", ") + (deal?.companyName ? ` @ ${deal.companyName}` : ""), Boolean(nameHit), nameHit ? `${nameHit.contact.name} matched at this company` : "no QC lead with this person at this company");
   if (nameHit) {
     const info = nameHit.info;
-    return { attribution: "possible", matchedBy: "name+company", campaign: info.campaign || "", reason: `${nameHit.contact.name} shares a name with a QC-contacted person at ${deal?.companyName} — likely the same lead, worth confirming.`, evidence: { name: nameHit.contact.name }, leadId: info.leadId || "", companyLogo: info.companyLogo || "", trace };
+    return { attribution: "possible", matchedBy: "name+company", campaign: info.campaign || "", reason: `${nameHit.contact.name} shares a name with a QC-contacted person at ${deal?.companyName}. Likely the same lead, worth confirming.`, evidence: { name: nameHit.contact.name }, leadId: info.leadId || "", companyLogo: info.companyLogo || "", trace };
   }
 
   // 5 — Bare company name: the weakest signal, the true last resort.
@@ -231,7 +231,7 @@ export function attributeDeal(deal, qc) {
   for (const [key, list] of byCompany) { if (companyMatches(dealCompany, key)) { companyHit = { key, info: list[0] }; break; } }
   step("Company name vs QC campaigns", deal?.companyName || "no company on the deal", Boolean(companyHit), companyHit ? `matches a company QC campaigned into${companyHit.info.campaign ? ` (${companyHit.info.campaign})` : ""}` : (deal?.companyName ? "company not in any QC campaign" : "nothing to match on"));
   if (companyHit) {
-    return { attribution: "possible", matchedBy: "company", campaign: companyHit.info.campaign || "", reason: `${deal?.companyName} matches a company QC campaigned into${companyHit.info.campaign ? ` (${companyHit.info.campaign})` : ""} — confirm the person to count it.`, evidence: { company: companyHit.key }, leadId: companyHit.info.leadId || "", companyLogo: companyHit.info.companyLogo || "", trace };
+    return { attribution: "possible", matchedBy: "company", campaign: companyHit.info.campaign || "", reason: `${deal?.companyName} matches a company QC campaigned into${companyHit.info.campaign ? ` (${companyHit.info.campaign})` : ""}. Confirm the person to count it.`, evidence: { company: companyHit.key }, leadId: companyHit.info.leadId || "", companyLogo: companyHit.info.companyLogo || "", trace };
   }
 
     return { attribution: "none", matchedBy: null, campaign: "", reason: "", evidence: {}, leadId: "", companyLogo: "", trace };

@@ -193,7 +193,7 @@ What we are waiting on the client for. Numbered, one short line each, with one i
 
 ## Rules
 
-- **Never use an em dash or an en dash.** Not one, anywhere, for any reason. No \`—\`, no \`–\`. They are the single clearest tell that a machine wrote this, and the brief has to read like a colleague wrote it. Use a comma, a colon, a semicolon, brackets, or two sentences instead. Where you would reach for one, a full stop is almost always better.
+- **Never use an em dash or an en dash.** Not one, anywhere, for any reason. No em dash (U+2014), no en dash (U+2013). They are the single clearest tell that a machine wrote this, and the brief has to read like a colleague wrote it. Use a comma, a colon, a semicolon, brackets, or two sentences instead. Where you would reach for one, a full stop is almost always better.
 - Every action item and every commitment must be attributable to something you were given. Say who said it and roughly when. If you cannot point at it, leave it out, because an invented action item costs the brief more trust than a missed one.
 - **Never write a name you were not given for the thing you are naming.** A sender's name comes only from the Figures, an owner's only from the mention table. Names are not interchangeable between the two: our team owns action items, the client's accounts do the sending. Where you have no name, say the count or say the role. A plausible name is not a name.
 - **Campaign names in full, always, exactly as the Figures spell them.** Write *BV007: ASCs v2*, never "BV007" and never "the ASCs campaign". The prefix on its own means nothing to the person reading, so they cannot tell which campaign you mean and the item cannot be acted on.
@@ -1102,7 +1102,7 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
         return `## ${prior.postedOn}${when(prior.ageDays)}\n\n${prior.body}\n\n${replies}`;
       })
       .join("\n\n");
-    return `# Your last brief${priors.length > 1 ? "s" : ""}, and how the team replied\n\nThis is what you already told them, and what they said back. Read it before you write, and apply two rules. First: a reply that says an item is handled, done, sorted, a dead end or resolved closes that item — do not raise it again, in any wording. The person replying knows more than every other source here, because they are answering the exact item you raised. Second: do not repeat an item from a brief below verbatim just because it is still open — you have already said it once. The only reason to raise something again is that it changed or went wrong again since. Never mention this section, these past briefs, or the replies in what you write; use them only to decide what not to say.\n\n${blocks}`;
+    return `# Your last brief${priors.length > 1 ? "s" : ""}, and how the team replied\n\nThis is what you already told them, and what they said back. Read it before you write, and apply two rules. First: a reply that says an item is handled, done, sorted, a dead end or resolved closes that item: do not raise it again, in any wording. The person replying knows more than every other source here, because they are answering the exact item you raised. Second: do not repeat an item from a brief below verbatim just because it is still open; you have already said it once. The only reason to raise something again is that it changed or went wrong again since. Never mention this section, these past briefs, or the replies in what you write; use them only to decide what not to say.\n\n${blocks}`;
   })();
 
   return [
@@ -1124,7 +1124,7 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     // still owed. Newest evidence wins: a later "done", a later link, a later reply settles an item an
     // earlier source left open, even when the earlier source is a call and the later one is one line in a
     // channel. Dates are on every source for exactly this; use them.
-    `# How to weigh what you are given\n\nEverything below is a snapshot from a different moment. When two sources disagree, the newer one wins — a call can ask for something and a later channel message can show it was already done, and if so it is done. Check the date on a finding before you raise it: an item is only open if nothing more recent has closed it. A reply on one of your past briefs (if any are included below) is the newest word of all, because it was written in answer to you raising the item.`,
+    `# How to weigh what you are given\n\nEverything below is a snapshot from a different moment. When two sources disagree, the newer one wins: a call can ask for something and a later channel message can show it was already done, and if so it is done. Check the date on a finding before you raise it: an item is only open if nothing more recent has closed it. A reply on one of your past briefs (if any are included below) is the newest word of all, because it was written in answer to you raising the item.`,
     `# Figures\n\nThese are facts. Do not restate them differently and do not compute new ones.\n\n${signalsAsText(inputs.signals)}`,
     roster,
     priorBriefsSection,
@@ -1221,7 +1221,7 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
         continue;
       }
       if (channel.error) {
-        facts.push(`${label} ${channel.channelId}: could not be read — ${channel.error}`);
+        facts.push(`${label} ${channel.channelId}: could not be read: ${channel.error}`);
         continue;
       }
       read += 1;
@@ -1246,7 +1246,7 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
     const extraChannels = (inputs.extraChannels ?? []).filter((channel) => channel.channelId);
     for (const channel of extraChannels) {
       if (channel.error) {
-        facts.push(`Extra ${channel.channelId}: could not be read — ${channel.error}`);
+        facts.push(`Extra ${channel.channelId}: could not be read: ${channel.error}`);
         continue;
       }
       raw += channel.raw ?? channel.messages;
@@ -1314,7 +1314,7 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
       facts.push(attendees.length ? `${plural(attendees.length, "attendee")}: ${attendees.join(", ")}.` : "The note carried no attendee list.");
       if (call.durationMinutes) facts.push(`Scheduled for ${plural(call.durationMinutes, "minute")}.`);
       facts.push(call.transcript
-        ? `Transcript: ${plural(call.transcript.length, "character")}${call.truncated ? ", of which only the last part was sent — the end of a call is where next steps get agreed" : ", sent whole"}.`
+        ? `Transcript: ${plural(call.transcript.length, "character")}${call.truncated ? ", of which only the last part was sent, because the end of a call is where next steps get agreed" : ", sent whole"}.`
         : "The transcript could not be read, so nothing from this call reached the brief.");
       facts.push("Granola's own summary was not sent. The transcript is the only account of the call the brief was given.");
       const excerpts: TraceStep["excerpts"] = [];
@@ -1340,7 +1340,7 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
       step.facts.push(`Also read ${plural(extraCalls.length, "extra meeting")}, ranked below the client's own call.`);
       for (const extra of extraCalls) {
         const age = extra.ageDays === null ? "" : extra.ageDays === 0 ? "today" : extra.ageDays === 1 ? "yesterday" : `${extra.ageDays} days ago`;
-        step.facts.push(`Extra: “${extra.title}”${age ? `, ${age}` : ""}, out of ${extra.owner}'s Granola — ${extra.transcript ? `${plural(extra.transcript.length, "character")} of transcript${extra.truncated ? ", last part only" : ""}` : "no transcript could be read"}.`);
+        step.facts.push(`Extra: “${extra.title}”${age ? `, ${age}` : ""}, out of ${extra.owner}'s Granola, ${extra.transcript ? `${plural(extra.transcript.length, "character")} of transcript${extra.truncated ? ", last part only" : ""}` : "no transcript could be read"}.`);
         if (extra.transcript) step.excerpts.push(excerptOf(`Extra meeting “${extra.title}”, as the model read it`, extra.transcript));
       }
     }
@@ -1369,7 +1369,7 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
     const untold = campaigns.total - campaigns.names.length;
     if (untold > 0) facts.push(`${plural(untold, "smaller campaign")} were left out, to keep the prompt to the active ones and the ones with volume in them.`);
     if (campaigns.active) {
-      facts.push(`Runway: ${count(runway.pending)} leads pending across ${plural(campaigns.active, "active campaign")} on ${plural(runway.senders, "sender")} — ${runway.daysLeft === null ? "days left unknown, because no senders are recorded" : `${plural(runway.daysLeft, "day")} of sending left`}.`);
+      facts.push(`Runway: ${count(runway.pending)} leads pending across ${plural(campaigns.active, "active campaign")} on ${plural(runway.senders, "sender")}: ${runway.daysLeft === null ? "days left unknown, because no senders are recorded" : `${plural(runway.daysLeft, "day")} of sending left`}.`);
     }
     // The one figure in the brief that is meant to start work today, so the trace has to show whether it
     // fired and on what basis. A brief that failed to raise it is a brief nobody can tell was wrong.
@@ -1378,7 +1378,7 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
     facts.push(`Replies: ${count(replies.thisWeek)} this week against ${count(replies.lastWeek)} the week before.`);
     if (acceptance.thisWeek !== null) facts.push(`Acceptance: ${acceptance.thisWeek}%${acceptance.lastWeek === null ? "" : ` against ${acceptance.lastWeek}% the week before`}.`);
     if (!sending.lastDayWithSends) facts.push("No sending at all is on record for the last three weeks.");
-    else if (sending.quietDays >= 2) facts.push(`Nothing sent since ${sending.lastDayWithSends} — ${plural(sending.quietDays, "day")} quiet.`);
+    else if (sending.quietDays >= 2) facts.push(`Nothing sent since ${sending.lastDayWithSends}, ${plural(sending.quietDays, "day")} quiet.`);
     // Only worth stating on a fallback run. A live read is hours-old by zero hours, and printing that
     // invites the reader to wonder which of the two figures — zero, or "just now" — to believe.
     if (!source.live && staleness.statsAgeHours !== null) facts.push(`Campaign figures were last collected ${plural(staleness.statsAgeHours, "hour")} ago.`);
@@ -1386,7 +1386,7 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
     steps.push({
       source: "HeyReach",
       result: known
-        ? `Read ${plural(campaigns.total, "campaign")} and ${plural(staleness.dayCount, "day")} of daily figures — ${campaigns.active} active, ${campaigns.paused} paused, ${campaigns.finished} finished.`
+        ? `Read ${plural(campaigns.total, "campaign")} and ${plural(staleness.dayCount, "day")} of daily figures: ${campaigns.active} active, ${campaigns.paused} paused, ${campaigns.finished} finished.`
         : "No figures have ever been collected for this client, so the brief was told to report none.",
       // A stored copy is the failure that looks like success: every number is present and every one is from
       // yesterday. It is never allowed to read as `ok`, however recently the copy was taken.

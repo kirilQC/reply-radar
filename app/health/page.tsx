@@ -863,7 +863,7 @@ export default function HealthPage() {
                   )}
                   {mode === "advanced" && (
                     <details className="diagnostic-details" open>
-                      <summary>Granola heartbeat log — last twelve polls</summary>
+                      <summary>Granola heartbeat log: last twelve polls</summary>
                       <pre>{JSON.stringify(granola ?? null, null, 2)}</pre>
                     </details>
                   )}

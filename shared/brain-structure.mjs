@@ -38,7 +38,7 @@
  */
 export const CLIENT_DOCS = [
   { key: "brief", label: "Brief", path: "README.md", aliases: ["readme.md", "overview.md"], blurb: "What this client is and what we are doing for them" },
-  { key: "icp", label: "ICP", path: "account/icp.md", aliases: ["account/ideal-customer.md"], blurb: "Who they sell to — firmographics, pains, triggers" },
+  { key: "icp", label: "ICP", path: "account/icp.md", aliases: ["account/ideal-customer.md"], blurb: "Who they sell to: firmographics, pains, triggers" },
   { key: "personas", label: "Personas", path: "account/personas.md", aliases: ["account/persona.md"], blurb: "The buyers, and the angle for each" },
   { key: "voice", label: "Voice", path: "account/voice.md", aliases: ["account/tone.md"], blurb: "How we write for them, and what never to say" },
   { key: "engagement", label: "Engagement", path: "strategy/current-engagement.md", aliases: ["strategy/engagement.md", "strategy/current.md"], blurb: "Live campaigns, open items, what we have learned" },
@@ -471,7 +471,7 @@ export function briefSummary(text, limit = 340) {
  * the knowledge a new joiner does not have and the folder name does not supply.
  */
 export const BRAIN_AREAS = [
-  { key: "company", label: "Company", prefix: "company/", blurb: "How QC runs — process, positioning, internal playbooks" },
+  { key: "company", label: "Company", prefix: "company/", blurb: "How QC runs: process, positioning, internal playbooks" },
   { key: "wiki", label: "Playbooks", prefix: "wiki/", blurb: "Sales motion, SOPs, prompts and the team handbook" },
   { key: "verticals", label: "Verticals", prefix: "verticals/", blurb: "Market research and messaging by industry" },
   { key: "commands", label: "Skills", prefix: ".claude/commands/", blurb: "The slash commands Claude can run against the brain" },

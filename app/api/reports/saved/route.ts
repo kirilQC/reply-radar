@@ -157,7 +157,7 @@ export async function POST(request: Request) {
         ok: false,
         error:
           error instanceof Error
-            ? `${error.message} — if rr_reports is missing, run supabase/migrations/20260812_rr_reports.sql.`
+            ? `${error.message}. If rr_reports is missing, run supabase/migrations/20260812_rr_reports.sql.`
             : "Could not save the report.",
       },
       { status: 502 },

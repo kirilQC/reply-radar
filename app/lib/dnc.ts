@@ -256,9 +256,9 @@ function renderDncMarkdown(clientName: string, entries: { company: string; domai
   const rows = entries
     .map((e) => `| ${e.company.replace(/\|/g, "\\|")} | ${(e.domain || "").replace(/\|/g, "\\|")} |`)
     .join("\n");
-  return `# ${clientName} — Do Not Contact
+  return `# ${clientName}: Do Not Contact
 
-Companies QC must never reach out to for ${clientName}. Maintained automatically by QC Command; the working source of truth is this client's Clay DNC table. Do not edit by hand — changes here are overwritten on the next sync.
+Companies QC must never reach out to for ${clientName}. Maintained automatically by QC Command; the working source of truth is this client's Clay DNC table. Do not edit by hand, changes here are overwritten on the next sync.
 
 | Company | Domain |
 | --- | --- |

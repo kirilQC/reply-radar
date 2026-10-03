@@ -31,7 +31,7 @@ async function workspaceIdFor(slug: string, c: NonNullable<ReturnType<typeof cre
   const rows = r.ok ? await r.json().catch(() => []) : [];
   return Array.isArray(rows) && rows[0]?.id ? String(rows[0].id) : "";
 }
-const TABLE_MISSING = "The rr_projects table doesn't exist yet — run the Project management SQL in Supabase, then reload.";
+const TABLE_MISSING = "The rr_projects table doesn't exist yet. Run the Project management SQL in Supabase, then reload.";
 
 export async function GET(request: Request) {
   const c = creds(); if (!c) return NextResponse.json({ ok: false, error: "Supabase not configured" }, { status: 503 });

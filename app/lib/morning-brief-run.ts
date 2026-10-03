@@ -31,6 +31,7 @@ import { ALL_STATUSES, campaignStatusFor } from "./heyreach-campaigns";
 import { campaignFunnelFor, dailyStatsFor } from "./heyreach-campaign-metrics";
 import { readConfig } from "./app-config";
 import { DEFAULT_MODEL, temperatureField } from "../../shared/anthropic-model.mjs";
+import { stripDashes } from "../../shared/no-dashes.mjs";
 
 /** Exported so the trace can name the model that was actually asked, rather than a second copy of it. */
 export const BRIEF_MODEL = DEFAULT_MODEL;
@@ -375,5 +376,5 @@ export async function writeBrief(systemPrompt: string, userContent: string, mode
     ? payload.content.filter((part: Row) => part?.type === "text").map((part: Row) => String(part.text ?? "")).join("").trim()
     : "";
   if (!text) throw new Error("Anthropic returned an empty brief.");
-  return text;
+  return stripDashes(text);
 }

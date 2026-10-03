@@ -39,7 +39,7 @@ export function EnrichControl({ mode, value, onChange, detection, disabled, llmM
           <span><b>{n(value === "all" ? detection.rows - detection.noTarget : detection.scrapeable)}</b> {value === "all" ? "would be scraped" : "can be scraped"} from {source}</span>
           {detection.noTarget > 0 && <span><b>{n(detection.noTarget)}</b> have no {mode === "companies" ? "website" : "LinkedIn URL"}</span>}
           {mode === "companies" ? <span>structured by <b>{llmModel.replace(/^openai\//, "")}</b></span> : <span>≤ <b>{n(credits)}</b> AI Ark credits</span>}
-          {detection.blocked && <span className="jev-warn-line">AI Ark is not set up — add AI_ARK_API_KEY in Vercel. Contacts will be judged on the CSV alone.</span>}
+          {detection.blocked && <span className="jev-warn-line">AI Ark is not set up. Add AI_ARK_API_KEY in Vercel. Contacts will be judged on the CSV alone.</span>}
         </div>
       )}
     </div>
@@ -79,7 +79,7 @@ export function StageCards({ stats, mode, running, rows, llmModel, enrichMode }:
           <div key={key} className={`jev-stage ${state}`}>
             <div className="jev-stage-top"><span className="jev-stage-n">{idx + 1}</span><strong>{label}</strong>{busy && <i className="jev-stage-pulse" />}</div>
             <div className="jev-stage-main">{skipped ? "—" : n(s.done)}</div>
-            <div className="jev-stage-sub">{skipped ? (key === "structure" && mode === "contacts" ? "not needed — AI Ark is structured" : "skipped") : sub}</div>
+            <div className="jev-stage-sub">{skipped ? (key === "structure" && mode === "contacts" ? "not needed, AI Ark is structured" : "skipped") : sub}</div>
             {!skipped && (
               <div className="jev-stage-meta">
                 {s.active > 0 && <span className="active">{n(s.active)} in progress</span>}

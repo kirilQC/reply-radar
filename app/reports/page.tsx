@@ -1411,7 +1411,7 @@ export default function ReportsPage() {
             {composerOpen && (
               <div className="hub-composer">
                 <p className="hub-composer-note">
-                  A template is a prompt. The numbers always come from the data — the prompt decides what the
+                  A template is a prompt. The numbers always come from the data. The prompt decides what the
                   write-up emphasises, who it is addressed to, and how the message reads. Templates are shared, so
                   one saved here shows up for everyone.
                 </p>
@@ -1620,7 +1620,7 @@ export default function ReportsPage() {
                     <code>supabase/migrations/20260812_rr_reports.sql</code>.
                   </>
                 ) : (
-                  "Every report generated is filed here automatically, with the exact numbers it was built from — so one a client has already seen always reopens showing what it showed on the day it was sent."
+                  "Every report generated is filed here automatically, with the exact numbers it was built from, so one a client has already seen always reopens showing what it showed on the day it was sent."
                 )}
               </div>
             )}
@@ -2281,7 +2281,7 @@ function PromptDialog({
           thing, and a rule you cannot see is a rule you will write against by accident.
         */}
         <details className="prompt-dialog-fixed">
-          <summary>Sent with it, every time — the rules that override this prompt</summary>
+          <summary>Sent with it, every time: the rules that override this prompt</summary>
           <pre>{COMPOSE_SYSTEM_PROMPT}</pre>
         </details>
 
@@ -2353,7 +2353,7 @@ function csv(value: unknown) {
 function buildCsv(report: ReportData) {
   const lines: string[] = [];
   for (const client of report.clients) {
-    lines.push(`# ${client.workspace.name} — ${report.periodLabel}`);
+    lines.push(`# ${client.workspace.name}: ${report.periodLabel}`);
     lines.push("");
     lines.push("Summary");
     lines.push("Metric,Value");
@@ -2855,7 +2855,7 @@ function MetricsBlock({ client, report }: { client: ClientReport; report: Report
   if (!metrics.available)
     return (
       <EmptyNote>
-        Acceptance and reply rates were unavailable{metrics.reason ? ` — ${metrics.reason}` : ""}. Confirm in
+        Acceptance and reply rates were unavailable{metrics.reason ? ` (${metrics.reason})` : ""}. Confirm in
         HeyReach.
       </EmptyNote>
     );
@@ -2881,7 +2881,7 @@ function MetricsBlock({ client, report }: { client: ClientReport; report: Report
       </div>
       <p className="report-caption">
         {report.periodLabel}, across the {metrics.campaignCount === 1 ? "campaign" : `${metrics.campaignCount} campaigns`}{" "}
-        named in this report — not the whole account. Acceptance rate is the average of each campaign's own
+        named in this report, not the whole account. Acceptance rate is the average of each campaign's own
         accepted ÷ sent. Reply rate is {num(metrics.replies)} ÷ {num(metrics.connectionsAccepted)} accepted
         connections; positive reply rate is {num(metrics.positiveReplies)} ÷ the same.
       </p>
@@ -3009,7 +3009,7 @@ function ActiveCampaignTable({ client, metrics }: { client: ClientReport; metric
   if (!status || !status.available)
     return (
       <EmptyNote>
-        Live campaign status was unavailable{status?.reason ? ` — ${status.reason}` : ""}. Confirm in HeyReach.
+        Live campaign status was unavailable{status?.reason ? ` (${status.reason})` : ""}. Confirm in HeyReach.
       </EmptyNote>
     );
 
@@ -3217,10 +3217,10 @@ function IcpDistribution({ client }: { client: ClientReport }) {
   const { icpBuckets } = client;
   const total = icpBuckets.excellent + icpBuckets.strong + icpBuckets.moderate + icpBuckets.weak || 1;
   const rows = [
-    { label: "Excellent (75–100)", count: icpBuckets.excellent },
-    { label: "Strong (50–74)", count: icpBuckets.strong },
-    { label: "Moderate (25–49)", count: icpBuckets.moderate },
-    { label: "Weak (0–24)", count: icpBuckets.weak },
+    { label: "Excellent (75 to 100)", count: icpBuckets.excellent },
+    { label: "Strong (50 to 74)", count: icpBuckets.strong },
+    { label: "Moderate (25 to 49)", count: icpBuckets.moderate },
+    { label: "Weak (0 to 24)", count: icpBuckets.weak },
   ];
   return (
     <table className="report-table">
@@ -3271,7 +3271,7 @@ function ReplyTimingChart({ client }: { client: ClientReport }) {
     <div className="timing-block">
       <div className="timing-bars">
         {client.replyTiming.map((count, hour) => (
-          <div className="timing-bar" key={hour} title={`${hour}:00 — ${count} replies`}>
+          <div className="timing-bar" key={hour} title={`${hour}:00 · ${count} replies`}>
             <span className="timing-bar-fill" style={{ height: `${(count / max) * 100}%` }} />
             <span className="timing-bar-label">{hour}</span>
           </div>
@@ -3319,7 +3319,7 @@ function SampleReplies({ client }: { client: ClientReport }) {
         <blockquote className="sample" key={index}>
           <p>"{row.body}"</p>
           <footer>
-            — <strong>{row.leadName}</strong>
+            <strong>{row.leadName}</strong>
             {row.role || row.company ? `, ${[row.role, row.company].filter(Boolean).join(" · ")}` : ""}
             <span className="sample-meta">
               {row.campaign} · Sent to {row.senderName} · {formatDate(row.sentAt, client.workspace.timezone)}

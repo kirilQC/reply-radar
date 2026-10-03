@@ -796,11 +796,11 @@ export function titlePoolQuestion(icp, descriptions = {}) {
   }
   const keys = Object.keys(criteria);
   criteria.similar_role = "A different title that carries the same responsibilities as one of the target roles above";
-  criteria.not_a_target = "None of the target roles — a different function, or too junior to be one of them";
+  criteria.not_a_target = "None of the target roles: a different function, or too junior to be one of them";
   criteria.unclear = "The profile does not say enough about their current job to tell";
   return {
     key: "target_role", label: "Target role", type: "choice", kind: "must",
-    instructions: "Which of these target roles best matches this person's CURRENT main job? Judge by what they are responsible for, using `listed_title`, `headline`, `about` and `current_roles` — not by exact title wording.",
+    instructions: "Which of these target roles best matches this person's CURRENT main job? Judge by what they are responsible for, using `listed_title`, `headline`, `about` and `current_roles`, not by exact title wording.",
     criteria, pass: [...keys, "similar_role"], neutral: ["unclear"],
   };
 }
@@ -1316,7 +1316,7 @@ function weightedVerdict(questions, answers, thresholds, context) {
   const score = counted.reduce((n, c) => n + c.p, 0) / counted.length;
   const weakest = counted.reduce((w, c) => (c.p < w.p ? c : w));
   const pctOf = (x) => `${Math.round(x * 100)}%`;
-  if (score < thresholds.drop) return { verdict: "bad", reason: `Score ${pctOf(score)} — weakest: ${weakest.label}${note}`, scores, score };
+  if (score < thresholds.drop) return { verdict: "bad", reason: `Score ${pctOf(score)} · weakest: ${weakest.label}${note}`, scores, score };
   /*
    * Good fit needs Jev to have actually checked most of the evidence. A Vitalic run marked contacts good with
    * "can't tell: Current role touches Medicare" — can't-tell answers sat out of the average and one or two
@@ -1333,14 +1333,14 @@ function weightedVerdict(questions, answers, thresholds, context) {
   const weakMust = questions.filter((q) => q.kind === "must" && typeof scores[q.key] === "number" && !unclear.includes(q)).reduce((w, q) => (!w || scores[q.key] < scores[w.key] ? q : w), null);
   const keyShort = questions.find((q) => q.kind === "key" && (unclear.includes(q) || typeof scores[q.key] !== "number" || scores[q.key] < thresholds.keep));
   if (score >= thresholds.keep && !missing && checkedEnough && !keyShort && (!weakMust || scores[weakMust.key] >= thresholds.keep)) return { verdict: "good", reason: fitReason(questions, scores, unclear, thresholds) + note, scores, score };
-  if (score >= thresholds.keep && weakMust && scores[weakMust.key] < thresholds.keep) return { verdict: "borderline", reason: `Maybe — unsure: ${weakMust.label} (${pctOf(scores[weakMust.key])})${note}`, scores, score };
+  if (score >= thresholds.keep && weakMust && scores[weakMust.key] < thresholds.keep) return { verdict: "borderline", reason: `Maybe · unsure: ${weakMust.label} (${pctOf(scores[weakMust.key])})${note}`, scores, score };
   if (keyShort) {
     const others = unclear.filter((q) => q !== keyShort);
     const why = unclear.includes(keyShort) ? `can't tell: ${[keyShort, ...others].map((q) => q.label).join(", ")}` : `not shown: ${keyShort.label} (${pctOf(scores[keyShort.key] ?? 0)})${others.length ? ` · can't tell: ${others.map((q) => q.label).join(", ")}` : ""}`;
-    return { verdict: "borderline", reason: `Maybe — ${why}`, scores, score };
+    return { verdict: "borderline", reason: `Maybe · ${why}`, scores, score };
   }
-  if (score >= thresholds.keep) return { verdict: "borderline", reason: missing ? `Maybe — no answer: ${missing.label}${note}` : `Maybe — ${note.slice(3)}`, scores, score };
-  return { verdict: "borderline", reason: `Maybe — score ${pctOf(score)}, weakest: ${weakest.label}${note}`, scores, score };
+  if (score >= thresholds.keep) return { verdict: "borderline", reason: missing ? `Maybe · no answer: ${missing.label}${note}` : `Maybe · ${note.slice(3)}`, scores, score };
+  return { verdict: "borderline", reason: `Maybe · score ${pctOf(score)}, weakest: ${weakest.label}${note}`, scores, score };
 }
 
 /**
@@ -1397,7 +1397,7 @@ export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS, 
   }
   const keyShort = questions.find((q) => q.kind === "key" && (unclear.includes(q) || typeof scores[q.key] !== "number" || scores[q.key] < thresholds.keep));
   const size = sizeCheck(context.icp, context.profile);
-  if (size === "outside") return { verdict: "bad", reason: `Company size outside ${context.icp.sizeMin ?? 0}–${context.icp.sizeMax ?? "any"} employees`, scores, score: null };
+  if (size === "outside") return { verdict: "bad", reason: `Company size outside ${context.icp.sizeMin ?? 0} to ${context.icp.sizeMax ?? "any"} employees`, scores, score: null };
   if (excluded) return { verdict: "bad", reason: `Excluded: ${excluded.q.label}`, scores, score: null };
   if (failed) return { verdict: "bad", reason: `Failed: ${failed.q.label}`, scores, score: null };
   if (!counted.length) return { verdict: "borderline", reason: missing ? `No answer: ${missing.label}` : "Not enough data to judge", scores, score: null };
@@ -1421,7 +1421,7 @@ export function verdictFor(questions, answers, thresholds = DEFAULT_THRESHOLDS, 
   if (score >= thresholds.keep && !missing && !unclear.length && !keyShort) return { verdict: "good", reason: fitReason(questions, scores, unclear, thresholds), scores, score };
   if (score >= thresholds.keep && keyShort) return { verdict: "borderline", reason: `Not shown: ${keyShort.label}${note}`, scores, score };
   if (score >= thresholds.keep && !missing) return { verdict: "borderline", reason: note.slice(3), scores, score };
-  return { verdict: "borderline", reason: `Score ${Math.round(score * 100)}% — weakest: ${weakest.q.label}${note}`, scores, score };
+  return { verdict: "borderline", reason: `Score ${Math.round(score * 100)}% · weakest: ${weakest.q.label}${note}`, scores, score };
 }
 
 /* ═══ Generation ═══ */

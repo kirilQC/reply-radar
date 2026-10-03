@@ -514,7 +514,7 @@ function AddLeadsModal({ slug, clientName, campaigns, busy, anyJobActive, onClos
     const parsed = parseCsv(await file.text());
     setRows(parsed.rows); setMapping(parsed.mapping);
     if (!listName) setListName(file.name.replace(/\.csv$/i, ""));
-    setMsg(parsed.rows.length ? `${parsed.rows.length} contacts read — ${parsed.rows.filter((r) => r.phone).length} with a phone number.` : "Couldn't read any rows. The file needs a header row with at least a name or phone column.");
+    setMsg(parsed.rows.length ? `${parsed.rows.length} contacts read, ${parsed.rows.filter((r) => r.phone).length} with a phone number.` : "Couldn't read any rows. The file needs a header row with at least a name or phone column.");
   };
   const doImport = async () => {
     if (!rows.length || importing) return;
@@ -574,25 +574,25 @@ function AddLeadsModal({ slug, clientName, campaigns, busy, anyJobActive, onClos
                 );
               })}
             </div>
-            <p className="cc-note">Fetching pulls everyone in the campaign and reveals a mobile number for each (AI Ark credits). Runs in the background{anyJobActive ? " — a job is running now." : "."}</p>
+            <p className="cc-note">Fetching pulls everyone in the campaign and reveals a mobile number for each (AI Ark credits). Runs in the background{anyJobActive ? ": a job is running now." : "."}</p>
           </div>
         ) : (
           <div className="cc-modal-body">
             <label className="cc-list-field">
               <span>List name <em>· so your team knows whose list this is</em></span>
-              <input value={listName} placeholder="e.g. Kiril — Q3 health-system targets" onChange={(e) => setListName(e.target.value)} />
+              <input value={listName} placeholder="e.g. Kiril: Q3 health-system targets" onChange={(e) => setListName(e.target.value)} />
             </label>
             <label className="cc-csv-drop">
               <input type="file" accept=".csv,text/csv" onChange={(e) => void onFile(e.target.files?.[0])} />
               <span className="cc-csv-icon">⬆</span>
               <span>{fileName || "Choose a CSV file"}</span>
-              <small>Any columns work — the name, phone (personal/mobile), LinkedIn, company and title are detected automatically.</small>
+              <small>Any columns work: the name, phone (personal/mobile), LinkedIn, company and title are detected automatically.</small>
             </label>
             {msg && <p className={`cc-csv-msg ${msg.startsWith("Imported") ? "ok" : ""}`}>{msg}</p>}
             {rows.length > 0 && (
               <>
                 <div className="cc-csv-map">
-                  <div className="cc-csv-map-title">Detected columns — check these look right:</div>
+                  <div className="cc-csv-map-title">Detected columns. Check these look right:</div>
                   {Object.entries(mapping).map(([field, col]) => (
                     <div className={`cc-csv-maprow ${col === "—" && field === "Phone" ? "warn" : ""}`} key={field}>
                       <b>{field}</b><span>→</span><em>{col}</em>
@@ -652,11 +652,11 @@ function ConversationColumn({ lead, detail, detailLoading, busy, onSave, onSkip,
           ? <div style={{ padding: "20px 22px" }}><Skeleton variant="lines" count={5} label="Loading conversation" /></div>
           : messages && messages.length > 0
             ? <Conversation messages={messages} />
-            : <div className="cc-thread-empty-wrap"><p className="cc-thread-empty">No LinkedIn messages on record — this lead hasn’t replied. Give them a call.</p></div>}
+            : <div className="cc-thread-empty-wrap"><p className="cc-thread-empty">No LinkedIn messages on record. This lead hasn’t replied. Give them a call.</p></div>}
       </div>
 
       <div className="cc-lp-log">
-        {lead.lastCall && <div className="cc-lastcall">Last: <b>{lead.lastCall.result || "logged"}</b>{lead.lastCall.notes ? ` — “${lead.lastCall.notes}”` : ""}</div>}
+        {lead.lastCall && <div className="cc-lastcall">Last: <b>{lead.lastCall.result || "logged"}</b>{lead.lastCall.notes ? `: “${lead.lastCall.notes}”` : ""}</div>}
         <div className="cc-results">
           {RESULTS.map((r) => (
             <button type="button" key={r} className={`cc-result ${result === r ? "is-on" : ""}`} onClick={() => setResult((cur) => (cur === r ? "" : r))}>{r}</button>
@@ -719,7 +719,7 @@ function LeadRecord({ lead, detail, loading }: { lead: CallLead; detail: Detail 
   const education = arr(e.educations).map((it) => nameOf(obj(it).school_name || obj(it).school || obj(it).name)).filter(Boolean);
   const companyName = nameOf(summary.name || company.name) || str(lead.company);
   const companyIndustry = str(summary.industry || company.industry || e.industry);
-  const companySize = range.start || range.end ? `${str(range.start || "?")}–${str(range.end || "?")} employees` : staff.total ? `${Number(staff.total).toLocaleString()} employees` : "";
+  const companySize = range.start || range.end ? `${str(range.start || "?")} to ${str(range.end || "?")} employees` : staff.total ? `${Number(staff.total).toLocaleString()} employees` : "";
   const companyLocation = locationText(obj(company.location).headquarter);
   const clients = (Array.isArray(rollup.clients) ? rollup.clients.map(String) : []).filter(Boolean);
   const about = str(e.summary || e.about);
