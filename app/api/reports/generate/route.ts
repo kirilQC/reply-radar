@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server";
 import { queryByIds } from "../../../lib/chunk-query";
 import {
-  allCampaigns,
+  ALL_STATUSES,
   campaignStatusFor,
   emptyStatus,
   selectCampaigns,
@@ -255,7 +255,7 @@ export async function POST(request: Request) {
         const status = selectCampaigns(await campaignStatusFor(apiKey), campaignIds);
         // With no campaigns picked, every one of ours counts, finished ones included: a campaign that
         // finished on Tuesday still accepted and got replies on Monday, and HeyReach counts those.
-        const ids = campaignIds ?? status.all.map((row) => row.id);
+        const ids = campaignIds ?? (await campaignStatusFor(apiKey, ALL_STATUSES)).all.map((row) => row.id);
         const funnel = status.available
           ? await campaignFunnelFor(apiKey, ids, statsSince, statsUntil)
           : emptyFunnel(status.reason);

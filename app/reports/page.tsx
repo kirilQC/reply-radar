@@ -573,7 +573,9 @@ export default function ReportsPage() {
       const rows = clients.flatMap((row) => (Array.isArray(row.campaigns) ? (row.campaigns as LiveCampaign[]) : []));
       setLiveCampaigns(rows);
       // A reopened report brings the campaigns it was run over, so regenerating it covers the same ones.
-      setCampaignPick(new Set(pick ?? rows.filter((row) => row.state === "active").map((row) => row.id)));
+      // Every campaign ticked by default, finished ones included, so a report covers what HeyReach's
+      // dashboard covers for the same dates. Untick to narrow it.
+      setCampaignPick(new Set(pick ?? rows.map((row) => row.id)));
       const unavailable = clients.filter((row) => !row.available);
       setCampaignsNote(
         unavailable.length

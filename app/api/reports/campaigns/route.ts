@@ -13,7 +13,7 @@
  * list marked unavailable.
  */
 import { NextResponse } from "next/server";
-import { allCampaigns, campaignStatusFor } from "../../../lib/heyreach-campaigns";
+import { ALL_STATUSES, campaignStatusFor } from "../../../lib/heyreach-campaigns";
 
 type Row = Record<string, unknown>;
 
@@ -38,14 +38,16 @@ export async function GET(request: Request) {
 
     const clients = await Promise.all(
       workspaces.map(async (workspace) => {
-        const status = await campaignStatusFor(text(workspace.heyreach_api_key_ciphertext));
+        // Every status, not just the live four: a campaign that finished midweek still sent, was accepted
+        // and got replies that week, and HeyReach's dashboard counts them. Drafts never sent anything.
+        const status = await campaignStatusFor(text(workspace.heyreach_api_key_ciphertext), ALL_STATUSES);
         return {
           workspace: { id: text(workspace.id), name: text(workspace.name), slug: text(workspace.slug) },
           available: status.available,
           reason: status.reason,
           // Flattened rather than grouped by state: the builder shows one list of checkboxes, and each
           // row already carries the state it belongs to.
-          campaigns: allCampaigns(status),
+          campaigns: status.all.filter((row) => row.state !== "draft"),
         };
       }),
     );
