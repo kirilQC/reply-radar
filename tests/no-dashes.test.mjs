@@ -37,7 +37,10 @@ test("stripDashes: bullets, table cells and line ends", () => {
 });
 
 test("stripDashes: anything left is a hyphen, and dash-free text is untouched", () => {
-  assert.equal(stripDashes("word—word"), "word-word");
+  // An unspaced em dash between words is a clause break ("context—and" reads "context, and"); an
+  // unspaced en dash is a hyphen.
+  assert.equal(stripDashes("word—word"), "word, word");
+  assert.equal(stripDashes("pre–seed"), "pre-seed");
   assert.equal(stripDashes("—"), "-");
   const clean = "foo, bar,\nbaz | --- | x-y";
   assert.equal(stripDashes(clean), clean);

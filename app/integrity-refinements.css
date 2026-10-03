@@ -6901,3 +6901,59 @@ body.light-mode .brain-icp {
     align-items: center;
   }
 }
+
+/* ----------------------------------------------------------------------------
+   Blanks in the AI draft. The draft field is a textarea over an identical layer
+   (DraftField.tsx); the layer's text is invisible and only the blanks are
+   painted, so each "(insert time here)" glows exactly where it sits. While one
+   is left, Send reply goes a darker, flatter shade instead of showing a message.
+   -------------------------------------------------------------------------- */
+.draft-field {
+  position: relative;
+}
+.draft-field textarea {
+  position: relative;
+  z-index: 1;
+  display: block;
+  background: transparent !important;
+}
+.draft-field-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  border: 0 solid transparent;
+  color: transparent;
+  pointer-events: none;
+}
+.draft-field-layer mark {
+  color: transparent;
+  background: color-mix(in srgb, var(--amber, #e7b96e) 34%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber, #e7b96e) 34%, transparent);
+  border-radius: 3px;
+}
+.send-button.needs-fill:disabled {
+  opacity: 1;
+  filter: none;
+  background: color-mix(in srgb, var(--accent) 32%, #0b0d10);
+  color: color-mix(in srgb, var(--accent) 40%, #9aa3a0);
+  cursor: not-allowed;
+}
+.light-mode .send-button.needs-fill:disabled {
+  background: color-mix(in srgb, var(--accent) 45%, #2a2f2d);
+  color: color-mix(in srgb, var(--accent) 30%, #e8ecea);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

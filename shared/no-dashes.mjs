@@ -14,7 +14,8 @@
  * - A dash opening a line, used as a bullet, becomes "- ".
  * - A dash followed only by punctuation or the end of a line is dropped.
  * - A spaced dash in prose ("this — that") becomes a comma: "this, that".
- * - Anything left (an unspaced "word—word") becomes a plain hyphen.
+ * - An unspaced em dash between words ("context—and") is a clause break and becomes ", ".
+ * - Anything left (an unspaced en dash, "pre–seed") becomes a plain hyphen.
  *
  * Plain ESM with no imports, so the server routes, the worker and the browser can all share it.
  *
@@ -35,9 +36,28 @@ export function stripDashes(input) {
       .replace(/(?<=\S)[ \t]*[—–]+[ \t]*(?=[,.;:!?)\]]|\r?\n|$)/g, "")
       // a spaced dash in prose
       .replace(/[ \t]*[—–]+[ \t]+|[ \t]+[—–]+[ \t]*/g, ", ")
+      // an unspaced em dash between words is a clause break too: "context—and" reads "context, and"
+      .replace(/(?<=[\p{L}\p{N}'"’)])—(?=[\p{L}\p{N}'"‘(])/gu, ", ")
       // anything left is unspaced
       .replace(/[—–]/g, "-")
   );
 }
 
 export default stripDashes;
+
+/**
+ * For messages written as a person (inbox drafts): also a hyphen used as a dash. "phase right now- if"
+ * and "great - talk soon" read as dashes to a lead even though they are hyphens. Hyphenated words
+ * ("LLM-ready", "follow-up") are untouched, because the hyphen there has a letter on both sides.
+ *
+ * @param {string} input
+ * @returns {string}
+ */
+export function stripDashLikeHyphens(input) {
+  if (typeof input !== "string") return input;
+  return stripDashes(input)
+    .replace(/(?<=\S)[ \t]+-{1,2}[ \t]+(?=\S)/g, ", ")
+    .replace(/(?<=[\p{L}\p{N}])-{1,2}[ \t]+(?=[\p{L}\p{N}])/gu, ", ")
+    .replace(/(?<=[\p{L}\p{N}])--(?=[\p{L}\p{N}])/gu, ", ")
+    .replace(/,\s*,/g, ",");
+}

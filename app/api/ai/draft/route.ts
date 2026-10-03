@@ -6,7 +6,8 @@ import { resolveModel, temperatureField, DEFAULT_MODEL } from "../../../../share
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { clientContext, withClientContext } from "../../../lib/client-context";
 import { latestInboundMessage, mergeMessageRadar } from "../../../lib/message-radar";
-import { stripDashes } from "../../../../shared/no-dashes.mjs";
+import { stripDashes, stripDashLikeHyphens } from "../../../../shared/no-dashes.mjs";
+import { bannedPhrases, humanReplies, pickExamples, voiceBlock, type VoiceExample, type VoiceMessage } from "../../../lib/reply-voice";
 
 type Row = Record<string, unknown>;
 const object = (v: unknown): Row => v && typeof v === "object" && !Array.isArray(v) ? v as Row : {};
@@ -21,90 +22,63 @@ async function resolveWorkspaceId(slug: string, url: string, headers: Record<str
   return rows[0]?.id ? String(rows[0].id) : slug;
 }
 
-export type PastReplyContext = {
-  body: string;
-  senderName: string;
-  leadName: string;
-  campaignName: string;
-};
+/**
+ * Everything the draft needs to sound like this client's team: real past replies (see reply-voice.ts),
+ * who is sending this one, the client's name, and the per-client reply instructions from Configuration
+ * (`guardrails.reply_prompt`), which drafting used to ignore entirely.
+ */
+type Voice = { examples: VoiceExample[]; senderName: string; clientName: string; replyPrompt: string };
 
-async function fetchPastReplies(workspaceId: string, campaignName: string | undefined): Promise<PastReplyContext[]> {
+async function loadVoice(workspaceRef: string, campaignName: string | undefined, conversationId: string): Promise<Voice> {
+  const empty: Voice = { examples: [], senderName: "", clientName: "", replyPrompt: "" };
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key || !workspaceId) return [];
+  if (!url || !key || !workspaceRef) return empty;
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  const resolvedId = await resolveWorkspaceId(workspaceId, url, headers);
-
-  // Get all conversations for this workspace + the lead attached to each — the
-  // lead name gets attached to each past reply so the admin feed can label who
-  // the example was sent to.
-  // Ordered by recent activity: without an order PostgREST returns an arbitrary 200, so a client with
-  // more conversations than that could be voiced from its oldest, least representative threads.
-  const convResponse = await fetch(
-    `${url}/rest/v1/rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(resolvedId)}&order=last_message_at.desc.nullslast,id.asc&limit=200`,
-    { headers, cache: "no-store" },
-  );
-  if (!convResponse.ok) return [];
-  const conversations = (await convResponse.json().catch(() => [])) as Row[];
-  const convIds = conversations.map((c) => String(c.id)).filter(Boolean);
-  if (!convIds.length) return [];
-  const leadIdByConv = new Map(conversations.map((c) => [String(c.id), String(c.lead_id ?? "")]));
-
-  // Fetch recent outbound messages across all this client's conversations
-  const msgResponse = await fetch(
-    `${url}/rest/v1/rr_messages?select=body,raw_data,conversation_id&conversation_id=in.(${convIds.join(",")})&direction=eq.outbound&order=sent_at.desc&limit=80`,
-    { headers, cache: "no-store" },
-  );
-  if (!msgResponse.ok) return [];
-  const messages = (await msgResponse.json().catch(() => [])) as Row[];
-
-  // Resolve lead names in a single batched request keyed on the conversations
-  // above, so each past reply carries the recipient it was actually sent to.
-  const uniqueLeadIds = [...new Set([...leadIdByConv.values()].filter(Boolean))];
-  const leadNameById = new Map<string, string>();
-  if (uniqueLeadIds.length) {
-    const leadResponse = await fetch(
-      `${url}/rest/v1/rr_leads?select=id,name&id=in.(${uniqueLeadIds.join(",")})`,
-      { headers, cache: "no-store" },
-    ).catch(() => null);
-    if (leadResponse?.ok) {
-      const rows = (await leadResponse.json().catch(() => [])) as Row[];
-      for (const row of rows) leadNameById.set(String(row.id), String(row.name ?? ""));
-    }
-  }
-
-  // Separate by campaign: same campaign vs. other campaigns
-  const sameCampaign: PastReplyContext[] = [];
-  const otherCampaign: PastReplyContext[] = [];
-
-  for (const msg of messages) {
-    const body = String(msg.body ?? "").trim();
-    if (!body || body.length < 15) continue; // skip trivial messages
-    const radar = object(object(msg.raw_data).reply_radar);
-    const msgCampaign = String(object(radar.campaign).name ?? "");
-    const senderName = String(object(radar.sender).name ?? "");
-    const leadName = leadNameById.get(leadIdByConv.get(String(msg.conversation_id)) ?? "") ?? "";
-    const context: PastReplyContext = { body, senderName, leadName, campaignName: msgCampaign };
-    if (campaignName && msgCampaign === campaignName) {
-      sameCampaign.push(context);
-    } else {
-      otherCampaign.push(context);
-    }
-  }
-
-  // Build the final set: prioritize same-campaign replies
-  const result: PastReplyContext[] = [];
-  for (const reply of sameCampaign.slice(0, 10)) {
-    if (result.length >= 10) break;
-    result.push(reply);
-  }
-  if (result.length < 10) {
-    for (const reply of otherCampaign) {
-      if (result.length >= 10) break;
-      result.push(reply);
-    }
-  }
-  return result;
+  const get = async (path: string): Promise<Row[]> => {
+    const response = await fetch(`${url}/rest/v1/${path}`, { headers, cache: "no-store" }).catch(() => null);
+    if (!response?.ok) return [];
+    const rows = await response.json().catch(() => []);
+    return Array.isArray(rows) ? (rows as Row[]) : [];
+  };
+  const workspaceId = await resolveWorkspaceId(workspaceRef, url, headers);
+  const [workspaceRows, conversations] = await Promise.all([
+    get(`rr_workspaces?select=name,reply_prompt:guardrails->>reply_prompt&id=eq.${encodeURIComponent(workspaceId)}&limit=1`),
+    // The 300 most recently active threads: enough history to find a dozen real replies for most clients.
+    get(`rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=last_message_at.desc.nullslast,id.asc&limit=300`),
+  ]);
+  const ids = [...new Set([...conversations.map((c) => String(c.id)), conversationId].filter(Boolean))];
+  const leadIdByConversation = new Map(conversations.map((c) => [String(c.id), String(c.lead_id ?? "")]));
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += 40) batches.push(ids.slice(i, i + 40));
+  const leadIds = [...new Set([...leadIdByConversation.values()].filter(Boolean))];
+  const leadBatches: string[][] = [];
+  for (let i = 0; i < leadIds.length; i += 100) leadBatches.push(leadIds.slice(i, i + 100));
+  const [messageRows, leadRows] = await Promise.all([
+    Promise.all(batches.map((batch) => get(
+      `rr_messages?select=conversation_id,direction,body,sent_at,sender:raw_data->reply_radar->sender->>name,campaign:raw_data->reply_radar->campaign->>name&conversation_id=in.(${batch.join(",")})&order=sent_at.asc&limit=1000`,
+    ))).then((pages) => pages.flat()),
+    Promise.all(leadBatches.map((batch) => get(`rr_leads?select=id,name&id=in.(${batch.join(",")})`))).then((pages) => pages.flat()),
+  ]);
+  const leadNameById = new Map(leadRows.map((row) => [String(row.id), String(row.name ?? "")]));
+  const leadNames = new Map([...leadIdByConversation].map(([conversation, lead]) => [conversation, leadNameById.get(lead) ?? ""]));
+  const messages: VoiceMessage[] = messageRows.map((row) => ({
+    conversationId: String(row.conversation_id ?? ""),
+    direction: String(row.direction ?? ""),
+    body: String(row.body ?? ""),
+    sentAt: String(row.sent_at ?? ""),
+    senderName: String(row.sender ?? ""),
+    campaignName: String(row.campaign ?? ""),
+  }));
+  // Whoever last wrote to this lead from our side is who the draft is written as.
+  const senderName = [...messages].reverse().find((m) => m.conversationId === conversationId && m.direction === "outbound" && m.senderName)?.senderName ?? "";
+  const examples = pickExamples(humanReplies(messages, leadNames, conversationId), { campaignName, senderName, limit: 12 });
+  return {
+    examples,
+    senderName,
+    clientName: String(workspaceRows[0]?.name ?? ""),
+    replyPrompt: String(workspaceRows[0]?.reply_prompt ?? "").trim(),
+  };
 }
 
 /** Fetch the lead's role + company for audit-log enrichment (best-effort). */
@@ -167,18 +141,16 @@ export async function POST(request: Request) {
   const requestedModel = resolveModel(typeof body.model === "string" && body.model ? body.model : process.env.ANTHROPIC_MODEL || FALLBACK_MODEL);
   let model = requestedModel;
 
-  // Fetch past outbound replies for tone learning (same client only)
+  // How this client's team really replies (reply-voice.ts), plus the per-client reply instructions.
   const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId : "";
   const campaignName = typeof body.campaignName === "string" ? body.campaignName : undefined;
-  let pastReplies: PastReplyContext[] = [];
-  if (mode === "analyze" && workspaceId) {
-    pastReplies = await fetchPastReplies(workspaceId, campaignName).catch(() => []);
-  }
-
-  // Build the tone context from past replies
-  const toneContext = pastReplies.length
-    ? `\n\nHere are recent outbound replies from this client's team. Use these as a reference for tone, style, and typical response patterns. Mirror the voice, length, and approach you see in these examples:\n\n${pastReplies.map((r, i) => `Example ${i + 1}: ${r.body}`).join("\n\n")}\n\n`
-    : "";
+  const voice: Voice = workspaceId
+    ? await loadVoice(workspaceId, campaignName, typeof body.conversationId === "string" ? body.conversationId : "").catch(() => ({ examples: [], senderName: "", clientName: "", replyPrompt: "" }))
+    : { examples: [], senderName: "", clientName: "", replyPrompt: "" };
+  const pastReplies = voice.examples;
+  const clientName = voice.clientName || (typeof body.workspaceName === "string" ? body.workspaceName : "") || "this client";
+  const voiceSection = voiceBlock(pastReplies, clientName, voice.senderName);
+  const avoid = bannedPhrases(pastReplies);
 
   // Latest inbound message = what the assistant is trying to answer. Grabbed
   // from the tail of the thread the caller sent, so we don't burn another read.
@@ -191,7 +163,16 @@ export async function POST(request: Request) {
   // none was. Writing in somebody's name with no idea who they are is the whole reason this is loaded
   // here rather than trusted to arrive in the body.
   const briefed = withClientContext(body.system ? String(body.system) : "", await clientContext(workspaceId));
-  const systemPrompt = briefed || undefined;
+  // The voice goes last in the system prompt, after the background, so it is the freshest thing the
+  // model reads about how to write. The client's own reply instructions sit with it.
+  const systemPrompt = [
+    briefed,
+    voiceSection,
+    voice.replyPrompt ? `Reply instructions for ${clientName} (follow these):\n${voice.replyPrompt}` : "",
+  ].filter(Boolean).join("\n\n") || undefined;
+  // Callers also pass the brief as "Client context: …", which the system prompt above already carries.
+  // Sent twice it doubled the prompt and drowned out the examples, so only a real instruction is kept.
+  const extraInstruction = /^client context:/i.test(instruction.trim()) ? "" : instruction;
 
   /**
    * A regenerate is a request for a different answer, and it was not getting one.
@@ -208,10 +189,10 @@ export async function POST(request: Request) {
    */
   const regenerate = body.regenerate === true;
   const regenerateNudge = regenerate
-    ? "\n\nThis is a REGENERATE: a draft for this conversation was already produced and the user rejected it. Write a genuinely different reply — a different opening, a different structure, a different way into the same goal. Do not lightly reword the obvious answer.\n"
+    ? "\n\nThis is a REGENERATE: a draft for this conversation was already produced and the user rejected it. Write a genuinely different reply: a different opening, a different structure, a different way into the same goal. Do not lightly reword the obvious answer.\n"
     : "";
 
-  const reasonInstruction = "reason (ONE sentence, 20 words maximum, saying why this latest inbound reply deserves attention — no preamble, no restating the message, no second sentence)";
+  const reasonInstruction = "reason (ONE sentence, 20 words maximum, saying why this latest inbound reply deserves attention; no preamble, no restating the message, no second sentence)";
 
   /**
    * A draft is a starting point, not an outgoing message — and it was quietly inventing the parts
@@ -224,13 +205,33 @@ export async function POST(request: Request) {
    * confident guess, and the guess is the expensive one.
    */
   const noFabricationRule =
-    "\n\nNever invent facts. Do not state availability, dates, times, prices, deadlines, numbers, links, documents, names or commitments unless they appear explicitly in the conversation above or in the client context. Where the reply needs a detail only the sender can supply, leave a short bracketed placeholder in its place — for example \"I'm free (insert time here)\", \"pricing starts at (insert price here)\", \"here's the (insert link here)\" — and write the rest of the sentence around it normally. Placeholders are expected and preferred over a plausible guess. Never fill a placeholder with an example value.\n";
+    "\n\nNever invent facts. Do not state availability, dates, times, prices, deadlines, numbers, links, documents, names or commitments unless they appear explicitly in the conversation above or in the client context. Where the reply needs a detail only the sender can supply, leave a short bracketed placeholder in its place, for example \"I'm free (insert time here)\", \"pricing starts at (insert price here)\", \"here's the (insert link here)\", and write the rest of the sentence around it normally. Placeholders are expected and preferred over a plausible guess. Never fill a placeholder with an example value.\n";
 
-  const userContent = `${mode === "analyze" ? `Return ONLY valid JSON with three string fields: draft (a concise, professional reply the sender could use), ${reasonInstruction}, and sentiment (exactly positive, neutral, or negative). Do not use markdown. ` : ""}${noFabricationRule}\n\nNever use em dashes or en dashes.${regenerateNudge}${toneContext}${instruction}\n\nConversation:\n${thread.map((item: { direction?: string; body?: string }) => `${item.direction ?? "message"}: ${item.body ?? ""}`).join("\n")}`;
+  /**
+   * The writing rules. The old line asked for "a concise, professional reply", which is precisely the
+   * register that reads as AI: polished, complete, slightly formal. The team writes like people
+   * answering a LinkedIn message, so that is what is asked for, with the examples as the authority.
+   */
+  const writingRules = [
+    pastReplies.length
+      ? "Write the reply the way the examples in HOW WE REPLY are written. They outrank anything else here on tone and length."
+      : "Write like a person answering a LinkedIn message: short, plain, friendly, specific. Not like marketing copy.",
+    "Answer what the lead actually said first. If they asked something, answer it directly before anything else.",
+    "Do not re-pitch or repeat the opening message. Only explain the product if they asked what it is, and then in a sentence or two.",
+    "At most one ask or next step.",
+    "Plain words and short sentences. No buzzwords, no flattery, no filler openers.",
+    avoid.length ? `Never use these phrases: ${avoid.map((p) => `"${p}"`).join(", ")}.` : "",
+    "Punctuation: never use em dashes, en dashes, or a hyphen as a dash between clauses. Use a comma or a full stop instead.",
+  ].filter(Boolean).map((line) => `- ${line}`).join("\n");
+  const speaker = (item: { direction?: string }) =>
+    String(item.direction ?? "").toLowerCase() === "outbound" ? (voice.senderName ? `Us (${voice.senderName})` : "Us") : String(item.direction ?? "").toLowerCase() === "inbound" ? "Lead" : "Message";
+  const userContent = `${mode === "analyze" ? `Return ONLY valid JSON with three string fields: draft (the next message we would send this lead, in our voice), ${reasonInstruction}, and sentiment (exactly positive, neutral, or negative). Do not use markdown. ` : ""}\n\nHow to write the draft:\n${writingRules}${noFabricationRule}${regenerateNudge}${extraInstruction ? `\n${extraInstruction}\n` : ""}\n\nConversation:\n${thread.map((item: { direction?: string; body?: string }) => `${speaker(item)}: ${item.body ?? ""}`).join("\n")}`;
 
   const requestBody = (m: string) => JSON.stringify({
     model: m,
-    max_tokens: body.maxTokens ?? 500,
+    // 500 cut drafts off mid-sentence ("Would a short call be useful? I'"). A short reply never needs
+    // this much, so the ceiling only matters when something goes long, and then it must not truncate.
+    max_tokens: body.maxTokens ?? 1200,
     // The Claude 5 family / Opus 4.8 reject `temperature` — omit it for those, keep it for older models.
     ...temperatureField(m, body.temperature ?? (regenerate ? 1 : 0)),
     ...(systemPrompt ? { system: systemPrompt } : {}),
@@ -246,7 +247,16 @@ export async function POST(request: Request) {
       model = FALLBACK_MODEL;
       response = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: anthropicHeaders, body: requestBody(model) });
     }
-    const payload = await response.json().catch(() => ({}));
+    let payload = await response.json().catch(() => ({}));
+    // A draft cut off by the token limit is never shown as if it were whole. One retry with double room.
+    if (response.ok && payload?.stop_reason === "max_tokens") {
+      const retry = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: anthropicHeaders,
+        body: JSON.stringify({ ...JSON.parse(requestBody(model)), max_tokens: 2400 }),
+      });
+      if (retry.ok) { response = retry; payload = await retry.json().catch(() => ({})); }
+    }
     const durationMs = Date.now() - t0;
     console.log(`[ai-draft] model=${model} status=${response.status} pastReplies=${pastReplies.length}`);
     const text = stripDashes(String(payload?.content?.find((item: { type?: string }) => item.type === "text")?.text ?? ""));
@@ -258,6 +268,8 @@ export async function POST(request: Request) {
       // off screen. Cut at the first sentence, then hard-trim on a word boundary if that one sentence
       // is still a paragraph.
       analysis.reason = clampReason(analysis.reason);
+      // A draft is written as a person: hyphens used as dashes go too, not just em and en dashes.
+      if (typeof analysis.draft === "string") analysis.draft = stripDashLikeHyphens(analysis.draft);
     }
     if (response.ok && mode === "analyze" && typeof body.conversationId === "string" && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
       const store = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
@@ -285,6 +297,7 @@ export async function POST(request: Request) {
       // Richer form the admin draft feed reads: each example carries the
       // sender, recipient and campaign so reviewers can trace the voice source.
       pastReplyContext: pastReplies.map((r) => ({
+        inbound: r.inbound.slice(0, 300),
         body: r.body.slice(0, 400),
         senderName: r.senderName,
         leadName: r.leadName,
@@ -298,7 +311,7 @@ export async function POST(request: Request) {
       leadCompany,
       httpStatus: response.status,
       providerError: response.ok ? undefined : (typeof payload?.error?.message === "string" ? payload.error.message.slice(0, 300) : `HTTP ${response.status}`),
-      summary: response.ok ? `Anthropic generated a reply draft with ${model} using ${pastReplies.length} past replies as tone reference.` : `Anthropic could not generate a reply draft with ${model} (HTTP ${response.status}${typeof payload?.error?.message === "string" ? `: ${payload.error.message.slice(0, 160)}` : ""}).` } });
+      summary: response.ok ? `Anthropic generated a reply draft with ${model} using ${pastReplies.length} real past replies as the voice reference.` : `Anthropic could not generate a reply draft with ${model} (HTTP ${response.status}${typeof payload?.error?.message === "string" ? `: ${payload.error.message.slice(0, 160)}` : ""}).` } });
     const providerMessage = typeof payload?.error?.message === "string" ? payload.error.message : "Anthropic rejected the draft request.";
     return NextResponse.json({ ok: response.ok, ...(response.ok ? {} : { error: providerMessage }), draft: mode === "analyze" ? String(analysis.draft ?? "") : text, reason: mode === "analyze" ? String(analysis.reason ?? "") : undefined, sentiment: mode === "analyze" ? String(analysis.sentiment ?? "") : undefined, usage: payload?.usage ?? null }, { status: response.ok ? 200 : response.status });
   } catch {

@@ -4,6 +4,7 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect */
 
+import DraftField, { firstPlaceholder } from "./components/DraftField";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
@@ -608,9 +609,9 @@ function Icon({ name }: { name: string }) {
 /**
  * A blank the draft model left for a person to fill ("(insert time here)", "[link]"). Sending one to a lead
  * is the most embarrassing mistake the composer can make, so the Send button stays off until it is filled.
+ * The blank itself is highlighted inside the draft (DraftField), which says what to do without a message.
  */
-const unfilledPlaceholder = (text: string): string | null =>
-  text.match(/\((?:insert|add|your|enter)[^)]{0,40}\)|\[(?:insert|add|your|enter|link|time|date|name)[^\]]{0,40}\]/i)?.[0] ?? null;
+const unfilledPlaceholder = firstPlaceholder;
 
 
 export default function Home() {
@@ -2920,10 +2921,10 @@ export function InboxPage() {
                         <span>Lead has been replied to!</span>
                       </button>
                     ) : (
-                      <textarea
+                      <DraftField
                         value={aiDraft}
-                        onChange={(event) => {
-                          setAiDraft(event.target.value);
+                        onChange={(next) => {
+                          setAiDraft(next);
                           // Editing the draft withdraws the confirmation. What was about to be sent is
                           // no longer what is written, and the reader has not agreed to the new text.
                           setArmed("");
@@ -2957,7 +2958,7 @@ export function InboxPage() {
                     ) : (
                       <div className="composer-foot">
                         <button
-                          className="send-button"
+                          className={`send-button${unfilledPlaceholder(aiDraft) ? " needs-fill" : ""}`}
                           type="button"
                           onClick={() => setArmed(current.id)}
                           disabled={sending || !aiDraft.trim() || current.id === "empty" || Boolean(unfilledPlaceholder(aiDraft))}
@@ -2965,9 +2966,6 @@ export function InboxPage() {
                         >
                           Send reply
                         </button>
-                        {unfilledPlaceholder(aiDraft) && (
-                          <p className="composer-senderror">Fill in {unfilledPlaceholder(aiDraft)} before sending.</p>
-                        )}
                       </div>
                     )}
                   </div>
