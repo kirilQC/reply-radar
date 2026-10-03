@@ -1038,7 +1038,10 @@ async function pruneSyncRuns() {
  * timely. Anyone who wants figures sooner than that presses the button on the client's page, which
  * queues an `rr_sync_runs` row that `queuedAnalyticsRequest` claims ahead of the rotation.
  */
-const ANALYTICS_STALENESS_MS = 24 * 60 * 60 * 1000;
+// Two hours, not a day. A day meant "today" on the analytics page could be a full day behind HeyReach,
+// which is the first number anyone checks against it. One client is collected per two-minute cycle,
+// so the whole roster turns over in under an hour; two hours keeps each pass far from the rate limit.
+const ANALYTICS_STALENESS_MS = 2 * 60 * 60 * 1000;
 /**
  * Days of daily history rewritten each pass.
  *

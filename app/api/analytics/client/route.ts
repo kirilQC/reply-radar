@@ -109,8 +109,15 @@ async function getAll(path: string, pageSize = 1000): Promise<Row[]> {
  * raw stored strings, and the trimming and lower-casing happen in one place below.
  */
 type ReplyGroup = { campaign: unknown; sentiment: unknown; recent: boolean; count: number };
+/**
+ * Leads (conversations) with at least one positive reply, per campaign. Counted as leads, not messages:
+ * a lead who wrote three upbeat messages is one positive lead, which is how HeyReach counts "Interested
+ * leads" and the only way a positive count can sit under the reply count it belongs to. `null` when the
+ * database function predates this field, so the caller falls back to message groups.
+ */
+type PositiveLeads = Map<string, number> | null;
 let clientRpcMissingUntil = 0;
-async function replyGroupsRpc(workspaceId: string, weekAgo: number): Promise<{ conversations: number; groups: ReplyGroup[] } | null> {
+async function replyGroupsRpc(workspaceId: string, weekAgo: number): Promise<{ conversations: number; groups: ReplyGroup[]; positiveLeads: PositiveLeads } | null> {
   if (Date.now() < clientRpcMissingUntil) return null;
   try {
     const response = await rest("rpc/rr_analytics_client_replies", {
@@ -128,9 +135,13 @@ async function replyGroupsRpc(workspaceId: string, weekAgo: number): Promise<{ c
       return null;
     }
     const groups = payload.groups as Row[];
+    const positiveLeads: PositiveLeads = Array.isArray(payload.positive_leads)
+      ? new Map((payload.positive_leads as Row[]).map((row) => [String(row.campaign ?? "").trim().toLowerCase(), num(row.n)]))
+      : null;
     return {
       conversations: num(payload?.conversations),
       groups: groups.map((row) => ({ campaign: row.campaign ?? null, sentiment: row.sentiment ?? null, recent: row.recent === true, count: num(row.n) })),
+      positiveLeads,
     };
   } catch (error) {
     console.warn("[analytics/client] rr_analytics_client_replies unavailable; reading rows instead.", error);
@@ -138,7 +149,7 @@ async function replyGroupsRpc(workspaceId: string, weekAgo: number): Promise<{ c
   }
 }
 
-async function replyGroupsRows(workspaceId: string, weekAgo: number): Promise<{ conversations: number; groups: ReplyGroup[] }> {
+async function replyGroupsRows(workspaceId: string, weekAgo: number): Promise<{ conversations: number; groups: ReplyGroup[]; positiveLeads: PositiveLeads }> {
   const conversations = await getAll(`rr_conversations?select=id&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=id.asc`);
   /*
    * Inbound messages, with the two fields needed lifted out of the JSON by PostgREST rather than
@@ -148,19 +159,30 @@ async function replyGroupsRows(workspaceId: string, weekAgo: number): Promise<{ 
   const conversationIds = conversations.map((row) => String(row.id)).filter(Boolean);
   const inbound = await queryByIds(conversationIds, 20, async (batch) =>
     getAll(
-      `rr_messages?select=sent_at,sentiment:raw_data->reply_radar->>sentiment,campaign:raw_data->reply_radar->campaign->>name` +
+      `rr_messages?select=sent_at,conversation_id,sentiment:raw_data->reply_radar->>sentiment,campaign:raw_data->reply_radar->campaign->>name` +
         `&direction=eq.inbound&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc,conversation_id.asc`,
     ),
   );
   const groups = new Map<string, ReplyGroup>();
+  const positive = new Map<string, Set<string>>();
   for (const message of inbound) {
+    if (String(message.sentiment ?? "").toLowerCase() === "positive") {
+      const campaign = String(message.campaign ?? "").trim().toLowerCase();
+      const leads = positive.get(campaign) ?? new Set<string>();
+      leads.add(String(message.conversation_id ?? ""));
+      positive.set(campaign, leads);
+    }
     const recent = Date.parse(String(message.sent_at ?? "")) >= weekAgo;
     const key = JSON.stringify([message.campaign ?? null, message.sentiment ?? null, recent]);
     const group = groups.get(key) ?? { campaign: message.campaign ?? null, sentiment: message.sentiment ?? null, recent, count: 0 };
     group.count += 1;
     groups.set(key, group);
   }
-  return { conversations: conversationIds.length, groups: [...groups.values()] };
+  return {
+    conversations: conversationIds.length,
+    groups: [...groups.values()],
+    positiveLeads: new Map([...positive].map(([campaign, leads]) => [campaign, leads.size])),
+  };
 }
 
 /**
@@ -171,11 +193,20 @@ async function replyGroupsRows(workspaceId: string, weekAgo: number): Promise<{ 
 const CLIENT_TTL_MS = 30_000;
 const clientCache = new Map<string, { expires: number; body: unknown }>();
 
-/** The last `days` calendar days, oldest first, as `YYYY-MM-DD`. */
+/**
+ * The last `days` calendar days, oldest first, as `YYYY-MM-DD`, ending on today's date in New York.
+ *
+ * HeyReach's dashboard does exactly this: "Last 7 days" asks for the viewer's local date range with UTC
+ * day boundaries (`…T00:00:00Z` to `…T23:59:59Z`), and its per-day figures are keyed by those UTC dates.
+ * This used to end on today's UTC date, so every evening after 8pm Eastern the window gained an empty
+ * "tomorrow" and lost its oldest real day, and no 7-day total could match HeyReach after dinner.
+ */
 function dayKeys(days: number) {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const anchor = Date.parse(`${today}T12:00:00Z`);
   const keys: string[] = [];
   for (let back = days - 1; back >= 0; back -= 1) {
-    keys.push(new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10));
+    keys.push(new Date(anchor - back * 86_400_000).toISOString().slice(0, 10));
   }
   return keys;
 }
@@ -222,9 +253,12 @@ export async function GET(request: Request) {
       if (group.recent) replies7d += group.count;
       if (!campaign) continue;
       repliesByCampaign.set(campaign, (repliesByCampaign.get(campaign) ?? 0) + group.count);
-      if (String(group.sentiment ?? "").toLowerCase() === "positive") {
+      if (!replies.positiveLeads && String(group.sentiment ?? "").toLowerCase() === "positive") {
         positiveByCampaign.set(campaign, (positiveByCampaign.get(campaign) ?? 0) + group.count);
       }
+    }
+    for (const [campaign, leads] of replies.positiveLeads ?? []) {
+      if (campaign) positiveByCampaign.set(campaign, leads);
     }
 
     /*
@@ -268,9 +302,9 @@ export async function GET(request: Request) {
         messagesStarted: num(row.messages_started),
         positiveReplies,
         acceptanceRate: sent ? (accepted / sent) * 100 : 0,
-        // Against accepted rather than sent: nobody can reply to a request that was never accepted, so
-        // dividing by everything sent measures the invite note twice and the message not at all.
-        replyRate: accepted ? (replies / accepted) * 100 : 0,
+        // HeyReach's own definition: replies over leads messaged, which is the percentage its dashboard
+        // and campaign list show. Falls back to accepted for rows stored before messages were collected.
+        replyRate: (num(row.messages_started) || accepted) ? (replies / (num(row.messages_started) || accepted)) * 100 : 0,
         positiveReplyRate: accepted ? (positiveReplies / accepted) * 100 : 0,
         firstTouch: row.first_touch ? String(row.first_touch) : null,
         followUp: row.follow_up ? String(row.follow_up) : null,

@@ -543,8 +543,17 @@ export default function AnalyticsPage() {
     const daily = clientPayload?.daily ?? [];
     const senders = clientPayload?.senders ?? [];
     const senderCap = clientPayload?.senderCap ?? 25;
-    const average = (key: "replyRate" | "acceptanceRate" | "positiveReplyRate") =>
-      clientCampaigns.length ? sum(clientCampaigns, (campaign) => campaign[key]) / clientCampaigns.length : null;
+    // Pooled over the client's campaigns, as HeyReach reports a workspace, not a mean of per-campaign
+    // rates (where a two-lead campaign weighed the same as a 1,600-lead one).
+    const average = (key: "replyRate" | "acceptanceRate" | "positiveReplyRate") => {
+      if (!clientCampaigns.length) return null;
+      const sent = sum(clientCampaigns, (campaign) => campaign.connectionsSent);
+      const accepted = sum(clientCampaigns, (campaign) => campaign.connectionsAccepted);
+      const messaged = sum(clientCampaigns, (campaign) => campaign.messagesStarted || campaign.connectionsAccepted);
+      if (key === "acceptanceRate") return sent ? (accepted / sent) * 100 : null;
+      if (key === "replyRate") return messaged ? (sum(clientCampaigns, (campaign) => campaign.replies) / messaged) * 100 : null;
+      return accepted ? (sum(clientCampaigns, (campaign) => campaign.positiveReplies) / accepted) * 100 : null;
+    };
     // HeyReach reply totals cover the full campaign history, not just what we have synced.
     const allTimeReplies = sum(clientCampaigns, (campaign) => campaign.replies);
     const runtime = engagementRuntime(clientCampaigns);
@@ -605,7 +614,7 @@ export default function AnalyticsPage() {
           </div>
           <div className="client-hero-sync">
             {/* Stamped with when the worker last read HeyReach, not with when this page was opened. The
-                figures are up to a day old, and saying so is the difference between a stale number and a
+                figures are up to two hours old, and saying so is the difference between a stale number and a
                 wrong one — which is also what the button beside it is for. */}
             <div className="analytics-live"><i /> {collectedAt ? `Last synced @ ${syncedLabel(collectedAt)}` : "Not synced yet"}</div>
             <button className="client-resync" onClick={() => requestRefresh(detail.slug)} disabled={inFlight}>

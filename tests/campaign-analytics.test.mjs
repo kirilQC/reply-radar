@@ -207,10 +207,11 @@ test("the states the worker writes are the states the page reads", () => {
 /** `24 * 60 * 60 * 1000` or `86_400_000` as a number, so these checks read a duration not a spelling. */
 const msValue = (expression) => expression.split("*").reduce((total, part) => total * Number(part.trim().replace(/_/g, "")), 1);
 
-test("analytics are collected once a day, and the button is the way to ask sooner", () => {
+test("analytics are collected every two hours, and the button is the way to ask sooner", () => {
   const window = worker.match(/const ANALYTICS_STALENESS_MS = ([^;]+);/);
   assert.ok(window, "ANALYTICS_STALENESS_MS is gone — nothing is pacing collection");
-  assert.equal(msValue(window[1]), 24 * 60 * 60 * 1000, `the collection window is ${window[1]}, not a day`);
+  // Two hours so "today" is never far behind HeyReach; not less, so a pass stays far from the rate limit.
+  assert.equal(msValue(window[1]), 2 * 60 * 60 * 1000, `the collection window is ${window[1]}, not two hours`);
   // A requested pass has to be able to jump the daily rotation, or the button waits up to a day.
   assert.match(worker, /const request = await queuedAnalyticsRequest\(\);\n\s*const workspace = request\?\.workspace \?\? \(await staleAnalyticsWorkspace\(\)\)/);
 });

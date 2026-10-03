@@ -223,6 +223,12 @@ type Aggregates = {
   inboundByDay: Record<string, number>;
   responseSumMs: number;
   responseCount: number;
+  /**
+   * Leads with a positive reply, per `${workspaceId}:${campaign name}`. Leads, not messages, so a lead who
+   * wrote three upbeat messages counts once and positives can never outnumber replies. Absent when the
+   * database function predates it, in which case the message groups are counted as before.
+   */
+  positiveLeads?: Map<string, number>;
 };
 
 /**
@@ -264,6 +270,7 @@ async function aggregateRows(ids: string[], weekAgo: number): Promise<Aggregates
   const messageGroups = new Map<string, Aggregates["messages"][number]>();
   const inboundByDay: Record<string, number> = {};
   const byConversation = new Map<string, Row[]>();
+  const positiveSets = new Map<string, Set<string>>();
   messages.forEach((message, index) => {
     const workspaceId = conversationWorkspace.get(String(message.conversation_id)) ?? "";
     const inbound = message.direction === "inbound";
@@ -274,6 +281,12 @@ async function aggregateRows(ids: string[], weekAgo: number): Promise<Aggregates
       ?? { workspaceId, direction: message.direction ?? null, campaign: message.campaign ?? null, sender: message.sender ?? null, sentiment, recent, count: 0, firstSeq: index };
     group.count += 1;
     messageGroups.set(key, group);
+    if (inbound && String(message.sentiment ?? "").toLowerCase() === "positive" && message.campaign) {
+      const leadKey = `${workspaceId}:${String(message.campaign)}`;
+      const leads = positiveSets.get(leadKey) ?? new Set<string>();
+      leads.add(String(message.conversation_id));
+      positiveSets.set(leadKey, leads);
+    }
     if (inbound) {
       const sentAt = new Date(String(message.sent_at));
       if (!Number.isNaN(sentAt.getTime())) {
@@ -296,7 +309,8 @@ async function aggregateRows(ids: string[], weekAgo: number): Promise<Aggregates
       else if (message.direction === "inbound" && lastOutbound && timestamp >= lastOutbound) { responseSumMs += timestamp - lastOutbound; responseCount += 1; lastOutbound = 0; }
     }
   }
-  return { conversations: [...conversationGroups.values()], messages: [...messageGroups.values()], inboundByDay, responseSumMs, responseCount };
+  const positiveLeads = new Map([...positiveSets].map(([leadKey, leads]) => [leadKey, leads.size]));
+  return { conversations: [...conversationGroups.values()], messages: [...messageGroups.values()], inboundByDay, responseSumMs, responseCount, positiveLeads };
 }
 
 /**
@@ -342,6 +356,9 @@ async function aggregateRpc(ids: string[], weekAgo: number, now: number): Promis
       inboundByDay: Object.fromEntries(Object.entries(days).map(([day, count]) => [day, Number(count ?? 0)])),
       responseSumMs: Number(object(payload.response).sum_ms ?? 0),
       responseCount: Number(object(payload.response).n ?? 0),
+      positiveLeads: Array.isArray(payload.positive_leads)
+        ? new Map(list(payload.positive_leads).map((row) => [`${String(row.workspace_id)}:${String(row.campaign ?? "")}`, Number(row.n ?? 0)]))
+        : undefined,
     };
   } catch (error) {
     console.warn("[analytics] rr_analytics_overview unavailable; reading rows instead.", error);
@@ -387,7 +404,7 @@ function assemble(selected: Row[], data: Aggregates, campaignResponses: Campaign
       const name = String(row.campaign ?? "");
       if (name) {
         const key = `${row.workspaceId}:${name}`;
-        if (String(row.sentiment ?? "").toLowerCase() === "positive") positiveByCampaign.set(key, (positiveByCampaign.get(key) ?? 0) + row.count);
+        if (!data.positiveLeads && String(row.sentiment ?? "").toLowerCase() === "positive") positiveByCampaign.set(key, (positiveByCampaign.get(key) ?? 0) + row.count);
         if (row.recent) recentByCampaign.set(key, (recentByCampaign.get(key) ?? 0) + row.count);
       }
     } else if (row.direction === "outbound") {
@@ -395,6 +412,7 @@ function assemble(selected: Row[], data: Aggregates, campaignResponses: Campaign
       forWorkspace(row.workspaceId).messagesSent += row.count;
     }
   }
+  for (const [leadKey, leads] of data.positiveLeads ?? []) positiveByCampaign.set(leadKey, leads);
   // Fourteen days rather than seven: a week of bars is too short to tell a slow week from a
   // trend, and the chart now has the width for it.
   //
@@ -466,14 +484,29 @@ function assemble(selected: Row[], data: Aggregates, campaignResponses: Campaign
       connectionsSent: Number(row.connectionsSent ?? 0), connectionsAccepted: accepted,
       replies, replies7d: campaignReplies7d, messagesStarted: Number(row.totalMessageStarted ?? 0) + Number(row.totalInmailStarted ?? 0),
       acceptanceRate,
-      replyRate: accepted ? replies / accepted * 100 : 0,
+      // HeyReach's own definition: replies over leads messaged (its "Replied leads" percentage).
+      replyRate: (() => { const messaged = Number(row.totalMessageStarted ?? 0) + Number(row.totalInmailStarted ?? 0) || accepted; return messaged ? replies / messaged * 100 : 0; })(),
       positiveReplies, positiveReplyRate: accepted ? positiveReplies / accepted * 100 : 0,
       launchedAt: launchedAt || null,
       status: launch ? String(launch.status ?? "") || null : null,
     };
   }));
-  const average = (key: "replyRate" | "acceptanceRate" | "positiveReplyRate") => campaignMetrics.length ? campaignMetrics.reduce((sum, row) => sum + row[key], 0) / campaignMetrics.length : 0;
-  const campaignAverages = { replyRate: average("replyRate"), acceptanceRate: average("acceptanceRate"), positiveReplyRate: average("positiveReplyRate") };
+  /*
+   * Pooled across campaigns, the way HeyReach's dashboard reports a workspace: total replies over total
+   * leads messaged, total accepted over total sent. These used to be plain means of the per-campaign
+   * rates, so a two-lead campaign at 100% weighed as much as a 1,600-lead one, and no figure here could
+   * ever be checked against HeyReach.
+   */
+  const total = (pick: (row: CampaignMetric) => number) => campaignMetrics.reduce((sum, row) => sum + pick(row), 0);
+  const pooledSent = total((row) => row.connectionsSent);
+  const pooledAccepted = total((row) => row.connectionsAccepted);
+  const pooledReplies = total((row) => row.replies);
+  const pooledMessaged = total((row) => row.messagesStarted || row.connectionsAccepted);
+  const campaignAverages = {
+    replyRate: pooledMessaged ? (pooledReplies / pooledMessaged) * 100 : 0,
+    acceptanceRate: pooledSent ? (pooledAccepted / pooledSent) * 100 : 0,
+    positiveReplyRate: pooledAccepted ? (total((row) => row.positiveReplies) / pooledAccepted) * 100 : 0,
+  };
   const workspaceDetails = selected.map((row) => ({ id: String(row.id), name: String(row.name), slug: String(row.slug), logoUrl: row.logo_url ? String(row.logo_url) : null, accentColor: row.accent_color ? String(row.accent_color) : null }));
   return { ok: true, status: "live", totalReplies, messagesSent, activeConversations, replies7d, trend, trendLabels, averageDailyReplies, averageResponseMinutes, campaignMetrics, campaignAverages, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, queueMix, clientLoad, workspaces: selected.map((row) => row.name), workspaceDetails };
 }

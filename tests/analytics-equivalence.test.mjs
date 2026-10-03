@@ -152,6 +152,7 @@ async function legacyAnalytics(get, requested = []) {
   }
   const averageResponseMinutes = responseTimes.length ? Math.round(responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length / 60_000) : null;
   const positiveByCampaign = new Map();
+  const positiveSets = new Map();
   const recentByCampaign = new Map();
   for (const message of inbound) {
     const radar = object(object(message.raw_data).reply_radar);
@@ -159,9 +160,15 @@ async function legacyAnalytics(get, requested = []) {
     if (!name) continue;
     const workspaceId = conversationWorkspace.get(String(message.conversation_id)) ?? "";
     const key = `${workspaceId}:${name}`;
-    if (String(radar.sentiment ?? "").toLowerCase() === "positive") positiveByCampaign.set(key, (positiveByCampaign.get(key) ?? 0) + 1);
+    // Positive leads, not positive messages (one lead with three positive messages is one).
+    if (String(radar.sentiment ?? "").toLowerCase() === "positive") {
+      const leads = positiveSets.get(key) ?? new Set();
+      leads.add(String(message.conversation_id));
+      positiveSets.set(key, leads);
+    }
     if (new Date(String(message.sent_at)).getTime() >= weekAgo) recentByCampaign.set(key, (recentByCampaign.get(key) ?? 0) + 1);
   }
+  for (const [key, leads] of positiveSets) positiveByCampaign.set(key, leads.size);
   const campaignMetrics = campaignResponses.flatMap(({ workspace, rows, launchById, launchByName }) => rows.map((row) => {
     const accepted = Number(row.connectionsAccepted ?? 0);
     const replies = Number(row.totalMessageReplies ?? 0) + Number(row.totalInmailReplies ?? 0);
@@ -179,13 +186,16 @@ async function legacyAnalytics(get, requested = []) {
       workspaceId: String(workspace.id), client: String(workspace.name), campaignId: String(row.campaignId ?? ""), name,
       connectionsSent: Number(row.connectionsSent ?? 0), connectionsAccepted: accepted,
       replies, replies7d, messagesStarted: Number(row.totalMessageStarted ?? 0) + Number(row.totalInmailStarted ?? 0),
-      acceptanceRate, replyRate: accepted ? replies / accepted * 100 : 0,
+      acceptanceRate, replyRate: (() => { const messaged = Number(row.totalMessageStarted ?? 0) + Number(row.totalInmailStarted ?? 0) || accepted; return messaged ? replies / messaged * 100 : 0; })(),
       positiveReplies, positiveReplyRate: accepted ? positiveReplies / accepted * 100 : 0,
       launchedAt: launchedAt || null, status: launch ? String(launch.status ?? "") || null : null,
     };
   }));
   const average = (key) => campaignMetrics.length ? campaignMetrics.reduce((sum, row) => sum + row[key], 0) / campaignMetrics.length : 0;
-  const campaignAverages = { replyRate: average("replyRate"), acceptanceRate: average("acceptanceRate"), positiveReplyRate: average("positiveReplyRate") };
+  const total = (pick) => campaignMetrics.reduce((sum, row) => sum + pick(row), 0);
+  const pooledSent = total((row) => row.connectionsSent), pooledAccepted = total((row) => row.connectionsAccepted);
+  const pooledReplies = total((row) => row.replies), pooledMessaged = total((row) => row.messagesStarted || row.connectionsAccepted);
+  const campaignAverages = { replyRate: pooledMessaged ? (pooledReplies / pooledMessaged) * 100 : 0, acceptanceRate: pooledSent ? (pooledAccepted / pooledSent) * 100 : 0, positiveReplyRate: pooledAccepted ? (total((row) => row.positiveReplies) / pooledAccepted) * 100 : 0 };
   const workspaceDetails = selected.map((row) => ({ id: String(row.id), name: String(row.name), slug: String(row.slug), logoUrl: row.logo_url ? String(row.logo_url) : null, accentColor: row.accent_color ? String(row.accent_color) : null }));
   return { ok: true, status: "live", totalReplies: inbound.length, messagesSent: outbound.length, activeConversations: conversations.length, replies7d: recentMessages.length, trend, trendLabels, averageDailyReplies, averageResponseMinutes, campaignMetrics, campaignAverages, campaigns: groupPerformance("campaign"), senders: groupPerformance("sender"), clientPerformance, queueMix, clientLoad, workspaces: selected.map((row) => row.name), workspaceDetails };
 }
@@ -265,6 +275,7 @@ function legacyClientReplies(slug) {
   const repliesByCampaign = new Map();
   let replies7d = 0;
   let inbound = 0;
+  const positiveLeads = new Map();
   for (const message of db.rr_messages) {
     if (!conversationIds.has(message.conversation_id) || message.direction !== "inbound") continue;
     inbound += 1;
@@ -275,8 +286,15 @@ function legacyClientReplies(slug) {
     if (!campaign) continue;
     repliesByCampaign.set(campaign, (repliesByCampaign.get(campaign) ?? 0) + 1);
     const sentiment = radar && typeof radar === "object" && !Array.isArray(radar) ? radar.sentiment : null;
-    if (String(sentiment ?? "").toLowerCase() === "positive") positiveByCampaign.set(campaign, (positiveByCampaign.get(campaign) ?? 0) + 1);
+    // Positive is counted per lead (conversation), not per message: a lead with three positive messages
+    // is one positive lead, matching HeyReach's "Interested leads".
+    if (String(sentiment ?? "").toLowerCase() === "positive") {
+      const leads = positiveLeads.get(campaign) ?? new Set();
+      leads.add(message.conversation_id);
+      positiveLeads.set(campaign, leads);
+    }
   }
+  for (const [campaign, leads] of positiveLeads) positiveByCampaign.set(campaign, leads.size);
   return { conversations: conversationIds.size, inbound, replies7d, positiveByCampaign, repliesByCampaign };
 }
 

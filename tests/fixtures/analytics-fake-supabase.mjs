@@ -162,11 +162,21 @@ export function overviewRpc(db, { p_workspace_ids, p_week_ago, p_trend_since }) 
     group.n += 1;
     tiers.set(key, group);
   }
+  // Leads with a positive reply per workspace and campaign name (->> text, lower(sentiment)).
+  const positive = new Map();
+  for (const row of msg) {
+    if (row.direction !== "inbound" || String(row.sentiment ?? "").toLowerCase() !== "positive" || !row.campaign) continue;
+    const key = JSON.stringify([row.workspace_id, String(row.campaign)]);
+    const leads = positive.get(key) ?? new Set();
+    leads.add(row.conversation_id);
+    positive.set(key, leads);
+  }
   return {
     conversations: [...tiers.values()],
     messages: [...grouped.values()].sort((a, b) => a.first_seq - b.first_seq),
     inbound_by_day: days,
     response: { sum_ms: Number(sum), n },
+    positive_leads: [...positive].map(([key, leads]) => { const [workspace_id, campaign] = JSON.parse(key); return { workspace_id, campaign, n: leads.size }; }),
   };
 }
 
@@ -175,18 +185,30 @@ export function clientRepliesRpc(db, { p_workspace_id, p_week_ago }) {
   const conv = new Set(db.rr_conversations.filter((row) => row.workspace_id === p_workspace_id).map((row) => row.id));
   const weekAgo = micros(p_week_ago);
   const groups = new Map();
+  const positive = new Map();
   for (const row of db.rr_messages) {
     if (!conv.has(row.conversation_id) || row.direction !== "inbound") continue;
     const radar = arrow(row.raw_data, "reply_radar");
     const campaign = arrowText(arrow(radar, "campaign"), "name");
     const sentiment = arrowText(radar, "sentiment");
+    if (String(sentiment ?? "").toLowerCase() === "positive") {
+      // lower(btrim(name)) in the SQL: spellings of one campaign share their leads.
+      const key = String(campaign ?? "").trim().toLowerCase();
+      const leads = positive.get(key) ?? new Set();
+      leads.add(row.conversation_id);
+      positive.set(key, leads);
+    }
     const recent = micros(row.sent_at) >= weekAgo;
     const key = JSON.stringify([campaign, sentiment, recent]);
     const group = groups.get(key) ?? { campaign, sentiment, recent, n: 0 };
     group.n += 1;
     groups.set(key, group);
   }
-  return { conversations: conv.size, groups: [...groups.values()] };
+  return {
+    conversations: conv.size,
+    groups: [...groups.values()],
+    positive_leads: [...positive].map(([campaign, leads]) => ({ campaign, n: leads.size })),
+  };
 }
 
 /**
