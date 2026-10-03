@@ -319,20 +319,21 @@ export async function GET(request: Request) {
       ),
     ];
     const conversationIds = conversations.map((row) => String(row.id));
+    const timed = <T,>(name: string, work: Promise<T>) => work.then((value) => { timings.push(`${name};dur=${Date.now() - mark}`); return value; });
     const [leads, messages, tagsByConversation] = await Promise.all([
-      queryByIds(leadIds, 40, (batch) =>
+      timed("leads", queryByIds(leadIds, 40, (batch) =>
         query(url, key, `rr_leads?select=${LEAD_COLUMNS}&id=in.(${batch.map(encodeURIComponent).join(",")})`).then((rows) => rows.map(withRawData)),
-      ),
-      queryByIds(conversationIds, 20, (batch) =>
+      )),
+      timed("messages", queryByIds(conversationIds, 20, (batch) =>
         queryPaged(
           url,
           key,
           `rr_messages?select=${MESSAGE_COLUMNS}&conversation_id=in.(${batch.map(encodeURIComponent).join(",")})&order=sent_at.asc,id.asc`,
         ).then((rows) => rows.map(withRawData)),
-      ),
+      )),
       // The team's inbox tags on these conversations. Never fails the inbox: an account without the tags
       // table yet (migration not run) reads as no tags rather than a 500 on the whole queue.
-      assignmentsFor(conversationIds).catch(() => new Map<string, string[]>()),
+      timed("tags", assignmentsFor(conversationIds).catch(() => new Map<string, string[]>())),
     ]);
     lap("leads_messages_tags");
     // Duplicate rows are collapsed on read so the thread is correct even before a refresh repairs the
