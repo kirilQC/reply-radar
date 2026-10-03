@@ -257,3 +257,20 @@ test("the migration adds the column and reloads the schema cache", () => {
   assert.match(sql, /notify pgrst, 'reload schema';/);
   assert.match(source("supabase/schema.sql"), /offboarded_at timestamptz,/);
 });
+
+test("nothing is posted to Slack for an offboarded client, even when it is named directly", async () => {
+  const { readFile } = await import("node:fs/promises");
+  for (const route of ["app/api/slack/brief/route.ts", "app/api/slack/eow-report/route.ts", "app/api/slack/call-analysis/route.ts"]) {
+    const source = await readFile(new URL(`../${route}`, import.meta.url), "utf8");
+    assert.match(source, /found\.offboarded_at && destination !== "preview"/, route);
+    assert.match(source, /\$\{columns\},offboarded_at,/, `${route} reads offboarded_at on the single-client path`);
+  }
+});
+
+test("Scout still finds an offboarded client by name, loosely, with active clients winning ties", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../app/lib/assistant-tools.ts", import.meta.url), "utf8");
+  assert.match(source, /\[all\.filter\(isExact\), legacy\.filter\(isExact\), all\.filter\(isPartial\), legacy\.filter\(isPartial\)\]/);
+  const insights = await readFile(new URL("../app/lib/scout-insights.ts", import.meta.url), "utf8");
+  assert.match(insights, /legacyClients\.filter\(partial\)/);
+});

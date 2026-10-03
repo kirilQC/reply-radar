@@ -180,7 +180,7 @@ async function db(path: string): Promise<unknown> {
 
 /* ── Clients ─────────────────────────────────────────────────────────────────────────────────── */
 
-/** `offboarded`: a legacy client. Found only when named exactly, and left out of every list. */
+/** `offboarded`: a legacy client. Found whenever it is named; left out of "all clients" roll-ups. */
 type Client = { id: string; name: string; slug: string; timezone: string; createdAt: string; apiKey: string; offboarded: boolean };
 
 // The workspace list is read by resolveClient and a dozen tools, several times within one assistant turn, and
@@ -218,21 +218,20 @@ async function clients(): Promise<Client[]> {
 async function resolveClient(name: unknown): Promise<Client> {
   const wanted = text(name).toLowerCase();
   const everyone = await clients();
-  // An offboarded client answers to its exact name or slug only; guesses and lists are active clients.
+  // Offboarded (legacy) clients are still fully answerable when someone names them ("Arcjet versus
+  // Steadywell"), matched the same loose way as active ones. Active clients win a tie, so a legacy name
+  // can never shadow a current client.
   const all = everyone.filter((c) => !c.offboarded);
-  if (!wanted) throw new Error(`Name a client. The clients are: ${all.map((c) => c.name).join(", ")}.`);
-  const exact = all.filter((c) => c.slug.toLowerCase() === wanted || c.name.toLowerCase() === wanted);
-  if (exact.length === 1) return exact[0];
-  const legacy = everyone.filter((c) => c.offboarded && (c.slug.toLowerCase() === wanted || c.name.toLowerCase() === wanted));
-  if (legacy.length === 1 && !exact.length) return legacy[0];
-  const partial = all.filter(
-    (c) => c.name.toLowerCase().includes(wanted) || c.slug.toLowerCase().includes(wanted),
-  );
-  if (partial.length === 1) return partial[0];
-  if (partial.length > 1) {
-    throw new Error(`"${text(name)}" matches several clients: ${partial.map((c) => c.name).join(", ")}. Ask which.`);
+  const legacy = everyone.filter((c) => c.offboarded);
+  const roster = () => `The clients are: ${all.map((c) => c.name).join(", ")}${legacy.length ? `. Offboarded: ${legacy.map((c) => c.name).join(", ")}` : ""}.`;
+  if (!wanted) throw new Error(`Name a client. ${roster()}`);
+  const isExact = (c: Client) => c.slug.toLowerCase() === wanted || c.name.toLowerCase() === wanted;
+  const isPartial = (c: Client) => c.name.toLowerCase().includes(wanted) || c.slug.toLowerCase().includes(wanted);
+  for (const pool of [all.filter(isExact), legacy.filter(isExact), all.filter(isPartial), legacy.filter(isPartial)]) {
+    if (pool.length === 1) return pool[0];
+    if (pool.length > 1) throw new Error(`"${text(name)}" matches several clients: ${pool.map((c) => c.name).join(", ")}. Ask which.`);
   }
-  throw new Error(`There is no client called "${text(name)}". The clients are: ${all.map((c) => c.name).join(", ")}.`);
+  throw new Error(`There is no client called "${text(name)}". ${roster()}`);
 }
 
 /** A client with a HeyReach key, for the tools that cannot work without one. */
@@ -1019,8 +1018,9 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
   if (INSIGHT_TOOL_NAMES.has(name)) return runInsightTool(name, input);
   switch (name) {
     case "list_clients": {
-      const all = (await clients()).filter((c) => !c.offboarded);
-      return all.map(({ apiKey, id, name, slug, timezone, createdAt }) => ({ name, slug, timezone, createdAt, heyreachConnected: Boolean(apiKey), id }));
+      // Offboarded clients are listed too, flagged, so a question that names one is answered rather
+      // than met with "no such client". Roll-ups across "all clients" still mean active ones.
+      return (await clients()).map(({ apiKey, id, name, slug, timezone, createdAt, offboarded }) => ({ name, slug, timezone, createdAt, heyreachConnected: Boolean(apiKey), id, offboarded }));
     }
 
     case "client_summary": {

@@ -368,10 +368,15 @@ export async function POST(request: Request) {
     // read over one unknown column. A database without the migration still writes reports; it just writes
     // them from the two named channels and the one call. Same columns the morning brief reads.
     const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,heyreach_api_key_ciphertext";
-    const rows = await read(`rr_workspaces?select=${columns},slack_extra_channel_ids,granola_extra_title_matches&slug=eq.${encodeURIComponent(slug)}&limit=1`)
+    const rows = await read(`rr_workspaces?select=${columns},offboarded_at,slack_extra_channel_ids,granola_extra_title_matches&slug=eq.${encodeURIComponent(slug)}&limit=1`)
       .catch(() => read(`rr_workspaces?select=${columns}&slug=eq.${encodeURIComponent(slug)}&limit=1`));
     const found = (Array.isArray(rows) ? (rows as Row[]) : [])[0];
     if (!found) return NextResponse.json({ error: "That client does not exist." }, { status: 404 });
+    // Offboarded clients get nothing posted to Slack, whoever asks: the scheduler's lists already leave
+    // them out, and this stops a manual send, a queued recap or a scheduler holding an older list.
+    if (found.offboarded_at && destination !== "preview") {
+      return NextResponse.json({ error: `${String(found.name ?? slug)} is offboarded, so nothing is posted to Slack for them. Restore the client in Configuration to resume.`, offboarded: true }, { status: 409 });
+    }
     workspace = found as BriefWorkspace;
     const clientName = String(workspace.name ?? "");
     const timeZone = String(workspace.timezone ?? "") || "America/New_York";

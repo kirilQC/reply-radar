@@ -74,7 +74,7 @@ async function dbByIds(build: (ids: string[]) => string, ids: string[]): Promise
 type Client = { id: string; name: string; slug: string; apiKey: string; guardrails: Row; brief: string; brainFolder: string; internal: string; external: string; granola: string; airtable: string; morningBrief: boolean };
 /**
  * Offboarded (legacy) clients from the last read. Never in `allClients()`, so "all clients" means active
- * ones; `pickClients` still finds one when it is named exactly.
+ * ones; `pickClients` still finds one whenever it is named.
  */
 let legacyClients: Client[] = [];
 async function allClients(): Promise<Client[]> {
@@ -94,7 +94,9 @@ function pickClients(all: Client[], wanted: string[]): Client[] {
   return wanted.map((w) => {
     const q = w.toLowerCase();
     const exact = (c: Client) => c.slug.toLowerCase() === q || c.name.toLowerCase() === q;
-    const hit = all.find(exact) ?? legacyClients.find(exact) ?? all.filter((c) => c.name.toLowerCase().includes(q) || c.slug.toLowerCase().includes(q))[0];
+    const partial = (c: Client) => c.name.toLowerCase().includes(q) || c.slug.toLowerCase().includes(q);
+    // Offboarded clients stay answerable by name, matched as loosely as active ones; active clients win ties.
+    const hit = all.find(exact) ?? legacyClients.find(exact) ?? all.filter(partial)[0] ?? legacyClients.filter(partial)[0];
     if (!hit) throw new Error(`There is no client called "${w}". The clients are: ${all.map((c) => c.name).join(", ")}.`);
     return hit;
   });
