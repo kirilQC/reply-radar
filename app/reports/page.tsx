@@ -133,6 +133,8 @@ type ClientReport = {
     campaignCount: number;
     connectionsSent: number;
     connectionsAccepted: number;
+    /** HeyReach's leads messaged; absent on reports saved before it was collected. */
+    leadsMessaged?: number;
     acceptanceRate: number;
     replies: number;
     positiveReplies: number;
@@ -2357,10 +2359,10 @@ function buildCsv(report: ReportData) {
     lines.push("");
     lines.push("Summary");
     lines.push("Metric,Value");
-    lines.push(`Total replies,${client.summary.totalReplies}`);
-    lines.push(`Positive replies,${client.summary.positiveReplies}`);
-    lines.push(`Neutral replies,${client.summary.neutralReplies}`);
-    lines.push(`Negative replies,${client.summary.negativeReplies}`);
+    lines.push(`Replied leads,${client.summary.totalReplies}`);
+    lines.push(`Positive leads,${client.summary.positiveReplies}`);
+    lines.push(`Neutral leads,${client.summary.neutralReplies}`);
+    lines.push(`Negative leads,${client.summary.negativeReplies}`);
     lines.push(`Positive rate,${pct(client.summary.positiveRate)}`);
     lines.push(`Avg replies/day,${client.summary.avgRepliesPerDay.toFixed(2)}`);
     lines.push(`Hot conversations,${client.summary.hotCount}`);
@@ -2374,11 +2376,11 @@ function buildCsv(report: ReportData) {
       lines.push(`Campaigns counted,${client.metrics.campaignCount}`);
       lines.push(`Connection requests sent,${client.metrics.connectionsSent}`);
       lines.push(`Connection requests accepted,${client.metrics.connectionsAccepted}`);
-      lines.push(`Average acceptance rate,${pct(client.metrics.acceptanceRate)}`);
-      lines.push(`Replies,${client.metrics.replies}`);
-      lines.push(`Leads that replied,${client.metrics.leadsReplied}`);
-      lines.push(`Reply rate (replies / accepted),${pct(client.metrics.replyRate)}`);
-      lines.push(`Positive reply rate (positive / accepted),${pct(client.metrics.positiveReplyRate)}`);
+      lines.push(`Leads messaged,${client.metrics.leadsMessaged ?? ""}`);
+      lines.push(`Acceptance rate (accepted / sent),${pct(client.metrics.acceptanceRate)}`);
+      lines.push(`Replied leads,${client.metrics.replies}`);
+      lines.push(`Reply rate (replied leads / leads messaged),${pct(client.metrics.replyRate)}`);
+      lines.push(`Positive reply rate (positive leads / replied leads),${pct(client.metrics.positiveReplyRate)}`);
       lines.push("");
       lines.push("Campaign,Requests sent,Requests accepted,Acceptance rate");
       for (const row of client.metrics.campaigns) {
@@ -2777,8 +2779,8 @@ function ExecutiveSummary({
       ) : (
         <p className="exec-lede">
           In <strong>{report.periodLabel}</strong>, <strong>{client.workspace.name}</strong> received{" "}
-          <strong>{num(summary.totalReplies)}</strong> inbound replies across the outbound motion QC Command
-          tracks. <strong>{num(summary.positiveReplies)}</strong> ({positiveShare}%) carried positive intent,
+          <strong>{num(summary.totalReplies)}</strong> replied leads across the outbound motion QC Command
+          tracks. <strong>{num(summary.positiveReplies)}</strong> ({positiveShare}%) replied with positive intent,
           producing <strong>{num(summary.hotCount)}</strong> conversations flagged as high-urgency follow-ups.
         </p>
       )}
@@ -2863,8 +2865,8 @@ function MetricsBlock({ client, report }: { client: ClientReport; report: Report
   const figures = [
     { label: "Connection requests sent", value: num(metrics.connectionsSent) },
     { label: "Requests accepted", value: num(metrics.connectionsAccepted) },
-    { label: "Average acceptance rate", value: pct(metrics.acceptanceRate) },
-    { label: `Replies from ${num(metrics.leadsReplied)} leads`, value: num(metrics.replies) },
+    { label: "Acceptance rate", value: pct(metrics.acceptanceRate) },
+    { label: "Replied leads", value: num(metrics.replies) },
     { label: "Reply rate", value: pct(metrics.replyRate) },
     { label: "Positive reply rate", value: pct(metrics.positiveReplyRate) },
   ];
@@ -2881,9 +2883,9 @@ function MetricsBlock({ client, report }: { client: ClientReport; report: Report
       </div>
       <p className="report-caption">
         {report.periodLabel}, across the {metrics.campaignCount === 1 ? "campaign" : `${metrics.campaignCount} campaigns`}{" "}
-        named in this report, not the whole account. Acceptance rate is the average of each campaign's own
-        accepted ÷ sent. Reply rate is {num(metrics.replies)} ÷ {num(metrics.connectionsAccepted)} accepted
-        connections; positive reply rate is {num(metrics.positiveReplies)} ÷ the same.
+        named in this report, not the whole account. Figures are HeyReach's: acceptance is accepted ÷ sent, reply
+        rate is {num(metrics.replies)} replied leads ÷ {num(metrics.leadsMessaged ?? metrics.connectionsAccepted)} leads messaged,
+        and positive reply rate is {num(metrics.positiveReplies)} positive leads ÷ the replied leads.
       </p>
     </div>
   );
@@ -2892,9 +2894,9 @@ function MetricsBlock({ client, report }: { client: ClientReport; report: Report
 function KpiGrid({ client }: { client: ClientReport }) {
   const { summary } = client;
   const kpis = [
-    { label: "Inbound replies", value: num(summary.totalReplies) },
+    { label: "Replied leads", value: num(summary.totalReplies) },
     { label: "Positive reply rate", value: pct(summary.positiveRate) },
-    { label: "Positive replies", value: num(summary.positiveReplies) },
+    { label: "Positive leads", value: num(summary.positiveReplies) },
     { label: "Hot conversations", value: num(summary.hotCount) },
     { label: "Top ICP leads (≥75)", value: num(summary.topIcpCount) },
     { label: "Avg replies / active day", value: summary.avgRepliesPerDay.toFixed(1) },

@@ -41,19 +41,19 @@ test("a missing rate is derived from the two counts rather than reported as zero
   assert.equal(funnel.rows[0].acceptanceRate, 25);
 });
 
-test("the average is per campaign, so one large campaign cannot speak for the rest", () => {
+test("acceptance is pooled across campaigns, as HeyReach's dashboard reports the same campaigns", () => {
   const funnel = summariseFunnel([
     row({ campaignId: "1", campaignName: "Big", connectionsSent: 3000, connectionsAccepted: 300, connectionAcceptanceRate: 0.1 }),
     row({ campaignId: "2", campaignName: "Small", connectionsSent: 100, connectionsAccepted: 50, connectionAcceptanceRate: 0.5 }),
   ]);
-  // Pooled would be 350/3100 = 11.3%. The mean of the two campaigns is 30%.
-  assert.equal(funnel.acceptanceRate, 30);
+  // 350 / 3100, not the 30% mean of the two campaign rates.
+  assert.equal(funnel.acceptanceRate.toFixed(2), "11.29");
   assert.equal(funnel.connectionsSent, 3100);
   assert.equal(funnel.connectionsAccepted, 350);
   assert.equal(funnel.campaignCount, 2);
 });
 
-test("a campaign that sent nothing in the period is left out of the average, not counted as 0%", () => {
+test("a campaign that sent nothing in the period adds nothing to the pooled rate", () => {
   const funnel = summariseFunnel([
     row({ campaignId: "1", campaignName: "Ran", connectionsSent: 100, connectionsAccepted: 40, connectionAcceptanceRate: 0.4 }),
     row({ campaignId: "2", campaignName: "Dormant", connectionsSent: 0, connectionsAccepted: 0, connectionAcceptanceRate: 0 }),
@@ -86,17 +86,18 @@ test("a nameless row still reports under its id rather than blank", () => {
   assert.equal(funnel.rows[0].name, "Campaign 412");
 });
 
-test("both rates divide by accepted connections, which is who could be messaged", () => {
+test("replies and the reply rate are HeyReach's: replied leads over leads messaged", () => {
   const funnel = summariseFunnel([
-    row({ campaignId: "1", campaignName: "A", connectionsSent: 500, connectionsAccepted: 200, connectionAcceptanceRate: 0.4 }),
+    row({ campaignId: "1", campaignName: "A", connectionsSent: 500, connectionsAccepted: 200, connectionAcceptanceRate: 0.4, totalMessageStarted: 160, totalMessageReplies: 40 }),
   ]);
-  const metrics = reportMetrics(funnel, { total: 30, positive: 12, leadsReplied: 28 });
-  assert.equal(metrics.replyRate, 15);
-  assert.equal(metrics.positiveReplyRate, 6);
-  assert.equal(metrics.replies, 30);
+  const metrics = reportMetrics(funnel, { total: 55, positive: 12, leadsReplied: 38 });
+  assert.equal(metrics.replies, 40);
+  assert.equal(metrics.leadsReplied, 40);
+  assert.equal(metrics.replyRate, 25);
   assert.equal(metrics.positiveReplies, 12);
-  assert.equal(metrics.leadsReplied, 28);
+  assert.equal(metrics.positiveReplyRate, 30);
   assert.equal(metrics.connectionsAccepted, 200);
+  assert.equal(metrics.leadsMessaged, 160);
 });
 
 test("no accepted connections means no rate rather than a division by zero", () => {
@@ -204,7 +205,7 @@ test("an unavailable funnel stays unavailable, with its reason, so no rate is pr
   });
   assert.equal(metrics.available, false);
   assert.match(metrics.reason, /API key/);
-  // The replies are ours and are known; only the rates that need HeyReach's denominator are missing.
+  // HeyReach could not be asked, so our own replied-lead figures stand in; only the rates are missing.
   assert.equal(metrics.replies, 41);
   assert.equal(metrics.positiveReplies, 19);
   assert.equal(metrics.connectionsAccepted, 0);

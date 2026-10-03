@@ -214,8 +214,16 @@ export async function POST(request: Request) {
    * that predates the agency and a ceiling of now. It filters by activity, so a window wider than the
    * data costs nothing.
    */
-  const statsSince = since ?? "2020-01-01T00:00:00.000Z";
-  const statsUntil = until ?? new Date().toISOString();
+  /*
+   * HeyReach is asked for whole UTC days named by the local dates, exactly as its own dashboard asks
+   * ("Last 7 days" on Oct 2 is 2026-09-26T00:00:00Z to 2026-10-02T23:59:59.999Z). Asking for New York
+   * midnights instead shifted every window by four or five hours, so a report's sent and accepted could
+   * never equal what the same dates show in HeyReach.
+   */
+  const localDate = (instant: number) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(instant));
+  const statsSince = since ? `${localDate(Date.parse(since))}T00:00:00.000Z` : "2020-01-01T00:00:00.000Z";
+  const statsUntil = `${localDate(until ? Date.parse(until) - 1 : Date.now())}T23:59:59.999Z`;
 
   try {
     // Resolve workspace(s)
@@ -313,27 +321,52 @@ export async function POST(request: Request) {
     const clientReports = workspaces.map((workspace) => {
       const workspaceId = text(workspace.id);
       const workspaceMessages = messagesByWorkspace.get(workspaceId) || [];
-      const totalReplies = workspaceMessages.length;
-
-      // Sentiment breakdown
-      const sentimentCounts: Record<string, number> = { positive: 0, neutral: 0, negative: 0, unclassified: 0 };
-      for (const message of workspaceMessages) {
+      /*
+       * Replies are counted per lead, as HeyReach counts "Replied leads". This used to be the number of
+       * inbound messages, so a lead who wrote three times was three replies and no report total could be
+       * checked against HeyReach. When HeyReach answered for the period, its own replied-lead count is the
+       * headline (see `metrics` below); ours stands in only when it could not be asked.
+       *
+       * Sentiment is per lead too: positive if any reply in the period was positive, otherwise the
+       * sentiment of the lead's latest reply. So the breakdown adds up to the replied leads.
+       */
+      const sentimentByLead = new Map<string, string>();
+      for (const message of [...workspaceMessages].sort((a, b) => text(a.sent_at).localeCompare(text(b.sent_at)))) {
+        const leadKey = text(message.conversation_id);
         const sentiment = text(radarOf(message.raw_data).sentiment).toLowerCase();
-        if (sentiment === "positive" || sentiment === "neutral" || sentiment === "negative") sentimentCounts[sentiment] += 1;
-        else sentimentCounts.unclassified += 1;
+        const label = sentiment === "positive" || sentiment === "neutral" || sentiment === "negative" ? sentiment : "unclassified";
+        if (sentimentByLead.get(leadKey) !== "positive") sentimentByLead.set(leadKey, label);
       }
-      const positiveRate = totalReplies ? (sentimentCounts.positive / totalReplies) * 100 : 0;
+      const sentimentCounts: Record<string, number> = { positive: 0, neutral: 0, negative: 0, unclassified: 0 };
+      for (const label of sentimentByLead.values()) sentimentCounts[label] += 1;
+      const heyReachFunnel = heyReachByWorkspace.get(workspaceId)?.funnel;
+      const totalReplies = heyReachFunnel?.available ? heyReachFunnel.replies : sentimentByLead.size;
+      const positiveRate = totalReplies ? Math.min(100, (sentimentCounts.positive / totalReplies) * 100) : 0;
 
       // Campaign performance
+      // Per lead, like the totals above: a lead who replied three times is one reply for its campaign.
       const campaigns = new Map<string, { name: string; replies: number; positive: number; negative: number }>();
+      const campaignLeads = new Map<string, Set<string>>();
       for (const message of workspaceMessages) {
         const campaign = object(radarOf(message.raw_data).campaign);
         const name = text(campaign.name) || "Unattributed";
-        const bucket = campaigns.get(name) || { name, replies: 0, positive: 0, negative: 0 };
-        bucket.replies += 1;
-        const sentiment = text(radarOf(message.raw_data).sentiment).toLowerCase();
-        if (sentiment === "positive") bucket.positive += 1;
-        if (sentiment === "negative") bucket.negative += 1;
+        const leads = campaignLeads.get(name) ?? new Set<string>();
+        leads.add(text(message.conversation_id));
+        campaignLeads.set(name, leads);
+      }
+      // HeyReach's replied leads per campaign for the same window, where it answered.
+      const heyReachRepliesByName = new Map(
+        (heyReachFunnel?.available ? heyReachFunnel.rows : []).map((row) => [row.name.trim().toLowerCase(), row.replies]),
+      );
+      for (const [name, leads] of campaignLeads) {
+        const bucket = { name, replies: leads.size, positive: 0, negative: 0 };
+        for (const lead of leads) {
+          const sentiment = sentimentByLead.get(lead);
+          if (sentiment === "positive") bucket.positive += 1;
+          if (sentiment === "negative") bucket.negative += 1;
+        }
+        const fromHeyReach = heyReachRepliesByName.get(name.trim().toLowerCase());
+        if (fromHeyReach !== undefined) bucket.replies = Math.max(fromHeyReach, bucket.positive);
         campaigns.set(name, bucket);
       }
       // Live status, joined onto the reply-derived rows by name because reply attribution carries a
@@ -365,13 +398,16 @@ export async function POST(request: Request) {
 
       // Sender leaderboard
       const senders = new Map<string, { name: string; replies: number; positive: number }>();
+      const senderLeads = new Map<string, Set<string>>();
       for (const message of workspaceMessages) {
         const sender = object(radarOf(message.raw_data).sender);
         const name = text(sender.name) || "Unassigned";
-        const bucket = senders.get(name) || { name, replies: 0, positive: 0 };
-        bucket.replies += 1;
-        if (text(radarOf(message.raw_data).sentiment).toLowerCase() === "positive") bucket.positive += 1;
-        senders.set(name, bucket);
+        const leads = senderLeads.get(name) ?? new Set<string>();
+        leads.add(text(message.conversation_id));
+        senderLeads.set(name, leads);
+      }
+      for (const [name, leads] of senderLeads) {
+        senders.set(name, { name, replies: leads.size, positive: [...leads].filter((lead) => sentimentByLead.get(lead) === "positive").length });
       }
       const senderRows = [...senders.values()]
         .sort((a, b) => b.replies - a.replies)
@@ -566,9 +602,9 @@ export async function POST(request: Request) {
          * report's reply rate be divided back out of the reply count printed above it.
          */
         metrics: reportMetrics(heyReach?.funnel ?? emptyFunnel("Rates were not requested."), {
-          total: totalReplies,
+          total: sentimentByLead.size,
           positive: sentimentCounts.positive,
-          leadsReplied: repliedLeadIds.size,
+          leadsReplied: sentimentByLead.size,
         }),
         sentiment: sentimentCounts,
         campaigns: campaignRows,

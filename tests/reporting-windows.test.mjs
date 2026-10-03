@@ -88,7 +88,9 @@ test("a thread batch with more than 1,000 replies is read in full", async (t) =>
   const conversations = [{ id: "c1", lead_id: "", workspace_id: "ws-1" }];
   const messages = Array.from({ length: 1500 }, (_, i) => ({ id: `m${i}`, conversation_id: "c1", direction: "inbound", body: `Reply ${i}`, sent_at: new Date(Date.UTC(2026, 8, 1) + i * 60_000).toISOString(), raw_data: {} }));
   const { payload } = await generate(t, { workspaceSlug: "willow", period: "all-time" }, { conversations, messages });
-  assert.equal(payload.clients[0].summary.totalReplies, 1500);
+  // Replies are counted per lead now (one lead here), so the full read shows in the per-day trend.
+  assert.equal(payload.clients[0].trend.reduce((total, row) => total + row.replies, 0), 1500);
+  assert.equal(payload.clients[0].summary.totalReplies, 1);
 });
 
 test("a custom range covers its last day, on New York midnights", async (t) => {
@@ -141,9 +143,10 @@ test("weeks start on Monday at local midnight", async (t) => {
 test("average replies per day divides by calendar days, quiet days included", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-20T16:00:00Z") });
   const conversations = [{ id: "c1", lead_id: "", workspace_id: "ws-1" }];
-  // Fourteen replies, all on two of the seven days.
-  const messages = Array.from({ length: 14 }, (_, i) => ({ id: `m${i}`, conversation_id: "c1", direction: "inbound", body: `Reply ${i}`, sent_at: `2026-10-0${i < 7 ? 2 : 5}T15:${String(i).padStart(2, "0")}:00Z`, raw_data: {} }));
-  const { payload } = await generate(t, { workspaceSlug: "willow", period: "custom", since: "2026-10-01", until: "2026-10-07" }, { conversations, messages });
+  // Fourteen leads replied, all on two of the seven days (replies are counted per lead).
+  const conversations14 = Array.from({ length: 14 }, (_, i) => ({ id: `c${i}`, lead_id: "", workspace_id: "ws-1" }));
+  const messages = Array.from({ length: 14 }, (_, i) => ({ id: `m${i}`, conversation_id: `c${i}`, direction: "inbound", body: `Reply ${i}`, sent_at: `2026-10-0${i < 7 ? 2 : 5}T15:${String(i).padStart(2, "0")}:00Z`, raw_data: {} }));
+  const { payload } = await generate(t, { workspaceSlug: "willow", period: "custom", since: "2026-10-01", until: "2026-10-07" }, { conversations: conversations14, messages });
   assert.equal(payload.clients[0].summary.totalReplies, 14);
   assert.equal(payload.clients[0].summary.avgRepliesPerDay, 2);
 });

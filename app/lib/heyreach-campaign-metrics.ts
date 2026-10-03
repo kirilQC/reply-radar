@@ -17,10 +17,11 @@ import { heyreachFetch } from "../../shared/heyreach-throttle.mjs";
  * HeyReach filters server-side on `campaignIds`, so the scoping is exact rather than approximated
  * after the fact.
  *
- * Replies and sentiment are deliberately *not* taken from here. HeyReach counts a reply when a message
- * comes back; we count one when it lands in our tables and gets a sentiment. Those disagree, and a
- * report whose headline reply count cannot be divided by its own denominator is worse than one with a
- * slightly conservative denominator. So: HeyReach supplies sent and accepted, our tables supply replies.
+ * Replies are HeyReach's too. Reports used to count inbound messages in our own tables, which never
+ * matched the "Replied leads" a client or teammate sees in HeyReach (a lead who writes three messages is
+ * three of ours and one of theirs). Every figure a report prints next to HeyReach's must be HeyReach's:
+ * sent, accepted, leads messaged and leads replied all come from here. Only sentiment is ours, counted
+ * per lead so it sits under the replied-lead count it is a share of.
  */
 
 type Row = Record<string, unknown>;
@@ -52,6 +53,8 @@ export type CampaignFunnelRow = {
    * disagrees with what they can see there is the thing that stops the brief being trusted.
    */
   replies: number;
+  /** Leads messaged (HeyReach's "Messaged leads"), messages and InMails together. */
+  messagesStarted: number;
 };
 
 export type CampaignFunnel = {
@@ -63,12 +66,14 @@ export type CampaignFunnel = {
   connectionsSent: number;
   connectionsAccepted: number;
   /**
-   * Mean of each campaign's own acceptance rate, not the pooled total.
-   *
-   * Asked for as an average, and it is the fairer figure when campaigns differ wildly in size — a
-   * pooled rate lets one 3,000-lead campaign speak for all of them.
+   * Accepted over sent across the campaigns, pooled, which is the figure HeyReach's dashboard shows for
+   * the same campaigns and dates. It used to be a mean of per-campaign rates, which nobody could check.
    */
   acceptanceRate: number;
+  /** Replied leads across the campaigns, as HeyReach counts them. */
+  replies: number;
+  /** Leads messaged across the campaigns, the reply rate's denominator in HeyReach. */
+  messagesStarted: number;
   rows: CampaignFunnelRow[];
 };
 
@@ -79,6 +84,8 @@ export const emptyFunnel = (reason: string): CampaignFunnel => ({
   connectionsSent: 0,
   connectionsAccepted: 0,
   acceptanceRate: 0,
+  replies: 0,
+  messagesStarted: 0,
   rows: [],
 });
 
@@ -104,20 +111,22 @@ export function summariseFunnel(rows: unknown[]): CampaignFunnel {
         connectionsAccepted: accepted,
         acceptanceRate: asPercent(row.connectionAcceptanceRate, accepted, sent),
         replies: count(row.totalMessageReplies) + count(row.totalInmailReplies),
+        messagesStarted: count(row.totalMessageStarted) + count(row.totalInmailStarted),
       };
     });
 
-  // Campaigns that sent nothing in the period are excluded from the average rather than counted as 0%,
-  // which would drag the figure down with campaigns that never ran.
-  const rated = parsed.filter((row) => row.connectionsSent > 0);
-
+  const sum = (pick: (row: CampaignFunnelRow) => number) => parsed.reduce((total, row) => total + pick(row), 0);
+  const sent = sum((row) => row.connectionsSent);
+  const accepted = sum((row) => row.connectionsAccepted);
   return {
     available: true,
     reason: "",
     campaignCount: parsed.length,
-    connectionsSent: parsed.reduce((total, row) => total + row.connectionsSent, 0),
-    connectionsAccepted: parsed.reduce((total, row) => total + row.connectionsAccepted, 0),
-    acceptanceRate: rated.length ? rated.reduce((total, row) => total + row.acceptanceRate, 0) / rated.length : 0,
+    connectionsSent: sent,
+    connectionsAccepted: accepted,
+    acceptanceRate: sent ? (accepted / sent) * 100 : 0,
+    replies: sum((row) => row.replies),
+    messagesStarted: sum((row) => row.messagesStarted),
     rows: parsed.sort((a, b) => b.connectionsAccepted - a.connectionsAccepted),
   };
 }
@@ -231,29 +240,34 @@ export async function dailyStatsFor(
 }
 
 /**
- * Joins the HeyReach funnel to the replies we hold, producing the figures the report prints.
+ * The figures a report prints, defined as HeyReach defines them.
  *
- * Both rates divide by connections accepted — the number of people who could actually be messaged.
- * Dividing by requests sent would understate the work, and dividing by leads on the list would compare
- * replies against people who were never reached.
+ * Replies are HeyReach's replied leads and the reply rate is replied leads over leads messaged, the same
+ * division HeyReach's dashboard does. Positive is ours (HeyReach has no sentiment), counted per lead, and
+ * its rate is a share of the replied leads. When HeyReach could not be asked, our own replied-lead count
+ * stands in and the rates that need HeyReach's denominators read as unavailable.
  */
 export function reportMetrics(
   funnel: CampaignFunnel,
-  replies: { total: number; positive: number; leadsReplied: number },
+  ours: { total: number; positive: number; leadsReplied: number },
 ) {
   const accepted = funnel.connectionsAccepted;
+  const replies = funnel.available ? funnel.replies : ours.total;
+  const leadsReplied = funnel.available ? funnel.replies : ours.leadsReplied;
+  const messaged = funnel.messagesStarted || accepted;
   return {
     available: funnel.available,
     reason: funnel.reason,
     campaignCount: funnel.campaignCount,
     connectionsSent: funnel.connectionsSent,
     connectionsAccepted: accepted,
+    leadsMessaged: funnel.messagesStarted,
     acceptanceRate: funnel.acceptanceRate,
-    replies: replies.total,
-    positiveReplies: replies.positive,
-    leadsReplied: replies.leadsReplied,
-    replyRate: accepted ? (replies.total / accepted) * 100 : 0,
-    positiveReplyRate: accepted ? (replies.positive / accepted) * 100 : 0,
+    replies,
+    positiveReplies: ours.positive,
+    leadsReplied,
+    replyRate: messaged ? (replies / messaged) * 100 : 0,
+    positiveReplyRate: replies ? Math.min(100, (ours.positive / replies) * 100) : 0,
     campaigns: funnel.rows,
   };
 }
