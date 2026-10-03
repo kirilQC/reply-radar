@@ -168,6 +168,12 @@ const age = (value: unknown) => {
  * database leg of the hottest route proportional to what it uses.
  */
 const MESSAGE_COLUMNS = "id,conversation_id,body,direction,sent_at,reply_radar:raw_data->reply_radar";
+/**
+ * The lead columns the inbox reads. Same reasoning as messages: a lead's `raw_data` also carries the whole
+ * HeyReach payload, and every reader here (sender, campaign, ICP, enrichment, history status) only looks
+ * under `reply_radar`. `withRawData` puts it back under `raw_data`.
+ */
+const LEAD_COLUMNS = "id,name,role,company,linkedin_profile_url,reply_radar:raw_data->reply_radar";
 /** Puts the narrowed `reply_radar` column back where every reader expects it: under `raw_data`. */
 const withRawData = (row: Row): Row =>
   row.raw_data && typeof row.raw_data === "object"
@@ -216,7 +222,7 @@ async function readThread(url: string, key: string, conversationId: string) {
   if (!conversation) return { ok: false, conversationId, thread: [], error: "Conversation not found." };
   const [leadRows, messages] = await Promise.all([
     conversation.lead_id
-      ? query(url, key, `rr_leads?select=*&id=eq.${encodeURIComponent(String(conversation.lead_id))}&limit=1`)
+      ? query(url, key, `rr_leads?select=${LEAD_COLUMNS}&id=eq.${encodeURIComponent(String(conversation.lead_id))}&limit=1`).then((rows) => rows.map(withRawData))
       : Promise.resolve([] as Row[]),
     queryPaged(
       url,
@@ -273,6 +279,11 @@ export async function GET(request: Request) {
     const until = isoOrNull(params.get("until"));
     const rangeFilter = `${since ? `&last_message_at=gte.${encodeURIComponent(since)}` : ""}${until ? `&last_message_at=lte.${encodeURIComponent(until)}` : ""}`;
     const rowLimit = since || until ? 2000 : 500;
+    // Per-step timings in a Server-Timing header, readable in the browser's network panel.
+    const started = Date.now();
+    const timings: string[] = [];
+    let mark = started;
+    const lap = (name: string) => { const now = Date.now(); timings.push(`${name};dur=${now - mark}`); mark = now; };
     const workspaces = await query(
       url,
       key,
@@ -296,6 +307,7 @@ export async function GET(request: Request) {
         rowLimit,
       ),
     );
+    lap("conversations");
     conversations.sort(
       (a, b) =>
         new Date(String(b.last_message_at)).getTime() -
@@ -309,7 +321,7 @@ export async function GET(request: Request) {
     const conversationIds = conversations.map((row) => String(row.id));
     const [leads, messages, tagsByConversation] = await Promise.all([
       queryByIds(leadIds, 40, (batch) =>
-        query(url, key, `rr_leads?select=*&id=in.(${batch.map(encodeURIComponent).join(",")})`),
+        query(url, key, `rr_leads?select=${LEAD_COLUMNS}&id=in.(${batch.map(encodeURIComponent).join(",")})`).then((rows) => rows.map(withRawData)),
       ),
       queryByIds(conversationIds, 20, (batch) =>
         queryPaged(
@@ -322,6 +334,7 @@ export async function GET(request: Request) {
       // table yet (migration not run) reads as no tags rather than a 500 on the whole queue.
       assignmentsFor(conversationIds).catch(() => new Map<string, string[]>()),
     ]);
+    lap("leads_messages_tags");
     // Duplicate rows are collapsed on read so the thread is correct even before a refresh repairs the
     // records themselves. Shared with the purge, which must judge who spoke first from the same view.
     const deduped = dedupeMessages(messages);
@@ -480,7 +493,12 @@ export async function GET(request: Request) {
     if (excluded.length) console.info("reply_radar_inbox_dropped_lead_initiated", { count: excluded.length, conversationIds: excluded.slice(0, 25) });
     if (orphaned.length) console.info("reply_radar_inbox_dropped_orphaned", { count: orphaned.length, conversationIds: orphaned.slice(0, 25) });
     if (hiddenNonCampaign.length) console.info("reply_radar_inbox_hidden_non_campaign", { count: hiddenNonCampaign.length, conversationIds: hiddenNonCampaign.slice(0, 25) });
-    return slimJson({ ok: true, conversations: visible, hiddenNonCampaign: hiddenNonCampaign.length });
+    lap("build");
+    timings.push(`total;dur=${Date.now() - started}`);
+    return slimJson(
+      { ok: true, conversations: visible, hiddenNonCampaign: hiddenNonCampaign.length },
+      { headers: { "Server-Timing": timings.join(", ") } },
+    );
   } catch (error) {
     return slimJson(
       {
