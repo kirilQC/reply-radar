@@ -110,11 +110,20 @@ export default function AppSidebar() {
   // differ from the server's on every page, which React reports as a hydration error (#418) and answers by
   // throwing away the server HTML and redrawing everything.
   const [sidebarClients, setSidebarClients] = useState<Array<{ name: string; slug: string; tone: string; logoUrl?: string }>>([]);
+  // Two writers share this cache (this sidebar and the Configuration page) with slightly different
+  // shapes, so whatever is read is put into the sidebar's own shape first.
+  const fromCache = (saved: string) =>
+    (JSON.parse(saved) as Array<Record<string, unknown>>).map((item) => ({
+      name: String(item.name ?? ""),
+      slug: String(item.slug ?? ""),
+      tone: String(item.tone ?? item.accentColor ?? item.accent_color ?? "var(--accent)"),
+      logoUrl: String(item.logoUrl ?? item.logo_url ?? "") || undefined,
+    }));
   useLayoutEffect(() => {
     try {
       const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (saved) setSidebarClients(JSON.parse(saved));
+      if (saved) setSidebarClients(fromCache(saved));
     } catch { /* keep the empty list until the fetch lands */ }
   }, []);
   const [clientsLoading, setClientsLoading] = useState(true);
@@ -164,13 +173,13 @@ export default function AppSidebar() {
       } catch { /* use the offline cache */ }
       try {
         const saved = window.localStorage.getItem("reply-radar-workspaces:v2");
-        if (saved) setSidebarClients(JSON.parse(saved));
+        if (saved) setSidebarClients(fromCache(saved));
       } catch { /* keep empty state */ }
       setClientsLoading(false);
     };
     void hydrate();
     const onStorage = () => {
-      try { const saved = window.localStorage.getItem("reply-radar-workspaces:v2"); if (saved) setSidebarClients(JSON.parse(saved)); } catch { /* ignore */ }
+      try { const saved = window.localStorage.getItem("reply-radar-workspaces:v2"); if (saved) setSidebarClients(fromCache(saved)); } catch { /* ignore */ }
     };
     window.addEventListener("storage", onStorage);
     window.addEventListener("reply-radar-workspaces-changed", onStorage);

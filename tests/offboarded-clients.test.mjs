@@ -245,7 +245,7 @@ test("webhooks keep storing replies for offboarded clients, and survive a missin
 test("Configuration asks for every client, and the shared cache only ever holds active ones", () => {
   const admin = source("app/admin/page.tsx");
   assert.match(admin, /fetch\("\/api\/admin\/workspaces\?include=all"/);
-  assert.match(admin, /list\.filter\(\(item\) => !item\.offboardedAt\)/);
+  assert.match(admin, /list\s*\.filter\(\(item\) => !item\.offboardedAt\)/);
   assert.doesNotMatch(admin, /window\.confirm\([^)]*[Oo]ffboard/, "the offboard confirmation is in the page");
   const sidebar = source("app/components/AppSidebar.tsx");
   assert.match(sidebar, /fetch\("\/api\/admin\/workspaces", \{ cache: "no-store" \}\)/, "the sidebar reads the active list");

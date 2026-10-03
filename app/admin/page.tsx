@@ -104,7 +104,12 @@ const WORKSPACE_CACHE_KEY = "reply-radar-workspaces:v2";
 function cacheWorkspaces(list: ClientWorkspace[]): void {
   try {
     // Every other page reads this cache as the active client list, so offboarded clients stay out of it.
-    const slim = list.filter((item) => !item.offboardedAt).map(({ logoUrl: _logoUrl, apiKey: _apiKey, ...rest }) => rest);
+    // Logos stay when they are links (the /api/img/<hash> form every route now returns) and are dropped
+    // only when they are inline data: images, which is what once overflowed storage. Dropping all of them
+    // blanked every logo in the sidebar the moment this page saved, since the sidebar reads this cache.
+    const slim = list
+      .filter((item) => !item.offboardedAt)
+      .map(({ logoUrl, apiKey: _apiKey, ...rest }) => (logoUrl && !String(logoUrl).startsWith("data:") ? { ...rest, logoUrl } : rest));
     window.localStorage.setItem(WORKSPACE_CACHE_KEY, JSON.stringify(slim));
   } catch {
     /* quota exceeded, or storage unavailable (private mode) — the cache is a convenience, not a requirement */
