@@ -1223,12 +1223,25 @@ async function collectCampaignStats(workspace) {
 async function collectDailyStats(workspace) {
   const apiKey = workspace.heyreach_api_key_ciphertext;
   const start = new Date(Date.now() - (ANALYTICS_WINDOW_DAYS - 1) * 86_400_000);
-  const startDate = `${start.toISOString().slice(0, 10)}T00:00:00.000Z`;
+  const startDay = start.toISOString().slice(0, 10);
+  const startDate = `${startDay}T00:00:00.000Z`;
   const endDate = new Date().toISOString();
-  const series = (accountIds) => heyReachFetch(apiKey, "stats/GetOverallStats", {
-    method: "POST",
-    body: JSON.stringify({ accountIds, campaignIds: [], startDate, endDate }),
-  }, ANALYTICS_TIMEOUT_MS);
+  /*
+   * QC's campaigns only. Some clients' API keys are their OWN HeyReach account, where their team runs
+   * campaigns of its own; asked with `campaignIds: []`, HeyReach returns the whole account, so CAMB, with
+   * no QC campaign at all, showed its own team's 110 requests a day as QC's work. The series is therefore
+   * asked for exactly the campaigns `ourCampaigns` recognises — the same rule the campaign stats use —
+   * and a client with none of ours gets a window of honest zeros rather than someone else's sending.
+   */
+  const ourIds = ourCampaigns(await heyReachCampaignPages(apiKey), (row) => row.name)
+    .map((row) => Number(row.id) || row.id)
+    .filter(Boolean);
+  const series = (accountIds) => (ourIds.length
+    ? heyReachFetch(apiKey, "stats/GetOverallStats", {
+        method: "POST",
+        body: JSON.stringify({ accountIds, campaignIds: ourIds, startDate, endDate }),
+      }, ANALYTICS_TIMEOUT_MS)
+    : Promise.resolve({ byDayStats: {} }));
 
   /*
    * `li_account/GetAll`, not `linkedinaccount/GetAll` — the latter is what the shape of every other
@@ -1270,8 +1283,18 @@ async function collectDailyStats(workspace) {
   };
 
   // The all-senders total. `sender_id = ''` is what marks it, and the primary key keeps it from
-  // colliding with any real sender.
-  push("", "", null, await series([]).catch(() => null));
+  // colliding with any real sender. If that read fails nothing below is stored, so a failed pass can
+  // never replace good figures with an empty window.
+  const total = await series([]);
+  let senderFailed = false;
+  push("", "", null, total);
+  // No campaign of ours: every day in the window is a real zero for QC's work, written as such so the
+  // portal shows the window as synced rather than as missing days.
+  if (!ourIds.length) {
+    for (let day = Date.parse(startDate); day <= Date.now(); day += 86_400_000) {
+      rows.push({ workspace_id: workspace.id, day: new Date(day).toISOString().slice(0, 10), sender_id: "", sender_name: "", connections_sent: 0, connections_accepted: 0, messages_sent: 0, replies: 0, daily_limit: null, refreshed_at: now });
+    }
+  }
   for (const account of accounts) {
     const id = String(account.id ?? "");
     if (!id) continue;
@@ -1280,9 +1303,19 @@ async function collectDailyStats(workspace) {
     // their side does not turn the cap into a null.
     const cap = Number(limits.connectioRequestLimit ?? limits.connectionRequestLimit ?? 0) || null;
     const name = [String(account.firstName || ""), String(account.lastName || "")].filter(Boolean).join(" ") || `Sender ${id}`;
-    push(id, name, cap, await series([Number(id) || id]).catch(() => null));
+    const perSender = await series([Number(id) || id]).catch(() => null);
+    if (!perSender && ourIds.length) senderFailed = true;
+    push(id, name, cap, perSender);
   }
   if (!rows.length) return 0;
+  // The window is replaced, not merged: a sender (or a client's own campaign) that no longer counts must
+  // not leave its old rows behind. Only reached once the fresh series above came back.
+  if (!senderFailed) {
+    await supabase(`rr_daily_stats?workspace_id=eq.${encodeURIComponent(workspace.id)}&day=gte.${startDay}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=representation" },
+    });
+  }
   await supabase("rr_daily_stats?on_conflict=workspace_id,day,sender_id", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
