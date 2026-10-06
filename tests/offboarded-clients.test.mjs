@@ -210,12 +210,14 @@ for (const path of ACTIVE_ONLY) {
   });
 }
 
-test("the worker skips offboarded clients for AI, analytics, deals and the health poll, but not for stored replies", () => {
+test("the worker skips offboarded clients for AI, deals and the health poll, but not for analytics or stored replies", () => {
   const worker = source("worker/render-worker.mjs");
   const line = (pattern) => worker.split("\n").find((entry) => pattern.test(entry)) ?? "";
   assert.match(line(/select=id,slug,name,client_brief,anthropic_model/), /offboarded_at=is\.null/, "AI pipeline");
   const stale = worker.slice(worker.indexOf("async function staleAnalyticsWorkspace"), worker.indexOf("async function staleAnalyticsWorkspace") + 400);
-  assert.match(stale, /offboarded_at=is\.null/, "analytics collection");
+  // HeyReach stats keep being collected: an offboarded client can still be sending, and freezing its
+  // numbers made the portal show real sending days as zero.
+  assert.doesNotMatch(stale, /offboarded_at=is\.null/, "analytics collection");
   assert.match(line(/crm_provider=not\.is\.null/), /offboarded_at=is\.null/, "deals sync");
   // Reconcile and conversation refresh store replies, so they keep running for offboarded clients.
   assert.doesNotMatch(line(/last_reconciled_at\.is\.null/), /offboarded_at/);

@@ -1293,8 +1293,13 @@ async function collectDailyStats(workspace) {
 
 /** The client whose stored analytics are oldest, or one that has none at all. */
 async function staleAnalyticsWorkspace() {
-  // Offboarded clients are not collected; their stored analytics stay as they were.
-  const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&heyreach_api_key_ciphertext=not.is.null&offboarded_at=is.null&order=created_at.asc");
+  /*
+   * Offboarded clients ARE collected. They used to be skipped, which froze their stored analytics on the
+   * day they were offboarded — but a client can keep sending after that (Bluvia sent 50 requests on Oct 5,
+   * two days after its offboarding), and the portal then showed those days as nothing sent. HeyReach is
+   * the source of truth for as long as there is a key to ask it with.
+   */
+  const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&heyreach_api_key_ciphertext=not.is.null&order=created_at.asc");
   if (!workspaces || !workspaces.length) return null;
   /*
    * Freshness is when this worker last *tried* a client (its newest analytics run), not when that client's
