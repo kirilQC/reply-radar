@@ -1005,7 +1005,7 @@ function SheetView({ tasks, h, sheet, clientName, onSheetChange, onUpdate, onCre
 
   const head = (
     <colgroup>
-      <col style={{ width: 92 }} /><col style={{ width: 136 }} /><col style={{ width: "24%" }} /><col style={{ width: 150 }} />
+      <col style={{ width: 118 }} /><col style={{ width: 136 }} /><col style={{ width: "24%" }} /><col style={{ width: 150 }} />
       <col style={{ width: 120 }} /><col style={{ width: 132 }} /><col /><col style={{ width: 104 }} />
     </colgroup>
   );
