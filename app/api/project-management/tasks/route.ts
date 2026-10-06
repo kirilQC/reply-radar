@@ -67,6 +67,9 @@ export async function POST(request: Request) {
   const stage = STAGES.includes(String(b.stage)) ? String(b.stage) : "todo";
   const links = Array.isArray(b.links) ? b.links.slice(0, 30) : [];
   const rec: Row = { workspace_id: wsId, title: title.slice(0, 300), stage, owner: b.owner ? String(b.owner).slice(0, 400) : null, due_date: b.dueDate || null, context: b.context ? String(b.context).slice(0, 5000) : null, links, priority: b.priority ? String(b.priority).slice(0, 20) : null, week: b.week || null, source: b.source ? String(b.source) : "manual", position: typeof b.position === "number" ? b.position : Date.now() };
+  // "Show to client" (QC Portal's Project tracker). Only written when set, so a database without the
+  // client_visible column still accepts every other create.
+  if (b.clientVisible === true) rec.client_visible = true;
   const r = await fetch(`${c.url}/rest/v1/rr_projects`, { method: "POST", headers: { ...c.headers, Prefer: "return=representation" }, body: JSON.stringify(rec) });
   if (!r.ok) return NextResponse.json({ ok: false, error: r.status === 404 ? TABLE_MISSING : `Could not create (${r.status}).` }, { status: 502 });
   const [task] = await r.json().catch(() => []);
@@ -89,14 +92,27 @@ export async function PATCH(request: Request) {
   if ("priority" in b) patch.priority = b.priority ? String(b.priority).slice(0, 20) : null;
   if ("week" in b) patch.week = b.week || null;
   if ("blocker" in b) { const arr = Array.isArray(b.blocker) ? b.blocker : b.blocker ? [b.blocker] : []; const clean = arr.filter((x: Record<string, unknown>) => x && (x.text || x.owner)).slice(0, 20); patch.blocker = clean.length ? clean : null; }
-  if (b.moveToSlug) { const wsId = await workspaceIdFor(String(b.moveToSlug), c); if (wsId) patch.workspace_id = wsId; }
+  if (typeof b.clientVisible === "boolean") patch.client_visible = b.clientVisible;
+  // A task moved to another client starts hidden from that client's portal: "show to client" was a
+  // decision about the old client, and must not publish one client's task on another's tracker.
+  if (b.moveToSlug) { const wsId = await workspaceIdFor(String(b.moveToSlug), c); if (wsId) { patch.workspace_id = wsId; if (typeof b.clientVisible !== "boolean") patch.client_visible = false; } }
   if ("updatedBy" in b) patch.updated_by = b.updatedBy ? String(b.updatedBy).slice(0, 200) : null;
   if (typeof b.position === "number") patch.position = b.position;
   if (b.checks && typeof b.checks === "object") await writeConfig(`${CHECKS_PREFIX}${id}`, asChecks(b.checks));
   // Dragging a task up or down the priority order is not an edit, so it doesn't move "Updated".
   const keys = Object.keys(b).filter((k) => k !== "id" && k !== "updatedBy");
   if (keys.length === 1 && keys[0] === "position") { delete patch.updated_at; delete patch.updated_by; }
-  const r = await fetch(`${c.url}/rest/v1/rr_projects?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: { ...c.headers, Prefer: "return=minimal" }, body: JSON.stringify(patch) });
+  const send = (body: Row) => fetch(`${c.url}/rest/v1/rr_projects?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: { ...c.headers, Prefer: "return=minimal" }, body: JSON.stringify(body) });
+  let r = await send(patch);
+  // Before the client_visible column exists, a move still has to work: retry without the reset. An
+  // explicit "show to client" toggle is reported instead, so nobody believes it saved.
+  if (!r.ok && "client_visible" in patch) {
+    const detail = await r.clone().text().catch(() => "");
+    if (/client_visible/i.test(detail)) {
+      if (typeof b.clientVisible === "boolean") return NextResponse.json({ ok: false, error: "Run the client_visible SQL for rr_projects in Supabase first, then try again." }, { status: 502 });
+      const rest = { ...patch }; delete rest.client_visible; r = await send(rest);
+    }
+  }
   if (!r.ok) return NextResponse.json({ ok: false, error: `Update failed (${r.status}).` }, { status: 502 });
   return NextResponse.json({ ok: true });
 }

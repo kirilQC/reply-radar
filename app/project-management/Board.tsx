@@ -12,7 +12,7 @@ import { MASCOTS, MascotFace, cleanPersonName, mascotOf } from "../components/Te
 
 export type LinkItem = { url: string; title?: string };
 export type Blocker = { owner?: string; text?: string; resolved?: boolean; resolvedAt?: string };
-export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; created_at?: string | null; updated_at?: string | null; updated_by?: string | null; position?: number | null; checks?: Checks | null; clientSlug?: string; clientName?: string };
+export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; created_at?: string | null; updated_at?: string | null; updated_by?: string | null; position?: number | null; checks?: Checks | null; clientSlug?: string; clientName?: string; client_visible?: boolean | null };
 const blockerList = (b?: Blocker | Blocker[] | null): Blocker[] => (Array.isArray(b) ? b : b ? [b] : []).filter((x) => x && (x.text || x.owner));
 /** The two checkpoints every campaign needs. */
 export type Checks = { list: boolean; messaging: boolean };
@@ -20,7 +20,7 @@ export type BoardClient = { slug: string; name: string; logoUrl?: string | null;
 export type Person = { name: string; avatarUrl?: string | null };
 type View = "kanban" | "byclient" | "individuals" | "table" | "swimlanes";
 type SortKey = "manual" | "priority" | "due" | "status" | "title" | "assignee";
-export type NewFields = { title: string; stage: string; assignee?: string; dueDate?: string; context?: string; links?: LinkItem[]; priority?: string; week?: string; checks?: Checks };
+export type NewFields = { title: string; stage: string; assignee?: string; dueDate?: string; context?: string; links?: LinkItem[]; priority?: string; week?: string; checks?: Checks; clientVisible?: boolean };
 
 const STAGES = [
   { key: "todo", label: "To do", cls: "todo", color: "#6b7280" },
@@ -392,7 +392,7 @@ function Card({ t, h, column, slide = 0 }: { t: BoardTask; h: Handlers; column?:
         {pr && <span className="pm-bcard-prio" style={{ color: pr.color }}>● {pr.label}</span>}
       </div>
       <div className="pm-bcard-body">
-        <div className="pm-bcard-title">{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}</div>
+        <div className="pm-bcard-title">{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}{t.client_visible && <span className="pm-client-vis" title="Shown to the client in QC Portal">Client</span>}</div>
         {t.context && <div className="pm-bcard-ctx">{plainNotes(t.context)}</div>}
         {(t.checks?.list || t.checks?.messaging) && (
           <div className="pm-bcard-checks">
@@ -750,12 +750,13 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
   const [blockers, setBlockers] = useState<Blocker[]>(blockerList(task?.blocker));
   const [checks, setChecks] = useState<Checks>({ list: Boolean(task?.checks?.list), messaging: Boolean(task?.checks?.messaging) });
   const [stage, setStage] = useState(isNew ? state.stage : (task?.stage ?? "todo"));
+  const [clientVisible, setClientVisible] = useState(Boolean(task?.client_visible));
   const s = stageOf(stage);
   const client = clients.find((c) => c.slug === slug);
   // Only send the checkpoints when someone actually toggled one. Sending them on every save wrote whatever
   // the board had loaded (all-false when the read missed them) over the real ticks.
   const checksChanged = checks.list !== Boolean(task?.checks?.list) || checks.messaging !== Boolean(task?.checks?.messaging);
-  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links: legacyLinks.length ? [] : links, priority, blocker: blockers, week, ...(checksChanged ? { checks } : {}) }); onClose(); };
+  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}), ...(clientVisible ? { clientVisible } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links: legacyLinks.length ? [] : links, priority, blocker: blockers, week, ...(checksChanged ? { checks } : {}), ...(clientVisible !== Boolean(task?.client_visible) ? { clientVisible } : {}) }); onClose(); };
   // Autosave: closing the task (✕, clicking outside, Escape) saves any changes. A new task saves if it
   // has a title and is simply discarded if it's still blank.
   const snapshot = JSON.stringify({ title, slug, owner, due, week, priority, context, links, blockers, checks, stage });
@@ -792,6 +793,10 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
             <div className="pm-f-row">
               <div className="pm-f"><span>Status</span><Select value={stage} options={stageOpts} tone={stageOf(stage).color} onChange={setStage} /></div>
               <div className="pm-f"><span>Priority</span><Select value={priority} options={prioOpts} placeholder="None" tone={prioOf(priority)?.color} onChange={setPriority} /></div>
+              <label className="pm-f pm-f-check" title="Shows this task on the client's Project tracker in QC Portal: title, stage, owner, priority and dates only. Never notes, blockers, updates or files.">
+                <span>Show to client</span>
+                <input type="checkbox" checked={clientVisible} onChange={(event) => setClientVisible(event.target.checked)} />
+              </label>
             </div>
             <div className="pm-f-row">
               <label className="pm-f"><span>Due date</span><input value={due} placeholder="e.g. Thu 9/4" onChange={(e) => setDue(e.target.value)} /></label>
