@@ -6,6 +6,7 @@ import { resolveModel } from "../../../../shared/anthropic-model.mjs";
 import { isAiArkEnrichmentEnabled } from "../../../lib/lead-identity";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { isOurWebhookUrl, publicBaseUrl, webhookUrlFor, workspaceSlug } from "../../../lib/public-url";
+import { LEGACY_SLUGS_KEY, withLegacySlug } from "../../../lib/legacy-slug";
 import { firstChannelClash, type ChannelOwner } from "../../../lib/channel-clash";
 import { normalizeChannelId } from "../../../lib/slack-channel";
 import { syncMessagingDocForSlug } from "../../../lib/messaging-sync";
@@ -223,12 +224,22 @@ export async function POST(request: Request) {
      * any other screen had saved since. Read-modify-write here means a save only ever moves the keys it
      * names.
      */
-    if (incomingGuardrails) {
-      const current = await fetch(`${url}/rest/v1/rr_workspaces?select=guardrails&${patchFilter}&limit=1`, { headers, cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    // A slug change is read-modify-write too: the old slug is kept in guardrails.legacy_slugs so the
+    // webhook URL HeyReach still holds keeps resolving (app/lib/legacy-slug.ts).
+    if (incomingGuardrails || record.slug) {
+      const current = await fetch(`${url}/rest/v1/rr_workspaces?select=slug,guardrails&${patchFilter}&limit=1`, { headers, cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
       if (!Array.isArray(current)) return NextResponse.json({ ok: false, error: "The workspace could not be read before saving. Try again." }, { status: 502 });
       if (!current.length) return NextResponse.json({ ok: false, error: "The workspace no longer exists. Refresh and try again." }, { status: 404 });
       const stored = current[0]?.guardrails && typeof current[0].guardrails === "object" && !Array.isArray(current[0].guardrails) ? current[0].guardrails as Record<string, unknown> : {};
-      record.guardrails = { ...stored, ...incomingGuardrails };
+      const currentSlug = String(current[0]?.slug ?? "");
+      const renamed = Boolean(record.slug) && Boolean(currentSlug) && record.slug !== currentSlug;
+      if (incomingGuardrails || renamed) {
+        record.guardrails = {
+          ...stored,
+          ...(incomingGuardrails ?? {}),
+          ...(renamed ? { [LEGACY_SLUGS_KEY]: withLegacySlug(stored[LEGACY_SLUGS_KEY], currentSlug, String(record.slug)) } : {}),
+        };
+      }
     }
     if (!Object.keys(record).length) return NextResponse.json({ ok: false, error: "Nothing to save." }, { status: 400 });
     const patch = (body: Record<string, unknown>) => fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { ...headers, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(body) });

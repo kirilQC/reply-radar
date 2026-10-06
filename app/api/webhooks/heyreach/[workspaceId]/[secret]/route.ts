@@ -2,6 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { after, NextResponse } from "next/server";
+import { legacySlugFilter } from "../../../../../lib/legacy-slug";
 import { ingestHeyReachWebhook } from "../../../../../lib/heyreach-ingestion";
 import { isHeyReachValidationPayload } from "../../../../../lib/heyreach-conversation";
 import { classifyLatestReply } from "../../../../../lib/reply-sentiment";
@@ -19,13 +20,22 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json" };
   try {
     const lookupColumn = isUuid(workspaceId) ? "id" : "slug";
-    const lookupWith = (columns: string) => fetch(`${url}/rest/v1/rr_workspaces?select=${columns}&${lookupColumn}=eq.${encodeURIComponent(workspaceId)}&limit=1`, { headers, cache: "no-store" });
+    // A slug that matches no current workspace may be one it was renamed from: HeyReach still holds the
+    // old URL, so the lookup falls back to `guardrails.legacy_slugs` rather than dropping the reply.
+    let filter = `${lookupColumn}=eq.${encodeURIComponent(workspaceId)}`;
+    const lookupWith = (columns: string) => fetch(`${url}/rest/v1/rr_workspaces?select=${columns}&${filter}&limit=1`, { headers, cache: "no-store" });
     // Replies must never be lost to a missing column: without the offboarded_at migration the lookup is
     // repeated without it and the client counts as active.
     let lookup = await lookupWith("id,name,slug,webhook_secret_hash,heyreach_api_key_ciphertext,offboarded_at");
     if (!lookup.ok) lookup = await lookupWith("id,name,slug,webhook_secret_hash,heyreach_api_key_ciphertext");
     if (!lookup.ok) return NextResponse.json({ ok: false, stage: "workspace_lookup", error: (await lookup.text()).slice(0, 1_000) }, { status: 502 });
-    const rows = await lookup.json() as Array<{ id: string; name?: string | null; slug?: string | null; webhook_secret_hash?: string | null; heyreach_api_key_ciphertext?: string | null; offboarded_at?: string | null }>;
+    let rows = await lookup.json() as Array<{ id: string; name?: string | null; slug?: string | null; webhook_secret_hash?: string | null; heyreach_api_key_ciphertext?: string | null; offboarded_at?: string | null }>;
+    if (!rows[0] && lookupColumn === "slug") {
+      filter = legacySlugFilter(workspaceId);
+      let legacy = await lookupWith("id,name,slug,webhook_secret_hash,heyreach_api_key_ciphertext,offboarded_at");
+      if (!legacy.ok) legacy = await lookupWith("id,name,slug,webhook_secret_hash,heyreach_api_key_ciphertext");
+      if (legacy.ok) rows = await legacy.json() as Array<{ id: string; name?: string | null; slug?: string | null; webhook_secret_hash?: string | null; heyreach_api_key_ciphertext?: string | null; offboarded_at?: string | null }>;
+    }
     const workspace = rows[0];
     if (!workspace) return NextResponse.json({ ok: false }, { status: 404 });
     // Secret verification is intentionally kept server-side. Existing installations may
