@@ -838,3 +838,65 @@
 }
 .pm-f-check { cursor: pointer; }
 .pm-f-check input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+/* ══ Sheet view: the engagement tracker as a spreadsheet (ops-only clients) ═══════════════════════ */
+.pm-sheet { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--panel, #111319); }
+.pm-sh-banner { display: flex; flex-direction: column; gap: 2px; padding: 16px 18px 14px; background: #0c1730; color: #fff; position: relative; }
+.pm-sh-banner .pm-sh-text, .pm-sh-banner .pm-sh-input { color: #fff; }
+.pm-sh-title { font-size: 21px !important; font-weight: 750 !important; letter-spacing: -.01em; }
+.pm-sh-subtitle { font-size: 13px !important; color: rgba(255, 255, 255, .72) !important; }
+.pm-sh-subtitle.is-empty { color: rgba(255, 255, 255, .38) !important; }
+.pm-sh-ops { position: absolute; top: 16px; right: 18px; display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: rgba(255, 255, 255, .7); cursor: pointer; }
+.pm-sh-ops input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+
+.pm-sh-scroll { overflow-x: auto; }
+.pm-sh-table { width: 100%; min-width: 1080px; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+.pm-sh-table thead th {
+  position: sticky; top: 0; z-index: 1; text-align: left; padding: 9px 10px; background: #1d2a3a; color: #fff;
+  font-size: 12.5px; font-weight: 700; border-right: 1px solid rgba(255, 255, 255, .08); white-space: nowrap;
+}
+.pm-sh-table thead th small { display: block; font-weight: 600; font-size: 10.5px; color: rgba(255, 255, 255, .6); }
+.pm-sh-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border-soft, var(--border)); vertical-align: middle; }
+.pm-sh-row:hover td { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+
+.pm-sh-section td { background: #0c2a55; color: #fff; padding: 9px 12px; font-weight: 700; font-size: 13.5px; border-right: 0; }
+.pm-sh-section td > * { vertical-align: middle; }
+.pm-sh-section-sep { margin: 0 8px; opacity: .7; }
+.pm-sh-section .pm-sh-text, .pm-sh-section .pm-sh-input { display: inline-block; width: auto; min-width: 280px; color: #fff; font-weight: 700; }
+.pm-sh-section .pm-sh-text.is-empty { color: rgba(255, 255, 255, .45); font-weight: 600; }
+
+/* Text cells: look like a sheet cell until clicked, then become an input of the same size. */
+.pm-sh-text {
+  display: block; width: 100%; min-height: 26px; padding: 4px 4px; border: 0; background: none; text-align: left;
+  font: inherit; color: var(--text); cursor: text; border-radius: 4px; white-space: normal; line-height: 1.35;
+}
+.pm-sh-text:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.pm-sh-text.is-empty { color: var(--muted-2); }
+.pm-sh-text.is-ongoing { font-style: italic; color: var(--muted); }
+.pm-sh-input {
+  width: 100%; height: 28px; padding: 0 6px; border: 1px solid var(--accent); border-radius: 4px;
+  background: var(--panel-2, #151821); color: var(--text); font: inherit; outline: none;
+}
+.pm-sh-date .pm-sh-text { white-space: nowrap; }
+.pm-sh-task { position: relative; }
+.pm-sh-task .pm-sh-text { padding-right: 22px; }
+.pm-sh-open { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: none; color: var(--muted-2); cursor: pointer; opacity: 0; }
+.pm-sh-row:hover .pm-sh-open { opacity: 1; }
+
+.pm-sh-ws {
+  display: inline-block; max-width: 100%; padding: 3px 8px; border: 0; border-radius: 5px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 700; color: var(--ws); background: color-mix(in srgb, var(--ws) 15%, transparent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pm-sh-links { white-space: nowrap; }
+.pm-sh-links a { display: inline-block; max-width: calc(100% - 46px); overflow: hidden; text-overflow: ellipsis; vertical-align: middle; color: var(--text); font-size: 12.5px; }
+.pm-sh-links .pm-linkscell { vertical-align: middle; margin-left: 4px; }
+.pm-sh-status { background: color-mix(in srgb, var(--st) 13%, transparent); }
+.pm-sh-prio { background: color-mix(in srgb, var(--pr, transparent) 13%, transparent); }
+.pm-sh-status .pm-dd-btn, .pm-sh-prio .pm-dd-btn { background: transparent; border-color: transparent; font-weight: 700; }
+.pm-sh-notes .pm-sh-text, .pm-sh-notes .pm-cellarea { font-size: 12.5px; color: var(--muted); }
+
+.pm-sh-addrow td { padding: 2px 8px; background: transparent; }
+.pm-sh-addin { width: 100%; height: 28px; border: 0; background: none; color: var(--text); font: inherit; font-size: 12.5px; outline: none; }
+.pm-sh-addin::placeholder { color: var(--muted-2); }
+.pm-sh-addmonth { margin: 10px 12px 12px; }

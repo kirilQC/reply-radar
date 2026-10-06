@@ -4,7 +4,7 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import RichNotes, { plainNotes } from "../components/RichNotes";
 import LatestUpdates from "./LatestUpdates";
@@ -12,15 +12,17 @@ import { MASCOTS, MascotFace, cleanPersonName, mascotOf } from "../components/Te
 
 export type LinkItem = { url: string; title?: string };
 export type Blocker = { owner?: string; text?: string; resolved?: boolean; resolvedAt?: string };
-export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; created_at?: string | null; updated_at?: string | null; updated_by?: string | null; position?: number | null; checks?: Checks | null; clientSlug?: string; clientName?: string; client_visible?: boolean | null };
+export type BoardTask = { id: string; title: string; stage: string; owner: string | null; due_date: string | null; context?: string | null; links?: (string | LinkItem)[]; priority?: string | null; week?: string | null; blocker?: Blocker | Blocker[] | null; source: string; created_at?: string | null; updated_at?: string | null; updated_by?: string | null; position?: number | null; checks?: Checks | null; clientSlug?: string; clientName?: string; client_visible?: boolean | null; workstream?: string | null };
 const blockerList = (b?: Blocker | Blocker[] | null): Blocker[] => (Array.isArray(b) ? b : b ? [b] : []).filter((x) => x && (x.text || x.owner));
 /** The two checkpoints every campaign needs. */
 export type Checks = { list: boolean; messaging: boolean };
 export type BoardClient = { slug: string; name: string; logoUrl?: string | null; accentColor?: string | null };
 export type Person = { name: string; avatarUrl?: string | null };
-type View = "kanban" | "byclient" | "individuals" | "table" | "swimlanes";
+type View = "kanban" | "byclient" | "individuals" | "table" | "swimlanes" | "sheet";
 type SortKey = "manual" | "priority" | "due" | "status" | "title" | "assignee";
-export type NewFields = { title: string; stage: string; assignee?: string; dueDate?: string; context?: string; links?: LinkItem[]; priority?: string; week?: string; checks?: Checks; clientVisible?: boolean };
+export type NewFields = { title: string; stage: string; assignee?: string; dueDate?: string; context?: string; links?: LinkItem[]; priority?: string; week?: string; checks?: Checks; clientVisible?: boolean; workstream?: string };
+/** The Sheet view's per-client words and switch (app/api/project-management/sheet). */
+export type SheetConfig = { title: string; subtitle: string; months: Record<string, string>; opsOnly: boolean };
 
 const STAGES = [
   { key: "todo", label: "To do", cls: "todo", color: "#6b7280" },
@@ -34,7 +36,7 @@ const STAGES = [
   { key: "other", label: "Other", cls: "other", color: "#9a8cf0" },
 ];
 const PRIORITIES = [{ key: "p1", label: "Priority", color: "#ff2d6f" }, { key: "high", label: "High", color: "#e5484d" }, { key: "medium", label: "Medium", color: "#f2913d" }, { key: "low", label: "Low", color: "#e6c229" }];
-const ALL_VIEWS: [View, string][] = [["kanban", "Kanban"], ["byclient", "By client"], ["individuals", "Individuals"], ["table", "Table"], ["swimlanes", "Swimlanes"]];
+const ALL_VIEWS: [View, string][] = [["kanban", "Kanban"], ["byclient", "By client"], ["individuals", "Individuals"], ["table", "Table"], ["swimlanes", "Swimlanes"], ["sheet", "Sheet"]];
 const stageOf = (k: string) => STAGES.find((x) => x.key === k) ?? STAGES[0];
 const prioOf = (k?: string | null) => PRIORITIES.find((x) => x.key === k) ?? null;
 const prioRank = (k?: string | null) => { const i = PRIORITIES.findIndex((p) => p.key === k); return i < 0 ? 9 : i; };
@@ -751,12 +753,13 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
   const [checks, setChecks] = useState<Checks>({ list: Boolean(task?.checks?.list), messaging: Boolean(task?.checks?.messaging) });
   const [stage, setStage] = useState(isNew ? state.stage : (task?.stage ?? "todo"));
   const [clientVisible, setClientVisible] = useState(Boolean(task?.client_visible));
+  const [workstream, setWorkstream] = useState(task?.workstream ?? "");
   const s = stageOf(stage);
   const client = clients.find((c) => c.slug === slug);
   // Only send the checkpoints when someone actually toggled one. Sending them on every save wrote whatever
   // the board had loaded (all-false when the read missed them) over the real ticks.
   const checksChanged = checks.list !== Boolean(task?.checks?.list) || checks.messaging !== Boolean(task?.checks?.messaging);
-  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}), ...(clientVisible ? { clientVisible } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links: legacyLinks.length ? [] : links, priority, blocker: blockers, week, ...(checksChanged ? { checks } : {}), ...(clientVisible !== Boolean(task?.client_visible) ? { clientVisible } : {}) }); onClose(); };
+  const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}), ...(clientVisible ? { clientVisible } : {}), ...(workstream.trim() ? { workstream: workstream.trim() } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links: legacyLinks.length ? [] : links, priority, blocker: blockers, week, ...(checksChanged ? { checks } : {}), ...(clientVisible !== Boolean(task?.client_visible) ? { clientVisible } : {}), ...(workstream.trim() !== (task?.workstream ?? "") ? { workstream: workstream.trim() } : {}) }); onClose(); };
   // Autosave: closing the task (✕, clicking outside, Escape) saves any changes. A new task saves if it
   // has a title and is simply discarded if it's still blank.
   const snapshot = JSON.stringify({ title, slug, owner, due, week, priority, context, links, blockers, checks, stage });
@@ -801,6 +804,7 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
             <div className="pm-f-row">
               <label className="pm-f"><span>Due date</span><input value={due} placeholder="e.g. Thu 9/4" onChange={(e) => setDue(e.target.value)} /></label>
               <label className="pm-f"><span>Start date</span><input value={week} placeholder="e.g. Mon 9/8" onChange={(e) => setWeek(e.target.value)} /></label>
+              <label className="pm-f"><span>Workstream</span><input value={workstream} list="pm-workstreams" placeholder="e.g. Signal-Based" onChange={(e) => setWorkstream(e.target.value)} /><datalist id="pm-workstreams">{DEFAULT_WORKSTREAMS.map((w) => <option key={w} value={w} />)}</datalist></label>
             </div>
             <div className="pm-f"><span>Campaign checklist</span><div className="pm-ed-checks">
               <button type="button" className={`pm-ed-check ${checks.list ? "on" : ""}`} aria-pressed={checks.list} onClick={() => setChecks((c) => ({ ...c, list: !c.list }))}><span className="pm-check">{checks.list ? "✓" : ""}</span>Contact list built</button>
@@ -816,8 +820,248 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
 }
 
 const SORTS: [SortKey, string][] = [["manual", "Manual order"], ["priority", "Priority"], ["due", "Due date"], ["status", "Status"], ["title", "Task name"], ["assignee", "Assignee"]];
-export default function ProjectBoard({ tasks, clients, defaultView, notifyChannel, rosterScope = "", onCreate, onUpdate, onDelete, onMove, onSetDay, onWeekChange }: {
+
+/* ══ Sheet view ═══════════════════════════════════════════════════════════════════════════════════
+ * The board laid out like the engagement trackers QC kept in Google Sheets, for ops-only engagements:
+ * a banner (title + a subtitle line for dates, north star, CRM), an "Always On" section, then one
+ * section per month with a theme, and the tasks as editable rows — Date, Workstream, Task, Links,
+ * Owner, Status, Notes, Priority. The rows are the board's own tasks; nothing is copied.
+ *
+ * Date is the start date (the task's `week`), falling back to the due date, read through the same
+ * free-text parser the board sorts by. Status is the board's stage seen through the sheet's three
+ * words; Blocked and Paused keep their own names rather than being flattened into one of them.
+ */
+const WORKSTREAM_COLORS: Record<string, string> = {
+  "always on": "#e0a83d", "tech stack": "#3b8beb", events: "#e05591", "list building": "#2fa36b",
+  "ae ramp": "#6c6ff0", "book motion": "#d39a26", "signal-based": "#ef7d32", outbound: "#e5484d",
+};
+const DEFAULT_WORKSTREAMS = ["Always On", "Tech Stack", "List Building", "Signal-Based", "Outbound", "Events", "Book Motion", "AE Ramp"];
+const wsColor = (w: string) => WORKSTREAM_COLORS[w.trim().toLowerCase()] ?? `hsl(${hue(w.toLowerCase())} 62% 58%)`;
+const isAlwaysOn = (w?: string | null) => (w ?? "").trim().toLowerCase() === "always on";
+const SHEET_STATUSES = [
+  { value: "todo", label: "Not Started", color: "#8b93a7" },
+  { value: "in_progress", label: "In Progress", color: "#5aa9f0" },
+  { value: "completed", label: "Done", color: "#3fb27f" },
+  { value: "blocked", label: "Blocked", color: "#e5484d" },
+  { value: "paused", label: "Paused", color: "#e0a83d" },
+];
+const sheetStatus = (stage: string) => {
+  const key = stage === "planning" || stage === "building" ? "in_progress" : stage === "launched" ? "completed" : stage === "other" ? "todo" : stage;
+  return SHEET_STATUSES.find((s) => s.value === key) ?? SHEET_STATUSES[0];
+};
+const sheetStatusOpts: Opt[] = SHEET_STATUSES.map((s) => ({ value: s.value, label: s.label, color: s.color }));
+const sheetDateText = (t: BoardTask) => (t.week || t.due_date || "").trim();
+const monthKeyOf = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+const monthLabel = (key: string) => new Date(`${key}-01T12:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+const shortDay = (ms: number) => new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const hasMarkup = (v?: string | null) => /<[a-z][\s\S]*>/i.test(v ?? "");
+
+/** An inline text cell: shows its value, commits on blur or Enter, Escape puts it back. */
+function SheetText({ value, placeholder, onCommit, className = "", display }: { value: string; placeholder?: string; onCommit: (v: string) => void; className?: string; display?: string }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  if (!editing) {
+    return (
+      <button type="button" className={`pm-sh-text ${value ? "" : "is-empty"} ${className}`} onClick={() => { setDraft(value); setEditing(true); }}>
+        {display ?? (value || placeholder || "")}
+      </button>
+    );
+  }
+  const commit = () => { setEditing(false); if (draft.trim() !== value.trim()) onCommit(draft.trim()); };
+  return (
+    <input
+      className={`pm-sh-input ${className}`}
+      // eslint-disable-next-line jsx-a11y/no-autofocus -- the cell was just clicked to edit it
+      autoFocus
+      value={draft}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+    />
+  );
+}
+
+/** The workstream tag, editable with a pick-list of this client's workstreams plus the usual ones. */
+function WorkstreamCell({ value, known, onCommit }: { value: string; known: string[]; onCommit: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const listId = useId();
+  if (!editing) {
+    return value ? (
+      <button type="button" className="pm-sh-ws" style={{ ["--ws" as string]: wsColor(value) } as React.CSSProperties} onClick={() => { setDraft(value); setEditing(true); }}>{value}</button>
+    ) : (
+      <button type="button" className="pm-sh-text is-empty" onClick={() => { setDraft(""); setEditing(true); }}>Workstream</button>
+    );
+  }
+  const commit = () => { setEditing(false); if (draft.trim() !== value) onCommit(draft.trim()); };
+  return (
+    <>
+      <input
+        className="pm-sh-input"
+        // eslint-disable-next-line jsx-a11y/no-autofocus -- the cell was just clicked to edit it
+        autoFocus
+        list={listId}
+        value={draft}
+        placeholder="Workstream"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+      />
+      <datalist id={listId}>{known.map((w) => <option key={w} value={w} />)}</datalist>
+    </>
+  );
+}
+
+function SheetRow({ t, h, known, onUpdate }: { t: BoardTask; h: Handlers; known: string[]; onUpdate: (id: string, f: Record<string, unknown>) => void }) {
+  const dateText = sheetDateText(t);
+  const ms = dueMs(dateText);
+  const status = sheetStatus(t.stage);
+  const prio = prioOf(t.priority);
+  const links = linkItems(t.links);
+  return (
+    <tr className="pm-sh-row">
+      <td className="pm-sh-date">
+        {isAlwaysOn(t.workstream) && !dateText
+          ? <SheetText value="" placeholder="Ongoing" className="is-ongoing" onCommit={(v) => onUpdate(t.id, { week: v || null })} />
+          : <SheetText value={dateText} display={Number.isFinite(ms) ? shortDay(ms) : dateText} placeholder="Date" onCommit={(v) => onUpdate(t.id, { week: v || null })} />}
+      </td>
+      <td><WorkstreamCell value={t.workstream ?? ""} known={known} onCommit={(v) => onUpdate(t.id, { workstream: v })} /></td>
+      <td className="pm-sh-task">
+        <SheetText value={t.title} onCommit={(v) => { if (v) onUpdate(t.id, { title: v }); }} />
+        <button type="button" className="pm-sh-open" title="Open task" onClick={() => h.onOpen(t)}>⤢</button>
+      </td>
+      <td className="pm-sh-links">
+        {links[0] && <a href={links[0].url} target="_blank" rel="noreferrer" title={links[0].url}>{linkLabel(links[0])}</a>}
+        <LinksCell links={links} onChange={(l) => onUpdate(t.id, { links: l })} />
+      </td>
+      <td><MultiPeople value={t.owner || ""} people={h.people} map={h.map} stack placeholder="—" onChange={(v) => onUpdate(t.id, { owner: v })} addPerson={h.addPerson} removePerson={h.removePerson} uploadAvatar={h.uploadAvatar} setMascot={h.setMascot} /></td>
+      <td className="pm-sh-status" style={{ ["--st" as string]: status.color } as React.CSSProperties}>
+        <Select value={status.value} options={sheetStatusOpts} tone={status.color} onChange={(v) => onUpdate(t.id, { stage: v })} />
+      </td>
+      <td className="pm-sh-notes">
+        {hasMarkup(t.context)
+          ? <button type="button" className="pm-sh-text" title="Formatted notes: open the task to edit" onClick={() => h.onOpen(t)}>{plainNotes(t.context || "")}</button>
+          : <AutoTextarea defaultValue={t.context || ""} placeholder="" onCommit={(v) => { if ((v || null) !== (t.context || null)) onUpdate(t.id, { context: v }); }} />}
+      </td>
+      <td className="pm-sh-prio" style={prio ? ({ ["--pr" as string]: prio.color } as React.CSSProperties) : undefined}>
+        <Select value={t.priority || ""} options={prioOpts} placeholder="—" tone={prio?.color} onChange={(v) => onUpdate(t.id, { priority: v })} />
+      </td>
+    </tr>
+  );
+}
+
+/** "+ Add task" at the foot of a section: type a title, Enter, and it lands in that section. */
+function SheetAddRow({ onAdd }: { onAdd: (title: string) => void }) {
+  const [draft, setDraft] = useState("");
+  const add = () => { const v = draft.trim(); if (!v) return; onAdd(v); setDraft(""); };
+  return (
+    <tr className="pm-sh-addrow">
+      <td colSpan={8}>
+        <input className="pm-sh-addin" value={draft} placeholder="+ Add a task to this section" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} onBlur={add} />
+      </td>
+    </tr>
+  );
+}
+
+function SheetView({ tasks, h, sheet, clientName, onSheetChange, onUpdate, onCreate }: {
+  tasks: BoardTask[]; h: Handlers; sheet: SheetConfig; clientName: string;
+  onSheetChange: (patch: Partial<SheetConfig>) => void;
+  onUpdate: (id: string, f: Record<string, unknown>) => void; onCreate: (slug: string, f: NewFields) => void;
+}) {
+  const slug = h.clients[0]?.slug ?? "";
+  const known = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const w of [...tasks.map((t) => t.workstream ?? ""), ...DEFAULT_WORKSTREAMS]) if (w.trim() && !seen.has(w.trim().toLowerCase())) seen.set(w.trim().toLowerCase(), w.trim());
+    return [...seen.values()];
+  }, [tasks]);
+  const sections = useMemo(() => {
+    const always: BoardTask[] = [], undated: BoardTask[] = [];
+    const months = new Map<string, { t: BoardTask; ms: number }[]>();
+    for (const t of tasks) {
+      if (isAlwaysOn(t.workstream)) { always.push(t); continue; }
+      const ms = dueMs(sheetDateText(t));
+      if (!Number.isFinite(ms)) { undated.push(t); continue; }
+      const key = monthKeyOf(ms);
+      months.set(key, [...(months.get(key) ?? []), { t, ms }]);
+    }
+    const ordered = [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, list]) => ({
+      key, label: monthLabel(key), tasks: list.sort((a, b) => a.ms - b.ms || (a.t.position ?? 0) - (b.t.position ?? 0)).map((x) => x.t),
+    }));
+    return { always, months: ordered, undated };
+  }, [tasks]);
+  const defaultTitle = `${clientName} x QC Growth -- Project and Campaign Tracker`;
+  const theme = (key: string, fallback: string) => sheet.months[key] ?? fallback;
+  const setTheme = (key: string, value: string) => onSheetChange({ months: { ...sheet.months, [key]: value } });
+  const add = (title: string, extra: Partial<NewFields>) => onCreate(slug, { title, stage: "todo", ...extra });
+  const nextMonthKey = () => {
+    const last = sections.months.at(-1)?.key;
+    const base = last ? new Date(`${last}-01T12:00:00`) : new Date();
+    if (last) base.setMonth(base.getMonth() + 1);
+    return monthKeyOf(+base);
+  };
+  const [extraMonths, setExtraMonths] = useState<string[]>([]);
+  const allMonths = [...sections.months, ...extraMonths.filter((k) => !sections.months.some((m) => m.key === k)).map((key) => ({ key, label: monthLabel(key), tasks: [] as BoardTask[] }))];
+
+  const head = (
+    <colgroup>
+      <col style={{ width: 92 }} /><col style={{ width: 136 }} /><col style={{ width: "24%" }} /><col style={{ width: 150 }} />
+      <col style={{ width: 120 }} /><col style={{ width: 132 }} /><col /><col style={{ width: 104 }} />
+    </colgroup>
+  );
+  const sectionHead = (key: string, label: string, fallbackTheme: string) => (
+    <tr className="pm-sh-section">
+      <td colSpan={8}>
+        <span className="pm-sh-section-label">{label}</span>
+        <span className="pm-sh-section-sep">--</span>
+        <SheetText value={theme(key, fallbackTheme)} placeholder="Add a theme for this stretch" className="pm-sh-theme" onCommit={(v) => setTheme(key, v)} />
+      </td>
+    </tr>
+  );
+
+  return (
+    <div className="pm-sheet">
+      <header className="pm-sh-banner">
+        <SheetText value={sheet.title || defaultTitle} className="pm-sh-title" onCommit={(v) => onSheetChange({ title: v === defaultTitle ? "" : v })} />
+        <SheetText value={sheet.subtitle} placeholder="Sep-Nov 2026  |  North star: …  |  CRM: …" className="pm-sh-subtitle" onCommit={(v) => onSheetChange({ subtitle: v })} />
+        <label className="pm-sh-ops" title="Ops-only engagements open on this Sheet view by default">
+          <input type="checkbox" checked={sheet.opsOnly} onChange={(e) => onSheetChange({ opsOnly: e.target.checked })} />
+          Ops-only engagement: open in Sheet view
+        </label>
+      </header>
+      <div className="pm-sh-scroll">
+        <table className="pm-sh-table">
+          {head}
+          <thead>
+            <tr><th>Date <small>(start date unless noted)</small></th><th>Workstream</th><th>Task</th><th>Links</th><th>Owner</th><th>Status</th><th>Notes</th><th>Priority</th></tr>
+          </thead>
+          <tbody>
+            {sectionHead("always", "Always On", "Runs the Entire Engagement")}
+            {sections.always.map((t) => <SheetRow key={t.id} t={t} h={h} known={known} onUpdate={onUpdate} />)}
+            <SheetAddRow onAdd={(title) => add(title, { workstream: "Always On" })} />
+            {allMonths.map((m) => (
+              <React.Fragment key={m.key}>
+                {sectionHead(m.key, m.label, "")}
+                {m.tasks.map((t) => <SheetRow key={t.id} t={t} h={h} known={known} onUpdate={onUpdate} />)}
+                <SheetAddRow onAdd={(title) => add(title, { week: shortDay(+new Date(`${m.key}-01T12:00:00`)) })} />
+              </React.Fragment>
+            ))}
+            {sections.undated.length > 0 && <>
+              {sectionHead("undated", "No date yet", "Give these a start date to file them under a month")}
+              {sections.undated.map((t) => <SheetRow key={t.id} t={t} h={h} known={known} onUpdate={onUpdate} />)}
+            </>}
+          </tbody>
+        </table>
+      </div>
+      <button type="button" className="pm-add pm-sh-addmonth" onClick={() => setExtraMonths((list) => [...list, nextMonthKey()])}>+ Add a month</button>
+    </div>
+  );
+}
+
+export default function ProjectBoard({ tasks, clients, defaultView, notifyChannel, rosterScope = "", sheet, onSheetChange, onCreate, onUpdate, onDelete, onMove, onSetDay, onWeekChange }: {
   tasks: BoardTask[]; clients: BoardClient[]; defaultView?: View; notifyChannel?: string;
+  /** Single-client boards only: the Sheet view's settings, and how to save them. */
+  sheet?: SheetConfig; onSheetChange?: (patch: Partial<SheetConfig>) => void;
   /** Whose assignee roster this board uses: `client:<slug>` or `view:<slug>`. Each board keeps its own. */
   rosterScope?: string;
   onCreate: (clientSlug: string, fields: NewFields) => void; onUpdate: (id: string, fields: Record<string, unknown>) => void; onDelete: (id: string) => void; onMove: (id: string, stage: string) => void; onSetDay: (id: string, date: string) => void; onWeekChange?: (label: string | null) => void;
@@ -842,9 +1086,16 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
   const map = useMemo(() => { const m: Record<string, string> = {}; for (const p of legacy) if (p.avatarUrl) m[p.name] = p.avatarUrl; for (const p of people) if (p.avatarUrl) m[p.name] = p.avatarUrl; return m; }, [people, legacy]);
 
   useEffect(() => {
-    try { const v = localStorage.getItem("pm-view") as View | null; const ok = v && ALL_VIEWS.some(([k]) => k === v) && (v !== "byclient" || multi); if (v && ok) setView(v); else if (defaultView) setView(defaultView); } catch { /* ignore */ }
+    // The layout is remembered per board first (an ops-only client lives in the Sheet, others don't), then
+    // the board's own default (a client marked ops-only), then the last layout used anywhere.
+    try {
+      const usable = (v: string | null): v is View => Boolean(v) && ALL_VIEWS.some(([k]) => k === v) && (v !== "byclient" || multi) && (v !== "sheet" || (!multi && Boolean(sheet)));
+      const own = rosterScope ? localStorage.getItem(`pm-view:${rosterScope}`) : null;
+      const global = localStorage.getItem("pm-view");
+      if (usable(own)) setView(own); else if (defaultView && usable(defaultView)) setView(defaultView); else if (usable(global)) setView(global);
+    } catch { /* ignore */ }
     try { const o = JSON.parse(localStorage.getItem("pm-view-order") || "[]") as View[]; if (Array.isArray(o) && o.length) setOrder([...o.filter((v) => ALL_VIEWS.some(([k]) => k === v)), ...ALL_VIEWS.map(([k]) => k).filter((k) => !o.includes(k))]); } catch { /* ignore */ }
-  }, [defaultView, multi]);
+  }, [defaultView, multi, rosterScope, Boolean(sheet)]); // eslint-disable-line react-hooks/exhaustive-deps
   const peopleUrl = (extra = "") => `/api/project-management/people?scope=${encodeURIComponent(rosterScope)}${extra}`;
   const [rosterLoaded, setRosterLoaded] = useState(false);
   useEffect(() => {
@@ -882,7 +1133,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
   useEffect(() => { if (!multi) return; void fetch("/api/project-management/weeks", { cache: "no-store" }).then((r) => r.json()).then((p) => setWeeks(Array.isArray(p.weeks) ? p.weeks : [])).catch(() => {}); }, [multi]);
   useEffect(() => { onWeekChange?.(multi && week ? weekDisplay(week) : null); }, [week, multi, onWeekChange]);
 
-  const pickView = (v: View) => { setView(v); try { localStorage.setItem("pm-view", v); } catch { /* ignore */ } };
+  const pickView = (v: View) => { setView(v); try { localStorage.setItem("pm-view", v); if (rosterScope) localStorage.setItem(`pm-view:${rosterScope}`, v); } catch { /* ignore */ } };
   const reorderViews = (keys: View[]) => { setOrder(keys); try { localStorage.setItem("pm-view-order", JSON.stringify(keys)); } catch { /* ignore */ } };
   const setMascot = (name: string, id: string) => setAvatar(name, `mascot:${id}`);
   const addPerson = (rawName: string) => {
@@ -925,7 +1176,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
   const create = (slug: string, f: NewFields) => onCreate(slug, { ...f, week: multi && week ? week : undefined });
   const h: Handlers = { clients, multi, people, map, addPerson, removePerson, uploadAvatar, setMascot, openNew: (stage, clientSlug, assignee) => setEditor({ mode: "new", stage, clientSlug, assignee }), onOpen: (t) => setEditor({ mode: "edit", task: t }), onDelete, notifyChannel, onDrag, dragId, dragH, landedId, onMove, onSetDay, onReorder: reorder, dropHint, setDropHint };
   const byStage = useMemo(() => { const m: Record<string, BoardTask[]> = {}; for (const s of STAGES) m[s.key] = []; for (const t of visible) (m[t.stage] || m.todo).push(t); return m; }, [visible]);
-  const views: [View, string][] = order.filter((v) => v !== "byclient" || multi).map((v) => ALL_VIEWS.find(([k]) => k === v)!);
+  const views: [View, string][] = order.filter((v) => (v !== "byclient" || multi) && (v !== "sheet" || (!multi && Boolean(sheet)))).map((v) => ALL_VIEWS.find(([k]) => k === v)!);
 
   return (
     <>
@@ -937,6 +1188,7 @@ export default function ProjectBoard({ tasks, clients, defaultView, notifyChanne
       {view === "individuals" && <IndividualsView tasks={visible} h={h} />}
       {view === "table" && <TableView tasks={visible} h={h} onUpdate={onUpdate} onCreate={create} week={multi && week ? week : undefined} />}
       {view === "swimlanes" && <SwimlanesView tasks={visible} h={h} />}
+      {view === "sheet" && !multi && sheet && onSheetChange && <SheetView tasks={visible} h={h} sheet={sheet} clientName={clients[0]?.name ?? "Client"} onSheetChange={onSheetChange} onUpdate={onUpdate} onCreate={create} />}
       {editor && <TaskEditor state={editor} clients={clients} people={people} map={map} multi={multi} notifyChannel={notifyChannel} addPerson={addPerson} removePerson={removePerson} uploadAvatar={uploadAvatar} setMascot={setMascot} onClose={() => setEditor(null)} onCreate={create} onUpdate={onUpdate} onDelete={onDelete} />}
     </>
   );
