@@ -100,11 +100,58 @@ export default function ClientProjects() {
             {!client && loading ? <h1 className="rr-skel" aria-label="Loading"><span className="rr-skel-bar" style={{ width: 220, height: 34, borderRadius: 8 }} /></h1> : <h1 className="rr-appear">{client?.name || "Client"}</h1>}
           </div>
           {err && <div className="pm-err">⚠ {err}</div>}
+          <SetupAlerts slug={slug} tasks={tasks} onAddTask={(title, context) => void onCreate(slug, { title, stage: "todo", context, priority: "high" })} />
           {loading || !sheet ? <Skeleton variant="board" label="Loading tasks" /> : (
             <div className="rr-appear"><ProjectBoard rosterScope={`client:${slug}`} tasks={tasks} clients={client ? [client] : []} defaultView={sheet.opsOnly ? "sheet" : undefined} sheet={sheet} onSheetChange={onSheetChange} onCreate={onCreate} onUpdate={onUpdate} onDelete={onDelete} onMove={(id, stage) => void onUpdate(id, { stage })} onSetDay={(id, date) => void onUpdate(id, { dueDate: date })} /></div>
           )}
         </main>
       </section>
+    </div>
+  );
+}
+
+type SetupGap = { key: string; level: "missing" | "stale"; title: string; detail: string; action: { label: string; href: string } };
+
+/**
+ * What this client's portal is missing (app/api/project-management/setup-checks): a messaging doc that
+ * never synced, a weekly call recap system that is not set up, a brain folder that is not linked.
+ *
+ * The QC Portal hides a tab that has nothing in it, so a client quietly never sees Messaging or Weekly
+ * calls and nobody notices. This puts the gap where the account team works on the client every day,
+ * with the fix one click away, and turns it into a task on the board in one more.
+ */
+function SetupAlerts({ slug, tasks, onAddTask }: { slug: string; tasks: BoardTask[]; onAddTask: (title: string, context: string) => void }) {
+  const [gaps, setGaps] = useState<SetupGap[]>([]);
+  useEffect(() => {
+    if (!slug) return;
+    let live = true;
+    fetch(`/api/project-management/setup-checks?slug=${encodeURIComponent(slug)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((p) => { if (live && p?.ok) setGaps(Array.isArray(p.gaps) ? p.gaps : []); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [slug]);
+  if (!gaps.length) return null;
+  const hasTask = (title: string) => tasks.some((task) => task.title.trim().toLowerCase() === title.trim().toLowerCase());
+  return (
+    <div className="pm-setup" role="region" aria-label="Portal setup gaps">
+      {gaps.map((gap) => (
+        <div key={gap.key} className={`pm-setup-row is-${gap.level}`}>
+          <span className="pm-setup-icon" aria-hidden="true">{gap.level === "stale" ? "◷" : "!"}</span>
+          <div className="pm-setup-text">
+            <strong>{gap.title}</strong>
+            <span>{gap.detail}</span>
+          </div>
+          <div className="pm-setup-actions">
+            <Link href={gap.action.href} className="pm-setup-link">{gap.action.label}</Link>
+            {hasTask(gap.title) ? (
+              <span className="pm-setup-added">On the board</span>
+            ) : (
+              <button type="button" className="pm-setup-add" onClick={() => onAddTask(gap.title, gap.detail)}>Add as task</button>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

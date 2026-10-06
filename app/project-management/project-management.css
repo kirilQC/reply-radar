@@ -900,3 +900,18 @@
 .pm-sh-addin { width: 100%; height: 28px; border: 0; background: none; color: var(--text); font: inherit; font-size: 12.5px; outline: none; }
 .pm-sh-addin::placeholder { color: var(--muted-2); }
 .pm-sh-addmonth { margin: 10px 12px 12px; }
+
+/* ── Portal setup alerts: what this client's QC Portal is missing (setup-checks API) ── */
+.pm-setup { display: flex; flex-direction: column; gap: 8px; margin: 0 0 18px; }
+.pm-setup-row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--amber, #e7b96e) 40%, var(--border)); background: color-mix(in srgb, var(--amber, #e7b96e) 8%, var(--panel)); }
+.pm-setup-row.is-stale { border-color: var(--border); background: var(--panel); }
+.pm-setup-icon { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--amber, #e7b96e) 22%, transparent); color: var(--amber, #e7b96e); font-weight: 800; font-size: 13px; }
+.pm-setup-row.is-stale .pm-setup-icon { background: var(--panel-2); color: var(--muted); }
+.pm-setup-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pm-setup-text strong { font-size: 13px; color: var(--text); }
+.pm-setup-text span { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+.pm-setup-actions { flex: none; display: flex; align-items: center; gap: 8px; }
+.pm-setup-link { font-size: 11.5px; font-weight: 600; color: var(--accent); text-decoration: none; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel); }
+.pm-setup-add { font-size: 11.5px; font-weight: 600; padding: 6px 10px; border-radius: 7px; border: 0; background: var(--accent); color: var(--accent-ink, #06201d); cursor: pointer; }
+.pm-setup-added { font-size: 11px; color: var(--green, #55c7a2); font-weight: 600; }
+@media (max-width: 700px) { .pm-setup-row { flex-wrap: wrap; } .pm-setup-actions { width: 100%; } }
