@@ -289,12 +289,19 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
 
         <div className="booking-setup-row">
           <strong>Clay table</strong>
+          {g.clayWebhookUrl && drafts.clayOpen !== "1" ? (
+            <>
+              <span className="booking-setup-value">Shared table connected</span>
+              <code className="booking-code is-short">…{g.clayWebhookUrl.slice(-12)}</code>
+              <button type="button" className="secondary-button" onClick={() => setDraft("clayOpen", "1")}>Change</button>
+            </>
+          ) : (<>
           <input
             className="booking-input is-wide"
             placeholder="Webhook URL of the shared table"
             value={draft("clayUrl", g.clayWebhookUrl)}
             onChange={(event) => setDraft("clayUrl", event.target.value)}
-            onBlur={() => { const value = draft("clayUrl", g.clayWebhookUrl).trim(); clearDraft("clayUrl"); if (value !== g.clayWebhookUrl) void saveGlobal({ clayWebhookUrl: value }, "clay"); }}
+            onBlur={() => { const value = draft("clayUrl", g.clayWebhookUrl).trim(); clearDraft("clayUrl"); clearDraft("clayOpen"); if (value !== g.clayWebhookUrl) void saveGlobal({ clayWebhookUrl: value }, "clay"); }}
           />
           <input
             type="password"
@@ -304,6 +311,7 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
             onChange={(event) => setDraft("clayAuth", event.target.value)}
             onBlur={() => { const value = draft("clayAuth", "").trim(); clearDraft("clayAuth"); if (value) void saveGlobal({ clayAuthToken: value }, "clay"); }}
           />
+          </>)}
           <label className="booking-wait">
             Wait
             <input
