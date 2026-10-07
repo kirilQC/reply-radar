@@ -7060,3 +7060,8 @@ button.booking-chip:disabled { opacity: 0.5; cursor: default; }
 }
 .booking-add-event { margin-top: 8px; }
 @media (max-width: 760px) { .booking-events li { grid-template-columns: 1fr; } }
+.booking-event-list { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.booking-event { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--report-ink); cursor: pointer; }
+.booking-event small { color: var(--report-ink-soft); }
+.booking-event.is-off span { opacity: 0.6; }
+.booking-event-list .booking-chip { justify-self: start; }

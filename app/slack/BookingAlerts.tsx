@@ -4,7 +4,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { filterTerms, routeBooking } from "../../shared/bookings.mjs";
 
 /**
  * Booked meetings on the Slack tab: the shared setup (QC's Calendly, the Clay table) and, per client, the
@@ -24,6 +23,7 @@ type Client = {
   botName: string;
   steps: Step[];
   hubspotConnected: boolean;
+  eventTypes: Array<{ id: string; name: string; source: string }>;
   ownCalendly: { email: string; scope: string } | null;
   ownCalCom: { email: string } | null;
   lastBooking: { name: string; at: string; stage: string; error: string } | null;
@@ -55,7 +55,7 @@ const ago = (value: string) => {
   if (minutes < 48 * 60) return `${Math.round(minutes / 60)} h ago`;
   return day(value);
 };
-type CalendarEvent = { source: "calendly" | "calcom"; name: string; slug: string; active: boolean; owner: string; url: string };
+type CalendarEvent = { source: "calendly" | "calcom"; id: string; name: string; slug: string; active: boolean; owner: string; url: string };
 const STAGE: Record<string, string> = { new: "received", enriching: "waiting on Clay", ready: "posting", done: "posted", failed: "failed", skipped: "skipped" };
 
 async function call(path: string, init?: RequestInit) {
@@ -78,7 +78,8 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<{ brief: Brief; who: string } | null>(null);
   const [setupOpen, setSetupOpen] = useState(!focus);
-  const [events, setEvents] = useState<{ list: CalendarEvent[]; errors: string[]; loading: boolean }>({ list: [], errors: [], loading: false });
+  // Each client's own event types, loaded when its row is opened: one client's Calendly is one client's events.
+  const [events, setEvents] = useState<Record<string, { list: CalendarEvent[]; errors: string[]; loading: boolean }>>({});
   const returnPath = focus ? `/bookings/${focus}` : "/slack?view=bookings";
 
   const take = (payload: Payload | null) => {
@@ -102,14 +103,16 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
     params.delete("calendly");
     window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
   }, []);
-  const clientId = focus ? data?.clients[0]?.id ?? "" : "";
-  const loadEvents = async () => {
-    setEvents((current) => ({ ...current, loading: true }));
-    const result = await call(`/api/bookings/events${clientId ? `?workspaceId=${encodeURIComponent(clientId)}` : ""}`);
-    setEvents({ list: result.ok ? result.payload.events : [], errors: result.ok ? result.payload.errors : [result.error], loading: false });
+  const loadEvents = async (workspaceId: string) => {
+    setEvents((current) => ({ ...current, [workspaceId]: { list: current[workspaceId]?.list ?? [], errors: [], loading: true } }));
+    const result = await call(`/api/bookings/events?workspaceId=${encodeURIComponent(workspaceId)}`);
+    setEvents((current) => ({ ...current, [workspaceId]: { list: result.ok ? result.payload.events : [], errors: result.ok ? result.payload.errors : [result.error], loading: false } }));
   };
-  const connectedKey = `${data?.global.calendly?.connectedAt ?? ""}|${data?.global.calcom?.connectedAt ?? ""}|${data?.clients[0]?.ownCalendly?.email ?? ""}|${data?.clients[0]?.ownCalCom?.email ?? ""}`;
-  useEffect(() => { if (data && (!focus || clientId)) void loadEvents(); }, [connectedKey, clientId]);
+  const openClient = data?.clients.find((client) => client.id === open);
+  const openCalendar = openClient ? `${openClient.ownCalendly?.email ?? ""}|${openClient.ownCalCom?.email ?? ""}` : "";
+  useEffect(() => {
+    if (openClient && (openClient.ownCalendly || openClient.ownCalCom)) void loadEvents(openClient.id);
+  }, [open, openCalendar]);
   useEffect(() => { if (focus && data?.clients[0]) setOpen(data.clients[0].id); }, [focus, data?.clients[0]?.id]);
 
   const note = (key: string, value: string) => setNotes((current) => ({ ...current, [key]: value }));
@@ -233,20 +236,10 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
     )
   );
 
-  // Which client each event goes to, by the same rule the webhook uses. Assigning adds the event's exact name
-  // to that client's filter; the longest match wins, so the exact name beats any shorter term elsewhere.
-  const routed = (name: string) => routeBooking(name, data.clients.map((client) => ({ id: client.id, name: client.name, filter: client.eventFilter })));
-  const assign = (event: CalendarEvent, targetId: string) => {
-    const target = data.clients.find((client) => client.id === targetId);
-    if (!target) return;
-    const terms = filterTerms(target.eventFilter, target.name);
-    const name = event.name.trim().toLowerCase();
-    if (!terms.includes(name)) void saveClient(target, { eventFilter: [...terms, name].join(", ") });
-  };
-  const unassign = (event: CalendarEvent, client: Client) => {
-    const name = event.name.trim().toLowerCase();
-    const terms = filterTerms(client.eventFilter, client.name).filter((term) => term !== name);
-    void saveClient(client, { eventFilter: terms.join(", ") });
+  /** Ticking an event adds it to the client's trigger list; unticking removes it. Matched on the event type id. */
+  const toggleEvent = (client: Client, event: { id: string; name: string; source: string }) => {
+    const chosen = client.eventTypes.some((item) => item.id === event.id);
+    void saveClient(client, { eventTypes: chosen ? client.eventTypes.filter((item) => item.id !== event.id) : [...client.eventTypes, { id: event.id, name: event.name, source: event.source }] });
   };
 
   return (
@@ -258,23 +251,11 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
         <span>Shared setup</span>
         {focus ? (
           <button type="button" className="booking-chip is-more" onClick={() => setSetupOpen((value) => !value)} aria-expanded={setupOpen}>
-            {g.calendly ? "Calendly on" : "Calendly off"} · {g.clayWebhookUrl ? "Clay on" : "Clay off"} · {setupOpen ? "Hide" : "Edit"}
+            {oauthReady ? "Calendly app saved" : "Calendly app missing"} · {g.clayWebhookUrl ? "Clay on" : "Clay off"} · {setupOpen ? "Hide" : "Edit"}
           </button>
         ) : <span />}
       </div>
       {setupOpen && <div className="booking-setup">
-        <div className="booking-setup-row">
-          <strong>Calendly</strong>
-          {calendlyControls("", "calendly", g.calendly)}
-          {notes.calendly && <small>{notes.calendly}</small>}
-        </div>
-
-        <div className="booking-setup-row">
-          <strong>cal.com</strong>
-          {calComControls("", "calcom", g.calcom)}
-          {notes.calcom && <small>{notes.calcom}</small>}
-        </div>
-
         {(!oauthReady || drafts.oauthOpen === "1") ? (
           <div className="booking-setup-row">
             <strong>Calendly app</strong>
@@ -352,53 +333,15 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
       </div>}
 
       <div className="hub-group-label">
-        <span>Events</span>
-        <button type="button" className="booking-chip is-more" disabled={events.loading} onClick={() => void loadEvents()}>{events.loading ? "Loading…" : `${events.list.length} · Refresh`}</button>
-      </div>
-      {events.errors.map((message) => <div key={message} className="config-error">{message}</div>)}
-      {events.list.length > 0 ? (
-        <ul className="booking-events">
-          {(focus
-            ? events.list.filter((event) => routed(event.name)?.id === clientId || filterTerms(data.clients[0]?.eventFilter, "").includes(event.name.trim().toLowerCase()))
-            : events.list
-          ).map((event) => {
-            const owner = routed(event.name);
-            const ownerClient = data.clients.find((client) => client.id === owner?.id);
-            return (
-              <li key={`${event.source}:${event.slug}:${event.name}`} className={event.active ? "" : "is-off"}>
-                <strong>{event.name}</strong>
-                <span>{event.source === "calcom" ? "cal.com" : "Calendly"}{event.owner ? ` · ${event.owner}` : ""}{event.active ? "" : " · off"}</span>
-                {focus ? (
-                  ownerClient && <button type="button" className="secondary-button" onClick={() => unassign(event, ownerClient)}>Remove</button>
-                ) : (
-                  <select value={owner?.id ?? ""} onChange={(change) => assign(event, change.target.value)} aria-label={`Client for ${event.name}`}>
-                    <option value="">No client</option>
-                    {data.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-                  </select>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      ) : !events.loading && <div className="hub-empty">{g.calendly || g.calcom ? "No event types found." : "Connect Calendly or cal.com to see events."}</div>}
-      {focus && events.list.length > 0 && (
-        <div className="booking-setup-row booking-add-event">
-          <select value="" onChange={(change) => { const event = events.list.find((item) => `${item.source}:${item.name}` === change.target.value); if (event && data.clients[0]) assign(event, data.clients[0].id); }}>
-            <option value="">Add an event to {data.clients[0]?.name}…</option>
-            {events.list.filter((event) => routed(event.name)?.id !== clientId).map((event) => (
-              <option key={`${event.source}:${event.slug}:${event.name}`} value={`${event.source}:${event.name}`}>{event.name}{routed(event.name) ? ` (now ${data.clients.find((c) => c.id === routed(event.name)?.id)?.name ?? "another client"})` : ""}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      <div className="hub-group-label">
         <span>{focus ? "Workflow" : "Clients"}</span>
         <span>{focus ? "" : `${on} on`}</span>
       </div>
       <ul className="brief-client-list">
         {data.clients.map((client) => {
-          const ready = Boolean(client.channel);
+          const connected = Boolean(client.ownCalendly || client.ownCalCom);
+          const hasEvent = client.eventTypes.length > 0 || Boolean(client.eventFilter);
+          const ready = Boolean(client.channel) && connected && hasEvent;
+          const missing = [!connected && "a calendar", !hasEvent && "an event", !client.channel && "a channel"].filter(Boolean).join(", ");
           const expanded = open === client.id;
           const hs = hubspot(client);
           const lastLine = client.lastBooking ? `Last: ${client.lastBooking.name || "booking"} ${ago(client.lastBooking.at)}, ${STAGE[client.lastBooking.stage] ?? client.lastBooking.stage}` : "";
@@ -419,17 +362,14 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
                 </div>
               </div>
               <div className="brief-client-channels booking-fields-row">
-                <label className="brief-channel">
+                <span className={connected ? "brief-channel" : "brief-channel is-missing"}>
+                  CALENDAR
+                  <code>{client.ownCalendly ? "Calendly" : client.ownCalCom ? "cal.com" : "None"}</code>
+                </span>
+                <span className={hasEvent ? "brief-channel" : "brief-channel is-missing"}>
                   EVENT
-                  <input
-                    className="reply-alert-channel"
-                    placeholder={client.name}
-                    value={draft(`filter:${client.id}`, client.eventFilter)}
-                    onChange={(event) => setDraft(`filter:${client.id}`, event.target.value)}
-                    onBlur={() => { const value = draft(`filter:${client.id}`, client.eventFilter).trim(); clearDraft(`filter:${client.id}`); if (value !== client.eventFilter) void saveClient(client, { eventFilter: value }); }}
-                    disabled={busy === client.id}
-                  />
-                </label>
+                  <code>{client.eventTypes.length ? (client.eventTypes.length === 1 ? client.eventTypes[0].name : `${client.eventTypes.length} events`) : client.eventFilter ? `"${client.eventFilter}"` : "None"}</code>
+                </span>
                 <label className={client.channel ? "brief-channel" : "brief-channel is-missing"}>
                   CHANNEL
                   <input
@@ -456,7 +396,7 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
                 {webhooks(client).map((step) => (
                   <span key={step.id} className={step.enabled ? "booking-chip is-on" : "booking-chip"}>{step.label || "Webhook"}</span>
                 ))}
-                <button type="button" className="booking-chip is-more" onClick={() => setOpen(expanded ? "" : client.id)} aria-expanded={expanded}>{expanded ? "Less" : "More"}</button>
+                <button type="button" className="booking-chip is-more" onClick={() => setOpen(expanded ? "" : client.id)} aria-expanded={expanded}>{expanded ? "Less" : connected ? "More" : "Connect"}</button>
               </div>
               <div className="brief-client-actions">
                 <button
@@ -464,7 +404,7 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
                   className={client.enabled ? "brief-switch is-on" : "brief-switch"}
                   onClick={() => void saveClient(client, { enabled: !client.enabled })}
                   disabled={busy === client.id || (!client.enabled && !ready)}
-                  title={ready ? "" : "Needs a bookings channel."}
+                  title={ready ? "" : `Needs ${missing}.`}
                 >
                   <span />{client.enabled ? "On" : "Off"}
                 </button>
@@ -474,15 +414,42 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
               {expanded && (
                 <div className="booking-more">
                   <div className="booking-more-row">
-                    <strong>Own Calendly</strong>
+                    <strong>Calendly</strong>
                     {calendlyControls(client.id, `cal:${client.id}`, client.ownCalendly)}
                     {notes[`cal:${client.id}`] && <small>{notes[`cal:${client.id}`]}</small>}
                   </div>
 
                   <div className="booking-more-row">
-                    <strong>Own cal.com</strong>
+                    <strong>cal.com</strong>
                     {calComControls(client.id, `calcom:${client.id}`, client.ownCalCom)}
                     {notes[`calcom:${client.id}`] && <small>{notes[`calcom:${client.id}`]}</small>}
+                  </div>
+
+                  <div className="booking-more-row is-list">
+                    <strong>Runs on</strong>
+                    {!connected ? (
+                      <span className="booking-setup-value">Connect the client&apos;s calendar to choose its event</span>
+                    ) : (() => {
+                      const state = events[client.id];
+                      // Chosen events stay listed even if the calendar stops returning them (renamed, deleted).
+                      const listed = [...(state?.list ?? [])];
+                      for (const chosen of client.eventTypes) if (!listed.some((event) => event.id === chosen.id)) listed.push({ source: chosen.source === "calcom" ? "calcom" : "calendly", id: chosen.id, name: chosen.name, slug: "", active: false, owner: "", url: "" });
+                      return (
+                        <div className="booking-event-list">
+                          {listed.map((event) => (
+                            <label key={event.id} className={event.active ? "booking-event" : "booking-event is-off"}>
+                              <input type="checkbox" checked={client.eventTypes.some((item) => item.id === event.id)} disabled={busy === client.id} onChange={() => toggleEvent(client, event)} />
+                              <span>{event.name}</span>
+                              <small>{event.owner}{event.active ? "" : event.owner ? " · off" : "off"}</small>
+                            </label>
+                          ))}
+                          {state?.loading && <small>Loading events…</small>}
+                          {state && !state.loading && !listed.length && <small>No event types found on this calendar.</small>}
+                          {state?.errors.map((message) => <small key={message} className="booking-error">{message}</small>)}
+                          <button type="button" className="booking-chip is-more" disabled={state?.loading} onClick={() => void loadEvents(client.id)}>Refresh</button>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="booking-more-row">

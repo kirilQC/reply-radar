@@ -78,6 +78,7 @@ function present(settings: BookingSettings, workspaces: Row[], meetings: Row[], 
         enabled: config.enabled,
         enabledAt: config.enabledAt,
         eventFilter: config.eventFilter,
+        eventTypes: config.eventTypes,
         channel: config.channel,
         botName: config.botName,
         briefAbout: config.briefAbout,
@@ -151,12 +152,19 @@ export async function POST(request: Request) {
 
     const workspaceId = text(body.workspaceId);
     if (!workspaceId) return NextResponse.json({ ok: false, error: "No client was named." }, { status: 400 });
-    const current = await rest(`rr_workspaces?select=id,booking_config,calcom_secret&id=eq.${encodeURIComponent(workspaceId)}&limit=1`);
+    const current = await rest(`rr_workspaces?select=id,booking_config,calcom_secret,calendly_subscription&id=eq.${encodeURIComponent(workspaceId)}&limit=1`);
     const row = Array.isArray(current.data) ? (current.data[0] as Row | undefined) : undefined;
     if (!current.ok || !row) return NextResponse.json({ ok: false, error: "That client could not be read." }, { status: 404 });
     const next = { ...object(row.booking_config) };
     const patch: Row = {};
     if ("eventFilter" in body) next.event_filter = text(body.eventFilter);
+    if ("eventTypes" in body) {
+      next.event_types = (Array.isArray(body.eventTypes) ? body.eventTypes : [])
+        .map((event) => object(event))
+        .filter((event) => text(event.id))
+        .slice(0, 20)
+        .map((event) => ({ id: text(event.id), name: text(event.name), source: text(event.source) }));
+    }
     if ("channel" in body) next.channel = channelId(body.channel);
     if ("botName" in body) next.bot_name = text(body.botName);
     if ("briefAbout" in body) next.brief_about = String(body.briefAbout ?? "").trim().slice(0, 12000);
@@ -165,6 +173,12 @@ export async function POST(request: Request) {
     if (!text(next.channel)) next.enabled = false;
     if (typeof body.enabled === "boolean") {
       if (body.enabled && !text(next.channel)) return NextResponse.json({ ok: false, error: "Set a bookings channel first." }, { status: 400 });
+      if (body.enabled && !text(object(row.calendly_subscription).subscription_uri) && !text(row.calcom_secret)) {
+        return NextResponse.json({ ok: false, error: "Connect this client's Calendly or cal.com first." }, { status: 400 });
+      }
+      if (body.enabled && !(Array.isArray(next.event_types) && next.event_types.length) && !text(next.event_filter)) {
+        return NextResponse.json({ ok: false, error: "Choose the event that runs the workflow first." }, { status: 400 });
+      }
       if (body.enabled && next.enabled !== true) next.enabled_at = new Date().toISOString();
       next.enabled = body.enabled;
     }

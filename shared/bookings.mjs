@@ -103,6 +103,8 @@ export function parseCalendly(body) {
   return {
     kind,
     eventName: str(scheduled.name),
+    // The event type's own id: what a client's chosen events are matched on, since a name can repeat.
+    eventTypeId: str(scheduled.event_type),
     externalId: str(p.uri),
     previousId: kind === "created" ? str(p.old_invitee) : "",
     fields: {
@@ -141,6 +143,7 @@ export function parseCalCom(body) {
   return {
     kind,
     eventName: [str(p.eventTitle), str(p.type), str(p.title)].filter(Boolean).join(" · ") || eventName,
+    eventTypeId: p.eventTypeId === undefined || p.eventTypeId === null ? "" : str(p.eventTypeId),
     externalId: str(p.uid),
     previousId: trigger === "BOOKING_RESCHEDULED" ? str(p.rescheduleUid) || str(p.fromReschedule) : "",
     fields: {
@@ -198,6 +201,30 @@ export function routeBooking(eventName, clients) {
     else if (term.length === bestLength) tie = true;
   }
   return tie ? null : best;
+}
+
+/**
+ * Whether a booking on a client's own calendar is one of the events that runs the workflow.
+ *
+ * A client's Calendly holds all their own meetings as well as the one QC created for them ("QC Growth
+ * Meeting"), so only the event types chosen on the Booked meetings page count, matched on the event type's
+ * id. With none chosen nothing counts: posting a client's internal meetings would be worse than posting none.
+ * A legacy name filter still works for a client set up before event types could be chosen.
+ * @param {{ eventTypeId?: string, eventName?: string }} parsed
+ * @param {Array<{ id: string, name?: string }>} chosen
+ * @param {string} [legacyFilter]
+ */
+export function eventChosen(parsed, chosen, legacyFilter = "") {
+  const list = Array.isArray(chosen) ? chosen : [];
+  if (list.length) {
+    const id = str(parsed?.eventTypeId);
+    if (id && list.some((event) => str(event.id) === id)) return true;
+    // An event type id missing from the payload (rare) falls back to the exact chosen name.
+    const name = str(parsed?.eventName).toLowerCase();
+    return !id && Boolean(name) && list.some((event) => name.includes(str(event.name).toLowerCase()) && str(event.name));
+  }
+  const terms = str(legacyFilter).split(",").map((term) => term.trim().toLowerCase()).filter(Boolean);
+  return terms.length > 0 && Boolean(matchedTerm(parsed?.eventName, terms));
 }
 
 // ── Clay ──────────────────────────────────────────────────────────────────────────────────────────

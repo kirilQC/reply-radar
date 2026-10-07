@@ -9,6 +9,7 @@ import {
   buildInfoThread,
   buildTldrThread,
   clayRow,
+  eventChosen,
   formatMeetingTime,
   fromClay,
   hostsLabel,
@@ -218,4 +219,20 @@ test("small helpers", () => {
   assert.equal(formatMeetingTime("2026-12-02T19:00:00Z"), "December 02, 2026 @ 2:00 PM EST");
   assert.equal(hostsLabel([{ user_name: "Josh K", user_email: "j@x.com" }, { user_name: "Josh K", user_email: "j2@x.com" }]), "Josh");
   assert.equal(linkedinUrl("nothing here"), "");
+});
+
+test("only the client's chosen event runs the workflow, matched on its event type id", () => {
+  const qc = { id: "https://api.calendly.com/event_types/QC1", name: "QC Growth Meeting", source: "calendly" };
+  const booking = parseCalendly({ ...calendlyCreated, payload: { ...calendlyCreated.payload, scheduled_event: { ...calendlyCreated.payload.scheduled_event, name: "QC Growth Meeting", event_type: qc.id } } });
+  assert.equal(booking.eventTypeId, qc.id);
+  assert.equal(eventChosen(booking, [qc]), true);
+  // The client's own other meetings never fire, even with a similar name.
+  const own = parseCalendly({ ...calendlyCreated, payload: { ...calendlyCreated.payload, scheduled_event: { ...calendlyCreated.payload.scheduled_event, name: "QC Growth Meeting (internal)", event_type: "https://api.calendly.com/event_types/OTHER" } } });
+  assert.equal(eventChosen(own, [qc]), false);
+  // Nothing chosen: nothing fires.
+  assert.equal(eventChosen(booking, []), false);
+  // A client set up with the older name filter keeps working until events are chosen.
+  assert.equal(eventChosen({ eventName: "Steadywell Intro" }, [], "steadywell"), true);
+  // cal.com carries a numeric event type id.
+  assert.equal(parseCalCom({ triggerEvent: "BOOKING_CREATED", payload: { uid: "u", eventTypeId: 4521, attendees: [{ name: "A", email: "a@b.co" }] } }).eventTypeId, "4521");
 });

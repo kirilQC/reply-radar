@@ -152,7 +152,7 @@ export async function calendlyToken(config: Config, connection: CalendlyConnecti
 
 // ── Event types ───────────────────────────────────────────────────────────────────────────────────
 
-export type CalendarEvent = { source: "calendly" | "calcom"; name: string; slug: string; active: boolean; owner: string; url: string };
+export type CalendarEvent = { source: "calendly" | "calcom"; id: string; name: string; slug: string; active: boolean; owner: string; url: string };
 
 /** Every event type the connection can see: the whole organization for an admin, else the user's own. */
 export async function calendlyEvents(token: string, connection: CalendlyConnection): Promise<CalendarEvent[]> {
@@ -164,7 +164,7 @@ export async function calendlyEvents(token: string, connection: CalendlyConnecti
     const data = object(await response.json().catch(() => ({})));
     if (!response.ok) throw new Error(text(data.message) || `Calendly answered ${response.status}.`);
     for (const item of Array.isArray(data.collection) ? (data.collection as Row[]) : []) {
-      out.push({ source: "calendly", name: text(item.name), slug: text(item.slug), active: item.active !== false, owner: text(object(item.profile).name), url: text(item.scheduling_url) });
+      out.push({ source: "calendly", id: text(item.uri), name: text(item.name), slug: text(item.slug), active: item.active !== false, owner: text(object(item.profile).name), url: text(item.scheduling_url) });
     }
     next = text(object(data.pagination).next_page);
   }
@@ -203,7 +203,7 @@ export async function calComEvents(apiKey: string): Promise<CalendarEvent[]> {
   const seen = new Set<string>();
   return found
     .filter((row) => { const key = `${text(row.id)}:${text(row.slug)}`; if (seen.has(key)) return false; seen.add(key); return true; })
-    .map((row) => ({ source: "calcom" as const, name: text(row.title), slug: text(row.slug), active: row.hidden !== true, owner: text(object(row.owner).name), url: "" }));
+    .map((row) => ({ source: "calcom" as const, id: text(row.id), name: text(row.title), slug: text(row.slug), active: row.hidden !== true, owner: text(object(row.owner).name), url: "" }));
 }
 
 /** Checks the key, creates QC's webhook with a fresh secret, and returns the connection to save. */
@@ -266,17 +266,19 @@ export async function listEvents(config: Config, workspaceId = ""): Promise<{ ev
   const run = async (label: string, task: () => Promise<CalendarEvent[]>) => {
     try { events.push(...(await task())); } catch (error) { errors.push(`${label}: ${error instanceof Error ? error.message : "could not list events"}`); }
   };
-  if (settings.calendly) {
+  // A client's page lists only that client's own calendars; the shared QC calendar (if one is still
+  // connected) is listed on the all-clients page.
+  if (!workspaceId && settings.calendly) {
     const connection = settings.calendly;
     await run("Calendly", async () => calendlyEvents(await calendlyToken(config, connection, text(settings.calendly_token)), connection));
   }
-  if (settings.calcom?.api_key) await run("cal.com", () => calComEvents(settings.calcom!.api_key));
+  if (!workspaceId && settings.calcom?.api_key) await run("cal.com", () => calComEvents(settings.calcom!.api_key));
   if (workspaceId) {
     const row = await workspaceRow(config, workspaceId);
     const own = row?.calendly_subscription as CalendlyConnection | null;
-    if (row && own?.subscription_uri) await run("Client's Calendly", async () => calendlyEvents(await calendlyToken(config, own, text(row.calendly_token), workspaceId), own));
+    if (row && own?.subscription_uri) await run("Calendly", async () => calendlyEvents(await calendlyToken(config, own, text(row.calendly_token), workspaceId), own));
     const ownCalCom = object(row?.booking_config).calcom_connection as CalComConnection | undefined;
-    if (ownCalCom?.api_key) await run("Client's cal.com", () => calComEvents(ownCalCom.api_key));
+    if (ownCalCom?.api_key) await run("cal.com", () => calComEvents(ownCalCom.api_key));
   }
   return { events, errors };
 }

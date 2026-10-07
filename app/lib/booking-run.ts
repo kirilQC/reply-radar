@@ -38,6 +38,7 @@ import {
   hasTldr,
   normalizeSteps,
   routeBooking,
+  eventChosen,
 } from "../../shared/bookings.mjs";
 import { stripDashes } from "../../shared/no-dashes.mjs";
 import { resolveModel, temperatureField } from "../../shared/anthropic-model.mjs";
@@ -187,6 +188,11 @@ export function clientConfig(workspace: Row) {
     enabled: config.enabled === true,
     enabledAt: text(config.enabled_at) || null,
     eventFilter: text(config.event_filter),
+    /** The client's event types that run the workflow, as { id, name, source }. */
+    eventTypes: (Array.isArray(config.event_types) ? config.event_types : [])
+      .map((event: unknown) => object(event))
+      .filter((event: Row) => text(event.id))
+      .map((event: Row) => ({ id: text(event.id), name: text(event.name), source: text(event.source) })),
     channel: text(config.channel),
     botName: text(config.bot_name),
     briefAbout: text(config.brief_about),
@@ -251,6 +257,7 @@ async function release(config: Config, key: string, token: string): Promise<void
 export type Parsed = {
   kind: string;
   eventName: string;
+  eventTypeId?: string;
   externalId: string;
   previousId: string;
   fields: Row;
@@ -267,9 +274,9 @@ async function routeIntake(config: Config, parsed: Parsed, source: string, works
   if (workspaceId) {
     const workspace = await loadWorkspace(config, workspaceId);
     if (!workspace) return { workspace: null, note: "Unknown client." };
-    const filter = clientConfig(workspace).eventFilter;
-    if (filter && !routeBooking(parsed.eventName, [{ id: text(workspace.id), name: text(workspace.name), filter }])) {
-      return { workspace: null, note: `"${parsed.eventName}" does not match this client's event filter.` };
+    const settings = clientConfig(workspace);
+    if (!eventChosen(parsed, settings.eventTypes, settings.eventFilter)) {
+      return { workspace: null, note: settings.eventTypes.length || settings.eventFilter ? `"${parsed.eventName}" is not one of this client's chosen events.` : "No event is chosen for this client yet." };
     }
     return { workspace, note: "" };
   }
