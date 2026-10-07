@@ -160,7 +160,11 @@ export async function ensureCallbackSecret(config: Config, settings: BookingSett
   if (!settings.callback_secret) patch.callback_secret = randomBytes(18).toString("base64url");
   // Remembered so the sweep, which has no request to read a host from, builds the same URL.
   if (request) {
-    const base = publicBaseUrl(request);
+    // The host the page is actually served from, not APP_BASE_URL: the bare domain answers webhooks with a
+    // 308 to www, and Calendly, cal.com and Clay do not reliably follow a redirect on a POST.
+    const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
+    const proto = request.headers.get("x-forwarded-proto") || "https";
+    const base = host && !/^(localhost|127\.)/.test(host) ? `${proto}://${host}` : publicBaseUrl(request);
     if (base && base !== settings.base_url) patch.base_url = base;
   }
   return Object.keys(patch).length ? writeSettings(config, patch) : settings;
