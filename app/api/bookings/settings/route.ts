@@ -3,7 +3,7 @@
 
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
-import { normalizeSteps } from "../../../../shared/bookings.mjs";
+import { DEFAULT_BRIEF_INSTRUCTIONS, normalizeSteps } from "../../../../shared/bookings.mjs";
 import {
   DEFAULT_CLAY_WAIT_MINUTES,
   baseUrl,
@@ -46,13 +46,14 @@ const channelId = (value: unknown) => {
   return match ? match[1] : raw;
 };
 
-function present(settings: BookingSettings, workspaces: Row[], meetings: Row[]) {
+function present(settings: BookingSettings, workspaces: Row[], meetings: Row[], focus: string) {
   const base = baseUrl(settings);
   const lastByClient = new Map<string, Row>();
   for (const row of meetings) if (!lastByClient.has(text(row.workspace_id))) lastByClient.set(text(row.workspace_id), row);
   return {
     ok: true,
     testChannelSet: Boolean((process.env.SLACK_TEST_CHANNEL_ID ?? "").trim()),
+    defaultBriefInstructions: DEFAULT_BRIEF_INSTRUCTIONS,
     global: {
       clayWebhookUrl: text(settings.clay_webhook_url),
       clayAuthSet: Boolean(text(settings.clay_auth_token)),
@@ -78,6 +79,15 @@ function present(settings: BookingSettings, workspaces: Row[], meetings: Row[]) 
         eventFilter: config.eventFilter,
         channel: config.channel,
         botName: config.botName,
+        briefAbout: config.briefAbout,
+        briefInstructions: config.briefInstructions,
+        clientBrief: focus ? text(workspace.client_brief) : "",
+        recent: focus
+          ? meetings.filter((row) => text(row.workspace_id) === id).slice(0, 15).map((row) => {
+            const b = object(row.booking);
+            return { id: text(row.id), name: text(row.invitee_name), company: text(row.company_name), at: text(row.created_at), stage: text(b.stage), error: text(b.error), clay: Boolean(object(b.clay).received_at), clayTimedOut: Boolean(object(b.clay).timed_out) };
+          })
+          : [],
         steps: config.steps,
         hubspotConnected: text(workspace.crm_provider) === "hubspot" && Boolean(text(workspace.crm_api_key_ciphertext)),
         ownCalendly: own.subscription_uri ? { email: text(own.email), scope: text(own.scope) } : null,
@@ -90,16 +100,17 @@ function present(settings: BookingSettings, workspaces: Row[], meetings: Row[]) 
 
 async function load(request: Request) {
   const config = supabaseConfig()!;
+  const focus = (new URL(request.url).searchParams.get("client") ?? "").trim();
   const settings = await ensureCallbackSecret(config, await readSettings(config), request);
   const [workspaces, meetings] = await Promise.all([
-    rest(`rr_workspaces?select=${WORKSPACE_COLUMNS},accent_color&slug=neq.misc&offboarded_at=is.null&order=name.asc`),
-    rest(`rr_meetings?select=workspace_id,invitee_name,created_at,booking&booking->>source=not.is.null&order=created_at.desc&limit=300`),
+    rest(`rr_workspaces?select=${WORKSPACE_COLUMNS},accent_color&slug=${focus ? `eq.${encodeURIComponent(focus)}` : "neq.misc&offboarded_at=is.null"}&order=name.asc`),
+    rest(`rr_meetings?select=id,workspace_id,invitee_name,company_name,created_at,booking&booking->>source=not.is.null&order=created_at.desc&limit=300`),
   ]);
   if (!workspaces.ok) {
     const detail = typeof workspaces.data === "string" ? workspaces.data : JSON.stringify(workspaces.data);
     throw new Error(/booking_config|calendly|calcom/.test(detail) ? "Run the booking alerts migration (20261008_booking_alerts.sql) first." : `Could not read clients (${workspaces.status}).`);
   }
-  return present(settings, (workspaces.data as Row[]) ?? [], meetings.ok && Array.isArray(meetings.data) ? (meetings.data as Row[]) : []);
+  return present(settings, (workspaces.data as Row[]) ?? [], meetings.ok && Array.isArray(meetings.data) ? (meetings.data as Row[]) : [], focus);
 }
 
 export async function GET(request: Request) {
@@ -140,6 +151,8 @@ export async function POST(request: Request) {
     if ("eventFilter" in body) next.event_filter = text(body.eventFilter);
     if ("channel" in body) next.channel = channelId(body.channel);
     if ("botName" in body) next.bot_name = text(body.botName);
+    if ("briefAbout" in body) next.brief_about = String(body.briefAbout ?? "").trim().slice(0, 12000);
+    if ("briefInstructions" in body) next.brief_instructions = String(body.briefInstructions ?? "").trim().slice(0, 8000);
     if ("steps" in body) next.steps = normalizeSteps(body.steps);
     if (!text(next.channel)) next.enabled = false;
     if (typeof body.enabled === "boolean") {

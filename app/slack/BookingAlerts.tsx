@@ -26,7 +26,12 @@ type Client = {
   ownCalendly: { email: string; scope: string } | null;
   calcom: { url: string; secret: string } | null;
   lastBooking: { name: string; at: string; stage: string; error: string } | null;
+  briefAbout: string;
+  briefInstructions: string;
+  clientBrief: string;
+  recent: Array<{ id: string; name: string; company: string; at: string; stage: string; error: string; clay: boolean; clayTimedOut: boolean }>;
 };
+type Brief = { leadSummary?: string; companySummary?: string; callFocus?: string; painPoints?: string };
 type Global = {
   clayWebhookUrl: string;
   clayAuthSet: boolean;
@@ -35,7 +40,7 @@ type Global = {
   calendly: { email: string; name: string; scope: string; connectedAt: string } | null;
   lastClayCallback: { at: string; meeting_id: string; test: boolean; fields: string[] } | null;
 };
-type Payload = { ok: boolean; error?: string; global: Global; clients: Client[]; testChannelSet: boolean };
+type Payload = { ok: boolean; error?: string; global: Global; clients: Client[]; testChannelSet: boolean; defaultBriefInstructions: string };
 
 const day = (value: string | null) =>
   value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" }) : "";
@@ -55,13 +60,20 @@ async function call(path: string, init?: RequestInit) {
   return { ok: Boolean(response?.ok && payload?.ok !== false), payload, error: String(payload?.error || (response ? `Failed (${response.status}).` : "Network error.")) };
 }
 
-export default function BookingAlerts({ onBack }: { onBack: () => void }) {
+/**
+ * `focus` (a client slug) is the per-client page opened from onboarding: that client only, opened up, with
+ * its pre-call brief and recent bookings. Without it, every client, from the Slack tab.
+ */
+export default function BookingAlerts({ onBack, backLabel = "← Slack automations", focus = "" }: { onBack: () => void; backLabel?: string; focus?: string }) {
+  const settingsPath = focus ? `/api/bookings/settings?client=${encodeURIComponent(focus)}` : "/api/bookings/settings";
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [open, setOpen] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<{ brief: Brief; who: string } | null>(null);
+  const [setupOpen, setSetupOpen] = useState(!focus);
 
   const take = (payload: Payload | null) => {
     if (payload?.global) {
@@ -70,11 +82,12 @@ export default function BookingAlerts({ onBack }: { onBack: () => void }) {
     }
   };
   const load = async () => {
-    const result = await call("/api/bookings/settings");
+    const result = await call(settingsPath);
     if (result.ok) take(result.payload);
     else setError(result.error);
   };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [settingsPath]);
+  useEffect(() => { if (focus && data?.clients[0]) setOpen(data.clients[0].id); }, [focus, data?.clients[0]?.id]);
 
   const note = (key: string, value: string) => setNotes((current) => ({ ...current, [key]: value }));
   const draft = (key: string, fallback: string) => drafts[key] ?? fallback;
@@ -83,7 +96,7 @@ export default function BookingAlerts({ onBack }: { onBack: () => void }) {
 
   const saveGlobal = async (patch: Record<string, unknown>, key: string) => {
     setBusy(key);
-    const result = await call("/api/bookings/settings", { method: "POST", body: JSON.stringify({ global: patch }) });
+    const result = await call(settingsPath, { method: "POST", body: JSON.stringify({ global: patch }) });
     setBusy("");
     if (result.ok) { take(result.payload); note(key, "Saved"); } else note(key, result.error);
   };
@@ -91,7 +104,7 @@ export default function BookingAlerts({ onBack }: { onBack: () => void }) {
   const saveClient = async (client: Client, patch: Record<string, unknown>) => {
     setBusy(client.id);
     note(client.id, "");
-    const result = await call("/api/bookings/settings", { method: "POST", body: JSON.stringify({ workspaceId: client.id, ...patch }) });
+    const result = await call(settingsPath, { method: "POST", body: JSON.stringify({ workspaceId: client.id, ...patch }) });
     setBusy("");
     if (result.ok) take(result.payload);
     else note(client.id, result.error);
@@ -130,8 +143,8 @@ export default function BookingAlerts({ onBack }: { onBack: () => void }) {
   if (!data) {
     return (
       <main className="reports-hub">
-        <button type="button" className="config-back" onClick={onBack}>← Slack automations</button>
-        <div className="hub-lede"><h1>Booked meetings</h1></div>
+        <button type="button" className="config-back" onClick={onBack}>{backLabel}</button>
+        <div className="hub-lede"><h1>{focus ? "Booked meetings" : "Booked meetings"}</h1></div>
         {error ? <div className="config-error">{error}</div> : <div className="hub-empty">Loading…</div>}
       </main>
     );
@@ -153,11 +166,18 @@ export default function BookingAlerts({ onBack }: { onBack: () => void }) {
 
   return (
     <main className="reports-hub">
-      <button type="button" className="config-back" onClick={onBack}>← Slack automations</button>
-      <div className="hub-lede"><h1>Booked meetings</h1></div>
+      <button type="button" className="config-back" onClick={onBack}>{backLabel}</button>
+      <div className="hub-lede"><h1>{focus && data.clients[0] ? `${data.clients[0].name} booked meetings` : "Booked meetings"}</h1></div>
 
-      <div className="hub-group-label"><span>Setup</span></div>
-      <div className="booking-setup">
+      <div className="hub-group-label">
+        <span>Shared setup</span>
+        {focus ? (
+          <button type="button" className="booking-chip is-more" onClick={() => setSetupOpen((value) => !value)} aria-expanded={setupOpen}>
+            {g.calendly ? "Calendly on" : "Calendly off"} · {g.clayWebhookUrl ? "Clay on" : "Clay off"} · {setupOpen ? "Hide" : "Edit"}
+          </button>
+        ) : <span />}
+      </div>
+      {setupOpen && <div className="booking-setup">
         <div className="booking-setup-row">
           <strong>Calendly</strong>
           {g.calendly ? (
@@ -217,11 +237,11 @@ export default function BookingAlerts({ onBack }: { onBack: () => void }) {
           </small>
         </div>
         {last && last.fields.length > 0 && <div className="booking-fields">{last.fields.join(" · ")}</div>}
-      </div>
+      </div>}
 
       <div className="hub-group-label">
-        <span>Clients</span>
-        <span>{on} on</span>
+        <span>{focus ? "Workflow" : "Clients"}</span>
+        <span>{focus ? "" : `${on} on`}</span>
       </div>
       <ul className="brief-client-list">
         {data.clients.map((client) => {
@@ -397,6 +417,77 @@ export default function BookingAlerts({ onBack }: { onBack: () => void }) {
           );
         })}
       </ul>
+      {focus && data.clients[0] && (() => {
+        const client = data.clients[0];
+        const aboutKey = `about:${client.id}`;
+        const rulesKey = `rules:${client.id}`;
+        const about = draft(aboutKey, client.briefAbout);
+        const rules = draft(rulesKey, client.briefInstructions || data.defaultBriefInstructions);
+        const dirty = about !== client.briefAbout || rules !== (client.briefInstructions || data.defaultBriefInstructions);
+        const save = async () => {
+          const ok = await saveClient(client, { briefAbout: about, briefInstructions: rules.trim() === data.defaultBriefInstructions.trim() ? "" : rules });
+          if (ok) { clearDraft(aboutKey); clearDraft(rulesKey); note("brief", "Saved"); }
+        };
+        const run = async () => {
+          setBusy("brief");
+          note("brief", "");
+          setPreview(null);
+          const result = await call("/api/bookings/test", { method: "POST", body: JSON.stringify({ workspaceId: client.id, preview: true, about, instructions: rules }) });
+          setBusy("");
+          if (result.ok) setPreview({ brief: result.payload.tldr, who: [result.payload.meeting?.name, result.payload.meeting?.company].filter(Boolean).join(", ") });
+          else note("brief", result.error);
+        };
+        return (
+          <>
+            <div className="hub-group-label"><span>Pre-call brief</span><span>{client.briefInstructions ? "Custom" : "Default"}</span></div>
+            <div className="booking-setup booking-brief">
+              <label className="booking-brief-field">
+                <strong>About {client.name}</strong>
+                <textarea
+                  rows={5}
+                  value={about}
+                  placeholder={client.clientBrief ? `Uses the client brief:\n${client.clientBrief.slice(0, 600)}` : "Two or three paragraphs on what the client sells and who it is for."}
+                  onChange={(event) => setDraft(aboutKey, event.target.value)}
+                />
+              </label>
+              <label className="booking-brief-field">
+                <strong>Instructions</strong>
+                <textarea rows={9} value={rules} onChange={(event) => setDraft(rulesKey, event.target.value)} />
+              </label>
+              <div className="booking-setup-row">
+                <button type="button" className="secondary-button" disabled={busy === client.id || !dirty} onClick={() => void save()}>Save</button>
+                <button type="button" className="secondary-button" disabled={busy === "brief" || !client.recent.length} onClick={() => void run()}>{busy === "brief" ? "Writing…" : "Preview on the latest booking"}</button>
+                <button type="button" className="secondary-button" disabled={rules === data.defaultBriefInstructions} onClick={() => setDraft(rulesKey, data.defaultBriefInstructions)}>Reset instructions</button>
+                {notes.brief && <small>{notes.brief}</small>}
+              </div>
+              {preview && (
+                <div className="booking-preview">
+                  <small>{preview.who}</small>
+                  {([["leadSummary", "Lead Summary"], ["companySummary", "Company Summary"], ["callFocus", "Call Focus"], ["painPoints", "Pain Points"]] as const).map(([key, label]) =>
+                    preview.brief[key] ? (<div key={key}><strong>{label}</strong><p>{preview.brief[key]}</p></div>) : null)}
+                </div>
+              )}
+            </div>
+
+            <div className="hub-group-label"><span>Recent bookings</span><span>{client.recent.length}</span></div>
+            {client.recent.length ? (
+              <ul className="booking-recent">
+                {client.recent.map((row) => (
+                  <li key={row.id}>
+                    <strong>{row.name || "Someone"}</strong>
+                    <span>{row.company}</span>
+                    <span>{ago(row.at)}</span>
+                    <span className={row.stage === "failed" ? "booking-error" : ""}>
+                      {STAGE[row.stage] ?? row.stage}{row.clay ? " · Clay" : row.clayTimedOut ? " · Clay timed out" : ""}
+                    </span>
+                    {row.error && row.stage !== "done" && <small className="booking-error">{row.error}</small>}
+                  </li>
+                ))}
+              </ul>
+            ) : <div className="hub-empty">No bookings through QC yet.</div>}
+          </>
+        );
+      })()}
       {!data.testChannelSet && <div className="hub-empty">Set <code>SLACK_TEST_CHANNEL_ID</code> to send tests.</div>}
       {error && <div className="config-error">{error}</div>}
     </main>

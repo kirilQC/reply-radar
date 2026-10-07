@@ -426,6 +426,7 @@ export default function OnboardingChecklistPage() {
                   <h1>{client.name}</h1>
                   <Link href="/onboarding" className="onb-back">← All clients</Link>
                 </div>
+                <Link href={`/bookings/${client.slug}`} className="secondary-button onb-bookings-link">Booked meetings workflow</Link>
               </div>
 
               <div className="onb-progress-sticky">

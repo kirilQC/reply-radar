@@ -246,25 +246,27 @@ export function fromClay(body) {
     meetingId: get("meeting_id", "meetingid", "qc_meeting_id", "booking_id"),
     test: testValue === "true" || testValue === "1" || testValue === "yes",
     fields: {
-      invitee_linkedin: linkedinUrl(get("lead_linkedin", "linkedin", "linkedin_url", "person_linkedin", "linkedin_profile", "linkedin_profile_url", "spark_linkedin")),
+      invitee_linkedin: linkedinUrl(get("lead_linkedin", "USER LINKEDIN FINAL!!", "linkedin", "linkedin_url", "person_linkedin", "linkedin_profile", "linkedin_profile_url", "spark_linkedin")),
       invitee_title: get("lead_title", "title", "job_title", "person_title"),
-      invitee_location: get("lead_location", "person_location", "location"),
-      invitee_headline: get("lead_headline", "headline", "person_headline"),
+      invitee_location: get("lead_location", "person_location", "location_name", "location"),
+      invitee_headline: get("lead_headline", "headline", "headline_2", "person_headline"),
       invitee_photo_url: get("lead_photo", "profile_photo", "profile_picture", "photo_url"),
       company_name: get("company_name", "company"),
       company_domain: get("company_domain", "domain", "company_website", "website").replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, ""),
       company_linkedin: linkedinUrl(get("company_linkedin", "company_linkedin_url")),
-      company_location: get("company_location", "company_hq", "hq", "company_headquarters"),
+      company_location: get("company_location", "company_hq", "hq", "company_headquarters", "locality"),
       company_industry: get("company_industry", "industry"),
       company_size: sizeLabel(get("company_size", "company_headcount", "headcount", "employees", "employee_count")),
       company_type: get("company_type"),
-      company_description: get("company_description", "description", "company_about", "about"),
-      company_logo_url: get("company_logo", "company_logo_url", "logo"),
+      company_description: get("company_description", "description_2", "company_about", "about", "description"),
+      company_logo_url: get("company_logo", "company_logo_url", "logo_url", "logo"),
     },
     tldr: {
       leadSummary: get("lead_summary", "person_summary"),
-      leadCallFocus: get("lead_call_focus", "person_call_focus"),
       companySummary: get("company_summary"),
+      callFocus: get("call_focus", "pre_call_focus"),
+      painPoints: get("pain_points"),
+      leadCallFocus: get("lead_call_focus", "person_call_focus"),
       companyCallFocus: get("company_call_focus"),
     },
   };
@@ -362,12 +364,7 @@ export function buildTldrThread(tldr) {
     // A call focus is a list; it starts on its own line so the first item lines up with the rest.
     return text.includes("\n") || /^[-•]/.test(text) ? `• *${label}:*\n${text}` : `• *${label}:* ${text}`;
   };
-  const lines = [
-    block("Lead Summary", t.leadSummary),
-    block("Lead Call Focus", t.leadCallFocus),
-    block("Company Summary", t.companySummary),
-    block("Company Call Focus", t.companyCallFocus),
-  ].filter(Boolean);
+  const lines = BRIEF_SECTIONS.map(([key, label]) => block(label, t[key])).filter(Boolean);
   if (!lines.length) return { text: "", blocks: [] };
   return { text: "TLDR", blocks: sections(`:sparkle: _*TLDR*_ :sparkle:\n\n${lines.join("\n\n")}`) };
 }
@@ -408,28 +405,53 @@ export function normalizeSteps(steps) {
   return out;
 }
 
-/** The row QC adds to the shared Clay table. `callback_url` is where Clay's last column posts the result. */
+/**
+ * The row QC adds to the shared Clay table, keyed by the table's own column names so the webhook fills
+ * them ("USER title" and "USER company name" are what the person typed on the booking form). `meeting_id`
+ * and `callback_url` are QC's: the last column posts back to `callback_url` with `meeting_id` in the body.
+ * `Known LinkedIn` is filled when the person is already a lead of ours, so the LinkedIn waterfall can skip.
+ */
 export function clayRow(meeting, client, callbackUrl, test = false) {
   const m = obj(meeting);
-  const name = clean(m.invitee_name);
-  const [first, ...rest] = name.split(/\s+/);
   return {
     meeting_id: str(m.id),
-    test,
-    client: str(client?.name),
-    client_slug: str(client?.slug),
-    name,
-    first_name: first || "",
-    last_name: rest.join(" "),
-    email: clean(m.invitee_email),
-    company: clean(m.company_name),
-    company_domain: clean(m.company_domain),
-    title: clean(m.invitee_title),
-    linkedin: clean(m.invitee_linkedin),
-    meeting_title: clean(m.summary),
-    meeting_time: clean(m.meeting_at) ? formatMeetingTime(m.meeting_at) : clean(m.when_text),
-    meeting_with: clean(m.host),
-    campaign: clean(m.campaign),
     callback_url: callbackUrl,
+    test,
+    Client: str(client?.name),
+    Campaign: clean(m.campaign),
+    Date: clean(m.meeting_at) ? formatMeetingTime(m.meeting_at) : clean(m.when_text),
+    "Meeting With": clean(m.host),
+    "Meeting Title": clean(m.summary),
+    Name: clean(m.invitee_name),
+    Email: clean(m.invitee_email),
+    "USER title": clean(m.invitee_title),
+    "USER company name": clean(m.company_name),
+    "Known LinkedIn": clean(m.invitee_linkedin),
   };
 }
+
+// ── Pre-call brief ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The default instructions for the pre-call brief, taken from the Clay prompts it replaces. A client's own
+ * instructions (Booked meetings page) replace these; the facts and the output format are always added.
+ */
+export const DEFAULT_BRIEF_INSTRUCTIONS = [
+  "Write pre-call context for a founder or salesperson about to take this meeting.",
+  "Lead summary: exactly 3 sentences. Who they are and what they do; their seniority and likely influence on the buying decision; whether they are a strong, moderate, weak or unclear fit, and why.",
+  "Company summary: exactly 3 sentences. What the company does; its size, stage and any operating signals; whether it is a strong, moderate, weak or unclear fit, and why.",
+  "Call focus: exactly 3 bullets. Short, specific and tactical: what to lead with and what to ask.",
+  "Pain points: exactly 3 bullets. The problems this person and company most likely have that the client solves, worded the way the lead would say them.",
+  "Base everything on the data given and the client description. Never invent facts or numbers. If something is missing, say \"Not enough data\" briefly.",
+  "Business-ready, sharp, no fluff. Under 220 words in total.",
+].join("\n");
+
+/** The four sections a brief is made of, in the order Slack shows them. Clay's older two-part fields still read. */
+export const BRIEF_SECTIONS = [
+  ["leadSummary", "Lead Summary"],
+  ["companySummary", "Company Summary"],
+  ["callFocus", "Call Focus"],
+  ["painPoints", "Pain Points"],
+  ["leadCallFocus", "Lead Call Focus"],
+  ["companyCallFocus", "Company Call Focus"],
+];

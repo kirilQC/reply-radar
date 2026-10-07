@@ -32,6 +32,7 @@ import {
   changeNote,
   clayRow,
   clean,
+  DEFAULT_BRIEF_INSTRUCTIONS,
   formatMeetingTime,
   fromClay,
   hasTldr,
@@ -47,7 +48,7 @@ import { writeAuditEvent } from "./audit-log";
 
 type Row = Record<string, unknown>;
 export type Config = { url: string; key: string };
-type Tldr = { leadSummary?: string; leadCallFocus?: string; companySummary?: string; companyCallFocus?: string };
+export type Tldr = { leadSummary?: string; companySummary?: string; callFocus?: string; painPoints?: string; leadCallFocus?: string; companyCallFocus?: string };
 export type Step = { id: string; type: string; enabled: boolean; url?: string; label?: string; stage?: string; pipeline?: string; owner?: string; campaignProperty?: string };
 type StepResult = Row & { done_at?: string; error?: string; failed_at?: string; attempts?: number };
 type Booking = {
@@ -175,6 +176,8 @@ export function clientConfig(workspace: Row) {
     eventFilter: text(config.event_filter),
     channel: text(config.channel),
     botName: text(config.bot_name),
+    briefAbout: text(config.brief_about),
+    briefInstructions: text(config.brief_instructions),
     steps: normalizeSteps(config.steps) as Step[],
   };
 }
@@ -423,33 +426,40 @@ export async function intakeClay(config: Config, body: unknown): Promise<{ ok: b
   return { ok: true, status: 200, note: "Stored. Running the steps.", run: () => deliverBooking(config, id).then(() => undefined) };
 }
 
-// ── TLDR ──────────────────────────────────────────────────────────────────────────────────────────
+// ── Pre-call brief ────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The four-part brief for the call, written from the client's brief, the enrichment and our conversation with
- * the person. Used when Clay sent no TLDR of its own. Null when no model is configured or it fails.
+ * The pre-call brief (lead summary, company summary, call focus, pain points), written here rather than in
+ * Clay so each client's version can be changed on the Booked meetings page without touching the shared
+ * table. What the client sells comes from the page's "About" text, else the client brief every AI run uses;
+ * the instructions are the client's own, else DEFAULT_BRIEF_INSTRUCTIONS. Unlike the Clay columns it also
+ * reads our LinkedIn conversation with the person, which is usually the best evidence of what they care about.
  */
-async function writeTldr(workspace: Row, meeting: Row): Promise<Tldr | null> {
+export async function writeBrief(workspace: Row, meeting: Row, override: { about?: string; instructions?: string } = {}): Promise<{ tldr: Tldr | null; error?: string }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) return { tldr: null, error: "ANTHROPIC_API_KEY is not set." };
+  const settings = clientConfig(workspace);
+  const about = (override.about ?? settings.briefAbout) || text(workspace.client_brief);
+  const instructions = (override.instructions ?? settings.briefInstructions) || DEFAULT_BRIEF_INSTRUCTIONS;
   const conversation = await getMeetingConversation(text(meeting.id)).catch(() => null);
   const transcript = (conversation?.messages ?? []).slice(-30).map((message) => `${message.direction === "inbound" ? "Lead" : "Us"}: ${message.body.slice(0, 800)}`).join("\n");
   const facts = [
-    ["Name", meeting.invitee_name], ["Title", meeting.invitee_title], ["Headline", meeting.invitee_headline], ["Location", meeting.invitee_location],
-    ["Company", meeting.company_name], ["Domain", meeting.company_domain], ["Industry", meeting.company_industry], ["Size", meeting.company_size],
+    ["Name", meeting.invitee_name], ["Email", meeting.invitee_email], ["LinkedIn", meeting.invitee_linkedin], ["Title", meeting.invitee_title],
+    ["Headline", meeting.invitee_headline], ["Location", meeting.invitee_location],
+    ["Company", meeting.company_name], ["Website", meeting.company_domain], ["Industry", meeting.company_industry], ["Size", meeting.company_size],
     ["Type", meeting.company_type], ["Company HQ", meeting.company_location], ["Company description", meeting.company_description],
-    ["Meeting", meeting.summary], ["Campaign", meeting.campaign],
+    ["Meeting", meeting.summary], ["Campaign that booked it", meeting.campaign],
   ].filter(([, value]) => clean(value)).map(([label, value]) => `${label}: ${clean(value)}`).join("\n");
   const model = resolveModel(process.env.ANTHROPIC_MODEL);
+  const name = text(workspace.name);
   const system = [
-    `You write the pre-call TLDR for a sales meeting booked with ${text(workspace.name)}.`,
-    "Return only JSON with four string fields: lead_summary, lead_call_focus, company_summary, company_call_focus.",
-    "lead_summary and company_summary: two or three sentences each on who they are and why they fit.",
-    "lead_call_focus and company_call_focus: two or three short lines, each starting with \"- \", on what to lead with on the call.",
-    "Use only the facts given. Never invent numbers. Never use em dashes or en dashes.",
-  ].join("\n");
+    `You are writing pre-call meeting context for the ${name} team.`,
+    instructions,
+    "Return only JSON with four string fields: lead_summary, company_summary, call_focus, pain_points. call_focus and pain_points are lines that each start with \"- \".",
+    "Never use em dashes or en dashes.",
+  ].join("\n\n");
   const user = [
-    text(workspace.client_brief) ? `What ${text(workspace.name)} sells and who it is for:\n${text(workspace.client_brief).slice(0, 6000)}` : "",
+    about ? `About ${name}:\n${about.slice(0, 8000)}` : `No description of ${name} is saved; judge fit from the meeting and campaign names only.`,
     `The person who booked:\n${facts}`,
     transcript ? `Our LinkedIn conversation with them, oldest first:\n${transcript}` : "",
   ].filter(Boolean).join("\n\n");
@@ -457,24 +467,33 @@ async function writeTldr(workspace: Row, meeting: Row): Promise<Tldr | null> {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model, max_tokens: 1500, ...temperatureField(model, 0.3), system, messages: [{ role: "user", content: user }] }),
-      signal: AbortSignal.timeout(45_000),
+      body: JSON.stringify({ model, max_tokens: 2000, ...temperatureField(model, 0.3), system, messages: [{ role: "user", content: user }] }),
+      signal: AbortSignal.timeout(50_000),
     });
-    if (!response.ok) return null;
+    if (!response.ok) return { tldr: null, error: `The model answered ${response.status}.` };
     const payload = (await response.json()) as { content?: Array<{ type: string; text?: string }> };
     const output = (payload.content ?? []).filter((part) => part.type === "text").map((part) => part.text ?? "").join("");
-    const json = output.slice(output.indexOf("{"), output.lastIndexOf("}") + 1);
-    const parsed = object(JSON.parse(json));
+    const parsed = object(JSON.parse(output.slice(output.indexOf("{"), output.lastIndexOf("}") + 1)));
     const tldr: Tldr = {
       leadSummary: stripDashes(text(parsed.lead_summary)),
-      leadCallFocus: stripDashes(text(parsed.lead_call_focus)),
       companySummary: stripDashes(text(parsed.company_summary)),
-      companyCallFocus: stripDashes(text(parsed.company_call_focus)),
+      callFocus: stripDashes(text(parsed.call_focus)),
+      painPoints: stripDashes(text(parsed.pain_points)),
     };
-    return hasTldr(tldr) ? tldr : null;
-  } catch {
-    return null;
+    return hasTldr(tldr) ? { tldr } : { tldr: null, error: "The model returned nothing usable." };
+  } catch (error) {
+    return { tldr: null, error: error instanceof Error ? error.message : "The brief could not be written." };
   }
+}
+
+/** The page's Preview: the brief for the client's latest booking with the instructions being edited. Nothing is saved. */
+export async function previewBrief(config: Config, workspaceId: string, override: { about?: string; instructions?: string }) {
+  const workspace = await loadWorkspace(config, workspaceId);
+  if (!workspace) return { ok: false, error: "Unknown client." };
+  const [latest] = await rows(config, `rr_meetings?select=*&workspace_id=eq.${enc(workspaceId)}&order=created_at.desc&limit=1`);
+  if (!latest) return { ok: false, error: "This client has no booked meetings to preview on yet." };
+  const result = await writeBrief(workspace, latest, override);
+  return result.tldr ? { ok: true, tldr: result.tldr, meeting: { name: text(latest.invitee_name), company: text(latest.company_name) } } : { ok: false, error: result.error };
 }
 
 // ── Steps ─────────────────────────────────────────────────────────────────────────────────────────
@@ -637,7 +656,7 @@ export async function deliverBooking(config: Config, meetingId: string, opts: { 
 
     let tldr: Tldr | null = hasTldr(booking.tldr) ? (booking.tldr as Tldr) : null;
     if (!tldr) {
-      tldr = await writeTldr(workspace, meeting);
+      tldr = (await writeBrief(workspace, meeting)).tldr;
       if (tldr && !test) booking = await saveBooking(config, meetingId, { tldr, tldr_source: "qc" });
     }
 

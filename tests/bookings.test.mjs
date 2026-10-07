@@ -188,13 +188,30 @@ test("steps always start with Slack; webhooks need https", () => {
   assert.equal(steps[2].label, "Sheet");
 });
 
-test("the Clay row carries the meeting id and callback URL back", () => {
+test("the Clay row uses the shared table's own column names", () => {
   const row = clayRow(meeting, { name: "Steadywell", slug: "steadywell" }, "https://qc.example/api/webhooks/clay/booking?secret=s", false);
   assert.equal(row.meeting_id, "m1");
-  assert.equal(row.first_name, "Jason");
-  assert.equal(row.last_name, "Michael Borycki");
-  assert.equal(row.company, "Sound Physicians");
   assert.equal(row.callback_url, "https://qc.example/api/webhooks/clay/booking?secret=s");
+  assert.equal(row.Client, "Steadywell");
+  assert.equal(row.Name, "Jason Michael Borycki");
+  assert.equal(row["USER title"], "Senior Director Analytics");
+  assert.equal(row["USER company name"], "Sound Physicians");
+  assert.equal(row["Meeting With"], "Josh & Tim");
+  assert.equal(row.Date, "September 02, 2026 @ 2:00 PM EDT");
+  assert.equal(row["Known LinkedIn"], "https://linkedin.com/in/jason-borycki-fsa-maaa-4212836");
+});
+
+test("Clay's own column names read back, and the brief has four sections in order", () => {
+  const parsed = fromClay({ meeting_id: "x", "USER LINKEDIN FINAL!!": "https://www.linkedin.com/in/a-b", "Location Name": "Austin, TX", "Headline (2)": "CMO", "Description (2)": "Senior care.", Locality: "Austin", "Logo Url": "https://logo" });
+  assert.equal(parsed.fields.invitee_linkedin, "https://www.linkedin.com/in/a-b");
+  assert.equal(parsed.fields.invitee_location, "Austin, TX");
+  assert.equal(parsed.fields.invitee_headline, "CMO");
+  assert.equal(parsed.fields.company_description, "Senior care.");
+  assert.equal(parsed.fields.company_location, "Austin");
+  const text = buildTldrThread({ painPoints: "- Readmissions", callFocus: "- Pilot", companySummary: "Big.", leadSummary: "Senior." }).blocks[0].text.text;
+  const order = ["Lead Summary", "Company Summary", "Call Focus", "Pain Points"].map((label) => text.indexOf(label));
+  assert.deepEqual([...order].sort((a, b) => a - b), order);
+  assert.ok(order[0] > 0);
 });
 
 test("small helpers", () => {
