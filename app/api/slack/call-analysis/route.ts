@@ -37,6 +37,7 @@ import {
   isDueNow,
   type BriefSchedule,
 } from "../../../lib/morning-brief-schedule";
+import { meetingAlreadyPosted, postedCallsFrom } from "../../../lib/granola-heartbeat";
 import { postMessage, probeChannel, slackConfigured, slackReadable, SLACK_TOKEN_ENV, SLACK_USER_TOKEN_ENV, userToken } from "../../../lib/slack";
 import { slimImages } from "../../../lib/image-refs";
 /** Embedded logos and photos become cached /api/img URLs instead of megabytes of base64. */
@@ -322,6 +323,22 @@ export async function POST(request: Request) {
       gatherChannels(workspace),
       brainContext(workspace),
     ]);
+
+    // Once per client per day, whoever asks. Each teammate who recorded the call has their own Granola note
+    // of it, and a short internal call with the client's name in its title is a note too; a recap already
+    // posted for a call on the same day (the client's day) is this day's recap, and a second one is refused
+    // before the model is paid for. Tests and previews go nowhere a client reads, so they are never refused.
+    if ((destination === "internal" || destination === "external") && call.call) {
+      const since = new Date(Number(call.call.startedAt) - 24 * 60 * 60 * 1000).toISOString();
+      const prior = await read(
+        `rr_slack_briefs?select=status,workspaceId:workspace_id,noteId:signals->sources->call->>noteId,startedAt:signals->sources->call->>startedAt,created_at&workspace_id=eq.${encodeURIComponent(String(workspace.id))}&automation=eq.${AUTOMATION}&destination=eq.${destination}&slack_message_ts=not.is.null&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=50`,
+      ).catch(() => null);
+      // An unreadable history refuses rather than risks a second recap; the next hour retries.
+      if (prior === null) return NextResponse.json({ ok: false, posted: false, error: "Could not check whether this call was already recapped, so nothing was posted." }, { status: 503 });
+      if (meetingAlreadyPosted({ workspaceId: String(workspace.id), noteId: call.call.noteId, startedAt: Number(call.call.startedAt) }, postedCallsFrom(prior), String(workspace.timezone ?? ""))) {
+        return NextResponse.json({ ok: true, posted: false, duplicate: true, note: `${workspace.name} already has a call recap for that day.` });
+      }
+    }
 
     // Name and id together, so the recap can turn "Kori will send it" into a mention Kori is notified by.
     const people = [...(channels.internal.people ?? []), ...(channels.external.people ?? [])];

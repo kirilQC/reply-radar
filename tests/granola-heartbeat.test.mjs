@@ -103,9 +103,10 @@ test("the heartbeat route stands down outside the window and never polls", () =>
   assert.match(heartbeatRoute, /inWindow: false/, "it reports the closed window without polling");
 });
 
-test("the heartbeat route keys new calls on the stored call note id", () => {
-  assert.match(heartbeatRoute, /signals.*sources.*call|call\.noteId|postedNoteIds/s, "it reads posted note ids");
-  assert.match(heartbeatRoute, /selectNewCalls/, "it selects new calls by note id");
+test("the heartbeat route keys new calls on the stored call note id and the meeting", () => {
+  assert.match(heartbeatRoute, /signals->sources->call->>noteId/, "it reads posted note ids");
+  assert.match(heartbeatRoute, /signals->sources->call->>startedAt/, "and when each posted call started");
+  assert.match(heartbeatRoute, /meetingAlreadyPosted\(/, "it selects new calls by note id and by meeting");
 });
 
 test("the call analysis route records the call note id so the heartbeat can dedupe on it", () => {
@@ -123,4 +124,27 @@ test("the health route surfaces a granola heartbeat block and service light", ()
   assert.match(healthRoute, /granolaHeartbeatState/, "it computes the heartbeat state");
   assert.match(healthRoute, /id: "granola"/, "it adds a granola core service");
   assert.match(healthRoute, /granola,/, "it returns the granola block in the payload");
+});
+
+test("one recap per client per day: other recorders' notes and a same-day pre-sync are not new", async () => {
+  const { meetingAlreadyPosted, postedCallsFrom } = await import("../app/lib/granola-heartbeat.ts");
+  const sync = Date.parse("2026-10-07T15:30:00Z"); // 10:30 Central, the Hyperpath sync, posted at 11:55
+  const posted = postedCallsFrom([{ status: "success", workspaceId: "hyperpath", noteId: "note-sam", startedAt: String(sync) }]);
+  const chicago = "America/Chicago";
+  assert.equal(meetingAlreadyPosted({ workspaceId: "hyperpath", noteId: "note-corey", startedAt: sync + 2 * 60 * 1000 }, posted, chicago), true, "another recorder's note");
+  assert.equal(meetingAlreadyPosted({ workspaceId: "hyperpath", noteId: "not_PYNhXBhRCqwITS", startedAt: Date.parse("2026-10-07T16:59:08Z") }, posted, chicago), true, "Nikki's Pre-Sync the same day");
+  assert.equal(meetingAlreadyPosted({ workspaceId: "hyperpath", noteId: "note-sam", startedAt: null }, posted, chicago), true, "the same note");
+  assert.equal(meetingAlreadyPosted({ workspaceId: "hyperpath", noteId: "note-next", startedAt: Date.parse("2026-10-09T15:30:00Z") }, posted, chicago), false, "a call later in the week");
+  assert.equal(meetingAlreadyPosted({ workspaceId: "ema", noteId: "note-ema", startedAt: sync }, posted, chicago), false, "another client");
+  // 11 PM Central on the 7th is the 8th in UTC: the client's own day decides.
+  const late = postedCallsFrom([{ status: "success", workspaceId: "x", noteId: "a", startedAt: String(Date.parse("2026-10-08T04:00:00Z")) }]);
+  assert.equal(meetingAlreadyPosted({ workspaceId: "x", noteId: "b", startedAt: Date.parse("2026-10-07T14:00:00Z") }, late, chicago), true);
+  assert.deepEqual(postedCallsFrom([{ status: "error", workspaceId: "hyperpath", noteId: "x", startedAt: "1" }]), [], "an errored run never reached anyone");
+});
+
+test("the posting route refuses a second recap of a meeting, and the worker treats that as done", () => {
+  assert.match(callRoute, /meetingAlreadyPosted\(/);
+  assert.match(callRoute, /duplicate: true/);
+  assert.match(worker, /result\?\.duplicate/);
+  assert.match(heartbeatRoute, /meetingAlreadyPosted\(/);
 });

@@ -110,3 +110,48 @@ export function selectNewCalls(
     .filter((sighting) => sighting.noteId && !postedNoteIds.has(sighting.noteId))
     .map((sighting) => sighting.slug);
 }
+
+/**
+ * One recap per client per day, whoever recorded and whatever the call was called.
+ *
+ * Every teammate who records a call in Granola gets their own note of it, with its own id, and a short
+ * internal call with the client's name in its title ("HyperPath Pre-Sync") is a note too. Keyed on the
+ * note id alone, the hourly poll posted the sync at 11:55 and then, an hour later, the next matching note as
+ * a second "Weekly Sync Recap". A client has one weekly call; a day is the unit that can only hold one,
+ * while a second call later in the same week still gets its own recap. The day is the client's own.
+ */
+export const RECAP_DAY_FALLBACK_ZONE = "America/New_York";
+
+const dayKey = (ms: number, timeZone: string) => {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: RECAP_DAY_FALLBACK_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
+  }
+};
+
+export type PostedCall = { workspaceId: string; noteId: string; startedAt: number | null };
+
+/** The posted recaps out of `rr_slack_briefs` rows selected as `workspaceId, status, noteId, startedAt`. Errored runs never reached anyone, so they do not count. */
+export function postedCallsFrom(rows: unknown): PostedCall[] {
+  const out: PostedCall[] = [];
+  for (const row of Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : []) {
+    if (String(row.status ?? "") === "error") continue;
+    const started = Number(row.startedAt);
+    out.push({ workspaceId: String(row.workspaceId ?? ""), noteId: String(row.noteId ?? "").trim(), startedAt: Number.isFinite(started) && started > 0 ? started : null });
+  }
+  return out;
+}
+
+/** Whether this client already has a recap for a call on this call's day (or for this very note). */
+export function meetingAlreadyPosted(
+  call: { workspaceId: string; noteId: string | null; startedAt: number | null },
+  posted: PostedCall[],
+  timeZone: string = RECAP_DAY_FALLBACK_ZONE,
+): boolean {
+  return posted.some((row) => {
+    if (call.noteId && row.noteId === call.noteId) return true;
+    if (row.workspaceId !== call.workspaceId || row.startedAt === null || call.startedAt === null) return false;
+    return dayKey(row.startedAt, timeZone || RECAP_DAY_FALLBACK_ZONE) === dayKey(call.startedAt, timeZone || RECAP_DAY_FALLBACK_ZONE);
+  });
+}

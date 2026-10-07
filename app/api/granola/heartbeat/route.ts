@@ -30,7 +30,7 @@ import { CALL_WINDOW_DAYS, type BriefWorkspace } from "../../../lib/morning-brie
 import { granolaKeys } from "../../../lib/morning-brief-run";
 import { latestCallsAcrossKeys } from "../../../lib/granola";
 import { callReadinessOf } from "../../../lib/morning-brief-schedule";
-import { GRANOLA_TIMEZONE, inGranolaWindow, selectNewCalls, type HeartbeatSighting } from "../../../lib/granola-heartbeat";
+import { GRANOLA_TIMEZONE, inGranolaWindow, meetingAlreadyPosted, postedCallsFrom, type HeartbeatSighting } from "../../../lib/granola-heartbeat";
 
 /** One list pass across every key, comfortably inside Hobby's ceiling — no model call, no transcript. */
 export const maxDuration = 60;
@@ -61,33 +61,6 @@ async function insertHeartbeat(url: string, key: string, row: Row): Promise<void
     body: JSON.stringify(row),
     cache: "no-store",
   }).catch(() => null);
-}
-
-/**
- * The note ids of every call analysis already posted, so a call is only ever posted once.
- *
- * Read from `rr_slack_briefs`, where each delivered call analysis stores its call's note id under
- * `signals.sources.call.noteId`. Previews are counted too: a preview does not post to a channel, but it did
- * read that call, and the point of the id is "has this meeting been turned into an analysis," which a preview
- * satisfies. The set is what stops the hourly poll from re-posting the same call every hour it stays newest.
- *
- * Errored runs are the one thing left out. A run whose Slack post threw — the bot not in the channel, a stale
- * channel id — still wrote a row with the note id, and counting it would mark the call posted when it never
- * reached anyone: the recap lands in the QC Brain and nowhere else, silently, forever. Skipping error rows
- * lets the next hour retry, so a call that failed to post is picked up again once the channel is fixed.
- */
-function postedNoteIdsFrom(rows: unknown): Set<string> {
-  const ids = new Set<string>();
-  for (const row of Array.isArray(rows) ? (rows as Row[]) : []) {
-    if (String(row.status ?? "") === "error") continue;
-    // The read below selects the id on its own as `noteId`; the nested path is kept for a full row.
-    const signals = (row.signals ?? {}) as Row;
-    const sources = (signals.sources ?? {}) as Row;
-    const call = (sources.call ?? {}) as Row;
-    const noteId = String(row.noteId ?? call.noteId ?? "").trim();
-    if (noteId) ids.add(noteId);
-  }
-  return ids;
 }
 
 /*
@@ -122,14 +95,15 @@ export async function GET() {
        * Only the note id is selected, not the whole signals blob it sits in.
        */
       read(
-        `rr_slack_briefs?select=status,noteId:signals->sources->call->>noteId&automation=eq.call_analysis&created_at=gte.${encodeURIComponent(
+        `rr_slack_briefs?select=status,workspaceId:workspace_id,noteId:signals->sources->call->>noteId,startedAt:signals->sources->call->>startedAt&automation=eq.call_analysis&created_at=gte.${encodeURIComponent(
           new Date(now.getTime() - POSTED_LOOKBACK_DAYS * 86_400_000).toISOString(),
         )}&order=created_at.desc&limit=5000`,
       ),
       granolaKeys(read),
     ]);
 
-    const postedNoteIds = postedNoteIdsFrom(briefRows);
+    // Posted recaps by note id AND by meeting: another recorder's note of a call already posted is not new.
+    const postedCalls = postedCallsFrom(briefRows);
 
     // Only clients that have opted in and are in a fit state to receive an analysis: a call found for a
     // client with no internal channel or no title to match on has nowhere to go and nothing to be sure it
@@ -144,6 +118,7 @@ export async function GET() {
           id: String(workspace.id ?? ""),
           name: String(workspace.name ?? ""),
           slug: String(workspace.slug ?? ""),
+          timezone: String(workspace.timezone ?? ""),
           titleMatch: (workspace as BriefWorkspace).granola_title_match ?? workspace.name,
           enabled: Boolean(workspace.call_analysis_enabled),
           ready: readiness.ready,
@@ -168,11 +143,11 @@ export async function GET() {
         startedAt: sighting?.startedAt ?? null,
         ageDays: sighting?.ageDays ?? null,
         owner: sighting?.owner ?? null,
-        isNew: Boolean(noteId && !postedNoteIds.has(noteId)),
+        isNew: Boolean(noteId && !meetingAlreadyPosted({ workspaceId: workspace.id, noteId, startedAt: sighting?.startedAt ?? null }, postedCalls, workspace.timezone)),
       };
     });
 
-    const newCalls = selectNewCalls(sightings, postedNoteIds);
+    const newCalls = sightings.filter((sighting) => sighting.isNew).map((sighting) => sighting.slug);
     const callsFound = sightings.filter((sighting) => sighting.noteId).length;
 
     await insertHeartbeat(url, key, {

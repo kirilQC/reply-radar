@@ -2081,6 +2081,11 @@ async function runGranolaHeartbeat() {
         body: JSON.stringify({ workspace: slug, destination: "internal" }),
       }, APP_MODEL_TIMEOUT_MS);
       const result = await response.json().catch(() => ({}));
+      // Another teammate's note of a call already recapped: nothing to post, and nothing wrong.
+      if (result?.duplicate) {
+        console.info("reply_radar_call_analysis_duplicate", { slug });
+        continue;
+      }
       failed = !response.ok || result?.ok === false || !result?.posted;
       errorText = failed ? `${slug}: ${String(result?.error || `HTTP ${response.status}`)}`.slice(0, 500) : null;
       console.info("reply_radar_call_analysis_sent", { slug, destination: "internal", posted: Boolean(result?.posted) });
