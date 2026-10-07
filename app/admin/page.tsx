@@ -4,6 +4,7 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages, jsx-a11y/label-has-associated-control, react/no-unescaped-entities, react-hooks/set-state-in-effect */
 
+import HeyReachPull from "../components/HeyReachPull";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
@@ -875,20 +876,9 @@ export default function AdminPage() {
                           </button>
                         </div>
                       </label>
-                      <div className="field-row">
-                        <label className="field-label">
-                          WEBHOOK STATUS
-                          <div className="status-field">
-                            <i /> {isNewWorkspace ? "Not configured" : "Registered · 10 event types"}
-                          </div>
-                        </label>
-                        <label className="field-label">
-                          LAST RECONCILIATION
-                          <div className="status-field">
-                            {isNewWorkspace ? "—" : <>Today, 09:42 AM <span>↻</span></>}
-                          </div>
-                        </label>
-                      </div>
+                      {/* Real sync times and the full re-pull. These two fields used to be fixed text that read
+                          the same for every client. */}
+                      <HeyReachPull slug={client.slug} disabled={isNewWorkspace || !client.keyConfigured} />
                       <label className="field-label">
                         CLIENT MESSAGING DOC
                         <input value={workspaceDraft.messagingDocUrl} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, messagingDocUrl: event.target.value }))} placeholder="https://docs.google.com/document/d/…" type="url" />

@@ -1097,7 +1097,7 @@ async function storedCampaignStats(workspaceId) {
 }
 
 /** `rr_campaign_stats` for one client: the campaign list joined to the lifetime rollup. */
-async function collectCampaignStats(workspace) {
+async function collectCampaignStats(workspace, sequenceBudget = ANALYTICS_SEQUENCE_BUDGET) {
   const apiKey = workspace.heyreach_api_key_ciphertext;
   const [campaigns, rollup, stored] = await Promise.all([
     heyReachCampaignPages(apiKey),
@@ -1141,7 +1141,7 @@ async function collectCampaignStats(workspace) {
   const needsCopy = ours
     .filter((row) => !storedById.get(String(row.id))?.sequence_fetched_at)
     .sort((left, right) => String(right.startedAt || right.creationTime || "").localeCompare(String(left.startedAt || left.creationTime || "")))
-    .slice(0, ANALYTICS_SEQUENCE_BUDGET);
+    .slice(0, sequenceBudget);
   const copyById = new Map();
   for (const campaign of needsCopy) {
     try {
@@ -1585,6 +1585,176 @@ async function collectAnalytics() {
   return true;
 }
 
+// ── Full HeyReach pull ──────────────────────────────────────────────
+/**
+ * A hard re-pull of one client from HeyReach, asked for from the client's Configuration page.
+ *
+ * For when a client's stored HeyReach data cannot be trusted, typically after a wrong API key was saved
+ * and then replaced (Camb, Oct 2026). With the wrong key, analytics and the nightly reconcile read
+ * another account entirely. One press:
+ *   1. clears the stored HeyReach figures (campaign stats, daily stats, outreach log) and rebuilds them,
+ *      reading every campaign's copy rather than six a pass;
+ *   2. removes conversations that are not in this HeyReach account, but only when the account's inbox
+ *      listing came back complete, so a short or failed listing can never delete real conversations;
+ *   3. ingests every conversation in the account that QC does not hold, all time rather than the nightly
+ *      90 days and with no nightly cap, through the same webhook path the nightly reconcile uses.
+ * A pass that runs out of time queues a continuation that skips steps 1 and 2 and carries on with 3.
+ */
+const FULL_PULL_BUDGET_MS = 15 * 60 * 1000;
+const FULL_PULL_STUCK_MS = 45 * 60 * 1000;
+const FULL_PULL_MAX_PAGES = 100;
+
+async function claimFullPull() {
+  const stuckBefore = new Date(Date.now() - FULL_PULL_STUCK_MS).toISOString();
+  await supabase(`rr_sync_runs?run_type=eq.full_pull&status=eq.running&started_at=lt.${encodeURIComponent(stuckBefore)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ status: "error", finished_at: new Date().toISOString(), error_text: "Stopped: the worker restarted mid-pull. Press Full HeyReach pull again." }),
+  }).catch(() => {});
+  const queued = await supabase("rr_sync_runs?select=id,workspace_id,source&run_type=eq.full_pull&status=eq.queued&workspace_id=not.is.null&order=started_at.asc&limit=1");
+  const run = queued?.[0];
+  if (!run) return null;
+  const rows = await supabase(`rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&id=eq.${encodeURIComponent(String(run.workspace_id))}&limit=1`);
+  const workspace = rows?.[0];
+  if (!workspace?.heyreach_api_key_ciphertext) {
+    await patchSyncRun(run.id, { status: "failed", finished_at: new Date().toISOString(), error_text: "No HeyReach key on this client" });
+    return null;
+  }
+  await patchSyncRun(run.id, { status: "running" });
+  return { workspace, run };
+}
+
+/** The whole inbox, and whether HeyReach said it was the whole inbox. Only a complete listing may delete. */
+async function heyReachInboxFull(apiKey) {
+  const items = [];
+  for (let page = 0; page < FULL_PULL_MAX_PAGES; page += 1) {
+    const response = await heyReachFetch(apiKey, "inbox/GetConversationsV2", {
+      method: "POST",
+      body: JSON.stringify({ offset: page * RECONCILE_PAGE_SIZE, limit: RECONCILE_PAGE_SIZE, filters: {} }),
+    }, 45_000);
+    const batch = Array.isArray(response) ? response : (response && Array.isArray(response.items) ? response.items : []);
+    items.push(...batch);
+    const total = Number((response && response.totalCount) || 0);
+    if (batch.length < RECONCILE_PAGE_SIZE) return { items, complete: !total || items.length >= total };
+    if (total && items.length >= total) return { items, complete: true };
+  }
+  return { items, complete: false };
+}
+
+async function deleteRows(table, column, ids) {
+  for (let i = 0; i < ids.length; i += 100) {
+    const batch = ids.slice(i, i + 100).map((id) => encodeURIComponent(id)).join(",");
+    await supabase(`${table}?${column}=in.(${batch})`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+  }
+}
+
+async function fullPull(workspace, run) {
+  const continuing = run.source === "admin-continue";
+  const deadline = Date.now() + FULL_PULL_BUDGET_MS;
+  const apiKey = workspace.heyreach_api_key_ciphertext;
+  const id = encodeURIComponent(workspace.id);
+  const parts = [];
+  let seen = 0;
+  let ingested = 0;
+  let remaining = 0;
+  let errorText = null;
+  try {
+    if (!continuing) {
+      for (const table of ["rr_campaign_stats", "rr_daily_stats", "rr_outreach"]) {
+        await supabase(`${table}?workspace_id=eq.${id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } })
+          .catch((error) => console.warn("reply_radar_full_pull_clear_failed", { workspace: workspace.slug, table, error: error instanceof Error ? error.message : String(error) }));
+      }
+      const campaigns = await collectCampaignStats(workspace, Number.POSITIVE_INFINITY);
+      await touchHeartbeat();
+      const days = await collectDailyStats(workspace);
+      parts.push(`${campaigns} campaigns`, `${days} daily rows`);
+      try { await syncOutreach(workspace); } catch (error) { console.warn("reply_radar_full_pull_outreach_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) }); }
+      await touchHeartbeat();
+    }
+
+    const { items, complete } = await heyReachInboxFull(apiKey);
+    seen = items.length;
+    const inAccount = new Set();
+    for (const item of items) {
+      for (const value of [item.id, item.conversationId, item.conversation_id, item.linkedInConversationId]) if (value) inAccount.add(String(value));
+    }
+
+    if (!continuing) {
+      if (complete && items.length) {
+        // Conversations stored under this client that the account does not have came from another key.
+        const stored = [];
+        for (let offset = 0; ; offset += 1000) {
+          const page = await supabase(`rr_conversations?select=id,lead_id,heyreach_conversation_id&workspace_id=eq.${id}&order=id.asc&offset=${offset}&limit=1000`);
+          stored.push(...(page || []));
+          if (!page || page.length < 1000) break;
+        }
+        const foreign = stored.filter((row) => !inAccount.has(String(row.heyreach_conversation_id || "").split("::")[0]));
+        if (foreign.length) {
+          await deleteRows("rr_conversations", "id", foreign.map((row) => String(row.id)));
+          // Their leads go too, unless the lead still has a conversation that does belong here.
+          const leadIds = [...new Set(foreign.map((row) => String(row.lead_id || "")).filter(Boolean))];
+          const keep = new Set();
+          for (let i = 0; i < leadIds.length; i += 100) {
+            const batch = leadIds.slice(i, i + 100).map((lead) => encodeURIComponent(lead)).join(",");
+            for (const row of (await supabase(`rr_conversations?select=lead_id&lead_id=in.(${batch})`)) || []) keep.add(String(row.lead_id));
+          }
+          await deleteRows("rr_leads", "id", leadIds.filter((lead) => !keep.has(lead)));
+        }
+        parts.push(`removed ${foreign.length} conversations not in this HeyReach account`);
+      } else {
+        parts.push("nothing removed (HeyReach did not return the complete inbox)");
+      }
+    }
+
+    const [known, declined] = await Promise.all([storedConversationIds(workspace.id), declinedConversations(workspace.id)]);
+    const missing = [];
+    for (const item of items) {
+      const conversationId = String(item.id || item.conversationId || item.conversation_id || item.linkedInConversationId || "");
+      if (!conversationId || known.has(conversationId)) continue;
+      const candidate = reconciliationCandidate(item, 0);
+      if (!candidate) continue;
+      const refusedAt = Date.parse(declined.get(conversationId) || "");
+      if (Number.isFinite(refusedAt) && !(Date.parse(candidate.lastMessageAt || "") > refusedAt)) continue;
+      missing.push(candidate);
+    }
+    missing.sort((left, right) => String(right.lastMessageAt).localeCompare(String(left.lastMessageAt)));
+    let lastHeartbeat = Date.now();
+    let index = 0;
+    for (; index < missing.length && Date.now() < deadline; index += 1) {
+      try {
+        const result = await appPost(`/api/webhooks/heyreach/${encodeURIComponent(workspace.slug)}`, missing[index].payload);
+        if (!(result && result.discarded)) ingested += 1;
+      } catch (error) {
+        console.warn("reply_radar_full_pull_ingest_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) });
+      }
+      if (Date.now() - lastHeartbeat >= 60_000) { lastHeartbeat = Date.now(); await touchHeartbeat(); }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    remaining = missing.length - index;
+    parts.push(`${ingested} conversations pulled in`);
+    if (remaining) {
+      parts.push(`${remaining} still to pull, continuing`);
+      await writeSyncRun({ workspace_id: workspace.id, run_type: "full_pull", source: "admin-continue", status: "queued", started_at: new Date().toISOString(), records_seen: 0, records_written: 0 });
+    }
+    await supabase(`rr_workspaces?id=eq.${id}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ last_reconciled_at: new Date().toISOString() }),
+    }).catch(() => {});
+  } catch (error) {
+    errorText = error instanceof Error ? error.message : "Full pull failed";
+    console.warn("reply_radar_full_pull_failed", { workspace: workspace.slug, error: errorText });
+  }
+  // `error_text` carries the summary on success too: it is the one free-text column, and the page shows it.
+  await patchSyncRun(run.id, {
+    status: errorText ? "failed" : remaining ? "partial" : "success",
+    finished_at: new Date().toISOString(),
+    records_seen: seen,
+    records_written: ingested,
+    error_text: errorText ? `${parts.join(" · ")}${parts.length ? " · " : ""}failed: ${errorText}` : parts.join(" · "),
+  });
+  console.info("reply_radar_full_pull", { workspace: workspace.slug, summary: parts.join(" · "), error: errorText });
+}
+
 /**
  * Analytics on its own loop. A main cycle (reconcile, CRM sync, AI pipeline, sleep) can take a quarter of
  * an hour, and one client per main cycle meant a 30-client roster took most of a day to refresh and a
@@ -1595,7 +1765,14 @@ const ANALYTICS_IDLE_MS = 30 * 1000;
 async function analyticsLoop() {
   for (;;) {
     let worked = false;
-    try { worked = await collectAnalytics(); } catch (error) { console.error("reply_radar_analytics_cycle_failed", error); }
+    // A full pull somebody pressed for goes first; it is the one thing on this loop a person is watching.
+    try {
+      const pull = await claimFullPull();
+      if (pull) { await fullPull(pull.workspace, pull.run); worked = true; }
+    } catch (error) { console.error("reply_radar_full_pull_cycle_failed", error); }
+    if (!worked) {
+      try { worked = await collectAnalytics(); } catch (error) { console.error("reply_radar_analytics_cycle_failed", error); }
+    }
     // A short breath between passes so HeyReach is never hit back to back by this and the main loop at once.
     await new Promise((resolve) => setTimeout(resolve, worked ? 5_000 : ANALYTICS_IDLE_MS));
   }
