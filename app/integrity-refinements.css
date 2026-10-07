@@ -7065,3 +7065,4 @@ button.booking-chip:disabled { opacity: 0.5; cursor: default; }
 .booking-event small { color: var(--report-ink-soft); }
 .booking-event.is-off span { opacity: 0.6; }
 .booking-event-list .booking-chip { justify-self: start; }
+.booking-fields-row .brief-channel { display: inline-flex; align-items: center; gap: 6px; }
