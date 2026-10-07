@@ -157,7 +157,9 @@ export function leadFromRow(row: Row): AlertLead {
   const company = object(ai.company);
   const summary = object(company.summary);
   const companyLinks = object(company.link);
-  const industry = text(row.company_industry) || text(summary.industry) || text(company.industry) || text(ai.industry);
+  // AI Ark stores industries lower case ("software development"); the card reads them as titles.
+  const rawIndustry = text(row.company_industry) || text(summary.industry) || text(company.industry) || text(ai.industry);
+  const industry = rawIndustry === rawIndustry.toLowerCase() ? rawIndustry.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()) : rawIndustry;
   return {
     name: text(row.name),
     title: text(row.role) || text(ai.title),
