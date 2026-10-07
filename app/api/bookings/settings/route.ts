@@ -1,7 +1,6 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
-import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { DEFAULT_BRIEF_INSTRUCTIONS, normalizeSteps } from "../../../../shared/bookings.mjs";
 import {
@@ -59,12 +58,14 @@ function present(settings: BookingSettings, workspaces: Row[], meetings: Row[], 
       clayAuthSet: Boolean(text(settings.clay_auth_token)),
       clayWaitMinutes: Number(settings.clay_wait_minutes) || DEFAULT_CLAY_WAIT_MINUTES,
       callbackUrl: clayCallbackUrl(settings),
-      calendly: settings.calendly ? { email: settings.calendly.email, name: settings.calendly.name, scope: settings.calendly.scope, connectedAt: settings.calendly.connected_at } : null,
+      calendly: settings.calendly ? { email: settings.calendly.email, name: settings.calendly.name, scope: settings.calendly.scope, connectedAt: settings.calendly.connected_at, auth: settings.calendly.auth ?? "token" } : null,
+      calendlyOAuth: { clientIdSet: Boolean(settings.calendly_oauth?.client_id), secretSet: Boolean(settings.calendly_oauth?.client_secret), redirectUri: `${base}/api/bookings/calendly/oauth/callback` },
+      calcom: settings.calcom ? { email: settings.calcom.email, connectedAt: settings.calcom.connected_at } : null,
       lastClayCallback: settings.last_clay_callback ?? null,
     },
     clients: workspaces.map((workspace) => {
       const id = text(workspace.id);
-      const config = clientConfig(workspace);
+      const config = { ...clientConfig(workspace), raw: object(workspace.booking_config) };
       const own = object(workspace.calendly_subscription);
       const last = lastByClient.get(id);
       const booking = object(last?.booking);
@@ -91,7 +92,7 @@ function present(settings: BookingSettings, workspaces: Row[], meetings: Row[], 
         steps: config.steps,
         hubspotConnected: text(workspace.crm_provider) === "hubspot" && Boolean(text(workspace.crm_api_key_ciphertext)),
         ownCalendly: own.subscription_uri ? { email: text(own.email), scope: text(own.scope) } : null,
-        calcom: text(workspace.calcom_secret) ? { url: `${base}/api/webhooks/calcom?client=${id}`, secret: text(workspace.calcom_secret) } : null,
+        ownCalCom: object(config.raw).calcom_connection ? { email: text(object(object(config.raw).calcom_connection).email) } : null,
         lastBooking: last ? { name: text(last.invitee_name), at: text(last.created_at), stage: text(booking.stage), error: text(booking.error) } : null,
       };
     }),
@@ -136,6 +137,13 @@ export async function POST(request: Request) {
         patch.clay_webhook_url = url;
       }
       if ("clayAuthToken" in g) patch.clay_auth_token = text(g.clayAuthToken);
+      if ("calendlyClientId" in g || "calendlyClientSecret" in g) {
+        const current = (await readSettings(config)).calendly_oauth ?? { client_id: "", client_secret: "" };
+        patch.calendly_oauth = {
+          client_id: "calendlyClientId" in g ? text(g.calendlyClientId) : current.client_id,
+          client_secret: "calendlyClientSecret" in g && text(g.calendlyClientSecret) ? text(g.calendlyClientSecret) : current.client_secret,
+        };
+      }
       if ("clayWaitMinutes" in g) patch.clay_wait_minutes = Math.min(120, Math.max(1, Math.round(Number(g.clayWaitMinutes) || DEFAULT_CLAY_WAIT_MINUTES)));
       await writeSettings(config, patch);
       return NextResponse.json(await load(request));
@@ -161,8 +169,6 @@ export async function POST(request: Request) {
       next.enabled = body.enabled;
     }
     patch.booking_config = next;
-    if (body.calcom === "generate") patch.calcom_secret = randomBytes(18).toString("base64url");
-    if (body.calcom === "clear") patch.calcom_secret = null;
     const saved = await rest(`rr_workspaces?id=eq.${encodeURIComponent(workspaceId)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) });
     if (!saved.ok) return NextResponse.json({ ok: false, error: `Could not save (${saved.status}).` }, { status: 500 });
     return NextResponse.json(await load(request));

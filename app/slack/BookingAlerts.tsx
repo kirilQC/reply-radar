@@ -4,6 +4,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { filterTerms, routeBooking } from "../../shared/bookings.mjs";
 
 /**
  * Booked meetings on the Slack tab: the shared setup (QC's Calendly, the Clay table) and, per client, the
@@ -24,7 +25,7 @@ type Client = {
   steps: Step[];
   hubspotConnected: boolean;
   ownCalendly: { email: string; scope: string } | null;
-  calcom: { url: string; secret: string } | null;
+  ownCalCom: { email: string } | null;
   lastBooking: { name: string; at: string; stage: string; error: string } | null;
   briefAbout: string;
   briefInstructions: string;
@@ -37,7 +38,9 @@ type Global = {
   clayAuthSet: boolean;
   clayWaitMinutes: number;
   callbackUrl: string;
-  calendly: { email: string; name: string; scope: string; connectedAt: string } | null;
+  calendly: { email: string; name: string; scope: string; connectedAt: string; auth: string } | null;
+  calendlyOAuth: { clientIdSet: boolean; secretSet: boolean; redirectUri: string };
+  calcom: { email: string; connectedAt: string } | null;
   lastClayCallback: { at: string; meeting_id: string; test: boolean; fields: string[] } | null;
 };
 type Payload = { ok: boolean; error?: string; global: Global; clients: Client[]; testChannelSet: boolean; defaultBriefInstructions: string };
@@ -52,6 +55,7 @@ const ago = (value: string) => {
   if (minutes < 48 * 60) return `${Math.round(minutes / 60)} h ago`;
   return day(value);
 };
+type CalendarEvent = { source: "calendly" | "calcom"; name: string; slug: string; active: boolean; owner: string; url: string };
 const STAGE: Record<string, string> = { new: "received", enriching: "waiting on Clay", ready: "posting", done: "posted", failed: "failed", skipped: "skipped" };
 
 async function call(path: string, init?: RequestInit) {
@@ -74,6 +78,8 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<{ brief: Brief; who: string } | null>(null);
   const [setupOpen, setSetupOpen] = useState(!focus);
+  const [events, setEvents] = useState<{ list: CalendarEvent[]; errors: string[]; loading: boolean }>({ list: [], errors: [], loading: false });
+  const returnPath = focus ? `/bookings/${focus}` : "/slack?view=bookings";
 
   const take = (payload: Payload | null) => {
     if (payload?.global) {
@@ -87,6 +93,23 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
     else setError(result.error);
   };
   useEffect(() => { void load(); }, [settingsPath]);
+  // Back from Calendly's sign-in: say how it went, then drop the flag from the address bar.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("calendly");
+    if (!status) return;
+    note("calendly", status === "connected" ? "Connected" : status);
+    params.delete("calendly");
+    window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+  }, []);
+  const clientId = focus ? data?.clients[0]?.id ?? "" : "";
+  const loadEvents = async () => {
+    setEvents((current) => ({ ...current, loading: true }));
+    const result = await call(`/api/bookings/events${clientId ? `?workspaceId=${encodeURIComponent(clientId)}` : ""}`);
+    setEvents({ list: result.ok ? result.payload.events : [], errors: result.ok ? result.payload.errors : [result.error], loading: false });
+  };
+  const connectedKey = `${data?.global.calendly?.connectedAt ?? ""}|${data?.global.calcom?.connectedAt ?? ""}|${data?.clients[0]?.ownCalendly?.email ?? ""}|${data?.clients[0]?.ownCalCom?.email ?? ""}`;
+  useEffect(() => { if (data && (!focus || clientId)) void loadEvents(); }, [connectedKey, clientId]);
   useEffect(() => { if (focus && data?.clients[0]) setOpen(data.clients[0].id); }, [focus, data?.clients[0]?.id]);
 
   const note = (key: string, value: string) => setNotes((current) => ({ ...current, [key]: value }));
@@ -119,6 +142,21 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
     const result = await call("/api/bookings/calendly", { method: "POST", body: JSON.stringify({ token, workspaceId: workspaceId || undefined }) });
     setBusy("");
     if (result.ok) { clearDraft(key); await load(); note(key, `Connected (${result.payload.scope})`); } else note(key, result.error);
+  };
+  const connectCalCom = async (workspaceId: string, key: string) => {
+    const apiKey = (drafts[key] ?? "").trim();
+    if (!apiKey) return;
+    setBusy(key);
+    note(key, "");
+    const result = await call("/api/bookings/calcom", { method: "POST", body: JSON.stringify({ apiKey, workspaceId: workspaceId || undefined }) });
+    setBusy("");
+    if (result.ok) { clearDraft(key); await load(); note(key, "Connected"); } else note(key, result.error);
+  };
+  const disconnectCalCom = async (workspaceId: string, key: string) => {
+    setBusy(key);
+    const result = await call(`/api/bookings/calcom${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`, { method: "DELETE" });
+    setBusy("");
+    if (result.ok) await load(); else note(key, result.error);
   };
   const disconnect = async (workspaceId: string, key: string) => {
     setBusy(key);
@@ -164,6 +202,53 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
     return setSteps(client, current ? [...others, { ...current, enabled: !current.enabled }] : [...others, { id: "hubspot", type: "hubspot", enabled: true }]);
   };
 
+  const oauthReady = g.calendlyOAuth.clientIdSet && g.calendlyOAuth.secretSet;
+  const oauthHref = (workspaceId: string) => `/api/bookings/calendly/oauth?return=${encodeURIComponent(returnPath)}${workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""}`;
+  /** Calendly for the shared calendar ("") or one client: connected line, or Connect with Calendly with a token fallback. */
+  const calendlyControls = (workspaceId: string, key: string, connection: { email: string; scope: string } | null) => (
+    connection ? (
+      <>
+        <span className="booking-setup-value">{connection.email} · {connection.scope}</span>
+        <button type="button" className="secondary-button" disabled={busy === key} onClick={() => void disconnect(workspaceId, key)}>Disconnect</button>
+      </>
+    ) : (
+      <>
+        {oauthReady ? <a className="primary-button booking-oauth" href={oauthHref(workspaceId)}>Connect with Calendly</a> : <span className="booking-setup-value">Add the OAuth app below to sign in</span>}
+        <input type="password" className="booking-input" placeholder="or a personal access token" value={draft(key, "")} onChange={(event) => setDraft(key, event.target.value)} />
+        <button type="button" className="secondary-button" disabled={busy === key || !draft(key, "").trim()} onClick={() => void connect(workspaceId, key)}>Connect</button>
+      </>
+    )
+  );
+  const calComControls = (workspaceId: string, key: string, connection: { email: string } | null) => (
+    connection ? (
+      <>
+        <span className="booking-setup-value">{connection.email || "Connected"}</span>
+        <button type="button" className="secondary-button" disabled={busy === key} onClick={() => void disconnectCalCom(workspaceId, key)}>Disconnect</button>
+      </>
+    ) : (
+      <>
+        <input type="password" className="booking-input" placeholder="cal.com API key" value={draft(key, "")} onChange={(event) => setDraft(key, event.target.value)} />
+        <button type="button" className="secondary-button" disabled={busy === key || !draft(key, "").trim()} onClick={() => void connectCalCom(workspaceId, key)}>Connect</button>
+      </>
+    )
+  );
+
+  // Which client each event goes to, by the same rule the webhook uses. Assigning adds the event's exact name
+  // to that client's filter; the longest match wins, so the exact name beats any shorter term elsewhere.
+  const routed = (name: string) => routeBooking(name, data.clients.map((client) => ({ id: client.id, name: client.name, filter: client.eventFilter })));
+  const assign = (event: CalendarEvent, targetId: string) => {
+    const target = data.clients.find((client) => client.id === targetId);
+    if (!target) return;
+    const terms = filterTerms(target.eventFilter, target.name);
+    const name = event.name.trim().toLowerCase();
+    if (!terms.includes(name)) void saveClient(target, { eventFilter: [...terms, name].join(", ") });
+  };
+  const unassign = (event: CalendarEvent, client: Client) => {
+    const name = event.name.trim().toLowerCase();
+    const terms = filterTerms(client.eventFilter, client.name).filter((term) => term !== name);
+    void saveClient(client, { eventFilter: terms.join(", ") });
+  };
+
   return (
     <main className="reports-hub">
       <button type="button" className="config-back" onClick={onBack}>{backLabel}</button>
@@ -180,19 +265,46 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
       {setupOpen && <div className="booking-setup">
         <div className="booking-setup-row">
           <strong>Calendly</strong>
-          {g.calendly ? (
-            <>
-              <span className="booking-setup-value">{g.calendly.email} · {g.calendly.scope}</span>
-              <button type="button" className="secondary-button" disabled={busy === "calendly"} onClick={() => void disconnect("", "calendly")}>Disconnect</button>
-            </>
-          ) : (
-            <>
-              <input type="password" className="booking-input" placeholder="Personal access token" value={draft("calendly", "")} onChange={(event) => setDraft("calendly", event.target.value)} />
-              <button type="button" className="secondary-button" disabled={busy === "calendly" || !draft("calendly", "").trim()} onClick={() => void connect("", "calendly")}>Connect</button>
-            </>
-          )}
+          {calendlyControls("", "calendly", g.calendly)}
           {notes.calendly && <small>{notes.calendly}</small>}
         </div>
+
+        <div className="booking-setup-row">
+          <strong>cal.com</strong>
+          {calComControls("", "calcom", g.calcom)}
+          {notes.calcom && <small>{notes.calcom}</small>}
+        </div>
+
+        {(!oauthReady || drafts.oauthOpen === "1") ? (
+          <div className="booking-setup-row">
+            <strong>Calendly app</strong>
+            <input className="booking-input" placeholder={g.calendlyOAuth.clientIdSet ? "Client ID saved" : "OAuth client ID"} value={draft("oauthId", "")} onChange={(event) => setDraft("oauthId", event.target.value)} />
+            <input type="password" className="booking-input" placeholder={g.calendlyOAuth.secretSet ? "Client secret saved" : "OAuth client secret"} value={draft("oauthSecret", "")} onChange={(event) => setDraft("oauthSecret", event.target.value)} />
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={busy === "oauth" || (!draft("oauthId", "").trim() && !draft("oauthSecret", "").trim())}
+              onClick={async () => {
+                const patch: Record<string, string> = {};
+                if (draft("oauthId", "").trim()) patch.calendlyClientId = draft("oauthId", "").trim();
+                if (draft("oauthSecret", "").trim()) patch.calendlyClientSecret = draft("oauthSecret", "").trim();
+                await saveGlobal(patch, "oauth");
+                clearDraft("oauthId"); clearDraft("oauthSecret"); clearDraft("oauthOpen");
+              }}
+            >
+              Save
+            </button>
+            <code className="booking-code">{g.calendlyOAuth.redirectUri}</code>
+            <button type="button" className="secondary-button" onClick={() => copy(g.calendlyOAuth.redirectUri, "oauth")}>Copy redirect URI</button>
+            {notes.oauth && <small>{notes.oauth}</small>}
+          </div>
+        ) : (
+          <div className="booking-setup-row">
+            <strong>Calendly app</strong>
+            <span className="booking-setup-value">OAuth app saved</span>
+            <button type="button" className="secondary-button" onClick={() => setDraft("oauthOpen", "1")}>Change</button>
+          </div>
+        )}
 
         <div className="booking-setup-row">
           <strong>Clay table</strong>
@@ -238,6 +350,47 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
         </div>
         {last && last.fields.length > 0 && <div className="booking-fields">{last.fields.join(" · ")}</div>}
       </div>}
+
+      <div className="hub-group-label">
+        <span>Events</span>
+        <button type="button" className="booking-chip is-more" disabled={events.loading} onClick={() => void loadEvents()}>{events.loading ? "Loading…" : `${events.list.length} · Refresh`}</button>
+      </div>
+      {events.errors.map((message) => <div key={message} className="config-error">{message}</div>)}
+      {events.list.length > 0 ? (
+        <ul className="booking-events">
+          {(focus
+            ? events.list.filter((event) => routed(event.name)?.id === clientId || filterTerms(data.clients[0]?.eventFilter, "").includes(event.name.trim().toLowerCase()))
+            : events.list
+          ).map((event) => {
+            const owner = routed(event.name);
+            const ownerClient = data.clients.find((client) => client.id === owner?.id);
+            return (
+              <li key={`${event.source}:${event.slug}:${event.name}`} className={event.active ? "" : "is-off"}>
+                <strong>{event.name}</strong>
+                <span>{event.source === "calcom" ? "cal.com" : "Calendly"}{event.owner ? ` · ${event.owner}` : ""}{event.active ? "" : " · off"}</span>
+                {focus ? (
+                  ownerClient && <button type="button" className="secondary-button" onClick={() => unassign(event, ownerClient)}>Remove</button>
+                ) : (
+                  <select value={owner?.id ?? ""} onChange={(change) => assign(event, change.target.value)} aria-label={`Client for ${event.name}`}>
+                    <option value="">No client</option>
+                    {data.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+                  </select>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : !events.loading && <div className="hub-empty">{g.calendly || g.calcom ? "No event types found." : "Connect Calendly or cal.com to see events."}</div>}
+      {focus && events.list.length > 0 && (
+        <div className="booking-setup-row booking-add-event">
+          <select value="" onChange={(change) => { const event = events.list.find((item) => `${item.source}:${item.name}` === change.target.value); if (event && data.clients[0]) assign(event, data.clients[0].id); }}>
+            <option value="">Add an event to {data.clients[0]?.name}…</option>
+            {events.list.filter((event) => routed(event.name)?.id !== clientId).map((event) => (
+              <option key={`${event.source}:${event.slug}:${event.name}`} value={`${event.source}:${event.name}`}>{event.name}{routed(event.name) ? ` (now ${data.clients.find((c) => c.id === routed(event.name)?.id)?.name ?? "another client"})` : ""}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="hub-group-label">
         <span>{focus ? "Workflow" : "Clients"}</span>
@@ -322,33 +475,13 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
                 <div className="booking-more">
                   <div className="booking-more-row">
                     <strong>Own Calendly</strong>
-                    {client.ownCalendly ? (
-                      <>
-                        <span className="booking-setup-value">{client.ownCalendly.email} · {client.ownCalendly.scope}</span>
-                        <button type="button" className="secondary-button" disabled={busy === `cal:${client.id}`} onClick={() => void disconnect(client.id, `cal:${client.id}`)}>Disconnect</button>
-                      </>
-                    ) : (
-                      <>
-                        <input type="password" className="booking-input" placeholder="Personal access token" value={draft(`cal:${client.id}`, "")} onChange={(event) => setDraft(`cal:${client.id}`, event.target.value)} />
-                        <button type="button" className="secondary-button" disabled={busy === `cal:${client.id}` || !draft(`cal:${client.id}`, "").trim()} onClick={() => void connect(client.id, `cal:${client.id}`)}>Connect</button>
-                      </>
-                    )}
+                    {calendlyControls(client.id, `cal:${client.id}`, client.ownCalendly)}
                     {notes[`cal:${client.id}`] && <small>{notes[`cal:${client.id}`]}</small>}
                   </div>
 
                   <div className="booking-more-row">
-                    <strong>cal.com</strong>
-                    {client.calcom ? (
-                      <>
-                        <code className="booking-code">{client.calcom.url}</code>
-                        <button type="button" className="secondary-button" onClick={() => copy(client.calcom!.url, `calcom:${client.id}`)}>Copy URL</button>
-                        <code className="booking-code is-short">{client.calcom.secret}</code>
-                        <button type="button" className="secondary-button" onClick={() => copy(client.calcom!.secret, `calcom:${client.id}`)}>Copy secret</button>
-                        <button type="button" className="secondary-button" onClick={() => void saveClient(client, { calcom: "clear" })}>Remove</button>
-                      </>
-                    ) : (
-                      <button type="button" className="secondary-button" onClick={() => void saveClient(client, { calcom: "generate" })}>Make a cal.com webhook</button>
-                    )}
+                    <strong>Own cal.com</strong>
+                    {calComControls(client.id, `calcom:${client.id}`, client.ownCalCom)}
                     {notes[`calcom:${client.id}`] && <small>{notes[`calcom:${client.id}`]}</small>}
                   </div>
 

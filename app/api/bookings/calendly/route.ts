@@ -12,6 +12,7 @@ import {
   writeSettings,
   type CalendlyConnection,
 } from "../../../lib/booking-run";
+import { calendlyToken } from "../../../lib/booking-connect";
 
 /**
  * Connects or disconnects a Calendly account. Without `workspaceId` it is the shared QC calendar, whose
@@ -54,9 +55,10 @@ export async function POST(request: Request) {
     if (workspaceId) {
       const current = await readWorkspace(workspaceId);
       if (!current) return NextResponse.json({ ok: false, error: "Unknown client." }, { status: 404 });
-      await disconnectCalendly(text(current.calendly_token), current.calendly_subscription as CalendlyConnection | null);
+      const own = current.calendly_subscription as CalendlyConnection | null;
+      await disconnectCalendly(await calendlyToken(config, own, text(current.calendly_token), workspaceId).catch(() => ""), own);
     } else {
-      await disconnectCalendly(text(settings.calendly_token), settings.calendly ?? null);
+      await disconnectCalendly(await calendlyToken(config, settings.calendly ?? null, text(settings.calendly_token)).catch(() => ""), settings.calendly ?? null);
     }
     const result = await connectCalendly(token, url);
     if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
@@ -75,11 +77,12 @@ export async function DELETE(request: Request) {
   try {
     if (workspaceId) {
       const current = await readWorkspace(workspaceId);
-      if (current) await disconnectCalendly(text(current.calendly_token), current.calendly_subscription as CalendlyConnection | null);
+      const own = (current?.calendly_subscription ?? null) as CalendlyConnection | null;
+      if (current) await disconnectCalendly(await calendlyToken(config, own, text(current.calendly_token), workspaceId).catch(() => ""), own);
       await patchWorkspace(workspaceId, { calendly_token: null, calendly_subscription: null });
     } else {
       const settings = await readSettings(config);
-      await disconnectCalendly(text(settings.calendly_token), settings.calendly ?? null);
+      await disconnectCalendly(await calendlyToken(config, settings.calendly ?? null, text(settings.calendly_token)).catch(() => ""), settings.calendly ?? null);
       await writeSettings(config, { calendly_token: "", calendly: null });
     }
     return NextResponse.json({ ok: true });

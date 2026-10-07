@@ -73,7 +73,13 @@ export type CalendlyConnection = {
   signing_key: string;
   url: string;
   connected_at: string;
+  /** "oauth" when connected with Connect with Calendly: the token then expires and is refreshed. */
+  auth?: "token" | "oauth";
+  refresh_token?: string;
+  expires_at?: string;
 };
+/** A cal.com account connected with an API key: QC made the webhook and signs nothing, cal.com signs with `secret`. */
+export type CalComConnection = { api_key: string; webhook_id: string; secret: string; url: string; email: string; connected_at: string };
 export type BookingSettings = {
   clay_webhook_url?: string;
   clay_auth_token?: string;
@@ -82,6 +88,9 @@ export type BookingSettings = {
   base_url?: string;
   calendly_token?: string;
   calendly?: CalendlyConnection | null;
+  /** The Calendly OAuth app QC signs in through, registered once at developer.calendly.com. */
+  calendly_oauth?: { client_id: string; client_secret: string } | null;
+  calcom?: CalComConnection | null;
   last_clay_callback?: { at: string; meeting_id: string; test: boolean; fields: string[] } | null;
 };
 
@@ -250,7 +259,7 @@ export type IntakeResult = { ok: boolean; note: string; meetingId?: string; clie
  * does not have its own connection. Routing looks at clients that are switched off too, so a booking for a
  * client that is off is dropped rather than handed to the next closest name.
  */
-async function routeIntake(config: Config, parsed: Parsed, workspaceId?: string): Promise<{ workspace: Row | null; note: string }> {
+async function routeIntake(config: Config, parsed: Parsed, source: string, workspaceId?: string): Promise<{ workspace: Row | null; note: string }> {
   if (workspaceId) {
     const workspace = await loadWorkspace(config, workspaceId);
     if (!workspace) return { workspace: null, note: "Unknown client." };
@@ -261,7 +270,10 @@ async function routeIntake(config: Config, parsed: Parsed, workspaceId?: string)
     return { workspace, note: "" };
   }
   const everyone = await rows(config, `rr_workspaces?select=${WORKSPACE_COLUMNS}&slug=neq.misc&offboarded_at=is.null`);
-  const shared = everyone.filter((workspace) => !text(object(workspace.calendly_subscription).subscription_uri));
+  // A client with its own calendar of this kind gets its bookings on its own URL, never from the shared one.
+  const shared = everyone.filter((workspace) => source === "calcom"
+    ? !text(workspace.calcom_secret)
+    : !text(object(workspace.calendly_subscription).subscription_uri));
   const match = routeBooking(parsed.eventName, shared.map((workspace) => ({ id: text(workspace.id), name: text(workspace.name), filter: clientConfig(workspace).eventFilter })));
   if (!match) return { workspace: null, note: `No single client matches the event "${parsed.eventName}".` };
   return { workspace: shared.find((workspace) => text(workspace.id) === match.id) ?? null, note: "" };
@@ -290,7 +302,7 @@ async function noteChange(config: Config, meeting: Row, kind: "rescheduled" | "c
  */
 export async function intakeBooking(config: Config, parsed: Parsed, source: string, raw: unknown, workspaceId?: string): Promise<IntakeResult> {
   if (parsed.kind === "ignored") return { ok: true, note: "Nothing to do for this event." };
-  const { workspace, note } = await routeIntake(config, parsed, workspaceId);
+  const { workspace, note } = await routeIntake(config, parsed, source, workspaceId);
   if (!workspace) return { ok: true, note };
   const client = text(workspace.name);
   const settings = clientConfig(workspace);

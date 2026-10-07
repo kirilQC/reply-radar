@@ -158,6 +158,10 @@ const formatWhen = (iso: string) => {
 export default function SlackPage() {
   const [view, setView] = useState<"automations" | "clients" | "brief" | "personal" | "replies" | "bookings">("automations");
   const [automation, setAutomation] = useState<Automation>("morning_brief");
+  // /slack?view=bookings (where Calendly's sign-in returns to) opens Booked meetings directly.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("view") === "bookings") setView("bookings");
+  }, []);
   // Both directories are held at once so the landing screen can show each automation's card without
   // opening it. `directory` below is whichever one is currently open.
   const [directories, setDirectories] = useState<Record<Automation, Directory | null>>({ morning_brief: null, call_analysis: null, eow_report: null });
