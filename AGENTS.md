@@ -48,8 +48,8 @@ Read it rather than re-deriving things. `context/README.md` is the index.
    work goes through `/api/ai/*` routes the worker calls over HTTP. Never keep a second copy.
 7. **There is no local `.env`**, so no local production data. Anything needing live data must be a
    button the owner clicks. Verify changes with the harness pattern in `context/07-verification.md`.
-8. **Lint baseline is exactly 18 errors and 67 warnings**, via `npx eslint .` — **`npx next lint` is
-   broken here.** Any nineteenth is yours. Don't fix the existing ones as drive-by work.
+8. **Lint baseline is exactly 160 errors and 103 warnings** (Oct 2026), via `npx eslint .` — **`npx next lint` is
+   broken here.** Any one more is yours. Don't fix the existing ones as drive-by work.
 9. **The brief's layout is applied to the model's output, not asked of it** (`briefFraming`). It looks
    like something to simplify and is not; `context/09-morning-brief.md` has the two failures that
    argue for it.
@@ -77,8 +77,8 @@ Authentication of any kind. Webhook secret verification. Encryption of HeyReach 
 
 ```bash
 npm run typecheck     # clean
-npx eslint .          # exactly 18 errors, 67 warnings
-npm test              # 341 passing, 0 failing
+npx eslint .          # exactly 160 errors, 103 warnings
+npm test              # 836 passing, 0 failing
 npm run watermark     # every source file carries the banner
 npm run build         # confirm any new route appears in the route list
 ```

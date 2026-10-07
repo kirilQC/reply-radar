@@ -1,5 +1,28 @@
 # 8. Session handoff — state as of `8e8f90a`
 
+> ## Addendum — Oct 7, 2026 (newer than everything below; trust it where they differ)
+>
+> **Baselines now:** `npm test` → **836 passing**; `npx eslint .` → **160 errors, 103 warnings** (the
+> baseline; do not add one). Lint and test counts further down this file are historical.
+>
+> **Changes made alongside the QC Portal (repo `kirilQC/qc-portal`) work:**
+> - **Daily stats count QC's campaigns only** (`collectDailyStats`). Some clients' HeyReach keys are their
+>   own account; `GetOverallStats` is now asked for the IDs `ourCampaigns()` recognises, a client with none
+>   gets a window of zeros, and the stored window is replaced (merged instead if a sender failed to load).
+>   Test: `tests/daily-stats-scope.test.mjs`. CAMB had shown its own team's ~110/day as QC's work.
+> - **Analytics are collected for offboarded clients** (`staleAnalyticsWorkspace` no longer filters
+>   `offboarded_at`). Bluvia kept sending after its Oct 3 offboarding and its days read as zero in the
+>   portal. AI drafting, deals and the health poll still skip offboarded clients.
+> - **Portal setup alerts** on each client's project management page:
+>   `app/api/project-management/setup-checks/route.ts` + `SetupAlerts` in
+>   `app/project-management/[slug]/page.tsx`. Flags a missing/unsynced messaging doc, weekly-call recaps not
+>   set up / none yet / stale (>14 days), and no QC Brain folder, each with a fix link and "Add as task".
+> - The portal keeps a verbatim copy of `shared/campaign-code.mjs`; change both together.
+>
+> The portal's own docs (`README.md`, `CLAUDE.md`, `docs/`) describe how it consumes this data.
+
+---
+
 Read this for **where the project actually stands right now**; read `01`–`07` for how the system
 works, and `09-morning-brief.md` for the feature that has taken up most of the recent sessions.
 
