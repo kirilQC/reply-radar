@@ -111,28 +111,38 @@ test("Reply #N counts the lead's messages up to this one", () => {
   assert.equal(alert.replyNumber(messages, messages[3]), 2);
 });
 
-test("the thread lists the conversation by speaker, then the latest reply, then an editable draft and a confirmed Send", () => {
+test("the thread is the conversation by speaker, then an editable draft and a confirmed Send", () => {
   const thread = alert.buildAlertThread({ messages, latest: messages[3], messageId: "m4", leadName: "Dana Whitfield", senderName: "Sam Ortiz", draft: "Great, sending it now. Does (insert time here) work?", conversationId: "conv-1" });
   const types = thread.blocks.map((block) => block.type);
-  assert.deepEqual(types, ["section", "rich_text", "divider", "section", "rich_text", "divider", "section", "input", "actions"]);
+  assert.deepEqual(types, ["section", "rich_text", "divider", "input", "actions"]);
   assert.equal(thread.blocks[0].text.text, "*Conversation History*");
   const history = thread.blocks[1].elements[0].elements[0].text;
   assert.equal(history.split("\n\n")[0], "1. Sam Ortiz: Hi Dana, saw Harbor & Pine is opening a new DC. Worth a chat?");
   assert.match(history, /\n\n2\. Dana Whitfield: Maybe\. What does it cost\?\n\n3\. Sam Ortiz: /);
-  assert.equal(thread.blocks[3].text.text, "*Latest Lead Reply*");
-  assert.equal(thread.blocks[4].elements[0].elements[0].text, "Sure, send it over.\nThursday works too.");
-  assert.equal(thread.blocks[6].text.text, "*Generated Reply*");
-  const input = thread.blocks[7];
+  // The latest lead reply is on the card now, not in the thread.
+  assert.doesNotMatch(JSON.stringify(thread), /Latest Lead Reply/);
+  assert.equal(thread.blocks[2].block_id, alert.REPLY_HEADING_BLOCK_ID);
+  const input = thread.blocks[3];
   assert.equal(input.block_id, alert.DRAFT_BLOCK_ID);
+  assert.equal(input.label.text, "Generated Reply");
   assert.equal(input.dispatch_action, false);
   assert.equal(input.element.multiline, true);
   assert.equal(input.element.initial_value, "Great, sending it now. Does (insert time here) work?");
-  const button = thread.blocks[8].elements[0];
+  const button = thread.blocks[4].elements[0];
   assert.equal(button.action_id, alert.SEND_REPLY_ACTION);
   assert.equal(button.style, "primary");
   assert.equal(button.confirm.text.text, "Send this reply to Dana Whitfield on LinkedIn from Sam Ortiz?");
   assert.deepEqual(alert.parseSendValue(button.value), { messageId: "m4", conversationId: "conv-1", test: false });
   assert.doesNotMatch(JSON.stringify(thread), DASHES);
+});
+
+test("the card carries the latest lead reply, preformatted, and no company summary", () => {
+  const lead = alert.leadFromRow({ name: "Dana Whitfield", company: "Harbor & Pine", raw_data: { reply_radar: { ai_ark: { company: { summary: { description: "A long company description." } } } } } });
+  const card = alert.buildAlertCard({ lead, replyNumber: 2, senderName: "Sam Ortiz", campaignName: "HP001: DCs", clientName: "Harbor", latestReply: "Sure, send it over.\nThursday works too." });
+  const heading = card.blocks.findIndex((block) => block.text?.text === "*Latest Lead Reply*");
+  assert.ok(heading > 0);
+  assert.equal(card.blocks[heading + 1].elements[0].elements[0].text, "Sure, send it over.\nThursday works too.");
+  assert.doesNotMatch(JSON.stringify(card), /Company Summary|A long company description/);
 });
 
 test("a very long conversation keeps the newest messages, numbered as they really are, inside Slack's block limit", () => {

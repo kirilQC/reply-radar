@@ -273,7 +273,7 @@ export async function alertMessage(config: Config, messageId: string, opts: { te
       || thread.map((row) => text(object(radarOf(row.raw_data).campaign).name)).find(Boolean) || "";
     const leadFields = leadFromRow(lead);
     const draft = await draftFor(workspace, conversationId, thread, leadFields.name, campaignName);
-    const card = buildAlertCard({ lead: leadFields, replyNumber: replyNumber(messages, self), senderName, campaignName, clientName: text(workspace.name), test });
+    const card = buildAlertCard({ lead: leadFields, replyNumber: replyNumber(messages, self), senderName, campaignName, clientName: text(workspace.name), latestReply: latest.body, test });
     const reply = buildAlertThread({ messages, latest, messageId, leadName: leadFields.name, senderName, draft, conversationId, test });
 
     cardTs = await postMessage(channel, card.text, "", card.blocks);

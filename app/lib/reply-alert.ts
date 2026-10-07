@@ -133,18 +133,7 @@ export type AlertLead = {
   tags: string[];
   domain: string;
   companyLinkedinUrl: string;
-  /** One line about the company, shown in italics under the card as the n8n bot did. */
-  companySummary: string;
 };
-
-/** A company description as one line, cut at a sentence or word boundary so it never runs on. */
-function oneLineSummary(value: string): string {
-  const flat = value.replace(/\s+/g, " ").trim();
-  if (flat.length <= 220) return flat;
-  const cut = flat.slice(0, 220);
-  const sentence = cut.lastIndexOf(". ");
-  return sentence > 120 ? cut.slice(0, sentence + 1) : `${cut.slice(0, cut.lastIndexOf(" "))}…`;
-}
 
 /**
  * The card's lead fields out of an rr_leads row: its own columns first, AI Ark's enrichment second.
@@ -173,7 +162,6 @@ export function leadFromRow(row: Row): AlertLead {
     tags: patternTags(company),
     domain: bareDomain(row.company_domain) || bareDomain(companyLinks.website) || bareDomain(summary.website),
     companyLinkedinUrl: withScheme(text(companyLinks.linkedin)),
-    companySummary: oneLineSummary(text(summary.description) || text(summary.seo)),
   };
 }
 
@@ -219,6 +207,8 @@ export type AlertCardInput = {
   senderName: string;
   campaignName: string;
   clientName: string;
+  /** The lead's latest message, shown on the card under the lead and campaign details. */
+  latestReply?: string;
   /** A sample posted from Configuration to the test channel. */
   test?: boolean;
 };
@@ -249,7 +239,10 @@ export function buildAlertCard(input: AlertCardInput): { text: string; blocks: R
   const turn = Math.max(1, input.replyNumber);
   const blocks: Row[] = [section(`${turn === 1 ? ":email:" : ":arrows_counterclockwise:"} *New Reply · Reply #${turn}*`)];
   for (const part of [person, company, ours]) if (part) blocks.push(section(part));
-  if (lead.companySummary) blocks.push(section(`*Company Summary:* _${escapeMrkdwn(lead.companySummary)}_`));
+  // The reply itself, on the card, so the channel reads as a list of what leads said without opening
+  // threads. Preformatted, as the n8n bot showed it, so nothing a lead typed is read as markup.
+  const latestReply = (input.latestReply ?? "").trim();
+  if (latestReply) blocks.push(section("*Latest Lead Reply*"), ...preformatted(latestReply).slice(0, 5));
   if (input.test) blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "_Test post. Nothing will be sent from it._" }] });
   const who = lead.name || "a lead";
   return { text: `${input.test ? "Test: " : ""}New reply from ${who}${input.clientName ? ` (${input.clientName})` : ""}`, blocks };
@@ -302,22 +295,20 @@ export function buildAlertThread(input: AlertThreadInput): { text: string; block
     const hidden = entries.length - shown.length;
     history = preformatted([`(${hidden} earlier message${hidden === 1 ? "" : "s"} not shown)`, ...shown].join("\n\n"));
   }
-  const latest = preformatted(input.latest.body.trim() || " ").slice(0, 5);
   const draft = input.draft.trim().slice(0, 3_000);
   const confirmText = `Send this reply to ${input.leadName || "this lead"} on LinkedIn from ${input.senderName || "the sender"}?`;
   const blocks: Row[] = [
     section("*Conversation History*"),
     ...history,
-    { type: "divider" },
-    section("*Latest Lead Reply*"),
-    ...latest,
-    { type: "divider" },
-    section("*Generated Reply*", REPLY_HEADING_BLOCK_ID),
+    // The latest lead reply sits on the card itself, so the thread is the history and the draft.
+    // This divider marks where the draft starts: everything from it down is replaced once sent.
+    { type: "divider", block_id: REPLY_HEADING_BLOCK_ID },
     {
       type: "input",
       block_id: DRAFT_BLOCK_ID,
       dispatch_action: false,
-      label: { type: "plain_text", text: "Reply", emoji: false },
+      // Slack requires a label on an input, so it is the heading rather than a second one above it.
+      label: { type: "plain_text", text: "Generated Reply", emoji: false },
       element: {
         type: "plain_text_input",
         action_id: DRAFT_ACTION_ID,
