@@ -193,8 +193,6 @@ export default function AdminPage() {
   const [logoStatus, setLogoStatus] = useState("");
   const [messagingSyncing, setMessagingSyncing] = useState(false);
   const [messagingSyncResult, setMessagingSyncResult] = useState("");
-  const [replyAlertTesting, setReplyAlertTesting] = useState(false);
-  const [replyAlertTestResult, setReplyAlertTestResult] = useState("");
   const [themePreset, setThemePreset] = useState("midnight");
   const [logos, setLogos] = useState<Record<string, string>>({});
   const [accentOverrides, setAccentOverrides] = useState<Record<string, string>>({});
@@ -275,7 +273,6 @@ export default function AdminPage() {
     setDraftBaseline(initial);
     setWorkspaceNotice("");
     setLogoStatus("");
-    setReplyAlertTestResult("");
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `new-workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -692,19 +689,6 @@ export default function AdminPage() {
     }
     setMessagingSyncing(false);
   };
-  // Posts this client's latest reply as a card and thread to the Slack test channel, never the client's.
-  const sendReplyAlertTest = async () => {
-    if (!client.id || replyAlertTesting) return;
-    setReplyAlertTesting(true);
-    setReplyAlertTestResult("");
-    try {
-      const response = await fetch("/api/slack/reply-alert", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ test: true, workspaceId: client.id }) }).catch(() => null);
-      const payload = await response?.json().catch(() => null) as { ok?: boolean; error?: string } | null;
-      setReplyAlertTestResult(payload?.ok ? "Posted to the test channel." : payload?.error || "Could not post the test.");
-    } finally {
-      setReplyAlertTesting(false);
-    }
-  };
   return (
     <div className="app-shell">
       <AppSidebar />
@@ -1028,17 +1012,8 @@ export default function AdminPage() {
                         REPLIES CHANNEL ID
                         <input value={workspaceDraft.slackReplies} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slackReplies: event.target.value }))} placeholder="C09REPLIES" />
                       </label>
-                      <label className="internal-only-toggle">
-                        <input type="checkbox" checked={workspaceDraft.replyAlerts} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, replyAlerts: event.target.checked }))} />
-                        <span>Post lead replies to Slack</span>
-                      </label>
-                      {/* Uses the saved client, so it is off until the client exists. */}
-                      <div className="messaging-doc-sync">
-                        <button type="button" onClick={sendReplyAlertTest} disabled={replyAlertTesting || isNewWorkspace || !client.id}>
-                          {replyAlertTesting ? "Sending…" : "Send a test"}
-                        </button>
-                        {replyAlertTestResult && <small className="messaging-doc-sync-result">{replyAlertTestResult}</small>}
-                      </div>
+                      {/* Turning reply alerts on and off, and the test post, live on the Slack tab with
+                          the other automations. Only the channel is set here, beside the client's others. */}
                     </section>
                     <section className="admin-panel client-config-section" id="client-granola">
                       <div className="panel-heading"><div><h2>Call transcripts</h2><p>Which Granola meeting belongs to this client.</p></div></div>

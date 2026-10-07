@@ -6980,3 +6980,9 @@ body.light-mode .brain-icp {
 .heyreach-pull-confirm .heyreach-pull-go { background: var(--accent); border-color: transparent; color: var(--accent-ink, #fff); }
 .heyreach-pull-status { color: var(--muted); font-size: 10.5px; line-height: 1.5; }
 .heyreach-pull-error { color: var(--coral, #ed8a77); font-size: 10.5px; }
+
+/* Reply alerts on the Slack tab: the replies channel is edited in place in the client row. */
+.brief-channel .reply-alert-channel {
+  width: 128px; margin-left: 6px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px;
+  background: var(--panel); color: var(--text); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
