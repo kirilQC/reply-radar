@@ -51,6 +51,9 @@ type ClientWorkspace = {
   brainFolder?: string;
   slackInternalChannelId?: string;
   slackExternalChannelId?: string;
+  /** Where every lead reply is posted when reply alerts are on. */
+  slackRepliesChannelId?: string;
+  replyAlertsEnabled?: boolean;
   granolaTitleMatch?: string;
   /** The extras, always lists. A database without the migration run reads them as empty, not as absent. */
   slackExtraChannelIds?: string[];
@@ -76,8 +79,9 @@ type WorkspaceDraft = {
   anthropicModel: string; systemPrompt: string; apiKey: string; brainFolder: string;
   slackInternal: string; slackExternal: string; slackInternalOnly: boolean; granolaTitleMatch: string;
   slackExtra: string[]; granolaExtra: string[]; airtableBaseId: string; clayDncWebhookUrl: string;
+  slackReplies: string; replyAlerts: boolean;
 };
-const emptyDraft: WorkspaceDraft = { name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", slackInternalOnly: false, granolaTitleMatch: "", slackExtra: [], granolaExtra: [], airtableBaseId: "", clayDncWebhookUrl: "" };
+const emptyDraft: WorkspaceDraft = { name: "", slug: "", brief: "", timezone: "America/New_York", website: "", messagingDocUrl: "", anthropicModel: "", systemPrompt: "", apiKey: "", brainFolder: "", slackInternal: "", slackExternal: "", slackInternalOnly: false, granolaTitleMatch: "", slackExtra: [], granolaExtra: [], airtableBaseId: "", clayDncWebhookUrl: "", slackReplies: "", replyAlerts: false };
 
 /**
  * The slug as it is being typed: lowercase, and anything that is not a letter or digit becomes a hyphen.
@@ -189,6 +193,8 @@ export default function AdminPage() {
   const [logoStatus, setLogoStatus] = useState("");
   const [messagingSyncing, setMessagingSyncing] = useState(false);
   const [messagingSyncResult, setMessagingSyncResult] = useState("");
+  const [replyAlertTesting, setReplyAlertTesting] = useState(false);
+  const [replyAlertTestResult, setReplyAlertTestResult] = useState("");
   const [themePreset, setThemePreset] = useState("midnight");
   const [logos, setLogos] = useState<Record<string, string>>({});
   const [accentOverrides, setAccentOverrides] = useState<Record<string, string>>({});
@@ -236,6 +242,7 @@ export default function AdminPage() {
             slackExtraChannelIds: asTextList(item.slack_extra_channel_ids), granolaExtraTitleMatches: asTextList(item.granola_extra_title_matches),
             airtableBaseId: String(item.airtable_base_id ?? ""),
             clayDncWebhookUrl: String(item.clay_dnc_webhook_url ?? ""),
+            slackRepliesChannelId: String(item.slack_replies_channel_id ?? ""), replyAlertsEnabled: item.reply_alerts_enabled === true,
             guardrails: item.guardrails && typeof item.guardrails === "object" ? item.guardrails as Record<string, unknown> : {},
             offboardedAt: item.offboardedAt ? String(item.offboardedAt) : undefined,
           }));
@@ -263,11 +270,12 @@ export default function AdminPage() {
     if (!workspaceOpen || !client) return;
     // A new workspace starts with no slug: it is derived from the name on save. The placeholder slug it
     // carries in the list is only a local key until then.
-    const initial: WorkspaceDraft = { name: client.name, slug: client.isNew ? "" : client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", slackInternalOnly: Boolean(client.guardrails?.slack_internal_only), granolaTitleMatch: client.granolaTitleMatch ?? "", slackExtra: client.slackExtraChannelIds ?? [], granolaExtra: client.granolaExtraTitleMatches ?? [], airtableBaseId: client.airtableBaseId ?? "", clayDncWebhookUrl: client.clayDncWebhookUrl ?? "" };
+    const initial: WorkspaceDraft = { name: client.name, slug: client.isNew ? "" : client.slug, brief: client.brief ?? "", timezone: client.timezone ?? "America/New_York", website: client.website ?? "", messagingDocUrl: String(client.guardrails?.messaging_doc_url ?? ""), anthropicModel: client.anthropicModel ?? "", systemPrompt: client.systemPrompt ?? "", apiKey: "", brainFolder: client.brainFolder ?? "", slackInternal: client.slackInternalChannelId ?? "", slackExternal: client.slackExternalChannelId ?? "", slackInternalOnly: Boolean(client.guardrails?.slack_internal_only), granolaTitleMatch: client.granolaTitleMatch ?? "", slackExtra: client.slackExtraChannelIds ?? [], granolaExtra: client.granolaExtraTitleMatches ?? [], airtableBaseId: client.airtableBaseId ?? "", clayDncWebhookUrl: client.clayDncWebhookUrl ?? "", slackReplies: client.slackRepliesChannelId ?? "", replyAlerts: Boolean(client.replyAlertsEnabled) };
     /* eslint-disable-next-line react-hooks/set-state-in-effect */ setWorkspaceDraft(initial);
     setDraftBaseline(initial);
     setWorkspaceNotice("");
     setLogoStatus("");
+    setReplyAlertTestResult("");
   }, [selected, workspaceOpen]);
   const addWorkspace = () => {
     const next: ClientWorkspace = { name: "", slug: `new-workspace-${Date.now()}`, leads: 0, status: "Not configured", tone: "#8b7cff", lastSync: "not synced", createdAt: new Date().toISOString(), isNew: true };
@@ -303,6 +311,8 @@ export default function AdminPage() {
     put("granolaExtra", "granolaExtraTitleMatches", workspaceDraft.granolaExtra);
     put("airtableBaseId", "airtableBaseId", workspaceDraft.airtableBaseId);
     put("clayDncWebhookUrl", "clayDncWebhookUrl", workspaceDraft.clayDncWebhookUrl);
+    put("slackReplies", "slackRepliesChannelId", workspaceDraft.slackReplies);
+    put("replyAlerts", "replyAlertsEnabled", workspaceDraft.replyAlerts);
     put("anthropicModel", "anthropicModel", workspaceDraft.anthropicModel || null);
     put("systemPrompt", "systemPrompt", workspaceDraft.systemPrompt || null);
     // Kept in guardrails with the client's other switches, so they need no column of their own. Only the
@@ -349,7 +359,7 @@ export default function AdminPage() {
       const savedGuardrails = savedRow?.guardrails && typeof savedRow.guardrails === "object" ? savedRow.guardrails as Record<string, unknown> : null;
       const keyWasSaved = Boolean(workspaceDraft.apiKey.trim()) || client.keyConfigured;
       const savedLogo = logos[oldSlug] ?? client.logoUrl;
-      const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: String(savedRow?.name ?? normalizedName), slug: savedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: String(savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked ?? "")), keyConfigured: Boolean(savedRow?.key_configured ?? keyWasSaved), timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaTitleMatch: String(savedRow?.granola_title_match ?? workspaceDraft.granolaTitleMatch), slackExtraChannelIds: asTextList(savedRow?.slack_extra_channel_ids ?? workspaceDraft.slackExtra), granolaExtraTitleMatches: asTextList(savedRow?.granola_extra_title_matches ?? workspaceDraft.granolaExtra), airtableBaseId: String(savedRow?.airtable_base_id ?? workspaceDraft.airtableBaseId), clayDncWebhookUrl: String(savedRow?.clay_dnc_webhook_url ?? workspaceDraft.clayDncWebhookUrl), anthropicModel: workspaceDraft.anthropicModel, systemPrompt: workspaceDraft.systemPrompt, tone: typeof body.accentColor === "string" ? body.accentColor : item.tone, logoUrl: savedLogo, webhookUrl: String(savedRow?.webhook_url ?? item.webhookUrl ?? ""), guardrails: savedGuardrails ?? { ...(item.guardrails ?? {}), ...((body.guardrails as Record<string, unknown> | undefined) ?? {}) }, isNew: false } : item);
+      const next = workspaceClients.map((item, index) => index === selected ? { ...item, id: String(savedRow?.id ?? item.id ?? ""), name: String(savedRow?.name ?? normalizedName), slug: savedSlug, brief: workspaceDraft.brief, apiKey: "", apiKeyMasked: String(savedRow?.heyreach_api_key_masked ?? (workspaceDraft.apiKey.trim() ? `Saved key ••••${workspaceDraft.apiKey.trim().slice(-4)}` : item.apiKeyMasked ?? "")), keyConfigured: Boolean(savedRow?.key_configured ?? keyWasSaved), timezone: workspaceDraft.timezone, website: workspaceDraft.website, brainFolder: workspaceDraft.brainFolder, slackInternalChannelId: String(savedRow?.slack_internal_channel_id ?? workspaceDraft.slackInternal), slackExternalChannelId: String(savedRow?.slack_external_channel_id ?? workspaceDraft.slackExternal), granolaTitleMatch: String(savedRow?.granola_title_match ?? workspaceDraft.granolaTitleMatch), slackExtraChannelIds: asTextList(savedRow?.slack_extra_channel_ids ?? workspaceDraft.slackExtra), granolaExtraTitleMatches: asTextList(savedRow?.granola_extra_title_matches ?? workspaceDraft.granolaExtra), airtableBaseId: String(savedRow?.airtable_base_id ?? workspaceDraft.airtableBaseId), clayDncWebhookUrl: String(savedRow?.clay_dnc_webhook_url ?? workspaceDraft.clayDncWebhookUrl), slackRepliesChannelId: String(savedRow?.slack_replies_channel_id ?? workspaceDraft.slackReplies), replyAlertsEnabled: savedRow && "reply_alerts_enabled" in savedRow ? savedRow.reply_alerts_enabled === true : workspaceDraft.replyAlerts, anthropicModel: workspaceDraft.anthropicModel, systemPrompt: workspaceDraft.systemPrompt, tone: typeof body.accentColor === "string" ? body.accentColor : item.tone, logoUrl: savedLogo, webhookUrl: String(savedRow?.webhook_url ?? item.webhookUrl ?? ""), guardrails: savedGuardrails ?? { ...(item.guardrails ?? {}), ...((body.guardrails as Record<string, unknown> | undefined) ?? {}) }, isNew: false } : item);
       // Per-slug local state follows the client to its new slug.
       if (savedSlug !== oldSlug) {
         if (logos[oldSlug]) setLogos((current) => ({ ...current, [savedSlug]: current[oldSlug] }));
@@ -682,6 +692,19 @@ export default function AdminPage() {
     }
     setMessagingSyncing(false);
   };
+  // Posts this client's latest reply as a card and thread to the Slack test channel, never the client's.
+  const sendReplyAlertTest = async () => {
+    if (!client.id || replyAlertTesting) return;
+    setReplyAlertTesting(true);
+    setReplyAlertTestResult("");
+    try {
+      const response = await fetch("/api/slack/reply-alert", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ test: true, workspaceId: client.id }) }).catch(() => null);
+      const payload = await response?.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+      setReplyAlertTestResult(payload?.ok ? "Posted to the test channel." : payload?.error || "Could not post the test.");
+    } finally {
+      setReplyAlertTesting(false);
+    }
+  };
   return (
     <div className="app-shell">
       <AppSidebar />
@@ -1001,6 +1024,21 @@ export default function AdminPage() {
                         placeholder="C09MOREID"
                         onChange={(next) => setWorkspaceDraft((draft) => ({ ...draft, slackExtra: next }))}
                       />
+                      <label className="field-label">
+                        REPLIES CHANNEL ID
+                        <input value={workspaceDraft.slackReplies} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, slackReplies: event.target.value }))} placeholder="C09REPLIES" />
+                      </label>
+                      <label className="internal-only-toggle">
+                        <input type="checkbox" checked={workspaceDraft.replyAlerts} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, replyAlerts: event.target.checked }))} />
+                        <span>Post lead replies to Slack</span>
+                      </label>
+                      {/* Uses the saved client, so it is off until the client exists. */}
+                      <div className="messaging-doc-sync">
+                        <button type="button" onClick={sendReplyAlertTest} disabled={replyAlertTesting || isNewWorkspace || !client.id}>
+                          {replyAlertTesting ? "Sending…" : "Send a test"}
+                        </button>
+                        {replyAlertTestResult && <small className="messaging-doc-sync-result">{replyAlertTestResult}</small>}
+                      </div>
                     </section>
                     <section className="admin-panel client-config-section" id="client-granola">
                       <div className="panel-heading"><div><h2>Call transcripts</h2><p>Which Granola meeting belongs to this client.</p></div></div>

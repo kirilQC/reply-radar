@@ -73,6 +73,12 @@ create table if not exists rr_workspaces (
   -- is hidden from listings and skipped by automations, but nothing is deleted: webhooks keep storing its
   -- replies and clearing this restores it.
   offboarded_at timestamptz,
+  -- Reply alerts (app/lib/reply-alert-run.ts): every lead reply posted to this channel with a draft and a
+  -- Send button. Off by default like the other automations. `reply_alerts_enabled_at` is stamped when it is
+  -- switched on, and no reply older than that is ever posted, so turning it on does not flood the channel.
+  slack_replies_channel_id text,
+  reply_alerts_enabled boolean not null default false,
+  reply_alerts_enabled_at timestamptz,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 

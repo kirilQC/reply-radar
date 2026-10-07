@@ -6,8 +6,12 @@ import { legacySlugFilter } from "../../../../lib/legacy-slug";
 import { ingestHeyReachWebhook } from "../../../../lib/heyreach-ingestion";
 import { isHeyReachValidationPayload } from "../../../../lib/heyreach-conversation";
 import { classifyLatestReply } from "../../../../lib/reply-sentiment";
+import { alertNewReplies } from "../../../../lib/reply-alert-run";
 
 const ready = (workspaceId: string) => NextResponse.json({ ok: true, webhook: "ready", workspace: workspaceId });
+// Room for the work handed to `after()`: the reply alert may write a draft before it posts.
+export const maxDuration = 60;
+
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 export async function GET(_request: Request, context: { params: Promise<{ workspaceId: string }> }) {
@@ -71,6 +75,9 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     // client's reply is stored but not classified.
     if (!("discarded" in result) && result.conversationId && !workspace.offboarded_at) {
       after(() => classifyLatestReply({ url, key }, result.conversationId, workspace.slug ?? workspaceId, { workspaceName: workspace.name ?? undefined }).catch(() => undefined));
+      // The Slack reply alert, for clients that have it on. After the response, so HeyReach is answered
+      // first; it checks the client's switch itself, and the worker's sweep catches anything this misses.
+      after(() => alertNewReplies({ url, key }, result.conversationId).catch(() => undefined));
     }
     console.info("heyreach_webhook_processed", { workspaceId, origin, ...result });
     return NextResponse.json({ ok: true, ...result }, { status: 200 });

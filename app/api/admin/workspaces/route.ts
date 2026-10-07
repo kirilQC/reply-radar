@@ -35,6 +35,10 @@ function supabaseConfig() {
   return { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
 }
 
+/** Added by the 20261007 reply alerts migration. */
+const REPLY_ALERT_COLUMNS = ["slack_replies_channel_id", "reply_alerts_enabled", "reply_alerts_enabled_at"];
+const REPLY_ALERTS_MIGRATION_MISSING = "Reply alerts are not set up in the database yet. Run the reply alerts migration, then save again.";
+
 /**
  * True when a PostgREST error is about the `offboarded_at` column, i.e. the migration has not run yet.
  */
@@ -61,7 +65,11 @@ export async function GET(request: Request) {
     if (!missingOffboardedColumn(errorText)) return response;
     return fetch(`${url}/rest/v1/rr_workspaces?select=${columns}&slug=neq.misc&order=name.asc`, { headers, cache: "no-store" });
   };
-  let response = await list("id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,brain_folder,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids,granola_title_match,granola_extra_title_matches,airtable_base_id,clay_dnc_webhook_url,morning_brief_enabled,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails");
+  const fullColumns = "id,name,slug,client_brief,anthropic_model,custom_system_prompt,logo_url,accent_color,timezone,website_url,brain_folder,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids,granola_title_match,granola_extra_title_matches,airtable_base_id,clay_dnc_webhook_url,morning_brief_enabled,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails";
+  // The reply alert columns are asked for on their own first, so a database without that migration loses
+  // only them rather than falling all the way back to the short list below.
+  let response = await list(`${fullColumns},${REPLY_ALERT_COLUMNS.join(",")}`);
+  if (!response.ok) response = await list(fullColumns);
   // Permit the UI to keep working while the additive migration is being run.
   if (!response.ok) response = await list("id,name,slug,client_brief,anthropic_model,logo_url,accent_color,webhook_url,webhook_secret_hash,last_webhook_received_at,last_successful_poll_at,created_at,heyreach_api_key_ciphertext,guardrails");
   const rows = await response.json();
@@ -141,6 +149,16 @@ export async function POST(request: Request) {
   // is the common case.
   if (has("slackInternalChannelId")) record.slack_internal_channel_id = normalizeChannelId(payload.slackInternalChannelId) || null;
   if (has("slackExternalChannelId")) record.slack_external_channel_id = normalizeChannelId(payload.slackExternalChannelId) || null;
+  /*
+   * Reply alerts. On a create they are only written when set, so adding a client still works on a
+   * database without the migration. Switching them on stamps `reply_alerts_enabled_at` (below, once the
+   * stored value is known): replies older than that stamp are never posted.
+   */
+  if (has("slackRepliesChannelId")) {
+    const repliesChannel = normalizeChannelId(payload.slackRepliesChannelId);
+    if (repliesChannel || !create) record.slack_replies_channel_id = repliesChannel || null;
+  }
+  if (typeof payload.replyAlertsEnabled === "boolean" && (payload.replyAlertsEnabled || !create)) record.reply_alerts_enabled = payload.replyAlertsEnabled;
   const incomingGuardrails = payload.guardrails && typeof payload.guardrails === "object" && !Array.isArray(payload.guardrails) ? payload.guardrails as Record<string, unknown> : null;
 
   /*
@@ -241,10 +259,26 @@ export async function POST(request: Request) {
         };
       }
     }
+    if (record.reply_alerts_enabled === true || record.slack_replies_channel_id === null) {
+      const stored = await fetch(`${url}/rest/v1/rr_workspaces?select=slack_replies_channel_id,reply_alerts_enabled&${patchFilter}&limit=1`, { headers, cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (!Array.isArray(stored)) return NextResponse.json({ ok: false, error: REPLY_ALERTS_MIGRATION_MISSING }, { status: 409 });
+      const before = (stored[0] ?? {}) as Record<string, unknown>;
+      const channelAfter = "slack_replies_channel_id" in record ? record.slack_replies_channel_id : before.slack_replies_channel_id;
+      const enabledAfter = "reply_alerts_enabled" in record ? record.reply_alerts_enabled : before.reply_alerts_enabled;
+      if (enabledAfter === true && !channelAfter) return NextResponse.json({ ok: false, error: "Reply alerts need a replies channel ID." }, { status: 400 });
+      // Stamped only on the switch from off to on; saving an unrelated field must not move the start line.
+      if (record.reply_alerts_enabled === true && before.reply_alerts_enabled !== true) record.reply_alerts_enabled_at = new Date().toISOString();
+    }
     if (!Object.keys(record).length) return NextResponse.json({ ok: false, error: "Nothing to save." }, { status: 400 });
     const patch = (body: Record<string, unknown>) => fetch(`${url}/rest/v1/rr_workspaces?${patchFilter}`, { method: "PATCH", headers: { ...headers, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(body) });
     let patched = await patch(record);
-    if (!patched.ok && (patched.status === 400 || patched.status === 422)) patched = await patch(withoutLegacyColumns(record));
+    if (!patched.ok && (patched.status === 400 || patched.status === 422)) {
+      // Dropping these silently would show "Saved" for a switch that was never stored.
+      if (REPLY_ALERT_COLUMNS.some((column) => column in record) && /slack_replies_channel_id|reply_alerts_enabled/.test(await patched.clone().text().catch(() => ""))) {
+        return NextResponse.json({ ok: false, error: REPLY_ALERTS_MIGRATION_MISSING }, { status: 409 });
+      }
+      patched = await patch(withoutLegacyColumns(record));
+    }
     const patchText = await patched.text();
     let patchData: unknown = null; try { patchData = patchText ? JSON.parse(patchText) : null; } catch { patchData = patchText; }
     if (!patched.ok) return NextResponse.json({ ok: false, error: postgrestMessage(patchData, "Workspace update failed.") }, { status: patched.status });
@@ -264,6 +298,10 @@ export async function POST(request: Request) {
   // A plain insert, never merge-duplicates: if a racing create took the slug between the check above and
   // here, the unique violation is reported instead of the existing client being overwritten.
   record.guardrails = incomingGuardrails ?? {};
+  if (record.reply_alerts_enabled === true) {
+    if (!record.slack_replies_channel_id) return NextResponse.json({ ok: false, error: "Reply alerts need a replies channel ID." }, { status: 400 });
+    record.reply_alerts_enabled_at = new Date().toISOString();
+  }
   const insert = (body: Record<string, unknown>) => fetch(`${url}/rest/v1/rr_workspaces`, { method: "POST", headers: { ...headers, "content-type": "application/json", Prefer: "return=representation" }, body: JSON.stringify(body) });
   let response = await insert(record);
   if (!response.ok && (response.status === 400 || response.status === 422)) response = await insert(withoutLegacyColumns(record));

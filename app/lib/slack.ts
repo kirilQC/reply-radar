@@ -546,10 +546,12 @@ export async function postMessage(channelId: string, text: string, threadTs = ""
  * duplicate. Same bot token, same mrkdwn and no-unfurl treatment as `postMessage`, because it is the
  * same message.
  */
-export async function updateMessage(channelId: string, ts: string, text: string): Promise<void> {
+export async function updateMessage(channelId: string, ts: string, text: string, blocks?: unknown[]): Promise<void> {
   await call("chat.update", {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },
+    // `blocks` replaces the message's layout when given (a reply alert swapping its Send button for who
+    // sent it). Without it, a message that had blocks keeps them and only the fallback text changes.
     body: JSON.stringify({
       channel: channelId,
       ts,
@@ -557,7 +559,22 @@ export async function updateMessage(channelId: string, ts: string, text: string)
       mrkdwn: true,
       unfurl_links: false,
       unfurl_media: false,
+      ...(blocks && blocks.length ? { blocks } : {}),
     }),
+  }, "write");
+}
+
+/**
+ * A message only `userId` sees, in the channel (and thread) they are looking at.
+ *
+ * How a button press that cannot go ahead says why (a blank left in a draft, a reply already sent)
+ * without putting the refusal in front of the whole channel. Needs only `chat:write`.
+ */
+export async function postEphemeral(channelId: string, userId: string, text: string, threadTs = ""): Promise<void> {
+  await call("chat.postEphemeral", {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ channel: channelId, user: userId, text, ...(threadTs ? { thread_ts: threadTs } : {}) }),
   }, "write");
 }
 

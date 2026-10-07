@@ -59,6 +59,8 @@ import {
 } from "../../../../shared/slack-agent.mjs";
 import { briefEditIsSafe } from "../../../../shared/brief-reply.mjs";
 import { findBriefThread, writeBriefReply, updateStoredBody, type BriefThread } from "../../../lib/brief-reply";
+import { SEND_REPLY_ACTION } from "../../../lib/reply-alert";
+import { sendReplyFromSlack } from "../../../lib/reply-alert-run";
 
 /** Same ceiling as the MCP route: the agent's tool budget is tuned to answer inside three hundred seconds. */
 export const maxDuration = 300;
@@ -574,6 +576,12 @@ export async function POST(request: Request) {
       if (str(pressed.action_id).startsWith(ASK_ACTION) && str(pressed.value)) {
         const claimed = await claimEvent(`click:${str(action.trigger_id) || str(pressed.action_ts)}`);
         if (claimed && slackConfigured()) after(() => answerButton(action, str(pressed.value)));
+      }
+      // Send Reply under a reply alert. Acknowledged now and sent in `after`, because HeyReach can take
+      // longer than Slack's three seconds; the send claims itself, so a redelivered click sends nothing.
+      if (str(pressed.action_id) === SEND_REPLY_ACTION) {
+        const claimed = await claimEvent(`click:${str(action.trigger_id) || str(pressed.action_ts)}`);
+        if (claimed && slackConfigured()) after(() => sendReplyFromSlack(action));
       }
     }
     return new Response("", { status: 200 });

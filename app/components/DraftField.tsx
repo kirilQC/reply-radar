@@ -4,26 +4,10 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { splitPlaceholders } from "../lib/draft-placeholders";
 
-/** Blanks the draft model leaves for a person to fill: "(insert time here)", "[link]". */
-export const PLACEHOLDER_PATTERN =
-  /\((?:insert|add|your|enter)[^)]{0,40}\)|\[(?:insert|add|your|enter|link|time|date|name)[^\]]{0,40}\]/gi;
-
-export const firstPlaceholder = (text: string): string | null => text.match(new RegExp(PLACEHOLDER_PATTERN.source, "i"))?.[0] ?? null;
-
-/** Text split into plain runs and blanks, for drawing the highlights. */
-export function splitPlaceholders(text: string): Array<{ text: string; blank: boolean }> {
-  const parts: Array<{ text: string; blank: boolean }> = [];
-  let last = 0;
-  for (const match of text.matchAll(new RegExp(PLACEHOLDER_PATTERN.source, "gi"))) {
-    const start = match.index ?? 0;
-    if (start > last) parts.push({ text: text.slice(last, start), blank: false });
-    parts.push({ text: match[0], blank: true });
-    last = start + match[0].length;
-  }
-  if (last < text.length) parts.push({ text: text.slice(last), blank: false });
-  return parts;
-}
+// Re-exported so the inbox keeps importing them from here; the patterns live in the shared lib.
+export { PLACEHOLDER_PATTERN, firstPlaceholder, splitPlaceholders } from "../lib/draft-placeholders";
 
 /**
  * The draft textarea with every unfilled blank highlighted in place.

@@ -2201,10 +2201,72 @@ async function scheduledSendsLoop() {
   }
 }
 
+/**
+ * The backup for Slack reply alerts (app/lib/reply-alert-run.ts).
+ *
+ * The webhook posts a reply's card the moment it is stored. This catches what that missed: a webhook
+ * that timed out, a reply found by reconciliation or the conversation refresh. Every minute, on its own
+ * loop, because the main cycle can run a quarter of an hour and a missed reply should not wait that long.
+ * Only replies inside the window (since alerts were switched on, at most 48 hours) and at least two
+ * minutes old, so the webhook's own run is left to finish. The route claims each one, so a reply this
+ * hands over while the webhook is still posting it is refused there rather than posted twice.
+ */
+const REPLY_ALERT_IDLE_MS = 60 * 1000;
+const REPLY_ALERT_PER_CYCLE = 20;
+const REPLY_ALERT_WINDOW_MS = 48 * 60 * 60 * 1000;
+const REPLY_ALERT_SETTLE_MS = 2 * 60 * 1000;
+let replyAlertColumnsWarned = false;
+
+async function sweepReplyAlerts() {
+  if (!appBaseUrl) return;
+  let workspaces;
+  try {
+    workspaces = await supabase("rr_workspaces?select=id,slug,reply_alerts_enabled_at&reply_alerts_enabled=is.true&offboarded_at=is.null&slack_replies_channel_id=not.is.null");
+  } catch (error) {
+    // The migration has not been run. Said once, then quietly skipped until it is.
+    if (!replyAlertColumnsWarned) console.warn("reply_radar_reply_alerts_unavailable", { reason: String(error.message || error).slice(0, 200) });
+    replyAlertColumnsWarned = true;
+    return;
+  }
+  const now = Date.now();
+  const settled = new Date(now - REPLY_ALERT_SETTLE_MS).toISOString();
+  const due = [];
+  for (const workspace of workspaces || []) {
+    if (due.length >= REPLY_ALERT_PER_CYCLE) break;
+    const enabledAt = Date.parse(String(workspace.reply_alerts_enabled_at || ""));
+    const since = new Date(Math.max(Number.isNaN(enabledAt) ? now : enabledAt, now - REPLY_ALERT_WINDOW_MS)).toISOString();
+    if (since >= settled) continue;
+    const conversations = (await supabase(`rr_conversations?select=id&workspace_id=eq.${encodeURIComponent(workspace.id)}&last_message_at=gte.${encodeURIComponent(since)}&limit=500`)) || [];
+    if (!conversations.length) continue;
+    const rows = await chunked(conversations.map((row) => row.id), 40, (batch) =>
+      supabase(`rr_messages?select=id,sent_at&conversation_id=in.(${batch.join(",")})&direction=eq.inbound&sent_at=gte.${encodeURIComponent(since)}&sent_at=lte.${encodeURIComponent(settled)}&raw_data->reply_radar->reply_alert->>done_at=is.null&order=sent_at.asc&limit=${REPLY_ALERT_PER_CYCLE}`),
+    );
+    rows.sort((a, b) => Date.parse(a.sent_at) - Date.parse(b.sent_at));
+    due.push(...rows.slice(0, REPLY_ALERT_PER_CYCLE - due.length).map((row) => String(row.id)));
+  }
+  // Three at a time: a reply with no cached draft waits on the model before it posts.
+  await inParallel(due, 3, async (messageId) => {
+    try {
+      const result = await appPost("/api/slack/reply-alert", { messageId }, { timeoutMs: 120_000 });
+      if (result.outcome === "posted") console.info("reply_radar_reply_alert_posted", { messageId, source: "sweep" });
+    } catch (error) {
+      console.warn("reply_radar_reply_alert_failed", { messageId, reason: String(error.message || error).slice(0, 200) });
+    }
+  });
+}
+
+async function replyAlertLoop() {
+  for (;;) {
+    try { await sweepReplyAlerts(); } catch (error) { console.error("reply_radar_reply_alert_sweep_failed", error); }
+    await new Promise((resolve) => setTimeout(resolve, REPLY_ALERT_IDLE_MS));
+  }
+}
+
 async function main() {
   console.info("reply_radar_worker_started", { pollIntervalSeconds: pollIntervalMs / 1000 });
   scheduledSendsLoop().catch((error) => console.error("reply_radar_scheduled_sends_loop_failed", error));
   analyticsLoop().catch((error) => console.error("reply_radar_analytics_loop_failed", error));
+  replyAlertLoop().catch((error) => console.error("reply_radar_reply_alert_loop_failed", error));
   for (;;) {
     try { await runOnce(); } catch (error) { console.error("reply_radar_worker_cycle_failed", error); }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
