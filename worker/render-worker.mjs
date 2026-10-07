@@ -2262,11 +2262,31 @@ async function replyAlertLoop() {
   }
 }
 
+/**
+ * The backup for booking alerts (app/lib/booking-run.ts): a booking whose webhook run never finished, one
+ * the Clay table has not answered within the wait, and a step to retry. The route does the work.
+ */
+const BOOKING_SWEEP_IDLE_MS = 60 * 1000;
+async function bookingLoop() {
+  for (;;) {
+    if (appBaseUrl) {
+      try {
+        const result = await appPost("/api/slack/bookings-sweep", {}, { timeoutMs: 290_000 });
+        if (result.ran) console.info("reply_radar_booking_sweep", { checked: result.checked, ran: result.ran });
+      } catch (error) {
+        console.warn("reply_radar_booking_sweep_failed", String(error.message || error).slice(0, 200));
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, BOOKING_SWEEP_IDLE_MS));
+  }
+}
+
 async function main() {
   console.info("reply_radar_worker_started", { pollIntervalSeconds: pollIntervalMs / 1000 });
   scheduledSendsLoop().catch((error) => console.error("reply_radar_scheduled_sends_loop_failed", error));
   analyticsLoop().catch((error) => console.error("reply_radar_analytics_loop_failed", error));
   replyAlertLoop().catch((error) => console.error("reply_radar_reply_alert_loop_failed", error));
+  bookingLoop().catch((error) => console.error("reply_radar_booking_loop_failed", error));
   for (;;) {
     try { await runOnce(); } catch (error) { console.error("reply_radar_worker_cycle_failed", error); }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));

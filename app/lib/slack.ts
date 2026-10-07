@@ -490,8 +490,11 @@ async function inviteBot(channelId: string): Promise<{ ok: boolean; error?: stri
   }
 }
 
-export async function postMessage(channelId: string, text: string, threadTs = "", blocks?: unknown[]): Promise<string> {
-  const send = () => call("chat.postMessage", {
+export async function postMessage(channelId: string, text: string, threadTs = "", blocks?: unknown[], identity?: { username?: string; iconUrl?: string }): Promise<string> {
+  // A custom name and icon ("Steadywell Calls" with the client's logo) need the chat:write.customize scope.
+  // Without it Slack refuses the post, so the identity is dropped and the post retried as QC Bot.
+  let custom = Boolean(identity?.username || identity?.iconUrl);
+  const post = () => call("chat.postMessage", {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },
     // `unfurl_links: false` because a brief that quotes a campaign URL should not paste a preview card
@@ -506,8 +509,20 @@ export async function postMessage(channelId: string, text: string, threadTs = ""
       unfurl_media: false,
       ...(threadTs ? { thread_ts: threadTs } : {}),
       ...(blocks && blocks.length ? { blocks } : {}),
+      ...(custom && identity?.username ? { username: identity.username } : {}),
+      ...(custom && identity?.iconUrl ? { icon_url: identity.iconUrl } : {}),
     }),
   }, "write");
+  const send = async () => {
+    try {
+      return await post();
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (!custom || (code !== "missing_scope" && code !== "invalid_arguments" && code !== "not_allowed_token_type")) throw error;
+      custom = false;
+      return post();
+    }
+  };
 
   try {
     return String((await send()).ts ?? "");

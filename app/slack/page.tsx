@@ -32,6 +32,7 @@ import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
 import Crumb from "../components/Crumb";
 import PersonalAssistants from "./PersonalAssistants";
 import ReplyAlerts from "./ReplyAlerts";
+import BookingAlerts from "./BookingAlerts";
 import { DAY_NAMES, DEFAULT_SCHEDULE, describeSchedule, type BriefSchedule, type Check } from "../lib/morning-brief-schedule";
 import type { TraceStep } from "../lib/morning-brief";
 import "../reports/reports.css";
@@ -155,7 +156,7 @@ const formatWhen = (iso: string) => {
 };
 
 export default function SlackPage() {
-  const [view, setView] = useState<"automations" | "clients" | "brief" | "personal" | "replies">("automations");
+  const [view, setView] = useState<"automations" | "clients" | "brief" | "personal" | "replies" | "bookings">("automations");
   const [automation, setAutomation] = useState<Automation>("morning_brief");
   // Both directories are held at once so the landing screen can show each automation's card without
   // opening it. `directory` below is whichever one is currently open.
@@ -364,7 +365,7 @@ export default function SlackPage() {
 
             <div className="hub-group-label">
               <span>Automations</span>
-              <span>5 automations</span>
+              <span>6 automations</span>
             </div>
             <div className="hub-card-grid">
               {(["morning_brief", "call_analysis", "eow_report"] as Automation[]).map((which) => {
@@ -387,6 +388,13 @@ export default function SlackPage() {
                 <button type="button" className="hub-card-open" onClick={() => setView("replies")}>
                   <h3>Reply alerts</h3>
                   <div className="hub-card-meta"><b>Runs when a lead replies</b></div>
+                </button>
+              </div>
+              {/* Booked meetings fire on a Calendly / cal.com booking, enriched through the shared Clay table. */}
+              <div className="hub-card">
+                <button type="button" className="hub-card-open" onClick={() => setView("bookings")}>
+                  <h3>Booked meetings</h3>
+                  <div className="hub-card-meta"><b>Runs when a meeting is booked</b></div>
                 </button>
               </div>
               {/* The personal assistant is per-person, not per-client, so it has its own management view. */}
@@ -414,6 +422,8 @@ export default function SlackPage() {
           <PersonalAssistants onBack={() => setView("automations")} />
         ) : view === "replies" ? (
           <ReplyAlerts onBack={() => setView("automations")} />
+        ) : view === "bookings" ? (
+          <BookingAlerts onBack={() => setView("automations")} />
         ) : view === "clients" ? (
           <main className="reports-hub">
             <button type="button" className="config-back" onClick={() => setView("automations")}>← Slack automations</button>

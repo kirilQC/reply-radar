@@ -343,7 +343,7 @@ function enrichmentPatch(meetingRow: Row, enrichment: Row): Row {
  * Find the rr_leads row this meeting's invitee is, within the meeting's client. LinkedIn URL is the strongest
  * signal (the Zap sends it), then name + company. Returns the lead row (with raw_data and campaign_names) or null.
  */
-async function findLeadForMeeting(url: string, key: string, workspaceId: string, ids: { linkedin: string; email: string; name: string; company: string }): Promise<Row | null> {
+export async function findLeadForMeeting(url: string, key: string, workspaceId: string, ids: { linkedin: string; email: string; name: string; company: string }): Promise<Row | null> {
   const sel = "id,name,company,linkedin_profile_url,campaign_names,raw_data";
   const ws = `workspace_id=eq.${encodeURIComponent(workspaceId)}`;
   const handle = normalizeLinkedin(ids.linkedin);
@@ -361,7 +361,7 @@ async function findLeadForMeeting(url: string, key: string, workspaceId: string,
 }
 
 /** The QC campaign(s) a lead was contacted in, as one readable string, or null. Handles array or CSV storage. */
-function campaignFromLead(lead: Row): string | null {
+export function campaignFromLead(lead: Row): string | null {
   const raw = lead.campaign_names;
   const list = Array.isArray(raw) ? raw.map((c) => str(c)) : str(raw).split(/[;,]/);
   const cleaned = [...new Set(list.map((c) => c.trim()).filter(Boolean))];

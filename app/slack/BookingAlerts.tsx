@@ -1,0 +1,404 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
+"use client";
+
+import { useEffect, useState } from "react";
+
+/**
+ * Booked meetings on the Slack tab: the shared setup (QC's Calendly, the Clay table) and, per client, the
+ * event filter, the bookings channel, the steps and the switch. The pipeline is app/lib/booking-run.ts.
+ */
+type Step = { id: string; type: string; enabled: boolean; url?: string; label?: string; stage?: string; pipeline?: string; owner?: string; campaignProperty?: string };
+type Client = {
+  id: string;
+  name: string;
+  slug: string;
+  logoUrl: string;
+  tone: string;
+  enabled: boolean;
+  enabledAt: string | null;
+  eventFilter: string;
+  channel: string;
+  botName: string;
+  steps: Step[];
+  hubspotConnected: boolean;
+  ownCalendly: { email: string; scope: string } | null;
+  calcom: { url: string; secret: string } | null;
+  lastBooking: { name: string; at: string; stage: string; error: string } | null;
+};
+type Global = {
+  clayWebhookUrl: string;
+  clayAuthSet: boolean;
+  clayWaitMinutes: number;
+  callbackUrl: string;
+  calendly: { email: string; name: string; scope: string; connectedAt: string } | null;
+  lastClayCallback: { at: string; meeting_id: string; test: boolean; fields: string[] } | null;
+};
+type Payload = { ok: boolean; error?: string; global: Global; clients: Client[]; testChannelSet: boolean };
+
+const day = (value: string | null) =>
+  value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" }) : "";
+const ago = (value: string) => {
+  const minutes = Math.round((Date.now() - Date.parse(value)) / 60000);
+  if (!Number.isFinite(minutes)) return "";
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 48 * 60) return `${Math.round(minutes / 60)} h ago`;
+  return day(value);
+};
+const STAGE: Record<string, string> = { new: "received", enriching: "waiting on Clay", ready: "posting", done: "posted", failed: "failed", skipped: "skipped" };
+
+async function call(path: string, init?: RequestInit) {
+  const response = await fetch(path, { cache: "no-store", ...init, headers: { "content-type": "application/json", ...(init?.headers ?? {}) } }).catch(() => null);
+  const payload = await response?.json().catch(() => null);
+  return { ok: Boolean(response?.ok && payload?.ok !== false), payload, error: String(payload?.error || (response ? `Failed (${response.status}).` : "Network error.")) };
+}
+
+export default function BookingAlerts({ onBack }: { onBack: () => void }) {
+  const [data, setData] = useState<Payload | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  const take = (payload: Payload | null) => {
+    if (payload?.global) {
+      setData(payload);
+      setError("");
+    }
+  };
+  const load = async () => {
+    const result = await call("/api/bookings/settings");
+    if (result.ok) take(result.payload);
+    else setError(result.error);
+  };
+  useEffect(() => { void load(); }, []);
+
+  const note = (key: string, value: string) => setNotes((current) => ({ ...current, [key]: value }));
+  const draft = (key: string, fallback: string) => drafts[key] ?? fallback;
+  const setDraft = (key: string, value: string) => setDrafts((current) => ({ ...current, [key]: value }));
+  const clearDraft = (key: string) => setDrafts((current) => { const next = { ...current }; delete next[key]; return next; });
+
+  const saveGlobal = async (patch: Record<string, unknown>, key: string) => {
+    setBusy(key);
+    const result = await call("/api/bookings/settings", { method: "POST", body: JSON.stringify({ global: patch }) });
+    setBusy("");
+    if (result.ok) { take(result.payload); note(key, "Saved"); } else note(key, result.error);
+  };
+
+  const saveClient = async (client: Client, patch: Record<string, unknown>) => {
+    setBusy(client.id);
+    note(client.id, "");
+    const result = await call("/api/bookings/settings", { method: "POST", body: JSON.stringify({ workspaceId: client.id, ...patch }) });
+    setBusy("");
+    if (result.ok) take(result.payload);
+    else note(client.id, result.error);
+    return result.ok;
+  };
+
+  const connect = async (workspaceId: string, key: string) => {
+    const token = (drafts[key] ?? "").trim();
+    if (!token) return;
+    setBusy(key);
+    note(key, "");
+    const result = await call("/api/bookings/calendly", { method: "POST", body: JSON.stringify({ token, workspaceId: workspaceId || undefined }) });
+    setBusy("");
+    if (result.ok) { clearDraft(key); await load(); note(key, `Connected (${result.payload.scope})`); } else note(key, result.error);
+  };
+  const disconnect = async (workspaceId: string, key: string) => {
+    setBusy(key);
+    const result = await call(`/api/bookings/calendly${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`, { method: "DELETE" });
+    setBusy("");
+    if (result.ok) await load(); else note(key, result.error);
+  };
+
+  const test = async (body: Record<string, unknown>, key: string, done: string) => {
+    setBusy(key);
+    note(key, "");
+    const result = await call("/api/bookings/test", { method: "POST", body: JSON.stringify(body) });
+    setBusy("");
+    note(key, result.ok ? done : result.error);
+    if (body.clay) window.setTimeout(() => void load(), 20_000);
+  };
+
+  const copy = (value: string, key: string) => {
+    navigator.clipboard?.writeText(value).then(() => note(key, "Copied"), () => note(key, "Select and copy it"));
+  };
+
+  if (!data) {
+    return (
+      <main className="reports-hub">
+        <button type="button" className="config-back" onClick={onBack}>← Slack automations</button>
+        <div className="hub-lede"><h1>Booked meetings</h1></div>
+        {error ? <div className="config-error">{error}</div> : <div className="hub-empty">Loading…</div>}
+      </main>
+    );
+  }
+
+  const g = data.global;
+  const on = data.clients.filter((client) => client.enabled).length;
+  const last = g.lastClayCallback;
+
+  const stepsFor = (client: Client) => client.steps;
+  const setSteps = (client: Client, steps: Step[]) => saveClient(client, { steps });
+  const hubspot = (client: Client) => client.steps.find((step) => step.type === "hubspot");
+  const webhooks = (client: Client) => client.steps.filter((step) => step.type === "webhook");
+  const toggleHubspot = (client: Client) => {
+    const current = hubspot(client);
+    const others = stepsFor(client).filter((step) => step.type !== "hubspot");
+    return setSteps(client, current ? [...others, { ...current, enabled: !current.enabled }] : [...others, { id: "hubspot", type: "hubspot", enabled: true }]);
+  };
+
+  return (
+    <main className="reports-hub">
+      <button type="button" className="config-back" onClick={onBack}>← Slack automations</button>
+      <div className="hub-lede"><h1>Booked meetings</h1></div>
+
+      <div className="hub-group-label"><span>Setup</span></div>
+      <div className="booking-setup">
+        <div className="booking-setup-row">
+          <strong>Calendly</strong>
+          {g.calendly ? (
+            <>
+              <span className="booking-setup-value">{g.calendly.email} · {g.calendly.scope}</span>
+              <button type="button" className="secondary-button" disabled={busy === "calendly"} onClick={() => void disconnect("", "calendly")}>Disconnect</button>
+            </>
+          ) : (
+            <>
+              <input type="password" className="booking-input" placeholder="Personal access token" value={draft("calendly", "")} onChange={(event) => setDraft("calendly", event.target.value)} />
+              <button type="button" className="secondary-button" disabled={busy === "calendly" || !draft("calendly", "").trim()} onClick={() => void connect("", "calendly")}>Connect</button>
+            </>
+          )}
+          {notes.calendly && <small>{notes.calendly}</small>}
+        </div>
+
+        <div className="booking-setup-row">
+          <strong>Clay table</strong>
+          <input
+            className="booking-input is-wide"
+            placeholder="Webhook URL of the shared table"
+            value={draft("clayUrl", g.clayWebhookUrl)}
+            onChange={(event) => setDraft("clayUrl", event.target.value)}
+            onBlur={() => { const value = draft("clayUrl", g.clayWebhookUrl).trim(); clearDraft("clayUrl"); if (value !== g.clayWebhookUrl) void saveGlobal({ clayWebhookUrl: value }, "clay"); }}
+          />
+          <input
+            type="password"
+            className="booking-input"
+            placeholder={g.clayAuthSet ? "Auth token saved" : "Auth token (optional)"}
+            value={draft("clayAuth", "")}
+            onChange={(event) => setDraft("clayAuth", event.target.value)}
+            onBlur={() => { const value = draft("clayAuth", "").trim(); clearDraft("clayAuth"); if (value) void saveGlobal({ clayAuthToken: value }, "clay"); }}
+          />
+          <label className="booking-wait">
+            Wait
+            <input
+              type="number"
+              min={1}
+              max={120}
+              value={draft("clayWait", String(g.clayWaitMinutes))}
+              onChange={(event) => setDraft("clayWait", event.target.value)}
+              onBlur={() => { const value = Number(draft("clayWait", String(g.clayWaitMinutes))); clearDraft("clayWait"); if (value !== g.clayWaitMinutes) void saveGlobal({ clayWaitMinutes: value }, "clay"); }}
+            />
+            min
+          </label>
+          <button type="button" className="secondary-button" disabled={busy === "clayTest" || !g.clayWebhookUrl} onClick={() => void test({ clay: true }, "clayTest", "Sample row sent")}>Send a sample row</button>
+          {(notes.clay || notes.clayTest) && <small>{notes.clayTest || notes.clay}</small>}
+        </div>
+
+        <div className="booking-setup-row">
+          <strong>Clay callback</strong>
+          <code className="booking-code">{g.callbackUrl}</code>
+          <button type="button" className="secondary-button" onClick={() => copy(g.callbackUrl, "callback")}>Copy</button>
+          <small>
+            {last ? `Last answer ${ago(last.at)}${last.test ? " (sample)" : ""} · ${last.fields.length} fields` : "No answer from Clay yet"}
+            {notes.callback ? ` · ${notes.callback}` : ""}
+          </small>
+        </div>
+        {last && last.fields.length > 0 && <div className="booking-fields">{last.fields.join(" · ")}</div>}
+      </div>
+
+      <div className="hub-group-label">
+        <span>Clients</span>
+        <span>{on} on</span>
+      </div>
+      <ul className="brief-client-list">
+        {data.clients.map((client) => {
+          const ready = Boolean(client.channel);
+          const expanded = open === client.id;
+          const hs = hubspot(client);
+          const lastLine = client.lastBooking ? `Last: ${client.lastBooking.name || "booking"} ${ago(client.lastBooking.at)}, ${STAGE[client.lastBooking.stage] ?? client.lastBooking.stage}` : "";
+          return (
+            <li key={client.id} className={`booking-client ${ready ? "brief-client" : "brief-client is-short"}`}>
+              <div className="brief-client-who">
+                <i className="brief-client-logo" style={client.logoUrl ? undefined : { background: client.tone }} aria-hidden="true">
+                  {client.logoUrl ? <img src={client.logoUrl} alt="" /> : client.name.slice(0, 1).toUpperCase()}
+                </i>
+                <div>
+                  <strong>{client.name}</strong>
+                  <small>
+                    {client.enabled ? `On since ${day(client.enabledAt)}` : "Off"}
+                    {lastLine ? ` · ${lastLine}` : ""}
+                    {notes[client.id] ? ` · ${notes[client.id]}` : ""}
+                  </small>
+                  {client.lastBooking?.error && client.lastBooking.stage !== "done" && <small className="booking-error">{client.lastBooking.error}</small>}
+                </div>
+              </div>
+              <div className="brief-client-channels booking-fields-row">
+                <label className="brief-channel">
+                  EVENT
+                  <input
+                    className="reply-alert-channel"
+                    placeholder={client.name}
+                    value={draft(`filter:${client.id}`, client.eventFilter)}
+                    onChange={(event) => setDraft(`filter:${client.id}`, event.target.value)}
+                    onBlur={() => { const value = draft(`filter:${client.id}`, client.eventFilter).trim(); clearDraft(`filter:${client.id}`); if (value !== client.eventFilter) void saveClient(client, { eventFilter: value }); }}
+                    disabled={busy === client.id}
+                  />
+                </label>
+                <label className={client.channel ? "brief-channel" : "brief-channel is-missing"}>
+                  CHANNEL
+                  <input
+                    className="reply-alert-channel"
+                    placeholder="C09BOOKINGS"
+                    value={draft(`channel:${client.id}`, client.channel)}
+                    onChange={(event) => setDraft(`channel:${client.id}`, event.target.value)}
+                    onBlur={() => { const value = draft(`channel:${client.id}`, client.channel).trim(); clearDraft(`channel:${client.id}`); if (value !== client.channel) void saveClient(client, { channel: value }); }}
+                    disabled={busy === client.id}
+                  />
+                </label>
+              </div>
+              <div className="booking-steps">
+                <span className="booking-chip is-on">Slack</span>
+                <button
+                  type="button"
+                  className={hs?.enabled ? "booking-chip is-on" : "booking-chip"}
+                  disabled={busy === client.id || (!client.hubspotConnected && !hs?.enabled)}
+                  title={client.hubspotConnected ? "" : "No HubSpot token for this client (Deals)."}
+                  onClick={() => void toggleHubspot(client)}
+                >
+                  HubSpot deal
+                </button>
+                {webhooks(client).map((step) => (
+                  <span key={step.id} className={step.enabled ? "booking-chip is-on" : "booking-chip"}>{step.label || "Webhook"}</span>
+                ))}
+                <button type="button" className="booking-chip is-more" onClick={() => setOpen(expanded ? "" : client.id)} aria-expanded={expanded}>{expanded ? "Less" : "More"}</button>
+              </div>
+              <div className="brief-client-actions">
+                <button
+                  type="button"
+                  className={client.enabled ? "brief-switch is-on" : "brief-switch"}
+                  onClick={() => void saveClient(client, { enabled: !client.enabled })}
+                  disabled={busy === client.id || (!client.enabled && !ready)}
+                  title={ready ? "" : "Needs a bookings channel."}
+                >
+                  <span />{client.enabled ? "On" : "Off"}
+                </button>
+                <button type="button" className="secondary-button" disabled={busy === client.id || !data.testChannelSet} onClick={() => void test({ workspaceId: client.id }, client.id, "Test posted to the test channel")}>Send a test</button>
+              </div>
+
+              {expanded && (
+                <div className="booking-more">
+                  <div className="booking-more-row">
+                    <strong>Own Calendly</strong>
+                    {client.ownCalendly ? (
+                      <>
+                        <span className="booking-setup-value">{client.ownCalendly.email} · {client.ownCalendly.scope}</span>
+                        <button type="button" className="secondary-button" disabled={busy === `cal:${client.id}`} onClick={() => void disconnect(client.id, `cal:${client.id}`)}>Disconnect</button>
+                      </>
+                    ) : (
+                      <>
+                        <input type="password" className="booking-input" placeholder="Personal access token" value={draft(`cal:${client.id}`, "")} onChange={(event) => setDraft(`cal:${client.id}`, event.target.value)} />
+                        <button type="button" className="secondary-button" disabled={busy === `cal:${client.id}` || !draft(`cal:${client.id}`, "").trim()} onClick={() => void connect(client.id, `cal:${client.id}`)}>Connect</button>
+                      </>
+                    )}
+                    {notes[`cal:${client.id}`] && <small>{notes[`cal:${client.id}`]}</small>}
+                  </div>
+
+                  <div className="booking-more-row">
+                    <strong>cal.com</strong>
+                    {client.calcom ? (
+                      <>
+                        <code className="booking-code">{client.calcom.url}</code>
+                        <button type="button" className="secondary-button" onClick={() => copy(client.calcom!.url, `calcom:${client.id}`)}>Copy URL</button>
+                        <code className="booking-code is-short">{client.calcom.secret}</code>
+                        <button type="button" className="secondary-button" onClick={() => copy(client.calcom!.secret, `calcom:${client.id}`)}>Copy secret</button>
+                        <button type="button" className="secondary-button" onClick={() => void saveClient(client, { calcom: "clear" })}>Remove</button>
+                      </>
+                    ) : (
+                      <button type="button" className="secondary-button" onClick={() => void saveClient(client, { calcom: "generate" })}>Make a cal.com webhook</button>
+                    )}
+                    {notes[`calcom:${client.id}`] && <small>{notes[`calcom:${client.id}`]}</small>}
+                  </div>
+
+                  <div className="booking-more-row">
+                    <strong>Posts as</strong>
+                    <input
+                      className="booking-input"
+                      placeholder={`${client.name} Calls`}
+                      value={draft(`bot:${client.id}`, client.botName)}
+                      onChange={(event) => setDraft(`bot:${client.id}`, event.target.value)}
+                      onBlur={() => { const value = draft(`bot:${client.id}`, client.botName).trim(); clearDraft(`bot:${client.id}`); if (value !== client.botName) void saveClient(client, { botName: value }); }}
+                    />
+                  </div>
+
+                  {hs && (
+                    <div className="booking-more-row">
+                      <strong>HubSpot deal</strong>
+                      {(["stage", "pipeline", "owner", "campaignProperty"] as const).map((field) => (
+                        <input
+                          key={field}
+                          className="booking-input is-narrow"
+                          placeholder={{ stage: "appointmentscheduled", pipeline: "default", owner: "Owner id", campaignProperty: "campaign" }[field]}
+                          title={{ stage: "Deal stage id", pipeline: "Pipeline id", owner: "Deal owner id", campaignProperty: "Deal property for the campaign" }[field]}
+                          value={draft(`hs:${field}:${client.id}`, hs[field] ?? "")}
+                          onChange={(event) => setDraft(`hs:${field}:${client.id}`, event.target.value)}
+                          onBlur={() => {
+                            const value = draft(`hs:${field}:${client.id}`, hs[field] ?? "").trim();
+                            clearDraft(`hs:${field}:${client.id}`);
+                            if (value !== (hs[field] ?? "")) void setSteps(client, stepsFor(client).map((step) => (step.type === "hubspot" ? { ...step, [field]: value } : step)));
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="booking-more-row is-list">
+                    <strong>Webhooks</strong>
+                    {webhooks(client).map((step) => (
+                      <span key={step.id} className="booking-webhook">
+                        <code className="booking-code">{step.url}</code>
+                        <button type="button" className="secondary-button" onClick={() => void setSteps(client, stepsFor(client).map((s) => (s.id === step.id ? { ...s, enabled: !s.enabled } : s)))}>{step.enabled ? "Pause" : "Resume"}</button>
+                        <button type="button" className="secondary-button" onClick={() => void setSteps(client, stepsFor(client).filter((s) => s.id !== step.id))}>Remove</button>
+                      </span>
+                    ))}
+                    <span className="booking-webhook">
+                      <input className="booking-input is-wide" placeholder="https://…" value={draft(`hook:${client.id}`, "")} onChange={(event) => setDraft(`hook:${client.id}`, event.target.value)} />
+                      <input className="booking-input is-narrow" placeholder="Label" value={draft(`hookLabel:${client.id}`, "")} onChange={(event) => setDraft(`hookLabel:${client.id}`, event.target.value)} />
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={!/^https:\/\//i.test(draft(`hook:${client.id}`, "").trim())}
+                        onClick={async () => {
+                          const url = draft(`hook:${client.id}`, "").trim();
+                          const label = draft(`hookLabel:${client.id}`, "").trim();
+                          const id = `webhook_${Date.now().toString(36)}`;
+                          if (await setSteps(client, [...stepsFor(client), { id, type: "webhook", enabled: true, url, label }])) { clearDraft(`hook:${client.id}`); clearDraft(`hookLabel:${client.id}`); }
+                        }}
+                      >
+                        Add
+                      </button>
+                    </span>
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {!data.testChannelSet && <div className="hub-empty">Set <code>SLACK_TEST_CHANNEL_ID</code> to send tests.</div>}
+      {error && <div className="config-error">{error}</div>}
+    </main>
+  );
+}
