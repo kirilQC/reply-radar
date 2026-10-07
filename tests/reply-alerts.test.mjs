@@ -86,8 +86,10 @@ test("unknown fields are left out of the card rather than printed blank", () => 
   const lead = alert.leadFromRow({ name: "Lee Park", company: "Quiet Co", raw_data: {} });
   const card = alert.buildAlertCard({ lead, replyNumber: 1, senderName: "", campaignName: "", clientName: "" });
   const body = card.blocks.map((block) => block.text?.text ?? "").join("\n");
-  assert.equal(card.blocks[0].text.text, ":arrows_counterclockwise: *New Reply · Reply #1*");
-  for (const label of ["Title", "Headline", "LinkedIn", "Location", "Industry", "Pattern Tags", "Domain", "Company LinkedIn", "Sender", "Campaign"]) {
+  // A first reply gets :email:, a later one :arrows_counterclockwise:, as the n8n bot did.
+  assert.equal(card.blocks[0].text.text, ":email: *New Reply · Reply #1*");
+  assert.match(alert.buildAlertCard({ lead, replyNumber: 3, senderName: "", campaignName: "", clientName: "" }).blocks[0].text.text, /^:arrows_counterclockwise: \*New Reply · Reply #3\*$/);
+  for (const label of ["Title", "Headline", "LinkedIn", "Email", "Location", "Industry", "Pattern Tags", "Domain", "Company LinkedIn", "Sender", "Campaign", "Company Summary"]) {
     assert.doesNotMatch(body, new RegExp(`\\*${label}:\\*`), label);
   }
   assert.match(body, /\*Name:\* Lee Park/);

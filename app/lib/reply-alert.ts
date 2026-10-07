@@ -125,6 +125,7 @@ export type AlertLead = {
   title: string;
   headline: string;
   linkedinUrl: string;
+  email: string;
   location: string;
   company: string;
   industry: string;
@@ -132,7 +133,18 @@ export type AlertLead = {
   tags: string[];
   domain: string;
   companyLinkedinUrl: string;
+  /** One line about the company, shown in italics under the card as the n8n bot did. */
+  companySummary: string;
 };
+
+/** A company description as one line, cut at a sentence or word boundary so it never runs on. */
+function oneLineSummary(value: string): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  if (flat.length <= 220) return flat;
+  const cut = flat.slice(0, 220);
+  const sentence = cut.lastIndexOf(". ");
+  return sentence > 120 ? cut.slice(0, sentence + 1) : `${cut.slice(0, cut.lastIndexOf(" "))}…`;
+}
 
 /**
  * The card's lead fields out of an rr_leads row: its own columns first, AI Ark's enrichment second.
@@ -151,6 +163,7 @@ export function leadFromRow(row: Row): AlertLead {
     title: text(row.role) || text(ai.title),
     headline: text(ai.headline),
     linkedinUrl: withScheme(text(row.linkedin_profile_url)),
+    email: text(row.email),
     location: text(row.lead_location) || locationText(ai.location),
     company: text(row.company) || text(summary.name) || text(company.name),
     industry,
@@ -158,6 +171,7 @@ export function leadFromRow(row: Row): AlertLead {
     tags: patternTags(company),
     domain: bareDomain(row.company_domain) || bareDomain(companyLinks.website) || bareDomain(summary.website),
     companyLinkedinUrl: withScheme(text(companyLinks.linkedin)),
+    companySummary: oneLineSummary(text(summary.description) || text(summary.seo)),
   };
 }
 
@@ -217,6 +231,7 @@ export function buildAlertCard(input: AlertCardInput): { text: string; blocks: R
     line("Title", escapeMrkdwn(lead.title)),
     line("Headline", escapeMrkdwn(lead.headline)),
     line("LinkedIn", lead.linkedinUrl ? link(lead.linkedinUrl, "View Profile") : ""),
+    line("Email", escapeMrkdwn(lead.email)),
     line("Location", escapeMrkdwn(lead.location)),
   );
   const industry = [lead.industry ? escapeMrkdwn(lead.industry) : "", lead.headcount ? `${lead.headcount} employees` : ""].filter(Boolean).join(" | ");
@@ -228,8 +243,11 @@ export function buildAlertCard(input: AlertCardInput): { text: string; blocks: R
     line("Company LinkedIn", lead.companyLinkedinUrl ? link(lead.companyLinkedinUrl, "View Profile") : ""),
   );
   const ours = group(line("Sender", escapeMrkdwn(input.senderName)), line("Campaign", escapeMrkdwn(input.campaignName)));
-  const blocks: Row[] = [section(`:arrows_counterclockwise: *New Reply · Reply #${Math.max(1, input.replyNumber)}*`)];
+  // :email: for a first reply, :arrows_counterclockwise: for a lead writing back again, as the n8n bot did.
+  const turn = Math.max(1, input.replyNumber);
+  const blocks: Row[] = [section(`${turn === 1 ? ":email:" : ":arrows_counterclockwise:"} *New Reply · Reply #${turn}*`)];
   for (const part of [person, company, ours]) if (part) blocks.push(section(part));
+  if (lead.companySummary) blocks.push(section(`*Company Summary:* _${escapeMrkdwn(lead.companySummary)}_`));
   if (input.test) blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "_Test post. Nothing will be sent from it._" }] });
   const who = lead.name || "a lead";
   return { text: `${input.test ? "Test: " : ""}New reply from ${who}${input.clientName ? ` (${input.clientName})` : ""}`, blocks };
