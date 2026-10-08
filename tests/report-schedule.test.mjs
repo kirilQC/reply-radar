@@ -38,3 +38,9 @@ test("both report routes judge each client on its own schedule, and QC Bot has t
   }
   assert.match(readFileSync(new URL("../app/lib/assistant-tools.ts", import.meta.url), "utf8"), /case "report_schedule":/);
 });
+
+test("an on-demand brief runs the scheduled brief's own route into the internal channel", () => {
+  const tools = readFileSync(new URL("../app/lib/assistant-tools.ts", import.meta.url), "utf8");
+  assert.match(tools, /case "run_morning_brief":[\s\S]{0,1200}\/api\/slack\/brief[\s\S]{0,300}destination: "internal"/);
+  assert.match(tools, /name: "run_morning_brief"/);
+});

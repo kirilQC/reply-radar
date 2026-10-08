@@ -329,6 +329,7 @@ const PROGRESS_LABELS = {
   heyreach_workspace_totals: "Totalling the outreach account",
   email_campaign_metrics: "Reading the email campaigns",
   report_schedule: "Checking the report schedule",
+  run_morning_brief: "Writing the morning brief",
   heyreach_inbox_search: "Searching the HeyReach inbox",
   heyreach_person_profile: "Reading a LinkedIn profile",
   brain_search: "Searching the QC Brain",

@@ -999,6 +999,12 @@ const BASE_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: "run_morning_brief",
+    description:
+      "Write and post a client's morning brief RIGHT NOW, on demand: the exact brief the scheduled automation writes (same figures, Slack channels, last call, QC Brain, memory of earlier briefs, same format), posted the same way into the client's internal channel (a header with the brief in its thread), with the same tracker and project-board updates. Works whether or not the client's automatic briefs are on, so a client can be on-demand only (turn the automatic ones off with report_schedule enabled:false). Takes about a minute. Use it for 'give me the morning brief/report for X', 'run Velora's brief now'. Afterwards say where it was posted and link it (the result has the link); do not repeat or summarise the brief itself.",
+    input_schema: { type: "object", properties: { ...CLIENT_ARG }, required: ["client"] },
+  },
+  {
     name: "report_schedule",
     description:
       "Read or change WHEN a client's morning brief or end-of-week report posts. Each client follows the shared schedule (set on the Slack page) unless it has its own; this sets the client's own days, time and time zone, puts it back on the shared schedule, or turns that report on or off for the client. Call with only client and report to read the current schedule. Example: 'for Velora, morning brief only on Wednesdays at 8am' → client Velora, report morning_brief, days [\"wednesday\"], time \"08:00\". Changes take effect on the next scheduled run. Confirm what you changed using the 'schedule' the result returns, in plain words.",
@@ -2265,6 +2271,38 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         note: result.removed
           ? `Removed ${result.removed} entr${result.removed === 1 ? "y" : "ies"}. State the new total (${result.total} ${result.total === 1 ? "company" : "companies"}) and include the link: ${result.link ?? "(no brain link)"}.`
           : "Nothing on the DNC matched that.",
+      };
+    }
+
+    case "run_morning_brief": {
+      const client = await resolveClient(input.client);
+      if (client.offboarded) throw new Error(`${client.name} is offboarded, so no brief is posted for them.`);
+      // The brief route itself, so an on-demand brief is the scheduled one exactly: same request, same
+      // inputs, same post into the internal channel, same row in rr_slack_briefs (it becomes the next brief's
+      // memory and counts as today's brief, so the automation does not post a second one today).
+      const base = publicBaseUrl() || "https://www.replyradar.dev";
+      const secret = (process.env.CRON_SECRET ?? "").trim();
+      const response = await fetch(`${base}/api/slack/brief`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
+        body: JSON.stringify({ workspace: client.slug, destination: "internal" }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(185_000),
+      });
+      const result = object(await response.json().catch(() => ({})));
+      if (!response.ok && !result.brief) throw new Error(text(result.error) || `The brief could not be written (${response.status}).`);
+      const channel = text(result.channelId);
+      const threadTs = text(result.threadTs);
+      const link = channel && threadTs ? `https://slack.com/archives/${channel}/p${threadTs.replace(".", "")}` : null;
+      return {
+        client: client.name,
+        posted: result.posted === true,
+        where: channel ? `<#${channel}>` : null,
+        link,
+        error: text(result.error) || null,
+        note: result.posted === true
+          ? "Posted in the client's internal channel, as the scheduled brief would be. Link to it; do not restate it."
+          : `The brief was written but not posted${text(result.error) ? `: ${text(result.error)}` : ""}.`,
       };
     }
 
