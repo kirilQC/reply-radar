@@ -173,16 +173,21 @@ export async function gatherPriorBriefs(
     const resetAt = Date.parse(String((await readConfig(briefMemoryResetKey(String(workspace.id ?? ""))).catch(() => "")) ?? ""));
     const since = Number.isNaN(resetAt) ? "" : `&created_at=gt.${encodeURIComponent(new Date(resetAt).toISOString())}`;
     const rows = await read(
-      `rr_slack_briefs?select=body,created_at,slack_channel_id,slack_message_ts,sources`
+      `rr_slack_briefs?select=body,created_at,slack_channel_id,slack_message_ts,recordedChannels:signals->sources->channels`
       + `&workspace_id=eq.${encodeURIComponent(workspace.id)}&automation=eq.morning_brief`
       + `&destination=eq.internal&status=eq.success&slack_message_ts=not.is.null${since}`
       + `&order=created_at.desc&limit=${PRIOR_BRIEF_COUNT + 3}`,
-    ).catch(() => []);
+    ).catch((error) => {
+      // A failed read here is a brief with no memory, which looks exactly like a client with no history:
+      // said out loud, because a wrong column name once hid every client's replies for days.
+      console.warn("reply_radar_brief_memory_read_failed", { client: workspace.slug, error: String(error).slice(0, 300) });
+      return [];
+    });
     const current = briefChannelsOf(workspace);
     const briefs = (Array.isArray(rows) ? (rows as Row[]) : [])
       .filter((row) => String(row.body ?? "").trim())
       .filter((row) => {
-        const recorded = (row.sources as Row | null)?.channels as Row | undefined;
+        const recorded = (row.recordedChannels ?? undefined) as Row | undefined;
         if (!recorded) return true;
         return String(recorded.internal ?? "") === current.internal && String(recorded.external ?? "") === current.external;
       })
@@ -219,7 +224,7 @@ export async function briefMemoryReport(read: (path: string) => Promise<unknown>
   const resetRaw = String((await readConfig(briefMemoryResetKey(String(workspace.id ?? ""))).catch(() => "")) ?? "");
   const resetAt = Date.parse(resetRaw);
   const rows = await read(
-    `rr_slack_briefs?select=created_at,destination,status,slack_channel_id,slack_message_ts,sources,body`
+    `rr_slack_briefs?select=created_at,destination,status,slack_channel_id,slack_message_ts,recordedChannels:signals->sources->channels,body`
     + `&workspace_id=eq.${encodeURIComponent(workspace.id)}&automation=eq.morning_brief&order=created_at.desc&limit=12`,
   ).catch(() => []);
   const current = briefChannelsOf(workspace);
@@ -227,7 +232,7 @@ export async function briefMemoryReport(read: (path: string) => Promise<unknown>
     current,
     resetAt: resetRaw || null,
     briefs: (Array.isArray(rows) ? (rows as Row[]) : []).map((row) => {
-      const recorded = (row.sources as Row | null)?.channels as Row | undefined;
+      const recorded = (row.recordedChannels ?? undefined) as Row | undefined;
       const reasons = [
         row.destination !== "internal" && `destination ${String(row.destination)}`,
         row.status !== "success" && `status ${String(row.status)}`,
@@ -260,14 +265,14 @@ export async function gatherClosedItems(read: (path: string) => Promise<unknown>
     const resetAt = Date.parse(String((await readConfig(briefMemoryResetKey(String(workspace.id ?? ""))).catch(() => "")) ?? ""));
     const from = Math.max(Number.isNaN(resetAt) ? 0 : resetAt, Date.now() - CLOSED_ITEMS_DAYS * 86_400_000);
     const rows = await read(
-      `rr_slack_briefs?select=body,sources&workspace_id=eq.${encodeURIComponent(workspace.id)}&automation=eq.morning_brief`
+      `rr_slack_briefs?select=body,recordedChannels:signals->sources->channels&workspace_id=eq.${encodeURIComponent(workspace.id)}&automation=eq.morning_brief`
       + `&destination=eq.internal&status=eq.success&slack_message_ts=not.is.null&created_at=gt.${encodeURIComponent(new Date(from).toISOString())}`
       + `&order=created_at.desc&limit=40`,
     ).catch(() => []);
     const current = briefChannelsOf(workspace);
     const titles = new Set<string>();
     for (const row of Array.isArray(rows) ? (rows as Row[]) : []) {
-      const recorded = (row.sources as Row | null)?.channels as Row | undefined;
+      const recorded = (row.recordedChannels ?? undefined) as Row | undefined;
       if (recorded && (String(recorded.internal ?? "") !== current.internal || String(recorded.external ?? "") !== current.external)) continue;
       for (const title of struckItems(String(row.body ?? ""))) titles.add(title);
     }

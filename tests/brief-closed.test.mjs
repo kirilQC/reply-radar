@@ -112,3 +112,13 @@ test("a section left empty says so, and nothing closed means nothing changes", (
   assert.match(result.body, /Things to work on\*\n\n=+\n\nNothing open here right now\.\n\n\n=+/);
   assert.equal(dropClosedItems(oct8, []).body, oct8);
 });
+
+test("brief memory reads ask for columns rr_slack_briefs actually has", async () => {
+  const { readFileSync } = await import("node:fs");
+  const run = readFileSync(new URL("../app/lib/morning-brief-run.ts", import.meta.url), "utf8");
+  // The table has no `sources` column (it lives in signals.sources); selecting it failed every memory read.
+  for (const select of run.match(/rr_slack_briefs\?select=[^&`]+/g) ?? []) {
+    assert.doesNotMatch(select, /(?:select=|,)sources(?:,|$)/, select);
+  }
+  assert.match(run, /recordedChannels:signals->sources->channels/);
+});
