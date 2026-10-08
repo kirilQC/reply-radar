@@ -30,6 +30,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   if (!workspace || !secret || String(workspace.lemlist_webhook_secret ?? "") !== secret || !workspace.lemlist_api_key) {
     return NextResponse.json({ ok: false, error: "Unknown webhook." }, { status: 404 });
   }
+  // The client's "replies are arriving" signal on the health page, as a HeyReach webhook stamps it.
+  await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(String(workspace.id))}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify({ last_webhook_received_at: new Date().toISOString() }) }).catch(() => undefined);
   const body = object(await request.json().catch(() => ({})));
   const channel = (channelOfActivity(body.type) ?? new URL(request.url).searchParams.get("channel")) as LemlistChannel | null;
   const contactId = String(body.contactId ?? "").trim();

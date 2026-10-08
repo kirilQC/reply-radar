@@ -312,6 +312,8 @@ async function refreshAllConversations() {
 // because relying on somebody to remember is how the noise built up in the first place.
 const PURGE_LOOP_MS = 60 * 60 * 1000;
 let lastPurgeRun = 0;
+// Where the last purge stopped: the route checks 4,000 conversations a run, so the scan resumes here.
+let purgeCursor = "";
 
 async function purgeInboundLeads() {
   if (!appBaseUrl) return;
@@ -319,10 +321,11 @@ async function purgeInboundLeads() {
   try {
     const response = await appFetch("/api/database/purge", {
       method: "POST",
-      body: JSON.stringify({ confirm: true }),
+      body: JSON.stringify({ confirm: true, after: purgeCursor }),
     }, 120_000);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`purge ${response.status}: ${String(payload.error || "").slice(0, 200)}`);
+    purgeCursor = payload.hasMore && payload.nextCursor ? String(payload.nextCursor) : "";
     const deleted = payload.deleted || {};
     await writeSyncRun({
       workspace_id: null,
@@ -2179,7 +2182,9 @@ async function runOnce() {
   // The HeyReach health poll skips offboarded clients. Reconcile and conversation refresh do not: replies
   // can still arrive for them and are stored.
   const workspaces = await supabase("rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&offboarded_at=is.null&order=created_at.asc");
-  for (const workspace of workspaces) await syncWorkspace(workspace);
+  // Only HeyReach clients have a HeyReach key to check. A lemlist- or Email Bison-only client is polled by its
+  // own sync (which stamps last_successful_poll_at), so it is not logged here as a failed HeyReach poll.
+  for (const workspace of workspaces) if (workspace.heyreach_api_key_ciphertext) await syncWorkspace(workspace);
   await writeSyncRun({ workspace_id: null, run_type: "heartbeat", source: "render-worker-heartbeat", status: "success", started_at: cycleStarted, finished_at: new Date().toISOString(), records_seen: workspaces.length, records_written: 0 }).catch(logFailed);
 
   // Run conversation refresh every ~2.4h (10 batches/day × 5 conversations = 50/workspace/day)

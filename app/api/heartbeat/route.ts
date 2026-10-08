@@ -569,7 +569,8 @@ export async function GET(incoming: Request) {
     const clients = rows.map((row) => {
       const webhookAgeSeconds = ageSeconds(row.last_webhook_received_at);
       const pollAgeSeconds = ageSeconds(row.last_successful_poll_at);
-      const keyConfigured = Boolean(row.heyreach_api_key_ciphertext);
+      // Any outreach account counts: a lemlist-only or Email Bison-only client is connected, not missing.
+      const keyConfigured = Boolean(row.heyreach_api_key_ciphertext || row.lemlist_api_key || row.emailbison_workspace_id);
       const webhookHealthy =
         webhookAgeSeconds !== null &&
         webhookAgeSeconds <= thresholds.webhookFreshSeconds;
@@ -595,7 +596,7 @@ export async function GET(incoming: Request) {
         lastSuccessfulPollAt: row.last_successful_poll_at ?? null,
         lastReconciledAt: row.last_reconciled_at ?? null,
         webhookStatus: !keyConfigured
-          ? "Add a HeyReach API key first."
+          ? "Connect an outreach account (HeyReach, lemlist or Email Bison) first."
           : webhookHealthy
             ? "Replies are reaching QC Command."
             : webhookAgeSeconds === null

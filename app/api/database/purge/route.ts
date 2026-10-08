@@ -30,21 +30,28 @@ type Row = Record<string, unknown>;
 const MAX_CONVERSATIONS_PER_RUN = 4_000;
 const PAGE = 1_000;
 
-async function readAllConversations(url: string, key: string): Promise<{ rows: Row[]; hasMore: boolean }> {
+/**
+ * Up to MAX_CONVERSATIONS_PER_RUN conversations after `after` (an id; "" = from the start). Each run used to
+ * start at the beginning, so with more than 4,000 conversations everything past the first 4,000 was never
+ * checked; the caller now passes back `nextCursor` and the scan walks the whole table across runs.
+ */
+async function readAllConversations(url: string, key: string, after = ""): Promise<{ rows: Row[]; hasMore: boolean; nextCursor: string }> {
   const rows: Row[] = [];
+  const from = after ? `&id=gt.${encodeURIComponent(after)}` : "";
   for (let offset = 0; offset < MAX_CONVERSATIONS_PER_RUN; offset += PAGE) {
     // Ordered by id because it is unique: paging by last_message_at would revisit or skip rows
     // wherever two conversations share a timestamp.
     const page = await selectRows(
       url,
       key,
-      `rr_conversations?select=id,lead_id,workspace_id&order=id.asc&limit=${PAGE}&offset=${offset}`,
+      `rr_conversations?select=id,lead_id,workspace_id${from}&order=id.asc&limit=${PAGE}&offset=${offset}`,
     );
     rows.push(...page);
-    if (page.length < PAGE) return { rows, hasMore: false };
+    if (page.length < PAGE) return { rows, hasMore: false, nextCursor: "" };
   }
-  const next = await selectRows(url, key, `rr_conversations?select=id&order=id.asc&limit=1&offset=${MAX_CONVERSATIONS_PER_RUN}`);
-  return { rows, hasMore: next.length > 0 };
+  const nextCursor = String(rows[rows.length - 1]?.id ?? "");
+  const next = await selectRows(url, key, `rr_conversations?select=id&id=gt.${encodeURIComponent(nextCursor)}&order=id.asc&limit=1`);
+  return { rows, hasMore: next.length > 0, nextCursor: next.length ? nextCursor : "" };
 }
 
 async function readMessages(url: string, key: string, conversationIds: string[]): Promise<Row[]> {
@@ -73,7 +80,7 @@ export async function POST(request: Request) {
   const confirmed = body.confirm === true;
 
   try {
-    const { rows: conversations, hasMore } = await readAllConversations(url, key);
+    const { rows: conversations, hasMore, nextCursor } = await readAllConversations(url, key, typeof body.after === "string" ? body.after : "");
     const leadIds = [...new Set(conversations.map((row) => String(row.lead_id)).filter(Boolean))];
     const leads = await queryByIds(leadIds, 40, (batch) =>
       selectRows(url, key, `rr_leads?select=id,name,raw_data&id=in.(${batch.map(encodeURIComponent).join(",")})`),
@@ -129,6 +136,7 @@ export async function POST(request: Request) {
         .filter(Boolean)
         .slice(0, 12),
       hasMore,
+      nextCursor,
     };
 
     if (!confirmed) return NextResponse.json({ ok: true, dryRun: true, ...preview });

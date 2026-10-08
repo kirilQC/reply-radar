@@ -30,6 +30,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   if (!workspace || !secret || String(workspace.emailbison_webhook_secret ?? "") !== secret) {
     return NextResponse.json({ ok: false, error: "Unknown webhook." }, { status: 404 });
   }
+  // The client's "replies are arriving" signal on the health page, as a HeyReach webhook stamps it.
+  await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(String(workspace.id))}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify({ last_webhook_received_at: new Date().toISOString() }) }).catch(() => undefined);
   const body = object(await request.json().catch(() => ({})));
   const replyId = object(object(body.data).reply).id ?? object(body.reply).id;
   if (!replyId) return NextResponse.json({ ok: true, note: "No reply in this event." });
