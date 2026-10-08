@@ -2,7 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
-import { LEMLIST_WORKSPACE_COLUMNS, syncLemlistReplies, type LemlistWorkspace } from "../../../lib/lemlist-ingest";
+import { LEMLIST_WORKSPACE_COLUMNS, diagnoseLemlistShapes, syncLemlistReplies, type LemlistWorkspace } from "../../../lib/lemlist-ingest";
 import { alertNewReplies } from "../../../lib/reply-alert-run";
 import { classifyLatestReply } from "../../../lib/reply-sentiment";
 
@@ -14,7 +14,7 @@ export const maxDuration = 300;
 
 export async function POST(request: Request) {
   // `days` re-reads that far back (at most 30); the routine worker pass sends nothing and reads since the last sync.
-  const body = (await request.json().catch(() => ({}))) as { days?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { days?: unknown; diagnose?: unknown; client?: unknown };
   const days = Math.min(30, Math.max(0, Number(body.days) || 0));
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -27,6 +27,12 @@ export async function POST(request: Request) {
   // Before the migration is run the columns do not exist: nothing to do, not an error worth retrying.
   if (!response.ok) return NextResponse.json({ ok: true, skipped: `lemlist columns missing (${response.status}).` });
   const workspaces = (await response.json()) as LemlistWorkspace[];
+  // Field names and lengths only (diagnoseLemlistShapes), never message text: safe on this machine path.
+  if (body.diagnose === true) {
+    const target = workspaces.find((row) => row.slug === String(body.client ?? ""));
+    if (!target) return NextResponse.json({ ok: false, error: "That client has no lemlist key." }, { status: 404 });
+    return NextResponse.json({ ok: true, shapes: await diagnoseLemlistShapes(target) });
+  }
   const report: Array<Record<string, unknown>> = [];
   const started = Date.now();
   for (const workspace of workspaces) {

@@ -398,3 +398,24 @@ export async function disconnectLemlist(config: Config, workspace: LemlistWorksp
   await rest(config, `rr_workspaces?id=eq.${enc(workspace.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ lemlist_api_key: null, lemlist_team_id: null, lemlist_team_name: null, lemlist_webhook_ids: null }) });
   return { ok: true };
 }
+
+
+/**
+ * Read-only shape check for debugging (no message text leaves this): for a client's latest replies on each
+ * channel, the field names of the activity and of every message in the contact's thread, with the length of
+ * each string field. Used to find where lemlist keeps a reply's text when the inbox shows it empty.
+ */
+export async function diagnoseLemlistShapes(workspace: LemlistWorkspace, perType = 2): Promise<Row[]> {
+  const apiKey = text(workspace.lemlist_api_key);
+  if (!apiKey) return [];
+  const shape = (row: Row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === "string" ? `string(${value.length})` : Array.isArray(value) ? `array(${value.length})` : value && typeof value === "object" ? `object{${Object.keys(value).join(",")}}` : typeof value]));
+  const out: Row[] = [];
+  for (const type of ["linkedinReplied", "emailsReplied"] as const) {
+    const activities = (await replyActivities(apiKey, type, new Date(Date.now() - 30 * 86_400_000).toISOString(), 1)).slice(0, perType);
+    for (const activity of activities) {
+      const thread = await contactMessages(apiKey, text(activity.contactId)).catch(() => [] as Row[]);
+      out.push({ type, activity: shape(activity), thread: thread.map(shape) });
+    }
+  }
+  return out;
+}
