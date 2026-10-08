@@ -259,12 +259,14 @@ async function findOrCreateLead(config: Config, workspaceId: string, lead: Row):
     await rememberEmail(config, linked, person.email, bisonLeadId);
     return text(linked.id);
   }
-  const fromHeyReach = await findInHeyReach(config, workspaceId, person).catch(() => null);
-  if (fromHeyReach) return leadForHeyReachProfile(config, workspaceId, fromHeyReach, person, bisonLeadId);
+  // Already seen as an email-only lead: reuse it. The HeyReach and AI Ark searches below are slow (one call
+  // per HeyReach list) and only for someone new; `relinkEmailLeads` retries the matching for these.
   if (person.email) {
     const emailOnly = await rows(config, `rr_leads?select=id&workspace_id=eq.${enc(workspaceId)}&raw_data->reply_radar->>email=eq.${enc(person.email)}&limit=1`);
     if (emailOnly[0]) return text(emailOnly[0].id);
   }
+  const fromHeyReach = await findInHeyReach(config, workspaceId, person).catch(() => null);
+  if (fromHeyReach) return leadForHeyReachProfile(config, workspaceId, fromHeyReach, person, bisonLeadId);
   const created = await rest(config, "rr_leads", {
     method: "POST",
     headers: { Prefer: "return=representation" },
