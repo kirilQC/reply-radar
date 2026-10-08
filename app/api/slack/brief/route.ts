@@ -161,14 +161,14 @@ function countsAsSent(row: Row, nowMs: number) {
  * HeyReach key is read as a list of ids that have one rather than as a column, so no key material is
  * pulled out of the database to answer a question that only needs a yes or no.
  */
-export async function GET(request: Request) {
+export async function GET(request?: Request) {
   const credential = credentials();
   if (!credential) return slimJson({ error: "Supabase not configured" }, { status: 503 });
   const { url, key } = credential;
   const read = reader(url, key);
 
   // ?memory=<slug>: which of the client's stored briefs the next brief will remember, and why not the rest.
-  const memorySlug = new URL(request.url).searchParams.get("memory");
+  const memorySlug = request?.url ? new URL(request.url).searchParams.get("memory") : null;
   if (memorySlug) {
     const found = ((await read(`rr_workspaces?select=id,slug,slack_internal_channel_id,slack_external_channel_id&slug=eq.${encodeURIComponent(memorySlug)}&limit=1`).catch(() => [])) as Row[])[0];
     if (!found) return slimJson({ error: "That client does not exist." }, { status: 404 });
