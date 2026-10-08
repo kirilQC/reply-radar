@@ -50,10 +50,44 @@ export function stripQuoted(text) {
   return kept || String(text ?? "").trim();
 }
 
+/** Lines and markers that start an email signature or a phone/app footer. */
+const SIGNATURE_START = [
+  /(^|\s)-{3,}(\s|$)/, // "---" (Gmail's signature rule, often flattened onto the last line)
+  /^--\s*$/m, // RFC "-- " on its own line
+  /^(sent from my (iphone|ipad|android|phone|samsung|mobile)|get outlook for (ios|android)|sent via )/im,
+];
+
+/**
+ * A reply with the signature junk cut out: Gmail's inline signature images ("[https://lh6.googleusercontent…]"),
+ * linked social icons ("<http://www.facebook.com/…>"), and everything from the signature marker on, so the
+ * inbox and Slack show what the person wrote. Their name and title are lost with the signature, which is fine:
+ * the card already says who they are.
+ */
+export function cleanEmailBody(text) {
+  let body = String(text ?? "")
+    .replace(/\[(?:cid:|https?:\/\/)[^\]]*\]/gi, " ") // [https://lh6.googleusercontent.com/…] and [cid:image001.png]
+    .replace(/<(?:https?:\/\/|mailto:)[^>]*>/gi, " ") // <http://www.facebook.com/kurufootwear/>
+    .replace(/\r\n/g, "\n");
+  for (const marker of SIGNATURE_START) {
+    const match = marker.exec(body);
+    // Only a marker after some words counts: a reply that opens with "---" keeps its text.
+    if (match && match.index > 0 && body.slice(0, match.index).trim()) body = body.slice(0, match.index);
+  }
+  return body
+    .split("\n")
+    .filter((line) => !/^\s*(https?:\/\/\S+|www\.\S+)\s*$/i.test(line)) // a line that is only a link
+    .join("\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /** The person-written part of a reply body, from whichever of text and HTML Email Bison gave us. */
 export function replyText(reply) {
   const plain = String(reply?.text_body ?? "").trim();
-  return stripQuoted(plain || htmlToText(reply?.html_body));
+  const words = cleanEmailBody(stripQuoted(plain || htmlToText(reply?.html_body)));
+  return words || stripQuoted(plain || htmlToText(reply?.html_body));
 }
 
 /** The conversation key for an email thread: one per Email Bison lead. Never a HeyReach id. */

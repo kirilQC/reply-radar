@@ -21,6 +21,7 @@
 
 import { isOurCampaign } from "../../shared/campaign-code.mjs";
 import { emailConversationKey, htmlToText, replyText } from "../../shared/email-text.mjs";
+import { linkedinFromVariables, normalName, pickLinkedInLead } from "../../shared/lead-match.mjs";
 import {
   bisonConfigured,
   campaignName,
@@ -86,47 +87,113 @@ export async function ensureBisonLink(config: Config, workspace: EmailWorkspace)
   return { teamId, token };
 }
 
-const normal = (value: unknown) => text(value).toLowerCase().replace(/\s+/g, " ");
+/** A Bison lead as the matcher reads it. */
+type PersonForMatch = { email: string; name: string; company: string; linkedinHandle: string };
 
-/** The lead row this Bison lead is: same email, else same name and company (a LinkedIn lead), else a new one. */
-async function findOrCreateLead(config: Config, workspaceId: string, lead: Row): Promise<string> {
-  const email = text(lead.email).toLowerCase();
-  const name = [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || text(lead.name) || email;
-  const company = text(lead.company);
-  const ws = `workspace_id=eq.${enc(workspaceId)}`;
-  if (email) {
-    const byEmail = await rows(config, `rr_leads?select=id&${ws}&raw_data->reply_radar->>email=eq.${enc(email)}&limit=1`);
-    if (byEmail[0]) return text(byEmail[0].id);
+/**
+ * The LinkedIn lead (same client) this email person already is, or null. Every email campaign is fed from a
+ * HeyReach campaign, so this nearly always finds them. In order of certainty: the LinkedIn URL Bison carries
+ * in a custom variable; the email address HeyReach or an earlier email reply stored on the lead; then the
+ * same first and last name, the company deciding between namesakes (shared/lead-match.mjs).
+ */
+async function findLinkedInLead(config: Config, workspaceId: string, person: PersonForMatch, excludeId = ""): Promise<Row | null> {
+  const ws = `workspace_id=eq.${enc(workspaceId)}&linkedin_profile_url=not.is.null${excludeId ? `&id=neq.${enc(excludeId)}` : ""}`;
+  const select = "id,name,company,raw_data,linkedin_profile_url";
+  if (person.linkedinHandle) {
+    const byUrl = await rows(config, `rr_leads?select=${select}&${ws}&linkedin_profile_url=ilike.*${enc(person.linkedinHandle)}*&limit=1`);
+    if (byUrl[0]) return byUrl[0];
   }
-  if (name && company) {
-    const safe = (s: string) => enc(s.replace(/[*%,()]/g, " ").trim());
-    const candidates = await rows(config, `rr_leads?select=id,name,company,raw_data&${ws}&name=ilike.${safe(name)}&company=ilike.*${safe(company)}*&limit=3`);
-    const same = candidates.find((row) => normal(row.name) === normal(name));
-    if (same) {
-      // Remember the address on the LinkedIn lead, so the next email from them lands here directly.
-      const raw = object(same.raw_data);
-      await rest(config, `rr_leads?id=eq.${enc(text(same.id))}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({ raw_data: { ...raw, reply_radar: { ...object(raw.reply_radar), email, emailbison: { lead_id: text(lead.id) } } } }),
-      });
-      return text(same.id);
-    }
+  if (person.email) {
+    const email = enc(person.email);
+    const byEmail = await rows(config, `rr_leads?select=${select}&${ws}&or=(raw_data->reply_radar->>email.eq.${email},raw_data->>email_address.ilike.${email},raw_data->>email.ilike.${email})&limit=1`);
+    if (byEmail[0]) return byEmail[0];
+  }
+  const words = normalName(person.name).split(" ").filter(Boolean);
+  const last = words[words.length - 1];
+  if (words.length < 2 || !last || last.length < 2) return null;
+  const candidates = await rows(config, `rr_leads?select=${select}&${ws}&name=ilike.*${enc(last)}*&limit=50`);
+  const picked = pickLinkedInLead({ name: person.name, company: person.company }, candidates.map((row) => ({ id: text(row.id), name: text(row.name), company: text(row.company) })));
+  return picked ? candidates.find((row) => text(row.id) === picked.id) ?? null : null;
+}
+
+/** Remember the email address (and Bison lead) on a LinkedIn lead, so the next email lands on it by address. */
+async function rememberEmail(config: Config, lead: Row, email: string, bisonLeadId: string): Promise<void> {
+  const raw = object(lead.raw_data);
+  const radar = object(raw.reply_radar);
+  if (text(radar.email) === email && text(object(radar.emailbison).lead_id) === bisonLeadId) return;
+  await rest(config, `rr_leads?id=eq.${enc(text(lead.id))}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ raw_data: { ...raw, reply_radar: { ...radar, email, emailbison: { lead_id: bisonLeadId } } } }),
+  });
+}
+
+const personOf = (lead: Row): PersonForMatch => ({
+  email: text(lead.email).toLowerCase(),
+  name: [text(lead.first_name), text(lead.last_name)].filter(Boolean).join(" ") || text(lead.name) || text(lead.email),
+  company: text(lead.company),
+  linkedinHandle: linkedinFromVariables(lead.custom_variables),
+});
+
+/** The lead row for this Bison lead: their LinkedIn lead when QC has one, else an email-only lead (made once). */
+async function findOrCreateLead(config: Config, workspaceId: string, lead: Row): Promise<string> {
+  const person = personOf(lead);
+  const bisonLeadId = text(lead.id);
+  const linked = await findLinkedInLead(config, workspaceId, person);
+  if (linked) {
+    await rememberEmail(config, linked, person.email, bisonLeadId);
+    return text(linked.id);
+  }
+  if (person.email) {
+    const emailOnly = await rows(config, `rr_leads?select=id&workspace_id=eq.${enc(workspaceId)}&raw_data->reply_radar->>email=eq.${enc(person.email)}&limit=1`);
+    if (emailOnly[0]) return text(emailOnly[0].id);
   }
   const created = await rest(config, "rr_leads", {
     method: "POST",
     headers: { Prefer: "return=representation" },
     body: JSON.stringify({
       workspace_id: workspaceId,
-      name,
+      name: person.name,
       role: text(lead.title) || null,
-      company: company || null,
-      raw_data: { email, full_name: name, company_name: company || null, reply_radar: { email, channel: "email", history_status: "complete", emailbison: { lead_id: text(lead.id) } } },
+      company: person.company || null,
+      raw_data: { email: person.email, full_name: person.name, company_name: person.company || null, reply_radar: { email: person.email, channel: "email", history_status: "complete", emailbison: { lead_id: bisonLeadId } } },
     }),
   });
   const row = Array.isArray(created.data) ? (created.data[0] as Row | undefined) : undefined;
   if (!created.ok || !row) throw new Error(`Could not save the email lead (${created.status}).`);
   return text(row.id);
+}
+
+/**
+ * The one-off repair for email replies stored before matching existed: each email-only lead that turns out
+ * to be a LinkedIn lead has its conversations moved onto that lead, and the duplicate removed.
+ */
+export async function relinkEmailLeads(config: Config, workspace: EmailWorkspace): Promise<{ checked: number; linked: number }> {
+  const emailOnly = await rows(config, `rr_leads?select=id,name,company,raw_data&workspace_id=eq.${enc(workspace.id)}&raw_data->reply_radar->>channel=eq.email&linkedin_profile_url=is.null&limit=1000`);
+  let linked = 0;
+  for (const lead of emailOnly) {
+    const radar = object(object(lead.raw_data).reply_radar);
+    const person: PersonForMatch = { email: text(radar.email), name: text(lead.name), company: text(lead.company), linkedinHandle: "" };
+    const target = await findLinkedInLead(config, workspace.id, person, text(lead.id));
+    if (!target) continue;
+    const moved = await rest(config, `rr_conversations?lead_id=eq.${enc(text(lead.id))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ lead_id: text(target.id) }) });
+    if (!moved.ok) continue;
+    await rememberEmail(config, target, person.email, text(object(radar.emailbison).lead_id));
+    await rest(config, `rr_leads?id=eq.${enc(text(lead.id))}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+    linked += 1;
+  }
+  return { checked: emailOnly.length, linked };
+}
+
+/** Re-reads every stored email conversation of a client from Bison (after a change to how bodies are cleaned). */
+export async function recleanEmailConversations(config: Config, workspace: EmailWorkspace): Promise<{ conversations: number; refreshed: number }> {
+  const conversations = await rows(config, `rr_conversations?select=id&workspace_id=eq.${enc(workspace.id)}&heyreach_conversation_id=like.bison:*&limit=1000`);
+  let refreshed = 0;
+  for (const conversation of conversations) {
+    const result = await refreshEmailConversation(config, text(conversation.id)).catch(() => ({ messagesUpdated: 0 }));
+    if (result.messagesUpdated) refreshed += 1;
+  }
+  return { conversations: conversations.length, refreshed };
 }
 
 export type EmailIngestResult = { discarded: true; reason: string } | { conversationId: string; leadId: string; messagesWritten: number; campaignName: string };

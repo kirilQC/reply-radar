@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { BISON_KEY_ENV, BISON_URL_ENV, bisonConfigured, listBisonWorkspaces, matchBisonWorkspace } from "../../../lib/emailbison";
-import { EMAIL_WORKSPACE_COLUMNS, ensureBisonLink, refreshBisonStats, registerBisonWebhook, syncBisonReplies, type EmailWorkspace } from "../../../lib/email-ingest";
+import { EMAIL_WORKSPACE_COLUMNS, ensureBisonLink, recleanEmailConversations, refreshBisonStats, registerBisonWebhook, relinkEmailLeads, syncBisonReplies, type EmailWorkspace } from "../../../lib/email-ingest";
 import { publicBaseUrl } from "../../../lib/public-url";
 
 /** The host the page is served from (www): the bare domain 308s POSTs, which webhook senders do not follow. */
@@ -15,7 +15,7 @@ const servingBase = (request: Request) => {
 /**
  * Email Bison, per client: which Bison workspace it is matched to, whether it has its own token and QC's
  * webhook, and when its replies were last synced. POST runs one step for one client (or every client):
- *   { action: "link" | "webhook" | "sync" | "stats", client?: slug, workspaceId?: bison id to set by hand }
+ *   { action: "link" | "webhook" | "sync" | "stats" | "relink" | "reclean", client?: slug, workspaceId?: bison id to set by hand }
  */
 export const maxDuration = 300;
 
@@ -93,6 +93,8 @@ export async function POST(request: Request) {
         else if (action === "webhook") results.push({ client: workspace.slug, ...(await registerBisonWebhook(c, workspace, servingBase(request))) });
         else if (action === "sync") results.push({ client: workspace.slug, ...(await syncBisonReplies(c, workspace, body.full === true ? 60 : 10, body.full === true)) });
         else if (action === "stats") results.push({ client: workspace.slug, ...(await refreshBisonStats(c, workspace)) });
+        else if (action === "relink") results.push({ client: workspace.slug, ...(await relinkEmailLeads(c, workspace)) });
+        else if (action === "reclean") results.push({ client: workspace.slug, ...(await recleanEmailConversations(c, workspace)) });
         else return NextResponse.json({ ok: false, error: "Unknown action." }, { status: 400 });
       } catch (error) {
         results.push({ client: workspace.slug, error: error instanceof Error ? error.message.slice(0, 300) : "failed" });
