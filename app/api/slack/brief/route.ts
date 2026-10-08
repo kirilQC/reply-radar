@@ -34,6 +34,9 @@ import { brainContext } from "../../../lib/brain-context";
 import { writeConfig } from "../../../lib/app-config";
 import {
   alreadySentToday,
+  clientSchedule,
+  describeSchedule,
+  SCHEDULE_OVERRIDE_KEYS,
   DEFAULT_SCHEDULE,
   isDueNow,
   localDayKey,
@@ -205,6 +208,7 @@ export async function GET(request?: Request) {
     }
 
     const now = new Date();
+    // The shared schedule's own verdict, for the page; each client is judged on its own schedule below.
     const due = isDueNow(schedule, now);
 
     const workspaces = (Array.isArray(workspaceRows) ? (workspaceRows as Row[]) : []).map((workspace) => {
@@ -226,8 +230,11 @@ export async function GET(request?: Request) {
         granolaKeyCount,
         internalOnly: Boolean((workspace.guardrails as Row | null)?.slack_internal_only),
       }, now.getTime());
-      const sentToday = alreadySentToday(sent ? String(sent.created_at ?? "") : null, schedule, now);
+      // This client's own schedule when it has one (guardrails.brief_schedule, set by QC Bot), else the shared one.
+      const own = clientSchedule(schedule, workspace.guardrails, SCHEDULE_OVERRIDE_KEYS.morning_brief);
+      const sentToday = alreadySentToday(sent ? String(sent.created_at ?? "") : null, own, now);
       return {
+        schedule: { custom: own.custom, text: describeSchedule(own) },
         id,
         name: String(workspace.name ?? ""),
         slug: String(workspace.slug ?? ""),
@@ -247,7 +254,7 @@ export async function GET(request?: Request) {
         // The worker reads this rather than recomputing it. Readiness is required as well as the toggle:
         // an enabled client whose HeyReach sync died should not post a brief built from two sources
         // while the page says three, it should show as not ready until somebody looks.
-        dueNow: due && enabled && readiness.ready && !sentToday,
+        dueNow: isDueNow(own, now) && enabled && readiness.ready && !sentToday,
       };
     });
 

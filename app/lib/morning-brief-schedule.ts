@@ -244,3 +244,33 @@ export function describeSchedule(schedule: BriefSchedule): string {
   const suffix = schedule.sendHour < 12 ? "AM" : "PM";
   return `${when} at ${hour}:${String(schedule.sendMinute).padStart(2, "0")} ${suffix} ${schedule.timezone.split("/").pop()?.replace(/_/g, " ") ?? schedule.timezone}`;
 }
+
+/**
+ * One client's own schedule for a report, layered over the shared one.
+ *
+ * The shared schedule (rr_slack_automations, set on the Slack page) is every client's by default. A client
+ * can carry its own days, time and zone in guardrails (`brief_schedule` for the morning brief,
+ * `eow_schedule` for the end-of-week report), set by QC Bot ("for Velora, briefs only on Wednesdays at
+ * 8am"). Whatever the override leaves out comes from the shared schedule, and the shared on/off switch still
+ * applies: turning the automation off stops every client.
+ */
+export type ScheduleOverride = { sendDays?: number[]; sendHour?: number; sendMinute?: number; timezone?: string };
+export const SCHEDULE_OVERRIDE_KEYS = { morning_brief: "brief_schedule", eow_report: "eow_schedule" } as const;
+
+export function clientSchedule(base: BriefSchedule, guardrails: unknown, key: string): BriefSchedule & { custom: boolean } {
+  const raw = guardrails && typeof guardrails === "object" ? (guardrails as Record<string, unknown>)[key] : null;
+  if (!raw || typeof raw !== "object") return { ...base, custom: false };
+  const o = raw as ScheduleOverride;
+  const days = Array.isArray(o.sendDays) ? o.sendDays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  const hour = Number(o.sendHour);
+  const minute = Number(o.sendMinute);
+  return {
+    ...base,
+    sendDays: days.length ? days : base.sendDays,
+    sendHour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : base.sendHour,
+    sendMinute: Number.isInteger(minute) && minute >= 0 && minute <= 59 ? minute : base.sendMinute,
+    timezone: typeof o.timezone === "string" && o.timezone.trim() ? o.timezone.trim() : base.timezone,
+    custom: true,
+  };
+}
+

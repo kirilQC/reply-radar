@@ -89,6 +89,8 @@ type BriefClient = {
   lastBriefStatus: string | null;
   lastBriefDestination: string | null;
   dueNow: boolean;
+  /** The client's own schedule, when it has one instead of the shared schedule (set through QC Bot). */
+  schedule?: { custom: boolean; text: string };
 };
 
 type Directory = {
@@ -530,7 +532,7 @@ export default function SlackPage() {
                       {logoOf(client, "brief-client-logo")}
                       <div>
                         <strong>{client.name}</strong>
-                        <small>{client.lastBriefAt ? `Last brief ${formatWhen(client.lastBriefAt)}` : "Never run"}{client.sentToday ? " · sent today" : ""}</small>
+                        <small>{client.lastBriefAt ? `Last brief ${formatWhen(client.lastBriefAt)}` : "Never run"}{client.sentToday ? " · sent today" : ""}{client.schedule?.custom ? ` · own schedule: ${client.schedule.text}` : ""}</small>
                       </div>
                     </div>
                     <div className="brief-client-checks">

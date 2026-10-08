@@ -48,6 +48,7 @@
 
 import { campaignStatusFor } from "./heyreach-campaigns";
 import { lemlistCampaignsAnswer, lemlistMetricsAnswer, lemlistSendersAnswer, lemlistTotalsAnswer } from "./lemlist-assistant";
+import { clientSchedule, DEFAULT_SCHEDULE, describeSchedule, EOW_DEFAULT_SCHEDULE, SCHEDULE_OVERRIDE_KEYS, type BriefSchedule } from "./morning-brief-schedule";
 import {
   createRecords as airtableCreate,
   findTableByName,
@@ -995,6 +996,24 @@ const BASE_TOOLS: ToolDefinition[] = [
         company: { type: "string", description: "The company name or domain to remove." },
       },
       required: ["client", "company"],
+    },
+  },
+  {
+    name: "report_schedule",
+    description:
+      "Read or change WHEN a client's morning brief or end-of-week report posts. Each client follows the shared schedule (set on the Slack page) unless it has its own; this sets the client's own days, time and time zone, puts it back on the shared schedule, or turns that report on or off for the client. Call with only client and report to read the current schedule. Example: 'for Velora, morning brief only on Wednesdays at 8am' → client Velora, report morning_brief, days [\"wednesday\"], time \"08:00\". Changes take effect on the next scheduled run. Confirm what you changed using the 'schedule' the result returns, in plain words.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...CLIENT_ARG,
+        report: { type: "string", enum: ["morning_brief", "eow_report"], description: "Which report. The morning brief unless they said end of week / EOW." },
+        days: { type: "array", items: { type: "string" }, description: "Days it posts: day names (monday … sunday), or 'weekdays' / 'every day'. Leave out to keep the current days." },
+        time: { type: "string", description: "Time of day it posts, 24-hour HH:MM (8am = \"08:00\", 1:30pm = \"13:30\"). Leave out to keep the current time." },
+        timezone: { type: "string", description: "IANA time zone for that time (e.g. America/New_York, America/Los_Angeles). Leave out to keep the current zone; Eastern unless they named another." },
+        use_shared_schedule: { type: "boolean", description: "true puts the client back on the shared schedule, removing its own." },
+        enabled: { type: "boolean", description: "true turns this report on for the client, false turns it off. Leave out to leave it as it is." },
+      },
+      required: ["client"],
     },
   },
   {
@@ -2246,6 +2265,109 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         note: result.removed
           ? `Removed ${result.removed} entr${result.removed === 1 ? "y" : "ies"}. State the new total (${result.total} ${result.total === 1 ? "company" : "companies"}) and include the link: ${result.link ?? "(no brain link)"}.`
           : "Nothing on the DNC matched that.",
+      };
+    }
+
+    case "report_schedule": {
+      const client = await resolveClient(input.client);
+      const report = text(input.report) === "eow_report" ? "eow_report" : "morning_brief";
+      const overrideKey = SCHEDULE_OVERRIDE_KEYS[report];
+      const enabledColumn = report === "eow_report" ? "eow_report_enabled" : "morning_brief_enabled";
+      const automation = report === "eow_report" ? "eow_report" : "morning_brief";
+      const [workspace] = rows(await db(`rr_workspaces?select=guardrails,${enabledColumn}&id=eq.${encodeURIComponent(client.id)}&limit=1`));
+      if (!workspace) throw new Error(`Could not read ${client.name}'s settings.`);
+      const [shared] = rows(await db(`rr_slack_automations?select=enabled,send_days,send_hour,send_minute,timezone&automation=eq.${automation}&limit=1`).catch(() => []));
+      // The shared schedule as the brief and EOW routes read it: the saved row, else the built-in default.
+      const fallback = report === "eow_report" ? EOW_DEFAULT_SCHEDULE : DEFAULT_SCHEDULE;
+      const sharedDays = Array.isArray(shared?.send_days) ? (shared.send_days as unknown[]).map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+      const base: BriefSchedule = shared
+        ? {
+            ...fallback,
+            enabled: Boolean(shared.enabled),
+            sendDays: sharedDays.length ? sharedDays : fallback.sendDays,
+            sendHour: Number.isFinite(Number(shared.send_hour)) ? Number(shared.send_hour) : fallback.sendHour,
+            sendMinute: Number.isFinite(Number(shared.send_minute)) ? Number(shared.send_minute) : fallback.sendMinute,
+            timezone: text(shared.timezone) || fallback.timezone,
+          }
+        : fallback;
+      const guardrails = object(workspace.guardrails);
+      const current = object(guardrails[overrideKey]);
+      const changed: string[] = [];
+
+      // Days: names, short names, "weekdays", "every day".
+      let sendDays: number[] | undefined;
+      if (Array.isArray(input.days) && input.days.length) {
+        const names = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+        const picked = new Set<number>();
+        for (const raw of input.days.map((d) => text(d).toLowerCase())) {
+          if (/^(every ?day|daily|all)$/.test(raw)) names.forEach((_, i) => picked.add(i));
+          else if (/^weekdays?$/.test(raw)) [1, 2, 3, 4, 5].forEach((i) => picked.add(i));
+          else {
+            const index = names.findIndex((name) => name.startsWith(raw.replace(/s$/, "").slice(0, 3)));
+            if (index < 0) throw new Error(`"${raw}" is not a day of the week.`);
+            picked.add(index);
+          }
+        }
+        sendDays = [...picked].sort((a, b) => a - b);
+      }
+      let sendHour: number | undefined;
+      let sendMinute: number | undefined;
+      if (text(input.time)) {
+        const match = /^(\d{1,2}):(\d{2})$/.exec(text(input.time));
+        if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) throw new Error(`"${text(input.time)}" is not a 24-hour HH:MM time.`);
+        sendHour = Number(match[1]);
+        sendMinute = Number(match[2]);
+      }
+      let timezone: string | undefined;
+      if (text(input.timezone)) {
+        try { new Intl.DateTimeFormat("en-US", { timeZone: text(input.timezone) }); } catch { throw new Error(`"${text(input.timezone)}" is not a time zone. Use an IANA name like America/New_York.`); }
+        timezone = text(input.timezone);
+      }
+
+      const nextGuardrails: Row = { ...guardrails };
+      if (input.use_shared_schedule === true) {
+        delete nextGuardrails[overrideKey];
+        changed.push("back on the shared schedule");
+      } else if (sendDays || sendHour !== undefined || timezone) {
+        nextGuardrails[overrideKey] = {
+          ...current,
+          ...(sendDays ? { sendDays } : {}),
+          ...(sendHour !== undefined ? { sendHour, sendMinute } : {}),
+          ...(timezone ? { timezone } : {}),
+        };
+        changed.push("its own schedule");
+      }
+      const patch: Row = {};
+      if (changed.length) patch.guardrails = nextGuardrails;
+      if (typeof input.enabled === "boolean" && input.enabled !== Boolean(workspace[enabledColumn])) {
+        patch[enabledColumn] = input.enabled;
+        changed.push(input.enabled ? "turned on" : "turned off");
+      }
+      if (Object.keys(patch).length) {
+        const { url, key } = supabase();
+        const response = await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(client.id)}`, {
+          method: "PATCH",
+          headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" },
+          body: JSON.stringify(patch),
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error(`Could not save ${client.name}'s schedule (${response.status}).`);
+      }
+      const effective = clientSchedule(base, nextGuardrails, overrideKey);
+      const on = typeof patch[enabledColumn] === "boolean" ? Boolean(patch[enabledColumn]) : Boolean(workspace[enabledColumn]);
+      return {
+        client: client.name,
+        report: report === "eow_report" ? "end-of-week report" : "morning brief",
+        changed: changed.length ? changed : "nothing (read only)",
+        schedule: describeSchedule(effective),
+        ownSchedule: effective.custom,
+        reportOnForClient: on,
+        sharedScheduleRunning: base.enabled,
+        note: [
+          !on ? `The ${report === "eow_report" ? "end-of-week report" : "morning brief"} is OFF for ${client.name}, so nothing posts until it is turned on.` : "",
+          !base.enabled ? "The shared automation is switched off on the Slack page, which stops every client, this one included." : "",
+          "It still only posts when the client is ready (outreach account polling, internal channel set).",
+        ].filter(Boolean).join(" "),
       };
     }
 

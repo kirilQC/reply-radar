@@ -28,6 +28,9 @@
 import { NextResponse } from "next/server";
 import {
   alreadySentToday,
+  clientSchedule,
+  describeSchedule,
+  SCHEDULE_OVERRIDE_KEYS,
   EOW_DEFAULT_SCHEDULE,
   eowReadinessOf,
   isDueNow,
@@ -145,7 +148,7 @@ export async function GET() {
 
   try {
     const [workspaceRows, keyedRows, reportRows, automationRows] = await Promise.all([
-      read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,slack_internal_channel_id,slack_external_channel_id,eow_report_enabled,last_successful_poll_at&slug=neq.misc&offboarded_at=is.null&order=name.asc"),
+      read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,slack_internal_channel_id,slack_external_channel_id,eow_report_enabled,last_successful_poll_at,guardrails&slug=neq.misc&offboarded_at=is.null&order=name.asc"),
       // A lemlist key counts as an outreach account exactly as a HeyReach key does.
       read("rr_workspaces?select=id&or=(heyreach_api_key_ciphertext.not.is.null,lemlist_api_key.not.is.null,emailbison_workspace_id.not.is.null)"),
       read(`rr_slack_briefs?select=workspace_id,created_at,status,destination,slack_channel_id&automation=eq.${AUTOMATION}&order=created_at.desc&limit=200`).catch(() => []),
@@ -182,8 +185,11 @@ export async function GET() {
         internalChannelId,
         externalChannelId,
       }, now.getTime());
-      const sentToday = alreadySentToday(sent ? String(sent.created_at ?? "") : null, schedule, now);
+      // This client's own schedule when it has one (guardrails.eow_schedule, set by QC Bot), else the shared one.
+      const own = clientSchedule(schedule, workspace.guardrails, SCHEDULE_OVERRIDE_KEYS.eow_report);
+      const sentToday = alreadySentToday(sent ? String(sent.created_at ?? "") : null, own, now);
       return {
+        schedule: { custom: own.custom, text: describeSchedule(own) },
         id,
         name: String(workspace.name ?? ""),
         slug: String(workspace.slug ?? ""),
@@ -198,7 +204,7 @@ export async function GET() {
         lastBriefStatus: last ? String(last.status ?? "") : null,
         lastBriefDestination: last ? String(last.destination ?? "") : null,
         // The worker reads this rather than recomputing it. Readiness is required as well as the toggle.
-        dueNow: due && enabled && readiness.ready && !sentToday,
+        dueNow: isDueNow(own, now) && enabled && readiness.ready && !sentToday,
       };
     });
 
