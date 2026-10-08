@@ -590,6 +590,9 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: !sendError,
       brief: body_,
+      // What the team had closed, and what was taken out of this brief because of it.
+      closedItems,
+      closedDropped: closedCheck.dropped,
       mentions,
       signals,
       sources,
