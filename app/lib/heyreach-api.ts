@@ -322,6 +322,12 @@ export async function leadsInListPage(apiKey: string, listId: string, offset: nu
   return { items: list(payload.items).map(object), total: num(payload.totalCount) };
 }
 
+/** Leads on a list whose name (or other searchable fields) match a keyword. Up to 1,000 per call. */
+export async function searchList(apiKey: string, listId: string, keyword: string, limit = 200): Promise<Row[]> {
+  const payload = object(await call(apiKey, "list/GetLeadsFromList", { listId, keyword, offset: 0, limit }));
+  return list(payload.items).map(object);
+}
+
 /**
  * The companies on a list.
  *

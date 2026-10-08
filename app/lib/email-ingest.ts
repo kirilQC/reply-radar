@@ -116,6 +116,87 @@ async function findLinkedInLead(config: Config, workspaceId: string, person: Per
   return picked ? candidates.find((row) => text(row.id) === picked.id) ?? null : null;
 }
 
+/** The client's coded HeyReach campaigns with their lead lists, cached for ten minutes per client. */
+const campaignListCache = new Map<string, { at: number; lists: Array<{ listId: string; campaign: string }> }>();
+async function heyReachLists(config: Config, workspaceId: string): Promise<{ apiKey: string; lists: Array<{ listId: string; campaign: string }> } | null> {
+  const [workspace] = await rows(config, `rr_workspaces?select=heyreach_api_key_ciphertext&id=eq.${enc(workspaceId)}&limit=1`);
+  const apiKey = text(workspace?.heyreach_api_key_ciphertext);
+  if (!apiKey) return null;
+  const cached = campaignListCache.get(workspaceId);
+  if (cached && Date.now() - cached.at < 10 * 60 * 1000) return { apiKey, lists: cached.lists };
+  const { campaigns } = await import("./heyreach-api");
+  const page = await campaigns(apiKey);
+  const seen = new Set<string>();
+  const lists = page.items
+    .filter((campaign) => campaign.listId && isOurCampaign(campaign.name))
+    .filter((campaign) => (seen.has(campaign.listId) ? false : (seen.add(campaign.listId), true)))
+    .map((campaign) => ({ listId: campaign.listId, campaign: campaign.name }));
+  campaignListCache.set(workspaceId, { at: Date.now(), lists });
+  return { apiKey, lists };
+}
+
+/** A HeyReach list lead in the shape the matcher and the new lead row need. */
+const heyReachPerson = (row: Row) => {
+  const name = text(row.fullName) || [text(row.firstName), text(row.lastName)].filter(Boolean).join(" ");
+  return {
+    name,
+    company: text(row.companyName) || text(row.company),
+    title: text(row.position) || text(row.headline),
+    email: (text(row.emailAddress) || text(row.enrichedEmailAddress) || text(row.customEmailAddress) || text(row.email)).toLowerCase(),
+    profileUrl: text(row.profileUrl) || text(row.linkedInProfileUrl),
+    linkedinId: text(row.linkedInId) || text(row.linkedin_id),
+    raw: row,
+  };
+};
+
+/**
+ * This email person in the client's HeyReach campaign lists: every email lead was a LinkedIn lead first, but
+ * QC only holds the ones who replied on LinkedIn, so the rest are looked up here. Each coded campaign's list
+ * is searched by name; an email match wins, otherwise the same first and last name (company deciding).
+ */
+async function findInHeyReach(config: Config, workspaceId: string, person: PersonForMatch): Promise<(ReturnType<typeof heyReachPerson> & { campaign: string }) | null> {
+  const source = await heyReachLists(config, workspaceId).catch(() => null);
+  if (!source || !person.name) return null;
+  const { searchList } = await import("./heyreach-api");
+  for (const { listId, campaign } of source.lists) {
+    const found = (await searchList(source.apiKey, listId, normalName(person.name)).catch(() => [] as Row[])).map(heyReachPerson).filter((row) => row.profileUrl);
+    if (!found.length) continue;
+    const byEmail = person.email ? found.find((row) => row.email && row.email === person.email) : undefined;
+    if (byEmail) return { ...byEmail, campaign };
+    const picked = pickLinkedInLead({ name: person.name, company: person.company }, found.map((row, index) => ({ id: String(index), name: row.name, company: row.company })));
+    if (picked) return { ...found[Number(picked.id)], campaign };
+  }
+  return null;
+}
+
+/** The QC lead for a HeyReach profile: the one already stored for that profile, else a new LinkedIn lead. */
+async function leadForHeyReachProfile(config: Config, workspaceId: string, found: NonNullable<Awaited<ReturnType<typeof findInHeyReach>>>, person: PersonForMatch, bisonLeadId: string): Promise<string> {
+  const handle = (found.profileUrl.match(/linkedin\.com\/in\/([^/?#\s]+)/i)?.[1] ?? "").toLowerCase();
+  if (handle) {
+    const [existing] = await rows(config, `rr_leads?select=id,raw_data&workspace_id=eq.${enc(workspaceId)}&linkedin_profile_url=ilike.*${enc(handle)}*&limit=1`);
+    if (existing) {
+      await rememberEmail(config, existing, person.email, bisonLeadId);
+      return text(existing.id);
+    }
+  }
+  const created = await rest(config, "rr_leads", {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      linkedin_profile_url: found.profileUrl,
+      linkedin_id: found.linkedinId || null,
+      name: found.name || person.name,
+      role: found.title || null,
+      company: found.company || person.company || null,
+      raw_data: { ...found.raw, profile_url: found.profileUrl, email: person.email, reply_radar: { email: person.email, history_status: "complete", emailbison: { lead_id: bisonLeadId }, attribution: { source: "heyreach_list", campaign: found.campaign } } },
+    }),
+  });
+  const row = Array.isArray(created.data) ? (created.data[0] as Row | undefined) : undefined;
+  if (!created.ok || !row) throw new Error(`Could not save the LinkedIn lead for the email reply (${created.status}).`);
+  return text(row.id);
+}
+
 /** Remember the email address (and Bison lead) on a LinkedIn lead, so the next email lands on it by address. */
 async function rememberEmail(config: Config, lead: Row, email: string, bisonLeadId: string): Promise<void> {
   const raw = object(lead.raw_data);
@@ -144,6 +225,8 @@ async function findOrCreateLead(config: Config, workspaceId: string, lead: Row):
     await rememberEmail(config, linked, person.email, bisonLeadId);
     return text(linked.id);
   }
+  const fromHeyReach = await findInHeyReach(config, workspaceId, person).catch(() => null);
+  if (fromHeyReach) return leadForHeyReachProfile(config, workspaceId, fromHeyReach, person, bisonLeadId);
   if (person.email) {
     const emailOnly = await rows(config, `rr_leads?select=id&workspace_id=eq.${enc(workspaceId)}&raw_data->reply_radar->>email=eq.${enc(person.email)}&limit=1`);
     if (emailOnly[0]) return text(emailOnly[0].id);
@@ -174,8 +257,32 @@ export async function relinkEmailLeads(config: Config, workspace: EmailWorkspace
   for (const lead of emailOnly) {
     const radar = object(object(lead.raw_data).reply_radar);
     const person: PersonForMatch = { email: text(radar.email), name: text(lead.name), company: text(lead.company), linkedinHandle: "" };
-    const target = await findLinkedInLead(config, workspace.id, person, text(lead.id));
-    if (!target) continue;
+    let target = await findLinkedInLead(config, workspace.id, person, text(lead.id));
+    if (!target) {
+      // Not a lead QC holds: find them in HeyReach and turn this email-only lead into their LinkedIn lead.
+      const found = await findInHeyReach(config, workspace.id, person).catch(() => null);
+      if (!found) continue;
+      const handle = (found.profileUrl.match(/linkedin\.com\/in\/([^/?#\s]+)/i)?.[1] ?? "").toLowerCase();
+      const [existing] = handle ? await rows(config, `rr_leads?select=id,name,company,raw_data,linkedin_profile_url&workspace_id=eq.${enc(workspace.id)}&linkedin_profile_url=ilike.*${enc(handle)}*&limit=1`) : [];
+      if (existing) target = existing;
+      else {
+        const raw = object(lead.raw_data);
+        await rest(config, `rr_leads?id=eq.${enc(text(lead.id))}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({
+            linkedin_profile_url: found.profileUrl,
+            linkedin_id: found.linkedinId || null,
+            name: found.name || text(lead.name),
+            role: found.title || null,
+            company: found.company || text(lead.company) || null,
+            raw_data: { ...found.raw, ...raw, profile_url: found.profileUrl, reply_radar: { ...radar, channel: undefined, attribution: { source: "heyreach_list", campaign: found.campaign } } },
+          }),
+        });
+        linked += 1;
+        continue;
+      }
+    }
     const moved = await rest(config, `rr_conversations?lead_id=eq.${enc(text(lead.id))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ lead_id: text(target.id) }) });
     if (!moved.ok) continue;
     await rememberEmail(config, target, person.email, text(object(radar.emailbison).lead_id));
