@@ -50,7 +50,7 @@ test("HeyReach code never touches lemlist conversations", () => {
   assert.match(source("../app/lib/conversation-send.ts"), /isLemlistConversationKey\(conversation\.heyreach_conversation_id\)\) \{[\s\S]{0,120}sendLemlistConversationReply/, "a lemlist reply is sent through lemlist");
   assert.match(source("../app/api/conversations/refresh/route.ts"), /isLemlistConversationKey\(conv\.heyreach_conversation_id\)\) return refreshLemlistConversation/, "the inbox refresh reads lemlist threads from lemlist");
   const ingest = source("../app/lib/lemlist-ingest.ts");
-  assert.match(ingest, /if \(!isOurCampaign\(campaignName\)\) return \{ discarded: true, reason: "not_our_campaign" \}/, "lemlist replies follow the QC campaign code rule");
+  assert.match(ingest, /if \(!isOurCampaign\(campaignName\)\) return \{ discarded: true, reason: "not_our_campaign"/, "lemlist replies follow the QC campaign code rule");
   assert.match(ingest, /isAutoReply\(/, "out-of-office emails from lemlist are dropped");
 });
 
