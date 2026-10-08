@@ -206,9 +206,14 @@ async function draftFor(workspace: Row, conversationId: string, thread: Row[], l
  */
 export async function alertMessage(config: Config, messageId: string, opts: { test?: boolean; channel?: string; retry?: boolean } = {}): Promise<AlertOutcome> {
   const test = opts.test === true;
-  const [target] = await rows(config, `rr_messages?select=id,conversation_id,direction,body,sent_at&id=eq.${enc(messageId)}&limit=1`);
+  const [target] = await rows(config, `rr_messages?select=id,conversation_id,direction,body,sent_at,raw_data&id=eq.${enc(messageId)}&limit=1`);
   if (!target) return { outcome: "skipped", reason: "That message is not stored." };
   if (target.direction !== "inbound") return { outcome: "skipped", reason: "Only replies from the lead are posted." };
+  // An out-of-office or other auto-reply, as Email Bison flags it, is not a reply anyone needs to act on.
+  if (!opts.test && radarOf(target.raw_data).automated === true) {
+    await mirrorAlert(config, messageId, { done_at: new Date().toISOString(), skipped: "automated" });
+    return { outcome: "skipped", reason: "An automated reply (out of office)." };
+  }
   const [conversation] = await rows(config, `rr_conversations?select=id,workspace_id,lead_id,heyreach_conversation_id&id=eq.${enc(text(target.conversation_id))}&limit=1`);
   if (!conversation) return { outcome: "skipped", reason: "The conversation is gone." };
   const workspace = await loadWorkspace(config, text(conversation.workspace_id));
