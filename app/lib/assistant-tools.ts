@@ -47,6 +47,7 @@
  */
 
 import { campaignStatusFor } from "./heyreach-campaigns";
+import { lemlistCampaignsAnswer, lemlistMetricsAnswer, lemlistSendersAnswer, lemlistTotalsAnswer } from "./lemlist-assistant";
 import {
   createRecords as airtableCreate,
   findTableByName,
@@ -181,7 +182,7 @@ async function db(path: string): Promise<unknown> {
 /* ── Clients ─────────────────────────────────────────────────────────────────────────────────── */
 
 /** `offboarded`: a legacy client. Found whenever it is named; left out of "all clients" roll-ups. */
-type Client = { id: string; name: string; slug: string; timezone: string; createdAt: string; apiKey: string; offboarded: boolean };
+type Client = { id: string; name: string; slug: string; timezone: string; createdAt: string; apiKey: string; lemlistKey: string; offboarded: boolean };
 
 // The workspace list is read by resolveClient and a dozen tools, several times within one assistant turn, and
 // it barely changes. A short TTL cache turns that back into one fetch per warm instance every half-minute
@@ -192,7 +193,7 @@ const CLIENTS_TTL_MS = 30_000;
 async function clients(): Promise<Client[]> {
   if (clientsCache && Date.now() - clientsCache.at < CLIENTS_TTL_MS) return clientsCache.value;
   const raw = rows(
-    await db("rr_workspaces?select=id,name,slug,timezone,created_at,heyreach_api_key_ciphertext,offboarded_at&order=name.asc"),
+    await db("rr_workspaces?select=id,name,slug,timezone,created_at,heyreach_api_key_ciphertext,lemlist_api_key,offboarded_at&order=name.asc"),
   );
   const value = raw.map((row) => ({
     id: text(row.id),
@@ -201,6 +202,7 @@ async function clients(): Promise<Client[]> {
     timezone: text(row.timezone) || "America/New_York",
     createdAt: text(row.created_at),
     apiKey: text(row.heyreach_api_key_ciphertext),
+    lemlistKey: text(row.lemlist_api_key),
     offboarded: Boolean(row.offboarded_at),
   }));
   clientsCache = { at: Date.now(), value };
@@ -237,7 +239,8 @@ async function resolveClient(name: unknown): Promise<Client> {
 /** A client with a HeyReach key, for the tools that cannot work without one. */
 async function connectedClient(name: unknown): Promise<Client> {
   const client = await resolveClient(name);
-  if (!client.apiKey) throw new Error(`${client.name} has no HeyReach API key saved, so HeyReach cannot be queried for them.`);
+  if (!client.apiKey && client.lemlistKey) throw new Error(`${client.name} runs its outreach on lemlist, not HeyReach, and this tool only reads HeyReach. heyreach_campaigns, heyreach_campaign_metrics, heyreach_senders and heyreach_workspace_totals read lemlist for this client.`);
+  if (!client.apiKey) throw new Error(`${client.name} has no HeyReach or lemlist API key saved, so their campaigns cannot be queried.`);
   return client;
 }
 
@@ -269,7 +272,7 @@ async function airtableBaseFor(name: unknown): Promise<{ client: Client; baseId:
   if (named) {
     // A synthetic client so the rest of the Airtable path is unchanged; it has no workspace row, so its
     // id and HeyReach key are blank — nothing in the Airtable tools reads them.
-    const client: Client = { id: "", name: named.name, slug: named.key, timezone: "America/New_York", createdAt: "", apiKey: "", offboarded: false };
+    const client: Client = { id: "", name: named.name, slug: named.key, timezone: "America/New_York", createdAt: "", apiKey: "", lemlistKey: "", offboarded: false };
     return { client, baseId: named.baseId };
   }
   const client = await resolveClient(name);
@@ -577,19 +580,19 @@ const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "heyreach_campaigns",
     description:
-      "Live campaign status for one client, straight from HeyReach: which campaigns are active and still contacting new leads, which have worked through their list, which are scheduled or paused, how many leads are pending, who is sending, and how many days of sending are left. Only campaigns QC launched are included — a client's own pre-engagement campaigns are excluded by naming convention. Use this for 'what's running', 'what's live', campaign status, or when leads will run out.",
+      "Live campaign status for one client, straight from HeyReach (or from lemlist for a client whose outreach runs on lemlist; the answer then says source: lemlist): which campaigns are active and still contacting new leads, which have worked through their list, which are scheduled or paused, how many leads are pending, who is sending, and how many days of sending are left. Only campaigns QC launched are included — a client's own pre-engagement campaigns are excluded by naming convention. Use this for 'what's running', 'what's live', campaign status, or when leads will run out.",
     input_schema: { type: "object", properties: { ...CLIENT_ARG }, required: ["client"] },
   },
   {
     name: "heyreach_campaign_metrics",
     description:
-      "Per-campaign performance for one client from HeyReach: connections sent and accepted, messages sent, conversations started, replies received, leads auto-tagged interested, and HeyReach's own acceptance and reply rates. Optionally over a date window; both since and until must be given together. This is the authoritative source for one client's reply counts. Rates come back as percentages already converted, but read the rateWarning in the result before ranking anything by one. Unique leads contacted is not available per campaign — heyreach_workspace_totals is the only place HeyReach reports it.",
+      "Per-campaign performance for one client from HeyReach (or lemlist, for a lemlist client): connections sent and accepted, messages sent, conversations started, replies received, leads auto-tagged interested, and HeyReach's own acceptance and reply rates. Optionally over a date window; both since and until must be given together. This is the authoritative source for one client's reply counts. Rates come back as percentages already converted, but read the rateWarning in the result before ranking anything by one. Unique leads contacted is not available per campaign — heyreach_workspace_totals is the only place HeyReach reports it.",
     input_schema: { type: "object", properties: { ...CLIENT_ARG, ...WINDOW_ARGS }, required: ["client"] },
   },
   {
     name: "heyreach_senders",
     description:
-      "The LinkedIn accounts sending for one client, and their health: whether each is switched on, whether its LinkedIn session is still valid, and how many campaigns it is on. An account that is active but whose session has expired is silently sending nothing — call this when a client's numbers have dropped.",
+      "The LinkedIn accounts sending for one client (HeyReach, or lemlist for a lemlist client), and their health: whether each is switched on, whether its LinkedIn session is still valid, and how many campaigns it is on. An account that is active but whose session has expired is silently sending nothing — call this when a client's numbers have dropped.",
     input_schema: { type: "object", properties: { ...CLIENT_ARG }, required: ["client"] },
   },
   {
@@ -652,7 +655,7 @@ const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "heyreach_workspace_totals",
     description:
-      "One client's account-wide totals from HeyReach, optionally over a date window: connections sent and accepted, messages sent, conversations started, replies, unique leads contacted, and leads tagged interested. This is the only place unique leads contacted is available — HeyReach does not report it per campaign. Use it for 'how is this client doing overall'. Note this covers the client's entire HeyReach account, so it includes any campaigns they ran before hiring QC; heyreach_campaign_metrics is the QC-only view.",
+      "One client's account-wide totals from HeyReach (or lemlist, for a lemlist client), optionally over a date window: connections sent and accepted, messages sent, conversations started, replies, unique leads contacted, and leads tagged interested. This is the only place unique leads contacted is available — HeyReach does not report it per campaign. Use it for 'how is this client doing overall'. Note this covers the client's entire HeyReach account, so it includes any campaigns they ran before hiring QC; heyreach_campaign_metrics is the QC-only view.",
     input_schema: { type: "object", properties: { ...CLIENT_ARG, ...WINDOW_ARGS }, required: ["client"] },
   },
   {
@@ -1020,7 +1023,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     case "list_clients": {
       // Offboarded clients are listed too, flagged, so a question that names one is answered rather
       // than met with "no such client". Roll-ups across "all clients" still mean active ones.
-      return (await clients()).map(({ apiKey, id, name, slug, timezone, createdAt, offboarded }) => ({ name, slug, timezone, createdAt, heyreachConnected: Boolean(apiKey), id, offboarded }));
+      return (await clients()).map(({ apiKey, lemlistKey, id, name, slug, timezone, createdAt, offboarded }) => ({ name, slug, timezone, createdAt, heyreachConnected: Boolean(apiKey), lemlistConnected: Boolean(lemlistKey), outreach: [apiKey ? "HeyReach" : "", lemlistKey ? "lemlist" : ""].filter(Boolean).join(" + ") || "none", id, offboarded }));
     }
 
     case "client_summary": {
@@ -1272,6 +1275,8 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     }
 
     case "heyreach_campaigns": {
+      const lem = await resolveClient(input.client);
+      if (!lem.apiKey && lem.lemlistKey) return lemlistCampaignsAnswer(lem.name, lem.lemlistKey);
       const client = await connectedClient(input.client);
       const status = await campaignStatusFor(client.apiKey);
       if (!status.available) throw new Error(`HeyReach could not be reached for ${client.name}: ${status.reason}`);
@@ -1298,12 +1303,14 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     }
 
     case "heyreach_campaign_metrics": {
-      const client = await connectedClient(input.client);
       const since = text(input.since);
       const until = text(input.until);
       if (Boolean(since) !== Boolean(until)) {
         throw new Error("HeyReach needs both since and until, or neither. One alone is rejected.");
       }
+      const lem = await resolveClient(input.client);
+      if (!lem.apiKey && lem.lemlistKey) return lemlistMetricsAnswer(lem.name, lem.lemlistKey, since, until);
+      const client = await connectedClient(input.client);
       const all = await heyreach.statsByCampaign(client.apiKey, { startDate: since || undefined, endDate: until || undefined });
       const ours = all.filter((row) => isOurCampaign(row.campaignName) && !row.deleted);
       return {
@@ -1332,6 +1339,8 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     }
 
     case "heyreach_senders": {
+      const lem = await resolveClient(input.client);
+      if (!lem.apiKey && lem.lemlistKey) return lemlistSendersAnswer(lem.name, lem.lemlistKey);
       const client = await connectedClient(input.client);
       const page = await heyreach.senders(client.apiKey);
       return {
@@ -1495,12 +1504,14 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     }
 
     case "heyreach_workspace_totals": {
-      const client = await connectedClient(input.client);
       const since = text(input.since);
       const until = text(input.until);
       if (Boolean(since) !== Boolean(until)) {
         throw new Error("HeyReach needs both since and until, or neither. One alone is rejected.");
       }
+      const lem = await resolveClient(input.client);
+      if (!lem.apiKey && lem.lemlistKey) return lemlistTotalsAnswer(lem.name, lem.lemlistKey, since, until);
+      const client = await connectedClient(input.client);
       const stats = await heyreach.overallStats(client.apiKey, {
         startDate: since || undefined,
         endDate: until || undefined,

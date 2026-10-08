@@ -221,6 +221,8 @@ export async function ingestLemlistContact(config: Config, workspace: LemlistWor
       channel,
       last_message_at: last?.sent_at ?? new Date().toISOString(),
       last_message_direction: last?.direction ?? "inbound",
+      // Read from lemlist just now: the inbox footer says when, instead of "Not yet synced".
+      last_refreshed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }),
   });
@@ -418,6 +420,10 @@ export async function diagnoseLemlistShapes(workspace: LemlistWorkspace, perType
     }
   }
   out.push({ campaigns: [...counts.values()].sort((a, b) => b.replies - a.replies) });
+  // QC's webhooks in this lemlist team: event type and whether lemlist still delivers, never the URL (it holds the secret).
+  const hooks = await listHooks(apiKey).catch(() => [] as Row[]);
+  const secret = text(workspace.lemlist_webhook_secret);
+  out.push({ hooks: hooks.filter((hook) => secret && text(hook.targetUrl).includes(secret)).map((hook) => ({ type: text(hook.type), disabled: hook.disabled === true, lastErrorStatus: hook.lastErrorStatus ?? null })), otherHooks: hooks.filter((hook) => !secret || !text(hook.targetUrl).includes(secret)).length });
   for (const type of ["linkedinReplied", "emailsReplied"] as const) {
     const activities = (await replyActivities(apiKey, type, since, 1)).slice(0, perType);
     for (const activity of activities) {

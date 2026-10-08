@@ -178,7 +178,8 @@ export async function GET(request?: Request) {
   try {
     const [workspaceRows, keyedRows, briefRows, granolaRows, automationRows] = await Promise.all([
       read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,client_brief,slack_internal_channel_id,slack_external_channel_id,granola_title_match,morning_brief_enabled,last_successful_poll_at,guardrails&slug=neq.misc&offboarded_at=is.null&order=name.asc"),
-      read("rr_workspaces?select=id&heyreach_api_key_ciphertext=not.is.null"),
+      // A lemlist key counts as an outreach account exactly as a HeyReach key does.
+      read("rr_workspaces?select=id&or=(heyreach_api_key_ciphertext.not.is.null,lemlist_api_key.not.is.null)"),
       // Every client's brief history in one read rather than one read per client. 200 rows is roughly a
       // year of three-a-week briefs for a dozen clients, and only the newest per client is used.
       read(`rr_slack_briefs?select=workspace_id,created_at,status,destination,slack_channel_id,error_text&automation=eq.${AUTOMATION}&order=created_at.desc&limit=200`).catch(() => []),
@@ -367,7 +368,7 @@ export async function POST(request: Request) {
     // Two selects, because the extra-source columns are an additive migration and PostgREST fails the
     // whole read over one unknown column. A database without the migration still writes briefs; it just
     // writes them from the two channels and the one call, which is what it had before.
-    const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,heyreach_api_key_ciphertext";
+    const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,heyreach_api_key_ciphertext,lemlist_api_key";
     const rows = await read(`rr_workspaces?select=${columns},offboarded_at,slack_extra_channel_ids,granola_extra_title_matches,airtable_base_id&slug=eq.${encodeURIComponent(slug)}&limit=1`)
       .catch(() => read(`rr_workspaces?select=${columns}&slug=eq.${encodeURIComponent(slug)}&limit=1`));
     const found = (Array.isArray(rows) ? (rows as Row[]) : [])[0];
@@ -410,7 +411,7 @@ export async function POST(request: Request) {
      * point is either cheap or already parallel, and the alternative is starting the stored reads for every
      * client on every run to throw them away.
      */
-    const live = await gatherLiveFigures(String((found as Row).heyreach_api_key_ciphertext ?? ""));
+    const live = await gatherLiveFigures(String((found as Row).heyreach_api_key_ciphertext ?? ""), String((found as Row).lemlist_api_key ?? ""));
     const [signals, channels, call, systemPrompt, brain, priorBriefs, closedItems] = await Promise.all([
       gatherSignals(read, workspace, live),
       gatherChannels(workspace),

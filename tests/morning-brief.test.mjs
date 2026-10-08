@@ -285,7 +285,7 @@ test("no API key is a different sentence from HeyReach failing", async () => {
   // The two send whoever reads the brief to two different places: one is a config page, the other is a
   // service having a bad morning. A single "figures may be stale" line would conflate them.
   const signals = await gatherSignals(readerFor([], dayRows(0, 7, 50)), WORKSPACE, { available: false, reason: "", campaigns: [], days: [] });
-  assert.match(signalsAsText(signals), /HeyReach was not asked, because no API key is saved for this client/);
+  assert.match(signalsAsText(signals), /No outreach account \(HeyReach or lemlist\) was asked, because no API key is saved for this client/);
 });
 
 test("a live read says it is current, and says it once", async () => {

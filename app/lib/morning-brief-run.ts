@@ -324,7 +324,24 @@ const HEYREACH_HISTORY_DAYS = 21;
  * Never throws. `available: false` with a reason is the answer when HeyReach cannot be reached, and the
  * caller then falls back to the stored copy with the brief saying so out loud.
  */
-export async function gatherLiveFigures(apiKey: string): Promise<LiveFigures> {
+/**
+ * The client's live campaign figures from every outreach account it has: HeyReach, lemlist, or both added
+ * together. To the team the two are the same thing, so a lemlist-only client gets the same brief. `source`
+ * names where the figures came from, for the brief's provenance line.
+ */
+export async function gatherLiveFigures(apiKey: string, lemlistKey = ""): Promise<LiveFigures> {
+  const heyreachKey = String(apiKey ?? "").trim();
+  const lemKey = String(lemlistKey ?? "").trim();
+  if (!lemKey) return { ...(await gatherHeyReachFigures(heyreachKey)), source: "HeyReach" };
+  const { lemlistLiveFigures, mergeLiveFigures } = await import("./lemlist-figures");
+  if (!heyreachKey) return { ...(await lemlistLiveFigures(lemKey)), source: "lemlist" };
+  const [heyreach, lemlist] = await Promise.all([gatherHeyReachFigures(heyreachKey), lemlistLiveFigures(lemKey)]);
+  const merged = mergeLiveFigures(heyreach, lemlist);
+  const source = heyreach.available && lemlist.available ? "HeyReach and lemlist" : heyreach.available ? "HeyReach" : "lemlist";
+  return { ...merged, source, reason: merged.reason || [heyreach.reason, lemlist.reason].filter(Boolean).join(" ") };
+}
+
+async function gatherHeyReachFigures(apiKey: string): Promise<LiveFigures> {
   const key = String(apiKey ?? "").trim();
   const nothing = (reason: string): LiveFigures => ({ available: false, reason, campaigns: [], days: [] });
   if (!key) return nothing("");

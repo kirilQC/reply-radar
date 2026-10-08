@@ -95,7 +95,7 @@ export function assistantSchedule(a: PersonalAssistant): BriefSchedule {
 // today's, so the personal note is a triage of real briefs, not a fresh (and costly) six-client generation.
 const REUSE_BRIEF_MS = 20 * 60 * 60 * 1000;
 
-const BRIEF_COLUMNS = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,heyreach_api_key_ciphertext";
+const BRIEF_COLUMNS = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,heyreach_api_key_ciphertext,lemlist_api_key";
 
 /**
  * One client's brief body for the person's note: the most recent morning brief if it is fresh, otherwise a
@@ -120,7 +120,7 @@ async function briefBodyForClient(read: (path: string) => Promise<unknown>, slug
 
   // Otherwise write one fresh, mirroring the morning-brief route.
   try {
-    const live = await gatherLiveFigures(str(found.heyreach_api_key_ciphertext));
+    const live = await gatherLiveFigures(str(found.heyreach_api_key_ciphertext), str(found.lemlist_api_key));
     const [signals, channels, call, systemPrompt, brain, priorBriefs, closedItems] = await Promise.all([
       gatherSignals(read, workspace, live),
       gatherChannels(workspace),

@@ -146,7 +146,8 @@ export async function GET() {
   try {
     const [workspaceRows, keyedRows, reportRows, automationRows] = await Promise.all([
       read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,slack_internal_channel_id,slack_external_channel_id,eow_report_enabled,last_successful_poll_at&slug=neq.misc&offboarded_at=is.null&order=name.asc"),
-      read("rr_workspaces?select=id&heyreach_api_key_ciphertext=not.is.null"),
+      // A lemlist key counts as an outreach account exactly as a HeyReach key does.
+      read("rr_workspaces?select=id&or=(heyreach_api_key_ciphertext.not.is.null,lemlist_api_key.not.is.null)"),
       read(`rr_slack_briefs?select=workspace_id,created_at,status,destination,slack_channel_id&automation=eq.${AUTOMATION}&order=created_at.desc&limit=200`).catch(() => []),
       read(`rr_slack_automations?select=automation,enabled,send_days,send_hour,send_minute,timezone,destination&automation=eq.${AUTOMATION}&limit=1`).catch(() => []),
     ]);
@@ -367,7 +368,7 @@ export async function POST(request: Request) {
     // Two selects, because the extra-source columns are an additive migration and PostgREST fails the whole
     // read over one unknown column. A database without the migration still writes reports; it just writes
     // them from the two named channels and the one call. Same columns the morning brief reads.
-    const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,heyreach_api_key_ciphertext";
+    const columns = "id,name,slug,timezone,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,heyreach_api_key_ciphertext,lemlist_api_key";
     const rows = await read(`rr_workspaces?select=${columns},offboarded_at,slack_extra_channel_ids,granola_extra_title_matches&slug=eq.${encodeURIComponent(slug)}&limit=1`)
       .catch(() => read(`rr_workspaces?select=${columns}&slug=eq.${encodeURIComponent(slug)}&limit=1`));
     const found = (Array.isArray(rows) ? (rows as Row[]) : [])[0];
@@ -402,7 +403,7 @@ export async function POST(request: Request) {
      * copy. The rest run together — channels, the call and the QC Brain — none of which throws, so a missing
      * call or an unreachable brain is a thinner report rather than a failed one.
      */
-    const live = await gatherLiveFigures(String((found as Row).heyreach_api_key_ciphertext ?? ""));
+    const live = await gatherLiveFigures(String((found as Row).heyreach_api_key_ciphertext ?? ""), String((found as Row).lemlist_api_key ?? ""));
     const [signals, channels, call, brain] = await Promise.all([
       gatherSignals(read, workspace, live),
       gatherChannels(workspace, EOW_WINDOW_DAYS),

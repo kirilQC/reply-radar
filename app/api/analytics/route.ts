@@ -143,6 +143,19 @@ async function heyReachCampaignStats(workspace: Row) {
 }
 
 /**
+ * A lemlist client's campaigns, from the stored copy the worker refreshes hourly (lemlist-figures.ts), in the
+ * shape HeyReach's rollup and campaign list have, so the overview treats both accounts the same way.
+ */
+async function lemlistCampaignRows(workspace: Row): Promise<{ rows: Row[]; list: Row[] }> {
+  if (!String(workspace.lemlist_api_key ?? "").trim()) return { rows: [], list: [] };
+  const stored = (await supabase(`rr_campaign_stats?select=campaign_id,name,status,launched_at,connections_sent,connections_accepted,replies,messages_started&workspace_id=eq.${encodeURIComponent(String(workspace.id))}&campaign_id=like.lemlist:*`)) ?? [];
+  return {
+    rows: stored.map((row) => ({ campaignId: row.campaign_id, campaignName: row.name, connectionsSent: row.connections_sent, connectionsAccepted: row.connections_accepted, totalMessageReplies: row.replies, totalInmailReplies: 0, totalMessageStarted: row.messages_started, totalInmailStarted: 0 })),
+    list: stored.map((row) => ({ id: row.campaign_id, name: row.name, startedAt: row.launched_at, status: row.status })),
+  };
+}
+
+/**
  * Campaign launch dates only exist on the campaign records themselves, not on the stats
  * rollup, so the two have to be joined. Names follow an "XX001:" convention but the number
  * is not a reliable launch order, so the real `startedAt` is always used.
@@ -539,7 +552,7 @@ async function compute(requested: string[]): Promise<CachedAnswer> {
     return { expires: Date.now() + RESPONSE_TTL_MS, body: text, etag: `"${createHash("sha1").update(text).digest("base64url")}"`, status };
   };
   try {
-    const workspaces = await supabase("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,logo_url,accent_color,offboarded_at&slug=neq.misc&order=name.asc") ?? [];
+    const workspaces = await supabase("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,lemlist_api_key,logo_url,accent_color,offboarded_at&slug=neq.misc&order=name.asc") ?? [];
     // Offboarded (legacy) clients only when a request names them.
     const selected = requested.length ? workspaces.filter((row) => requested.includes(String(row.slug))) : workspaces.filter((row) => !row.offboarded_at);
     const ids = selected.map((row) => String(row.id));
@@ -551,10 +564,13 @@ async function compute(requested: string[]): Promise<CachedAnswer> {
      * wait for every conversation and message to be paged in before the first HeyReach call went out.
      */
     const campaignResponsesPromise = Promise.all(selected.map(async (workspace) => {
-      const [rows, list] = await Promise.all([
+      const [heyreachRows, heyreachList, lemlist] = await Promise.all([
         heyReachCampaignStats(workspace).catch(() => [] as Row[]),
         heyReachCampaignList(workspace).catch(() => [] as Row[]),
+        lemlistCampaignRows(workspace).catch(() => ({ rows: [] as Row[], list: [] as Row[] })),
       ]);
+      const rows = [...heyreachRows, ...lemlist.rows];
+      const list = [...heyreachList, ...lemlist.list];
       // Launch metadata is keyed by campaign id; fall back to the name for older rows.
       const launchById = new Map<string, Row>();
       const launchByName = new Map<string, Row>();

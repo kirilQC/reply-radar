@@ -55,13 +55,15 @@ export async function getTeam(apiKey: string): Promise<{ id: string; name: strin
   return { id: text(team._id), name: text(team.name) };
 }
 
-/** Every campaign in the team, as { id, name }. */
-export async function listCampaigns(apiKey: string): Promise<Array<{ id: string; name: string }>> {
-  const out: Array<{ id: string; name: string }> = [];
+export type LemlistCampaignRow = { id: string; name: string; status: string; createdAt: string };
+
+/** Every campaign in the team: id, name, status (running, paused, ended, draft, archived) and creation date. */
+export async function listCampaigns(apiKey: string): Promise<LemlistCampaignRow[]> {
+  const out: LemlistCampaignRow[] = [];
   for (let page = 1; page <= 20; page += 1) {
     const data = await lemlist(apiKey, `/campaigns?version=v2&limit=100&page=${page}`);
     const list = Array.isArray(data) ? data : Array.isArray(object(data).campaigns) ? (object(data).campaigns as unknown[]) : [];
-    out.push(...list.map((row) => ({ id: text(object(row)._id), name: text(object(row).name) })).filter((row) => row.id));
+    out.push(...list.map((row) => ({ id: text(object(row)._id), name: text(object(row).name), status: text(object(row).status), createdAt: text(object(row).createdAt) })).filter((row) => row.id));
     const pagination = object(object(data).pagination);
     if (list.length < 100 || (Number(pagination.totalPage ?? pagination.totalPages) || 1) <= page) break;
   }
@@ -78,6 +80,36 @@ export async function replyActivities(apiKey: string, type: "emailsReplied" | "l
     if (list.length < 100) break;
   }
   return out;
+}
+
+/** The team's members by user id, with their names (needs version=v2). */
+export async function teamUsers(apiKey: string): Promise<Map<string, string>> {
+  const team = object(await lemlist(apiKey, "/team?version=v2"));
+  const users = Array.isArray(team.users) ? team.users.map(object) : [];
+  return new Map(users.map((user) => [text(user.userId), text(user.name) || text(user.email)]).filter(([id]) => id) as Array<[string, string]>);
+}
+
+/** Which campaigns each team member sends for: user id, then campaign ids. */
+export async function teamSenders(apiKey: string): Promise<Array<{ userId: string; campaignIds: string[] }>> {
+  const data = await lemlist(apiKey, "/team/senders");
+  return (Array.isArray(data) ? data : []).map(object).map((row) => ({
+    userId: text(row.userId),
+    campaignIds: (Array.isArray(row.campaigns) ? row.campaigns : []).map((campaign) => text(object(campaign)._id)).filter(Boolean),
+  })).filter((row) => row.userId);
+}
+
+/**
+ * lemlist's figures for up to 100 campaigns over a window (lifetime when the window starts in 2020), one row
+ * per campaign: nbLeads, nbLeadsLaunched, messagesSent, invitationAccepted, replied, steps[] (with `invited`).
+ * `sendUser` narrows to one sender ("usr_…").
+ */
+export async function batchCampaignStats(apiKey: string, campaignIds: string[], startDate: string, endDate: string, sendUser = ""): Promise<Row[]> {
+  if (!campaignIds.length) return [];
+  const data = object(await lemlist(apiKey, "/v2/campaigns/stats/batch", {
+    method: "POST",
+    body: JSON.stringify({ campaignIds: campaignIds.slice(0, 100), startDate, endDate, ...(sendUser ? { sendUser } : {}) }),
+  }));
+  return (Array.isArray(data.results) ? data.results : []).map(object);
 }
 
 /** Every message exchanged with a contact (all channels), oldest first. */

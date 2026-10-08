@@ -2,6 +2,9 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
+import { refreshLemlistStats } from "../../../../lib/lemlist-figures";
+
+export const maxDuration = 120;
 
 /**
  * Asks the worker to collect one client's analytics now, rather than at its next daily turn.
@@ -43,11 +46,24 @@ export async function POST(request: Request) {
   if (!slug) return NextResponse.json({ ok: false, status: "no_client" }, { status: 400 });
 
   try {
-    const workspaces = await rest(`rr_workspaces?select=id,heyreach_api_key_ciphertext&slug=eq.${encodeURIComponent(slug)}&limit=1`);
+    const workspaces = await rest(`rr_workspaces?select=id,heyreach_api_key_ciphertext,lemlist_api_key&slug=eq.${encodeURIComponent(slug)}&limit=1`);
     const workspace = workspaces[0];
     if (!workspace) return NextResponse.json({ ok: false, status: "not_found" }, { status: 404 });
+    // lemlist's figures are collected here and now (a minute at most), not by the worker's queue.
+    if (workspace.lemlist_api_key) {
+      const startedAt = new Date().toISOString();
+      const result = await refreshLemlistStats({ url, key }, { id: String(workspace.id), lemlist_api_key: String(workspace.lemlist_api_key) }, Boolean(workspace.heyreach_api_key_ciphertext)).catch((error) => ({ campaigns: 0, days: 0, error: error instanceof Error ? error.message : "lemlist failed" }));
+      await rest("rr_sync_runs", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ workspace_id: workspace.id, run_type: "analytics", source: "lemlist", status: result.error ? "failed" : "success", started_at: startedAt, finished_at: new Date().toISOString(), records_seen: result.campaigns, records_written: result.days, error_text: result.error ?? null }),
+      }).catch(() => []);
+      if (!workspace.heyreach_api_key_ciphertext) {
+        return NextResponse.json({ ok: !result.error, status: result.error ? "error" : "done", state: "idle", ...result }, { status: result.error ? 502 : 200 });
+      }
+    }
     if (!workspace.heyreach_api_key_ciphertext) {
-      return NextResponse.json({ ok: false, status: "no_key", message: "This client has no HeyReach key connected." }, { status: 409 });
+      return NextResponse.json({ ok: false, status: "no_key", message: "This client has no HeyReach or lemlist key connected." }, { status: 409 });
     }
     const workspaceId = encodeURIComponent(String(workspace.id));
 

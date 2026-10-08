@@ -21,14 +21,14 @@ export async function GET(request: Request) {
   const slug = new URL(request.url).searchParams.get("client")?.trim() ?? "";
   if (!slug) return NextResponse.json({ ok: false, error: "No client given." }, { status: 400 });
 
-  const rows = await fetch(`${url}/rest/v1/rr_workspaces?select=name,heyreach_api_key_ciphertext&slug=eq.${encodeURIComponent(slug)}&limit=1`, {
+  const rows = await fetch(`${url}/rest/v1/rr_workspaces?select=name,heyreach_api_key_ciphertext,lemlist_api_key&slug=eq.${encodeURIComponent(slug)}&limit=1`, {
     headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store",
   }).then((r) => (r.ok ? r.json() : [])).catch(() => []);
   const workspace = Array.isArray(rows) ? rows[0] : null;
   if (!workspace) return NextResponse.json({ ok: false, error: "That client does not exist." }, { status: 404 });
-  if (!workspace.heyreach_api_key_ciphertext) return NextResponse.json({ ok: true, connected: false, campaigns: [] });
+  if (!workspace.heyreach_api_key_ciphertext && !workspace.lemlist_api_key) return NextResponse.json({ ok: true, connected: false, campaigns: [] });
 
-  const live = await gatherLiveFigures(String(workspace.heyreach_api_key_ciphertext));
+  const live = await gatherLiveFigures(String(workspace.heyreach_api_key_ciphertext ?? ""), String(workspace.lemlist_api_key ?? ""));
   if (!live.available) return NextResponse.json({ ok: false, error: live.reason || "HeyReach could not be reached." }, { status: 502 });
 
   // Running campaigns with leads left, plus paused ones that still have leads left (tagged), so a paused

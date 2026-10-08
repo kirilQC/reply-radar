@@ -23,3 +23,26 @@ test("whichever of message and text is filled is used", () => {
   assert.equal(lemlistBody({ type: "linkedinSent", message: "", text: "From text" }, "outbound"), "From text");
   assert.equal(lemlistBody({ type: "emailsSent", message: "<p>From message</p>" }, "outbound"), "From message");
 });
+
+import { readFileSync } from "node:fs";
+const source = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+
+test("HeyReach's analytics cleanup never deletes lemlist's stored figures", () => {
+  const worker = source("../worker/render-worker.mjs");
+  assert.match(worker, /campaign_id=not\.in\.\(\$\{keep\}\)&campaign_id=not\.like\.lemlist:\*/, "the campaign prune keeps lemlist rows");
+  assert.match(worker, /day=gte\.\$\{startDay\}&sender_id=not\.like\.lemlist:\*/, "the daily window replace keeps lemlist senders");
+  assert.match(worker, /const notLemlist = table === "rr_campaign_stats"/, "a full HeyReach pull keeps lemlist rows");
+});
+
+test("briefs, end of week and QC Bot read lemlist when a client has it", () => {
+  for (const path of ["../app/api/slack/brief/route.ts", "../app/api/slack/eow-report/route.ts"]) {
+    const route = source(path);
+    assert.match(route, /gatherLiveFigures\(.*heyreach_api_key_ciphertext.*String\(\(found as Row\)\.lemlist_api_key/, `${path} passes the lemlist key`);
+    assert.match(route, /or=\(heyreach_api_key_ciphertext\.not\.is\.null,lemlist_api_key\.not\.is\.null\)/, `${path} counts a lemlist key as connected`);
+  }
+  assert.match(source("../app/lib/personal-brief.ts"), /gatherLiveFigures\(str\(found\.heyreach_api_key_ciphertext\), str\(found\.lemlist_api_key\)\)/);
+  const tools = source("../app/lib/assistant-tools.ts");
+  for (const tool of ["heyreach_campaigns", "heyreach_campaign_metrics", "heyreach_senders", "heyreach_workspace_totals"]) {
+    assert.match(tools, new RegExp(`case "${tool}": \\{[\\s\\S]{0,400}if \\(!lem\\.apiKey && lem\\.lemlistKey\\) return lemlist`), `${tool} answers from lemlist for a lemlist client`);
+  }
+});

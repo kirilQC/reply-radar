@@ -1202,7 +1202,8 @@ async function collectCampaignStats(workspace, sequenceBudget = ANALYTICS_SEQUEN
    * client and to ids we did not just write.
    */
   const keep = rows.map((row) => `"${row.campaign_id}"`).join(",");
-  await supabase(`rr_campaign_stats?workspace_id=eq.${encodeURIComponent(workspace.id)}&campaign_id=not.in.(${keep})`, {
+  // lemlist's rows (`lemlist:` ids, app/lib/lemlist-figures.ts) are kept: HeyReach's list never contains them.
+  await supabase(`rr_campaign_stats?workspace_id=eq.${encodeURIComponent(workspace.id)}&campaign_id=not.in.(${keep})&campaign_id=not.like.lemlist:*`, {
     method: "DELETE", headers: { Prefer: "return=minimal" },
   }).catch((error) => console.warn("reply_radar_analytics_prune_failed", { workspace: workspace.slug, error: error instanceof Error ? error.message : String(error) }));
   return rows.length;
@@ -1311,7 +1312,7 @@ async function collectDailyStats(workspace) {
   // The window is replaced, not merged: a sender (or a client's own campaign) that no longer counts must
   // not leave its old rows behind. Only reached once the fresh series above came back.
   if (!senderFailed) {
-    await supabase(`rr_daily_stats?workspace_id=eq.${encodeURIComponent(workspace.id)}&day=gte.${startDay}`, {
+    await supabase(`rr_daily_stats?workspace_id=eq.${encodeURIComponent(workspace.id)}&day=gte.${startDay}&sender_id=not.like.lemlist:*`, {
       method: "DELETE",
       headers: { Prefer: "return=representation" },
     });
@@ -1712,7 +1713,9 @@ async function fullPull(workspace, run) {
   try {
     if (!continuing) {
       for (const table of ["rr_campaign_stats", "rr_daily_stats", "rr_outreach"]) {
-        await supabase(`${table}?workspace_id=eq.${id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } })
+        // A full HeyReach pull clears HeyReach's figures only; lemlist's (`lemlist:` ids) are left in place.
+        const notLemlist = table === "rr_campaign_stats" ? "&campaign_id=not.like.lemlist:*" : table === "rr_daily_stats" ? "&sender_id=not.like.lemlist:*" : "";
+        await supabase(`${table}?workspace_id=eq.${id}${notLemlist}`, { method: "DELETE", headers: { Prefer: "return=minimal" } })
           .catch((error) => console.warn("reply_radar_full_pull_clear_failed", { workspace: workspace.slug, table, error: error instanceof Error ? error.message : String(error) }));
       }
       const campaigns = await collectCampaignStats(workspace, Number.POSITIVE_INFINITY);
@@ -2335,6 +2338,7 @@ const BOOKING_SWEEP_IDLE_MS = 60 * 1000;
 const EMAIL_SYNC_IDLE_MS = 5 * 60 * 1000;
 const EMAIL_STATS_EVERY_MS = 60 * 60 * 1000;
 let lastEmailStatsAt = 0;
+let lastLemlistStatsAt = 0;
 async function emailLoop() {
   for (;;) {
     if (appBaseUrl) {
@@ -2349,7 +2353,10 @@ async function emailLoop() {
       }
       // lemlist, the same way: the backup to its reply webhooks (app/api/lemlist/sync).
       try {
-        const result = await appPost("/api/lemlist/sync", {}, { timeoutMs: 295_000 });
+        // Campaign figures hourly, on their own clock so a skipped Email Bison pass cannot make it every 5 minutes.
+        const lemlistStats = Date.now() - lastLemlistStatsAt > EMAIL_STATS_EVERY_MS;
+        const result = await appPost("/api/lemlist/sync", { stats: lemlistStats }, { timeoutMs: 295_000 });
+        if (lemlistStats) lastLemlistStatsAt = Date.now();
         const busy = (result.clients || []).filter((row) => row.ingested || row.error);
         if (busy.length) console.info("reply_radar_lemlist_sync", { clients: busy });
       } catch (error) {

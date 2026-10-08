@@ -71,16 +71,16 @@ async function dbByIds(build: (ids: string[]) => string, ids: string[]): Promise
   return out;
 }
 
-type Client = { id: string; name: string; slug: string; apiKey: string; guardrails: Row; brief: string; brainFolder: string; internal: string; external: string; granola: string; airtable: string; morningBrief: boolean };
+type Client = { id: string; name: string; slug: string; apiKey: string; lemlistKey: string; guardrails: Row; brief: string; brainFolder: string; internal: string; external: string; granola: string; airtable: string; morningBrief: boolean };
 /**
  * Offboarded (legacy) clients from the last read. Never in `allClients()`, so "all clients" means active
  * ones; `pickClients` still finds one whenever it is named.
  */
 let legacyClients: Client[] = [];
 async function allClients(): Promise<Client[]> {
-  const rows = await db("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,guardrails,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,airtable_base_id,morning_brief_enabled,offboarded_at&slug=neq.misc&order=name.asc");
+  const rows = await db("rr_workspaces?select=id,name,slug,heyreach_api_key_ciphertext,lemlist_api_key,guardrails,client_brief,brain_folder,slack_internal_channel_id,slack_external_channel_id,granola_title_match,airtable_base_id,morning_brief_enabled,offboarded_at&slug=neq.misc&order=name.asc");
   const toClient = (r: Row): Client => ({
-    id: text(r.id), name: text(r.name), slug: text(r.slug), apiKey: text(r.heyreach_api_key_ciphertext),
+    id: text(r.id), name: text(r.name), slug: text(r.slug), apiKey: text(r.heyreach_api_key_ciphertext), lemlistKey: text(r.lemlist_api_key),
     guardrails: (r.guardrails && typeof r.guardrails === "object" ? r.guardrails : {}) as Row,
     brief: text(r.client_brief), brainFolder: text(r.brain_folder), internal: text(r.slack_internal_channel_id), external: text(r.slack_external_channel_id),
     granola: text(r.granola_title_match), airtable: text(r.airtable_base_id), morningBrief: Boolean(r.morning_brief_enabled),
@@ -196,6 +196,16 @@ async function sendingStats(clients: Client[], w: Window, live: boolean) {
   return out;
 }
 async function runway(c: Client) {
+  // A lemlist client's runway is read from lemlist the same way: active campaigns' pending leads over senders.
+  if (!c.apiKey && c.lemlistKey) {
+    try {
+      const { lemlistCampaignFigures } = await import("./lemlist-figures");
+      const active = (await lemlistCampaignFigures(c.lemlistKey)).campaigns.filter((r) => r.status === "IN_PROGRESS" && r.pending > 0);
+      const pending = active.reduce((a, r) => a + r.pending, 0);
+      const senders = new Set(active.flatMap((r) => r.senderIds)).size;
+      return { activeCampaigns: active.map((r) => ({ name: r.name, pending: r.pending, senders: r.senderIds.length })), leadsPending: pending, daysOfSendingLeft: sendingDaysLeft(pending, senders), source: "lemlist" };
+    } catch { return null; }
+  }
   if (!c.apiKey) return null;
   try {
     const status = await campaignStatusFor(c.apiKey, ALL_STATUSES);
@@ -365,7 +375,7 @@ async function clientReadiness(input: Row) {
     if (!folder) missing.push("QC Brain folder");
     else for (const [k, v] of Object.entries(docs)) if (["ICP", "Personas", "Voice", "Brief"].includes(k) && v !== "written") missing.push(`brain ${k} (${v})`);
     if (c.brief.length < 80) missing.push("client brief in QC Command");
-    if (!c.apiKey) missing.push("HeyReach key");
+    if (!c.apiKey && !c.lemlistKey) missing.push("HeyReach or lemlist key");
     if (!c.internal) missing.push("internal Slack channel");
     if (ob && !ob.progress.complete) missing.push(`onboarding ${ob.progress.pct}% done (${ob.progress.doneLeaves}/${ob.progress.totalLeaves} steps)`);
     return {
@@ -374,7 +384,7 @@ async function clientReadiness(input: Row) {
       brainFolder: folder || "none found", brainDocs: docs,
       clientBrief: c.brief.length >= 80 ? "saved" : c.brief ? "too short to be useful" : "missing",
       onboarding: ob ? `${ob.progress.pct}% (${ob.progress.doneLeaves}/${ob.progress.totalLeaves})` : "not started",
-      heyreach: c.apiKey ? "connected" : "missing", slackInternal: c.internal ? "set" : "missing", slackExternal: c.external ? "set" : "missing",
+      heyreach: c.apiKey ? "connected" : c.lemlistKey ? "lemlist instead" : "missing", lemlist: c.lemlistKey ? "connected" : "none", slackInternal: c.internal ? "set" : "missing", slackExternal: c.external ? "set" : "missing",
       granolaCalls: c.granola ? `matches "${c.granola}"` : "matches the client name", airtable: c.airtable ? "linked" : "not linked", morningBrief: c.morningBrief ? "on" : "off",
     };
   });
@@ -638,11 +648,12 @@ async function senderPerformance(input: Row) {
 
 async function sendingRunway(input: Row) {
   const all = await allClients();
-  const picked = (strings(input.clients ?? input.client).length ? pickClients(all, strings(input.clients ?? input.client)) : all).filter((c) => c.apiKey);
+  const picked = (strings(input.clients ?? input.client).length ? pickClients(all, strings(input.clients ?? input.client)) : all)
+    .filter((c) => c.apiKey || c.lemlistKey);
   const within = num(input.withinDays) || 0;
   const results = await Promise.all(picked.map(async (c) => {
     const r = await runway(c);
-    return r ? { client: c.name, ...r } : { client: c.name, error: "HeyReach could not be read" };
+    return r ? { client: c.name, ...r } : { client: c.name, error: c.apiKey ? "HeyReach could not be read" : "lemlist could not be read" };
   }));
   const ranked = results.sort((a, b) => num((a as Row).daysOfSendingLeft ?? 9999) - num((b as Row).daysOfSendingLeft ?? 9999));
   return {

@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { LEMLIST_WORKSPACE_COLUMNS, diagnoseLemlistShapes, syncLemlistReplies, type LemlistWorkspace } from "../../../lib/lemlist-ingest";
+import { refreshLemlistStats } from "../../../lib/lemlist-figures";
 import { alertNewReplies } from "../../../lib/reply-alert-run";
 import { classifyLatestReply } from "../../../lib/reply-sentiment";
 
@@ -14,7 +15,7 @@ export const maxDuration = 300;
 
 export async function POST(request: Request) {
   // `days` re-reads that far back (at most 30); the routine worker pass sends nothing and reads since the last sync.
-  const body = (await request.json().catch(() => ({}))) as { days?: unknown; diagnose?: unknown; client?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { days?: unknown; diagnose?: unknown; client?: unknown; stats?: unknown };
   const days = Math.min(30, Math.max(0, Number(body.days) || 0));
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -33,12 +34,23 @@ export async function POST(request: Request) {
     if (!target) return NextResponse.json({ ok: false, error: "That client has no lemlist key." }, { status: 404 });
     return NextResponse.json({ ok: true, shapes: await diagnoseLemlistShapes(target) });
   }
+  // Which of them also have HeyReach: those keep HeyReach's client-wide daily row and its poll time.
+  const keyed = await fetch(`${url}/rest/v1/rr_workspaces?select=id&heyreach_api_key_ciphertext=not.is.null`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" }).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  const withHeyReach = new Set((Array.isArray(keyed) ? keyed : []).map((row: { id?: string }) => String(row.id ?? "")));
   const report: Array<Record<string, unknown>> = [];
   const started = Date.now();
   for (const workspace of workspaces) {
     if (Date.now() - started > 240_000) break;
     try {
       const sync = await syncLemlistReplies(config, workspace, days);
+      // Campaign figures for briefs, QC Bot and analytics, hourly (the worker asks with `stats`).
+      const stats = body.stats === true ? await refreshLemlistStats(config, workspace, withHeyReach.has(workspace.id)).catch((error) => ({ campaigns: 0, days: 0, error: error instanceof Error ? error.message.slice(0, 160) : "failed" })) : null;
+      // For a lemlist-only client this is its outreach account answering, which is what the brief's
+      // readiness check reads as "polled". A HeyReach client's poll time stays HeyReach's.
+      if (!withHeyReach.has(workspace.id)) {
+        await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(workspace.id)}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify({ last_successful_poll_at: new Date().toISOString() }) }).catch(() => undefined);
+      }
+      if (stats) report.push({ client: workspace.slug, stats });
       for (const conversationId of sync.ingested) {
         await classifyLatestReply(config, conversationId, workspace.slug, { workspaceName: workspace.name }).catch(() => undefined);
         await alertNewReplies(config, conversationId).catch(() => undefined);

@@ -358,6 +358,8 @@ export type LiveFigures = {
   reason: string;
   campaigns: CampaignFacts[];
   days: BriefDay[];
+  /** Which outreach account(s) answered: "HeyReach", "lemlist" or "HeyReach and lemlist". */
+  source?: string;
 };
 
 export type BriefSignals = {
@@ -389,7 +391,8 @@ export type BriefSignals = {
    * our overnight copy has to say so on its face. `live: false` is a degraded run, not a normal one, and
    * it is stated in the figures, in the trace and in the stored row.
    */
-  source: { live: boolean; reason: string };
+  /** `platform` names the outreach account(s) the figures are from: HeyReach, lemlist, or both. */
+  source: { live: boolean; reason: string; platform?: string };
 };
 
 const int = (value: unknown) => (Number.isFinite(Number(value)) ? Number(value) : 0);
@@ -415,7 +418,7 @@ export async function gatherSignals(
    */
   live?: LiveFigures | null,
 ): Promise<BriefSignals> {
-  if (live?.available) return composeSignals(live.campaigns, live.days, { live: true, reason: "", statsAgeHours: 0 });
+  if (live?.available) return composeSignals(live.campaigns, live.days, { live: true, reason: "", statsAgeHours: 0, platform: live.source || "HeyReach" });
 
   const filter = `workspace_id=eq.${encodeURIComponent(workspace.id)}`;
   const [campaignRows, dailyRows, senderRows] = await Promise.all([
@@ -471,6 +474,7 @@ export async function gatherSignals(
 
   return composeSignals(facts, days, {
     live: false,
+    platform: live?.source || "HeyReach",
     reason: live?.reason ?? "",
     statsAgeHours: freshest ? Math.round((Date.now() - freshest) / 3_600_000) : null,
   });
@@ -487,7 +491,7 @@ export function composeSignals(
   facts: CampaignFacts[],
   /** Newest first. A day with no sending is an absent row, not a zero row. */
   days: BriefDay[],
-  source: { live: boolean; reason: string; statsAgeHours: number | null },
+  source: { live: boolean; reason: string; statsAgeHours: number | null; platform?: string },
 ): BriefSignals {
   const isPaused = (status: unknown) => /pause|stopped|hold/i.test(String(status ?? ""));
   const isFinished = (status: unknown) => /finish|complet|done|ended/i.test(String(status ?? ""));
@@ -573,7 +577,7 @@ export function composeSignals(
       lastWeek: rate(sum(previous, "accepted"), lastWeek),
     },
     staleness: { statsAgeHours: source.statsAgeHours, dayCount: days.length },
-    source: { live: source.live, reason: source.reason },
+    source: { live: source.live, reason: source.reason, platform: source.platform || "HeyReach" },
   };
 }
 
@@ -596,11 +600,12 @@ export function signalsAsText(signals: BriefSignals): string {
    * line says so and costs nine words. When it did not, the line is the most important thing in the
    * figures: it says the numbers are a copy, how old, and why the live read failed.
    */
-  if (source.live) lines.push("These figures were read from HeyReach just now, so they are current as of this minute.");
+  const platform = source.platform || "HeyReach";
+  if (source.live) lines.push(`These figures were read from ${platform} just now, so they are current as of this minute.`);
   else {
     const age = staleness.statsAgeHours === null ? "" : ` They were last collected ${staleness.statsAgeHours} hours ago.`;
-    const why = source.reason ? ` HeyReach could not be reached: ${source.reason}` : " HeyReach was not asked, because no API key is saved for this client.";
-    lines.push(`Every figure below comes from our own stored copy rather than from HeyReach.${age}${why} Say once, in one short clause, that the numbers are as of then and not live. Do not repeat it per campaign.`);
+    const why = source.reason ? ` ${platform} could not be reached: ${source.reason}` : " No outreach account (HeyReach or lemlist) was asked, because no API key is saved for this client.";
+    lines.push(`Every figure below comes from our own stored copy rather than from ${platform}.${age}${why} Say once, in one short clause, that the numbers are as of then and not live. Do not repeat it per campaign.`);
   }
 
   // "Nothing has been collected" is the only case where the figures must be withheld, and it is not the
@@ -1358,8 +1363,8 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
     const facts: string[] = [];
     // First fact, before any figure, because it is the one that decides how much the rest are worth.
     facts.push(source.live
-      ? "Read from HeyReach during this run, scoped to this client's own campaigns."
-      : `HeyReach was not the source of these figures. ${source.reason || "No API key is saved for this client."} The stored copy was used instead and the brief was told to say so.`);
+      ? `Read from ${source.platform || "HeyReach"} during this run, scoped to this client's own campaigns.`
+      : `${source.platform || "HeyReach"} was not the source of these figures. ${source.reason || "No API key is saved for this client."} The stored copy was used instead and the brief was told to say so.`);
     for (const campaign of campaigns.names) {
       const accepted = rate(campaign.accepted, campaign.sent);
       // The trace is where somebody goes to find out why a brief said what it said, so an unnamed sender is
