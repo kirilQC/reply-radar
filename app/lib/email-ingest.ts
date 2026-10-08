@@ -20,7 +20,7 @@
  */
 
 import { isOurCampaign } from "../../shared/campaign-code.mjs";
-import { emailConversationKey, htmlToText, replyText } from "../../shared/email-text.mjs";
+import { emailConversationKey, htmlToText, isAutoReply, isOurEmail, replyText } from "../../shared/email-text.mjs";
 import { linkedinFromVariables, nameKey, normalName, pickLinkedInLead } from "../../shared/lead-match.mjs";
 import {
   bisonConfigured,
@@ -366,6 +366,8 @@ export async function ingestBisonReply(config: Config, workspace: EmailWorkspace
   const reply = await getReply(link.token, replyId);
   if (!reply) return { discarded: true, reason: "reply_not_found" };
   if (text(reply.type) !== "Tracked Reply" || !reply.lead_id || !reply.campaign_id) return { discarded: true, reason: "untracked" };
+  // An out-of-office answering our campaign is not a reply: it never opens a conversation (and any it left
+  // behind is cleared below, once the lead's whole history is read).
 
   const campaign = await campaignName(link.token, String(reply.campaign_id));
   // The same rule as LinkedIn: a campaign without a QC code is the client's own outreach, not ours.
@@ -380,6 +382,12 @@ export async function ingestBisonReply(config: Config, workspace: EmailWorkspace
     leadReplies(link.token, bisonLeadId).catch(() => [] as BisonReply[]),
   ]);
   const allReplies = replies.some((row) => text(row.id) === text(reply.id)) ? replies : [...replies, reply];
+  // What we sent from Bison's master inbox (folder Sent, type "Outgoing Email") is ours, not the lead's: it
+  // used to be stored as their reply, so a thread read as the lead answering themselves.
+  const ours = allReplies.filter((row) => isOurEmail(row) && text(row.date_received || row.created_at));
+  const theirs = allReplies.filter((row) => !isOurEmail(row) && text(row.date_received));
+  const automatedIds = theirs.filter((row) => isAutoReply(row)).map((row) => `bison:reply:${text(row.id)}`);
+  const human = theirs.filter((row) => !isAutoReply(row));
 
   const campaignRef = (id: unknown, name: string) => ({ id: text(id), name, source: "emailbison" });
   const messages = [
@@ -390,14 +398,28 @@ export async function ingestBisonReply(config: Config, workspace: EmailWorkspace
       sent_at: text(row.sent_at),
       raw_data: { channel: "email", subject: text(row.email_subject), reply_radar: { channel: "email", campaign: campaignRef(row.campaign_id, campaign), sender: { id: text(object(row.sender_email).id), name: text(object(row.sender_email).name) || text(object(row.sender_email).email) }, emailbison: { scheduled_email_id: text(row.id) } } },
     })),
-    ...allReplies.filter((row) => text(row.date_received)).map((row) => ({
+    ...ours.map((row) => ({
+      heyreach_message_id: `bison:reply:${text(row.id)}`,
+      direction: "outbound",
+      body: replyText(row),
+      sent_at: text(row.date_received || row.created_at),
+      raw_data: { channel: "email", subject: text(row.subject), reply_radar: { channel: "email", campaign: campaignRef(reply.campaign_id, campaign), sender: { name: text(row.from_name) || text(row.from_email_address) }, emailbison: { reply_id: text(row.id), sent_from_bison: true } } },
+    })),
+    ...human.map((row) => ({
       heyreach_message_id: `bison:reply:${text(row.id)}`,
       direction: "inbound",
       body: replyText(row),
       sent_at: text(row.date_received),
-      raw_data: { channel: "email", subject: text(row.subject), from: text(row.from_email_address), reply_radar: { channel: "email", campaign: campaignRef(row.campaign_id ?? reply.campaign_id, campaign), interested: row.interested === true, automated: row.automated_reply === true, emailbison: { reply_id: text(row.id), sender_email_id: text(row.sender_email_id) } } },
+      raw_data: { channel: "email", subject: text(row.subject), from: text(row.from_email_address), reply_radar: { channel: "email", campaign: campaignRef(row.campaign_id ?? reply.campaign_id, campaign), interested: row.interested === true, automated: false, emailbison: { reply_id: text(row.id), sender_email_id: text(row.sender_email_id) } } },
     })),
   ].filter((message) => message.body || message.direction === "inbound");
+
+  const conversationKey = emailConversationKey(bisonLeadId);
+  if (!human.length) {
+    // Nothing but auto-replies from this lead: no conversation, and one stored before this rule is removed.
+    await rest(config, `rr_conversations?workspace_id=eq.${enc(workspace.id)}&heyreach_conversation_id=eq.${enc(conversationKey)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+    return { discarded: true, reason: "automated" };
+  }
 
   const sorted = [...messages].sort((a, b) => Date.parse(a.sent_at) - Date.parse(b.sent_at));
   const last = sorted[sorted.length - 1];
@@ -407,7 +429,7 @@ export async function ingestBisonReply(config: Config, workspace: EmailWorkspace
     body: JSON.stringify({
       workspace_id: workspace.id,
       lead_id: leadId,
-      heyreach_conversation_id: emailConversationKey(bisonLeadId),
+      heyreach_conversation_id: conversationKey,
       account_id: text(reply.sender_email_id) || null,
       channel: "email",
       last_message_at: last?.sent_at ?? text(reply.date_received),
@@ -419,6 +441,10 @@ export async function ingestBisonReply(config: Config, workspace: EmailWorkspace
   if (!conversation.ok || !conversationRow) throw new Error(`Could not save the email conversation (${conversation.status}): ${JSON.stringify(conversation.data).slice(0, 200)}`);
   const conversationId = text(conversationRow.id);
 
+  // Auto-replies stored before this rule leave the thread.
+  if (automatedIds.length) {
+    await rest(config, `rr_messages?conversation_id=eq.${enc(conversationId)}&heyreach_message_id=in.(${automatedIds.map((id) => `"${id}"`).map(enc).join(",")})`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+  }
   if (sorted.length) {
     const written = await rest(config, "rr_messages?on_conflict=conversation_id,heyreach_message_id", {
       method: "POST",
@@ -499,17 +525,29 @@ export async function sendEmailConversationReply(config: Config, conversationId:
   return { ok: true, status: 200, sentAt };
 }
 
-/** The inbox's refresh for an email thread: the lead's latest reply re-ingested from Bison. */
+/**
+ * The inbox's refresh for an email thread: the lead's history re-read from Bison. Starts from the newest
+ * stored inbound reply and steps back when Bison says it is not a lead's tracked reply (a message we sent
+ * that was once stored as theirs), so a misfiled thread can still be repaired.
+ */
 export async function refreshEmailConversation(config: Config, conversationId: string): Promise<{ messagesUpdated: number; error?: string }> {
   const [conversation] = await rows(config, `rr_conversations?select=id,workspace_id&id=eq.${enc(conversationId)}&limit=1`);
   if (!conversation) return { messagesUpdated: 0, error: "Conversation not found" };
   const [workspace] = await rows(config, `rr_workspaces?select=${EMAIL_WORKSPACE_COLUMNS}&id=eq.${enc(text(conversation.workspace_id))}&limit=1`);
-  const [latest] = await rows(config, `rr_messages?select=raw_data&conversation_id=eq.${enc(conversationId)}&direction=eq.inbound&order=sent_at.desc&limit=1`);
-  const replyId = text(object(object(object(latest?.raw_data).reply_radar).emailbison).reply_id);
-  if (!workspace || !replyId) return { messagesUpdated: 0, error: "Nothing to refresh from Email Bison." };
-  const result = await ingestBisonReply(config, workspace as unknown as EmailWorkspace, replyId);
-  await rest(config, `rr_conversations?id=eq.${enc(conversationId)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_refreshed_at: new Date().toISOString() }) });
-  return "conversationId" in result ? { messagesUpdated: result.messagesWritten } : { messagesUpdated: 0, error: result.reason };
+  const stored = await rows(config, `rr_messages?select=raw_data&conversation_id=eq.${enc(conversationId)}&direction=eq.inbound&order=sent_at.desc&limit=10`);
+  const replyIds = stored.map((row) => text(object(object(object(row.raw_data).reply_radar).emailbison).reply_id)).filter(Boolean);
+  if (!workspace || !replyIds.length) return { messagesUpdated: 0, error: "Nothing to refresh from Email Bison." };
+  let last = "";
+  for (const replyId of replyIds) {
+    const result = await ingestBisonReply(config, workspace as unknown as EmailWorkspace, replyId);
+    if ("conversationId" in result) {
+      await rest(config, `rr_conversations?id=eq.${enc(conversationId)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_refreshed_at: new Date().toISOString() }) });
+      return { messagesUpdated: result.messagesWritten };
+    }
+    last = result.reason;
+    if (result.reason === "automated") break;
+  }
+  return { messagesUpdated: 0, error: last };
 }
 
 /** Email campaign totals and the last 45 days of daily activity for one client, from Bison into QC. */

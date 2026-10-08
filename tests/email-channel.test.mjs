@@ -49,3 +49,15 @@ test("only tracked replies to coded campaigns are ingested", () => {
   assert.match(ingest, /text\(reply\.type\) !== "Tracked Reply"/);
   assert.match(ingest, /if \(!isOurCampaign\(campaign\)\) return \{ discarded: true, reason: "not_our_campaign" \}/);
 });
+
+test("out-of-office and automatic replies are recognised, real replies are not", async () => {
+  const { isAutoReply, isOurEmail } = await import("../shared/email-text.mjs");
+  assert.ok(isAutoReply({ text_body: "Hello, Thank you for your email. I am traveling until 9 October and will be slow to respond to emails. Warm regards, Rhiannon" }));
+  assert.ok(isAutoReply({ text_body: "I will be out of the office until 10/13. For urgent issues contact…" }));
+  assert.ok(isAutoReply({ subject: "Automatic reply: Meet EmaEQ at WHIS", text_body: "Thanks" }));
+  assert.ok(isAutoReply({ automated_reply: true, text_body: "Hi!" }));
+  assert.ok(!isAutoReply({ text_body: "Hi Nick, We can have a meeting about this. I am not sure what we have that we might be able to part of this program." }));
+  assert.ok(!isAutoReply({ text_body: "Would love to attend, we have also integrated AI for testing and workflow and wearables." }));
+  assert.ok(isOurEmail({ folder: "Sent", type: "Outgoing Email" }));
+  assert.ok(!isOurEmail({ folder: "Inbox", type: "Tracked Reply" }));
+});

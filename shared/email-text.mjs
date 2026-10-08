@@ -93,3 +93,28 @@ export function replyText(reply) {
 /** The conversation key for an email thread: one per Email Bison lead. Never a HeyReach id. */
 export const emailConversationKey = (bisonLeadId) => `bison:${bisonLeadId}`;
 export const isEmailConversationKey = (key) => String(key ?? "").startsWith("bison:");
+
+/**
+ * Whether a reply is an out-of-office or other automatic answer, which never belongs in the inbox. Email
+ * Bison's own flag first; then the subject a mail client puts on one; then, for a short message only, the
+ * wording of one ("I am traveling until 9 October", "out of the office until"). A long reply that happens to
+ * mention travel is a real reply and is kept.
+ */
+const AUTO_SUBJECT = /^\s*(automatic reply|auto(matic)?[\s-]?reply|autoreply|out of (the )?office|ooo\b|abwesenheit|r[ée]ponse automatique|respuesta autom[aá]tica|delivery status notification|undeliverable)/i;
+const AUTO_BODY = [
+  /\b(out of (the )?office|ooo)\b/i,
+  /\b(i am|i'm|i will be|i'll be)\s+(currently\s+)?(traveling|travelling|away|on (annual |parental |maternity |paternity )?leave|on vacation|on holiday|out)\b[^.]{0,80}\b(until|through|returning|back on|back in|from)\b/i,
+  /\blimited (access to|ability to check) (my )?e-?mail\b/i,
+  /\b(will|shall) (respond|reply|get back to you)[^.]{0,40}\b(upon|when|after) (my|i) return/i,
+  /\bthis (is an )?(automatic|automated|auto-generated) (reply|response|message)\b/i,
+  /\bno longer (with|at|working (at|for))\b/i,
+];
+export function isAutoReply(reply) {
+  if (reply?.automated_reply === true || reply?.automated === true) return true;
+  if (AUTO_SUBJECT.test(String(reply?.subject ?? reply?.email_subject ?? ""))) return true;
+  const body = replyText(reply);
+  return body.length <= 700 && AUTO_BODY.some((pattern) => pattern.test(body));
+}
+
+/** A message in a lead's Bison history that we sent (a reply from the master inbox), not one they sent us. */
+export const isOurEmail = (reply) => String(reply?.folder ?? "").toLowerCase() === "sent" || /outgoing/i.test(String(reply?.type ?? ""));
