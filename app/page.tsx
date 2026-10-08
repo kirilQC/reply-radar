@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import DashboardHome from "./components/DashboardHome";
 import AppSidebar from "./components/AppSidebar";
 import Crumb from "./components/Crumb";
+import { NavIcon } from "./components/NavIcon";
 import DateRangeCalendar from "./components/DateRangeCalendar";
 import { accentOf, applyAccent, DEFAULT_ACCENT } from "./lib/brand-theme";
 import { usePopoverDismiss } from "./lib/use-popover-dismiss";
@@ -2601,6 +2602,15 @@ export function InboxPage() {
                         <div>
                           <strong className="lead-name">
                             <span className="lead-name-text">{lead.name}</span>
+                            {lead.channel === "email" && (
+                              <span
+                                className="channel-email-icon"
+                                title="Email reply (Email Bison)"
+                                aria-label="Email"
+                              >
+                                <NavIcon name="mail" size={9} />
+                              </span>
+                            )}
                             {lastDirectionOf(lead) === "outbound" && (
                               <span
                                 className="responded-check"
@@ -2649,7 +2659,7 @@ export function InboxPage() {
                         <span>{lead.client}</span>
                       </div>
                       <div className="inbox-meta-cell campaign-cell">
-                        <strong>{lead.channel === "email" && <span className="inbox-channel-chip" title="Email reply (Email Bison)">Email</span>}{lead.campaignName || "No campaign"}</strong>
+                        <strong>{lead.campaignName || "No campaign"}</strong>
                       </div>
                       <div className="inbox-meta-cell date-cell">
                         <strong>
@@ -2751,6 +2761,15 @@ export function InboxPage() {
                         <div className="detail-name-line">
                           <h3>
                             {current.name}
+                            {current.channel === "email" && (
+                              <span
+                                className="channel-email-icon detail-channel-email-icon"
+                                title="Email reply (Email Bison)"
+                                aria-label="Email"
+                              >
+                                <NavIcon name="mail" size={11} />
+                              </span>
+                            )}
                             {lastDirectionOf(current) === "outbound" && (
                               <span
                                 className="responded-check detail-responded-check"

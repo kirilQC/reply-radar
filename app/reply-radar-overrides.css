@@ -283,6 +283,11 @@ html:not(.hydrated) body{visibility:hidden}
 /* Same green check in the detail card header — larger to match h3 size. */
 .detail-name-line h3{display:inline-flex;align-items:center;gap:8px}
 .detail-responded-check{width:18px;height:18px;font-size:11px}
+/* Envelope in the check's slot for Email Bison threads, so the channel reads at a glance without
+   scanning the campaign column. `.lead-main .x` beats the row's `.lead-main span` block styling,
+   which would otherwise drop the icon onto its own line. */
+.channel-email-icon,.lead-main .channel-email-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:14px;height:14px;border-radius:50%;background:color-mix(in srgb,var(--accent) 22%,transparent);color:var(--accent);line-height:1}
+.detail-channel-email-icon{width:18px;height:18px}
 /* Stands in for the AI draft textarea when we sent the last message. A bare line rather than a
    panel: it is one fact, and it is also the way back to a composer, since a nudge is sometimes
    the right next move — clicking it swaps the textarea back in. */
