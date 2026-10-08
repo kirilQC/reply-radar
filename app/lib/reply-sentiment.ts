@@ -23,7 +23,7 @@ const object = (value: unknown): Row =>
  * boundary cases are the whole problem — "sounds interesting" and "send me some info" have to be shown
  * as neutral or they get read as wins.
  */
-const DEFAULT_SENTIMENT_PROMPT = `You are classifying the lead's LATEST inbound reply in a LinkedIn conversation run by an outbound growth agency. The agency messaged the lead first; the lead is replying to a cold pitch, so ordinary politeness costs them nothing and means nothing.
+const DEFAULT_SENTIMENT_PROMPT = `You are classifying the lead's LATEST inbound reply in a LinkedIn or email conversation run by an outbound growth agency. The agency messaged the lead first; the lead is replying to a cold pitch, so ordinary politeness costs them nothing and means nothing.
 
 Your default answer is NEUTRAL. Most replies to cold outreach are neutral. Move off NEUTRAL only when the reply gives you something concrete to point at: real forward movement (positive) or real refusal (negative). A reply being warm, long, or on-topic is not interest.
 

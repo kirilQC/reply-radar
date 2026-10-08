@@ -287,7 +287,7 @@ export async function alertMessage(config: Config, messageId: string, opts: { te
     const leadFields = leadFromRow(lead);
     const draft = await draftFor(workspace, conversationId, thread, leadFields.name, campaignName);
     const card = buildAlertCard({ lead: leadFields, replyNumber: replyNumber(messages, self), senderName, campaignName, clientName: text(workspace.name), latestReply: latest.body, test, channel: text(conversation.channel) === "email" || text(conversation.heyreach_conversation_id).startsWith("bison:") ? "email" : "linkedin" });
-    const reply = buildAlertThread({ messages, latest, messageId, leadName: leadFields.name, senderName, draft, conversationId, test });
+    const reply = buildAlertThread({ messages, latest, messageId, leadName: leadFields.name, senderName, draft, conversationId, test, channel: text(conversation.channel) === "email" || text(conversation.heyreach_conversation_id).startsWith("bison:") ? "email" : "linkedin" });
 
     cardTs = await postMessage(channel, card.text, "", card.blocks);
     // The card is out, so from here on nothing may release the claim: a retry would post a second card.
@@ -424,7 +424,7 @@ export async function sendReplyFromSlack(action: Row): Promise<void> {
     if (!result.ok) {
       // Nothing reached the lead (or the send's own lock is holding it), so the button is left for another try.
       await rest(config, `rr_app_config?key=eq.${enc(claimKey)}&value->>token=eq.${enc(claim.token)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
-      return tell(`Not sent. ${result.error ?? "HeyReach did not accept it."}`);
+      return tell(`Not sent. ${result.error ?? "The outreach platform did not accept it."}`);
     }
     const at = new Date(result.sentAt || Date.now());
     await swapConfigValue(config, claimKey, claim.token, { status: "sent", token: claim.token, at: at.toISOString(), by: user }).catch(() => false);

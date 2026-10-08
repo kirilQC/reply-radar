@@ -267,6 +267,8 @@ export function parseSendValue(value: unknown): SendValue | null {
 }
 
 export type AlertThreadInput = {
+  /** "email" when the reply goes out as an email (Email Bison or lemlist); LinkedIn otherwise. */
+  channel?: string;
   messages: AlertMessage[];
   /** The newest message from the lead, which the draft answers. */
   latest: AlertMessage;
@@ -299,7 +301,7 @@ export function buildAlertThread(input: AlertThreadInput): { text: string; block
     history = preformatted([`(${hidden} earlier message${hidden === 1 ? "" : "s"} not shown)`, ...shown].join("\n\n"));
   }
   const draft = input.draft.trim().slice(0, 3_000);
-  const confirmText = `Send this reply to ${input.leadName || "this lead"} on LinkedIn from ${input.senderName || "the sender"}?`;
+  const confirmText = `Send this reply to ${input.leadName || "this lead"} ${input.channel === "email" ? "by email" : "on LinkedIn"} from ${input.senderName || "the sender"}?`;
   const blocks: Row[] = [
     section("*Conversation History*"),
     ...history,

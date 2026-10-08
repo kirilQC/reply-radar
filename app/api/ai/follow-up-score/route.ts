@@ -48,7 +48,7 @@ export async function POST(request: Request) {
   // the client wants. "Send me pricing" from a target account and from a student are the same sentence
   // and different scores, and only the brief knows which is which.
   const systemPrompt = await briefedSystemPrompt(
-    `You are a follow-up urgency scorer for LinkedIn sales conversations. Score urgency 0-100 based on the client's criteria.${sentiment ? `\n\nThe lead's latest reply reads as ${sentiment}.` : ""}\n\nClient follow-up criteria:\n${followUpPrompt}\n\nReturn ONLY valid JSON: { "urgency": <0-100>, "reason": "<one sentence>" }. If no follow-up is needed, return urgency 0 with a reason.`,
+    `You are a follow-up urgency scorer for LinkedIn and email sales conversations. Score urgency 0-100 based on the client's criteria.${sentiment ? `\n\nThe lead's latest reply reads as ${sentiment}.` : ""}\n\nClient follow-up criteria:\n${followUpPrompt}\n\nReturn ONLY valid JSON: { "urgency": <0-100>, "reason": "<one sentence>" }. If no follow-up is needed, return urgency 0 with a reason.`,
     workspaceId,
   );
 

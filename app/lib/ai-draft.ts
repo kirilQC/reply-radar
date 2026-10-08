@@ -25,10 +25,10 @@ async function resolveWorkspaceId(slug: string, url: string, headers: Record<str
  * who is sending this one, the client's name, and the per-client reply instructions from Configuration
  * (`guardrails.reply_prompt`), which drafting used to ignore entirely.
  */
-type Voice = { examples: VoiceExample[]; senderName: string; clientName: string; replyPrompt: string };
+type Voice = { examples: VoiceExample[]; senderName: string; clientName: string; replyPrompt: string; channel: "email" | "linkedin" };
 
 async function loadVoice(workspaceRef: string, campaignName: string | undefined, conversationId: string): Promise<Voice> {
-  const empty: Voice = { examples: [], senderName: "", clientName: "", replyPrompt: "" };
+  const empty: Voice = { examples: [], senderName: "", clientName: "", replyPrompt: "", channel: "linkedin" };
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key || !workspaceRef) return empty;
@@ -40,10 +40,14 @@ async function loadVoice(workspaceRef: string, campaignName: string | undefined,
     return Array.isArray(rows) ? (rows as Row[]) : [];
   };
   const workspaceId = await resolveWorkspaceId(workspaceRef, url, headers);
+  // The channel this reply goes out on (email from Email Bison or lemlist, LinkedIn otherwise) decides both the
+  // writing rules and which past replies are its examples: a LinkedIn DM is no style guide for an email.
+  const [target] = conversationId ? await get(`rr_conversations?select=channel,heyreach_conversation_id&id=eq.${encodeURIComponent(conversationId)}&limit=1`) : [];
+  const channel: Voice["channel"] = String(target?.channel ?? "") === "email" || String(target?.heyreach_conversation_id ?? "").startsWith("bison:") ? "email" : "linkedin";
   const [workspaceRows, conversations] = await Promise.all([
     get(`rr_workspaces?select=name,reply_prompt:guardrails->>reply_prompt&id=eq.${encodeURIComponent(workspaceId)}&limit=1`),
-    // The 300 most recently active threads: enough history to find a dozen real replies for most clients.
-    get(`rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=last_message_at.desc.nullslast,id.asc&limit=300`),
+    // The 300 most recently active threads on the same channel: enough history to find a dozen real replies.
+    get(`rr_conversations?select=id,lead_id&workspace_id=eq.${encodeURIComponent(workspaceId)}&channel=eq.${channel}&order=last_message_at.desc.nullslast,id.asc&limit=300`),
   ]);
   const ids = [...new Set([...conversations.map((c) => String(c.id)), conversationId].filter(Boolean))];
   const leadIdByConversation = new Map(conversations.map((c) => [String(c.id), String(c.lead_id ?? "")]));
@@ -76,6 +80,7 @@ async function loadVoice(workspaceRef: string, campaignName: string | undefined,
     senderName,
     clientName: String(workspaceRows[0]?.name ?? ""),
     replyPrompt: String(workspaceRows[0]?.reply_prompt ?? "").trim(),
+    channel,
   };
 }
 
@@ -148,8 +153,8 @@ export async function runDraft(body: Row): Promise<DraftResult> {
   const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId : "";
   const campaignName = typeof body.campaignName === "string" ? body.campaignName : undefined;
   const voice: Voice = workspaceId
-    ? await loadVoice(workspaceId, campaignName, typeof body.conversationId === "string" ? body.conversationId : "").catch(() => ({ examples: [], senderName: "", clientName: "", replyPrompt: "" }))
-    : { examples: [], senderName: "", clientName: "", replyPrompt: "" };
+    ? await loadVoice(workspaceId, campaignName, typeof body.conversationId === "string" ? body.conversationId : "").catch((): Voice => ({ examples: [], senderName: "", clientName: "", replyPrompt: "", channel: "linkedin" }))
+    : { examples: [], senderName: "", clientName: "", replyPrompt: "", channel: "linkedin" };
   const pastReplies = voice.examples;
   const clientName = voice.clientName || (typeof body.workspaceName === "string" ? body.workspaceName : "") || "this client";
   const voiceSection = voiceBlock(pastReplies, clientName, voice.senderName);
@@ -218,7 +223,13 @@ export async function runDraft(body: Row): Promise<DraftResult> {
   const writingRules = [
     pastReplies.length
       ? "Write the reply the way the examples in HOW WE REPLY are written. They outrank anything else here on tone and length."
-      : "Write like a person answering a LinkedIn message: short, plain, friendly, specific. Not like marketing copy.",
+      : voice.channel === "email"
+        ? "Write like a person answering an email: short, plain, friendly, specific. Not like marketing copy."
+        : "Write like a person answering a LinkedIn message: short, plain, friendly, specific. Not like marketing copy.",
+    // An email reply is threaded under the lead's message: a greeting and a sign-off belong, a subject line does not.
+    voice.channel === "email"
+      ? `This reply is an EMAIL, sent in the same thread. Open with a short greeting using the lead's first name, keep it to two or three short paragraphs, and end with a plain sign-off${voice.senderName ? ` from ${voice.senderName.split(" ")[0]}` : ""}. Do not write a subject line.`
+      : "",
     "Answer what the lead actually said first. If they asked something, answer it directly before anything else.",
     "Do not re-pitch or repeat the opening message. Only explain the product if they asked what it is, and then in a sentence or two.",
     "At most one ask or next step.",

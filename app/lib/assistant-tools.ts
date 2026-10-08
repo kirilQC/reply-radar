@@ -182,7 +182,7 @@ async function db(path: string): Promise<unknown> {
 /* ── Clients ─────────────────────────────────────────────────────────────────────────────────── */
 
 /** `offboarded`: a legacy client. Found whenever it is named; left out of "all clients" roll-ups. */
-type Client = { id: string; name: string; slug: string; timezone: string; createdAt: string; apiKey: string; lemlistKey: string; offboarded: boolean };
+type Client = { id: string; name: string; slug: string; timezone: string; createdAt: string; apiKey: string; lemlistKey: string; bisonLinked?: boolean; offboarded: boolean };
 
 // The workspace list is read by resolveClient and a dozen tools, several times within one assistant turn, and
 // it barely changes. A short TTL cache turns that back into one fetch per warm instance every half-minute
@@ -193,7 +193,7 @@ const CLIENTS_TTL_MS = 30_000;
 async function clients(): Promise<Client[]> {
   if (clientsCache && Date.now() - clientsCache.at < CLIENTS_TTL_MS) return clientsCache.value;
   const raw = rows(
-    await db("rr_workspaces?select=id,name,slug,timezone,created_at,heyreach_api_key_ciphertext,lemlist_api_key,offboarded_at&order=name.asc"),
+    await db("rr_workspaces?select=id,name,slug,timezone,created_at,heyreach_api_key_ciphertext,lemlist_api_key,emailbison_workspace_id,offboarded_at&order=name.asc"),
   );
   const value = raw.map((row) => ({
     id: text(row.id),
@@ -203,6 +203,7 @@ async function clients(): Promise<Client[]> {
     createdAt: text(row.created_at),
     apiKey: text(row.heyreach_api_key_ciphertext),
     lemlistKey: text(row.lemlist_api_key),
+    bisonLinked: Boolean(row.emailbison_workspace_id),
     offboarded: Boolean(row.offboarded_at),
   }));
   clientsCache = { at: Date.now(), value };
@@ -419,6 +420,10 @@ async function describeConversations(conversationRows: Row[]): Promise<Row[]> {
       role: text(lead.role),
       company: text(lead.company),
       profileUrl: text(lead.linkedin_profile_url),
+      // Where the conversation lives: LinkedIn (HeyReach or lemlist) or email (Email Bison or lemlist).
+      channel: text(row.channel) || (text(row.heyreach_conversation_id).startsWith("bison:") ? "email" : "linkedin"),
+      platform: text(row.heyreach_conversation_id).startsWith("bison:") ? "Email Bison" : text(row.heyreach_conversation_id).startsWith("lemlist:") ? "lemlist" : "HeyReach",
+      email: text(object(object(lead.raw_data).reply_radar).email) || null,
       lastMessageAt: text(row.last_message_at),
       lastMessageFrom: text(row.last_message_direction) === "inbound" ? "lead" : "us",
       lastMessage: text(message.body).slice(0, 600),
@@ -446,7 +451,7 @@ async function conversationsFor(
     awaitingUs ? AWAITING_US : "",
     since ? `last_message_at=gte.${encodeURIComponent(since)}` : "",
   ].filter(Boolean);
-  const path = `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction${filters.length ? `&${filters.join("&")}` : ""}&order=${order}&limit=${limit}`;
+  const path = `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction,channel,heyreach_conversation_id${filters.length ? `&${filters.join("&")}` : ""}&order=${order}&limit=${limit}`;
   return describeConversations(rows(await db(path)));
 }
 
@@ -474,7 +479,7 @@ const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "list_clients",
     description:
-      "Every client workspace in QC Command: name, slug, time zone, when they were added, and whether a HeyReach key is connected. Call this first when a question names a client you have not yet resolved, or asks how many clients there are.",
+      "Every client workspace in QC Command: name, slug, time zone, when they were added, and which outreach accounts are connected (HeyReach, lemlist, Email Bison). Call this first when a question names a client you have not yet resolved, or asks how many clients there are.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -656,6 +661,12 @@ const BASE_TOOLS: ToolDefinition[] = [
     name: "heyreach_workspace_totals",
     description:
       "One client's account-wide totals from HeyReach (or lemlist, for a lemlist client), optionally over a date window: connections sent and accepted, messages sent, conversations started, replies, unique leads contacted, and leads tagged interested. This is the only place unique leads contacted is available — HeyReach does not report it per campaign. Use it for 'how is this client doing overall'. Note this covers the client's entire HeyReach account, so it includes any campaigns they ran before hiring QC; heyreach_campaign_metrics is the QC-only view.",
+    input_schema: { type: "object", properties: { ...CLIENT_ARG, ...WINDOW_ARGS }, required: ["client"] },
+  },
+  {
+    name: "email_campaign_metrics",
+    description:
+      "One client's EMAIL campaigns from Email Bison, refreshed hourly: per campaign name, status, leads, leads contacted, emails sent, unique replies, interested, bounced, unsubscribed, opens, with reply and interested rates; plus day-by-day email activity over an optional window (since/until, both or neither; default the last 14 days). Use it for anything about a client's email outreach. LinkedIn figures come from the heyreach_* campaign tools.",
     input_schema: { type: "object", properties: { ...CLIENT_ARG, ...WINDOW_ARGS }, required: ["client"] },
   },
   {
@@ -1023,7 +1034,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     case "list_clients": {
       // Offboarded clients are listed too, flagged, so a question that names one is answered rather
       // than met with "no such client". Roll-ups across "all clients" still mean active ones.
-      return (await clients()).map(({ apiKey, lemlistKey, id, name, slug, timezone, createdAt, offboarded }) => ({ name, slug, timezone, createdAt, heyreachConnected: Boolean(apiKey), lemlistConnected: Boolean(lemlistKey), outreach: [apiKey ? "HeyReach" : "", lemlistKey ? "lemlist" : ""].filter(Boolean).join(" + ") || "none", id, offboarded }));
+      return (await clients()).map(({ apiKey, lemlistKey, bisonLinked, id, name, slug, timezone, createdAt, offboarded }) => ({ name, slug, timezone, createdAt, heyreachConnected: Boolean(apiKey), lemlistConnected: Boolean(lemlistKey), emailBisonConnected: Boolean(bisonLinked), outreach: [apiKey ? "HeyReach" : "", lemlistKey ? "lemlist" : "", bisonLinked ? "Email Bison" : ""].filter(Boolean).join(" + ") || "none", id, offboarded }));
     }
 
     case "client_summary": {
@@ -1099,9 +1110,12 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     case "find_person": {
       const query = text(input.query);
       if (!query) throw new Error("Give a name or a LinkedIn profile URL.");
+      // An email address finds email-only leads (Email Bison, lemlist), whose address is all they may have.
       const filter = /linkedin\.com/i.test(query)
         ? `linkedin_profile_url=ilike.*${encodeURIComponent(query.replace(/^https?:\/\//i, "").replace(/\/$/, ""))}*`
-        : `name=ilike.*${encodeURIComponent(query)}*`;
+        : /^[^\s@(),]+@[^\s@(),]+\.[^\s@(),]+$/.test(query)
+          ? `or=(raw_data->reply_radar->>email.eq.${encodeURIComponent(query.toLowerCase())},raw_data->>email.ilike.${encodeURIComponent(query)},raw_data->>email_address.ilike.${encodeURIComponent(query)})`
+          : `name=ilike.*${encodeURIComponent(query)}*`;
       const leadRows = rows(
         await db(`rr_leads?select=id,name,role,company,linkedin_profile_url,workspace_id&${filter}&limit=${MAX_ROWS}`),
       );
@@ -1111,7 +1125,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const leadIds = leadRows.map((row) => text(row.id)).filter(Boolean);
       const conversationRows = await dbByIds(
         (batch) =>
-          `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction&lead_id=in.(${batch.join(",")})&order=last_message_at.desc&limit=${MAX_ROWS}`,
+          `rr_conversations?select=id,lead_id,workspace_id,last_message_at,last_message_direction,channel,heyreach_conversation_id&lead_id=in.(${batch.join(",")})&order=last_message_at.desc&limit=${MAX_ROWS}`,
         leadIds,
       );
       const described = await describeConversations(conversationRows);
@@ -1277,6 +1291,8 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     case "heyreach_campaigns": {
       const lem = await resolveClient(input.client);
       if (!lem.apiKey && lem.lemlistKey) return lemlistCampaignsAnswer(lem.name, lem.lemlistKey);
+      // A client on both HeyReach and lemlist gets both: lemlist's answer rides along under `lemlist`.
+      const both = lem.lemlistKey ? lemlistCampaignsAnswer(lem.name, lem.lemlistKey).catch(() => null) : null;
       const client = await connectedClient(input.client);
       const status = await campaignStatusFor(client.apiKey);
       if (!status.available) throw new Error(`HeyReach could not be reached for ${client.name}: ${status.reason}`);
@@ -1293,6 +1309,7 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
         daysOfSendingLeft: row.daysLeftInSending,
       });
       return {
+        ...(both ? { lemlist: await both } : {}),
         client: client.name,
         note: "Active means running AND still contacting new leads. Worked through means HeyReach says in progress but the list is exhausted, which is finished in every sense the client cares about.",
         active: status.active.map(describe),
@@ -1310,10 +1327,13 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       }
       const lem = await resolveClient(input.client);
       if (!lem.apiKey && lem.lemlistKey) return lemlistMetricsAnswer(lem.name, lem.lemlistKey, since, until);
+      // A client on both HeyReach and lemlist gets both: lemlist's answer rides along under `lemlist`.
+      const both = lem.lemlistKey ? lemlistMetricsAnswer(lem.name, lem.lemlistKey, since, until).catch(() => null) : null;
       const client = await connectedClient(input.client);
       const all = await heyreach.statsByCampaign(client.apiKey, { startDate: since || undefined, endDate: until || undefined });
       const ours = all.filter((row) => isOurCampaign(row.campaignName) && !row.deleted);
       return {
+        ...(both ? { lemlist: await both } : {}),
         client: client.name,
         window: since ? { since, until } : "all time",
         note: "Only campaigns QC launched. Rates are percentages, already converted.",
@@ -1341,9 +1361,12 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
     case "heyreach_senders": {
       const lem = await resolveClient(input.client);
       if (!lem.apiKey && lem.lemlistKey) return lemlistSendersAnswer(lem.name, lem.lemlistKey);
+      // A client on both HeyReach and lemlist gets both: lemlist's answer rides along under `lemlist`.
+      const both = lem.lemlistKey ? lemlistSendersAnswer(lem.name, lem.lemlistKey).catch(() => null) : null;
       const client = await connectedClient(input.client);
       const page = await heyreach.senders(client.apiKey);
       return {
+        ...(both ? { lemlist: await both } : {}),
         client: client.name,
         note: "An account that is active but whose LinkedIn session is invalid sends nothing without erroring.",
         senders: page.items.map((row) => ({
@@ -1503,6 +1526,43 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       };
     }
 
+    case "email_campaign_metrics": {
+      const client = await resolveClient(input.client);
+      const since = text(input.since).slice(0, 10) || new Date(Date.now() - 13 * 86_400_000).toISOString().slice(0, 10);
+      const until = text(input.until).slice(0, 10) || new Date().toISOString().slice(0, 10);
+      const [campaigns, days] = await Promise.all([
+        db(`rr_email_campaign_stats?select=campaign_id,name,status,total_leads,leads_contacted,emails_sent,unique_replies,interested,bounced,unsubscribed,unique_opens,refreshed_at&workspace_id=eq.${encodeURIComponent(client.id)}&order=emails_sent.desc&limit=200`),
+        db(`rr_email_daily_stats?select=day,sent,replies,interested,bounced,opens&workspace_id=eq.${encodeURIComponent(client.id)}&day=gte.${since}&day=lte.${until}&order=day.asc`),
+      ]);
+      const campaignRows = rows(campaigns).filter((row) => isOurCampaign(text(row.name)));
+      if (!campaignRows.length && !rows(days).length) {
+        return { client: client.name, note: client.bisonLinked ? "Email Bison is connected but no email figures have been collected yet." : `${client.name} has no Email Bison workspace linked, so there are no email campaign figures.` };
+      }
+      const rate = (part: unknown, whole: unknown) => (Number(whole) ? Math.round((Number(part) / Number(whole)) * 1000) / 10 : null);
+      return {
+        client: client.name,
+        source: "Email Bison",
+        note: "Only campaigns QC launched. replyRatePercent = unique replies / leads contacted; interestedRatePercent = interested / leads contacted.",
+        campaigns: campaignRows.map((row) => ({
+          name: text(row.name),
+          status: text(row.status),
+          leads: Number(row.total_leads) || 0,
+          leadsContacted: Number(row.leads_contacted) || 0,
+          emailsSent: Number(row.emails_sent) || 0,
+          uniqueReplies: Number(row.unique_replies) || 0,
+          interested: Number(row.interested) || 0,
+          bounced: Number(row.bounced) || 0,
+          unsubscribed: Number(row.unsubscribed) || 0,
+          uniqueOpens: Number(row.unique_opens) || 0,
+          replyRatePercent: rate(row.unique_replies, row.leads_contacted),
+          interestedRatePercent: rate(row.interested, row.leads_contacted),
+        })),
+        window: { since, until },
+        days: rows(days).map((row) => ({ day: text(row.day), sent: Number(row.sent) || 0, replies: Number(row.replies) || 0, interested: Number(row.interested) || 0, bounced: Number(row.bounced) || 0 })),
+        figuresAsOf: campaignRows.map((row) => text(row.refreshed_at)).sort().at(-1) ?? null,
+      };
+    }
+
     case "heyreach_workspace_totals": {
       const since = text(input.since);
       const until = text(input.until);
@@ -1511,12 +1571,15 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       }
       const lem = await resolveClient(input.client);
       if (!lem.apiKey && lem.lemlistKey) return lemlistTotalsAnswer(lem.name, lem.lemlistKey, since, until);
+      // A client on both HeyReach and lemlist gets both: lemlist's answer rides along under `lemlist`.
+      const both = lem.lemlistKey ? lemlistTotalsAnswer(lem.name, lem.lemlistKey, since, until).catch(() => null) : null;
       const client = await connectedClient(input.client);
       const stats = await heyreach.overallStats(client.apiKey, {
         startDate: since || undefined,
         endDate: until || undefined,
       });
       return {
+        ...(both ? { lemlist: await both } : {}),
         client: client.name,
         window: since ? { since, until } : "all time",
         note: "The client's whole HeyReach account, including any campaigns they ran before hiring QC. Rates are percentages.",
