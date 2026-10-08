@@ -91,7 +91,7 @@ export async function POST(request: Request) {
       try {
         if (action === "link") results.push({ client: workspace.slug, linked: Boolean(await ensureBisonLink(c, workspace)) });
         else if (action === "webhook") results.push({ client: workspace.slug, ...(await registerBisonWebhook(c, workspace, servingBase(request))) });
-        else if (action === "sync") results.push({ client: workspace.slug, ...(await syncBisonReplies(c, workspace, 10)) });
+        else if (action === "sync") results.push({ client: workspace.slug, ...(await syncBisonReplies(c, workspace, body.full === true ? 60 : 10, body.full === true)) });
         else if (action === "stats") results.push({ client: workspace.slug, ...(await refreshBisonStats(c, workspace)) });
         else return NextResponse.json({ ok: false, error: "Unknown action." }, { status: 400 });
       } catch (error) {

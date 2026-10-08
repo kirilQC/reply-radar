@@ -211,7 +211,7 @@ export async function ingestBisonReply(config: Config, workspace: EmailWorkspace
  * inbox fills with vendor pitches, and a page of those used to end the read before any real reply was seen.
  * A campaign's paging stops at the first page whose replies are all stored, so a quiet campaign costs one call.
  */
-export async function syncBisonReplies(config: Config, workspace: EmailWorkspace, maxPages = 3): Promise<{ checked: number; ingested: string[]; skipped: Record<string, number> }> {
+export async function syncBisonReplies(config: Config, workspace: EmailWorkspace, maxPages = 3, full = false): Promise<{ checked: number; ingested: string[]; skipped: Record<string, number> }> {
   const link = await ensureBisonLink(config, workspace);
   if (!link) return { checked: 0, ingested: [], skipped: { no_bison_workspace: 1 } };
   // Why each new reply was not stored, by reason, so a client whose replies never arrive says why.
@@ -235,7 +235,8 @@ export async function syncBisonReplies(config: Config, workspace: EmailWorkspace
         if (result && "conversationId" in result) ingested.push(result.conversationId);
         else if (result && "reason" in result) skip(result.reason);
       }
-      if (!fresh || page >= lastPage) break;
+      // `full` (the one-time backfill) reads every page; the routine pass stops at the first page with nothing new.
+      if ((!fresh && !full) || page >= lastPage) break;
     }
   }
   await rest(config, `rr_workspaces?id=eq.${enc(workspace.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ emailbison_synced_at: new Date().toISOString() }) });
