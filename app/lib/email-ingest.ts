@@ -344,8 +344,9 @@ export async function relinkEmailLeads(config: Config, workspace: EmailWorkspace
 }
 
 /** Re-reads every stored email conversation of a client from Bison (after a change to how bodies are cleaned). */
-export async function recleanEmailConversations(config: Config, workspace: EmailWorkspace): Promise<{ conversations: number; refreshed: number }> {
-  const conversations = await rows(config, `rr_conversations?select=id&workspace_id=eq.${enc(workspace.id)}&heyreach_conversation_id=like.bison:*&limit=1000`);
+export async function recleanEmailConversations(config: Config, workspace: EmailWorkspace, offset = 0, limit = 1000): Promise<{ conversations: number; refreshed: number }> {
+  // In batches (`offset`/`limit`, ordered by id) so a client with many threads fits the request time limit.
+  const conversations = await rows(config, `rr_conversations?select=id&workspace_id=eq.${enc(workspace.id)}&heyreach_conversation_id=like.bison:*&order=id.asc&offset=${offset}&limit=${limit}`);
   let refreshed = 0;
   for (const conversation of conversations) {
     const result = await refreshEmailConversation(config, text(conversation.id)).catch(() => ({ messagesUpdated: 0 }));

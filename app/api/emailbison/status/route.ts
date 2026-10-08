@@ -95,7 +95,7 @@ export async function POST(request: Request) {
         else if (action === "stats") results.push({ client: workspace.slug, ...(await refreshBisonStats(c, workspace)) });
         else if (action === "relink") results.push({ client: workspace.slug, ...(await relinkEmailLeads(c, workspace)) });
         else if (action === "diagnose") results.push({ client: workspace.slug, leads: await diagnoseEmailLeads(c, workspace) });
-        else if (action === "reclean") results.push({ client: workspace.slug, ...(await recleanEmailConversations(c, workspace)) });
+        else if (action === "reclean") results.push({ client: workspace.slug, ...(await recleanEmailConversations(c, workspace, Number(body.offset) || 0, Number(body.limit) || 1000)) });
         else return NextResponse.json({ ok: false, error: "Unknown action." }, { status: 400 });
       } catch (error) {
         results.push({ client: workspace.slug, error: error instanceof Error ? error.message.slice(0, 300) : "failed" });
