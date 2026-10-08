@@ -18,7 +18,8 @@
  */
 
 import { isOurCampaign } from "../../shared/campaign-code.mjs";
-import { cleanEmailBody, htmlToText, isAutoReply, stripQuoted } from "../../shared/email-text.mjs";
+import { isAutoReply } from "../../shared/email-text.mjs";
+import { lemlistBody } from "../../shared/lemlist-text.mjs";
 import {
   findInHeyReach,
   findLinkedInLead,
@@ -79,14 +80,7 @@ const KIND: Record<string, { channel: LemlistChannel; direction: "inbound" | "ou
 };
 export const channelOfActivity = (type: unknown): LemlistChannel | null => KIND[text(type)]?.channel ?? null;
 
-/** lemlist bodies are HTML with the quoted thread inside; the quote is cut before flattening. */
-function bodyOf(message: Row, direction: "inbound" | "outbound"): string {
-  const html = String(message.message ?? message.body ?? "")
-    .replace(/<div[^>]*class="[^"]*gmail_quote[\s\S]*$/i, "")
-    .replace(/<blockquote[\s\S]*$/i, "");
-  const plain = /<[a-z][\s\S]*>/i.test(html) ? htmlToText(html) : html.trim();
-  return direction === "inbound" ? cleanEmailBody(stripQuoted(plain)) || stripQuoted(plain) : plain;
-}
+const bodyOf = (message: Row, direction: "inbound" | "outbound"): string => lemlistBody(message, direction);
 
 /** Campaign names per key, cached ten minutes: the thread carries campaign ids, the code rule needs names. */
 const campaignCache = new Map<string, { at: number; names: Map<string, string> }>();
