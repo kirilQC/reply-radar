@@ -8,7 +8,8 @@ import { isHeyReachValidationPayload } from "../../../../../lib/heyreach-convers
 import { classifyLatestReply } from "../../../../../lib/reply-sentiment";
 import { alertNewReplies } from "../../../../../lib/reply-alert-run";
 // Room for the work handed to `after()`: the reply alert may write a draft before it posts.
-export const maxDuration = 60;
+// 120: the reply alert waits up to 25s for a lead's follow-up message (shared/reply-burst.mjs) before posting.
+export const maxDuration = 120;
 
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 

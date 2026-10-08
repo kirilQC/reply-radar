@@ -25,6 +25,7 @@
 import { randomUUID } from "node:crypto";
 import { classifyConversationOrigin } from "../../shared/conversation-origin.mjs";
 import { NEAR_DUPLICATE_MS } from "../../shared/message-identity.mjs";
+import { burstText, laterInBurst, QUIET_MS } from "../../shared/reply-burst.mjs";
 import { runDraft } from "./ai-draft";
 import { writeAuditEvent } from "./audit-log";
 import { sendConversationReply } from "./conversation-send";
@@ -248,6 +249,19 @@ export async function alertMessage(config: Config, messageId: string, opts: { te
   }
 
   const twins = twinIds(stored.map(asMessage), asMessage(target), NEAR_DUPLICATE_MS);
+
+  // Two or three messages in a row from the lead ("Sounds great" then "Looking forward to the session")
+  // get one card, on the newest; an earlier one is folded into it rather than posted on its own
+  // (shared/reply-burst.mjs). A test post is never folded.
+  if (!test) {
+    const burstThread = dedupeMessages(stored).map(asMessage);
+    const selfInThread = burstThread.find((message) => twins.includes(message.id)) ?? asMessage(target);
+    const later = laterInBurst(burstThread, selfInThread);
+    if (later) {
+      await mirrorAlert(config, messageId, { done_at: new Date(now).toISOString(), skipped: "merged", merged_into: later.id });
+      return { outcome: "skipped", reason: "Folded into the lead's next message, which carries one card for both." };
+    }
+  }
   const claimKey = `reply_alert:${twins[0]}`;
   let claim: Extract<ClaimResult, { verdict: "take" }> | null = null;
   if (!test) {
@@ -286,7 +300,7 @@ export async function alertMessage(config: Config, messageId: string, opts: { te
       || thread.map((row) => text(object(radarOf(row.raw_data).campaign).name)).find(Boolean) || "";
     const leadFields = leadFromRow(lead);
     const draft = await draftFor(workspace, conversationId, thread, leadFields.name, campaignName);
-    const card = buildAlertCard({ lead: leadFields, replyNumber: replyNumber(messages, self), senderName, campaignName, clientName: text(workspace.name), latestReply: latest.body, test, channel: text(conversation.channel) === "email" || text(conversation.heyreach_conversation_id).startsWith("bison:") ? "email" : "linkedin" });
+    const card = buildAlertCard({ lead: leadFields, replyNumber: replyNumber(messages, self), senderName, campaignName, clientName: text(workspace.name), latestReply: burstText(messages, latest) || latest.body, test, channel: text(conversation.channel) === "email" || text(conversation.heyreach_conversation_id).startsWith("bison:") ? "email" : "linkedin" });
     const reply = buildAlertThread({ messages, latest, messageId, leadName: leadFields.name, senderName, draft, conversationId, test, channel: text(conversation.channel) === "email" || text(conversation.heyreach_conversation_id).startsWith("bison:") ? "email" : "linkedin" });
 
     cardTs = await postMessage(channel, card.text, "", card.blocks);
@@ -336,10 +350,19 @@ export async function alertNewReplies(config: Config, conversationId: string): P
   const workspace = await loadWorkspace(config, text(conversation.workspace_id));
   if (!workspace || !alertsOn(workspace)) return [];
   const since = new Date(windowStart(workspace, Date.now())).toISOString();
-  const candidates = await rows(
+  const read = () => rows(
     config,
-    `rr_messages?select=id,alert:raw_data->reply_radar->reply_alert&conversation_id=eq.${enc(conversationId)}&direction=eq.inbound&sent_at=gte.${enc(since)}&order=sent_at.asc&limit=10`,
+    `rr_messages?select=id,sent_at,alert:raw_data->reply_radar->reply_alert&conversation_id=eq.${enc(conversationId)}&direction=eq.inbound&sent_at=gte.${enc(since)}&order=sent_at.asc&limit=10`,
   );
+  let candidates = await read();
+  // A reply that just landed may be the first of a few: wait until the lead has been quiet for QUIET_MS,
+  // then read again, so the whole burst is posted as one card on its newest message.
+  const newest = Math.max(0, ...candidates.filter((row) => !text(object(row.alert).done_at)).map((row) => Date.parse(text(row.sent_at)) || 0));
+  const wait = newest ? QUIET_MS - (Date.now() - newest) : 0;
+  if (wait > 0) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(wait, QUIET_MS)));
+    candidates = await read();
+  }
   const outcomes: AlertOutcome[] = [];
   for (const row of candidates) {
     if (text(object(row.alert).done_at)) continue;

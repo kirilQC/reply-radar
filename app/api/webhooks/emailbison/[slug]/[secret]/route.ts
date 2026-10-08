@@ -12,7 +12,8 @@ import { classifyLatestReply } from "../../../../../lib/reply-sentiment";
  * fetched from Bison with the client's token (see email-ingest.ts), then handled exactly as a HeyReach reply
  * is: sentiment, then the Slack reply alert when the client has it on.
  */
-export const maxDuration = 60;
+// 120: the reply alert waits up to 25s for a lead's follow-up message (shared/reply-burst.mjs) before posting.
+export const maxDuration = 120;
 
 type Row = Record<string, unknown>;
 const object = (value: unknown): Row => (value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {});
