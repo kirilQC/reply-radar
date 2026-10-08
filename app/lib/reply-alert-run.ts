@@ -204,7 +204,7 @@ async function draftFor(workspace: Row, conversationId: string, thread: Row[], l
  * `test` posts the same thing to `channel` (the Slack test channel) with no claim, no stamp and a
  * Send button that refuses to send, for the button on Configuration.
  */
-export async function alertMessage(config: Config, messageId: string, opts: { test?: boolean; channel?: string } = {}): Promise<AlertOutcome> {
+export async function alertMessage(config: Config, messageId: string, opts: { test?: boolean; channel?: string; retry?: boolean } = {}): Promise<AlertOutcome> {
   const test = opts.test === true;
   const [target] = await rows(config, `rr_messages?select=id,conversation_id,direction,body,sent_at&id=eq.${enc(messageId)}&limit=1`);
   if (!target) return { outcome: "skipped", reason: "That message is not stored." };
@@ -253,12 +253,20 @@ export async function alertMessage(config: Config, messageId: string, opts: { te
       await mirrorAlert(config, messageId, { channel: posted?.channel, ts: posted?.ts, thread_ts: posted?.thread_ts, posted_at: posted?.posted_at, done_at: posted?.posted_at || new Date(now).toISOString() });
       return { outcome: "already_posted" };
     }
-    if (result.verdict === "gave_up") {
+    // "Retry missed" on the Reply alerts page: a reply that ran out of attempts (QC Bot was not in the
+    // channel) is taken over with its attempts reset, once someone has fixed what stopped it.
+    if (result.verdict === "gave_up" && opts.retry && result.existing?.token) {
+      const retriedAt = new Date(now).toISOString();
+      const token = randomUUID();
+      const taken = await swapConfigValue(config, claimKey, result.existing.token, { status: "claimed", token, attempts: 0, claimed_at: retriedAt });
+      if (!taken) return { outcome: "busy" };
+      claim = { verdict: "take", token, attempts: 0, claimedAt: retriedAt };
+    } else if (result.verdict === "gave_up") {
       await mirrorAlert(config, messageId, { done_at: new Date(now).toISOString(), failed_at: result.existing?.failed_at, error: result.existing?.error, attempts: result.existing?.attempts });
       return { outcome: "gave_up", reason: result.existing?.error };
     }
-    if (result.verdict !== "take") return { outcome: "busy", reason: "error" in result ? result.error : undefined };
-    claim = result;
+    else if (result.verdict !== "take") return { outcome: "busy", reason: "error" in result ? result.error : undefined };
+    else claim = result;
   }
 
   let cardTs = "";
@@ -421,4 +429,33 @@ export async function sendReplyFromSlack(action: Row): Promise<void> {
   } catch (error) {
     await tell(`Not sent. ${error instanceof Error ? error.message : "Something went wrong."}`);
   }
+}
+
+/**
+ * "Retry missed": every reply inside the window that failed to post (most often because QC Bot was not in
+ * the replies channel), posted again now. Replies that were posted, or skipped on purpose, are left alone.
+ */
+export async function alertRetryMissed(config: Config, workspaceId: string): Promise<{ retried: number; posted: number; reason?: string }> {
+  const workspace = await loadWorkspace(config, workspaceId);
+  if (!workspace || !alertsOn(workspace)) return { retried: 0, posted: 0, reason: "Reply alerts are off for this client." };
+  const since = new Date(windowStart(workspace, Date.now())).toISOString();
+  const conversations = await rows(config, `rr_conversations?select=id&workspace_id=eq.${enc(workspaceId)}&last_message_at=gte.${enc(since)}&limit=500`);
+  if (!conversations.length) return { retried: 0, posted: 0 };
+  const missed: string[] = [];
+  for (let i = 0; i < conversations.length; i += 40) {
+    const batch = conversations.slice(i, i + 40).map((row) => text(row.id)).join(",");
+    const found = await rows(config, `rr_messages?select=id,alert:raw_data->reply_radar->reply_alert&conversation_id=in.(${batch})&direction=eq.inbound&sent_at=gte.${enc(since)}&order=sent_at.asc&limit=100`);
+    for (const row of found) {
+      const alert = object(row.alert);
+      if (text(alert.error) && !text(alert.posted_at)) missed.push(text(row.id));
+    }
+  }
+  let posted = 0;
+  let reason = "";
+  for (const id of missed.slice(0, 20)) {
+    const outcome = await alertMessage(config, id, { retry: true }).catch((error) => ({ outcome: "failed" as const, reason: error instanceof Error ? error.message : "" }));
+    if (outcome.outcome === "posted") posted += 1;
+    else if (outcome.reason) reason = outcome.reason;
+  }
+  return { retried: Math.min(missed.length, 20), posted, ...(reason ? { reason } : {}) };
 }

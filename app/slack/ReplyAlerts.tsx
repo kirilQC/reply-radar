@@ -45,6 +45,14 @@ export default function ReplyAlerts({ onBack }: { onBack: () => void }) {
   const [busy, setBusy] = useState("");
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
+  // Whether QC Bot can post in each replies channel. A private channel it was never invited to is the usual
+  // reason alerts go quiet, so it is checked here rather than discovered when a reply fails.
+  const [reach, setReach] = useState<Record<string, { canPost: boolean; error: string }>>({});
+  const checkChannels = async () => {
+    const payload = await fetch("/api/slack/reply-alert", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+    if (payload?.channels) setReach(payload.channels);
+  };
+  useEffect(() => { void checkChannels(); }, []);
 
   const load = async () => {
     const payload = await fetch("/api/admin/workspaces", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
@@ -84,7 +92,7 @@ export default function ReplyAlerts({ onBack }: { onBack: () => void }) {
     const value = (channels[client.slug] ?? "").trim();
     if (value === client.channel) return;
     // Clearing the channel also stops the alerts: there is nowhere left to post them.
-    if (await save(client, { slackRepliesChannelId: value, ...(value ? {} : { replyAlertsEnabled: false }) })) note(client.slug, "Saved");
+    if (await save(client, { slackRepliesChannelId: value, ...(value ? {} : { replyAlertsEnabled: false }) })) { note(client.slug, "Saved"); void checkChannels(); }
   };
 
   const toggle = (client: Client) => save(client, { replyAlertsEnabled: !client.enabled });
@@ -100,6 +108,21 @@ export default function ReplyAlerts({ onBack }: { onBack: () => void }) {
     const payload = await response?.json().catch(() => null);
     setBusy("");
     note(client.slug, payload?.ok ? "Test posted to the test channel" : String(payload?.error || "Could not post the test."));
+  };
+
+  const retryMissed = async (client: Client) => {
+    setBusy(client.slug);
+    note(client.slug, "");
+    await checkChannels();
+    const response = await fetch("/api/slack/reply-alert", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ retryMissed: true, workspaceId: client.id }),
+    }).catch(() => null);
+    const payload = await response?.json().catch(() => null);
+    setBusy("");
+    if (!payload?.ok) return note(client.slug, String(payload?.error || "Could not retry."));
+    note(client.slug, payload.retried ? `Posted ${payload.posted} of ${payload.retried} missed${payload.reason && payload.posted < payload.retried ? `: ${payload.reason}` : ""}` : "Nothing missed");
   };
 
   const ready = clients.filter((client) => client.channel && client.keyConfigured).length;
@@ -130,6 +153,9 @@ export default function ReplyAlerts({ onBack }: { onBack: () => void }) {
                   <div>
                     <strong>{client.name}</strong>
                     <small>{client.enabled ? `On since ${since(client.enabledAt)}` : "Off"}{notes[client.slug] ? ` · ${notes[client.slug]}` : ""}</small>
+                    {client.channel && reach[client.slug] && !reach[client.slug].canPost && (
+                      <small className="booking-error">QC Bot can&apos;t post here. Type /invite @QC Bot in the channel, then Retry missed.</small>
+                    )}
                   </div>
                 </div>
                 <div className="brief-client-checks">
@@ -162,6 +188,7 @@ export default function ReplyAlerts({ onBack }: { onBack: () => void }) {
                     <span />{client.enabled ? "On" : "Off"}
                   </button>
                   <button type="button" className="secondary-button" onClick={() => void test(client)} disabled={busy === client.slug}>Send a test</button>
+                  {client.enabled && <button type="button" className="secondary-button" onClick={() => void retryMissed(client)} disabled={busy === client.slug}>Retry missed</button>}
                 </div>
               </li>
             );
