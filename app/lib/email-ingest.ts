@@ -21,7 +21,7 @@
 
 import { isOurCampaign } from "../../shared/campaign-code.mjs";
 import { emailConversationKey, htmlToText, replyText } from "../../shared/email-text.mjs";
-import { linkedinFromVariables, normalName, pickLinkedInLead } from "../../shared/lead-match.mjs";
+import { linkedinFromVariables, nameKey, normalName, pickLinkedInLead } from "../../shared/lead-match.mjs";
 import {
   bisonConfigured,
   campaignName,
@@ -127,9 +127,13 @@ async function heyReachLists(config: Config, workspaceId: string): Promise<{ api
   const { campaigns } = await import("./heyreach-api");
   const page = await campaigns(apiKey);
   const seen = new Set<string>();
-  const lists = page.items
-    .filter((campaign) => campaign.listId && isOurCampaign(campaign.name))
+  // Our coded campaigns first (that is where email leads come from), then the rest of the account: some
+  // clients' campaigns carry no QC code yet (Camb), and finding the person is all this is for. Newest first.
+  const ordered = [...page.items].reverse().sort((a, b) => Number(isOurCampaign(b.name)) - Number(isOurCampaign(a.name)));
+  const lists = ordered
+    .filter((campaign) => campaign.listId)
     .filter((campaign) => (seen.has(campaign.listId) ? false : (seen.add(campaign.listId), true)))
+    .slice(0, 60)
     .map((campaign) => ({ listId: campaign.listId, campaign: campaign.name }));
   campaignListCache.set(workspaceId, { at: Date.now(), lists });
   return { apiKey, lists };
@@ -159,7 +163,8 @@ async function findInHeyReach(config: Config, workspaceId: string, person: Perso
   if (!source || !person.name) return null;
   const { searchList } = await import("./heyreach-api");
   for (const { listId, campaign } of source.lists) {
-    const found = (await searchList(source.apiKey, listId, normalName(person.name)).catch(() => [] as Row[])).map(heyReachPerson).filter((row) => row.profileUrl);
+    // First and last name only: a middle name or initial on one side would hide the person from the search.
+    const found = (await searchList(source.apiKey, listId, nameKey(person.name)).catch(() => [] as Row[])).map(heyReachPerson).filter((row) => row.profileUrl);
     if (!found.length) continue;
     const byEmail = person.email ? found.find((row) => row.email && row.email === person.email) : undefined;
     if (byEmail) return { ...byEmail, campaign };
