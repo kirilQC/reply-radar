@@ -209,7 +209,7 @@ export async function alertMessage(config: Config, messageId: string, opts: { te
   const [target] = await rows(config, `rr_messages?select=id,conversation_id,direction,body,sent_at&id=eq.${enc(messageId)}&limit=1`);
   if (!target) return { outcome: "skipped", reason: "That message is not stored." };
   if (target.direction !== "inbound") return { outcome: "skipped", reason: "Only replies from the lead are posted." };
-  const [conversation] = await rows(config, `rr_conversations?select=id,workspace_id,lead_id&id=eq.${enc(text(target.conversation_id))}&limit=1`);
+  const [conversation] = await rows(config, `rr_conversations?select=id,workspace_id,lead_id,heyreach_conversation_id&id=eq.${enc(text(target.conversation_id))}&limit=1`);
   if (!conversation) return { outcome: "skipped", reason: "The conversation is gone." };
   const workspace = await loadWorkspace(config, text(conversation.workspace_id));
   if (!workspace) return { outcome: "skipped", reason: "The client could not be read. Has the reply alerts migration been run?" };
@@ -281,7 +281,7 @@ export async function alertMessage(config: Config, messageId: string, opts: { te
       || thread.map((row) => text(object(radarOf(row.raw_data).campaign).name)).find(Boolean) || "";
     const leadFields = leadFromRow(lead);
     const draft = await draftFor(workspace, conversationId, thread, leadFields.name, campaignName);
-    const card = buildAlertCard({ lead: leadFields, replyNumber: replyNumber(messages, self), senderName, campaignName, clientName: text(workspace.name), latestReply: latest.body, test });
+    const card = buildAlertCard({ lead: leadFields, replyNumber: replyNumber(messages, self), senderName, campaignName, clientName: text(workspace.name), latestReply: latest.body, test, channel: text(conversation.heyreach_conversation_id).startsWith("bison:") ? "email" : "linkedin" });
     const reply = buildAlertThread({ messages, latest, messageId, leadName: leadFields.name, senderName, draft, conversationId, test });
 
     cardTs = await postMessage(channel, card.text, "", card.blocks);

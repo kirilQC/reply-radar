@@ -277,7 +277,7 @@ async function refreshAllConversations() {
     let conversations;
     try {
       conversations = await supabase(
-        `rr_conversations?select=id,lead_id,account_id,heyreach_conversation_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&or=(last_refreshed_at.is.null,last_refreshed_at.lt.${encodeURIComponent(cutoff)})&last_message_at=gte.${encodeURIComponent(dormantCutoff)}&order=last_refreshed_at.asc.nullsfirst&limit=${REFRESH_BATCH_SIZE}`,
+        `rr_conversations?select=id,lead_id,account_id,heyreach_conversation_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&heyreach_conversation_id=not.like.bison:*&or=(last_refreshed_at.is.null,last_refreshed_at.lt.${encodeURIComponent(cutoff)})&last_message_at=gte.${encodeURIComponent(dormantCutoff)}&order=last_refreshed_at.asc.nullsfirst&limit=${REFRESH_BATCH_SIZE}`,
       );
     } catch (error) {
       totalErrors++;
@@ -1688,7 +1688,8 @@ async function fullPull(workspace, run) {
           stored.push(...(page || []));
           if (!page || page.length < 1000) break;
         }
-        const foreign = stored.filter((row) => !inAccount.has(String(row.heyreach_conversation_id || "").split("::")[0]));
+        // Email conversations (`bison:` keys) are not in HeyReach at all, so they are never foreign here.
+        const foreign = stored.filter((row) => !String(row.heyreach_conversation_id || "").startsWith("bison:") && !inAccount.has(String(row.heyreach_conversation_id || "").split("::")[0]));
         if (foreign.length) {
           await deleteRows("rr_conversations", "id", foreign.map((row) => String(row.id)));
           // Their leads go too, unless the lead still has a conversation that does belong here.
@@ -2272,6 +2273,31 @@ async function replyAlertLoop() {
  * the Clay table has not answered within the wait, and a step to retry. The route does the work.
  */
 const BOOKING_SWEEP_IDLE_MS = 60 * 1000;
+
+/**
+ * Email Bison (app/lib/email-ingest.ts): every five minutes the newest tracked email replies of every client
+ * not yet stored are pulled in, the backup to Bison's webhook. Once an hour the same pass also refreshes the
+ * email campaign and daily numbers for analytics. Does nothing until EMAILBISON_API_KEY is set on the app.
+ */
+const EMAIL_SYNC_IDLE_MS = 5 * 60 * 1000;
+const EMAIL_STATS_EVERY_MS = 60 * 60 * 1000;
+let lastEmailStatsAt = 0;
+async function emailLoop() {
+  for (;;) {
+    if (appBaseUrl) {
+      const stats = Date.now() - lastEmailStatsAt > EMAIL_STATS_EVERY_MS;
+      try {
+        const result = await appPost("/api/emailbison/sync", { stats }, { timeoutMs: 295_000 });
+        if (stats && !result.skipped) lastEmailStatsAt = Date.now();
+        const busy = (result.clients || []).filter((row) => row.ingested || row.error);
+        if (busy.length) console.info("reply_radar_email_sync", { clients: busy });
+      } catch (error) {
+        console.warn("reply_radar_email_sync_failed", String(error.message || error).slice(0, 200));
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, EMAIL_SYNC_IDLE_MS));
+  }
+}
 async function bookingLoop() {
   for (;;) {
     if (appBaseUrl) {
@@ -2292,6 +2318,7 @@ async function main() {
   analyticsLoop().catch((error) => console.error("reply_radar_analytics_loop_failed", error));
   replyAlertLoop().catch((error) => console.error("reply_radar_reply_alert_loop_failed", error));
   bookingLoop().catch((error) => console.error("reply_radar_booking_loop_failed", error));
+  emailLoop().catch((error) => console.error("reply_radar_email_loop_failed", error));
   for (;;) {
     try { await runOnce(); } catch (error) { console.error("reply_radar_worker_cycle_failed", error); }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));

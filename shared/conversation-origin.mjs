@@ -41,7 +41,9 @@ const radarOf = (rawData) => object(object(rawData).reply_radar);
  * written before that field existed carry no source, so they prove nothing — which is deliberate:
  * those are exactly the rows that need re-judging on the evidence in the thread.
  */
-const TRUSTED_CAMPAIGN_SOURCES = new Set(["webhook", "membership"]);
+// "emailbison": Email Bison only calls a reply "tracked" when the sender is a lead in one of our email
+// campaigns, which is the same confirmation as HeyReach's membership.
+const TRUSTED_CAMPAIGN_SOURCES = new Set(["webhook", "membership", "emailbison"]);
 
 /**
  * @param {Record<string, unknown>[]} messages

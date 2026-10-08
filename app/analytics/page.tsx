@@ -49,6 +49,14 @@ type ClientAnalytics = {
   status?: string; workspace?: WorkspaceDetail; campaigns?: ClientCampaign[]; daily?: DailyPoint[];
   senders?: SenderSeries[]; senderCap?: number; repliesSynced?: number; replies7d?: number;
   conversations?: number; collectedAt?: string | null; sync?: SyncState;
+  email?: EmailAnalytics;
+};
+/** Email (Email Bison) figures for one client; `available` is false until it has an email campaign. */
+type EmailAnalytics = {
+  available: boolean;
+  totals: { sent: number; leadsContacted: number; replies: number; interested: number; bounced: number; replyRate: number | null; interestedRate: number | null; bounceRate: number | null };
+  daily: { day: string; sent: number; replies: number }[];
+  campaigns: { name: string; status: string; sent: number; leadsContacted: number; replies: number; interested: number; bounced: number; replyRate: number | null }[];
 };
 
 /**
@@ -646,6 +654,37 @@ export default function AnalyticsPage() {
           <Kpi label="Campaigns running" value={running.length.toLocaleString()} sub={`${senders.length} sender${senders.length === 1 ? "" : "s"} active`}/>
           <Kpi label="Requests last 14 days" value={windowSent.toLocaleString()} sub={`${Math.round(windowSent / Math.max(daily.length, 1)).toLocaleString()} a day`}/>
         </section>
+
+        {clientPayload?.email?.available && (() => {
+          const email = clientPayload.email!;
+          const t = email.totals;
+          const rate = (value: number | null) => (value == null ? "—" : `${value.toFixed(1)}%`);
+          return (
+            <section className="analytics-card email-metrics-card">
+              <CardTitle title="Email" subtitle="Email Bison, our campaigns" />
+              <div className="analytics-kpis analytics-kpis-secondary email-kpis">
+                <Kpi label="Emails sent" value={t.sent.toLocaleString()} sub={`${t.leadsContacted.toLocaleString()} leads contacted`} />
+                <Kpi label="Replies" value={t.replies.toLocaleString()} sub={`${rate(t.replyRate)} of leads contacted`} />
+                <Kpi label="Interested" value={t.interested.toLocaleString()} sub={`${rate(t.interestedRate)} of replies`} />
+                <Kpi label="Bounced" value={t.bounced.toLocaleString()} sub={`${rate(t.bounceRate)} of emails sent`} />
+                <Kpi label="Sent last 14 days" value={email.daily.reduce((total, row) => total + row.sent, 0).toLocaleString()} sub={`${email.daily.reduce((total, row) => total + row.replies, 0)} replies`} />
+              </div>
+              <div className="email-campaign-table">
+                <table>
+                  <thead><tr><th>Campaign</th><th>Status</th><th>Sent</th><th>Leads</th><th>Replies</th><th>Reply rate</th><th>Interested</th><th>Bounced</th></tr></thead>
+                  <tbody>
+                    {email.campaigns.map((campaign) => (
+                      <tr key={campaign.name}>
+                        <td>{campaign.name}</td><td>{campaign.status}</td><td>{campaign.sent.toLocaleString()}</td><td>{campaign.leadsContacted.toLocaleString()}</td>
+                        <td>{campaign.replies}</td><td>{rate(campaign.replyRate)}</td><td>{campaign.interested}</td><td>{campaign.bounced}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          );
+        })()}
 
         <section className="analytics-primary">
           <article className="analytics-card analytics-trend">

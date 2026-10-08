@@ -28,6 +28,8 @@ import {
 import Skeleton from "./components/Skeleton";
 
 type Lead = {
+  /** "linkedin" (HeyReach) or "email" (Email Bison). */
+  channel?: string;
   id: string;
   leadId?: string;
   initials: string;
@@ -664,6 +666,8 @@ export function InboxPage() {
   const [campaignFilter, setCampaignFilter] = useState("");
   const [senderFilter, setSenderFilter] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState("");
+  // LinkedIn or Email only; "" is both.
+  const [channelFilter, setChannelFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   // The shared tag vocabulary, loaded once. Assignments ride on each lead's `tags` from the inbox payload.
   const [tagDefs, setTagDefs] = useState<InboxTag[]>([]);
@@ -1289,6 +1293,7 @@ export function InboxPage() {
             (!campaignFilter || lead.campaignName === campaignFilter) &&
             (!senderFilter || lead.senderName === senderFilter) &&
             (!sentimentFilter || lead.sentiment === sentimentFilter) &&
+            (!channelFilter || (lead.channel || "linkedin") === channelFilter) &&
             (!tagFilter || (lead.tags ?? []).includes(tagFilter)) &&
             (() => {
               if (filter === "All follow-ups") return true;
@@ -1350,6 +1355,7 @@ export function InboxPage() {
       campaignFilter,
       senderFilter,
       sentimentFilter,
+      channelFilter,
       tagFilter,
     ],
   );
@@ -2369,7 +2375,7 @@ export function InboxPage() {
                   )}
                   <div className="unified-filter-wrap" ref={filterWrapRef}>
                     <button className="filter-button unified-filter-toggle" onClick={() => { setFilterDropdownOpen((v) => !v); setFilterSub(null); }}>
-                        Filters{(campaignFilter || senderFilter || sentimentFilter || tagFilter || sort !== "score-desc" || ["Starred", "Hot", "Warm", "Nurture"].includes(filter)) ? " ●" : ""}
+                        Filters{(campaignFilter || senderFilter || sentimentFilter || channelFilter || tagFilter || sort !== "score-desc" || ["Starred", "Hot", "Warm", "Nurture"].includes(filter)) ? " ●" : ""}
                       </button>
                       {filterDropdownOpen && (
                         <div className="unified-filter-dropdown">
@@ -2384,6 +2390,7 @@ export function InboxPage() {
                             are already hovering it, so the click asks for the state it is already in.
                             A toggle would have closed the submenu under the cursor instead.
                           */}
+                          <button className="uf-item" onMouseEnter={() => setFilterSub("channel")} onClick={() => setFilterSub("channel")}>Channel {channelFilter ? `· ${channelFilter === "email" ? "Email" : "LinkedIn"}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("campaign")} onClick={() => setFilterSub("campaign")}>Campaign {campaignFilter ? `· ${campaignFilter.slice(0, 20)}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sender")} onClick={() => setFilterSub("sender")}>Sender {senderFilter ? `· ${senderFilter.slice(0, 20)}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sentiment")} onClick={() => setFilterSub("sentiment")}>Sentiment {sentimentFilter ? `· ${sentimentFilter}` : ""}<b>›</b></button>
@@ -2391,7 +2398,7 @@ export function InboxPage() {
                           <button className="uf-item" onMouseEnter={() => setFilterSub("tier")} onClick={() => setFilterSub("tier")}>Tier {["Hot", "Warm", "Nurture"].includes(filter) ? `· ${filter}` : ""}<b>›</b></button>
                           <button className="uf-item" onMouseEnter={() => setFilterSub("sort")} onClick={() => setFilterSub("sort")}>Sort {sort !== "score-desc" ? `· ${sort}` : ""}<b>›</b></button>
                           <div className="uf-divider" />
-                          <button className="uf-item uf-clear" onClick={() => { setCampaignFilter(""); setSenderFilter(""); setSentimentFilter(""); setTagFilter(""); setSort("score-desc"); setFilter("All follow-ups"); setFilterDropdownOpen(false); setSelectedId(""); }}>Clear all filters</button>
+                          <button className="uf-item uf-clear" onClick={() => { setCampaignFilter(""); setSenderFilter(""); setSentimentFilter(""); setChannelFilter(""); setTagFilter(""); setSort("score-desc"); setFilter("All follow-ups"); setFilterDropdownOpen(false); setSelectedId(""); }}>Clear all filters</button>
                           {filterSub === "campaign" && (
                             <div className="unified-filter-sub">
                               <button className={`uf-sub-item ${!campaignFilter ? "uf-active" : ""}`} onClick={() => { setCampaignFilter(""); setSelectedId(""); }}>All campaigns</button>
@@ -2424,6 +2431,13 @@ export function InboxPage() {
                               <button className={`uf-sub-item ${!senderFilter ? "uf-active" : ""}`} onClick={() => { setSenderFilter(""); setSelectedId(""); }}>All senders</button>
                               {[...new Set(leads.filter((l) => !assignedClients || assignedClients.includes(l.client)).map((l) => l.senderName).filter(Boolean))].sort().map((s) => (
                                 <button key={s} className={`uf-sub-item ${senderFilter === s ? "uf-active" : ""}`} onClick={() => { setSenderFilter(s); setSelectedId(""); }}>{s}</button>
+                              ))}
+                            </div>
+                          )}
+                          {filterSub === "channel" && (
+                            <div className="unified-filter-sub">
+                              {([["", "All channels"], ["linkedin", "LinkedIn"], ["email", "Email"]] as const).map(([value, label]) => (
+                                <button key={label} className={`uf-sub-item ${channelFilter === value ? "uf-active" : ""}`} onClick={() => { setChannelFilter(value); setSelectedId(""); }}>{label}</button>
                               ))}
                             </div>
                           )}
@@ -2635,7 +2649,7 @@ export function InboxPage() {
                         <span>{lead.client}</span>
                       </div>
                       <div className="inbox-meta-cell campaign-cell">
-                        <strong>{lead.campaignName || "No campaign"}</strong>
+                        <strong>{lead.channel === "email" && <span className="inbox-channel-chip" title="Email reply (Email Bison)">Email</span>}{lead.campaignName || "No campaign"}</strong>
                       </div>
                       <div className="inbox-meta-cell date-cell">
                         <strong>

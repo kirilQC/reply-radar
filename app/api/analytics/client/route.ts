@@ -1,6 +1,7 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
+import { isOurCampaign } from "../../../../shared/campaign-code.mjs";
 import { NextResponse } from "next/server";
 import { queryByIds } from "../../../lib/chunk-query";
 import { slimImages } from "../../../lib/image-refs";
@@ -227,6 +228,12 @@ export async function GET(request: Request) {
     const workspaceId = String(workspace.id);
 
     const weekAgo = Date.now() - 7 * 86_400_000;
+    // Email (Email Bison), read beside LinkedIn. Empty, never an error, before the email migration or for a
+    // client with no email: the LinkedIn figures must not depend on it.
+    const emailPromise = Promise.all([
+      get(`rr_email_campaign_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=created_at.desc.nullslast&limit=500`).catch(() => []),
+      get(`rr_email_daily_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&day=gte.${dayKeys(14)[0]}&order=day.asc`).catch(() => []),
+    ]);
     const [campaignRows, dailyRows, replies, runs] = await Promise.all([
       get(`rr_campaign_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=launched_at.desc.nullslast&limit=2000`),
       // Only the window being drawn. Asking for everything oldest-first hit Supabase's 1,000-row cap
@@ -402,6 +409,41 @@ export async function GET(request: Request) {
       replies7d,
       conversations: replies.conversations,
       collectedAt: refreshed.length ? new Date(Math.max(...refreshed)).toISOString() : null,
+      email: await (async () => {
+        const [emailCampaignRows, emailDailyRows] = await emailPromise;
+        const num = (value: unknown) => Number(value) || 0;
+        // Our campaigns only, by the same code rule as LinkedIn.
+        const ours = (Array.isArray(emailCampaignRows) ? (emailCampaignRows as Record<string, unknown>[]) : []).filter((row) => isOurCampaign(String(row.name ?? "")));
+        const sum = (key: string) => ours.reduce((total, row) => total + num(row[key]), 0);
+        const contacted = sum("leads_contacted");
+        const replies = sum("unique_replies");
+        const pct = (part: number, whole: number) => (whole ? Math.round((part / whole) * 1000) / 10 : null);
+        const byDay = new Map((Array.isArray(emailDailyRows) ? (emailDailyRows as Record<string, unknown>[]) : []).map((row) => [String(row.day), row]));
+        return {
+          available: ours.length > 0,
+          totals: {
+            sent: sum("emails_sent"),
+            leadsContacted: contacted,
+            replies,
+            interested: sum("interested"),
+            bounced: sum("bounced"),
+            replyRate: pct(replies, contacted),
+            interestedRate: pct(sum("interested"), replies),
+            bounceRate: pct(sum("bounced"), sum("emails_sent")),
+          },
+          daily: dayKeys(14).map((day) => ({ day, sent: num(byDay.get(day)?.sent), replies: num(byDay.get(day)?.replies) })),
+          campaigns: ours.map((row) => ({
+            name: String(row.name ?? ""),
+            status: String(row.status ?? ""),
+            sent: num(row.emails_sent),
+            leadsContacted: num(row.leads_contacted),
+            replies: num(row.unique_replies),
+            interested: num(row.interested),
+            bounced: num(row.bounced),
+            replyRate: pct(num(row.unique_replies), num(row.leads_contacted)),
+          })),
+        };
+      })(),
       sync: {
         // `queued` means the worker has not picked it up yet, `running` means it is mid-pass, and
         // `idle` means the stored figures are the whole story until the next daily turn.

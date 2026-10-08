@@ -154,7 +154,8 @@ export function leadFromRow(row: Row): AlertLead {
     title: text(row.role) || text(ai.title),
     headline: text(ai.headline),
     linkedinUrl: withScheme(text(row.linkedin_profile_url)),
-    email: text(row.email),
+    // Email leads keep their address on raw_data.reply_radar (rr_leads has no email column).
+    email: text(row.email) || text(object(object(row.raw_data).reply_radar).email),
     location: text(row.lead_location) || locationText(ai.location),
     company: text(row.company) || text(summary.name) || text(company.name),
     industry,
@@ -211,6 +212,8 @@ export type AlertCardInput = {
   latestReply?: string;
   /** A sample posted from Configuration to the test channel. */
   test?: boolean;
+  /** "email" for an Email Bison reply; LinkedIn otherwise. */
+  channel?: string;
 };
 
 /** The top-level card: who replied, their company, and who on our side they replied to. */
@@ -237,7 +240,7 @@ export function buildAlertCard(input: AlertCardInput): { text: string; blocks: R
   const ours = group(line("Sender", escapeMrkdwn(input.senderName)), line("Campaign", escapeMrkdwn(input.campaignName)));
   // :email: for a first reply, :arrows_counterclockwise: for a lead writing back again, as the n8n bot did.
   const turn = Math.max(1, input.replyNumber);
-  const blocks: Row[] = [section(`${turn === 1 ? ":email:" : ":arrows_counterclockwise:"} *New Reply · Reply #${turn}*`)];
+  const blocks: Row[] = [section(`${turn === 1 ? ":email:" : ":arrows_counterclockwise:"} *New ${input.channel === "email" ? "Email " : ""}Reply · Reply #${turn}*`)];
   for (const part of [person, company, ours]) if (part) blocks.push(section(part));
   // The reply itself, on the card, so the channel reads as a list of what leads said without opening
   // threads. Preformatted, as the n8n bot showed it, so nothing a lead typed is read as markup.

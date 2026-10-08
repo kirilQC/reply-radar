@@ -488,6 +488,9 @@ export async function GET(request: Request) {
         enrichedLocation: enrichment.location ?? null,
         industry: enrichment.industry ?? null,
         campaignName: campaign.name ?? null,
+        // LinkedIn (HeyReach) or email (Email Bison). Email threads are keyed `bison:` even before the
+        // channel column exists, so the key is the fallback.
+        channel: String(conversation.channel || (String(conversation.heyreach_conversation_id ?? "").startsWith("bison:") ? "email" : "linkedin")),
         // True when the conversation carries ANY campaign trace (a name or an id, from any source). This is the
         // "attributed to a campaign" signal the non-campaign display filter keys off — deliberately generous,
         // so a real reply with only a loosely-derived campaign is kept, never hidden.

@@ -7066,3 +7066,18 @@ button.booking-chip:disabled { opacity: 0.5; cursor: default; }
 .booking-event.is-off span { opacity: 0.6; }
 .booking-event-list .booking-chip { justify-self: start; }
 .booking-fields-row .brief-channel { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Email (Email Bison) conversations in the inbox list. */
+.inbox-channel-chip {
+  display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; vertical-align: 1px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Email (Email Bison) block on a client's analytics. */
+.email-metrics-card { display: grid; gap: 14px; }
+.email-kpis { margin: 0; }
+.email-campaign-table { overflow-x: auto; }
+.email-campaign-table table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.email-campaign-table th, .email-campaign-table td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.email-campaign-table th { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }

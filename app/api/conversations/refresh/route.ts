@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { writeAuditEvent } from "../../../lib/audit-log";
 import { extractMessageRows, messageKey, normalizeHeyReachMessages } from "../../../lib/heyreach-conversation";
 import { dedupeMessages } from "../../../lib/message-dedupe";
+import { refreshEmailConversation } from "../../../lib/email-ingest";
 
 type Row = Record<string, unknown>;
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -74,6 +75,8 @@ async function refreshConversation(
   )) as Row[];
   const conv = conversations[0];
   if (!conv) return { messagesUpdated: 0, error: "Conversation not found" };
+  // Email threads live in Email Bison, not HeyReach.
+  if (text(conv.heyreach_conversation_id).startsWith("bison:")) return refreshEmailConversation({ url, key }, conversationId);
 
   const workspaces = (await db(url, key,
     `rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&id=eq.${encodeURIComponent(text(conv.workspace_id))}&limit=1`,

@@ -53,7 +53,8 @@ function isMachinePath(pathname: string): boolean {
     pathname.startsWith("/api/ai/") || // the worker's enrichment, drafting and scoring
     pathname.startsWith("/api/granola/") || // Granola heartbeats
     pathname === "/api/heartbeat" || // liveness ping
-    pathname === "/api/database/purge" // the worker's retention purge
+    pathname === "/api/database/purge" || // the worker's retention purge
+    pathname === "/api/emailbison/sync" // the worker's Email Bison pass
   );
 }
 
