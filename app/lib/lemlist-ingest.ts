@@ -158,7 +158,7 @@ async function findOrCreateLead(config: Config, workspaceId: string, contactId: 
   return text(row.id);
 }
 
-export type LemlistIngestResult = { discarded: true; reason: string } | { conversationId: string; leadId: string; messagesWritten: number; campaignName: string; channel: LemlistChannel };
+export type LemlistIngestResult = { discarded: true; reason: string; campaignName?: string } | { conversationId: string; leadId: string; messagesWritten: number; campaignName: string; channel: LemlistChannel };
 
 /**
  * One contact's thread on one channel, read from lemlist with the client's key, into the inbox. Kept only when
@@ -176,7 +176,7 @@ export async function ingestLemlistContact(config: Config, workspace: LemlistWor
   const campaignName = names.get(campaignId) || [...history].reverse().map((message) => text(message.campaignName)).find(Boolean) || text(hint.campaignName);
   // The same rule as LinkedIn and Email Bison: a campaign without a QC code is the client's own outreach.
   if (!campaignId) return { discarded: true, reason: "no_campaign" };
-  if (!isOurCampaign(campaignName)) return { discarded: true, reason: "not_our_campaign" };
+  if (!isOurCampaign(campaignName)) return { discarded: true, reason: "not_our_campaign", campaignName };
 
   const theirs = history.filter((message) => KIND[text(message.type)].direction === "inbound");
   const isAuto = (message: Row) => channel === "email" && isAutoReply({ subject: text(message.subject), text_body: bodyOf(message, "inbound") });
@@ -278,7 +278,8 @@ export async function syncLemlistReplies(config: Config, workspace: LemlistWorks
       if (stored[0] && days <= 0) continue;
       const result = await ingestLemlistContact(config, workspace, contactId, channel, activity).catch((error) => { skip(`error: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); return null; });
       if (result && "conversationId" in result) ingested.push(result.conversationId);
-      else if (result && "reason" in result) skip(result.reason);
+      // A skipped campaign is named, so the Configuration panel says which lemlist campaigns lack a QC code.
+      else if (result && "reason" in result) skip(result.reason === "not_our_campaign" ? `not our campaign: ${result.campaignName || "unnamed"}` : result.reason);
     }
   }
   await rest(config, `rr_workspaces?id=eq.${enc(workspace.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ lemlist_synced_at: new Date(now).toISOString() }) });
