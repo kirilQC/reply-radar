@@ -211,9 +211,12 @@ export async function ingestBisonReply(config: Config, workspace: EmailWorkspace
  * inbox fills with vendor pitches, and a page of those used to end the read before any real reply was seen.
  * A campaign's paging stops at the first page whose replies are all stored, so a quiet campaign costs one call.
  */
-export async function syncBisonReplies(config: Config, workspace: EmailWorkspace, maxPages = 3): Promise<{ checked: number; ingested: string[] }> {
+export async function syncBisonReplies(config: Config, workspace: EmailWorkspace, maxPages = 3): Promise<{ checked: number; ingested: string[]; skipped: Record<string, number> }> {
   const link = await ensureBisonLink(config, workspace);
-  if (!link) return { checked: 0, ingested: [] };
+  if (!link) return { checked: 0, ingested: [], skipped: { no_bison_workspace: 1 } };
+  // Why each new reply was not stored, by reason, so a client whose replies never arrive says why.
+  const skipped: Record<string, number> = {};
+  const skip = (reason: string) => { skipped[reason] = (skipped[reason] ?? 0) + 1; };
   const { listCampaigns, listCampaignReplies } = await import("./emailbison");
   const campaigns = (await listCampaigns(link.token)).filter((row) => isOurCampaign(text(row.name)) && Number(row.unique_replies ?? row.replied ?? 1) > 0);
   const ingested: string[] = [];
@@ -224,18 +227,19 @@ export async function syncBisonReplies(config: Config, workspace: EmailWorkspace
       checked += replies.length;
       let fresh = 0;
       for (const reply of replies) {
-        if (!reply.lead_id) continue;
+        if (!reply.lead_id) { skip("no_lead"); continue; }
         const stored = await rows(config, `rr_messages?select=id&heyreach_message_id=eq.${enc(`bison:reply:${text(reply.id)}`)}&limit=1`);
         if (stored[0]) continue;
         fresh += 1;
-        const result = await ingestBisonReply(config, workspace, text(reply.id)).catch(() => null);
+        const result = await ingestBisonReply(config, workspace, text(reply.id)).catch((error) => { skip(`error: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); return null; });
         if (result && "conversationId" in result) ingested.push(result.conversationId);
+        else if (result && "reason" in result) skip(result.reason);
       }
       if (!fresh || page >= lastPage) break;
     }
   }
   await rest(config, `rr_workspaces?id=eq.${enc(workspace.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ emailbison_synced_at: new Date().toISOString() }) });
-  return { checked, ingested: [...new Set(ingested)] };
+  return { checked, ingested: [...new Set(ingested)], skipped };
 }
 
 /**
