@@ -97,6 +97,10 @@ export function cleanEmailBody(text) {
     .replace(/\[(?:cid:|https?:\/\/)[^\]]*\]/gi, " ") // [https://lh6.googleusercontent.com/…] and [cid:image001.png]
     .replace(/<(?:https?:\/\/|mailto:)[^>]*>/gi, " "); // <http://www.facebook.com/kurufootwear/>
   body = cutAtSignOff(body);
+  // Plain-text email is hard-wrapped at about 75 characters ("My nonprofit\nbuilds resources"). A long line
+  // broken before more words is a wrap, not a new line, so it is joined back; paragraphs and short lines
+  // ("Best," / "Justine") keep their breaks.
+  body = body.replace(/([^\n]{55,}[^\s.!?:])\n(?=[^\s\n])/g, "$1 ");
   for (const marker of SIGNATURE_START) {
     const match = marker.exec(body);
     // Only a marker after some words counts: a reply that opens with "---" keeps its text.

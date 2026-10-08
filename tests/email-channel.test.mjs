@@ -76,7 +76,7 @@ import { cleanEmailBody } from "../shared/email-text.mjs";
 
 test("Gmail signature images and everything after them are cut from a reply", () => {
   const body = "Great, I grabbed time on Weds PM. We'll just need to figure out where to\nmeet if Nolynn wants to email me.\n[image: understood.logo]\n\n[image: -]\n *Justine Bassman*\n*VP, Market Research and Insights | Market Research and Insights*\njbassman@understood.org\n\n[image: facebook icon] [image:\nlinkedin icon] Support us";
-  assert.equal(cleanEmailBody(body), "Great, I grabbed time on Weds PM. We'll just need to figure out where to\nmeet if Nolynn wants to email me.");
+  assert.equal(cleanEmailBody(body), "Great, I grabbed time on Weds PM. We'll just need to figure out where to meet if Nolynn wants to email me.");
 });
 
 test("a sign-off keeps the sender's name and drops the signature block under it", () => {
@@ -92,4 +92,9 @@ test("a reply that is only a thank-you, or a sign-off mid-sentence, is left alon
 test("the Best, Justine closing keeps the name and loses the logo after it", () => {
   const body = "I will be at your session! LMK your availability Weds/Thurs.\n\nBest,\n\nJustine\n\n[image: understood.logo]";
   assert.equal(cleanEmailBody(body), "I will be at your session! LMK your availability Weds/Thurs.\n\nBest,\n\nJustine");
+});
+
+test("hard-wrapped plain-text lines are joined back, paragraphs and the sign-off keep their breaks", () => {
+  const body = "Hi Amanda, Thanks for reaching out. I'd love to connect. My nonprofit\nbuilds resources for women with ADHD. I'm coming to WHIS looking for ways\nto scale what we have.\nI will be at your session!\nBest,\nJustine";
+  assert.equal(cleanEmailBody(body), "Hi Amanda, Thanks for reaching out. I'd love to connect. My nonprofit builds resources for women with ADHD. I'm coming to WHIS looking for ways to scale what we have.\nI will be at your session!\nBest,\nJustine");
 });
