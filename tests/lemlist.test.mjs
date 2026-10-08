@@ -46,3 +46,13 @@ test("briefs, end of week and QC Bot read lemlist when a client has it", () => {
     assert.match(tools, new RegExp(`case "${tool}": \\{[\\s\\S]{0,400}if \\(!lem\\.apiKey && lem\\.lemlistKey\\) return lemlist`), `${tool} answers from lemlist for a lemlist client`);
   }
 });
+
+import { classifyConversationOrigin } from "../shared/conversation-origin.mjs";
+
+test("a lemlist thread that opens with the lead's reply is still our outreach (the invite carried no note)", () => {
+  const verdict = classifyConversationOrigin({
+    messages: [{ direction: "inbound", sent_at: "2026-10-01T10:00:00Z", raw_data: { reply_radar: { campaign: { id: "cam_1", name: "RCH004: Jose 1st Deg", source: "lemlist" } } } }],
+    leadRawData: { reply_radar: { history_status: "complete" } },
+  });
+  assert.equal(verdict.origin, "outbound");
+});

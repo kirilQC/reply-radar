@@ -43,7 +43,11 @@ const radarOf = (rawData) => object(object(rawData).reply_radar);
  */
 // "emailbison": Email Bison only calls a reply "tracked" when the sender is a lead in one of our email
 // campaigns, which is the same confirmation as HeyReach's membership.
-const TRUSTED_CAMPAIGN_SOURCES = new Set(["webhook", "membership", "emailbison"]);
+// "lemlist": lemlist ties an activity to a campaign only when the lead is in that campaign, and ingestion
+// keeps only our coded campaigns (app/lib/lemlist-ingest.ts). A lemlist LinkedIn thread often opens with the
+// lead's reply (a connection request without a note is not a message), so without this it read as the
+// lead approaching us and was hidden from the inbox and purged.
+const TRUSTED_CAMPAIGN_SOURCES = new Set(["webhook", "membership", "emailbison", "lemlist"]);
 
 /**
  * @param {Record<string, unknown>[]} messages
