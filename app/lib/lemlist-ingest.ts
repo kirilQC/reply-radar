@@ -404,8 +404,22 @@ export async function diagnoseLemlistShapes(workspace: LemlistWorkspace, perType
   if (!apiKey) return [];
   const shape = (row: Row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === "string" ? `string(${value.length})` : Array.isArray(value) ? `array(${value.length})` : value && typeof value === "object" ? `object{${Object.keys(value).join(",")}}` : typeof value]));
   const out: Row[] = [];
+  // Each replied-to campaign's name as a letter/digit pattern only ("AAA999: Aaaa"), and whether the QC code
+  // rule accepts it: enough to see why replies are skipped without exposing any campaign name.
+  const pattern = (name: string) => name.slice(0, 14).replace(/[A-Za-z]/g, "A").replace(/[0-9]/g, "9");
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const counts = new Map<string, { pattern: string; ours: boolean; replies: number }>();
   for (const type of ["linkedinReplied", "emailsReplied"] as const) {
-    const activities = (await replyActivities(apiKey, type, new Date(Date.now() - 30 * 86_400_000).toISOString(), 1)).slice(0, perType);
+    for (const activity of await replyActivities(apiKey, type, since, 3)) {
+      const name = text(activity.campaignName);
+      const entry = counts.get(name) ?? { pattern: pattern(name), ours: isOurCampaign(name), replies: 0 };
+      entry.replies += 1;
+      counts.set(name, entry);
+    }
+  }
+  out.push({ campaigns: [...counts.values()].sort((a, b) => b.replies - a.replies) });
+  for (const type of ["linkedinReplied", "emailsReplied"] as const) {
+    const activities = (await replyActivities(apiKey, type, since, 1)).slice(0, perType);
     for (const activity of activities) {
       const thread = await contactMessages(apiKey, text(activity.contactId)).catch(() => [] as Row[]);
       out.push({ type, activity: shape(activity), thread: thread.map(shape) });
