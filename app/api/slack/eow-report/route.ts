@@ -147,7 +147,7 @@ export async function GET() {
     const [workspaceRows, keyedRows, reportRows, automationRows] = await Promise.all([
       read("rr_workspaces?select=id,name,slug,logo_url,accent_color,timezone,slack_internal_channel_id,slack_external_channel_id,eow_report_enabled,last_successful_poll_at&slug=neq.misc&offboarded_at=is.null&order=name.asc"),
       // A lemlist key counts as an outreach account exactly as a HeyReach key does.
-      read("rr_workspaces?select=id&or=(heyreach_api_key_ciphertext.not.is.null,lemlist_api_key.not.is.null)"),
+      read("rr_workspaces?select=id&or=(heyreach_api_key_ciphertext.not.is.null,lemlist_api_key.not.is.null,emailbison_workspace_id.not.is.null)"),
       read(`rr_slack_briefs?select=workspace_id,created_at,status,destination,slack_channel_id&automation=eq.${AUTOMATION}&order=created_at.desc&limit=200`).catch(() => []),
       read(`rr_slack_automations?select=automation,enabled,send_days,send_hour,send_minute,timezone,destination&automation=eq.${AUTOMATION}&limit=1`).catch(() => []),
     ]);
@@ -297,7 +297,7 @@ function reportHeader(clientName: string, timeZone: string): string {
  * cleanly on its own), a grey line naming what it was written from, and a button into QC Command's Reports
  * page with this client and the same template open, to edit or regenerate it there.
  */
-function emailBlocks(body: string, slug: string, read: { live: boolean; internal: number | null; external: number | null; call: string | null }): unknown[] {
+function emailBlocks(body: string, slug: string, read: { live: boolean; platform?: string; internal: number | null; external: number | null; call: string | null }): unknown[] {
   // Rich text, not mrkdwn sections: Slack folds any section past about five lines behind "Show more", which
   // hid the recap. Rich text shows in full and still has real bullets and bold.
   const inline = (line: string) => line.split(/(\*[^*\n]+\*)/).filter(Boolean).map((part) =>
@@ -334,7 +334,7 @@ function emailBlocks(body: string, slug: string, read: { live: boolean; internal
   }
   flushLines(); flushBullets();
   const sources = [
-    read.live ? "HeyReach live" : "HeyReach (stored figures)",
+    read.live ? `${read.platform || "HeyReach"} live` : `${read.platform || "HeyReach"} (stored figures)`,
     read.internal === null ? "" : `internal channel (${read.internal} msgs)`,
     read.external === null ? "" : `external channel (${read.external} msgs)`,
     read.call ? `Granola: ${read.call}` : "no call this week",
@@ -431,6 +431,7 @@ export async function POST(request: Request) {
         messageTs = await postMessage(channelId, header);
         reportTs = await postMessage(channelId, slackBody, messageTs, emailBlocks(slackBody, String(workspace.slug ?? ""), {
           live: live.available,
+          platform: live.source,
           internal: channels.internal.channelId ? channels.internal.messages : null,
           external: channels.external.channelId ? channels.external.messages : null,
           call: thisWeeksCall ? `${thisWeeksCall.title}${thisWeeksCall.ageDays !== null ? ` (${thisWeeksCall.ageDays === 0 ? "today" : `${thisWeeksCall.ageDays}d ago`})` : ""}` : null,

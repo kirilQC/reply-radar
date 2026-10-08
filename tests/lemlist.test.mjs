@@ -38,7 +38,7 @@ test("briefs, end of week and QC Bot read lemlist when a client has it", () => {
   for (const path of ["../app/api/slack/brief/route.ts", "../app/api/slack/eow-report/route.ts"]) {
     const route = source(path);
     assert.match(route, /gatherLiveFigures\(.*heyreach_api_key_ciphertext.*String\(\(found as Row\)\.lemlist_api_key/, `${path} passes the lemlist key`);
-    assert.match(route, /or=\(heyreach_api_key_ciphertext\.not\.is\.null,lemlist_api_key\.not\.is\.null\)/, `${path} counts a lemlist key as connected`);
+    assert.match(route, /or=\(heyreach_api_key_ciphertext\.not\.is\.null,lemlist_api_key\.not\.is\.null,emailbison_workspace_id\.not\.is\.null\)/, `${path} counts a lemlist or Email Bison account as connected`);
   }
   assert.match(source("../app/lib/personal-brief.ts"), /gatherLiveFigures\(str\(found\.heyreach_api_key_ciphertext\), str\(found\.lemlist_api_key\)\)/);
   const tools = source("../app/lib/assistant-tools.ts");

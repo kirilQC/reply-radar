@@ -255,7 +255,7 @@ test("a HeyReach key that stopped reporting is not a working source", () => {
   // show a live connection while the brief quoted figures from three days ago.
   assert.equal(readinessOf({ ...READY, lastSuccessfulPollAt: "2026-08-14T11:00:00Z" }, NOW).heyreach.ok, false);
   assert.equal(readinessOf({ ...READY, lastSuccessfulPollAt: null }, NOW).heyreach.detail, "Never polled");
-  assert.equal(readinessOf({ ...READY, heyreachKeyConfigured: false }, NOW).heyreach.detail, "No HeyReach or lemlist key");
+  assert.equal(readinessOf({ ...READY, heyreachKeyConfigured: false }, NOW).heyreach.detail, "No outreach account (HeyReach, lemlist or Email Bison)");
 });
 
 test("both channels are required unless the client is marked internal-only", () => {

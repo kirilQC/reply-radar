@@ -38,18 +38,35 @@ export type LemlistCampaignFigures = {
   id: string; name: string; status: string; launchedAt: string;
   total: number; pending: number; launched: number;
   sent: number; accepted: number; replies: number; messages: number;
+  emailSent: number; emailReplies: number; emailOpened: number; emailBounced: number; emailUnsubscribed: number;
+  interested: number; reached: number;
+  /** Whether the campaign does LinkedIn work at all (invites or LinkedIn messages); an email-only one does not. */
+  linkedin: boolean;
   senderIds: string[]; senderNames: string[];
 };
 
-/** The four counts out of one batch-stats row. */
+/**
+ * The counts out of one batch-stats row, split by channel. The LinkedIn four (invites sent, accepted,
+ * replies, messages) are what HeyReach's figures mean; email is kept apart (sent, replies, opened, bounced),
+ * because an email-only campaign has no connection requests and its replies are not LinkedIn replies.
+ * When lemlist gives no per-channel split, everything is read as LinkedIn, as before.
+ */
 function counts(row: Row) {
   const steps = Array.isArray(row.steps) ? row.steps.map(object) : [];
-  const linkedin = object(object(row.perChannel).linkedin);
+  const perChannel = object(row.perChannel);
+  const split = Object.keys(perChannel).length > 0;
+  const linkedin = object(perChannel.linkedin);
+  const email = object(perChannel.email);
   return {
     sent: steps.reduce((sum, step) => sum + int(step.invited), 0),
     accepted: int(row.invitationAccepted ?? linkedin.invitationAccepted),
-    replies: int(row.replied ?? row.nbLeadsAnswered),
-    messages: int(row.messagesSent),
+    replies: split ? int(linkedin.replied) : int(row.replied ?? row.nbLeadsAnswered),
+    messages: split ? int(linkedin.sent) : int(row.messagesSent),
+    emailSent: int(email.sent),
+    emailReplies: int(email.replied),
+    emailOpened: int(email.opened),
+    emailBounced: int(email.bounced),
+    emailUnsubscribed: int(email.unsubscribed),
   };
 }
 
@@ -77,6 +94,9 @@ export async function lemlistCampaignFigures(apiKey: string): Promise<{ campaign
       launched,
       pending: Math.max(0, total - launched),
       ...counts(row),
+      interested: int(row.nbLeadsInterested),
+      reached: int(row.nbLeadsReached),
+      linkedin: (() => { const c = counts(row); return c.sent > 0 || c.messages > 0 || c.accepted > 0 || c.emailSent === 0; })(),
       senderIds: ids,
       senderNames: ids.map((id) => users.get(id) ?? "").filter(Boolean),
     };
@@ -87,11 +107,11 @@ export async function lemlistCampaignFigures(apiKey: string): Promise<{ campaign
 const dayKey = (date: Date) => date.toISOString().slice(0, 10);
 
 /** Day by day sending for the given campaigns over the last `days` UTC days (newest first), optionally one sender. */
-export async function lemlistDailyFigures(apiKey: string, campaignIds: string[], days: number, sendUser = ""): Promise<Array<BriefDay & { messages: number }>> {
+export async function lemlistDailyFigures(apiKey: string, campaignIds: string[], days: number, sendUser = ""): Promise<Array<BriefDay & { messages: number; emailSent: number; emailReplies: number }>> {
   if (!campaignIds.length) return [];
   const today = new Date();
   const dates = Array.from({ length: days }, (_, index) => new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - index)));
-  const out: Array<BriefDay & { messages: number }> = [];
+  const out: Array<BriefDay & { messages: number; emailSent: number; emailReplies: number }> = [];
   // Four days at a time: lemlist allows about 20 calls per two seconds per key.
   for (let i = 0; i < dates.length; i += 4) {
     const chunk = await Promise.all(dates.slice(i, i + 4).map(async (date) => {
@@ -99,7 +119,7 @@ export async function lemlistDailyFigures(apiKey: string, campaignIds: string[],
       const end = `${dayKey(date)}T23:59:59.999Z`;
       let rows: Row[] = [];
       for (let j = 0; j < campaignIds.length; j += 100) rows = rows.concat(await batchCampaignStats(apiKey, campaignIds.slice(j, j + 100), start, end, sendUser));
-      const sum = rows.map(counts).reduce((acc, row) => ({ sent: acc.sent + row.sent, accepted: acc.accepted + row.accepted, replies: acc.replies + row.replies, messages: acc.messages + row.messages }), { sent: 0, accepted: 0, replies: 0, messages: 0 });
+      const sum = rows.map(counts).reduce((acc, row) => ({ sent: acc.sent + row.sent, accepted: acc.accepted + row.accepted, replies: acc.replies + row.replies, messages: acc.messages + row.messages, emailSent: acc.emailSent + row.emailSent, emailReplies: acc.emailReplies + row.emailReplies }), { sent: 0, accepted: 0, replies: 0, messages: 0, emailSent: 0, emailReplies: 0 });
       return { day: dayKey(date), ...sum };
     }));
     out.push(...chunk);
@@ -115,7 +135,9 @@ export async function lemlistLiveFigures(apiKey: string, historyDays = 21): Prom
   const key = apiKey.trim();
   if (!key) return { available: false, reason: "", campaigns: [], days: [] };
   try {
-    const { campaigns } = await lemlistCampaignFigures(key);
+    // The brief's campaign figures are LinkedIn ones; lemlist email campaigns reach it as email
+    // (rr_email_campaign_stats, read by shared/brief-channels.mjs).
+    const campaigns = (await lemlistCampaignFigures(key)).campaigns.filter((c) => c.linkedin);
     const days = await lemlistDailyFigures(key, campaigns.map((c) => c.id), historyDays);
     const facts: CampaignFacts[] = campaigns.map((c) => ({
       name: c.name,
@@ -173,7 +195,48 @@ export async function refreshLemlistStats(config: Config, workspace: { id: strin
   if (!apiKey) return { campaigns: 0, days: 0 };
   const ws = `workspace_id=eq.${encodeURIComponent(workspace.id)}`;
   const now = new Date().toISOString();
-  const { campaigns, senderNames } = await lemlistCampaignFigures(apiKey);
+  const figures = await lemlistCampaignFigures(apiKey);
+  const { senderNames } = figures;
+  const campaigns = figures.campaigns.filter((c) => c.linkedin);
+  const emailCampaigns = figures.campaigns.filter((c) => c.emailSent > 0);
+  if (emailCampaigns.length) {
+    // lemlist's email campaigns sit beside Email Bison's, ids prefixed `lemlist:` so neither overwrites the other.
+    await rest(config, "rr_email_campaign_stats?on_conflict=workspace_id,campaign_id", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(emailCampaigns.map((c) => ({
+        workspace_id: workspace.id,
+        campaign_id: `${LEMLIST_PREFIX}${c.id}`,
+        name: c.name,
+        status: c.status,
+        total_leads: c.total,
+        leads_contacted: c.reached || c.launched,
+        emails_sent: c.emailSent,
+        unique_replies: c.emailReplies,
+        interested: c.interested,
+        bounced: c.emailBounced,
+        unsubscribed: c.emailUnsubscribed,
+        unique_opens: c.emailOpened,
+        created_at: c.launchedAt || null,
+        refreshed_at: now,
+      }))),
+    });
+  }
+  const keepEmail = emailCampaigns.map((c) => `"${LEMLIST_PREFIX}${c.id}"`).join(",");
+  await rest(config, `rr_email_campaign_stats?${ws}&campaign_id=like.${encodeURIComponent(`${LEMLIST_PREFIX}*`)}${keepEmail ? `&campaign_id=not.in.(${encodeURIComponent(keepEmail)})` : ""}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+  // A lemlist client without Email Bison gets its email days from lemlist (the table is Bison's otherwise).
+  if (emailCampaigns.length) {
+    const linked = await rest(config, `rr_workspaces?select=emailbison_workspace_id&id=eq.${encodeURIComponent(workspace.id)}&limit=1`);
+    const hasBison = Array.isArray(linked.data) && Boolean(object(linked.data[0]).emailbison_workspace_id);
+    if (!hasBison) {
+      const emailDays = await lemlistDailyFigures(apiKey, emailCampaigns.map((c) => c.id), 14);
+      await rest(config, "rr_email_daily_stats?on_conflict=workspace_id,day", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(emailDays.map((day) => ({ workspace_id: workspace.id, day: day.day, sent: day.emailSent, replies: day.emailReplies, interested: 0, bounced: 0, opens: 0, refreshed_at: now }))),
+      });
+    }
+  }
   if (campaigns.length) {
     const written = await rest(config, "rr_campaign_stats?on_conflict=workspace_id,campaign_id", {
       method: "POST",

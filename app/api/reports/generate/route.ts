@@ -364,7 +364,9 @@ export async function POST(request: Request) {
       for (const label of sentimentByLead.values()) sentimentCounts[label] += 1;
       const heyReachFunnel = heyReachByWorkspace.get(workspaceId)?.funnel;
       const totalReplies = heyReachFunnel?.available ? heyReachFunnel.replies : sentimentByLead.size;
-      const positiveRate = totalReplies ? Math.min(100, (sentimentCounts.positive / totalReplies) * 100) : 0;
+      // Positives over the leads they were counted from (our own replies, every channel: LinkedIn and email).
+      // Dividing by HeyReach's reply count mixed email positives into a LinkedIn-only denominator.
+      const positiveRate = sentimentByLead.size ? Math.min(100, (sentimentCounts.positive / sentimentByLead.size) * 100) : 0;
 
       // Campaign performance
       // Per lead, like the totals above: a lead who replied three times is one reply for its campaign.

@@ -139,7 +139,7 @@ export type Readiness = { heyreach: Check; slack: Check; granola: Check; ready: 
 export function readinessOf(input: ReadinessInput, now = Date.now()): Readiness {
   const pollAge = input.lastSuccessfulPollAt ? (now - Date.parse(input.lastSuccessfulPollAt)) / 3_600_000 : null;
   const heyreach: Check = !input.heyreachKeyConfigured
-    ? { ok: false, detail: "No HeyReach or lemlist key" }
+    ? { ok: false, detail: "No outreach account (HeyReach, lemlist or Email Bison)" }
     : pollAge === null || !Number.isFinite(pollAge)
       ? { ok: false, detail: "Never polled" }
       : pollAge > STALE_POLL_HOURS
@@ -187,7 +187,7 @@ export type EowReadiness = { heyreach: Check; slack: Check; ready: boolean };
 export function eowReadinessOf(input: EowReadinessInput, now = Date.now()): EowReadiness {
   const pollAge = input.lastSuccessfulPollAt ? (now - Date.parse(input.lastSuccessfulPollAt)) / 3_600_000 : null;
   const heyreach: Check = !input.heyreachKeyConfigured
-    ? { ok: false, detail: "No HeyReach or lemlist key" }
+    ? { ok: false, detail: "No outreach account (HeyReach, lemlist or Email Bison)" }
     : pollAge === null || !Number.isFinite(pollAge)
       ? { ok: false, detail: "Never polled" }
       : pollAge > STALE_POLL_HOURS

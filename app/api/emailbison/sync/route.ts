@@ -29,12 +29,19 @@ export async function POST(request: Request) {
   });
   if (!response.ok) return NextResponse.json({ ok: false, error: `Run the email channel migration (20261009_email_channel.sql). Supabase answered ${response.status}.` }, { status: 500 });
   const workspaces = (await response.json()) as EmailWorkspace[];
+  // Clients whose only outreach account is Email Bison: this pass is their "polled", which the brief and
+  // end-of-week readiness checks read. HeyReach and lemlist clients keep their own poll time.
+  const others = await fetch(`${url}/rest/v1/rr_workspaces?select=id&or=(heyreach_api_key_ciphertext.not.is.null,lemlist_api_key.not.is.null)`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" }).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  const hasOther = new Set((Array.isArray(others) ? others : []).map((row: Row) => String(row.id ?? "")));
   const report: Row[] = [];
   const started = Date.now();
   for (const workspace of workspaces) {
     if (Date.now() - started > 240_000) break;
     try {
       const sync = await syncBisonReplies(config, workspace);
+      if (workspace.emailbison_workspace_id && !hasOther.has(workspace.id)) {
+        await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(workspace.id)}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify({ last_successful_poll_at: new Date().toISOString() }) }).catch(() => undefined);
+      }
       for (const conversationId of sync.ingested) {
         await classifyLatestReply(config, conversationId, workspace.slug, { workspaceName: workspace.name }).catch(() => undefined);
         await alertNewReplies(config, conversationId).catch(() => undefined);

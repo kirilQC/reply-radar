@@ -666,7 +666,7 @@ const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "email_campaign_metrics",
     description:
-      "One client's EMAIL campaigns from Email Bison, refreshed hourly: per campaign name, status, leads, leads contacted, emails sent, unique replies, interested, bounced, unsubscribed, opens, with reply and interested rates; plus day-by-day email activity over an optional window (since/until, both or neither; default the last 14 days). Use it for anything about a client's email outreach. LinkedIn figures come from the heyreach_* campaign tools.",
+      "One client's EMAIL campaigns from Email Bison and lemlist, refreshed hourly: per campaign name, status, leads, leads contacted, emails sent, unique replies, interested, bounced, unsubscribed, opens, with reply and interested rates; plus day-by-day email activity over an optional window (since/until, both or neither; default the last 14 days). Use it for anything about a client's email outreach. LinkedIn figures come from the heyreach_* campaign tools.",
     input_schema: { type: "object", properties: { ...CLIENT_ARG, ...WINDOW_ARGS }, required: ["client"] },
   },
   {
@@ -1541,8 +1541,8 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       const rate = (part: unknown, whole: unknown) => (Number(whole) ? Math.round((Number(part) / Number(whole)) * 1000) / 10 : null);
       return {
         client: client.name,
-        source: "Email Bison",
-        note: "Only campaigns QC launched. replyRatePercent = unique replies / leads contacted; interestedRatePercent = interested / leads contacted.",
+        source: "Email Bison and lemlist email",
+        note: "Only campaigns QC launched (lemlist email campaigns have ids starting lemlist:). replyRatePercent = unique replies / leads contacted; interestedRatePercent = interested / leads contacted.",
         campaigns: campaignRows.map((row) => ({
           name: text(row.name),
           status: text(row.status),

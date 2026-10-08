@@ -38,6 +38,8 @@
  */
 
 import { DAILY_CONNECTIONS_PER_SENDER, sendingDaysLeft } from "../../shared/sending-runway.mjs";
+import { channelFiguresAsText, gatherChannelFigures } from "../../shared/brief-channels.mjs";
+type ChannelFigures = Awaited<ReturnType<typeof gatherChannelFigures>>;
 
 /** The global prompt, and one variant per client that overrides it. Mirrors the sentiment prompt. */
 export const MORNING_BRIEF_PROMPT_PREFIX = "morning_brief_prompt";
@@ -363,6 +365,8 @@ export type LiveFigures = {
 };
 
 export type BriefSignals = {
+  /** Replies by channel, positives, meetings and Email Bison figures (shared/brief-channels.mjs). Absent on old traces. */
+  channels?: ChannelFigures;
   // `finished` is counted so that the three buckets add up to `total`. Without it a client whose work is
   // mostly done reads as "13 campaigns, 0 active, 2 paused", and the eleven unaccounted for look like a bug.
   campaigns: { total: number; active: number; paused: number; finished: number; names: BriefCampaign[] };
@@ -406,7 +410,16 @@ const rate = (accepted: number, sent: number) => (sent > 0 ? Math.round((accepte
  * recurring brief is really asking. `quietDays` is counted from the last day with any sends at all
  * rather than from today, so a client that stopped a fortnight ago reads as a fortnight, not as zero.
  */
-export async function gatherSignals(
+/**
+ * The brief's figures: the LinkedIn campaign signals below, plus every channel's replies, positives, meetings
+ * and email campaigns (shared/brief-channels.mjs), so a client's email work is reported beside its LinkedIn work.
+ */
+export async function gatherSignals(read: Reader, workspace: BriefWorkspace, live?: LiveFigures | null): Promise<BriefSignals> {
+  const [signals, channels] = await Promise.all([gatherCampaignSignals(read, workspace, live), gatherChannelFigures(read, workspace.id).catch(() => undefined)]);
+  return channels ? { ...signals, channels } : signals;
+}
+
+async function gatherCampaignSignals(
   read: Reader,
   workspace: BriefWorkspace,
   /**
@@ -589,6 +602,10 @@ export function composeSignals(
  * is a completely different brief from "nothing was sent".
  */
 export function signalsAsText(signals: BriefSignals): string {
+  return `${linkedinSignalsAsText(signals)}${channelFiguresAsText(signals.channels)}`;
+}
+
+function linkedinSignalsAsText(signals: BriefSignals): string {
   const lines: string[] = [];
   const { campaigns, runway, sending, replies, acceptance, staleness, source } = signals;
 
@@ -1394,7 +1411,7 @@ export function briefTrace(workspace: BriefWorkspace, inputs: BriefInputs, outco
     if (!source.live && staleness.statsAgeHours !== null) facts.push(`Campaign figures were last collected ${plural(staleness.statsAgeHours, "hour")} ago.`);
     const known = Boolean(campaigns.total || staleness.dayCount);
     steps.push({
-      source: "HeyReach",
+      source: source.platform || "HeyReach",
       result: known
         ? `Read ${plural(campaigns.total, "campaign")} and ${plural(staleness.dayCount, "day")} of daily figures: ${campaigns.active} active, ${campaigns.paused} paused, ${campaigns.finished} finished.`
         : "No figures have ever been collected for this client, so the brief was told to report none.",
