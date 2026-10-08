@@ -134,11 +134,15 @@ export default function RichNotes({ value, onChange, placeholder = "Everything a
         event.preventDefault(); void attach(files); return true;
       },
       handleDrop: (_view, event) => { const files = Array.from((event as DragEvent).dataTransfer?.files ?? []); if (!uploadUrl || !files.length) return false; event.preventDefault(); void attach(files); return true; },
-      // ⌘/Ctrl-click opens a link (a plain click just places the cursor, so it can be edited).
+      // A click on a link or an attached file opens it in a new tab (a file the browser cannot show is
+      // downloaded). To edit a link, put the cursor in it with the arrow keys, or select it and use the
+      // link button: the bar with Edit / Remove appears either way.
       handleClick: (_view, _pos, event) => {
         const a = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
-        if (a && (event.metaKey || event.ctrlKey)) { window.open(a.href, "_blank", "noopener"); return true; }
-        return false;
+        if (!a) return false;
+        event.preventDefault();
+        window.open(a.href, "_blank", "noopener");
+        return true;
       },
     },
     onUpdate: ({ editor: e }) => onChange(markdownOf(e)),

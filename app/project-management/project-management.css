@@ -932,3 +932,4 @@
    pushed the side panel's fields off the right edge. */
 .pm-ed-body { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
 @media (max-width: 720px) { .pm-ed-body { grid-template-columns: minmax(0, 1fr); } }
+.rn-doc a[href] { cursor: pointer; }

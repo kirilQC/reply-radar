@@ -394,7 +394,7 @@ function Card({ t, h, column, slide = 0 }: { t: BoardTask; h: Handlers; column?:
         {pr && <span className="pm-bcard-prio" style={{ color: pr.color }}>● {pr.label}</span>}
       </div>
       <div className="pm-bcard-body">
-        <div className="pm-bcard-title">{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}{t.client_visible && <span className="pm-client-vis" title="Shown to the client in QC Portal">Client</span>}</div>
+        <div className="pm-bcard-title">{t.source !== "manual" && <span className="pm-auto">✦</span>}{t.title}</div>
         {t.context && <div className="pm-bcard-ctx">{plainNotes(t.context)}</div>}
         {(t.checks?.list || t.checks?.messaging) && (
           <div className="pm-bcard-checks">
