@@ -39,7 +39,9 @@ export async function POST(request: Request) {
   const withHeyReach = new Set((Array.isArray(keyed) ? keyed : []).map((row: { id?: string }) => String(row.id ?? "")));
   const report: Array<Record<string, unknown>> = [];
   const started = Date.now();
-  for (const workspace of workspaces) {
+  // `client` narrows the pass to one client (a queued "Sync now" for a lemlist client).
+  const only = typeof body.client === "string" && body.client ? body.client : "";
+  for (const workspace of only ? workspaces.filter((row) => row.slug === only) : workspaces) {
     if (Date.now() - started > 240_000) break;
     try {
       const sync = await syncLemlistReplies(config, workspace, days);

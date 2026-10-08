@@ -1399,8 +1399,21 @@ async function queuedAnalyticsRequest() {
   const queued = await supabase("rr_sync_runs?select=id,workspace_id&run_type=eq.analytics&status=eq.queued&workspace_id=not.is.null&order=started_at.asc&limit=1");
   const request = queued?.[0];
   if (!request) return null;
-  const workspaces = await supabase(`rr_workspaces?select=id,slug,heyreach_api_key_ciphertext&id=eq.${encodeURIComponent(String(request.workspace_id))}&limit=1`);
+  const workspaces = await supabase(`rr_workspaces?select=id,slug,heyreach_api_key_ciphertext,lemlist_api_key&id=eq.${encodeURIComponent(String(request.workspace_id))}&limit=1`);
   const workspace = workspaces?.[0];
+  // A lemlist client's figures come from lemlist (app/lib/lemlist-figures.ts via /api/lemlist/sync), so a
+  // "Sync now" from the portal or QC Command is answered there rather than failed for want of HeyReach.
+  if (workspace && !workspace.heyreach_api_key_ciphertext && workspace.lemlist_api_key && appBaseUrl) {
+    await patchSyncRun(request.id, { status: "running" });
+    try {
+      const result = await appPost("/api/lemlist/sync", { stats: true, client: workspace.slug }, { timeoutMs: 290_000 });
+      const stats = (result.clients || []).find((row) => row.stats)?.stats || {};
+      await patchSyncRun(request.id, { status: stats.error ? "failed" : "success", finished_at: new Date().toISOString(), records_seen: Number(stats.campaigns) || 0, records_written: Number(stats.days) || 0, error_text: stats.error || null });
+    } catch (error) {
+      await patchSyncRun(request.id, { status: "failed", finished_at: new Date().toISOString(), error_text: `lemlist: ${String(error instanceof Error ? error.message : error).slice(0, 200)}` });
+    }
+    return null;
+  }
   if (!workspace?.heyreach_api_key_ciphertext) {
     // Closed rather than left queued: a client with no key will never be collectable, and a request
     // that stays `queued` leaves the page showing a progress bar that can never finish.
