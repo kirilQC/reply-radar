@@ -202,6 +202,35 @@ async function leadForHeyReachProfile(config: Config, workspaceId: string, found
   return text(row.id);
 }
 
+/**
+ * The last resort for an email person: AI Ark's lookup by email address gives their LinkedIn profile, and the
+ * profile is enriched like any LinkedIn lead (photo, headline, company), so the inbox and the portal show a
+ * real person rather than initials. Returns the profile URL and enrichment, or null.
+ */
+async function findViaAiArk(config: Config, workspaceId: string, person: PersonForMatch): Promise<{ profileUrl: string; enrichment: Row | null } | null> {
+  const { linkedinByEmail, enrichLeadWithAiArk } = await import("./ai-ark-enrichment");
+  const profileUrl = await linkedinByEmail(person.email);
+  if (!profileUrl) return null;
+  const enrichment = await enrichLeadWithAiArk(config, workspaceId, profileUrl, person.company).catch(() => null);
+  return { profileUrl, enrichment: enrichment ? (enrichment as unknown as Row) : null };
+}
+
+/** Fills an email lead in place with the LinkedIn profile (and enrichment) AI Ark found. */
+async function upgradeEmailLead(config: Config, lead: Row, found: { profileUrl: string; enrichment: Row | null }): Promise<void> {
+  const raw = object(lead.raw_data);
+  const radar = object(raw.reply_radar);
+  const ai = found.enrichment ?? {};
+  await rest(config, `rr_leads?id=eq.${enc(text(lead.id))}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      linkedin_profile_url: found.profileUrl,
+      role: text(lead.role) || text(ai.title) || null,
+      raw_data: { ...raw, profile_url: found.profileUrl, reply_radar: { ...radar, channel: undefined, attribution: { source: "ai_ark_email" }, ...(Object.keys(ai).length ? { ai_ark: ai, enrichment_status: "enriched" } : {}) } },
+    }),
+  });
+}
+
 /** Remember the email address (and Bison lead) on a LinkedIn lead, so the next email lands on it by address. */
 async function rememberEmail(config: Config, lead: Row, email: string, bisonLeadId: string): Promise<void> {
   const raw = object(lead.raw_data);
@@ -249,6 +278,9 @@ async function findOrCreateLead(config: Config, workspaceId: string, lead: Row):
   });
   const row = Array.isArray(created.data) ? (created.data[0] as Row | undefined) : undefined;
   if (!created.ok || !row) throw new Error(`Could not save the email lead (${created.status}).`);
+  // Not in QC or HeyReach: AI Ark by email address, so the lead gets a LinkedIn profile and enrichment.
+  const viaAiArk = await findViaAiArk(config, workspaceId, person).catch(() => null);
+  if (viaAiArk) await upgradeEmailLead(config, row, viaAiArk).catch(() => undefined);
   return text(row.id);
 }
 
@@ -266,7 +298,19 @@ export async function relinkEmailLeads(config: Config, workspace: EmailWorkspace
     if (!target) {
       // Not a lead QC holds: find them in HeyReach and turn this email-only lead into their LinkedIn lead.
       const found = await findInHeyReach(config, workspace.id, person).catch(() => null);
-      if (!found) continue;
+      if (!found) {
+        const viaAiArk = await findViaAiArk(config, workspace.id, person).catch(() => null);
+        if (!viaAiArk) continue;
+        const handle = (viaAiArk.profileUrl.match(/linkedin\.com\/in\/([^/?#\s]+)/i)?.[1] ?? "").toLowerCase();
+        const [existing] = handle ? await rows(config, `rr_leads?select=id,name,company,raw_data,linkedin_profile_url&workspace_id=eq.${enc(workspace.id)}&linkedin_profile_url=ilike.*${enc(handle)}*&id=neq.${enc(text(lead.id))}&limit=1`) : [];
+        if (existing) target = existing;
+        else {
+          await upgradeEmailLead(config, lead, viaAiArk);
+          linked += 1;
+          continue;
+        }
+      }
+      if (!target && found) {
       const handle = (found.profileUrl.match(/linkedin\.com\/in\/([^/?#\s]+)/i)?.[1] ?? "").toLowerCase();
       const [existing] = handle ? await rows(config, `rr_leads?select=id,name,company,raw_data,linkedin_profile_url&workspace_id=eq.${enc(workspace.id)}&linkedin_profile_url=ilike.*${enc(handle)}*&limit=1`) : [];
       if (existing) target = existing;
@@ -287,7 +331,9 @@ export async function relinkEmailLeads(config: Config, workspace: EmailWorkspace
         linked += 1;
         continue;
       }
+      }
     }
+    if (!target) continue;
     const moved = await rest(config, `rr_conversations?lead_id=eq.${enc(text(lead.id))}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ lead_id: text(target.id) }) });
     if (!moved.ok) continue;
     await rememberEmail(config, target, person.email, text(object(radar.emailbison).lead_id));

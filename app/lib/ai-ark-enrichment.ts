@@ -280,6 +280,33 @@ async function persistImage(
   }
 }
 
+/**
+ * A person by their email address (AI Ark's reverse lookup), for an email lead QC has no LinkedIn for. Returns
+ * the matched profile URL, or "" when AI Ark does not know the address. Never throws.
+ */
+export async function linkedinByEmail(email: string): Promise<string> {
+  const apiKey = text(process.env.AI_ARK_API_KEY);
+  const address = text(email).toLowerCase();
+  if (!apiKey || !address.includes("@")) return "";
+  try {
+    const response = await fetch(`${API_BASE}/api/developer-portal/v1/people/reverse-lookup`, {
+      method: "POST",
+      headers: { "X-TOKEN": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "CONTACT", search: address, page: 0, size: 3 }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) return "";
+    const data = object(await response.json().catch(() => ({})));
+    for (const candidate of list(data.content ?? data.data)) {
+      const url = personLinkedIn(candidate);
+      if (url) return url;
+    }
+  } catch {
+    /* unknown address or AI Ark unreachable: the lead stays email-only */
+  }
+  return "";
+}
+
 export async function enrichLeadWithAiArk(
   config: SupabaseConfig,
   workspaceId: string,
