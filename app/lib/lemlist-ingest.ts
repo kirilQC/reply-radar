@@ -20,6 +20,10 @@
 import { isOurCampaign } from "../../shared/campaign-code.mjs";
 import { isAutoReply } from "../../shared/email-text.mjs";
 import { lemlistBody } from "../../shared/lemlist-text.mjs";
+import { keepStoredState, supersededManualRows } from "../../shared/ingest-merge.mjs";
+import { attributeLead } from "./lead-attribution";
+import { blockedProfileKeys } from "./lead-blocklist";
+import { isBlockedProfile } from "../../shared/blocklist.mjs";
 import {
   findInHeyReach,
   findLinkedInLead,
@@ -113,8 +117,13 @@ function personOf(contact: Row | null, hint: Row): PersonForMatch & { title: str
  * one already made for this contact, a lead built from the LinkedIn URL lemlist holds, the person found in the
  * client's HeyReach lists, or else an email-only lead (which AI Ark then tries to put a LinkedIn profile on).
  */
-async function findOrCreateLead(config: Config, workspaceId: string, contactId: string, person: ReturnType<typeof personOf>): Promise<string> {
+async function findOrCreateLead(config: Config, workspaceId: string, contactId: string, person: ReturnType<typeof personOf>): Promise<string | null> {
   const ref = { lemlist: { contact_id: contactId } };
+  // Someone the team blocked never comes back through lemlist either (same list as HeyReach ingestion).
+  if (person.linkedinUrl) {
+    const blocked = await blockedProfileKeys(config.url, config.key).catch(() => new Set<string>());
+    if (blocked.size && isBlockedProfile(person.linkedinUrl, blocked)) return null;
+  }
   const linked = await findLinkedInLead(config, workspaceId, person);
   if (linked) {
     await rememberEmail(config, linked, person.email, ref);
@@ -183,6 +192,7 @@ export async function ingestLemlistContact(config: Config, workspace: LemlistWor
 
   const contact = await getContact(apiKey, contactId).catch(() => null);
   const leadId = await findOrCreateLead(config, workspace.id, contactId, personOf(contact, hint));
+  if (!leadId) return { discarded: true, reason: "blocked" };
   const campaign = { id: campaignId, name: campaignName, source: "lemlist" };
   const automatedIds = theirs.filter(isAuto).map((message) => `lemlist:${text(message._id)}`);
   const messages = history
@@ -233,14 +243,21 @@ export async function ingestLemlistContact(config: Config, workspace: LemlistWor
   if (automatedIds.length) {
     await rest(config, `rr_messages?conversation_id=eq.${enc(conversationId)}&heyreach_message_id=in.(${automatedIds.map((id) => enc(`"${id}"`)).join(",")})`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
   }
+  // What is stored already keeps its AI and Slack state (shared/ingest-merge.mjs), and our own copy of a
+  // reply sent from QC gives way to lemlist's copy of the same message.
+  const stored = await rows(config, `rr_messages?select=id,heyreach_message_id,direction,sent_at,raw_data&conversation_id=eq.${enc(conversationId)}&limit=1000`);
+  const superseded = supersededManualRows(stored, messages, "lemlist:");
+  if (superseded.length) await rest(config, `rr_messages?id=in.(${superseded.map(enc).join(",")})`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
   if (messages.length) {
     const written = await rest(config, "rr_messages?on_conflict=conversation_id,heyreach_message_id", {
       method: "POST",
       headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(messages.map((message) => ({ conversation_id: conversationId, ...message }))),
+      body: JSON.stringify(keepStoredState(messages, stored).map((message: Row) => ({ conversation_id: conversationId, ...message }))),
     });
     if (!written.ok) throw new Error(`Could not save the lemlist messages (${written.status}).`);
   }
+  const lastSend = [...history].reverse().find((message) => KIND[text(message.type)].direction === "outbound");
+  await attributeLead(config, leadId, { workspaceId: workspace.id, workspaceName: workspace.name, conversationId, campaignId, campaignName, senderId: text(lastSend?.sendUserId), senderName: text(lastSend?.sendUserName), source: "lemlist" });
   return { conversationId, leadId, messagesWritten: messages.length, campaignName, channel };
 }
 

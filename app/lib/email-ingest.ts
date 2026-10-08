@@ -22,6 +22,10 @@
 import { isOurCampaign } from "../../shared/campaign-code.mjs";
 import { emailConversationKey, htmlToText, isAutoReply, isOurEmail, replyText } from "../../shared/email-text.mjs";
 import { linkedinFromVariables, nameKey, normalName, pickLinkedInLead } from "../../shared/lead-match.mjs";
+import { keepStoredState, supersededManualRows } from "../../shared/ingest-merge.mjs";
+import { attributeLead } from "./lead-attribution";
+import { blockedProfileKeys } from "./lead-blocklist";
+import { isBlockedProfile } from "../../shared/blocklist.mjs";
 import {
   bisonConfigured,
   campaignName,
@@ -230,7 +234,7 @@ export async function upgradeEmailLead(config: Config, lead: Row, found: { profi
     body: JSON.stringify({
       linkedin_profile_url: found.profileUrl,
       role: text(lead.role) || text(ai.title) || null,
-      raw_data: { ...raw, profile_url: found.profileUrl, reply_radar: { ...radar, channel: undefined, attribution: { source: "ai_ark_email" }, ...(Object.keys(ai).length ? { ai_ark: ai, enrichment_status: "enriched" } : {}) } },
+      raw_data: { ...raw, profile_url: found.profileUrl, reply_radar: { ...radar, channel: undefined, icp_score: undefined, icp_reason: undefined, attribution: { source: "ai_ark_email" }, ...(Object.keys(ai).length ? { ai_ark: ai, enrichment_status: "enriched" } : {}) } },
     }),
   });
 }
@@ -256,9 +260,14 @@ const personOf = (lead: Row): PersonForMatch => ({
 });
 
 /** The lead row for this Bison lead: their LinkedIn lead when QC has one, else an email-only lead (made once). */
-async function findOrCreateLead(config: Config, workspaceId: string, lead: Row): Promise<string> {
+async function findOrCreateLead(config: Config, workspaceId: string, lead: Row): Promise<string | null> {
   const person = personOf(lead);
   const bisonLeadId = text(lead.id);
+  // Someone the team blocked never comes back through email either (same list as HeyReach ingestion).
+  if (person.linkedinHandle) {
+    const blocked = await blockedProfileKeys(config.url, config.key).catch(() => new Set<string>());
+    if (blocked.size && isBlockedProfile(`https://www.linkedin.com/in/${person.linkedinHandle}`, blocked)) return null;
+  }
   const linked = await findLinkedInLead(config, workspaceId, person);
   if (linked) {
     await rememberEmail(config, linked, person.email, { emailbison: { lead_id: bisonLeadId } });
@@ -383,6 +392,7 @@ export async function ingestBisonReply(config: Config, workspace: EmailWorkspace
 
   const lead = object(reply.lead);
   const leadId = await findOrCreateLead(config, workspace.id, Object.keys(lead).length ? lead : { id: reply.lead_id, email: reply.from_email_address, name: reply.from_name });
+  if (!leadId) return { discarded: true, reason: "blocked" };
   const bisonLeadId = text(reply.lead_id);
 
   const [sent, replies] = await Promise.all([
@@ -453,14 +463,21 @@ export async function ingestBisonReply(config: Config, workspace: EmailWorkspace
   if (automatedIds.length) {
     await rest(config, `rr_messages?conversation_id=eq.${enc(conversationId)}&heyreach_message_id=in.(${automatedIds.map((id) => `"${id}"`).map(enc).join(",")})`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
   }
+  // What is stored already keeps its AI and Slack state (shared/ingest-merge.mjs), and our own copy of a
+  // reply sent from QC gives way to Email Bison's copy of the same message.
+  const stored = await rows(config, `rr_messages?select=id,heyreach_message_id,direction,sent_at,raw_data&conversation_id=eq.${enc(conversationId)}&limit=1000`);
+  const superseded = supersededManualRows(stored, sorted, "bison:");
+  if (superseded.length) await rest(config, `rr_messages?id=in.(${superseded.map(enc).join(",")})`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
   if (sorted.length) {
     const written = await rest(config, "rr_messages?on_conflict=conversation_id,heyreach_message_id", {
       method: "POST",
       headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(sorted.map((message) => ({ conversation_id: conversationId, ...message }))),
+      body: JSON.stringify(keepStoredState(sorted, stored).map((message: Row) => ({ conversation_id: conversationId, ...message }))),
     });
     if (!written.ok) throw new Error(`Could not save the email messages (${written.status}).`);
   }
+  const lastSender = [...sorted].reverse().find((message) => message.direction === "outbound");
+  await attributeLead(config, leadId, { workspaceId: workspace.id, workspaceName: workspace.name, conversationId, campaignId: text(reply.campaign_id), campaignName: campaign, senderId: "", senderName: text(object(object(object(lastSender?.raw_data).reply_radar).sender).name), source: "emailbison" });
   return { conversationId, leadId, messagesWritten: sorted.length, campaignName: campaign };
 }
 

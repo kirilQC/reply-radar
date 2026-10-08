@@ -220,6 +220,8 @@ async function gatherQcIdentity(url: string, key: string, workspaceId: string) {
   return buildQcIdentity({
     leads: leadRows.map((r) => ({
       linkedin: str(r.linkedin_profile_url),
+      // An email-only lead (Email Bison, lemlist) is matched on the address its replies came from.
+      email: str((r.raw_data as Record<string, Record<string, unknown>> | null)?.reply_radar?.email) || str((r.raw_data as Record<string, unknown> | null)?.email),
       campaign: str(r.campaign_names),
       name: str(r.name),
       company: str(r.company),

@@ -1343,7 +1343,7 @@ async function staleAnalyticsWorkspace() {
    * parallel, because a single "newest runs" read would be filled by whichever client runs most often.
    */
   const lastTried = await Promise.all(workspaces.map(async (workspace) => {
-    const rows = await supabase(`rr_sync_runs?select=started_at&workspace_id=eq.${encodeURIComponent(String(workspace.id))}&run_type=eq.analytics&order=started_at.desc&limit=1`);
+    const rows = await supabase(`rr_sync_runs?select=started_at&workspace_id=eq.${encodeURIComponent(String(workspace.id))}&run_type=eq.analytics&source=neq.lemlist&order=started_at.desc&limit=1`);
     return Date.parse(String(rows?.[0]?.started_at || "")) || 0;
   }));
   const ranked = workspaces
@@ -1666,8 +1666,10 @@ async function renameStoredCampaigns(workspace) {
   for (const campaign of current) {
     const cid = String(campaign.campaign_id || "");
     const name = String(campaign.name || "");
-    if (!cid || !name) continue;
-    const stale = (await supabase(`rr_messages?select=id,raw_data&raw_data->reply_radar->campaign->>id=eq.${encodeURIComponent(cid)}&raw_data->reply_radar->campaign->>name=neq.${encodeURIComponent(name)}&limit=2000`)) || [];
+    // HeyReach campaigns only: lemlist's stored rows are `lemlist:` ids (their messages carry the raw id and
+    // source "lemlist"), and an Email Bison campaign id could equal a HeyReach one, so both are left alone.
+    if (!cid || !name || cid.startsWith("lemlist:")) continue;
+    const stale = (await supabase(`rr_messages?select=id,raw_data&raw_data->reply_radar->campaign->>id=eq.${encodeURIComponent(cid)}&raw_data->reply_radar->campaign->>name=neq.${encodeURIComponent(name)}&or=(raw_data->reply_radar->campaign->>source.is.null,raw_data->reply_radar->campaign->>source.not.in.(emailbison,lemlist))&limit=2000`)) || [];
     for (const row of stale) {
       const raw = row.raw_data || {};
       const radar = raw.reply_radar || {};

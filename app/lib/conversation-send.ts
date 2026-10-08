@@ -147,7 +147,27 @@ export async function sendConversationReply(
     )) as Row[];
     const conversation = conversations[0];
     if (!conversation) return { status: 404, ok: false, error: "That conversation no longer exists." };
-    // An email conversation goes out through Email Bison, never HeyReach.
+    // The lock comes before the 24 hour check, not after: a request that waited out another's send must
+    // then read the row that send wrote, and a request arriving mid-send is turned away here.
+    lockHeld = await acquireSendLock(url, key, lockKey);
+    if (!lockHeld) {
+      return { status: 409, ok: false, error: "That exact message is already being sent to this lead. Wait a moment, then refresh the thread." };
+    }
+
+    // Checked before the API key is even read: a duplicate must be refused whether or not HeyReach is
+    // reachable, and reaching HeyReach is the step that cannot be undone.
+    const since = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+    const recent = (await db(
+      url,
+      key,
+      `rr_messages?select=id,body,sent_at&conversation_id=eq.${encodeURIComponent(conversationId)}&direction=eq.outbound&sent_at=gte.${encodeURIComponent(since)}`,
+    )) as Row[];
+    if (recent.some((row) => text(row.body) === message)) {
+      return { status: 409, ok: false, error: "That exact message has already been sent to this lead. Change it, or leave it as it is." };
+    }
+
+    // Email Bison and lemlist conversations go out through their own platform, behind the same lock and
+    // duplicate check as HeyReach: a double click or the inbox and Slack at once must not write twice.
     if (text(conversation.heyreach_conversation_id).startsWith("bison:")) {
       const sent = await sendEmailConversationReply({ url, key }, conversationId, message);
       if (sent.ok) {
@@ -170,24 +190,6 @@ export async function sendConversationReply(
       return { status: 409, ok: false, error: "This conversation is not linked to a HeyReach chatroom and sender, so nothing can be sent from it." };
     }
 
-    // The lock comes before the 24 hour check, not after: a request that waited out another's send must
-    // then read the row that send wrote, and a request arriving mid-send is turned away here.
-    lockHeld = await acquireSendLock(url, key, lockKey);
-    if (!lockHeld) {
-      return { status: 409, ok: false, error: "That exact message is already being sent to this lead. Wait a moment, then refresh the thread." };
-    }
-
-    // Checked before the API key is even read: a duplicate must be refused whether or not HeyReach is
-    // reachable, and reaching HeyReach is the step that cannot be undone.
-    const since = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
-    const recent = (await db(
-      url,
-      key,
-      `rr_messages?select=id,body,sent_at&conversation_id=eq.${encodeURIComponent(conversationId)}&direction=eq.outbound&sent_at=gte.${encodeURIComponent(since)}`,
-    )) as Row[];
-    if (recent.some((row) => text(row.body) === message)) {
-      return { status: 409, ok: false, error: "That exact message has already been sent to this lead. Change it, or leave it as it is." };
-    }
 
     const workspaces = (await db(
       url,

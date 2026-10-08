@@ -351,6 +351,14 @@ export async function findLeadForMeeting(url: string, key: string, workspaceId: 
     const r = await rows(url, key, `rr_leads?select=${sel}&${ws}&linkedin_profile_url=ilike.*${encodeURIComponent(handle)}*&limit=1`);
     if (r[0]) return r[0];
   }
+  // Email next: an email-only lead (Email Bison, lemlist) has no LinkedIn URL, but the invitee's address is
+  // exactly the one its replies came from.
+  const email = ids.email.trim().toLowerCase();
+  if (email.includes("@") && !/[,()]/.test(email)) {
+    const e = encodeURIComponent(email);
+    const r = await rows(url, key, `rr_leads?select=${sel}&${ws}&or=(raw_data->reply_radar->>email.eq.${e},raw_data->>email.ilike.${e},raw_data->>email_address.ilike.${e})&limit=1`);
+    if (r[0]) return r[0];
+  }
   const name = ids.name.trim(), company = ids.company.trim();
   if (name && company) {
     const safe = (s: string) => encodeURIComponent(s.replace(/[*%,()]/g, " ").trim());
