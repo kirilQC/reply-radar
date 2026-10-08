@@ -286,8 +286,11 @@ html:not(.hydrated) body{visibility:hidden}
 /* Envelope in the check's slot for Email Bison threads, so the channel reads at a glance without
    scanning the campaign column. `.lead-main .x` beats the row's `.lead-main span` block styling,
    which would otherwise drop the icon onto its own line. */
-.channel-email-icon,.lead-main .channel-email-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:14px;height:14px;border-radius:50%;background:color-mix(in srgb,var(--accent) 22%,transparent);color:var(--accent);line-height:1}
-.detail-channel-email-icon{width:18px;height:18px}
+/* Solid blue and rectangular on purpose: the replied check is a pale green circle in the same slot, and
+   the two have to read as different things at a glance (a tinted accent circle looked like the check). */
+.channel-email-icon,.lead-main .channel-email-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:20px;height:15px;border-radius:4px;background:#3b82f6;color:#fff;line-height:1;box-shadow:0 0 0 1px color-mix(in srgb,#3b82f6 40%,transparent)}
+.channel-email-icon svg{stroke-width:2.4}
+.detail-channel-email-icon{width:24px;height:18px;border-radius:5px}
 /* Stands in for the AI draft textarea when we sent the last message. A bare line rather than a
    panel: it is one fact, and it is also the way back to a composer, since a nudge is sometimes
    the right next move — clicking it swaps the textarea back in. */

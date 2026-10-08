@@ -2608,7 +2608,7 @@ export function InboxPage() {
                                 title="Email reply (Email Bison)"
                                 aria-label="Email"
                               >
-                                <NavIcon name="mail" size={9} />
+                                <NavIcon name="mail" size={11} />
                               </span>
                             )}
                             {lastDirectionOf(lead) === "outbound" && (
@@ -2767,7 +2767,7 @@ export function InboxPage() {
                                 title="Email reply (Email Bison)"
                                 aria-label="Email"
                               >
-                                <NavIcon name="mail" size={11} />
+                                <NavIcon name="mail" size={13} />
                               </span>
                             )}
                             {lastDirectionOf(current) === "outbound" && (
