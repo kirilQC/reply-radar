@@ -297,7 +297,9 @@ export async function linkedinByEmail(email: string): Promise<string> {
     });
     if (!response.ok) return "";
     const data = object(await response.json().catch(() => ({})));
-    for (const candidate of list(data.content ?? data.data)) {
+    // The lookup answers with the one person it found as a bare profile object (link.linkedin), not a list.
+    const candidates = list(data.content ?? data.data);
+    for (const candidate of candidates.length ? candidates : [data]) {
       const url = personLinkedIn(candidate);
       if (url) return url;
     }
