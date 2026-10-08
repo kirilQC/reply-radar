@@ -915,3 +915,20 @@
 .pm-setup-add { font-size: 11.5px; font-weight: 600; padding: 6px 10px; border-radius: 7px; border: 0; background: var(--accent); color: var(--accent-ink, #06201d); cursor: pointer; }
 .pm-setup-added { font-size: 11px; color: var(--green, #55c7a2); font-weight: 600; }
 @media (max-width: 700px) { .pm-setup-row { flex-wrap: wrap; } .pm-setup-actions { width: 100%; } }
+
+/* The task's client visibility as a header toggle, beside Slack. Replaces the checkbox in the fields. */
+.pm-vis-btn {
+  display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 9px;
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer; white-space: nowrap;
+}
+.pm-vis-btn:hover { color: var(--text); }
+.pm-vis-btn.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+/* Fields in a row shrink rather than push the side panel past the modal's edge. */
+.pm-f-row > .pm-f { min-width: 0; }
+.pm-ed-side { min-width: 0; }
+.pm-f-row .pm-f input { width: 100%; min-width: 0; }
+/* Columns may not grow past the modal: plain fr tracks take their content's minimum width, which is what
+   pushed the side panel's fields off the right edge. */
+.pm-ed-body { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+@media (max-width: 720px) { .pm-ed-body { grid-template-columns: minmax(0, 1fr); } }

@@ -753,7 +753,7 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
   const [checks, setChecks] = useState<Checks>({ list: Boolean(task?.checks?.list), messaging: Boolean(task?.checks?.messaging) });
   const [stage, setStage] = useState(isNew ? state.stage : (task?.stage ?? "todo"));
   const [clientVisible, setClientVisible] = useState(Boolean(task?.client_visible));
-  const [workstream, setWorkstream] = useState(task?.workstream ?? "");
+  const [workstream] = useState(task?.workstream ?? "");
   const s = stageOf(stage);
   const client = clients.find((c) => c.slug === slug);
   // Only send the checkpoints when someone actually toggled one. Sending them on every save wrote whatever
@@ -762,7 +762,7 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
   const save = () => { if (!title.trim()) return; if (isNew) { if (!slug) return; onCreate(slug, { title, stage, assignee: owner, dueDate: due, context, links, priority, ...(week ? { week } : {}), ...(checks.list || checks.messaging ? { checks } : {}), ...(clientVisible ? { clientVisible } : {}), ...(workstream.trim() ? { workstream: workstream.trim() } : {}) }); } else onUpdate(task!.id, { title, stage, owner, dueDate: due, context, links: legacyLinks.length ? [] : links, priority, blocker: blockers, week, ...(checksChanged ? { checks } : {}), ...(clientVisible !== Boolean(task?.client_visible) ? { clientVisible } : {}), ...(workstream.trim() !== (task?.workstream ?? "") ? { workstream: workstream.trim() } : {}) }); onClose(); };
   // Autosave: closing the task (✕, clicking outside, Escape) saves any changes. A new task saves if it
   // has a title and is simply discarded if it's still blank.
-  const snapshot = JSON.stringify({ title, slug, owner, due, week, priority, context, links, blockers, checks, stage });
+  const snapshot = JSON.stringify({ title, slug, owner, due, week, priority, context, links, blockers, checks, stage, clientVisible });
   const initial = useRef(snapshot);
   const closeAndSave = () => {
     if (isNew) { if (title.trim()) save(); else onClose(); return; }
@@ -779,7 +779,22 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
         <div className="pm-ed-head">
           <div className="pm-ed-htop">
             <span className={`pm-stg ${s.cls}`}><span className="d" />{s.label}</span>
-            <div className="pm-ed-hactions">{!isNew && <SlackButton id={task!.id} channel={notifyChannel} />}<button type="button" className="pm-modal-x" title="Close (changes save automatically)" onClick={closeAndSave}>✕</button></div>
+            <div className="pm-ed-hactions">
+              <button
+                type="button"
+                className={clientVisible ? "pm-vis-btn on" : "pm-vis-btn"}
+                aria-pressed={clientVisible}
+                title="Shows this task on the client's Project tracker in QC Portal: title, stage, owner, priority and dates only. Never notes, blockers, updates or files."
+                onClick={() => setClientVisible((value) => !value)}
+              >
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  {clientVisible
+                    ? <><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>
+                    : <><path d="M3 3l18 18" /><path d="M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3 3.9M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></>}
+                </svg>
+                {clientVisible ? "Client can see" : "Hidden from client"}
+              </button>
+              {!isNew && <SlackButton id={task!.id} channel={notifyChannel} />}<button type="button" className="pm-modal-x" title="Close (changes save automatically)" onClick={closeAndSave}>✕</button></div>
           </div>
           {multi && client && <div className="pm-ed-client"><span className="pm-ed-clogo" style={client.logoUrl ? undefined : { background: client.accentColor || "var(--accent)" }}>{client.logoUrl ? <img src={client.logoUrl} alt="" /> : initials(client.name)}</span><span className="pm-ed-cname">{client.name}</span></div>}
           <input className="pm-ed-title" autoFocus value={title} placeholder="What needs doing?" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save(); }} />
@@ -788,7 +803,7 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
         <div className="pm-ed-body">
           <div className="pm-ed-main">
             <div className="pm-f pm-f-notes"><span>Context / notes</span><RichNotes value={context} onChange={setContext} uploadUrl="/api/project-management/upload-file" /></div>
-            {!isNew && task && !task.id.startsWith("tmp") && <div className="pm-f pm-f-updates"><span>Latest update</span><LatestUpdates taskId={task.id} people={people} map={map} /></div>}
+            {!isNew && task && !task.id.startsWith("tmp") && <div className="pm-f pm-f-updates"><span>Latest update</span><LatestUpdates taskId={task.id} people={people} map={map} fallback={owner} /></div>}
           </div>
           <div className="pm-ed-side">
             {isNew && multi && <div className="pm-f"><span>Client</span><Select value={slug} options={clientOptsOf(clients)} size="lg" onChange={setSlug} /></div>}
@@ -796,15 +811,10 @@ function TaskEditor({ state, clients, people, map, multi, notifyChannel, addPers
             <div className="pm-f-row">
               <div className="pm-f"><span>Status</span><Select value={stage} options={stageOpts} tone={stageOf(stage).color} onChange={setStage} /></div>
               <div className="pm-f"><span>Priority</span><Select value={priority} options={prioOpts} placeholder="None" tone={prioOf(priority)?.color} onChange={setPriority} /></div>
-              <label className="pm-f pm-f-check" title="Shows this task on the client's Project tracker in QC Portal: title, stage, owner, priority and dates only. Never notes, blockers, updates or files.">
-                <span>Show to client</span>
-                <input type="checkbox" checked={clientVisible} onChange={(event) => setClientVisible(event.target.checked)} />
-              </label>
             </div>
             <div className="pm-f-row">
               <label className="pm-f"><span>Due date</span><input value={due} placeholder="e.g. Thu 9/4" onChange={(e) => setDue(e.target.value)} /></label>
               <label className="pm-f"><span>Start date</span><input value={week} placeholder="e.g. Mon 9/8" onChange={(e) => setWeek(e.target.value)} /></label>
-              <label className="pm-f"><span>Workstream</span><input value={workstream} list="pm-workstreams" placeholder="e.g. Signal-Based" onChange={(e) => setWorkstream(e.target.value)} /><datalist id="pm-workstreams">{DEFAULT_WORKSTREAMS.map((w) => <option key={w} value={w} />)}</datalist></label>
             </div>
             <div className="pm-f"><span>Campaign checklist</span><div className="pm-ed-checks">
               <button type="button" className={`pm-ed-check ${checks.list ? "on" : ""}`} aria-pressed={checks.list} onClick={() => setChecks((c) => ({ ...c, list: !c.list }))}><span className="pm-check">{checks.list ? "✓" : ""}</span>Contact list built</button>

@@ -104,7 +104,7 @@ function VoicePlayer({ src, duration }: { src: string; duration?: number }) {
   );
 }
 
-export default function LatestUpdates({ taskId, people, map }: { taskId: string; people: Person[]; map: Record<string, string> }) {
+export default function LatestUpdates({ taskId, people, map, fallback = "" }: { taskId: string; people: Person[]; map: Record<string, string>; fallback?: string }) {
   const [updates, setUpdates] = useState<Update[] | null>(null);
   const [me, setMe] = useState("");
   const [text, setText] = useState("");
@@ -119,7 +119,13 @@ export default function LatestUpdates({ taskId, people, map }: { taskId: string;
   const timer = useRef<number | undefined>(undefined);
   const started = useRef(0);
 
-  useEffect(() => { try { setMe(localStorage.getItem("pm-me") || ""); } catch { /* ignore */ } }, []);
+  // Never an empty "Who?": whoever this browser last posted as, else the task's first assignee, else the
+  // first person on the board. They can still change it.
+  useEffect(() => {
+    let saved = "";
+    try { saved = localStorage.getItem("pm-me") || ""; } catch { /* ignore */ }
+    setMe(saved || fallback.split(",")[0].trim() || people[0]?.name || "");
+  }, [fallback, people]);
   useEffect(() => {
     let live = true;
     void fetch(`/api/project-management/updates?task=${encodeURIComponent(taskId)}`, { cache: "no-store" })
