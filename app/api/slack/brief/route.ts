@@ -28,7 +28,8 @@
 
 import { NextResponse } from "next/server";
 import { briefHeaderText, briefTrace, briefUserContent, briefWithFooter, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
-import { BRIEF_MODEL, briefChannelsOf, briefMemoryResetKey, gatherCalls, gatherChannels, gatherLiveFigures, gatherPriorBriefs, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
+import { BRIEF_MODEL, briefChannelsOf, briefMemoryResetKey, gatherCalls, gatherChannels, gatherClosedItems, gatherLiveFigures, gatherPriorBriefs, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
+import { dropClosedItems } from "../../../../shared/brief-closed.mjs";
 import { brainContext } from "../../../lib/brain-context";
 import { writeConfig } from "../../../lib/app-config";
 import {
@@ -402,23 +403,27 @@ export async function POST(request: Request) {
      * client on every run to throw them away.
      */
     const live = await gatherLiveFigures(String((found as Row).heyreach_api_key_ciphertext ?? ""));
-    const [signals, channels, call, systemPrompt, brain, priorBriefs] = await Promise.all([
+    const [signals, channels, call, systemPrompt, brain, priorBriefs, closedItems] = await Promise.all([
       gatherSignals(read, workspace, live),
       gatherChannels(workspace),
       gatherCalls(read, workspace),
       morningBriefPrompt(workspace.slug),
       brainContext(workspace),
       gatherPriorBriefs(read, workspace),
+      gatherClosedItems(read, workspace),
     ]);
 
-    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason, extraCalls: call.extras, brain: brain.block, priorBriefs };
+    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason, extraCalls: call.extras, brain: brain.block, priorBriefs, closedItems };
     const content = briefUserContent(workspace, inputs);
     // Monday's sync reminder and Friday's report reminder are appended here rather than written by the
     // model, so they land in the same place, worded the same way, with the same indent, every week. They
     // are constants; the only thing generating them could add is variation, which is the one thing a
     // standing reminder must not have. Stored and returned with the footer on, because this is the brief
     // people actually read.
-    const body_ = briefWithFooter(await writeBrief(systemPrompt, content), workspace.timezone || "America/New_York");
+    // Anything the team already closed comes out before posting, whatever the model wrote (see brief-closed.mjs).
+    const closedCheck = dropClosedItems(await writeBrief(systemPrompt, content), closedItems);
+    if (closedCheck.dropped.length) console.info("reply_radar_brief_closed_items_dropped", { client: workspace.slug, dropped: closedCheck.dropped });
+    const body_ = briefWithFooter(closedCheck.body, workspace.timezone || "America/New_York");
 
     /*
      * Two messages, not one: a one-line header in the channel, and the brief itself as a reply in its

@@ -11,6 +11,7 @@
  * written, and then the percentage would go unchecked.
  */
 
+import { struckItems } from "../../shared/brief-closed.mjs";
 import {
   BRIEF_MAX_MESSAGES,
   BRIEF_WINDOW_DAYS,
@@ -205,6 +206,41 @@ export async function gatherPriorBriefs(
         replies,
       };
     }));
+  } catch {
+    return [];
+  }
+}
+
+/** How far back an item marked done on a brief stays closed. */
+const CLOSED_ITEMS_DAYS = 21;
+
+/**
+ * Every item the team closed on this client's briefs in the last three weeks, as titles.
+ *
+ * A reply of "done" under a brief strikes the item through in the stored body (see brief-reply.ts). The two
+ * briefs `gatherPriorBriefs` reads back were not enough to keep it closed: the model rebuilt closed items
+ * from older call notes, reworded, and anything closed three briefs ago fell out of memory altogether. These
+ * titles go into the prompt as a list and are then enforced on the written brief by `dropClosedItems`.
+ * Same rules as the memory: posted internal briefs only, nothing from before a memory reset or from briefs
+ * built on other channels. Never throws; an empty list just means nothing is enforced.
+ */
+export async function gatherClosedItems(read: (path: string) => Promise<unknown>, workspace: BriefWorkspace): Promise<string[]> {
+  try {
+    const resetAt = Date.parse(String((await readConfig(briefMemoryResetKey(String(workspace.id ?? ""))).catch(() => "")) ?? ""));
+    const from = Math.max(Number.isNaN(resetAt) ? 0 : resetAt, Date.now() - CLOSED_ITEMS_DAYS * 86_400_000);
+    const rows = await read(
+      `rr_slack_briefs?select=body,sources&workspace_id=eq.${encodeURIComponent(workspace.id)}&automation=eq.morning_brief`
+      + `&destination=eq.internal&status=eq.success&slack_message_ts=not.is.null&created_at=gt.${encodeURIComponent(new Date(from).toISOString())}`
+      + `&order=created_at.desc&limit=40`,
+    ).catch(() => []);
+    const current = briefChannelsOf(workspace);
+    const titles = new Set<string>();
+    for (const row of Array.isArray(rows) ? (rows as Row[]) : []) {
+      const recorded = (row.sources as Row | null)?.channels as Row | undefined;
+      if (recorded && (String(recorded.internal ?? "") !== current.internal || String(recorded.external ?? "") !== current.external)) continue;
+      for (const title of struckItems(String(row.body ?? ""))) titles.add(title);
+    }
+    return [...titles];
   } catch {
     return [];
   }

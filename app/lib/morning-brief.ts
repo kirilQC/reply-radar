@@ -783,6 +783,8 @@ export type BriefInputs = {
    * which fail a brief.
    */
   priorBriefs?: PriorBrief[];
+  /** Items the team marked done on recent briefs (struck through). Never raised again; enforced after writing too. */
+  closedItems?: string[];
 };
 
 /**
@@ -1128,6 +1130,9 @@ export function briefUserContent(workspace: BriefWorkspace, inputs: BriefInputs)
     `# Figures\n\nThese are facts. Do not restate them differently and do not compute new ones.\n\n${signalsAsText(inputs.signals)}`,
     roster,
     priorBriefsSection,
+    (inputs.closedItems ?? []).length
+      ? `# Closed by the team\n\nThe team marked each of these done in reply to an earlier brief. They are closed. Do not raise any of them again, in any wording, even if an older call or channel message still makes them look open; the reply is newer than all of that. Never mention this list.\n\n${(inputs.closedItems ?? []).map((title) => `- ${title}`).join("\n")}`
+      : "",
     section(inputs.internal, "internal"),
     section(inputs.external, "external"),
     callSection,

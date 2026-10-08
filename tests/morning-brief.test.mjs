@@ -1403,7 +1403,7 @@ test("replies read out of threads are counted apart from the channel's own messa
 test("the trace is built from what the model was given, not from a second set of notes", () => {
   // The guarantee that makes it worth reading: one object goes to `briefUserContent` and to `briefTrace`,
   // so the trace cannot drift into describing a run that did not happen.
-  assert.match(route, /const inputs = \{ signals, \.\.\.channels, call: call\.call, callReason: call\.callReason, extraCalls: call\.extras, brain: brain\.block, priorBriefs \};/);
+  assert.match(route, /const inputs = \{ signals, \.\.\.channels, call: call\.call, callReason: call\.callReason, extraCalls: call\.extras, brain: brain\.block, priorBriefs, closedItems \};/);
   assert.match(route, /const content = briefUserContent\(workspace, inputs\);/);
   assert.match(route, /briefTrace\(workspace, inputs, \{/);
   // Not stored. The excerpts quote every client call verbatim, and the row is kept for a year.

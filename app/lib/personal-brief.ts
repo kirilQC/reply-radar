@@ -16,6 +16,7 @@
  * functions the morning brief uses.
  */
 
+import { dropClosedItems } from "../../shared/brief-closed.mjs";
 import {
   gatherSignals,
   briefUserContent,
@@ -28,6 +29,7 @@ import {
   gatherCalls,
   gatherLiveFigures,
   gatherPriorBriefs,
+  gatherClosedItems,
   morningBriefPrompt,
   writeBrief,
 } from "./morning-brief-run";
@@ -119,16 +121,17 @@ async function briefBodyForClient(read: (path: string) => Promise<unknown>, slug
   // Otherwise write one fresh, mirroring the morning-brief route.
   try {
     const live = await gatherLiveFigures(str(found.heyreach_api_key_ciphertext));
-    const [signals, channels, call, systemPrompt, brain, priorBriefs] = await Promise.all([
+    const [signals, channels, call, systemPrompt, brain, priorBriefs, closedItems] = await Promise.all([
       gatherSignals(read, workspace, live),
       gatherChannels(workspace),
       gatherCalls(read, workspace),
       morningBriefPrompt(workspace.slug),
       brainContext(workspace),
       gatherPriorBriefs(read, workspace),
+      gatherClosedItems(read, workspace),
     ]);
-    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason, extraCalls: call.extras, brain: brain.block, priorBriefs };
-    const body = await writeBrief(systemPrompt, briefUserContent(workspace, inputs));
+    const inputs = { signals, ...channels, call: call.call, callReason: call.callReason, extraCalls: call.extras, brain: brain.block, priorBriefs, closedItems };
+    const body = dropClosedItems(await writeBrief(systemPrompt, briefUserContent(workspace, inputs)), closedItems).body;
     return { client: workspace.name, body: str(body) };
   } catch {
     return { client: workspace.name, body: "" };
