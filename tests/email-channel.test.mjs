@@ -71,3 +71,25 @@ test("out-of-office and automatic replies are recognised, real replies are not",
   assert.ok(isOurEmail({ folder: "Sent", type: "Outgoing Email" }));
   assert.ok(!isOurEmail({ folder: "Inbox", type: "Tracked Reply" }));
 });
+
+import { cleanEmailBody } from "../shared/email-text.mjs";
+
+test("Gmail signature images and everything after them are cut from a reply", () => {
+  const body = "Great, I grabbed time on Weds PM. We'll just need to figure out where to\nmeet if Nolynn wants to email me.\n[image: understood.logo]\n\n[image: -]\n *Justine Bassman*\n*VP, Market Research and Insights | Market Research and Insights*\njbassman@understood.org\n\n[image: facebook icon] [image:\nlinkedin icon] Support us";
+  assert.equal(cleanEmailBody(body), "Great, I grabbed time on Weds PM. We'll just need to figure out where to\nmeet if Nolynn wants to email me.");
+});
+
+test("a sign-off keeps the sender's name and drops the signature block under it", () => {
+  const body = "Hi Nick,\n\nWe can have a meeting about this. I am not sure what we have that we might be able to part of this program.\n\nThank you,\n\nRachael Hamilton\nSupply Chain Manager\n4iiii Innovations Inc.\n141 - 2nd Avenue E\nCochrane, AB T4C 2B9\nEmail: Rachael.hamilton@4iiii.com\nCell: 403.619.0899";
+  assert.equal(cleanEmailBody(body), "Hi Nick,\n\nWe can have a meeting about this. I am not sure what we have that we might be able to part of this program.\n\nThank you,\n\nRachael Hamilton");
+});
+
+test("a reply that is only a thank-you, or a sign-off mid-sentence, is left alone", () => {
+  assert.equal(cleanEmailBody("Thanks!"), "Thanks!");
+  assert.equal(cleanEmailBody("Thanks for reaching out, Tuesday works.\nBest time is 2pm."), "Thanks for reaching out, Tuesday works.\nBest time is 2pm.");
+});
+
+test("the Best, Justine closing keeps the name and loses the logo after it", () => {
+  const body = "I will be at your session! LMK your availability Weds/Thurs.\n\nBest,\n\nJustine\n\n[image: understood.logo]";
+  assert.equal(cleanEmailBody(body), "I will be at your session! LMK your availability Weds/Thurs.\n\nBest,\n\nJustine");
+});

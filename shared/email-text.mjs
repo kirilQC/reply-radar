@@ -63,11 +63,40 @@ const SIGNATURE_START = [
  * inbox and Slack show what the person wrote. Their name and title are lost with the signature, which is fine:
  * the card already says who they are.
  */
+/**
+ * A closing line on its own ("Best,", "Thank you,", "Cheers") ends the message: what follows is the sender's
+ * name and then their signature block (title, address, phone, links). The name is kept, the block is not.
+ */
+const SIGN_OFF = /^(?:thanks(?: again| so much)?|thank you(?: so much)?|many thanks|best(?: regards| wishes)?|all the best|kind regards|warm regards|warmly|regards|cheers|sincerely|talk soon|speak soon)[\s,.!]*$/i;
+
+function cutAtSignOff(body) {
+  const lines = body.split("\n");
+  for (let i = 1; i < lines.length; i += 1) {
+    if (!SIGN_OFF.test(lines[i].trim())) continue;
+    // Only after something was said: a reply that is just "Thanks!" keeps it.
+    if (!lines.slice(0, i).join(" ").trim()) return body;
+    let end = i + 1;
+    // The name under it, when it looks like one (short, no digits, no address), stays with the sign-off.
+    while (end < lines.length && !lines[end].trim()) end += 1;
+    const name = (lines[end] ?? "").trim();
+    const keepName = name && name.length <= 40 && !/[\d@:/|]/.test(name) && name.split(/\s+/).length <= 4;
+    return lines.slice(0, keepName ? end + 1 : i + 1).join("\n");
+  }
+  return body;
+}
+
 export function cleanEmailBody(text) {
   let body = String(text ?? "")
-    .replace(/\[(?:cid:|https?:\/\/)[^\]]*\]/gi, " ") // [https://lh6.googleusercontent.com/…] and [cid:image001.png]
-    .replace(/<(?:https?:\/\/|mailto:)[^>]*>/gi, " ") // <http://www.facebook.com/kurufootwear/>
     .replace(/\r\n/g, "\n");
+  // Gmail's text version writes each signature image as "[image: understood.logo]". The first one after any
+  // words starts the signature, so everything from it on goes; any stray ones left are removed.
+  const image = /\[image:[^\]]*\]/i.exec(body);
+  if (image && image.index > 0 && body.slice(0, image.index).trim()) body = body.slice(0, image.index);
+  body = body
+    .replace(/\[image:[^\]]*\]/gi, " ")
+    .replace(/\[(?:cid:|https?:\/\/)[^\]]*\]/gi, " ") // [https://lh6.googleusercontent.com/…] and [cid:image001.png]
+    .replace(/<(?:https?:\/\/|mailto:)[^>]*>/gi, " "); // <http://www.facebook.com/kurufootwear/>
+  body = cutAtSignOff(body);
   for (const marker of SIGNATURE_START) {
     const match = marker.exec(body);
     // Only a marker after some words counts: a reply that opens with "---" keeps its text.
