@@ -52,7 +52,13 @@ export async function POST(request: Request) {
       if (!withHeyReach.has(workspace.id)) {
         await fetch(`${url}/rest/v1/rr_workspaces?id=eq.${encodeURIComponent(workspace.id)}`, { method: "PATCH", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify({ last_successful_poll_at: new Date().toISOString() }) }).catch(() => undefined);
       }
-      if (stats) report.push({ client: workspace.slug, stats });
+      if (stats) {
+        report.push({ client: workspace.slug, stats });
+        // Logged like a HeyReach analytics pass so "last synced" on QC Command and the portal reads it. Marked
+        // source lemlist, which the worker's HeyReach staleness check ignores.
+        const at = new Date().toISOString();
+        await fetch(`${url}/rest/v1/rr_sync_runs`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${key}`, "content-type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify({ workspace_id: workspace.id, run_type: "analytics", source: "lemlist", status: "error" in stats && stats.error ? "failed" : "success", started_at: at, finished_at: at, records_seen: stats.campaigns, records_written: stats.days, error_text: ("error" in stats && stats.error) || null }) }).catch(() => undefined);
+      }
       for (const conversationId of sync.ingested) {
         await classifyLatestReply(config, conversationId, workspace.slug, { workspaceName: workspace.name }).catch(() => undefined);
         await alertNewReplies(config, conversationId).catch(() => undefined);
