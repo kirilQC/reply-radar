@@ -661,7 +661,7 @@ export default function AnalyticsPage() {
           const rate = (value: number | null) => (value == null ? "—" : `${value.toFixed(1)}%`);
           return (
             <section className="analytics-card email-metrics-card">
-              <CardTitle title="Email" subtitle="Email Bison, our campaigns" />
+              <CardTitle title="Email" subtitle="Email Bison and lemlist, our campaigns" />
               <div className="analytics-kpis analytics-kpis-secondary email-kpis">
                 <Kpi label="Emails sent" value={t.sent.toLocaleString()} sub={`${t.leadsContacted.toLocaleString()} leads contacted`} />
                 <Kpi label="Replies" value={t.replies.toLocaleString()} sub={`${rate(t.replyRate)} of leads contacted`} />
