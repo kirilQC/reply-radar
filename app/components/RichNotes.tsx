@@ -137,13 +137,9 @@ export default function RichNotes({ value, onChange, placeholder = "Everything a
       // A click on a link or an attached file opens it in a new tab (a file the browser cannot show is
       // downloaded). To edit a link, put the cursor in it with the arrow keys, or select it and use the
       // link button: the bar with Edit / Remove appears either way.
-      handleClick: (_view, _pos, event) => {
-        const a = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
-        if (!a) return false;
-        event.preventDefault();
-        window.open(a.href, "_blank", "noopener");
-        return true;
-      },
+      // (The opening itself happens on the wrapper's mousedown, below; this only stops the editor moving the
+      // cursor into the link on the same click.)
+      handleClick: (_view, _pos, event) => Boolean((event.target as HTMLElement | null)?.closest?.("a[href]")),
     },
     onUpdate: ({ editor: e }) => onChange(markdownOf(e)),
   });
@@ -245,7 +241,20 @@ export default function RichNotes({ value, onChange, placeholder = "Everything a
         </div>
       )}
 
-      <div className={`rn-body ${empty ? "rn-empty" : ""}`} onClick={() => ed?.chain().focus().run()}>
+      <div
+        className={`rn-body ${empty ? "rn-empty" : ""}`}
+        // Caught here, before the editor sees it: a click on a link or attached file opens it in a new tab
+        // (the browser downloads what it cannot show). The editor's own click hook proved unreliable inside
+        // contenteditable, where Chrome never follows a link itself.
+        onMouseDownCapture={(e) => {
+          const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+          if (!a || e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          window.open(a.href, "_blank", "noopener");
+        }}
+        onClick={(e) => { if (!(e.target as HTMLElement | null)?.closest?.("a[href]")) ed?.chain().focus().run(); }}
+      >
         <EditorContent editor={editor} />
       </div>
     </div>
