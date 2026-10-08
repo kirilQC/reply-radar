@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { BISON_KEY_ENV, BISON_URL_ENV, bisonConfigured, listBisonWorkspaces, matchBisonWorkspace } from "../../../lib/emailbison";
-import { EMAIL_WORKSPACE_COLUMNS, ensureBisonLink, recleanEmailConversations, refreshBisonStats, registerBisonWebhook, relinkEmailLeads, syncBisonReplies, type EmailWorkspace } from "../../../lib/email-ingest";
+import { EMAIL_WORKSPACE_COLUMNS, diagnoseEmailLeads, ensureBisonLink, recleanEmailConversations, refreshBisonStats, registerBisonWebhook, relinkEmailLeads, syncBisonReplies, type EmailWorkspace } from "../../../lib/email-ingest";
 import { publicBaseUrl } from "../../../lib/public-url";
 
 /** The host the page is served from (www): the bare domain 308s POSTs, which webhook senders do not follow. */
@@ -94,6 +94,7 @@ export async function POST(request: Request) {
         else if (action === "sync") results.push({ client: workspace.slug, ...(await syncBisonReplies(c, workspace, body.full === true ? 60 : 10, body.full === true)) });
         else if (action === "stats") results.push({ client: workspace.slug, ...(await refreshBisonStats(c, workspace)) });
         else if (action === "relink") results.push({ client: workspace.slug, ...(await relinkEmailLeads(c, workspace)) });
+        else if (action === "diagnose") results.push({ client: workspace.slug, leads: await diagnoseEmailLeads(c, workspace) });
         else if (action === "reclean") results.push({ client: workspace.slug, ...(await recleanEmailConversations(c, workspace)) });
         else return NextResponse.json({ ok: false, error: "Unknown action." }, { status: 400 });
       } catch (error) {

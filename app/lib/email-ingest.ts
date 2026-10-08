@@ -609,3 +609,22 @@ export async function registerBisonWebhook(config: Config, workspace: EmailWorks
   await rest(config, `rr_workspaces?id=eq.${enc(workspace.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ emailbison_webhook_id: webhookId || "created", emailbison_webhook_secret: secret }) });
   return { ok: true, webhookId };
 }
+
+
+/** Read-only: how the ingest classifies each message in a few email leads' Bison histories (debugging). */
+export async function diagnoseEmailLeads(config: Config, workspace: EmailWorkspace, limit = 3): Promise<Row[]> {
+  const link = await ensureBisonLink(config, workspace);
+  if (!link) return [];
+  const leads = await rows(config, `rr_leads?select=name,raw_data&workspace_id=eq.${enc(workspace.id)}&raw_data->reply_radar->emailbison->>lead_id=not.is.null&limit=${limit}`);
+  const out: Row[] = [];
+  for (const lead of leads) {
+    const bisonLeadId = text(object(object(object(lead.raw_data).reply_radar).emailbison).lead_id);
+    const replies = await leadReplies(link.token, bisonLeadId).catch((error) => [{ error: String(error) }] as unknown as BisonReply[]);
+    out.push({
+      lead: text(lead.name),
+      bisonLeadId,
+      replies: replies.map((row) => ({ id: row.id, folder: row.folder, type: row.type, date_received: row.date_received, automated_reply: row.automated_reply, subject: text(row.subject).slice(0, 60), ours: isOurEmail(row), auto: isAutoReply(row), text: replyText(row).slice(0, 90), error: (row as Row).error })),
+    });
+  }
+  return out;
+}
