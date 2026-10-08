@@ -211,6 +211,37 @@ export async function gatherPriorBriefs(
   }
 }
 
+/**
+ * Why a client's brief does or does not remember: each stored brief, and the rule that keeps it out of
+ * memory if one does. Read-only, for the brief API's `?memory=<slug>` check.
+ */
+export async function briefMemoryReport(read: (path: string) => Promise<unknown>, workspace: BriefWorkspace) {
+  const resetRaw = String((await readConfig(briefMemoryResetKey(String(workspace.id ?? ""))).catch(() => "")) ?? "");
+  const resetAt = Date.parse(resetRaw);
+  const rows = await read(
+    `rr_slack_briefs?select=created_at,destination,status,slack_channel_id,slack_message_ts,sources,body`
+    + `&workspace_id=eq.${encodeURIComponent(workspace.id)}&automation=eq.morning_brief&order=created_at.desc&limit=12`,
+  ).catch(() => []);
+  const current = briefChannelsOf(workspace);
+  return {
+    current,
+    resetAt: resetRaw || null,
+    briefs: (Array.isArray(rows) ? (rows as Row[]) : []).map((row) => {
+      const recorded = (row.sources as Row | null)?.channels as Row | undefined;
+      const reasons = [
+        row.destination !== "internal" && `destination ${String(row.destination)}`,
+        row.status !== "success" && `status ${String(row.status)}`,
+        !row.slack_message_ts && "never posted",
+        !Number.isNaN(resetAt) && Date.parse(String(row.created_at)) <= resetAt && "before the memory reset",
+        recorded && (String(recorded.internal ?? "") !== current.internal || String(recorded.external ?? "") !== current.external)
+          && `read other channels (${String(recorded.internal ?? "")} / ${String(recorded.external ?? "")})`,
+        !String(row.body ?? "").trim() && "empty body",
+      ].filter(Boolean);
+      return { at: row.created_at, inMemory: reasons.length === 0, excludedBecause: reasons, struck: struckItems(String(row.body ?? "")).length };
+    }),
+  };
+}
+
 /** How far back an item marked done on a brief stays closed. */
 const CLOSED_ITEMS_DAYS = 21;
 

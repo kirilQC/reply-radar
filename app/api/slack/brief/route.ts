@@ -28,7 +28,7 @@
 
 import { NextResponse } from "next/server";
 import { briefHeaderText, briefTrace, briefUserContent, briefWithFooter, gatherSignals, type BriefWorkspace } from "../../../lib/morning-brief";
-import { BRIEF_MODEL, briefChannelsOf, briefMemoryResetKey, gatherCalls, gatherChannels, gatherClosedItems, gatherLiveFigures, gatherPriorBriefs, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
+import { BRIEF_MODEL, briefMemoryReport, briefChannelsOf, briefMemoryResetKey, gatherCalls, gatherChannels, gatherClosedItems, gatherLiveFigures, gatherPriorBriefs, morningBriefPrompt, writeBrief } from "../../../lib/morning-brief-run";
 import { dropClosedItems } from "../../../../shared/brief-closed.mjs";
 import { brainContext } from "../../../lib/brain-context";
 import { writeConfig } from "../../../lib/app-config";
@@ -161,11 +161,19 @@ function countsAsSent(row: Row, nowMs: number) {
  * HeyReach key is read as a list of ids that have one rather than as a column, so no key material is
  * pulled out of the database to answer a question that only needs a yes or no.
  */
-export async function GET() {
+export async function GET(request: Request) {
   const credential = credentials();
   if (!credential) return slimJson({ error: "Supabase not configured" }, { status: 503 });
   const { url, key } = credential;
   const read = reader(url, key);
+
+  // ?memory=<slug>: which of the client's stored briefs the next brief will remember, and why not the rest.
+  const memorySlug = new URL(request.url).searchParams.get("memory");
+  if (memorySlug) {
+    const found = ((await read(`rr_workspaces?select=id,slug,slack_internal_channel_id,slack_external_channel_id&slug=eq.${encodeURIComponent(memorySlug)}&limit=1`).catch(() => [])) as Row[])[0];
+    if (!found) return slimJson({ error: "That client does not exist." }, { status: 404 });
+    return slimJson({ ok: true, ...(await briefMemoryReport(read, found as unknown as BriefWorkspace)) });
+  }
 
   try {
     const [workspaceRows, keyedRows, briefRows, granolaRows, automationRows] = await Promise.all([
