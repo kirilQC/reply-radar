@@ -1555,6 +1555,8 @@ async function collectAnalytics() {
      */
     const failures = [];
     campaigns = await collectCampaignStats(workspace).catch((error) => { failures.push(`campaign stats: ${error instanceof Error ? error.message : String(error)}`); return 0; });
+    // A campaign renamed in HeyReach since the last pass: stored replies follow it to the new name.
+    await renameStoredCampaigns(workspace).catch((error) => console.warn("reply_radar_campaign_rename_failed", { workspace: workspace.slug, error: String(error).slice(0, 200) }));
     await touchHeartbeat();
     days = await collectDailyStats(workspace).catch((error) => { failures.push(`daily stats: ${error instanceof Error ? error.message : String(error)}`); return 0; });
     if (failures.length) throw new Error(failures.join("; "));
@@ -1648,6 +1650,55 @@ async function deleteRows(table, column, ids) {
   }
 }
 
+/**
+ * A campaign renamed in HeyReach (CAMB's "CAMB Live Commentary - Sports" became "CA001: …") left every stored
+ * message and lead summary under the old name, so the QC-code rule kept treating it as the client's own
+ * campaign and the portal hid its replies. After campaign stats are collected, every stored message whose
+ * campaign id matches but whose name is stale gets the current name, and the lead summaries follow.
+ * Cheap when nothing changed: one read per campaign.
+ */
+async function renameStoredCampaigns(workspace) {
+  const wid = encodeURIComponent(workspace.id);
+  const current = (await supabase(`rr_campaign_stats?select=campaign_id,name&workspace_id=eq.${wid}`)) || [];
+  let messages = 0;
+  const renames = new Map();
+  for (const campaign of current) {
+    const cid = String(campaign.campaign_id || "");
+    const name = String(campaign.name || "");
+    if (!cid || !name) continue;
+    const stale = (await supabase(`rr_messages?select=id,raw_data&raw_data->reply_radar->campaign->>id=eq.${encodeURIComponent(cid)}&raw_data->reply_radar->campaign->>name=neq.${encodeURIComponent(name)}&limit=2000`)) || [];
+    for (const row of stale) {
+      const raw = row.raw_data || {};
+      const radar = raw.reply_radar || {};
+      const oldName = String((radar.campaign || {}).name || "");
+      if (oldName) renames.set(oldName, name);
+      await supabase(`rr_messages?id=eq.${encodeURIComponent(row.id)}`, {
+        method: "PATCH", headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ raw_data: { ...raw, reply_radar: { ...radar, campaign: { ...(radar.campaign || {}), name } } } }),
+      });
+      messages += 1;
+    }
+  }
+  let leads = 0;
+  for (const [oldName, name] of renames) {
+    const rows = (await supabase(`rr_leads?select=id,raw_data&workspace_id=eq.${wid}&raw_data->reply_radar->rollup->>campaign_names=like.*${encodeURIComponent(oldName)}*&limit=2000`)) || [];
+    for (const row of rows) {
+      const raw = row.raw_data || {};
+      const radar = raw.reply_radar || {};
+      const rollup = radar.rollup || {};
+      const swap = (value) => (typeof value === "string" ? value.split(oldName).join(name) : Array.isArray(value) ? value.map((item) => (item === oldName ? name : item)) : value);
+      const attributions = Array.isArray(radar.attributions) ? radar.attributions.map((item) => (item && item.campaignName === oldName ? { ...item, campaignName: name } : item)) : radar.attributions;
+      await supabase(`rr_leads?id=eq.${encodeURIComponent(row.id)}`, {
+        method: "PATCH", headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ raw_data: { ...raw, campaign_names: swap(raw.campaign_names), reply_radar: { ...radar, attributions, rollup: { ...rollup, campaign_names: swap(rollup.campaign_names) } } } }),
+      });
+      leads += 1;
+    }
+  }
+  if (messages) console.info("reply_radar_campaigns_renamed", { workspace: workspace.slug, messages, leads, renames: [...renames].map(([from, to]) => `${from} -> ${to}`) });
+  return { messages, leads };
+}
+
 async function fullPull(workspace, run) {
   const continuing = run.source === "admin-continue";
   const deadline = Date.now() + FULL_PULL_BUDGET_MS;
@@ -1665,6 +1716,8 @@ async function fullPull(workspace, run) {
           .catch((error) => console.warn("reply_radar_full_pull_clear_failed", { workspace: workspace.slug, table, error: error instanceof Error ? error.message : String(error) }));
       }
       const campaigns = await collectCampaignStats(workspace, Number.POSITIVE_INFINITY);
+      const renamed = await renameStoredCampaigns(workspace).catch(() => ({ messages: 0 }));
+      if (renamed.messages) parts.push(`${renamed.messages} messages moved to renamed campaigns`);
       await touchHeartbeat();
       const days = await collectDailyStats(workspace);
       parts.push(`${campaigns} campaigns`, `${days} daily rows`);
