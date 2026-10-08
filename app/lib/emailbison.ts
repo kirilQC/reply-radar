@@ -95,6 +95,13 @@ export async function listReplies(token: string, page = 1): Promise<{ replies: B
   return { replies: (Array.isArray(data.data) ? data.data : []) as BisonReply[], lastPage: Number(meta.last_page) || 1 };
 }
 
+/** One page of a campaign's replies, newest first. Every one is a reply to that campaign (tracked). */
+export async function listCampaignReplies(token: string, campaignId: string | number, page = 1): Promise<{ replies: BisonReply[]; lastPage: number }> {
+  const data = await bison(token, `/api/campaigns/${encodeURIComponent(String(campaignId))}/replies?page=${page}`);
+  const meta = object(data.meta);
+  return { replies: (Array.isArray(data.data) ? data.data : []) as BisonReply[], lastPage: Number(meta.last_page) || 1 };
+}
+
 export async function getReply(token: string, replyId: string | number): Promise<BisonReply | null> {
   try {
     const data = await bison(token, `/api/replies/${encodeURIComponent(String(replyId))}`);

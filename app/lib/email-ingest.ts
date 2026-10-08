@@ -206,29 +206,33 @@ export async function ingestBisonReply(config: Config, workspace: EmailWorkspace
 }
 
 /**
- * The backup to the webhook: the newest inbox pages of one client's Bison workspace, any tracked reply not
- * yet stored ingested. Stops paging at the first page with nothing new, so a quiet inbox costs one call.
+ * The backup to the webhook, and the first backfill: every one of the client's coded campaigns, its replies
+ * newest first, any not yet stored ingested. Reading per campaign (not the shared inbox) matters: a sending
+ * inbox fills with vendor pitches, and a page of those used to end the read before any real reply was seen.
+ * A campaign's paging stops at the first page whose replies are all stored, so a quiet campaign costs one call.
  */
 export async function syncBisonReplies(config: Config, workspace: EmailWorkspace, maxPages = 3): Promise<{ checked: number; ingested: string[] }> {
   const link = await ensureBisonLink(config, workspace);
   if (!link) return { checked: 0, ingested: [] };
-  const { listReplies } = await import("./emailbison");
+  const { listCampaigns, listCampaignReplies } = await import("./emailbison");
+  const campaigns = (await listCampaigns(link.token)).filter((row) => isOurCampaign(text(row.name)) && Number(row.unique_replies ?? row.replied ?? 1) > 0);
   const ingested: string[] = [];
   let checked = 0;
-  for (let page = 1; page <= maxPages; page += 1) {
-    const { replies, lastPage } = await listReplies(link.token, page);
-    const tracked = replies.filter((row) => text(row.type) === "Tracked Reply" && row.lead_id && row.campaign_id);
-    checked += replies.length;
-    let fresh = 0;
-    for (const reply of tracked) {
-      const key = `bison:reply:${text(reply.id)}`;
-      const stored = await rows(config, `rr_messages?select=id&heyreach_message_id=eq.${enc(key)}&limit=1`);
-      if (stored[0]) continue;
-      fresh += 1;
-      const result = await ingestBisonReply(config, workspace, text(reply.id)).catch(() => null);
-      if (result && "conversationId" in result) ingested.push(result.conversationId);
+  for (const campaign of campaigns) {
+    for (let page = 1; page <= maxPages; page += 1) {
+      const { replies, lastPage } = await listCampaignReplies(link.token, text(campaign.id), page);
+      checked += replies.length;
+      let fresh = 0;
+      for (const reply of replies) {
+        if (!reply.lead_id) continue;
+        const stored = await rows(config, `rr_messages?select=id&heyreach_message_id=eq.${enc(`bison:reply:${text(reply.id)}`)}&limit=1`);
+        if (stored[0]) continue;
+        fresh += 1;
+        const result = await ingestBisonReply(config, workspace, text(reply.id)).catch(() => null);
+        if (result && "conversationId" in result) ingested.push(result.conversationId);
+      }
+      if (!fresh || page >= lastPage) break;
     }
-    if (!fresh || page >= lastPage) break;
   }
   await rest(config, `rr_workspaces?id=eq.${enc(workspace.id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ emailbison_synced_at: new Date().toISOString() }) });
   return { checked, ingested: [...new Set(ingested)] };
