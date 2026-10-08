@@ -5,6 +5,7 @@
 /* eslint-disable @next/next/no-html-link-for-pages, jsx-a11y/label-has-associated-control, react/no-unescaped-entities, react-hooks/set-state-in-effect */
 
 import HeyReachPull from "../components/HeyReachPull";
+import LemlistConnect from "../components/LemlistConnect";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import GlobalAppearanceControl from "../components/GlobalAppearanceControl";
@@ -886,6 +887,7 @@ export default function AdminPage() {
                       {/* Real sync times and the full re-pull. These two fields used to be fixed text that read
                           the same for every client. */}
                       <HeyReachPull slug={client.slug} disabled={isNewWorkspace || !client.keyConfigured} />
+                      <LemlistConnect slug={client.slug} disabled={isNewWorkspace} />
                       <label className="field-label">
                         CLIENT MESSAGING DOC
                         <input value={workspaceDraft.messagingDocUrl} onChange={(event) => setWorkspaceDraft((draft) => ({ ...draft, messagingDocUrl: event.target.value }))} placeholder="https://docs.google.com/document/d/…" type="url" />

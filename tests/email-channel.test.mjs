@@ -39,9 +39,19 @@ test("a tracked Email Bison reply counts as our outreach even if our email is mi
 test("HeyReach code never touches email conversations", () => {
   const worker = source("../worker/render-worker.mjs");
   assert.match(worker, /heyreach_conversation_id=not\.like\.bison:\*/, "the hourly HeyReach refresh skips email threads");
-  assert.match(worker, /!String\(row\.heyreach_conversation_id \|\| ""\)\.startsWith\("bison:"\) && !inAccount\.has/, "the full HeyReach pull never deletes email threads");
+  assert.match(worker, /!\/\^\(bison\|lemlist\):\/\.test\(String\(row\.heyreach_conversation_id \|\| ""\)\) && !inAccount\.has/, "the full HeyReach pull never deletes email or lemlist threads");
   assert.match(source("../app/lib/conversation-send.ts"), /startsWith\("bison:"\)[\s\S]{0,120}sendEmailConversationReply/, "sending an email reply goes through Email Bison");
   assert.match(source("../app/api/conversations/refresh/route.ts"), /startsWith\("bison:"\)\) return refreshEmailConversation/, "the inbox refresh reads email threads from Email Bison");
+});
+
+test("HeyReach code never touches lemlist conversations", () => {
+  const worker = source("../worker/render-worker.mjs");
+  assert.match(worker, /heyreach_conversation_id=not\.like\.lemlist:\*/, "the hourly HeyReach refresh skips lemlist threads");
+  assert.match(source("../app/lib/conversation-send.ts"), /isLemlistConversationKey\(conversation\.heyreach_conversation_id\)\) \{[\s\S]{0,120}sendLemlistConversationReply/, "a lemlist reply is sent through lemlist");
+  assert.match(source("../app/api/conversations/refresh/route.ts"), /isLemlistConversationKey\(conv\.heyreach_conversation_id\)\) return refreshLemlistConversation/, "the inbox refresh reads lemlist threads from lemlist");
+  const ingest = source("../app/lib/lemlist-ingest.ts");
+  assert.match(ingest, /if \(!isOurCampaign\(campaignName\)\) return \{ discarded: true, reason: "not_our_campaign" \}/, "lemlist replies follow the QC campaign code rule");
+  assert.match(ingest, /isAutoReply\(/, "out-of-office emails from lemlist are dropped");
 });
 
 test("only tracked replies to coded campaigns are ingested", () => {

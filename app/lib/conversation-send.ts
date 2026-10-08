@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { writeAuditEvent } from "./audit-log";
 import { syntheticMessageId } from "./heyreach-conversation";
 import { sendEmailConversationReply } from "./email-ingest";
+import { isLemlistConversationKey, sendLemlistConversationReply } from "./lemlist-ingest";
 
 type Row = Record<string, unknown>;
 export type SendResult = { status: number; ok: boolean; error?: string; sentAt?: string; message?: string };
@@ -151,6 +152,14 @@ export async function sendConversationReply(
       const sent = await sendEmailConversationReply({ url, key }, conversationId, message);
       if (sent.ok) {
         await writeAuditEvent({ url, key }, { actor: input.actor || "QC Command", action: "conversation.reply_sent", entityType: "conversation", entityId: conversationId, details: { source: input.source, status: "success", channel: "email", summary: "Email reply sent through Email Bison." } }).catch(() => undefined);
+      }
+      return { status: sent.status, ok: sent.ok, error: sent.error, sentAt: sent.sentAt };
+    }
+    // A lemlist conversation goes out through lemlist, on its own channel (email or LinkedIn).
+    if (isLemlistConversationKey(conversation.heyreach_conversation_id)) {
+      const sent = await sendLemlistConversationReply({ url, key }, conversationId, message);
+      if (sent.ok) {
+        await writeAuditEvent({ url, key }, { actor: input.actor || "QC Command", action: "conversation.reply_sent", entityType: "conversation", entityId: conversationId, details: { source: input.source, status: "success", channel: "lemlist", summary: "Reply sent through lemlist." } }).catch(() => undefined);
       }
       return { status: sent.status, ok: sent.ok, error: sent.error, sentAt: sent.sentAt };
     }

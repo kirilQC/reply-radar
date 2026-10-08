@@ -277,7 +277,7 @@ async function refreshAllConversations() {
     let conversations;
     try {
       conversations = await supabase(
-        `rr_conversations?select=id,lead_id,account_id,heyreach_conversation_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&heyreach_conversation_id=not.like.bison:*&or=(last_refreshed_at.is.null,last_refreshed_at.lt.${encodeURIComponent(cutoff)})&last_message_at=gte.${encodeURIComponent(dormantCutoff)}&order=last_refreshed_at.asc.nullsfirst&limit=${REFRESH_BATCH_SIZE}`,
+        `rr_conversations?select=id,lead_id,account_id,heyreach_conversation_id&workspace_id=eq.${encodeURIComponent(workspace.id)}&heyreach_conversation_id=not.like.bison:*&heyreach_conversation_id=not.like.lemlist:*&or=(last_refreshed_at.is.null,last_refreshed_at.lt.${encodeURIComponent(cutoff)})&last_message_at=gte.${encodeURIComponent(dormantCutoff)}&order=last_refreshed_at.asc.nullsfirst&limit=${REFRESH_BATCH_SIZE}`,
       );
     } catch (error) {
       totalErrors++;
@@ -1741,8 +1741,8 @@ async function fullPull(workspace, run) {
           stored.push(...(page || []));
           if (!page || page.length < 1000) break;
         }
-        // Email conversations (`bison:` keys) are not in HeyReach at all, so they are never foreign here.
-        const foreign = stored.filter((row) => !String(row.heyreach_conversation_id || "").startsWith("bison:") && !inAccount.has(String(row.heyreach_conversation_id || "").split("::")[0]));
+        // Email Bison (`bison:`) and lemlist (`lemlist:`) conversations are not in HeyReach at all, so they are never foreign here.
+        const foreign = stored.filter((row) => !/^(bison|lemlist):/.test(String(row.heyreach_conversation_id || "")) && !inAccount.has(String(row.heyreach_conversation_id || "").split("::")[0]));
         if (foreign.length) {
           await deleteRows("rr_conversations", "id", foreign.map((row) => String(row.id)));
           // Their leads go too, unless the lead still has a conversation that does belong here.
@@ -2346,6 +2346,14 @@ async function emailLoop() {
         if (busy.length) console.info("reply_radar_email_sync", { clients: busy });
       } catch (error) {
         console.warn("reply_radar_email_sync_failed", String(error.message || error).slice(0, 200));
+      }
+      // lemlist, the same way: the backup to its reply webhooks (app/api/lemlist/sync).
+      try {
+        const result = await appPost("/api/lemlist/sync", {}, { timeoutMs: 295_000 });
+        const busy = (result.clients || []).filter((row) => row.ingested || row.error);
+        if (busy.length) console.info("reply_radar_lemlist_sync", { clients: busy });
+      } catch (error) {
+        console.warn("reply_radar_lemlist_sync_failed", String(error.message || error).slice(0, 200));
       }
     }
     await new Promise((resolve) => setTimeout(resolve, EMAIL_SYNC_IDLE_MS));
