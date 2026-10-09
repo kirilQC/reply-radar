@@ -46,6 +46,7 @@
  * "no such client" invents one, whereas a model handed the actual names picks the right one.
  */
 
+import { crmPushNow, crmSyncStatus } from "./crm-sync-status";
 import { campaignStatusFor } from "./heyreach-campaigns";
 import { lemlistCampaignsAnswer, lemlistMetricsAnswer, lemlistSendersAnswer, lemlistTotalsAnswer } from "./lemlist-assistant";
 import { clientSchedule, DEFAULT_SCHEDULE, describeSchedule, EOW_DEFAULT_SCHEDULE, SCHEDULE_OVERRIDE_KEYS, type BriefSchedule } from "./morning-brief-schedule";
@@ -818,6 +819,18 @@ const BASE_TOOLS: ToolDefinition[] = [
       },
       required: ["client", "table", "records"],
     },
+  },
+  {
+    name: "crm_sync_status",
+    description:
+      "Where each client's replies and booked meetings go outside QC Command, and whether it is working. For the client's CRM (HubSpot or Attio): which account, whether the build is done, automatic pushing on/off, the last push and its result, how many replies (contacts) have been pushed and any failing, the QC Growth owner, whether booked meetings become deals (pipeline and Booked Meeting (QC) stage, deals pushed, failures), and links to the HubSpot QC Growth dashboard and contacts view or the Attio QC Growth list and QC Dashboard app. For each Google Sheet: what it holds (replies or booked meetings), whether its column mapping is confirmed, automatic pushing, last push and result, rows pushed and its link. Pass a client for one; omit for every client that has a CRM or sheet. Never returns keys or sign-ins. Use for any question about HubSpot, Attio, Google Sheets, CRM sync, pushing replies or booked meetings into a CRM, deals QC created, or 'is X syncing'.",
+    input_schema: { type: "object", properties: { client: { type: "string", description: "Optional client name or slug. Omit for every client with a CRM or sheet connected." } } },
+  },
+  {
+    name: "crm_push_now",
+    description:
+      "Push a client's new and changed replies and booked meetings to their CRM (HubSpot or Attio) and every Google Sheet right now, instead of waiting for the automatic sync (which runs every few minutes). Only sends to destinations whose build is confirmed; existing contacts, deals and rows are updated in place, never duplicated. Use when someone asks to sync, push or refresh a client's CRM or sheet now.",
+    input_schema: { type: "object", properties: { ...CLIENT_ARG }, required: ["client"] },
   },
   {
     name: "slack_channels",
@@ -1920,6 +1933,18 @@ export async function runTool(name: string, input: Row): Promise<unknown> {
       };
     }
 
+    case "crm_sync_status": {
+      const c = { url: process.env.SUPABASE_URL ?? "", key: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "" };
+      const all = await clients();
+      const names = new Map(all.map((client) => [client.id, client.name]));
+      const ids = text(input.client).trim() ? [(await resolveClient(input.client)).id] : null;
+      return { clients: await crmSyncStatus(c, ids, names) };
+    }
+    case "crm_push_now": {
+      const c = { url: process.env.SUPABASE_URL ?? "", key: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "" };
+      const client = await resolveClient(input.client);
+      return { client: client.name, ...(await crmPushNow(c, client.id)) };
+    }
     case "slack_channels": {
       if (!slackReadable()) throw new Error("Slack reading is not configured: neither a Slack user nor bot token is set.");
       const select = "name,slug,slack_internal_channel_id,slack_external_channel_id,slack_extra_channel_ids";

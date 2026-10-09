@@ -4,7 +4,7 @@
 import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, type Destination } from "../../../lib/crm-push";
 import { pushOne, pushPass } from "../../../lib/crm-push-run";
-import { hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotAudit, type HubSpotPlan } from "../../../lib/hubspot-push";
+import { hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotPlan } from "../../../lib/hubspot-push";
 import { hubspotBuildReporting, hubspotUserView } from "../../../lib/hubspot-reporting";
 import { dealsApply, dealsAudit, dealsPlan, type DealsPlan } from "../../../lib/hubspot-deals";
 import { pushMeetingsPass } from "../../../lib/meetings-deals-run";
@@ -149,100 +149,6 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const failed = log.filter((entry) => entry.result === "failed");
       await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: failed.length ? "planned" : "built", ...(!failed.length && destination.status !== "built" ? { auto_push: true } : {}) });
       return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
-    }
-    // Read-only: which HubSpot surfaces this client's key can reach (saved views, reports, segments, HubSQL),
-    // so the cockpit only offers what the key can actually build. Status codes only, never data.
-    if (action === "probe") {
-      const token = destination.api_key;
-      const probes: Array<[string, string, string, unknown?]> = [
-        ["views (CLI backend)", "GET", "/hub/cli/backend/crm/contacts/views"],
-        ["reports list", "GET", "/dashboard/v2/reports?limit=1"],
-        ["reports (reporting v1 fetch)", "GET", "/reporting/v1/reports/fetch?limit=1"],
-        ["segments (public lists API)", "POST", "/crm/v3/lists/search", { count: 1, processingTypes: ["DYNAMIC"] }],
-        ["segments (CLI backend)", "GET", "/hub/cli/backend/v1/segments/search?limit=1"],
-        ["HubSQL query", "POST", "/analytics/hubsql/2027-03-beta/query", { query: "SELECT COUNT(*) FROM contacts" }],
-        ["dashboards search (reporting beta)", "GET", "/analytics/reporting/2027-03-beta/dashboards?limit=1"],
-        ["reports search (reporting beta)", "GET", "/analytics/reporting/2027-03-beta/reports?limit=1"],
-      ];
-      const results: Array<{ name: string; status: number; message: string }> = [];
-      for (const [name, method, path, body] of probes) {
-        const response = await fetch(`https://api.hubapi.com${path}`, { method, headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" }).catch(() => null);
-        const raw = response ? await response.text().catch(() => "") : "";
-        let message = "";
-        try { message = String((JSON.parse(raw) as { message?: string; category?: string }).message ?? "").slice(0, 160); } catch { message = raw.slice(0, 80); }
-        results.push({ name, status: response?.status ?? 0, message: response && response.ok ? "" : message });
-      }
-      const info = await fetch("https://api.hubapi.com/oauth/v2/private-apps/get/access-token-info", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tokenKey: token }), cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
-      const scopes = (Array.isArray((info as { scopes?: unknown }).scopes) ? (info as { scopes: string[] }).scopes : []).filter((scope) => /report|dashboard|list|hubsql/i.test(scope));
-      return NextResponse.json({ ok: true, probe: results, scopes });
-    }
-    if (action === "reporting") {
-      if (!hubspotAppConfigured()) return NextResponse.json({ ok: false, error: "QC Growth's HubSpot app keys are not on Vercel yet." }, { status: 400 });
-      const userToken = await hubspotUserToken(c, destination);
-      if (!userToken) return NextResponse.json({ ok: false, error: "Connect the QC Growth user first." }, { status: 400 });
-      const reporting = await hubspotBuildReporting(userToken);
-      const fresh = (await loadDestination(c, workspace.id, "crm")) ?? destination;
-      const userView = fresh.config?.view_user_id ? null : await hubspotUserView(userToken, (fresh.audit as { qcView?: { id: string } } | null)?.qcView?.id ?? null);
-      if (userView) reporting.log.push(userView.log);
-      await saveDestination(c, workspace.id, "crm", { build_log: [...(fresh.build_log ?? []), ...reporting.log] as unknown as Row[], config: { ...(fresh.config ?? {}), ...(reporting.dashboardId ? { dashboard_id: reporting.dashboardId } : {}), ...(userView?.viewId ? { view_user_id: userView.viewId } : {}) } });
-      const failed = reporting.log.filter((entry) => entry.result === "failed");
-      return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
-    }
-    if (action === "disconnect_user") {
-      const { hubspot_user: _, ...rest } = (destination.config ?? {}) as Row;
-      await saveDestination(c, workspace.id, "crm", { config: rest });
-      return reply();
-    }
-    if (action === "probe_calls") {
-      // Raw reporting calls with the client's key, for working out what HubSpot accepts. Reporting paths only.
-      const allowed = /^\/(analytics\/reporting\/|hub\/cli\/backend\/reporting\/|dashboard\/v2\/|reporting\/v\d\/|crm\/v3\/pipelines\/)/;
-      const calls = (Array.isArray(body.calls) ? body.calls : []).slice(0, 12) as Array<{ method?: string; path?: string; body?: unknown; ua?: boolean }>;
-      const out: Array<{ method: string; path: string; status: number; body: string }> = [];
-      for (const entry of calls) {
-        const method = String(entry.method ?? "GET").toUpperCase();
-        const path = String(entry.path ?? "");
-        if (!allowed.test(path)) { out.push({ method, path, status: 0, body: "path not allowed" }); continue; }
-        const response = await fetch(`https://api.hubapi.com${path}`, { method, headers: { Authorization: `Bearer ${destination.api_key}`, "content-type": "application/json", ...(entry.ua ? { "user-agent": "hubcli/0.15.1" } : {}) }, body: entry.body === undefined ? undefined : JSON.stringify(entry.body), cache: "no-store" }).catch(() => null);
-        out.push({ method, path, status: response?.status ?? 0, body: response ? (await response.text().catch(() => "")).slice(0, 1500) : "" });
-      }
-      return NextResponse.json({ ok: true, out });
-    }
-    if (action === "probe_write") {
-      // Creates one TEST view, segment, report and dashboard with the client's key, reads each back, deletes them all.
-      const token = destination.api_key;
-      const call = async (method: string, path: string, payload?: unknown) => {
-        const response = await fetch(`https://api.hubapi.com${path}`, { method, headers: { Authorization: `Bearer ${token}`, "content-type": "application/json", ...(path.startsWith("/hub/cli/") ? { "user-agent": "hubcli/0.15.1", accept: "*/*" } : {}) }, body: payload === undefined ? undefined : JSON.stringify(payload), cache: "no-store" }).catch(() => null);
-        const raw = response ? await response.text().catch(() => "") : "";
-        let json: Record<string, unknown> = {};
-        try { json = JSON.parse(raw); } catch { /* empty */ }
-        return { status: response?.status ?? 0, json, message: response?.ok ? "" : String(json.message ?? raw).slice(0, 200) };
-      };
-      const steps: Array<{ step: string; status: number; id?: string; detail?: string; message?: string }> = [];
-      const platforms = ["heyreach", "lemlist", "email_bison"];
-      const view = await call("POST", "/hub/cli/backend/crm/contacts/views", { name: "TEST QC Growth view", objectTypeId: "contacts", columns: [{ name: "firstname" }, { name: "lastname" }, { name: "qc_campaign" }, { name: "qc_last_reply_date" }], filterGroups: [{ filters: [{ property: "qc_outreach_platform", operator: "IN", values: platforms }] }], sort: { property: "qc_last_reply_date", direction: "DESCENDING" } });
-      const viewId = String(view.json.id ?? "");
-      steps.push({ step: "view create", status: view.status, id: viewId, detail: view.message });
-      if (viewId) { const back = await call("GET", `/hub/cli/backend/crm/contacts/views/${viewId}`); steps.push({ step: "view read back", status: back.status, detail: JSON.stringify(back.json.filterGroups ?? back.json.filters ?? "").slice(0, 200) }); }
-      const list = await call("POST", "/crm/v3/lists", { name: "TEST QC Growth segment", objectTypeId: "0-1", processingType: "DYNAMIC", filterBranch: { filterBranchType: "OR", filters: [], filterBranches: [{ filterBranchType: "AND", filterBranches: [], filters: [{ filterType: "PROPERTY", property: "qc_outreach_platform", operation: { operationType: "ENUMERATION", operator: "IS_ANY_OF", values: platforms } }] }] } });
-      const listId = String((list.json.list as { listId?: string } | undefined)?.listId ?? "");
-      steps.push({ step: "segment create", status: list.status, id: listId, detail: list.message });
-      const reportSql = "SELECT qc_campaign, COUNT(*) FROM CONTACT WHERE qc_outreach_platform IN ('heyreach', 'lemlist', 'email_bison') GROUP BY qc_campaign";
-      const report = await call("POST", "/hub/cli/backend/reporting/v1/reports/create", { sql: reportSql, intent: reportSql, chartType: "BAR", name: "TEST QC replies by campaign" });
-      steps.push({ step: "report create (cli backend)", status: report.status, id: String(report.json.id ?? ""), detail: report.message });
-      const direct = report.json.id ? report : await call("POST", "/reporting/v1/reports/create", { sql: reportSql, intent: reportSql, chartType: "BAR", name: "TEST QC replies by campaign" });
-      if (direct !== report) steps.push({ step: "report create (reporting v1)", status: direct.status, id: String(direct.json.id ?? ""), detail: direct.message });
-      const reportId = String(direct.json.id ?? "");
-      const dashboard = await call("POST", "/analytics/reporting/2027-03-beta/dashboards", { name: "TEST QC Growth dashboard", permissions: { permissionType: "EVERYONE_VIEW" }, ...(reportId ? { reportIdsToAdd: [reportId] } : {}) });
-      const dashboardId = String(dashboard.json.id ?? "");
-      steps.push({ step: "dashboard create", status: dashboard.status, id: dashboardId, detail: dashboard.message || `widgets: ${Array.isArray(dashboard.json.widgets) ? dashboard.json.widgets.length : "?"}` });
-      if (body.keep === true) return NextResponse.json({ ok: true, steps, kept: true });
-      if (dashboardId) steps.push({ step: "dashboard delete", ...(await call("DELETE", `/analytics/reporting/2027-03-beta/dashboards/${dashboardId}`)), id: dashboardId });
-      for (const id of [reportId, ...(Array.isArray(body.extraReports) ? body.extraReports.map(String) : [])].filter(Boolean)) steps.push({ step: "report delete", ...(await call("DELETE", `/dashboard/v2/reports/${id}`)), id });
-      if (listId) steps.push({ step: "segment delete", ...(await call("DELETE", `/crm/v3/lists/${listId}`)), id: listId });
-      if (viewId) steps.push({ step: "view delete", ...(await call("DELETE", `/hub/cli/backend/crm/contacts/views/${viewId}`)), id: viewId });
-      const info = await fetch("https://api.hubapi.com/oauth/v2/private-apps/get/access-token-info", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tokenKey: token }), cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
-      const scopes = (Array.isArray((info as { scopes?: unknown }).scopes) ? (info as { scopes: string[] }).scopes : []).filter((scope) => /report|dashboard|list/i.test(scope));
-      return NextResponse.json({ ok: true, scopes, steps: steps.map(({ step, status, id, detail, message }) => ({ step, status, id, detail: detail ?? message })) });
     }
     if (action === "push_one") {
       return reply({ test: await pushOne(c, destination as Destination) });

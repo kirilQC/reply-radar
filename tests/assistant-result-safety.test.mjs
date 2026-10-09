@@ -104,3 +104,17 @@ test("an answer that would need more than 48 blocks falls back to plain text", (
   assert.equal(blocks, null);
   assert.ok(text.length > 0);
 });
+
+test("credential tables can't be read or embedded, casts are refused, and JSON read out as text is redacted", () => {
+  // The QC Growth user's HubSpot sign-in lives in rr_crm_push.config, the Google sign-in in rr_app_config.
+  assert.throws(() => assertSafeSelect("name,rr_crm_push(kind,config->>hubspot_user)"), /credentials/);
+  assert.throws(() => assertSafeSelect("name,rr_crm_push(config)"), /credentials/);
+  assert.throws(() => assertSafeSelect("id,rr_workspaces(name,rr_crm_push(config))"), /credentials/);
+  assert.throws(() => assertSafeSelect("name,rr_app_config(value)"), /credentials/);
+  assert.throws(() => assertSafeSelect("name,guardrails::text"), /Casts/);
+  const out = redact({ name: "x", blob: JSON.stringify({ hubspot_user: { refresh_token: "r", access_token: "a", email: "e" } }) });
+  assert.doesNotMatch(String(out.blob), /"refresh_token"|"access_token"|"r"|"a"/);
+  assert.match(String(out.blob), /has_refresh_token/);
+  // Ordinary reads still work.
+  assert.doesNotThrow(() => assertSafeSelect("name,slug,guardrails->>messaging_doc_url,rr_crm_push_records(provider)"));
+});

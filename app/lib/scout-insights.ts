@@ -353,9 +353,11 @@ async function followUpList(input: Row) {
 async function clientReadiness(input: Row) {
   const all = await allClients();
   const picked = text(input.client) ? pickClients(all, [text(input.client)]) : all;
-  const [tree, onboarding] = await Promise.all([
+  const [tree, onboarding, outbound] = await Promise.all([
     brainConfigured() ? brainTree().catch(() => []) : Promise.resolve([]),
     listOnboardingClients().catch(() => []),
+    // Where replies are pushed (CRM and sheets): safe columns only, no keys.
+    db("rr_crm_push?select=workspace_id,kind,provider,status,auto_push&api_key=not.is.null").catch(() => [] as Row[]),
   ]);
   const paths = tree.map((f) => f.path);
   const sizeOf = new Map(tree.map((f) => [f.path, f.size]));
@@ -386,6 +388,15 @@ async function clientReadiness(input: Row) {
       onboarding: ob ? `${ob.progress.pct}% (${ob.progress.doneLeaves}/${ob.progress.totalLeaves})` : "not started",
       heyreach: c.apiKey ? "connected" : c.lemlistKey ? "lemlist instead" : "missing", lemlist: c.lemlistKey ? "connected" : "none", slackInternal: c.internal ? "set" : "missing", slackExternal: c.external ? "set" : "missing",
       granolaCalls: c.granola ? `matches "${c.granola}"` : "matches the client name", airtable: c.airtable ? "linked" : "not linked", morningBrief: c.morningBrief ? "on" : "off",
+      ...(() => {
+        const mine = (Array.isArray(outbound) ? outbound : []).filter((row) => text(row.workspace_id) === c.id);
+        const crm = mine.find((row) => row.kind === "crm");
+        const sheets = mine.filter((row) => row.kind !== "crm");
+        return {
+          crm: crm ? `${crm.provider === "hubspot" ? "HubSpot" : "Attio"} ${crm.status === "built" ? "built" : "connected, build not approved"}${crm.auto_push === true ? ", pushing automatically" : ""}` : "none",
+          googleSheets: sheets.length ? `${sheets.length} connected (${sheets.filter((row) => row.status === "built").length} mapped)` : "none",
+        };
+      })(),
     };
   });
   const noDoc = new Set(rows.filter((r) => r.messagingDoc === "missing").map((r) => r.client));

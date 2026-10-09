@@ -31,6 +31,8 @@ export const DATA_TABLES: Record<string, string> = {
   rr_email_campaign_stats: "Per-campaign Email Bison figures, refreshed hourly: name, status, total_leads, leads_contacted, emails_sent, unique_replies, interested, bounced, unsubscribed, unique_opens. Primary key workspace_id + campaign_id.",
   rr_email_daily_stats: "Email Bison activity per client per day: sent, replies, interested, bounced, opens.",
   rr_daily_stats: "Per-day, per-sender LinkedIn activity (HeyReach, and lemlist senders as sender_id lemlist:<user>): connection requests, accepts, messages, replies. sender_id empty = the client-wide total.",
+  rr_crm_push_records: "One row per conversation QC pushed to a client's CRM or a Google Sheet: provider (hubspot, attio, google_sheets or google_sheets:<id> for a second sheet), the CRM contact/company/note id (or the sheet row number in contact_id), when, and the error if the last push failed. Join to rr_conversations on conversation_id. For a readable summary use crm_sync_status.",
+  rr_crm_push_meetings: "One row per booked meeting (rr_meetings.id) QC turned into a deal in the client's CRM: provider (hubspot or attio), deal_id, the linked contact and company ids, the note id, when, and the error if it failed.",
   rr_meetings: "Booked meetings: lead details, company, when, campaign, who it is with, notes, enrichment.",
   rr_deals: "CRM deals synced from HubSpot/Attio: name, stage, value, company, attribution to QC (verified / possible / not).",
   rr_call_logs: "Cold calling: every call outcome (Connected, Voicemail, Interested…), note, who called, when, lead.",
@@ -61,6 +63,13 @@ export const DATA_TABLES: Record<string, string> = {
 const SECRET = /(^|_)(api_?key|apikey|ciphertext|secret|token|password|passwd|private_?key|webhook_?url|signing|credential|bearer)s?($|_)/i;
 
 /**
+ * Tables that hold credentials in places a column name can't flag (rr_crm_push.config carries the QC Growth
+ * user's HubSpot sign-in; rr_app_config the Google sign-in; rr_granola_keys keys): never readable, not even
+ * embedded under an allowed table through a foreign key.
+ */
+const SEALED_TABLES = /^(rr_crm_push|rr_app_config|rr_granola_keys)$/i;
+
+/**
  * Secrets are dropped; whether each one is set survives as has_<column>, which is what questions need.
  *
  * Recursive, because a select can embed related rows (`rr_conversations(*, rr_workspaces(*))`) and
@@ -78,6 +87,10 @@ export const redact = (row: Row): Row => {
 function redactValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactValue);
   if (value && typeof value === "object") return redact(value as Row);
+  // JSON read out as text (a `->>` path) is redacted like the object it is.
+  if (typeof value === "string" && /^\s*[[{]/.test(value)) {
+    try { return JSON.stringify(redactValue(JSON.parse(value))); } catch { return value; }
+  }
   return value;
 }
 
@@ -94,6 +107,9 @@ const identifiers = (value: string) => value.match(/[a-z0-9_]+/gi) ?? [];
  */
 export function assertSafeSelect(select: string) {
   if (identifiers(select).some((name) => SECRET.test(name))) throw new Error("That column holds a secret and cannot be read.");
+  if (identifiers(select).some((name) => SEALED_TABLES.test(name))) throw new Error("That table holds credentials and cannot be read. Use crm_sync_status for CRM and sheet connections.");
+  // A cast turns an object into text the redaction can't see into.
+  if (select.includes("::")) throw new Error("Casts (::) are not allowed in a select.");
   const embed = /rr_workspaces\s*(?:![a-z0-9_]+\s*)?\(/gi;
   for (let match = embed.exec(select); match; match = embed.exec(select)) {
     let depth = 1;
