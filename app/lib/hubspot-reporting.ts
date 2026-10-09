@@ -75,7 +75,7 @@ export async function hubspotBuildReporting(token: string): Promise<{ log: Build
       log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "reused", detail: `Dashboard ${dashboardId}${added ? `, ${added} reports added` : ""}` });
     }
   } catch (error) {
-    log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "failed", detail: error instanceof HubSpotError && error.status === 403 ? "HubSpot refused: the QC Growth user needs reporting access in this account." : error instanceof Error ? error.message : "" });
+    log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "failed", detail: error instanceof HubSpotError && error.status === 403 ? `HubSpot refused (403): ${error.message.slice(0, 300)}` : error instanceof Error ? error.message : "" });
   }
   return { log, dashboardId };
 }
