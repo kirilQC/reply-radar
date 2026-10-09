@@ -321,7 +321,9 @@ async function noteChange(config: Config, meeting: Row, kind: "rescheduled" | "c
   const ts = text(slack.ts);
   if (!channel || !ts || !slackConfigured()) return;
   const card = buildBookingCard(meeting, { rescheduledFrom: kind === "rescheduled" ? previousWhen : "", meetingNumber: await meetingNumberFor(config, meeting) });
-  await updateMessage(channel, ts, card.text, card.blocks).catch(() => undefined);
+  await updateMessage(channel, ts, card.text, card.blocks)
+    .catch(() => updateMessage(channel, ts, card.text, card.blocks.map((block) => { const { accessory: _, ...rest } = block as Row; return rest; })))
+    .catch(() => undefined);
   await postMessage(channel, changeNote(meeting, kind, previousWhen), ts).catch(() => "");
 }
 
@@ -600,7 +602,12 @@ async function runSlack(step: Step, ctx: StepContext): Promise<StepResult> {
   const result: StepResult = { ...ctx.previous, channel };
   if (!text(result.ts)) {
     const card = buildBookingCard(ctx.meeting, { test: ctx.test, meetingNumber: await meetingNumberFor(ctx.config, ctx.meeting), rescheduledFrom: "" });
-    result.ts = await postMessage(channel, card.text, "", card.blocks, identity);
+    // An image Slack can't fetch (an expired LinkedIn photo) fails the whole post, so it goes again without it.
+    const plain = card.blocks.map((block) => { const { accessory: _, ...rest } = block as Row; return rest; });
+    result.ts = await postMessage(channel, card.text, "", card.blocks, identity).catch((error) => {
+      if (!card.blocks.some((block) => (block as Row).accessory)) throw error;
+      return postMessage(channel, card.text, "", plain, identity);
+    });
     await ctx.save(result);
   }
   if (!text(result.info_ts)) {

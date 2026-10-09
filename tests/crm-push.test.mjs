@@ -416,3 +416,9 @@ test("the booking card says which meeting with the person it is (canceled ones d
   assert.equal(buildBookingCard({ invitee_name: "A B", company_logo_url: "https://logo/x.png" }).blocks[0].accessory.image_url, "https://logo/x.png");
   assert.equal(buildBookingCard({ invitee_name: "A B" }).blocks[0].accessory, undefined);
 });
+
+test("a lead photo Slack can't fetch never costs the booking post: it is posted again without the image", () => {
+  const run = readFileSync(new URL("../app/lib/booking-run.ts", import.meta.url), "utf8");
+  assert.match(run, /postMessage\(channel, card\.text, "", card\.blocks, identity\)\.catch\(\(error\) => \{\s*if \(!card\.blocks\.some/);
+  assert.match(run, /return postMessage\(channel, card\.text, "", plain, identity\);/);
+});
