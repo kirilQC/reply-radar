@@ -1,0 +1,37 @@
+{
+  "uid": "qc_growth_app",
+  "type": "app",
+  "config": {
+    "description": "QC Growth builds its reporting in your HubSpot: replies from QC Growth's outreach by campaign, sentiment, platform and sender, on one QC Growth dashboard.",
+    "name": "QC Growth",
+    "distribution": "marketplace",
+    "isUserLevel": true,
+    "auth": {
+      "type": "oauth",
+      "redirectUrls": [
+        "https://www.replyradar.dev/api/hubspot/oauth/callback"
+      ],
+      "requiredScopes": [
+        "oauth",
+        "reporting.full.write",
+        "crm.objects.contacts.read"
+      ],
+      "optionalScopes": [
+        "reporting.full.admin"
+      ],
+      "conditionallyRequiredScopes": []
+    },
+    "permittedUrls": {
+      "fetch": [
+        "https://api.hubapi.com"
+      ],
+      "iframe": [],
+      "img": []
+    },
+    "support": {
+      "supportEmail": "admin@qcgrowth.com",
+      "documentationUrl": "https://qcgrowth.com",
+      "supportUrl": "https://qcgrowth.com"
+    }
+  }
+}
