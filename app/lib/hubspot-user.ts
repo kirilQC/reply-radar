@@ -50,8 +50,12 @@ export function readOauthState(state: string): string | null {
   return slug;
 }
 
-/** With the client's portal id, HubSpot opens straight on that account instead of asking which one. */
-export function authorizeUrl(origin: string, slug: string, portalId?: string | null): string {
+/**
+ * With the client's portal id, HubSpot opens straight on that account instead of asking which one. It must be
+ * opened on the portal's own region host (app-na2, app-eu1...): app.hubspot.com with an na2 portal bounces
+ * between HubSpot's login bridge and the authorize page forever.
+ */
+export function authorizeUrl(origin: string, slug: string, portalId?: string | null, accountHost?: string | null): string {
   const { clientId } = app();
   const params = new URLSearchParams({
     client_id: clientId,
@@ -60,7 +64,8 @@ export function authorizeUrl(origin: string, slug: string, portalId?: string | n
     optional_scope: HUBSPOT_USER_OPTIONAL_SCOPES.join(" "),
     state: oauthState(slug),
   });
-  return `https://app.hubspot.com/oauth/${portalId && /^\d+$/.test(portalId) ? `${portalId}/` : ""}authorize?${params}`;
+  const host = /^app(-[a-z]{2}\d+)?\.hubspot\.com$/.test(accountHost ?? "") ? accountHost : "app.hubspot.com";
+  return `https://${host}/oauth/${portalId && /^\d+$/.test(portalId) ? `${portalId}/` : ""}authorize?${params}`;
 }
 
 async function tokenRequest(fields: Record<string, string>): Promise<Row> {

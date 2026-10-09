@@ -126,3 +126,11 @@ test("Every push path takes the per-destination lock, so the sync and a click ne
   assert.match(read("../app/lib/crm-sync-status.ts"), /withPushLock\(config, workspaceId, destination\.kind/);
   assert.doesNotMatch(crmRoute, /probe_calls|probe_write/);
 });
+
+test("HubSpot sign-in opens on the portal's own region host, never app.hubspot.com for an na2 portal (redirect loop)", async () => {
+  const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("../app/lib/hubspot-user.ts", import.meta.url), "utf8"));
+  const start = await import("node:fs").then((fs) => fs.readFileSync(new URL("../app/api/hubspot/oauth/start/route.ts", import.meta.url), "utf8"));
+  assert.match(src, /accountHost\?: string \| null/);
+  assert.match(src, /return `https:\/\/\$\{host\}\/oauth\//);
+  assert.match(start, /authorizeUrl\(OAUTH_ORIGIN, slug, destination\?\.account_id, destination\?\.account_name\)/);
+});
