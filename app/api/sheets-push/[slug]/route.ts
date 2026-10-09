@@ -6,7 +6,8 @@ import { randomUUID } from "node:crypto";
 import { loadDestination, presentDestination, rest, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
 import { pushPass, recordKey } from "../../../lib/crm-push-run";
 import { disconnectGoogle, googleAccount, googleOauthConfigured } from "../../../lib/google-user";
-import { accessToken, ensureQcIdColumn, parseSheetUrl, serviceAccount, serviceAccountStatus, fieldsFor, sheetsConnect, sheetsFormat, sheetsPushMeetings, suggestMapping, type SheetConfig, type SheetContent } from "../../../lib/sheets-push";
+import { accessToken, contentOf as contentValue, ensureQcIdColumn, parseSheetUrl, serviceAccount, serviceAccountStatus, fieldsFor, sheetsConnect, sheetsFormat, suggestMapping, type SheetConfig, type SheetContent } from "../../../lib/sheets-push";
+import { tableItemsPass } from "../../../lib/table-push";
 
 /**
  * The onboarding cockpit's Google Sheets panel for one client (session only). GET says where it stands;
@@ -32,15 +33,15 @@ async function workspaceOf(c: { url: string; key: string }, slug: string) {
   return { id: text(workspace.id), name: text(workspace.name) };
 }
 
-const contentOf = (destination: { config?: unknown } | null) => (((destination?.config ?? {}) as { content?: SheetContent }).content === "meetings" ? "meetings" : "replies") as SheetContent;
-const shared = async (content: SheetContent = "replies") => ({ content, google: await googleAccount().catch(() => null), googleOauth: googleOauthConfigured(), robotEmail: serviceAccount()?.client_email ?? null, googleKey: serviceAccountStatus(), fields: fieldsFor(content).map(({ key, label }) => ({ key, label })), fieldsByContent: { replies: fieldsFor("replies").map(({ key, label }) => ({ key, label })), meetings: fieldsFor("meetings").map(({ key, label }) => ({ key, label })) } });
+const contentOf = (destination: { config?: unknown } | null): SheetContent => contentValue(((destination?.config ?? {}) as { content?: unknown }).content);
+const shared = async (content: SheetContent = "replies") => ({ content, google: await googleAccount().catch(() => null), googleOauth: googleOauthConfigured(), robotEmail: serviceAccount()?.client_email ?? null, googleKey: serviceAccountStatus(), fields: fieldsFor(content).map(({ key, label }) => ({ key, label })), fieldsByContent: { replies: fieldsFor("replies").map(({ key, label }) => ({ key, label })), meetings: fieldsFor("meetings").map(({ key, label }) => ({ key, label })), campaigns: fieldsFor("campaigns").map(({ key, label }) => ({ key, label })) } });
 
 /** Every sheet the client pushes into: the first is kind "sheets", the rest "sheets:<id>". Disconnected ones are left out. */
 async function sheetsOf(c: { url: string; key: string }, workspaceId: string) {
   const all = (await rows(c, `rr_crm_push?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&or=(kind.eq.sheets,kind.like.sheets:*)&order=created_at.asc`)) as unknown as Destination[];
   return all.filter((row) => row.api_key && row.status !== "disconnected");
 }
-const present = (list: Destination[]) => list.map((row) => ({ ...presentDestination(row), content: ((row.config ?? {}) as { content?: string }).content === "meetings" ? "meetings" : "replies" }));
+const present = (list: Destination[]) => list.map((row) => ({ ...presentDestination(row), content: contentOf(row) }));
 
 export async function GET(request: Request, context: { params: Promise<{ slug: string }> }) {
   try {
@@ -90,7 +91,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const sheet = await sheetsConnect(url);
       if (!sheet.headers.some(Boolean)) return NextResponse.json({ ok: false, error: "Add your headers in row 1 of the sheet first." }, { status: 400 });
       const previous = (destination?.config ?? {}) as Partial<SheetConfig>;
-      const content: SheetContent = action === "connect" ? (body.content === "meetings" ? "meetings" : "replies") : contentOf(destination);
+      const content: SheetContent = action === "connect" ? contentValue(body.content) : contentOf(destination);
       // A re-read keeps the confirmed choices for headers that are still there.
       const mapping = suggestMapping(sheet.headers, content).map((suggested, index) => {
         const before = previous.headers?.indexOf(sheet.headers[index]) ?? -1;
@@ -111,8 +112,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     const sheetConfig = (destination.config ?? {}) as unknown as SheetConfig & { url: string };
 
     if (action === "content") {
-      // What the sheet holds: replies (one row per conversation) or booked meetings (one row per person).
-      const content: SheetContent = body.content === "meetings" ? "meetings" : "replies";
+      // What the sheet holds: replies (one row per conversation), booked meetings (one per person) or campaigns.
+      const content: SheetContent = contentValue(body.content);
       if (content === contentOf(destination)) return reply();
       const mapping = suggestMapping(sheetConfig.headers, content);
       await saveDestination(c, workspace.id, kind, { config: { ...sheetConfig, content, mapping } as unknown as Row, status: "planned" });
@@ -136,8 +137,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     if (action === "push") {
       if (destination.status !== "built") return NextResponse.json({ ok: false, error: "Confirm the column mapping first." }, { status: 400 });
       const done = await withPushLock(c, workspace.id, kind, 300_000, async () => {
-        if (contentOf(destination) === "meetings") {
-          const result = await sheetsPushMeetings(c, destination as Destination);
+        if (contentOf(destination) !== "replies") {
+          const result = await tableItemsPass(c, destination as Destination, { all: true });
           const summary = { pushed: result.pushed, created: result.created, updated: result.updated, unchanged: 0, failed: 0, errors: [] as string[], nextOffset: null, at: new Date().toISOString() };
           await saveDestination(c, workspace.id, kind, { last_push_at: summary.at, last_push_summary: summary as unknown as Row });
           return summary;

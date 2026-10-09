@@ -14,8 +14,9 @@ import BookingAlerts from "../slack/BookingAlerts";
  * booked meetings workflow. Opened from the client's onboarding page.
  */
 
-type View = "hubspot" | "attio" | "sheets" | "meetings";
-const VIEWS: View[] = ["hubspot", "attio", "sheets", "meetings"];
+type View = "hubspot" | "attio" | "sheets" | "airtable" | "meetings";
+const VIEWS: View[] = ["hubspot", "attio", "sheets", "airtable", "meetings"];
+type Content = "replies" | "meetings" | "campaigns";
 
 type PlanItem = { id: string; kind: string; name: string; label: string; detail: string; action: "create" | "reuse" | "skip" };
 type Crm = {
@@ -53,17 +54,17 @@ type Crm = {
 };
 type Sheet = {
   key: string;
-  content: "replies" | "meetings";
+  content: Content;
   connected: boolean;
   accountName: string | null;
   status: string;
   autoPush: boolean;
   lastPushAt: string | null;
   lastPushSummary: null | { pushed: number; created: number; updated: number; failed: number; errors: string[] };
-  config: { url?: string; tab?: string; headers?: string[]; mapping?: string[]; qcIdColumn?: number };
+  config: { url?: string; tab?: string; headers?: string[]; types?: string[]; mapping?: string[]; qcIdColumn?: number };
 };
-type FieldsByContent = { replies: Array<{ key: string; label: string }>; meetings: Array<{ key: string; label: string }> };
-type SheetsPayload = { sheets?: Sheet[]; robotEmail?: string | null; google?: { email: string } | null; googleOauth?: boolean; fieldsByContent?: FieldsByContent; summary?: { created: number; updated: number; failed: number; nextOffset: number | null } };
+type FieldsByContent = Record<Content, Array<{ key: string; label: string }>>;
+type SheetsPayload = { sheets?: Sheet[]; tables?: Sheet[]; configured?: boolean; robotEmail?: string | null; google?: { email: string } | null; googleOauth?: boolean; fieldsByContent?: FieldsByContent; summary?: { created: number; updated: number; failed: number; nextOffset: number | null } };
 type Client = { name: string; slug: string; logoUrl?: string | null; accentColor?: string | null };
 type Returned = { ok: boolean; message: string } | undefined;
 type Pulse = { at: string; totalContacts: number | null; ourContacts: number | null; deals: number | null };
@@ -98,6 +99,15 @@ function SheetsLogo() {
       <path d="M19 3v7h7z" fill="#87CEAC" />
       <rect x="10" y="14" width="12" height="10" rx="1" fill="#fff" />
       <path d="M10 17.4h12M10 20.7h12M15 14v10" stroke="#0F9D58" strokeWidth="1.3" />
+    </svg>
+  );
+}
+function AirtableLogo() {
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M14.4 4.6 4.3 8.8c-.6.2-.6 1.1 0 1.4l10.2 4c.9.4 1.9.4 2.8 0l10.2-4c.6-.3.6-1.1 0-1.4L17.4 4.6a3.8 3.8 0 0 0-3 0z" fill="#FCB400" />
+      <path d="M16.8 16.4v10.1c0 .5.5.8.9.6l11.3-4.4c.3-.1.5-.4.5-.7V11.9c0-.5-.5-.8-.9-.6l-11.3 4.4c-.3.1-.5.4-.5.7z" fill="#18BFFF" />
+      <path d="m14.2 16.9-3.3 1.6-.4.2-7 3.4c-.4.2-1-.1-1-.6v-9.4c0-.2.1-.3.2-.4l.2-.1c.2-.1.4-.1.5 0l10.6 4.2c.5.2.6 1 .2 1.1z" fill="#F82B60" />
     </svg>
   );
 }
@@ -499,12 +509,14 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
   );
 }
 
-function ContentSwitch({ value, disabled, onChange }: { value: "replies" | "meetings"; disabled: boolean; onChange: (value: "replies" | "meetings") => void }) {
+const CONTENT_NAMES: Record<Content, string> = { replies: "Replies", meetings: "Booked meetings", campaigns: "Campaigns" };
+
+function ContentSwitch({ value, disabled, onChange }: { value: Content; disabled: boolean; onChange: (value: Content) => void }) {
   return (
-    <div className="ops-seg" role="radiogroup" aria-label="What goes in this sheet">
-      {(["replies", "meetings"] as const).map((option) => (
+    <div className="ops-seg" role="radiogroup" aria-label="What goes in this table">
+      {(["replies", "meetings", "campaigns"] as const).map((option) => (
         <button key={option} type="button" role="radio" aria-checked={value === option} className={value === option ? "ops-seg-on" : ""} disabled={disabled} onClick={() => onChange(option)}>
-          {option === "replies" ? "Replies" : "Booked meetings"}
+          {CONTENT_NAMES[option]}
         </button>
       ))}
     </div>
@@ -512,7 +524,7 @@ function ContentSwitch({ value, disabled, onChange }: { value: "replies" | "meet
 }
 
 /** One connected sheet: what it holds, its column mapping, formatting and pushing. */
-function SheetCard({ sheet, fields, run, busy }: { sheet: Sheet; fields: FieldsByContent; run: (action: string, extra?: Record<string, unknown>) => Promise<SheetsPayload | null>; busy: string }) {
+function SheetCard({ sheet, fields, run, busy, airtable = false }: { sheet: Sheet; fields: FieldsByContent; run: (action: string, extra?: Record<string, unknown>) => Promise<SheetsPayload | null>; busy: string; airtable?: boolean }) {
   const [mapping, setMapping] = useState<string[]>(sheet.config.mapping ?? []);
   useEffect(() => setMapping(sheet.config.mapping ?? []), [sheet.config.mapping]);
   const [progress, setProgress] = useState<{ created: number; updated: number; failed: number } | null>(null);
@@ -522,6 +534,8 @@ function SheetCard({ sheet, fields, run, busy }: { sheet: Sheet; fields: FieldsB
   const built = sheet.status === "built";
   const headers = sheet.config.headers ?? [];
   const meetings = sheet.content === "meetings";
+  const campaigns = sheet.content === "campaigns";
+  const what = campaigns ? "campaigns" : meetings ? "booked meetings" : "replies";
 
   const pushAll = async () => {
     let offset = 0;
@@ -540,18 +554,18 @@ function SheetCard({ sheet, fields, run, busy }: { sheet: Sheet; fields: FieldsB
   return (
     <section className="ops-panel">
       <div className="ops-panel-head">
-        <span className="ops-label">{meetings ? "Booked meetings" : "Replies"} · {built ? `last push ${when(sheet.lastPushAt)}` : "mapping not confirmed"}</span>
+        <span className="ops-label">{CONTENT_NAMES[sheet.content]} · {built ? `last push ${when(sheet.lastPushAt)}` : "mapping not confirmed"}</span>
         <span className={`ops-state ${built ? "ops-good" : "ops-wait"}`}>● {built ? "Live" : "Setup"}</span>
       </div>
       <div className="ops-titleline">
         <div className="ops-h2">{sheet.accountName ?? "Sheet"} <span className="ops-muted">· {sheet.config.tab ?? ""}</span></div>
-        {sheet.config.url && <a className="ops-link" href={sheet.config.url} target="_blank" rel="noreferrer">Open sheet ↗</a>}
+        {sheet.config.url && <a className="ops-link" href={sheet.config.url} target="_blank" rel="noreferrer">{airtable ? "Open table ↗" : "Open sheet ↗"}</a>}
       </div>
       <ContentSwitch value={sheet.content} disabled={Boolean(busy)} onChange={(value) => { if (value !== sheet.content) void step("content", { content: value }); }} />
       <ul className="ops-map">
         {headers.map((header, index) => index === sheet.config.qcIdColumn ? null : (
           <li key={`${header}-${index}`}>
-            <span>{header || `Column ${index + 1}`}</span>
+            <span>{header || `Column ${index + 1}`}{airtable && sheet.config.types?.[index] ? <small className="ops-faint"> · {sheet.config.types[index]}</small> : null}</span>
             <select className="ops-input" value={mapping[index] ?? ""} onChange={(e) => setMapping((current) => { const next = [...current]; next[index] = e.target.value; return next; })} aria-label={`Field for ${header || `column ${index + 1}`}`}>
               <option value="">Leave empty</option>
               {fields[sheet.content].map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
@@ -561,45 +575,47 @@ function SheetCard({ sheet, fields, run, busy }: { sheet: Sheet; fields: FieldsB
       </ul>
       <div className="ops-row">
         <button type="button" className={`ops-btn ${built ? "ops-sec" : "ops-pri"}`} disabled={Boolean(busy)} onClick={() => void step("map", { mapping })}>{doing("map") ? "Saving…" : built ? "Save mapping" : "Confirm mapping"}</button>
-        <button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("reread")}>{doing("reread") ? "Reading…" : "Re-read headers"}</button>
-        {built && <button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("format")}>{doing("format") ? "Formatting…" : "Format sheet"}</button>}
+        <button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("reread")}>{doing("reread") ? "Reading…" : airtable ? "Re-read fields" : "Re-read headers"}</button>
+        {built && !airtable && <button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("format")}>{doing("format") ? "Formatting…" : "Format sheet"}</button>}
       </div>
       {built && (
         <div className="ops-row">
-          <button type="button" className="ops-btn ops-pri" disabled={Boolean(busy)} onClick={() => void pushAll()}>{doing("push") ? "Pushing…" : meetings ? "Push all booked meetings" : "Push all replies"}</button>
-          <label className="ops-check"><input type="checkbox" checked={sheet.autoPush} disabled={Boolean(busy)} onChange={(e) => void step("auto", { on: e.target.checked })} /> Push new {meetings ? "bookings" : "replies"} automatically</label>
+          <button type="button" className="ops-btn ops-pri" disabled={Boolean(busy)} onClick={() => void pushAll()}>{doing("push") ? "Pushing…" : `Push all ${what}`}</button>
+          <label className="ops-check"><input type="checkbox" checked={sheet.autoPush} disabled={Boolean(busy)} onChange={(e) => void step("auto", { on: e.target.checked })} /> {campaigns ? "Add new campaigns, update figures weekly and on status change" : `Push new ${meetings ? "bookings" : "replies"} automatically`}</label>
         </div>
       )}
       {progress && <p className="ops-muted">{progress.created} added · {progress.updated} updated{progress.failed ? ` · ${progress.failed} failed` : ""}</p>}
       {sheet.lastPushSummary?.errors?.length ? <ul className="ops-errors">{sheet.lastPushSummary.errors.map((e) => <li key={e}>{e}</li>)}</ul> : null}
-      <div className="ops-row ops-quiet"><button type="button" className="ops-link ops-danger" disabled={Boolean(busy) && !mine} onClick={() => void step("disconnect")}>{doing("disconnect") ? "Removing…" : "Remove sheet"}</button></div>
+      <div className="ops-row ops-quiet"><button type="button" className="ops-link ops-danger" disabled={Boolean(busy) && !mine} onClick={() => void step("disconnect")}>{doing("disconnect") ? "Removing…" : airtable ? "Remove table" : "Remove sheet"}</button></div>
     </section>
   );
 }
 
-function useSheets(slug: string) {
+function useSheets(slug: string, endpoint: "sheets-push" | "airtable-push" = "sheets-push") {
   const [sheets, setSheets] = useState<Sheet[]>([]);
   const [robot, setRobot] = useState<string | null>(null);
   const [google, setGoogle] = useState<{ email: string } | null>(null);
   const [googleOauth, setGoogleOauth] = useState(false);
-  const [fields, setFields] = useState<FieldsByContent>({ replies: [], meetings: [] });
+  const [fields, setFields] = useState<FieldsByContent>({ replies: [], meetings: [], campaigns: [] });
+  const [configured, setConfigured] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const take = (payload: SheetsPayload) => {
-    if (payload.sheets) setSheets(payload.sheets);
+    if (payload.sheets ?? payload.tables) setSheets((payload.sheets ?? payload.tables)!);
+    if (payload.configured !== undefined) setConfigured(payload.configured);
     if (payload.google !== undefined) setGoogle(payload.google);
     if (payload.googleOauth !== undefined) setGoogleOauth(payload.googleOauth);
     if (payload.robotEmail !== undefined) setRobot(payload.robotEmail);
     if (payload.fieldsByContent) setFields(payload.fieldsByContent);
   };
   useEffect(() => {
-    void fetch(`/api/sheets-push/${encodeURIComponent(slug)}`, { cache: "no-store" }).then((r) => r.json()).then((payload) => { if (payload?.ok) take(payload); }).catch(() => undefined).finally(() => setLoaded(true));
-  }, [slug]);
+    void fetch(`/api/${endpoint}/${encodeURIComponent(slug)}`, { cache: "no-store" }).then((r) => r.json()).then((payload) => { if (payload?.ok) take(payload); }).catch(() => undefined).finally(() => setLoaded(true));
+  }, [slug, endpoint]);
   const run = async (action: string, extra: Record<string, unknown> = {}): Promise<SheetsPayload | null> => {
     setBusy(`${String(extra.sheet ?? "new")}:${action}`); setError("");
     try {
-      const response = await fetch(`/api/sheets-push/${encodeURIComponent(slug)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...extra }) });
+      const response = await fetch(`/api/${endpoint}/${encodeURIComponent(slug)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...extra }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok === false) { setError(String(payload.error || `That step failed (${response.status}).`)); return null; }
       take(payload);
@@ -608,14 +624,14 @@ function useSheets(slug: string) {
       setBusy("");
     }
   };
-  return { sheets, robot, google, googleOauth, fields, loaded, busy, error, run };
+  return { sheets, robot, google, googleOauth, fields, loaded, busy, error, run, configured };
 }
 type SheetsState = ReturnType<typeof useSheets>;
 
 function SheetsView({ slug, state, returned }: { slug: string; state: SheetsState; returned: Returned }) {
   const { sheets, robot, google, googleOauth, fields, loaded, busy, error, run } = state;
   const [url, setUrl] = useState("");
-  const [content, setContent] = useState<"replies" | "meetings">("replies");
+  const [content, setContent] = useState<Content>("replies");
   const writer = google?.email ?? robot;
   const live = sheets.filter((sheet) => sheet.status === "built").length;
 
@@ -661,8 +677,70 @@ function SheetsView({ slug, state, returned }: { slug: string; state: SheetsStat
   );
 }
 
-const VIEW_NAMES: Record<View, string> = { hubspot: "HubSpot", attio: "Attio", sheets: "Google Sheets", meetings: "Booked meetings" };
-const VIEW_LOGOS: Record<View, () => React.ReactElement> = { hubspot: HubSpotLogo, attio: AttioLogo, sheets: SheetsLogo, meetings: MeetingsLogo };
+/** Airtable: pick a base and table QC's Airtable account can see, map its fields, push replies, meetings or campaigns. */
+function AirtableView({ slug, state }: { slug: string; state: SheetsState }) {
+  const { sheets: tables, fields, loaded, busy, error, run, configured } = state;
+  const [bases, setBases] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [baseError, setBaseError] = useState("");
+  const [base, setBase] = useState("");
+  const [baseTables, setBaseTables] = useState<Array<{ id: string; name: string }>>([]);
+  const [table, setTable] = useState("");
+  const [content, setContent] = useState<Content>("replies");
+  useEffect(() => {
+    if (!configured) return;
+    void fetch(`/api/airtable-push/${encodeURIComponent(slug)}?bases=1`, { cache: "no-store" }).then((r) => r.json()).then((payload) => {
+      if (payload?.ok) setBases(payload.bases); else setBaseError(String(payload?.error || "Could not list Airtable bases."));
+    }).catch(() => setBaseError("Could not list Airtable bases."));
+  }, [slug, configured]);
+  useEffect(() => {
+    setTable(""); setBaseTables([]);
+    if (!base) return;
+    void fetch(`/api/airtable-push/${encodeURIComponent(slug)}?base=${encodeURIComponent(base)}`, { cache: "no-store" }).then((r) => r.json()).then((payload) => {
+      if (payload?.ok) { setBaseTables(payload.tables); setTable(payload.tables[0]?.id ?? ""); } else setBaseError(String(payload?.error || "Could not read that base."));
+    }).catch(() => setBaseError("Could not read that base."));
+  }, [slug, base]);
+  const live = tables.filter((entry) => entry.status === "built").length;
+
+  if (!loaded) return <p className="ops-muted">Loading Airtable…</p>;
+  return (
+    <div className="ops-stack">
+      <div className="ops-titlebar">
+        <div><span className="ops-label">Airtable</span><h1>{tables.length ? `${tables.length} ${tables.length === 1 ? "table" : "tables"}, ${live} live` : "Push into Airtable"}</h1></div>
+      </div>
+      {!configured && <section className="ops-alert" role="alert"><div className="ops-alert-title">QC's Airtable token isn't set.</div><div className="ops-alert-detail">Add AIRTABLE_API_KEY on Vercel.</div></section>}
+
+      {tables.map((entry) => <SheetCard key={entry.key} sheet={entry} fields={fields} run={run} busy={busy} airtable />)}
+
+      {configured && (
+        <section className="ops-panel">
+          <div className="ops-panel-head"><span className="ops-label">{tables.length ? "Add another table" : "Connect a table"}</span></div>
+          <ContentSwitch value={content} disabled={Boolean(busy)} onChange={setContent} />
+          <ol className="ops-steps">
+            <li>Make the table in the client's base, with the fields you want filled</li>
+            <li>Make sure QC's Airtable account can see the base (share it with QC, or add it to QC's token)</li>
+            <li>Pick the base and table here</li>
+          </ol>
+          <div className="ops-row">
+            <select className="ops-input ops-grow" value={base} onChange={(e) => setBase(e.target.value)} aria-label="Airtable base">
+              <option value="">{bases === null && !baseError ? "Loading bases…" : "Choose a base"}</option>
+              {(bases ?? []).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+            </select>
+            <select className="ops-input ops-grow" value={table} onChange={(e) => setTable(e.target.value)} disabled={!baseTables.length} aria-label="Airtable table">
+              {!baseTables.length && <option value="">Choose a base first</option>}
+              {baseTables.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+            </select>
+            <button type="button" className="ops-btn ops-pri" disabled={!base || !table || Boolean(busy)} onClick={() => void run("connect", { baseId: base, tableId: table, content }).then((ok) => { if (ok) { setBase(""); setTable(""); } })}>{busy === "new:connect" ? "Reading table…" : "Connect"}</button>
+          </div>
+          {baseError && <p className="ops-error">{baseError}</p>}
+        </section>
+      )}
+      {error && <p className="ops-error" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+const VIEW_NAMES: Record<View, string> = { hubspot: "HubSpot", attio: "Attio", sheets: "Google Sheets", airtable: "Airtable", meetings: "Booked meetings" };
+const VIEW_LOGOS: Record<View, () => React.ReactElement> = { hubspot: HubSpotLogo, attio: AttioLogo, sheets: SheetsLogo, airtable: AirtableLogo, meetings: MeetingsLogo };
 
 export default function ClientOperations({ slug }: { slug: string }) {
   const [client, setClient] = useState<Client | null>(null);
@@ -670,6 +748,7 @@ export default function ClientOperations({ slug }: { slug: string }) {
   const [returned, setReturned] = useState<{ hubspot?: Returned; sheets?: Returned }>({});
   const crmState = useCrm(slug);
   const sheetsState = useSheets(slug);
+  const airtableState = useSheets(slug, "airtable-push");
   const { crm } = crmState;
 
   useEffect(() => {
@@ -714,9 +793,10 @@ export default function ClientOperations({ slug }: { slug: string }) {
       if (crm.status !== "built") return { label: "Setup", tone: "wait" };
       return dealsAreLive(crm, target) ? { label: "Live", tone: "good" } : { label: "Deals", tone: "wait" };
     }
-    if (target === "sheets") {
-      const live = sheetsState.sheets.filter((sheet) => sheet.status === "built").length;
-      if (!sheetsState.sheets.length) return { label: "Add", tone: "off" };
+    if (target === "sheets" || target === "airtable") {
+      const list = target === "sheets" ? sheetsState.sheets : airtableState.sheets;
+      const live = list.filter((sheet) => sheet.status === "built").length;
+      if (!list.length) return { label: "Add", tone: "off" };
       return live ? { label: `${live} live`, tone: "good" } : { label: "Setup", tone: "wait" };
     }
     return { label: "Flow", tone: "off" };
@@ -768,6 +848,7 @@ export default function ClientOperations({ slug }: { slug: string }) {
         {!view && <p className="ops-muted">Loading…</p>}
         {(view === "hubspot" || view === "attio") && <CrmView key={view} slug={slug} clientName={name} provider={view} state={crmState} returned={view === "hubspot" ? returned.hubspot : undefined} />}
         {view === "sheets" && <SheetsView slug={slug} state={sheetsState} returned={returned.sheets} />}
+        {view === "airtable" && <AirtableView slug={slug} state={airtableState} />}
         {view === "meetings" && (
           <div className="ops-stack ops-meetings"><BookingAlerts focus={slug} /></div>
         )}

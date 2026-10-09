@@ -11,10 +11,15 @@
 import { pushedRecords, replyRecords, saveDestination, savePushRecord, type Config, type Destination } from "./crm-push";
 import { hubspotPush } from "./hubspot-push";
 import { attioPush } from "./attio-push";
-import { sheetsPushBatch } from "./sheets-push";
+import { SHEET_FIELDS } from "./sheets-push";
+import { isTable, tableContent, writeTable } from "./table-push";
 
 /** Which push records belong to this destination: each Google Sheet keeps its own (the first one "google_sheets"). */
-export const recordKey = (destination: Destination) => (destination.provider === "google_sheets" && destination.kind !== "sheets" ? `google_sheets:${destination.kind.slice("sheets:".length)}` : destination.provider);
+export const recordKey = (destination: Destination) => {
+  if (destination.provider === "google_sheets" && destination.kind !== "sheets") return `google_sheets:${destination.kind.slice("sheets:".length)}`;
+  if (destination.provider === "airtable") return `airtable:${destination.kind.slice("airtable:".length)}`;
+  return destination.provider;
+};
 
 /** The provider's push for one conversation. */
 const pushFor = (destination: Destination) => {
@@ -33,16 +38,17 @@ export async function pushPass(config: Config, destination: Destination, opts: {
   if (destination.status !== "built") throw new Error("The build has not been approved and applied yet.");
   const BATCH = 25;
   let offset = opts.offset ?? 0;
+  // A table holding booked meetings or campaigns has no replies to push (tableItemsPass fills it).
+  if (isTable(destination) && tableContent(destination) !== "replies") return summary;
   for (;;) {
     const { records, scanned } = await replyRecords(config, destination.workspace_id, { since: opts.since, limit: BATCH, offset });
     const stored = await pushedRecords(config, destination.workspace_id, recordKey(destination), records.map((record) => record.conversationId));
-    if (destination.provider === "google_sheets" && (destination.config as { content?: string } | null)?.content === "meetings") { summary.nextOffset = null; break; }
-    if (destination.provider === "google_sheets") {
-      // A sheet takes the whole batch in one write (Google limits writes per minute, not cells).
+    if (isTable(destination)) {
+      // A table takes the whole batch in one write (Google limits writes per minute, Airtable per second).
       const due = records.filter((record) => stored.get(record.conversationId)?.pushed_hash !== record.hash);
       summary.unchanged += records.length - due.length;
       try {
-        const rows = due.length ? await sheetsPushBatch(destination, due) : new Map();
+        const rows = due.length ? await writeTable(destination, due.map((record) => ({ id: record.conversationId, value: (key: string) => SHEET_FIELDS.find((field) => field.key === key)?.value(record) }))) : new Map();
         for (const record of due) {
           const placed = rows.get(record.conversationId);
           await savePushRecord(config, destination.workspace_id, recordKey(destination), { conversationId: record.conversationId, contactId: placed ? String(placed.row) : null, hash: record.hash, createdContact: placed?.created ?? false });

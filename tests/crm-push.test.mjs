@@ -223,3 +223,34 @@ test("Operations: the CRM a client doesn't use is locked, the pulse shows QC's s
   assert.match(ui, /Ours \(from QC\)/);
   assert.match(route, /propertyName: "qc_outreach_platform", operator: "HAS_PROPERTY"/);
 });
+
+test("tables (Google Sheets and Airtable) hold replies, booked meetings or campaigns through one writer", () => {
+  const sheets = readFileSync(new URL("../app/lib/sheets-push.ts", import.meta.url), "utf8");
+  const table = readFileSync(new URL("../app/lib/table-push.ts", import.meta.url), "utf8");
+  const run = readFileSync(new URL("../app/lib/crm-push-run.ts", import.meta.url), "utf8");
+  const sync = readFileSync(new URL("../app/api/crm-push/sync/route.ts", import.meta.url), "utf8");
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  assert.match(sheets, /export type SheetContent = "replies" \| "meetings" \| "campaigns"/);
+  // Campaigns: added on launch, written again on a status change and weekly, every one on Push all.
+  assert.match(sheets, /const due = opts\.all \|\| !before \|\| before\.status !== status \|\| Date\.now\(\) - Date\.parse\(before\.at\) >= WEEK/);
+  assert.match(sheets, /if \(!isLaunched\(campaign\)\) continue;/);
+  assert.match(table, /if \(destination\.provider === "airtable"\) return airtableWriteRows/);
+  assert.match(table, /campaign_state: state/);
+  assert.match(run, /if \(isTable\(destination\) && tableContent\(destination\) !== "replies"\) return summary;/);
+  assert.match(run, /if \(destination\.provider === "airtable"\) return `airtable:\$\{destination\.kind\.slice\("airtable:"\.length\)\}`;/);
+  assert.match(sync, /isTable\(destination\)\s*\? await tableItemsPass/);
+  assert.match(ui, /\["replies", "meetings", "campaigns"\] as const/);
+  assert.match(ui, /const VIEWS: View\[\] = \["hubspot", "attio", "sheets", "airtable", "meetings"\]/);
+});
+
+test("Airtable push finds records again by a QC ID field, writes by field id and never touches computed fields", () => {
+  const airtable = readFileSync(new URL("../app/lib/airtable-push.ts", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../app/api/airtable-push/[slug]/route.ts", import.meta.url), "utf8");
+  assert.match(airtable, /export const AIRTABLE_QC_ID = "QC ID"/);
+  assert.match(airtable, /const updates = items\.filter\(\(item\) => recordById\.has\(item\.id\)\)/);
+  assert.match(airtable, /typecast: true/);
+  assert.doesNotMatch(airtable, /"formula"|"multipleLookupValues"|"autoNumber"/);
+  assert.match(airtable, /await pause\(220\)/);
+  for (const action of ["connect", "reread", "content", "map", "push", "auto", "disconnect"]) assert.ok(route.includes(`action === "${action}"`), action);
+  assert.match(route, /withPushLock\(c, workspace\.id, kind/);
+});

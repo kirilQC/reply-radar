@@ -220,13 +220,14 @@ async function currentLayout(config: SheetConfig): Promise<SheetConfig> {
 
 // ── Push: a batch of records, one row each ───────────────────────────────────────────────────────
 
-type Cell = string | number | boolean;
+export type Cell = string | number | boolean;
+export type TableItem = { id: string; value: (key: string) => Cell | undefined };
 
 /**
  * Writes rows by QC ID: an existing row is updated in place, a new one appended. Only mapped columns and the
  * QC ID are written, so the team's own columns between them are left untouched. Returns the row per id.
  */
-async function writeRows(saved: SheetConfig, items: Array<{ id: string; value: (key: string) => Cell | undefined }>): Promise<Map<string, { row: number; created: boolean }>> {
+export async function writeRows(saved: SheetConfig, items: TableItem[]): Promise<Map<string, { row: number; created: boolean }>> {
   if (!saved?.spreadsheetId || !Array.isArray(saved.mapping)) throw new Error("Map the sheet's columns first.");
   const { spreadsheetId, tab, mapping, qcIdColumn } = await currentLayout(saved);
   const letter = columnLetter(qcIdColumn);
@@ -293,12 +294,13 @@ export const MEETING_SHEET_FIELDS: Array<{ key: string; label: string; match: Re
   { key: "pre_call_brief", label: "Pre-call brief", match: /brief|notes|summary|tl ?dr|prep/, value: (r) => f(r, "qc_pre_call_brief") },
 ];
 
-export type SheetContent = "replies" | "meetings";
-export const fieldsFor = (content: SheetContent | undefined) => (content === "meetings" ? MEETING_SHEET_FIELDS : SHEET_FIELDS);
+export type SheetContent = "replies" | "meetings" | "campaigns";
+export const contentOf = (value: unknown): SheetContent => (value === "meetings" || value === "campaigns" ? value : "replies");
+export const fieldsFor = (content: SheetContent | undefined): Array<{ key: string; label: string; match: RegExp }> => (content === "meetings" ? MEETING_SHEET_FIELDS : content === "campaigns" ? CAMPAIGN_FIELDS : SHEET_FIELDS);
 
-/** Booked meetings into a meetings sheet: cleaned, QC's own tests left out, one row per person (their latest booking). */
-export async function sheetsPushMeetings(config: Config, destination: Destination, opts: { since?: string } = {}): Promise<{ pushed: number; created: number; updated: number }> {
-  const meetings = await rows(config, `rr_meetings?select=*&workspace_id=eq.${encodeURIComponent(destination.workspace_id)}&order=meeting_at.asc.nullsfirst,created_at.asc&limit=1000`);
+/** Booked meetings as table rows: cleaned, QC's own tests left out, one row per person (their latest booking). */
+export async function meetingItems(config: Config, workspaceId: string, opts: { since?: string } = {}): Promise<TableItem[]> {
+  const meetings = await rows(config, `rr_meetings?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=meeting_at.asc.nullsfirst,created_at.asc&limit=1000`);
   const latest = new Map<string, Row>();
   const changed = new Set<string>();
   for (const raw of meetings) {
@@ -311,23 +313,83 @@ export async function sheetsPushMeetings(config: Config, destination: Destinatio
     latest.set(key, meeting);
     if (!opts.since || text(raw.updated_at) >= opts.since) changed.add(key);
   }
-  const due = [...latest.entries()].filter(([key]) => changed.has(key));
-  if (!due.length) return { pushed: 0, created: 0, updated: 0 };
-  const items: Array<{ id: string; value: (key: string) => Cell | undefined }> = [];
-  for (const [key, meeting] of due) {
-    const facts: MeetingFacts = { meeting, facts: await dealFacts(config, destination.workspace_id, meeting) };
+  const items: TableItem[] = [];
+  for (const [key, meeting] of [...latest.entries()].filter(([key]) => changed.has(key))) {
+    const facts: MeetingFacts = { meeting, facts: await dealFacts(config, workspaceId, meeting) };
     items.push({ id: `meeting:${createHash("sha256").update(key).digest("hex").slice(0, 16)}`, value: (field) => MEETING_SHEET_FIELDS.find((candidate) => candidate.key === field)?.value(facts) });
   }
+  return items;
+}
+
+/** Booked meetings into a meetings sheet. */
+export async function sheetsPushMeetings(config: Config, destination: Destination, opts: { since?: string } = {}): Promise<{ pushed: number; created: number; updated: number }> {
+  const items = await meetingItems(config, destination.workspace_id, opts);
+  if (!items.length) return { pushed: 0, created: 0, updated: 0 };
   const written = await writeRows(destination.config as unknown as SheetConfig, items);
   const created = [...written.values()].filter((entry) => entry.created).length;
   return { pushed: written.size, created, updated: written.size - created };
 }
 
+// ── Campaigns: one row per campaign, a tracker ───────────────────────────────────────────────────
+
+const pct = (part: number, whole: number) => (whole > 0 ? `${Math.round((part / whole) * 1000) / 10}%` : "");
+const num = (value: unknown) => Number(value) || 0;
+const title = (value: unknown) => text(value).toLowerCase().replace(/_/g, " ").replace(/^./, (first) => first.toUpperCase());
+
+/** The campaign tracker's fields, from the hourly campaign figures (HeyReach and lemlist). */
+export const CAMPAIGN_FIELDS: Array<{ key: string; label: string; match: RegExp; value: (row: Row) => Cell | undefined }> = [
+  { key: "campaign", label: "Campaign", match: /^campaign( name)?$|^name$/, value: (r) => text(r.name) },
+  { key: "platform", label: "Platform", match: /platform|tool|source/, value: (r) => (text(r.campaign_id).startsWith("lemlist:") ? "lemlist" : "HeyReach") },
+  { key: "status", label: "Status", match: /status|state/, value: (r) => title(r.status) },
+  { key: "launched", label: "Launched", match: /launch|start/, value: (r) => when(text(r.launched_at)) },
+  { key: "senders", label: "Senders", match: /sender|account/, value: (r) => (Array.isArray(r.sender_ids) ? r.sender_ids.length : 0) },
+  { key: "total_leads", label: "Total leads", match: /total|^leads$|lead count|# ?leads/, value: (r) => num(r.total_leads) },
+  { key: "leads_pending", label: "Leads not contacted yet", match: /pending|not contacted|remaining|left/, value: (r) => num(r.leads_pending) },
+  { key: "leads_in_progress", label: "Leads in progress", match: /in progress|active leads/, value: (r) => num(r.leads_in_progress) },
+  { key: "leads_finished", label: "Leads finished", match: /finished|completed|done/, value: (r) => num(r.leads_finished) },
+  { key: "connections_sent", label: "Connection requests sent", match: /sent|requests|invites|reached/, value: (r) => num(r.connections_sent) },
+  { key: "connections_accepted", label: "Connections accepted", match: /accepted|connections?$/, value: (r) => num(r.connections_accepted) },
+  { key: "acceptance_rate", label: "Acceptance rate", match: /accept(ance)? ?rate/, value: (r) => pct(num(r.connections_accepted), num(r.connections_sent)) },
+  { key: "replies", label: "Replies", match: /^repl(y|ies)$|repl(y|ies) ?(count|#)|# ?repl/, value: (r) => num(r.replies) },
+  { key: "reply_rate", label: "Reply rate (of accepted)", match: /repl(y|ies)? ?rate|response rate/, value: (r) => pct(num(r.replies), num(r.connections_accepted)) },
+  { key: "messages_started", label: "Messages started", match: /messages|conversations/, value: (r) => num(r.messages_started) },
+  { key: "sequence_steps", label: "Sequence steps", match: /steps|sequence/, value: (r) => (r.sequence_steps == null ? "" : num(r.sequence_steps)) },
+  { key: "first_touch", label: "Connection note", match: /note|first touch|opener|copy/, value: (r) => text(r.first_touch) },
+  { key: "follow_up", label: "First message", match: /follow|first message|message copy/, value: (r) => text(r.follow_up) },
+  { key: "updated", label: "Figures as of", match: /updated|as of|refreshed|last sync/, value: (r) => when(text(r.refreshed_at)) },
+];
+
+export type CampaignState = Record<string, { at: string; status: string }>;
+const WEEK = 7 * 86_400_000;
+const isLaunched = (row: Row) => Boolean(text(row.launched_at)) || num(row.connections_sent) > 0 || /activ|running|progress|start/i.test(text(row.status));
+
+/**
+ * The campaigns due for the tracker: a campaign is added once it has launched; after that its figures are
+ * written again when its status changes (finished, paused) and once a week. `all` (Push all) refreshes every one.
+ */
+export async function campaignItems(config: Config, workspaceId: string, state: CampaignState, opts: { all?: boolean } = {}): Promise<{ items: TableItem[]; state: CampaignState }> {
+  const campaigns = await rows(config, `rr_campaign_stats?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&order=launched_at.asc.nullslast&limit=1000`);
+  const now = new Date().toISOString();
+  const next: CampaignState = { ...state };
+  const items: TableItem[] = [];
+  for (const campaign of campaigns) {
+    if (!isLaunched(campaign)) continue;
+    const id = text(campaign.campaign_id);
+    const before = state[id];
+    const status = text(campaign.status);
+    const due = opts.all || !before || before.status !== status || Date.now() - Date.parse(before.at) >= WEEK;
+    if (!due) continue;
+    next[id] = { at: now, status };
+    items.push({ id: `campaign:${id}`, value: (key) => CAMPAIGN_FIELDS.find((field) => field.key === key)?.value(campaign) });
+  }
+  return { items, state: next };
+}
+
 // ── Formatting: QC's house style, applied to whole columns so new rows inherit it ───────────────
 
-const LEFT_WRAPPED = new Set(["latest_reply", "conversation", "pre_call_brief"]);
-const LEFT = new Set(["name", "first_name", "last_name", "email", "linkedin", "company_linkedin", "company"]);
-const WIDTH: Record<string, number> = { pre_call_brief: 460, latest_reply: 420, conversation: 520, linkedin: 260, company_linkedin: 260, campaign: 300, title: 260, email: 220 };
+const LEFT_WRAPPED = new Set(["latest_reply", "conversation", "pre_call_brief", "first_touch", "follow_up"]);
+const LEFT = new Set(["name", "first_name", "last_name", "email", "linkedin", "company_linkedin", "company", "campaign"]);
+const WIDTH: Record<string, number> = { first_touch: 420, follow_up: 420, pre_call_brief: 460, latest_reply: 420, conversation: 520, linkedin: 260, company_linkedin: 260, campaign: 300, title: 260, email: 220 };
 const grey = (level: number) => ({ red: level, green: level, blue: level });
 
 /**

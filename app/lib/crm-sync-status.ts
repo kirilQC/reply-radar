@@ -4,7 +4,7 @@
 import { rows, withPushLock, type Config, type Destination } from "./crm-push";
 import { pushPass, recordKey } from "./crm-push-run";
 import { pushMeetingsPass } from "./meetings-deals-run";
-import { sheetsPushMeetings } from "./sheets-push";
+import { isTable, tableItemsPass } from "./table-push";
 
 /**
  * Where each client's replies and booked meetings go outside QC Command, for Scout, the MCP route and QC Bot:
@@ -104,14 +104,14 @@ export async function crmSyncStatus(config: Config, workspaceIds: string[] | nul
       const sheetConfig = object(row.config);
       const pushed = count(records, workspace, recordKey(row as unknown as Destination));
       (entry.sheets as Row[]).push({
-        sheet: `${text(row.account_name)} · ${text(sheetConfig.tab)}`,
-        holds: sheetConfig.content === "meetings" ? "booked meetings (one row per person)" : "replies (one row per conversation)",
+        sheet: `${row.provider === "airtable" ? "Airtable" : "Google Sheet"}: ${text(row.account_name)} · ${text(sheetConfig.tab ?? sheetConfig.tableName)}`,
+        holds: sheetConfig.content === "meetings" ? "booked meetings (one row per person)" : sheetConfig.content === "campaigns" ? "campaigns (one row per campaign, figures refreshed on status change and weekly)" : "replies (one row per conversation)",
         mappingConfirmed: row.status === "built",
         columnsMapped: Array.isArray(sheetConfig.mapping) ? (sheetConfig.mapping as unknown[]).filter(Boolean).length : 0,
         pushAutomatically: row.auto_push === true,
         lastPush: text(row.last_push_at) || null,
         lastPushResult: summary(row.last_push_summary),
-        rowsPushed: sheetConfig.content === "meetings" ? undefined : pushed.total,
+        rowsPushed: sheetConfig.content === "meetings" || sheetConfig.content === "campaigns" ? undefined : pushed.total,
         url: text(sheetConfig.url) || null,
       });
     }
@@ -130,14 +130,14 @@ export async function crmPushNow(config: Config, workspaceId: string) {
   if (!destinations.length) return { pushed: [], note: "This client has no built CRM or sheet to push to." };
   const out: Row[] = [];
   for (const destination of destinations) {
-    const where = destination.kind === "crm" ? (destination.provider === "hubspot" ? "HubSpot" : "Attio") : `Sheet ${text(destination.account_name)}`;
+    const where = destination.kind === "crm" ? (destination.provider === "hubspot" ? "HubSpot" : "Attio") : `${destination.provider === "airtable" ? "Airtable" : "Sheet"} ${text(destination.account_name)}`;
     const last = Date.parse(destination.last_push_at ?? "");
     const since = new Date((Number.isNaN(last) ? Date.now() - 86_400_000 : last) - 15 * 60_000).toISOString();
     try {
       const done = await withPushLock(config, workspaceId, destination.kind, 300_000, async () => {
         const replies = await pushPass(config, destination, { since, budgetMs: 45_000 });
-        const meetings = destination.provider === "google_sheets"
-          ? (object(destination.config).content === "meetings" ? await sheetsPushMeetings(config, destination, { since }) : null)
+        const meetings = isTable(destination)
+          ? await tableItemsPass(config, destination, { since })
           : await pushMeetingsPass(config, destination, { since, budgetMs: 30_000 });
         return { where, replies: { pushed: replies.pushed, failed: replies.failed, errors: replies.errors }, meetings };
       });

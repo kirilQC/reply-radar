@@ -220,7 +220,7 @@ export type Destination = {
   workspace_id: string;
   /** "crm", or one Google Sheet: "sheets" (the first) or "sheets:<id>". */
   kind: string;
-  provider: "hubspot" | "attio" | "google_sheets";
+  provider: "hubspot" | "attio" | "google_sheets" | "airtable";
   api_key: string | null;
   account_id: string | null;
   account_name: string | null;
