@@ -164,11 +164,12 @@ body.light-mode .ops-area {
 .ops-log td.ops-log-k { width: 80px; color: var(--ops-faint); }
 .ops-log td.ops-log-name { color: var(--ops-strong); white-space: normal; font-family: var(--ops-sans), system-ui, sans-serif; font-size: 13px; }
 .ops-log td.ops-log-d { white-space: normal; color: var(--ops-faint); padding-right: 20px; }
-.ops-r-created, .ops-r-verified { color: var(--ops-green); }
-.ops-r-reused { color: var(--ops-yellow); }
-.ops-r-skipped { color: var(--ops-info); }
-.ops-r-failed { color: var(--ops-bad); }
-.ops-r-waiting, .ops-r-removed { color: var(--ops-wait); }
+.ops-log td.ops-log-r { font-weight: 600; }
+.ops-log td.ops-r-created, .ops-log td.ops-r-verified { color: var(--ops-green); }
+.ops-log td.ops-r-reused { color: var(--ops-yellow); }
+.ops-log td.ops-r-skipped { color: var(--ops-info); }
+.ops-log td.ops-r-failed { color: var(--ops-bad); }
+.ops-log td.ops-r-waiting, .ops-log td.ops-r-removed { color: var(--ops-wait); }
 
 /* Booked meetings view: the workflow component keeps its own layout inside the page. */
 .ops-meetings > :not(.ops-titlebar) { max-width: 100%; }
