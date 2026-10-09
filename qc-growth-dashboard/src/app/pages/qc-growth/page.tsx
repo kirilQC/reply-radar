@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 import React from "react"
 import {Card, Chart, EmptyState, Extensions, Grid, LoadingState, Stack, Table, useAsyncCache} from "attio/client"
 

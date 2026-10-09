@@ -1,3 +1,6 @@
+-- Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+-- Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 -- Analytics aggregates computed in Postgres instead of shipped row by row.
 --
 -- /api/analytics used to page every conversation and every message (raw_data included) of every

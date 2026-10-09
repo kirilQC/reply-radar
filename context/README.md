@@ -17,6 +17,7 @@ Written to be read in order, but each file stands alone. If you only read one th
 | [`07-verification.md`](07-verification.md) | How to prove a change works when there are no local credentials. The harness pattern. |
 | [`08-session-handoff.md`](08-session-handoff.md) | Where the project stands right now: what shipped recently, what's verified, what's still open. |
 | [`09-morning-brief.md`](09-morning-brief.md) | The Slack morning brief: its sources, the rules that are load-bearing, and why its layout is applied in code rather than asked of the model. |
+| [`11-operations-crm-bookings-email.md`](11-operations-crm-bookings-email.md) | **Newest (Oct 7 to 9, 2026).** The Operations page, HubSpot/Attio push, Sheets and Airtable tables, the booked meetings workflow, Email Bison, lemlist, Slack reply alerts, and the QC Portal brain connector. |
 | [`10-new-sections.md`](10-new-sections.md) | The sections built after the brief — the password gate, Onboarding, Meetings, Deals & attribution, the assistant's new tools — and the audit that hardened them. Start here for anything added recently. |
 
 ## The thirty-second version

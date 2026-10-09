@@ -1,3 +1,6 @@
+-- Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+-- Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 -- Every person QC has contacted, for every client, from HeyReach's campaign leads.
 -- Filled by the Render worker (syncOutreach), one client per analytics pass, re-synced daily.
 -- Read by Scout's outreach_people tool for "everyone with title X we contacted between A and B".

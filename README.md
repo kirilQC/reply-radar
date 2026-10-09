@@ -2,13 +2,18 @@
 
 <img src="public/qc-growth-logo.png" alt="QC Growth" width="96" />
 
-# Reply Radar
+# QC Command
 
-**One LinkedIn inbox across every client, scored and drafted by Claude.**
+**Every client's replies, CRMs, booked meetings and reporting, run from one place.**
 
-Internal reply-management platform for QC Growth. Pulls every HeyReach conversation for every
-client into a single inbox, works out which replies actually deserve attention, and has a draft
-waiting before anyone opens the thread.
+QC Growth's internal operating platform (repo `reply-radar`; renamed QC Command on 2026-10-01).
+Pulls every HeyReach, Email Bison and lemlist conversation for every client into one inbox, works
+out which replies deserve attention and drafts them, then pushes the results into each client's
+HubSpot, Attio, Google Sheets or Airtable and runs their booked-meeting workflow end to end.
+
+**Picking this up cold?** Read [`CLAUDE.md`](CLAUDE.md), then the top of
+[`context/08-session-handoff.md`](context/08-session-handoff.md) (current state and open items) and
+[`context/11-operations-crm-bookings-email.md`](context/11-operations-crm-bookings-email.md) (newest work).
 
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org)
 [![React 19](https://img.shields.io/badge/React-19-087EA4?logo=react&logoColor=white)](https://react.dev)
@@ -34,7 +39,12 @@ waiting before anyone opens the thread.
 | **Live lead database** | Every lead across every client, searchable, with exact totals and verified complete deletion. |
 | **Per-client analytics** | Reply and performance reporting, optionally on a client subdomain. |
 | **Onboarding hub** | A client directory and an interactive, ranked checklist snapshotted from an editable master template. Checking a step posts to the client's internal Slack channel; the last one flips them live. |
-| **Booked meetings** | Every client's booked calls, fed by a Zapier webhook off their Calendly (routed by client name), by hand, or by the assistant spotting one — with the full lead and company enrichment on each. |
+| **Client Operations page** | `/operations/<slug>`: one page per client with HubSpot, Attio, Google Sheets, Airtable and booked meetings in a left rail, a pulse check with red alerts, live "Ours (from QC)" tiles and a numbered, colour-coded build log. |
+| **CRM push** | Replies and leads into the client's HubSpot or Attio (QC Growth owns QC's contacts), booked meetings as deals in a Booked Meeting (QC) stage, HubSpot reports and a QC Growth dashboard via QC's own HubSpot app. Every build re-checks the key's scopes live and names any missing one. |
+| **Sheets & Airtable** | Any number of Google Sheets or Airtable tables per client, each holding replies, booked meetings or the campaign tracker; columns matched by name, missing ones added, one row per lead by a QC ID. |
+| **Booked meetings** | Each client's Calendly or cal.com bookings enriched through a shared Clay table, attributed to the QC campaign that produced them, given a pre-call brief (with an About section QC writes from the QC Brain, the client's site and web search) and posted to Slack as an expanded card with Meeting #N and the company logo. |
+| **Email & lemlist** | Email Bison and lemlist replies alongside HeyReach: channel filter, channel-aware drafts, email campaign figures in briefs and reports. |
+| **Slack reply alerts** | Every lead reply posted to the client's replies channel with the thread and a send button; bursts fold into one card. |
 | **Deals & attribution** | Pulls a client's CRM pipeline (HubSpot or Attio) and flags which deals came from QC — *certain* only when a person on the deal matches, by email or LinkedIn, someone QC contacted or booked. |
 | **Morning brief & call analysis** | Three mornings a week, a per-client intelligence report into Slack; weekly calls are transcribed, recapped, filed to Airtable, and written into the client's QC Brain. |
 | **Ask-anything assistant** | An in-app Claude with read access to every client's data — inbox, HeyReach, Airtable, Slack channels, meetings, deals, onboarding and the QC Brain — behind an allowlist of tools. |
@@ -174,6 +184,22 @@ considers the newest 200 replies needing work per client, and a lead AI Ark coul
 alone for seven days (AI Ark bills five attempts per call, so retrying every cycle spends real money
 re-learning the same answer).
 
+**Integrations (Vercel)**
+
+| Variable | Notes |
+|---|---|
+| `HUBSPOT_APP_CLIENT_ID` / `HUBSPOT_APP_CLIENT_SECRET` | QC Growth's user-level HubSpot app (reports and dashboard). `HUBSPOT_OAUTH_ORIGIN` defaults to `https://www.replyradar.dev`. `QC_HUBSPOT_OWNER_EMAIL` defaults to `admin@qcgrowth.com`. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google Sheets sign-in as admin@qcgrowth.com. `GOOGLE_SERVICE_ACCOUNT_*` is the fallback. |
+| `AIRTABLE_API_KEY` | QC's Airtable key for every client table. |
+| `EMAILBISON_API_KEY` / `EMAILBISON_BASE_URL` | Email Bison (`https://send.qcgrowth.com`); per-client workspace tokens are minted from it and stored in Supabase. |
+| `SLACK_BOT_TOKEN`, `SLACK_USER_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_TEST_CHANNEL_ID`, `SLACK_NEVER_PING` | QC Bot; test posts go to the test channel; never-ping list (Luke). |
+| `APP_PASSWORD`, `AUTH_SECRET`, `APP_RECOVERY_CODE` | The site password gate. |
+| `CRON_SECRET`, `ENFORCE_MACHINE_AUTH` | Machine-route auth; not enforced until `CRON_SECRET` is also on Render. |
+| `MEETINGS_WEBHOOK_SECRET` | Zapier meetings webhook (not set yet). |
+
+Per-client keys (HubSpot service key, Attio key, Calendly token, cal.com secret, lemlist key, Email
+Bison token) are entered in the app and stored in Supabase, never in env or the repo.
+
 HeyReach API keys are **per client**, entered in the app and stored in Supabase. There is no global
 HeyReach key and none should be added to Render.
 
@@ -208,7 +234,8 @@ AI state lives in JSON rather than columns, so adding a signal never needs a mig
 
 ## Working on this
 
-Read [`context/`](context/) first. It carries the full backend rundown, every issue this project has
+Read [`CLAUDE.md`](CLAUDE.md) and [`context/`](context/) first; the top of
+`context/08-session-handoff.md` is always the current state. It carries the full backend rundown, every issue this project has
 hit and how it was fixed, and the conventions that are not obvious from the code.
 
 The rules that matter most:
@@ -224,5 +251,5 @@ The rules that matter most:
 ---
 
 <div align="center">
-<sub>Internal tool for QC Growth. Not open for public use.</sub>
+<sub>QC Command: internal tool for QC Growth. Not open for public use.</sub>
 </div>

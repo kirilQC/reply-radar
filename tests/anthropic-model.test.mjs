@@ -1,3 +1,6 @@
+// Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
+// Reply Radar — proprietary. Not licensed for redistribution or resale.
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ACTIVE_MODELS, DEFAULT_MODEL, OPENROUTER_DEFAULT_MODEL, resolveModel, temperatureField } from "../shared/anthropic-model.mjs";

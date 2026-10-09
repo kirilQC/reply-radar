@@ -1,6 +1,45 @@
 # 8. Session handoff — state as of `8e8f90a`
 
-> ## Addendum — Oct 7, 2026 (newer than everything below; trust it where they differ)
+> ## Addendum: Oct 9, 2026 (newest; trust it over everything below)
+>
+> **Read [`11-operations-crm-bookings-email.md`](11-operations-crm-bookings-email.md) first.** It covers everything
+> built Oct 7 to 9: the Operations page, HubSpot/Attio push, Sheets and Airtable tables, the booked meetings
+> workflow, Email Bison, lemlist, Slack reply alerts, and the QC Portal brain connector.
+>
+> **Baselines at `f084f27` (checked 2026-10-09):** `npm run typecheck` clean · `npm test` **957 passing, 0
+> failing** · `npx eslint .` **240 errors, 113 warnings** (grew with the Oct 7 to 9 work, mostly
+> `no-img-element` and `react-hooks/*` in project-management, help and components; 2 are in the built
+> `qc-growth-dashboard/dist`) · `npm run build` passes · production deploy of `f084f27` is green on Vercel.
+>
+> **Open, in rough priority order:**
+> 1. **Calendly event creation (next build, awaiting Kiril's answers).** Plan agreed in principle: paste a
+>    client's Calendly key, list its event types to tick for tracking, or "Create QC meeting" (30 min) by API.
+>    **Calendly's API cannot add custom questions** (Calendly staff, June 2026), so Job title + Company name
+>    (both required) stay a manual step in Calendly; QC Command will read the event back and tick/flag that both
+>    exist and are required. Waiting on: the event name, location (Google Meet assumed), description.
+> 2. **Sazabi and Bead share one Calendly account** (admin+sazabi@qcgrowth.com, admin role, one "30 Minute
+>    Meeting"). Each connection subscribes its own webhook, so a booking may post for both. Kiril to decide:
+>    disconnect Bead, or give Bead its own key. The Sazabi token can create event types, one-off events and
+>    book invitees (verified read-only via `/api/bookings/calendly/check`).
+> 3. **Hyperpath**: drag the Booked Meeting (QC) stage above Discover in HubSpot (the API cannot reorder the
+>    first stage). Also needs the Reporting API beta before its dashboard builds.
+> 4. **Vitalic**: HubSpot key missing `settings.users.read` / `settings.users.write` (scope gate blocks builds).
+> 5. **Airtable leftovers**: 15 test fields on the KI test base's "Table 1"; Chroma's replies table has 6 meeting
+>    columns that can be removed. Both by hand in Airtable.
+> 6. `MEETINGS_WEBHOOK_SECRET` not set; QC's Calendly OAuth app not set up (tokens are used instead).
+> 7. Optionally test HeyReach booking attribution with a real campaign lead.
+> 8. Security items still open (see `10-new-sections.md` and memory): `CRON_SECRET` on Render then
+>    `ENFORCE_MACHINE_AUTH=1`; HeyReach webhooks have no secret.
+> 9. **Bluevia is marked offboarded** in `rr_workspaces` but is being used as an active portal client; clear the
+>    flag if that is wrong.
+>
+> **Standing instructions from Kiril (still in force):** don't send anything to anybody and don't delete
+> campaigns without asking; everything committed must be pushed and deployed (nothing kept only locally);
+> never store API keys locally or in the repo; QC Bot never pings Luke; QC never assigns its leads to the
+> client; no em or en dashes in user-facing text; paste SQL inline; push without asking; HubSpot work is done
+> by API, CLI or MCP only; no HubSpot "opt-in" flows beyond the Reporting API beta link.
+
+> ## Addendum — Oct 7, 2026 (older than the Oct 9 addendum above)
 >
 > **Baselines now:** `npm test` → **836 passing**; `npx eslint .` → **160 errors, 103 warnings** (the
 > baseline; do not add one). Lint and test counts further down this file are historical.

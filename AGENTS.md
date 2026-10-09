@@ -1,4 +1,4 @@
-# Reply Radar — read this first
+# QC Command (repo `reply-radar`) — read this first
 
 Internal LinkedIn reply-management platform for **QC Growth**, a GTM agency running outbound for
 multiple clients through HeyReach. Replies from every client land in one inbox; Codex classifies
@@ -9,7 +9,15 @@ It also writes the **morning brief**: three mornings a week, a short intelligenc
 posted into the team's internal Slack channel. See
 [`context/09-morning-brief.md`](context/09-morning-brief.md) before touching it.
 
-**Next.js 16 App Router + React 19 on Vercel (Hobby, 60s function ceiling) · Supabase over the
+**Renamed "QC Command" on 2026-10-01.** Same app, repo, domain and database. Use "QC Command" in any new
+user-facing text; never rename internal identifiers (`rr_*` tables, the `reply_radar` JSON key,
+`reply-radar-*` storage keys, the domain). It has grown well past the inbox: a per-client **Operations**
+page (HubSpot, Attio, Google Sheets, Airtable, booked meetings), Email Bison and lemlist as reply sources,
+Slack reply alerts, and QC Bot. **Picking up cold? Read the top of
+[`context/08-session-handoff.md`](context/08-session-handoff.md), then
+[`context/11-operations-crm-bookings-email.md`](context/11-operations-crm-bookings-email.md).**
+
+**Next.js 16 App Router + React 19 on Vercel (long routes set `maxDuration`, up to 300s) · Supabase over the
 PostgREST REST API only · Anthropic `Codex-haiku-4-5-20251001` for the inbox pipeline and
 `Codex-sonnet-4-6` for the brief and the brain · a separate always-on Render worker
 (`worker/render-worker.mjs`) · `replyradar.dev`, whose bare domain 308-redirects, so `curl` needs
@@ -29,6 +37,8 @@ Read it rather than re-deriving things. `context/README.md` is the index.
 | [`context/06-product-decisions.md`](context/06-product-decisions.md) | Settled decisions, including reversed ones. Do not relitigate. |
 | [`context/07-verification.md`](context/07-verification.md) | How to prove a change works with no local credentials. |
 | [`context/08-session-handoff.md`](context/08-session-handoff.md) | **Current state: recent commits, what's verified, what's still open.** Start here if picking up cold. |
+| [`context/11-operations-crm-bookings-email.md`](context/11-operations-crm-bookings-email.md) | **Newest work (Oct 7 to 9):** Operations page, CRM push, Sheets/Airtable, booked meetings + Clay + Calendly, Email Bison, lemlist, reply alerts, the QC Portal brain connector. |
+| [`context/10-new-sections.md`](context/10-new-sections.md) | Password gate, Onboarding, Meetings, Deals & attribution, assistant tools. |
 | [`context/09-morning-brief.md`](context/09-morning-brief.md) | The Slack morning brief: sources, the load-bearing rules, and why its layout is applied in code rather than asked of the model. |
 | [`context/00-original-handoff.md`](context/00-original-handoff.md) | The original handoff, verbatim. Historical where it conflicts with the above. |
 
@@ -48,7 +58,7 @@ Read it rather than re-deriving things. `context/README.md` is the index.
    work goes through `/api/ai/*` routes the worker calls over HTTP. Never keep a second copy.
 7. **There is no local `.env`**, so no local production data. Anything needing live data must be a
    button the owner clicks. Verify changes with the harness pattern in `context/07-verification.md`.
-8. **Lint baseline is exactly 160 errors and 103 warnings** (Oct 2026), via `npx eslint .` — **`npx next lint` is
+8. **Lint baseline is exactly 240 errors and 113 warnings** (2026-10-09), via `npx eslint .` — **`npx next lint` is
    broken here.** Any one more is yours. Don't fix the existing ones as drive-by work.
 9. **The brief's layout is applied to the model's output, not asked of it** (`briefFraming`). It looks
    like something to simplify and is not; `context/09-morning-brief.md` has the two failures that
@@ -77,8 +87,8 @@ Authentication of any kind. Webhook secret verification. Encryption of HeyReach 
 
 ```bash
 npm run typecheck     # clean
-npx eslint .          # exactly 160 errors, 103 warnings
-npm test              # 836 passing, 0 failing
+npx eslint .          # exactly 240 errors, 113 warnings
+npm test              # 957 passing, 0 failing
 npm run watermark     # every source file carries the banner
 npm run build         # confirm any new route appears in the route list
 ```
