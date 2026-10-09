@@ -33,6 +33,7 @@ export async function pushPass(config: Config, destination: Destination, opts: {
   for (;;) {
     const { records, scanned } = await replyRecords(config, destination.workspace_id, { since: opts.since, limit: BATCH, offset });
     const stored = await pushedRecords(config, destination.workspace_id, destination.provider, records.map((record) => record.conversationId));
+    if (destination.provider === "google_sheets" && (destination.config as { content?: string } | null)?.content === "meetings") { summary.nextOffset = null; break; }
     if (destination.provider === "google_sheets") {
       // A sheet takes the whole batch in one write (Google limits writes per minute, not cells).
       const due = records.filter((record) => stored.get(record.conversationId)?.pushed_hash !== record.hash);

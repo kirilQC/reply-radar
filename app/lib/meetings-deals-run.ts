@@ -32,8 +32,8 @@ export function cleanMeeting(meeting: Row): Row {
 }
 
 /** The person behind a meeting, so a second booking by them updates their deal instead of making another. */
-const personKey = (meeting: Row) => text(meeting.invitee_email).toLowerCase() || text(meeting.invitee_linkedin).toLowerCase().replace(/\/+$/, "") || text(meeting.invitee_name).toLowerCase();
-const internal = (meeting: Row) => /@qcgrowth\.com$/i.test(text(meeting.invitee_email)) || /^qc growth$/i.test(text(meeting.company_name));
+export const personKey = (meeting: Row) => text(meeting.invitee_email).toLowerCase() || text(meeting.invitee_linkedin).toLowerCase().replace(/\/+$/, "") || text(meeting.invitee_name).toLowerCase();
+export const internalMeeting = (meeting: Row) => /@qcgrowth\.com$/i.test(text(meeting.invitee_email)) || /^qc growth$/i.test(text(meeting.company_name));
 
 const meetingHash = (meeting: Row) => createHash("sha256").update(JSON.stringify(["v3", meeting.status, meeting.meeting_at, meeting.when_text, meeting.summary, meeting.campaign, meeting.invitee_name, meeting.invitee_email, meeting.invitee_linkedin, meeting.invitee_title, meeting.company_name, meeting.company_domain, meeting.host, object(object(meeting.booking).tldr)])).digest("hex").slice(0, 32);
 
@@ -59,7 +59,7 @@ export async function pushMeetingsPass(config: Config, destination: Destination,
   }
   for (const raw of meetings) {
     const meeting = cleanMeeting(raw);
-    if (internal(meeting)) { summary.unchanged += 1; continue; }
+    if (internalMeeting(meeting)) { summary.unchanged += 1; continue; }
     if (Date.now() - started > (opts.budgetMs ?? 60_000)) break;
     const id = text(meeting.id);
     const own = stored.get(id);

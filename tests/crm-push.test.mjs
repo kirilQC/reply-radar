@@ -90,7 +90,9 @@ test("Attio: QC's data lives on a shared QC Growth list, the person keeps its ow
 test("Google Sheets: only mapped columns and QC ID are written, a lead is found again by QC ID, the push needs a confirmed mapping", () => {
   const lib = readFileSync(new URL("../app/lib/sheets-push.ts", import.meta.url), "utf8");
   assert.match(lib, /if \(!key\) return;/);
-  assert.match(lib, /const existing = rowById\.get\(record\.conversationId\);/);
+  assert.match(lib, /const existing = rowById\.get\(item\.id\);/);
+  // A meetings sheet: one row per person, QC's own tests out.
+  assert.match(lib, /if \(internalMeeting\(meeting\)\) continue;/);
   assert.doesNotMatch(lib, /"DELETE"|:clear|deleteDimension/);
   const route = readFileSync(new URL("../app/api/sheets-push/[slug]/route.ts", import.meta.url), "utf8");
   assert.match(route, /if \(destination\.status !== "built"\) return NextResponse\.json\(\{ ok: false, error: "Confirm the column mapping first\." \}/);
@@ -112,5 +114,5 @@ test("Deals: names cleaned, one deal per person, QC's own test bookings skipped"
   const run = readFileSync(new URL("../app/lib/meetings-deals-run.ts", import.meta.url), "utf8");
   assert.match(run, /split\(";"\)/);
   assert.match(run, /const before = own \?\? byPerson\.get\(personKey\(meeting\)\);/);
-  assert.match(run, /if \(internal\(meeting\)\) \{ summary\.unchanged \+= 1; continue; \}/);
+  assert.match(run, /if \(internalMeeting\(meeting\)\) \{ summary\.unchanged \+= 1; continue; \}/);
 });

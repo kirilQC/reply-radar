@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, type Destination } from "../../../lib/crm-push";
 import { pushPass } from "../../../lib/crm-push-run";
 import { disconnectGoogle, googleAccount, googleOauthConfigured } from "../../../lib/google-user";
-import { accessToken, ensureQcIdColumn, serviceAccount, serviceAccountStatus, SHEET_FIELDS, sheetsConnect, sheetsFormat, suggestMapping, type SheetConfig } from "../../../lib/sheets-push";
+import { accessToken, ensureQcIdColumn, serviceAccount, serviceAccountStatus, fieldsFor, sheetsConnect, sheetsFormat, sheetsPushMeetings, suggestMapping, type SheetConfig, type SheetContent } from "../../../lib/sheets-push";
 
 /**
  * The onboarding cockpit's Google Sheets panel for one client (session only). GET says where it stands;
@@ -31,7 +31,8 @@ async function workspaceOf(c: { url: string; key: string }, slug: string) {
   return { id: text(workspace.id), name: text(workspace.name) };
 }
 
-const shared = async () => ({ google: await googleAccount().catch(() => null), googleOauth: googleOauthConfigured(), robotEmail: serviceAccount()?.client_email ?? null, googleKey: serviceAccountStatus(), fields: SHEET_FIELDS.map(({ key, label }) => ({ key, label })) });
+const contentOf = (destination: { config?: unknown } | null) => (((destination?.config ?? {}) as { content?: SheetContent }).content === "meetings" ? "meetings" : "replies") as SheetContent;
+const shared = async (content: SheetContent = "replies") => ({ content, google: await googleAccount().catch(() => null), googleOauth: googleOauthConfigured(), robotEmail: serviceAccount()?.client_email ?? null, googleKey: serviceAccountStatus(), fields: fieldsFor(content).map(({ key, label }) => ({ key, label })) });
 
 export async function GET(request: Request, context: { params: Promise<{ slug: string }> }) {
   try {
@@ -42,7 +43,8 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     }
     const c = config();
     const workspace = await workspaceOf(c, (await context.params).slug);
-    return NextResponse.json({ ok: true, ...(await shared()), sheet: presentDestination(await loadDestination(c, workspace.id, "sheets")) });
+    const destination = await loadDestination(c, workspace.id, "sheets");
+    return NextResponse.json({ ok: true, ...(await shared(contentOf(destination))), sheet: presentDestination(destination) });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not read the sheet settings." }, { status: 500 });
   }
@@ -55,15 +57,19 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     const c = config();
     const workspace = await workspaceOf(c, (await context.params).slug);
     const destination = await loadDestination(c, workspace.id, "sheets");
-    const reply = async (extra: Row = {}) => NextResponse.json({ ok: true, ...extra, ...(await shared()), sheet: presentDestination(await loadDestination(c, workspace.id, "sheets")) });
+    const reply = async (extra: Row = {}) => {
+      const fresh = await loadDestination(c, workspace.id, "sheets");
+      return NextResponse.json({ ok: true, ...extra, ...(await shared(contentOf(fresh))), sheet: presentDestination(fresh) });
+    };
 
     if (action === "connect" || (action === "reread" && destination)) {
       const url = action === "connect" ? text(body.url) : text(((destination?.config ?? {}) as Row).url);
       const sheet = await sheetsConnect(url);
       if (!sheet.headers.some(Boolean)) return NextResponse.json({ ok: false, error: "Add your headers in row 1 of the sheet first." }, { status: 400 });
       const previous = (destination?.config ?? {}) as Partial<SheetConfig>;
+      const content: SheetContent = action === "connect" ? (body.content === "meetings" ? "meetings" : "replies") : contentOf(destination);
       // A re-read keeps the confirmed choices for headers that are still there.
-      const mapping = suggestMapping(sheet.headers).map((suggested, index) => {
+      const mapping = suggestMapping(sheet.headers, content).map((suggested, index) => {
         const before = previous.headers?.indexOf(sheet.headers[index]) ?? -1;
         return before >= 0 && previous.mapping ? previous.mapping[before] ?? suggested : suggested;
       });
@@ -73,7 +79,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         account_id: sheet.spreadsheetId,
         account_name: sheet.title,
         status: action === "connect" ? "planned" : destination?.status ?? "planned",
-        config: { ...previous, url, spreadsheetId: sheet.spreadsheetId, tab: sheet.tab, headers: sheet.headers, mapping } as unknown as Row,
+        config: { ...previous, url, spreadsheetId: sheet.spreadsheetId, tab: sheet.tab, headers: sheet.headers, mapping, content } as unknown as Row,
         ...(action === "connect" ? { auto_push: false, build_log: [] } : {}),
       });
       return reply();
@@ -81,8 +87,17 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     if (!destination) return NextResponse.json({ ok: false, error: "Connect a sheet first." }, { status: 400 });
     const sheetConfig = (destination.config ?? {}) as unknown as SheetConfig & { url: string };
 
+    if (action === "content") {
+      // What the sheet holds: replies (one row per conversation) or booked meetings (one row per person).
+      const content: SheetContent = body.content === "meetings" ? "meetings" : "replies";
+      if (content === contentOf(destination)) return reply();
+      const mapping = suggestMapping(sheetConfig.headers, content);
+      await saveDestination(c, workspace.id, "sheets", { config: { ...sheetConfig, content, mapping } as unknown as Row, status: "planned" });
+      return reply();
+    }
     if (action === "map") {
-      const chosen = Array.isArray(body.mapping) ? (body.mapping as unknown[]).map((key) => (SHEET_FIELDS.some((field) => field.key === key) ? String(key) : "")) : sheetConfig.mapping;
+      const catalog = fieldsFor(contentOf(destination));
+      const chosen = Array.isArray(body.mapping) ? (body.mapping as unknown[]).map((key) => (catalog.some((field) => field.key === key) ? String(key) : "")) : sheetConfig.mapping;
       const { headers, qcIdColumn } = await ensureQcIdColumn(sheetConfig.spreadsheetId, sheetConfig.tab, sheetConfig.headers);
       const mapping = headers.map((_, index) => (index === qcIdColumn ? "" : chosen[index] ?? ""));
       await saveDestination(c, workspace.id, "sheets", { config: { ...sheetConfig, headers, mapping, qcIdColumn } as unknown as Row, status: "built", ...(destination.status !== "built" ? { auto_push: true } : {}) });
@@ -97,6 +112,12 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     }
     if (action === "push") {
       if (destination.status !== "built") return NextResponse.json({ ok: false, error: "Confirm the column mapping first." }, { status: 400 });
+      if (contentOf(destination) === "meetings") {
+        const done = await sheetsPushMeetings(c, destination as Destination);
+        const summary = { pushed: done.pushed, created: done.created, updated: done.updated, unchanged: 0, failed: 0, errors: [] as string[], nextOffset: null, at: new Date().toISOString() };
+        await saveDestination(c, workspace.id, "sheets", { last_push_at: summary.at, last_push_summary: summary as unknown as Row });
+        return reply({ summary });
+      }
       const summary = await pushPass(c, destination as Destination, { offset: Number(body.offset) || 0, budgetMs: 150_000 });
       return reply({ summary });
     }

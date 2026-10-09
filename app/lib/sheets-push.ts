@@ -4,6 +4,10 @@
 import { createSign } from "node:crypto";
 import { conversationText, type Destination, type ReplyRecord } from "./crm-push";
 import { googleAccount, googleUserToken } from "./google-user";
+import { createHash } from "node:crypto";
+import { rows, type Config } from "./crm-push";
+import { dealFacts } from "./hubspot-deals";
+import { cleanMeeting, internalMeeting, personKey } from "./meetings-deals-run";
 
 /**
  * Replies into a Google Sheet the team made, with the headers they want. QC Command writes as one Google
@@ -176,19 +180,20 @@ export const SHEET_FIELDS: Array<{ key: string; label: string; match: RegExp; va
 const QC_ID_HEADER = "QC ID";
 
 /** A suggested field per header (or "" to leave a column alone), the QC ID column never mapped. */
-export function suggestMapping(headers: string[]): string[] {
+export function suggestMapping(headers: string[], content: SheetContent = "replies"): string[] {
+  const catalog = fieldsFor(content);
   const used = new Set<string>();
   return headers.map((header) => {
     const normalized = header.toLowerCase().replace(/[_\-.:]+/g, " ").replace(/\s+/g, " ").trim();
     if (!normalized || normalized === QC_ID_HEADER.toLowerCase()) return "";
-    const field = SHEET_FIELDS.find((candidate) => !used.has(candidate.key) && candidate.match.test(normalized));
+    const field = catalog.find((candidate) => !used.has(candidate.key) && candidate.match.test(normalized));
     if (!field) return "";
     used.add(field.key);
     return field.key;
   });
 }
 
-export type SheetConfig = { spreadsheetId: string; tab: string; headers: string[]; mapping: string[]; qcIdColumn: number };
+export type SheetConfig = { spreadsheetId: string; tab: string; headers: string[]; mapping: string[]; qcIdColumn: number; content?: SheetContent };
 
 /** Adds the QC ID header at the end of the header row when it is not there yet. */
 export async function ensureQcIdColumn(spreadsheetId: string, tab: string, headers: string[]): Promise<{ headers: string[]; qcIdColumn: number }> {
@@ -215,12 +220,15 @@ async function currentLayout(config: SheetConfig): Promise<SheetConfig> {
 
 // ── Push: a batch of records, one row each ───────────────────────────────────────────────────────
 
-/** Writes the batch: existing leads' rows updated in place, new leads appended. Returns the row per record. */
-export async function sheetsPushBatch(destination: Destination, records: ReplyRecord[]): Promise<Map<string, { row: number; created: boolean }>> {
-  const saved = destination.config as unknown as SheetConfig;
+type Cell = string | number | boolean;
+
+/**
+ * Writes rows by QC ID: an existing row is updated in place, a new one appended. Only mapped columns and the
+ * QC ID are written, so the team's own columns between them are left untouched. Returns the row per id.
+ */
+async function writeRows(saved: SheetConfig, items: Array<{ id: string; value: (key: string) => Cell | undefined }>): Promise<Map<string, { row: number; created: boolean }>> {
   if (!saved?.spreadsheetId || !Array.isArray(saved.mapping)) throw new Error("Map the sheet's columns first.");
   const { spreadsheetId, tab, mapping, qcIdColumn } = await currentLayout(saved);
-  const width = Math.max(mapping.length, qcIdColumn + 1);
   const letter = columnLetter(qcIdColumn);
   const idColumn = await sheets("GET", `${spreadsheetId}/values/${encodeURIComponent(`${quote(tab)}!${letter}:${letter}`)}`);
   const rowById = new Map<string, number>();
@@ -229,41 +237,97 @@ export async function sheetsPushBatch(destination: Destination, records: ReplyRe
     if (id && index > 0) rowById.set(id, index + 1);
   });
   let nextRow = Math.max(1, (Array.isArray(idColumn.values) ? idColumn.values.length : 1)) + 1;
-
-  const build = (record: ReplyRecord) => {
-    const cells: Array<string | number | boolean> = Array.from({ length: width }, () => "");
-    mapping.forEach((key, index) => {
-      const field = SHEET_FIELDS.find((candidate) => candidate.key === key);
-      if (field) cells[index] = field.value(record);
-    });
-    cells[qcIdColumn] = record.conversationId;
-    return cells;
-  };
-
-  const data: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = [];
+  const data: Array<{ range: string; values: Cell[][] }> = [];
   const result = new Map<string, { row: number; created: boolean }>();
-  for (const record of records) {
-    const existing = rowById.get(record.conversationId);
+  for (const item of items) {
+    const existing = rowById.get(item.id);
     const row = existing ?? nextRow++;
-    rowById.set(record.conversationId, row);
-    result.set(record.conversationId, { row, created: !existing });
-    // Only mapped columns and QC ID are written: the team's own columns between them are left untouched.
-    const cells = build(record);
+    rowById.set(item.id, row);
+    result.set(item.id, { row, created: !existing });
     mapping.forEach((key, index) => {
       if (!key) return;
-      data.push({ range: `${quote(tab)}!${columnLetter(index)}${row}`, values: [[cells[index]]] });
+      data.push({ range: `${quote(tab)}!${columnLetter(index)}${row}`, values: [[item.value(key) ?? ""]] });
     });
-    data.push({ range: `${quote(tab)}!${letter}${row}`, values: [[record.conversationId]] });
+    data.push({ range: `${quote(tab)}!${letter}${row}`, values: [[item.id]] });
   }
   if (data.length) await sheets("POST", `${spreadsheetId}/values:batchUpdate`, { valueInputOption: "USER_ENTERED", data });
   return result;
 }
 
+/** Replies: one row per conversation. */
+export async function sheetsPushBatch(destination: Destination, records: ReplyRecord[]): Promise<Map<string, { row: number; created: boolean }>> {
+  return writeRows(destination.config as unknown as SheetConfig, records.map((record) => ({
+    id: record.conversationId,
+    value: (key) => SHEET_FIELDS.find((field) => field.key === key)?.value(record),
+  })));
+}
+
+// ── Booked meetings: one row per person ─────────────────────────────────────────────────────────
+
+type MeetingFacts = { meeting: Row; facts: Awaited<ReturnType<typeof dealFacts>> };
+const f = (facts: MeetingFacts, key: string) => facts.facts.fields[key] as Cell | undefined;
+
+export const MEETING_SHEET_FIELDS: Array<{ key: string; label: string; match: RegExp; value: (row: MeetingFacts) => Cell | undefined }> = [
+  { key: "company", label: "Company", match: /^company( name)?$|^organi[sz]ation$|^account$/, value: (r) => text(r.meeting.company_name) || r.facts.reply?.company || "" },
+  { key: "name", label: "Full name", match: /^(full ?)?name$|^lead( name)?$|^contact( name)?$|^person$|^attendee|^invitee/, value: (r) => text(r.meeting.invitee_name) },
+  { key: "first_name", label: "First name", match: /^first( ?name)?$/, value: (r) => text(r.meeting.invitee_name).split(/\s+/)[0] ?? "" },
+  { key: "last_name", label: "Last name", match: /^(last|sur) ?name$/, value: (r) => text(r.meeting.invitee_name).split(/\s+/).slice(1).join(" ") },
+  { key: "email", label: "Email", match: /e-?mail/, value: (r) => f(r, "qc_lead_email") },
+  { key: "title", label: "Job title", match: /title|role|position/, value: (r) => f(r, "qc_lead_title") },
+  { key: "linkedin", label: "LinkedIn", match: /^(person(al)? |lead |contact )?linked ?in( url| profile)?$/, value: (r) => f(r, "qc_lead_linkedin") },
+  { key: "company_domain", label: "Company domain", match: /domain|website/, value: (r) => f(r, "qc_company_domain") },
+  { key: "company_linkedin", label: "Company LinkedIn", match: /company linked ?in/, value: (r) => f(r, "qc_company_linkedin") },
+  { key: "industry", label: "Industry", match: /industry|sector/, value: (r) => f(r, "qc_company_industry") },
+  { key: "size", label: "Company size", match: /size|headcount|employees/, value: (r) => f(r, "qc_company_size") },
+  { key: "location", label: "Location", match: /location|city|country|region/, value: (r) => f(r, "qc_company_location") },
+  { key: "meeting_date", label: "Meeting date", match: /meeting (date|time)|^date$|^when$|scheduled( for)?|call (date|time)/, value: (r) => when(text(r.meeting.meeting_at)) || text(r.meeting.when_text) },
+  { key: "status", label: "Meeting status", match: /status/, value: (r) => ({ scheduled: "Scheduled", rescheduled: "Rescheduled", canceled: "Canceled", completed: "Completed", no_show: "No-show" } as Record<string, string>)[r.facts.status] ?? r.facts.status },
+  { key: "host", label: "Meeting host", match: /host|with|owner|rep|ae\b/, value: (r) => f(r, "qc_meeting_host") },
+  { key: "booked_at", label: "Booked at", match: /booked( at| on)?|created/, value: (r) => when(text(r.meeting.created_at)) },
+  { key: "campaign", label: "Campaign", match: /campaign/, value: (r) => f(r, "qc_campaign") },
+  { key: "sender", label: "Sender", match: /sender|sent by/, value: (r) => f(r, "qc_sender") },
+  { key: "platform", label: "Outreach platform", match: /platform|tool|source/, value: (r) => f(r, "qc_outreach_platform") },
+  { key: "sentiment", label: "Reply sentiment", match: /sentiment|intent/, value: (r) => f(r, "qc_reply_sentiment") },
+  { key: "latest_reply", label: "Latest reply", match: /latest repl|last message|^reply$|^message$|response/, value: (r) => f(r, "qc_latest_reply") },
+  { key: "conversation", label: "Full conversation", match: /conversation|thread|history|transcript/, value: (r) => f(r, "qc_conversation") },
+  { key: "pre_call_brief", label: "Pre-call brief", match: /brief|notes|summary|tl ?dr|prep/, value: (r) => f(r, "qc_pre_call_brief") },
+];
+
+export type SheetContent = "replies" | "meetings";
+export const fieldsFor = (content: SheetContent | undefined) => (content === "meetings" ? MEETING_SHEET_FIELDS : SHEET_FIELDS);
+
+/** Booked meetings into a meetings sheet: cleaned, QC's own tests left out, one row per person (their latest booking). */
+export async function sheetsPushMeetings(config: Config, destination: Destination, opts: { since?: string } = {}): Promise<{ pushed: number; created: number; updated: number }> {
+  const meetings = await rows(config, `rr_meetings?select=*&workspace_id=eq.${encodeURIComponent(destination.workspace_id)}&order=meeting_at.asc.nullsfirst,created_at.asc&limit=1000`);
+  const latest = new Map<string, Row>();
+  const changed = new Set<string>();
+  for (const raw of meetings) {
+    const meeting = cleanMeeting(raw);
+    if (internalMeeting(meeting)) continue;
+    const key = personKey(meeting);
+    const previous = latest.get(key);
+    // A canceled older booking never overwrites a newer live one.
+    if (previous && /cancel/i.test(text(meeting.status)) && !/cancel/i.test(text(previous.status))) continue;
+    latest.set(key, meeting);
+    if (!opts.since || text(raw.updated_at) >= opts.since) changed.add(key);
+  }
+  const due = [...latest.entries()].filter(([key]) => changed.has(key));
+  if (!due.length) return { pushed: 0, created: 0, updated: 0 };
+  const items: Array<{ id: string; value: (key: string) => Cell | undefined }> = [];
+  for (const [key, meeting] of due) {
+    const facts: MeetingFacts = { meeting, facts: await dealFacts(config, destination.workspace_id, meeting) };
+    items.push({ id: `meeting:${createHash("sha256").update(key).digest("hex").slice(0, 16)}`, value: (field) => MEETING_SHEET_FIELDS.find((candidate) => candidate.key === field)?.value(facts) });
+  }
+  const written = await writeRows(destination.config as unknown as SheetConfig, items);
+  const created = [...written.values()].filter((entry) => entry.created).length;
+  return { pushed: written.size, created, updated: written.size - created };
+}
+
 // ── Formatting: QC's house style, applied to whole columns so new rows inherit it ───────────────
 
-const LEFT_WRAPPED = new Set(["latest_reply", "conversation"]);
-const LEFT = new Set(["name", "first_name", "last_name", "email", "linkedin", "company_linkedin"]);
-const WIDTH: Record<string, number> = { latest_reply: 420, conversation: 520, linkedin: 260, company_linkedin: 260, campaign: 300, title: 260, email: 220 };
+const LEFT_WRAPPED = new Set(["latest_reply", "conversation", "pre_call_brief"]);
+const LEFT = new Set(["name", "first_name", "last_name", "email", "linkedin", "company_linkedin", "company"]);
+const WIDTH: Record<string, number> = { pre_call_brief: 460, latest_reply: 420, conversation: 520, linkedin: 260, company_linkedin: 260, campaign: 300, title: 260, email: 220 };
 const grey = (level: number) => ({ red: level, green: level, blue: level });
 
 /**

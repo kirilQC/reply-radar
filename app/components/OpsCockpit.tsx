@@ -354,6 +354,7 @@ function SheetsPanel({ slug, clientName, onClose, returned }: { slug: string; cl
   const [robot, setRobot] = useState<string | null>(null);
   const [google, setGoogle] = useState<{ email: string } | null>(null);
   const [googleOauth, setGoogleOauth] = useState(false);
+  const [content, setContent] = useState<"replies" | "meetings">("replies");
   const [fields, setFields] = useState<Array<{ key: string; label: string }>>([]);
   const [loaded, setLoaded] = useState(false);
   const [url, setUrl] = useState("");
@@ -362,8 +363,9 @@ function SheetsPanel({ slug, clientName, onClose, returned }: { slug: string; cl
   const [error, setError] = useState("");
   const [progress, setProgress] = useState<{ created: number; updated: number; failed: number } | null>(null);
 
-  const take = (payload: { sheet?: Sheet | null; robotEmail?: string | null; google?: { email: string } | null; googleOauth?: boolean; fields?: Array<{ key: string; label: string }> }) => {
+  const take = (payload: { sheet?: Sheet | null; robotEmail?: string | null; google?: { email: string } | null; googleOauth?: boolean; content?: string; fields?: Array<{ key: string; label: string }> }) => {
     if (payload.google !== undefined) setGoogle(payload.google);
+    if (payload.content === "replies" || payload.content === "meetings") setContent(payload.content);
     if (payload.googleOauth !== undefined) setGoogleOauth(payload.googleOauth);
     if (payload.sheet !== undefined) {
       setSheet(payload.sheet);
@@ -405,6 +407,17 @@ function SheetsPanel({ slug, clientName, onClose, returned }: { slug: string; cl
 
   const connected = Boolean(sheet?.connected);
   const writer = google?.email ?? robot;
+  const contentSwitch = (
+    <div className="oc-row" role="radiogroup" aria-label="What goes in this sheet">
+      {(["replies", "meetings"] as const).map((option) => (
+        <button key={option} type="button" role="radio" aria-checked={content === option} className={content === option ? "oc-primary" : "oc-ghost"} disabled={Boolean(busy)}
+          onClick={() => { if (connected) void step("content", { content: option }); else setContent(option); }}>
+          {option === "replies" ? "Replies" : "Booked meetings"}
+        </button>
+      ))}
+    </div>
+  );
+
   const headers = sheet?.config?.headers ?? [];
   const built = sheet?.status === "built";
 
@@ -437,6 +450,7 @@ function SheetsPanel({ slug, clientName, onClose, returned }: { slug: string; cl
         {loaded && writer && !connected && (
           <section className="oc-section">
             <h3>Connect</h3>
+            {contentSwitch}
             <ol className="oc-steps">
               <li>Make the sheet and put your headers in row 1</li>
               <li>{google ? <>Make sure <code>{writer}</code> can edit it (its own sheets already can)</> : <>Share it with <code>{writer}</code> as Editor</>}</li>
@@ -444,7 +458,7 @@ function SheetsPanel({ slug, clientName, onClose, returned }: { slug: string; cl
             </ol>
             <div className="oc-row">
               <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" />
-              <button type="button" className="oc-primary" disabled={!url.trim() || Boolean(busy)} onClick={() => void step("connect", { url: url.trim() }).then((ok) => ok && setUrl(""))}>{busy === "connect" ? "Reading sheet…" : "Connect"}</button>
+              <button type="button" className="oc-primary" disabled={!url.trim() || Boolean(busy)} onClick={() => void step("connect", { url: url.trim(), content }).then((ok) => ok && setUrl(""))}>{busy === "connect" ? "Reading sheet…" : "Connect"}</button>
             </div>
           </section>
         )}
@@ -452,6 +466,7 @@ function SheetsPanel({ slug, clientName, onClose, returned }: { slug: string; cl
         {connected && (
           <section className="oc-section">
             <h3>Columns</h3>
+            {contentSwitch}
             <ul className="oc-plan">
               {headers.map((header, index) => index === sheet?.config?.qcIdColumn ? null : (
                 <li key={`${header}-${index}`} className="oc-sheet-col">
@@ -474,11 +489,11 @@ function SheetsPanel({ slug, clientName, onClose, returned }: { slug: string; cl
 
         {connected && built && (
           <section className="oc-section">
-            <h3>Replies → Sheet</h3>
+            <h3>{content === "meetings" ? "Booked meetings" : "Replies"} → Sheet</h3>
             <div className="oc-stats"><span><strong>{when(sheet?.lastPushAt ?? null)}</strong>last push</span></div>
             <div className="oc-row">
-              <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void pushAll()}>{busy === "push" ? "Pushing…" : "Push all replies"}</button>
-              <label className="oc-toggle"><input type="checkbox" checked={Boolean(sheet?.autoPush)} disabled={Boolean(busy)} onChange={(e) => void step("auto", { on: e.target.checked })} /> Push new replies automatically</label>
+              <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void pushAll()}>{busy === "push" ? "Pushing…" : content === "meetings" ? "Push all booked meetings" : "Push all replies"}</button>
+              <label className="oc-toggle"><input type="checkbox" checked={Boolean(sheet?.autoPush)} disabled={Boolean(busy)} onChange={(e) => void step("auto", { on: e.target.checked })} /> Push new {content === "meetings" ? "bookings" : "replies"} automatically</label>
             </div>
             {progress && <p className="oc-muted">{progress.created} added · {progress.updated} updated{progress.failed ? ` · ${progress.failed} failed` : ""}</p>}
             {sheet?.lastPushSummary?.errors?.length ? <ul className="oc-errors">{sheet.lastPushSummary.errors.map((e) => <li key={e}>{e}</li>)}</ul> : null}
