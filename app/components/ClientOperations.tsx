@@ -5,7 +5,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import BookingAlerts from "../slack/BookingAlerts";
+import BookingSetup from "./BookingSetup";
 
 /**
  * A client's Operations page: where its replies and booked meetings go outside QC Command. One page, four
@@ -831,6 +831,11 @@ export default function ClientOperations({ slug }: { slug: string }) {
   const [returned, setReturned] = useState<{ hubspot?: Returned; sheets?: Returned }>({});
   const crmState = useCrm(slug);
   const sheetsState = useSheets(slug);
+  // Booked meetings' own state for the rail: on, or still being set up.
+  const [bookingOn, setBookingOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    void fetch(`/api/bookings/settings?client=${encodeURIComponent(slug)}`, { cache: "no-store" }).then((r) => r.json()).then((payload) => setBookingOn(Boolean(payload?.clients?.[0]?.enabled))).catch(() => undefined);
+  }, [slug, view]);
   const airtableState = useSheets(slug, "airtable-push");
   const { crm } = crmState;
 
@@ -882,7 +887,7 @@ export default function ClientOperations({ slug }: { slug: string }) {
       if (!list.length) return { label: "Add", tone: "off" };
       return live ? { label: `${live} live`, tone: "good" } : { label: "Setup", tone: "wait" };
     }
-    return { label: "Flow", tone: "off" };
+    return bookingOn === null ? { label: "", tone: "off" } : bookingOn ? { label: "Live", tone: "good" } : { label: "Setup", tone: "wait" };
   };
 
   const name = client?.name ?? slug;
@@ -933,7 +938,7 @@ export default function ClientOperations({ slug }: { slug: string }) {
         {view === "sheets" && <SheetsView slug={slug} state={sheetsState} returned={returned.sheets} />}
         {view === "airtable" && <AirtableView slug={slug} state={airtableState} />}
         {view === "meetings" && (
-          <div className="ops-stack ops-meetings"><BookingAlerts focus={slug} /></div>
+          <BookingSetup slug={slug} deals={crm?.connected && crm.status === "built" ? { provider: crm.provider === "attio" ? "Attio" : "HubSpot", live: dealsAreLive(crm, crm.provider), where: crm.provider === "attio" ? "Deals → Booked Meeting (QC)" : `${crm.plan?.deals?.pipelineLabel || "Pipeline"} → Booked Meeting (QC)` } : null} />
         )}
       </main>
     </div>

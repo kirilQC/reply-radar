@@ -196,6 +196,9 @@ export function clientConfig(workspace: Row) {
     channel: text(config.channel),
     botName: text(config.bot_name),
     briefAbout: text(config.brief_about),
+    /** Where QC's written About came from (QC Brain, the website, sites it searched), and when it was written. */
+    briefAboutSources: (Array.isArray(config.brief_about_sources) ? config.brief_about_sources : []).map((source: unknown) => text(source)).filter(Boolean) as string[],
+    briefAboutAt: text(config.brief_about_at) || null,
     briefInstructions: text(config.brief_instructions),
     steps: normalizeSteps(config.steps) as Step[],
   };

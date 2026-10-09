@@ -82,6 +82,8 @@ function present(settings: BookingSettings, workspaces: Row[], meetings: Row[], 
         channel: config.channel,
         botName: config.botName,
         briefAbout: config.briefAbout,
+        briefAboutSources: config.briefAboutSources,
+        briefAboutAt: config.briefAboutAt,
         briefInstructions: config.briefInstructions,
         clientBrief: focus ? text(workspace.client_brief) : "",
         recent: focus
@@ -168,6 +170,10 @@ export async function POST(request: Request) {
     if ("channel" in body) next.channel = channelId(body.channel);
     if ("botName" in body) next.bot_name = text(body.botName);
     if ("briefAbout" in body) next.brief_about = String(body.briefAbout ?? "").trim().slice(0, 12000);
+    if ("briefAboutSources" in body) {
+      next.brief_about_sources = (Array.isArray(body.briefAboutSources) ? body.briefAboutSources : []).map((source) => text(source)).filter(Boolean).slice(0, 10);
+      next.brief_about_at = new Date().toISOString();
+    }
     if ("briefInstructions" in body) next.brief_instructions = String(body.briefInstructions ?? "").trim().slice(0, 8000);
     if ("steps" in body) next.steps = normalizeSteps(body.steps);
     if (!text(next.channel)) next.enabled = false;

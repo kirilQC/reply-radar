@@ -310,3 +310,20 @@ test("tables get their standard columns: Airtable can create the table, and miss
   assert.match(airtable, /if \(taken\.has\(String\(spec\.name\)\.toLowerCase\(\)\)\) continue;/);
   assert.match(ui, /Create the table for me/);
 });
+
+test("booked meetings on Operations: six numbered steps, everything saves itself, QC writes the About from the brain, the site and the web", () => {
+  const ui = readFileSync(new URL("../app/components/BookingSetup.tsx", import.meta.url), "utf8");
+  const ops = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  const about = readFileSync(new URL("../app/api/bookings/about/route.ts", import.meta.url), "utf8");
+  assert.equal((ui.match(/<StepCard n=\{\d\}/g) ?? []).length, 6);
+  assert.doesNotMatch(ui, />Save</, "no Save buttons: every field saves itself");
+  assert.match(ui, /Write it for me/);
+  assert.match(ui, /briefAboutSources: result\.payload\.sources/);
+  assert.match(ui, /The old HubSpot deal step is still on/);
+  assert.match(ops, /<BookingSetup slug=\{slug\}/);
+  assert.match(about, /brainContext\(/);
+  assert.match(about, /siteText\(text\(workspace\.website_url\)\)/);
+  assert.match(about, /web_search_20250305/);
+  assert.match(about, /thinking: \{ type: "between_tools" \}/);
+  assert.match(about, /const undash/);
+});
