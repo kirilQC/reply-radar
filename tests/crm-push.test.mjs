@@ -409,6 +409,10 @@ test("the booking card says which meeting with the person it is (canceled ones d
   assert.equal(meetingOrdinal(2), "second");
   assert.equal(meetingOrdinal(12), "12th");
   const card = buildBookingCard({ invitee_name: "Derrick Forchetti", status: "rescheduled" }, { meetingNumber: 2, rescheduledFrom: "Oct 10" });
-  assert.match(card.blocks[0].text.text, /\*Meeting #2\* · second meeting with this lead · rescheduled/);
-  assert.match(buildBookingCard({ invitee_name: "A B" }, { meetingNumber: 1 }).blocks[0].text.text, /^\*A new booking has been scheduled!\*\n\*Meeting #1\* · first meeting with this lead/);
+  assert.match(card.blocks[0].text.text, /\*Meeting #2\* · rescheduled\n/);
+  assert.match(buildBookingCard({ invitee_name: "A B" }, { meetingNumber: 1 }).blocks[0].text.text, /^\*A new booking has been scheduled!\*\n\*Meeting #1\*\n/);
+  // The lead's photo sits to the right of the card; their company's logo when there is no photo; nothing without either.
+  assert.deepEqual(buildBookingCard({ invitee_name: "A B", invitee_photo_url: "https://media.licdn.com/p.jpg", company_logo_url: "https://logo/x.png" }).blocks[0].accessory, { type: "image", image_url: "https://media.licdn.com/p.jpg", alt_text: "A B" });
+  assert.equal(buildBookingCard({ invitee_name: "A B", company_logo_url: "https://logo/x.png" }).blocks[0].accessory.image_url, "https://logo/x.png");
+  assert.equal(buildBookingCard({ invitee_name: "A B" }).blocks[0].accessory, undefined);
 });

@@ -356,9 +356,13 @@ export function buildBookingCard(meeting, opts = {}) {
   // Which meeting this is with the person: the first, a second (they've met before), and whether it moved.
   const number = Number(opts.meetingNumber) || 0;
   const rescheduled = Boolean(opts.rescheduledFrom) || str(m.status) === "rescheduled";
-  const tag = number ? `*Meeting #${number}* · ${meetingOrdinal(number)} meeting with this lead${rescheduled ? " · rescheduled" : ""}` : rescheduled ? "*Rescheduled*" : "";
+  const tag = number ? `*Meeting #${number}*${rescheduled ? " · rescheduled" : ""}` : rescheduled ? "*Rescheduled*" : "";
   const text = `${opts.test ? "_Test post. Nothing was sent anywhere else._\n" : ""}${heading}${tag ? `\n${tag}` : ""}\n\n${lines.join("\n")}`;
-  return { text: `${canceled ? "Booking canceled" : "New booking"}: ${clean(m.invitee_name) || "someone"}${clean(m.company_name) ? ` (${clean(m.company_name)})` : ""}`, blocks: sections(text) };
+  const blocks = sections(text);
+  // The lead's photo to the right of the card (their company's logo when there is no photo).
+  const image = [m.invitee_photo_url, m.company_logo_url].map((value) => str(value).trim()).find((value) => /^https:\/\//i.test(value));
+  if (image && blocks[0]) blocks[0] = { ...blocks[0], accessory: { type: "image", image_url: image, alt_text: clean(m.invitee_name) || clean(m.company_name) || "Lead" } };
+  return { text: `${canceled ? "Booking canceled" : "New booking"}: ${clean(m.invitee_name) || "someone"}${clean(m.company_name) ? ` (${clean(m.company_name)})` : ""}`, blocks };
 }
 
 /** "first", "second"... for the meeting tag; past ten, "11th". */
