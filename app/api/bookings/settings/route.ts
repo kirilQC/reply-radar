@@ -62,6 +62,7 @@ function present(settings: BookingSettings, workspaces: Row[], meetings: Row[], 
       calendlyOAuth: { clientIdSet: Boolean(settings.calendly_oauth?.client_id), secretSet: Boolean(settings.calendly_oauth?.client_secret), redirectUri: `${base}/api/bookings/calendly/oauth/callback` },
       calcom: settings.calcom ? { email: settings.calcom.email, connectedAt: settings.calcom.connected_at } : null,
       lastClayCallback: settings.last_clay_callback ?? null,
+      lastTestPost: settings.last_test_post ?? null,
     },
     clients: workspaces.map((workspace) => {
       const id = text(workspace.id);

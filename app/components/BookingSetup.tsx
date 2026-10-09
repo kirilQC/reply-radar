@@ -34,7 +34,7 @@ type Client = {
 };
 type Payload = {
   ok: boolean;
-  global: { clayWebhookUrl: string; calendlyOAuth: { clientIdSet: boolean; secretSet: boolean }; lastClayCallback: { at: string; test: boolean; fields: string[] } | null };
+  global: { clayWebhookUrl: string; calendlyOAuth: { clientIdSet: boolean; secretSet: boolean }; lastClayCallback: { at: string; test: boolean; fields: string[] } | null; lastTestPost: { at: string; workspace_id: string; ok: boolean; reason: string } | null };
   clients: Client[];
   testChannelSet: boolean;
   defaultBriefInstructions: string;
@@ -199,18 +199,27 @@ export default function BookingSetup({ slug, deals }: { slug: string; deals: Dea
     if (!result.ok) { setNote((current) => ({ ...current, test: result.error })); return; }
     setNote((current) => ({ ...current, test: `Sent ${lead.name || lead.email} to Clay with client ${client.name}. Waiting for Clay's answer…` }));
     setClayWaiting(sentAt);
-    for (let i = 0; i < 12; i += 1) {
+    // First Clay's answer, then the Slack post it sets off (brief written, posted to the test channel).
+    let clayLine = "";
+    for (let i = 0; i < 24; i += 1) {
       await new Promise((done) => setTimeout(done, 5000));
       const fresh = await call(settingsPath);
       if (!fresh.ok) continue;
       take(fresh.payload);
-      const answer = (fresh.payload as Payload).global.lastClayCallback;
-      if (answer?.test && answer.at >= sentAt) {
-        setNote((current) => ({ ...current, test: `Clay answered with ${answer.fields.length} ${answer.fields.length === 1 ? "field" : "fields"}${answer.fields.length ? `: ${answer.fields.join(", ")}` : ""}.` }));
+      const g = (fresh.payload as Payload).global;
+      const answer = g.lastClayCallback;
+      if (!clayLine && answer?.test && answer.at >= sentAt) {
+        clayLine = `Clay answered with ${answer.fields.length} ${answer.fields.length === 1 ? "field" : "fields"}.`;
+        setNote((current) => ({ ...current, test: `${clayLine} Writing the brief and posting to the test channel…` }));
+      }
+      const post = g.lastTestPost;
+      if (clayLine && post && post.at >= sentAt && post.workspace_id === client.id) {
+        setNote((current) => ({ ...current, test: post.ok ? `${clayLine} Posted to the test channel in Slack with the pre-call brief.` : `${clayLine} The Slack post failed: ${post.reason}` }));
         setClayWaiting(null);
         return;
       }
     }
+    if (clayLine) { setNote((current) => ({ ...current, test: `${clayLine} The Slack post hasn't been confirmed yet; check the test channel.` })); setClayWaiting(null); return; }
     setNote((current) => ({ ...current, test: "Sent to Clay. No answer within a minute: check the table's HTTP column runs and posts back." }));
     setClayWaiting(null);
   };
@@ -375,7 +384,7 @@ export default function BookingSetup({ slug, deals }: { slug: string; deals: Dea
         </div>
         {testOpen && (
           <div className="bk-box">
-            <div className="bk-box-head"><strong>Test lead</strong><span className="ops-muted">Goes to the Clay table as a test, with client {client.name}</span></div>
+            <div className="bk-box-head"><strong>Test lead</strong><span className="ops-muted">Goes to Clay as a test with client {client.name}, then on to the Slack test channel with its brief. Nothing is saved and no deal is made.</span></div>
             <div className="bk-two">
               <label className="ops-field">Name<input className="ops-input" value={draft("tName", "")} onChange={(e) => setDraft("tName", e.target.value)} /></label>
               <label className="ops-field">Email<input className="ops-input" type="email" value={draft("tEmail", "")} onChange={(e) => setDraft("tEmail", e.target.value)} /></label>
@@ -387,7 +396,7 @@ export default function BookingSetup({ slug, deals }: { slug: string; deals: Dea
               {client.recent.length > 0 && data.testChannelSet && <button type="button" className="ops-btn ops-sec" disabled={busy === "test"} onClick={() => void sendTest()}>{busy === "test" ? "Posting…" : "Post the latest booking to the test channel"}</button>}
               {!data.global.clayWebhookUrl && <span className="ops-muted">No Clay table is connected (shared setup).</span>}
             </div>
-            {note.test && <p className={/^(Clay answered|Sent|Latest booking posted)/.test(note.test) ? "ops-ok" : "ops-error"}>{note.test}</p>}
+            {note.test && <p className={/failed|No answer|isn't set|not set/.test(note.test) ? "ops-error" : "ops-ok"}>{note.test}</p>}
           </div>
         )}
       </StepCard>

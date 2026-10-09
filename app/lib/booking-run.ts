@@ -94,6 +94,8 @@ export type BookingSettings = {
   calendly_oauth?: { client_id: string; client_secret: string } | null;
   calcom?: CalComConnection | null;
   last_clay_callback?: { at: string; meeting_id: string; test: boolean; fields: string[] } | null;
+  /** The last test lead that ran on to Slack after Clay answered: when, and how it went. */
+  last_test_post?: { at: string; workspace_id: string; ok: boolean; reason: string } | null;
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "");
@@ -439,7 +441,13 @@ export async function intakeClay(config: Config, body: unknown): Promise<{ ok: b
   const parsed = fromClay(body);
   const received = Object.entries({ ...parsed.fields, ...parsed.tldr }).filter(([, value]) => text(value)).map(([key]) => key);
   await writeSettings(config, { last_clay_callback: { at: now(), meeting_id: parsed.meetingId, test: parsed.test, fields: received } }).catch(() => undefined);
-  if (parsed.test) return { ok: true, status: 200, note: `Test row received with ${received.length} fields.` };
+  if (parsed.test) {
+    const workspaceId = parsed.meetingId.startsWith("test:") ? parsed.meetingId.slice(5) : "";
+    if (!/^[0-9a-f-]{36}$/i.test(workspaceId)) return { ok: true, status: 200, note: `Test row received with ${received.length} fields.` };
+    // A test lead from a client's page carries on: the brief is written and the Slack post goes to the test
+    // channel. No booking is stored and no deal is made.
+    return { ok: true, status: 200, note: `Test row received with ${received.length} fields. Posting it to the test channel.`, run: () => runTestLead(config, workspaceId, parsed.fields).then(() => undefined) };
+  }
   const meeting = await loadMeeting(config, parsed.meetingId);
   if (!meeting) return { ok: false, status: 404, note: "No booking has that meeting_id. Send back the meeting_id column QC added to the row." };
   const patch: Row = {};
@@ -665,13 +673,14 @@ export type DeliverOutcome = { outcome: "done" | "partial" | "busy" | "skipped" 
  * Step 3: run the client's steps for one booking. `test` posts the Slack part to the test channel and
  * touches nothing else: no claim, no stored state, no HubSpot, no webhooks.
  */
-export async function deliverBooking(config: Config, meetingId: string, opts: { test?: boolean; channel?: string } = {}): Promise<DeliverOutcome> {
+export async function deliverBooking(config: Config, meetingId: string, opts: { test?: boolean; channel?: string; meeting?: Row } = {}): Promise<DeliverOutcome> {
   const test = opts.test === true;
   const claimKey = `booking_deliver:${meetingId}`;
   const token = test ? "" : await claim(config, claimKey);
   if (!test && !token) return { outcome: "busy" };
   try {
-    let meeting = await loadMeeting(config, meetingId);
+    // A test lead from the Booked meetings step is never stored: it arrives here as it came back from Clay.
+    let meeting = test && opts.meeting ? opts.meeting : await loadMeeting(config, meetingId);
     if (!meeting) return { outcome: "skipped", reason: "That booking is not stored." };
     const workspace = await loadWorkspace(config, text(meeting.workspace_id));
     if (!workspace) return { outcome: "skipped", reason: "The client is gone." };
@@ -790,16 +799,40 @@ export async function bookingTest(config: Config, workspaceId: string): Promise<
   return deliverBooking(config, text(latest.id), { test: true, channel });
 }
 
+/** A test lead, as Clay sent it back, through the client's Slack step to the test channel. Never stored. */
+async function runTestLead(config: Config, workspaceId: string, fields: Row): Promise<void> {
+  const channel = (process.env[TEST_CHANNEL_ENV] ?? "").trim();
+  const record = (ok: boolean, reason: string) => writeSettings(config, { last_test_post: { at: now(), workspace_id: workspaceId, ok, reason } }).catch(() => undefined);
+  if (!channel) { await record(false, `${TEST_CHANNEL_ENV} is not set, so there is no test channel.`); return; }
+  const meeting: Row = {
+    id: "test",
+    workspace_id: workspaceId,
+    summary: "Test booking",
+    status: "scheduled",
+    meeting_at: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+    ...Object.fromEntries(Object.entries(fields).filter(([, value]) => text(value))),
+  };
+  const linkedin = text(meeting.invitee_linkedin);
+  if (linkedin) {
+    const pictures = await photosFromAiArk(linkedin, text(meeting.company_name)).catch(() => null);
+    if (pictures?.photo) meeting.invitee_photo_url = pictures.photo;
+    if (pictures?.logo) meeting.company_logo_url = pictures.logo;
+  }
+  const outcome = await deliverBooking(config, "test", { test: true, channel, meeting }).catch((error) => ({ outcome: "failed", reason: error instanceof Error ? error.message : "failed" }) as DeliverOutcome);
+  await record(outcome.outcome === "done", outcome.outcome === "done" ? "Posted to the test channel." : outcome.reason || "Nothing was posted.");
+}
+
 /** A made-up row sent to the Clay table, marked as a test, to check the table answers back. */
 /**
  * A test row to the shared Clay table, marked test so its answer is only recorded. From a client's Booked
  * meetings step, the person typed the lead (name, email, company, title) and the row carries that client's
  * name in the Client column, exactly like a real booking would; without one, a sample lead.
  */
-export async function clayTest(config: Config, request?: Request, lead?: { name: string; email: string; company: string; title: string; client: { name: string; slug: string } }): Promise<{ ok: boolean; error?: string }> {
+export async function clayTest(config: Config, request?: Request, lead?: { name: string; email: string; company: string; title: string; client: { name: string; slug: string; id: string } }): Promise<{ ok: boolean; error?: string }> {
   const settings = await ensureCallbackSecret(config, await readSettings(config), request);
   return sendToClay(settings, clayRow({
-    id: "test",
+    // "test:<client id>": Clay sends it back, and QC runs that client's Slack step on the answer.
+    id: lead?.client.id ? `test:${lead.client.id}` : "test",
     invitee_name: lead?.name || "Tim Puri",
     invitee_email: lead?.email ?? "",
     company_name: lead?.company || "Curana Health",

@@ -21,11 +21,11 @@ export async function POST(request: Request) {
       // From a client's page: the lead the person typed, with that client's name in the Client column.
       const lead = body.lead && typeof body.lead === "object" ? (body.lead as Record<string, unknown>) : null;
       const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId.trim() : "";
-      let client: { name: string; slug: string } | null = null;
+      let client: { name: string; slug: string; id: string } | null = null;
       if (workspaceId) {
         const response = await fetch(`${config.url}/rest/v1/rr_workspaces?select=name,slug&id=eq.${encodeURIComponent(workspaceId)}&limit=1`, { headers: { apikey: config.key, Authorization: `Bearer ${config.key}` }, cache: "no-store" });
         const [row] = ((await response.json().catch(() => [])) ?? []) as Array<{ name?: string; slug?: string }>;
-        if (row?.name) client = { name: String(row.name), slug: String(row.slug ?? "") };
+        if (row?.name) client = { name: String(row.name), slug: String(row.slug ?? ""), id: workspaceId };
       }
       const field = (key: string) => (lead && typeof lead[key] === "string" ? String(lead[key]).trim().slice(0, 200) : "");
       if (lead && !field("name") && !field("email")) return NextResponse.json({ ok: false, error: "Add at least a name or an email." }, { status: 400 });

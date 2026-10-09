@@ -370,3 +370,13 @@ test("Clay's answer: lead name and email accepted (never over what the booking f
   assert.match(run, /photosFromAiArk\(linkedin,/);
   assert.match(run, /if \(pictures\?\.photo && !clean\(meeting\.invitee_photo_url\)\)/);
 });
+
+test("a test lead carries on after Clay: brief and Slack post to the test channel, nothing stored, no deal", () => {
+  const run = readFileSync(new URL("../app/lib/booking-run.ts", import.meta.url), "utf8");
+  assert.match(run, /id: lead\?\.client\.id \? `test:\$\{lead\.client\.id\}` : "test"/);
+  assert.match(run, /run: \(\) => runTestLead\(config, workspaceId, parsed\.fields\)/);
+  assert.match(run, /deliverBooking\(config, "test", \{ test: true, channel, meeting \}\)/);
+  // A test only ever runs the Slack step, to the test channel, and saves nothing.
+  assert.match(run, /settings\.steps\.filter\(\(step\) => step\.enabled && \(!test \|\| step\.type === "slack"\)\)/);
+  assert.match(run, /let meeting = test && opts\.meeting \? opts\.meeting : await loadMeeting/);
+});
