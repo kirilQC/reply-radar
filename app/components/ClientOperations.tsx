@@ -66,6 +66,8 @@ type FieldsByContent = { replies: Array<{ key: string; label: string }>; meeting
 type SheetsPayload = { sheets?: Sheet[]; robotEmail?: string | null; google?: { email: string } | null; googleOauth?: boolean; fieldsByContent?: FieldsByContent; summary?: { created: number; updated: number; failed: number; nextOffset: number | null } };
 type Client = { name: string; slug: string; logoUrl?: string | null; accentColor?: string | null };
 type Returned = { ok: boolean; message: string } | undefined;
+type Pulse = { at: string; totalContacts: number | null; ourContacts: number | null; deals: number | null };
+type Alert = { key: string; title: string; detail: React.ReactNode; action?: React.ReactNode };
 
 function HubSpotLogo() {
   return (
@@ -113,11 +115,28 @@ function MeetingsLogo() {
 const HUBSPOT_STEPS = [
   "In the client's HubSpot: Development → Keys → Service keys → Create service key",
   "Name it QC Growth",
-  "Tick every scope below (search each name in the scope picker):",
-  "CRM records: crm.objects.contacts.read + write, crm.objects.companies.read + write, crm.objects.deals.read + write",
-  "CRM fields: crm.schemas.contacts.read + write, crm.schemas.companies.read + write, crm.schemas.deals.read + write",
-  "Owners, segments, users: crm.objects.owners.read, crm.lists.read + write, settings.users.read + write",
+  "Add every scope below (search each exact name in the scope picker)",
   "Copy the key (starts with pat-) and paste it here",
+];
+/** Every scope the QC Growth service key needs, one per line. Kept equal to REQUIRED_SCOPES (a test checks). */
+const HUBSPOT_SCOPES = [
+  "crm.objects.contacts.read",
+  "crm.objects.contacts.write",
+  "crm.objects.companies.read",
+  "crm.objects.companies.write",
+  "crm.objects.deals.read",
+  "crm.objects.deals.write",
+  "crm.schemas.contacts.read",
+  "crm.schemas.contacts.write",
+  "crm.schemas.companies.read",
+  "crm.schemas.companies.write",
+  "crm.schemas.deals.read",
+  "crm.schemas.deals.write",
+  "crm.objects.owners.read",
+  "crm.lists.read",
+  "crm.lists.write",
+  "settings.users.read",
+  "settings.users.write",
 ];
 const ATTIO_STEPS = [
   "In the client's Attio: Workspace settings → Developers → New access token",
@@ -154,6 +173,7 @@ const hubspotHost = (crm: Crm) => ((crm.accountName ?? "").includes("hubspot.com
 /** The CRM's state and actions, shared by the rail (status) and the HubSpot and Attio views. */
 function useCrm(slug: string) {
   const [crm, setCrm] = useState<Crm | null>(null);
+  const [pulse, setPulse] = useState<Pulse | null>(null);
   const [appReady, setAppReady] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState("");
@@ -162,7 +182,7 @@ function useCrm(slug: string) {
 
   const load = useCallback(async () => {
     const payload = await fetch(`/api/crm-push/${encodeURIComponent(slug)}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null);
-    if (payload?.ok) { setCrm(payload.crm); setAppReady(Boolean(payload.hubspotApp)); }
+    if (payload?.ok) { setCrm(payload.crm); setAppReady(Boolean(payload.hubspotApp)); setPulse(payload.pulse ?? null); }
     setLoaded(true);
   }, [slug]);
   useEffect(() => { void load(); }, [load]);
@@ -179,7 +199,7 @@ function useCrm(slug: string) {
       setBusy("");
     }
   };
-  return { crm, appReady, loaded, busy, error, note, setNote, step, load };
+  return { crm, pulse, appReady, loaded, busy, error, note, setNote, step, load };
 }
 type CrmState = ReturnType<typeof useCrm>;
 
@@ -214,7 +234,7 @@ function BuildLog({ entries }: { entries: Crm["buildLog"] }) {
 }
 
 function CrmView({ slug, clientName, provider, state, returned }: { slug: string; clientName: string; provider: "hubspot" | "attio"; state: CrmState; returned: Returned }) {
-  const { crm, appReady, loaded, busy, error, note, setNote, step } = state;
+  const { crm, pulse, appReady, loaded, busy, error, note, setNote, step, load } = state;
   const [apiKey, setApiKey] = useState("");
   const [ownerId, setOwnerId] = useState("");
   useEffect(() => { if (crm?.plan?.settings.ownerId) setOwnerId(crm.plan.settings.ownerId); }, [crm?.plan?.settings.ownerId]);
@@ -242,6 +262,7 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
       offset = payload.summary.nextOffset;
     }
     setNote(`Done: ${total.created} created, ${total.updated} updated, ${total.unchanged} unchanged${total.failed ? `, ${total.failed} failed` : ""}.`);
+    void load();
   };
 
   const name = provider === "hubspot" ? "HubSpot" : "Attio";
@@ -278,7 +299,16 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
       <div className="ops-stack">
         <div className="ops-titlebar"><div><span className="ops-label">{name}</span><h1>Connect {name}</h1></div></div>
         <section className="ops-panel">
-          <ol className="ops-steps">{(provider === "hubspot" ? HUBSPOT_STEPS : ATTIO_STEPS).map((line) => <li key={line}>{line}</li>)}</ol>
+          <ol className="ops-steps">
+            {(provider === "hubspot" ? HUBSPOT_STEPS : ATTIO_STEPS).map((line) => (
+              <li key={line}>
+                {line}
+                {provider === "hubspot" && line.startsWith("Add every scope") && (
+                  <ul className="ops-scope-bullets">{HUBSPOT_SCOPES.map((scope) => <li key={scope}><code>{scope}</code></li>)}</ul>
+                )}
+              </li>
+            ))}
+          </ol>
           <div className="ops-row">
             <input className="ops-input" type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={provider === "hubspot" ? "pat-…" : "Attio access token"} aria-label={`${name} key`} />
             <button type="button" className="ops-btn ops-pri" disabled={!apiKey.trim() || Boolean(busy)} onClick={() => void step("connect", { provider, apiKey: apiKey.trim() }).then((ok) => ok && setApiKey(""))}>{busy === "connect" ? `Reading ${name}…` : "Connect"}</button>
@@ -290,10 +320,29 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
   }
 
   const c = crm!;
+  const asOf = when(pulse?.at ?? new Date().toISOString());
+  const lastOrder = [...c.buildLog].reverse().find((entry) => entry.kind === "deal-stage-order");
+  const lastPushAge = c.lastPushAt ? Date.now() - Date.parse(c.lastPushAt) : Infinity;
+  const pushErrors = c.lastPushSummary?.errors ?? [];
+  const reread = <button type="button" className="ops-btn ops-alert-btn" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Checking…" : `Re-read ${name}`}</button>;
+  // Everything that needs a person, loudest first. Nothing here means the pulse is clean.
+  const alerts: Alert[] = !built ? [] : [
+    ...(scopeBlocked ? [{ key: "scopes", title: `The ${name} key is missing ${missingScopes.length === 1 ? "a scope" : `${missingScopes.length} scopes`}. Nothing will be built until ${missingScopes.length === 1 ? "it's" : "they're"} added.`, detail: <><ul className="ops-scope-list">{missingScopes.map((scope) => <li key={scope}><code>{scope}</code></li>)}</ul><p className="ops-alert-p">{provider === "hubspot" ? "In HubSpot: Development → Keys → QC Growth → edit scopes, add each one above, save." : "In Attio: Workspace settings → Developers → the QC Growth token, add each one above, save."} Then re-read.</p></>, action: reread }] : []),
+    ...(!dealsLive ? [{ key: "deals", title: "Booked meetings are not becoming deals.", detail: dealsBlocker ?? "The Booked Meeting (QC) stage isn't built yet. Approve the game plan below.", action: dealsBlocker ? reread : undefined }] : []),
+    ...(dealsLive && provider === "hubspot" && lastOrder?.result === "failed" ? [{ key: "order", title: `Booked Meeting (QC) is not the first stage in ${c.plan?.deals?.pipelineLabel || "the pipeline"}.`, detail: <>{lastOrder.detail} HubSpot won't let the API move it above the first stage. Drag it to the top in HubSpot: Settings → Objects → Deals → Pipelines.</> }] : []),
+    ...(!c.autoPush ? [{ key: "auto", title: "Automatic push is off.", detail: "New replies won't reach the CRM until someone pushes by hand.", action: <button type="button" className="ops-btn ops-alert-btn" disabled={Boolean(busy)} onClick={() => void step("auto", { on: true })}>Turn it on</button> }] : []),
+    ...(c.autoPush && lastPushAge > 3 * 3600_000 ? [{ key: "stale", title: `Nothing has been pushed since ${when(c.lastPushAt)}.`, detail: "The automatic push runs every few minutes. Check System health for the CRM & Sheets push, or push all now." }] : []),
+    ...(pushErrors.length || (c.lastPushSummary?.failed ?? 0) > 0 ? [{ key: "push", title: `The last push had ${c.lastPushSummary?.failed || pushErrors.length} ${(c.lastPushSummary?.failed || pushErrors.length) === 1 ? "failure" : "failures"}.`, detail: <ul className="ops-alert-list">{pushErrors.slice(0, 5).map((e) => <li key={e}>{e}</li>)}</ul> }] : []),
+    ...(provider === "hubspot" && !c.hubspotUser ? [{ key: "user", title: "The QC Growth user isn't signed in, so the dashboard can't be built or kept up to date.", detail: "Sign in once as admin@qcgrowth.com.", action: <a className={`ops-btn ops-alert-btn${appReady ? "" : " ops-disabled"}`} href={appReady ? `/api/hubspot/oauth/start?slug=${encodeURIComponent(slug)}` : undefined}>Connect QC Growth user</a> }] : []),
+    ...(provider === "hubspot" && c.hubspotUser && !c.config?.dashboard_id ? [{ key: "dashboard", title: "The QC Growth dashboard isn't built.", detail: "If it says the Reporting API beta isn't on, join the beta first, then build.", action: <><a className="ops-btn ops-alert-btn" href={`https://${hubspotHost(c)}/product-updates/${c.accountId}/in-beta?puQuery=api&rollout=327896`} target="_blank" rel="noreferrer">Join Reporting API beta ↗</a></> }] : []),
+  ];
   return (
     <div className="ops-stack">
       <div className="ops-titlebar">
-        <div><span className="ops-label">{name}</span><h1>{built ? `Replies flowing into ${name}` : `Set up ${name}`}</h1></div>
+        <div>
+          <span className="ops-label">{name} · pulse check</span>
+          <h1>{!built ? `Set up ${name}` : alerts.length ? `As of ${asOf}, ${alerts.length} ${alerts.length === 1 ? "thing needs" : "things need"} attention.` : `As of ${asOf}, replies and deals are flowing into ${name}.`}</h1>
+        </div>
         {built && (
           <div className="ops-row">
             <button type="button" className="ops-btn ops-sec" disabled={Boolean(busy) || scopeBlocked} onClick={() => void step("push_one").then((payload) => payload?.test && setTested(payload.test))}>{busy === "push_one" ? "Pushing 1…" : "Push 1 lead (test)"}</button>
@@ -302,7 +351,7 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
         )}
       </div>
 
-      {scopeBlocked && (
+      {scopeBlocked && !built && (
         <section className="ops-panel ops-blocked" role="alert">
           <div className="ops-panel-head"><span className="ops-label">Can't continue</span><span className="ops-state ops-bad">● {missingScopes.length} {missingScopes.length === 1 ? "scope" : "scopes"} missing</span></div>
           <div className="ops-h2">The {name} key is missing {missingScopes.length === 1 ? "a scope" : "scopes"}. Nothing will be built until {missingScopes.length === 1 ? "it's" : "they're"} added.</div>
@@ -312,11 +361,25 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
         </section>
       )}
 
+      {built && alerts.length > 0 && (
+        <div className="ops-alerts">
+          {alerts.map((alert) => (
+            <section key={alert.key} className="ops-alert" role="alert">
+              <div className="ops-alert-title">{alert.title}</div>
+              <div className="ops-alert-detail">{alert.detail}</div>
+              {alert.action && <div className="ops-row">{alert.action}</div>}
+            </section>
+          ))}
+        </div>
+      )}
+
       {c.audit && (
-        <div className="ops-tiles">
-          <div className="ops-tile"><span className="ops-label">{provider === "attio" ? "People" : "Contacts"}</span><span className="ops-num">{c.audit.contacts.toLocaleString()}{c.audit.countsCapped && c.audit.contacts >= 2000 ? "+" : ""}</span></div>
+        <div className={`ops-tiles${built ? " ops-tiles-6" : ""}`}>
+          <div className="ops-tile"><span className="ops-label">{provider === "attio" ? "People" : "Contacts"} in {name}</span><span className="ops-num">{(pulse?.totalContacts ?? c.audit.contacts).toLocaleString()}{pulse?.totalContacts == null && c.audit.countsCapped && c.audit.contacts >= 2000 ? "+" : ""}</span></div>
+          {built && <div className="ops-tile ops-tile-accent"><span className="ops-label">Ours (from QC)</span><span className="ops-num">{pulse?.ourContacts == null ? "–" : pulse.ourContacts.toLocaleString()}</span>{pulse?.ourContacts != null && (pulse.totalContacts ?? c.audit.contacts) > 0 && <span className="ops-tile-sub">{Math.round((pulse.ourContacts / (pulse.totalContacts ?? c.audit.contacts)) * 100)}% of all {provider === "attio" ? "people" : "contacts"}</span>}</div>}
           <div className="ops-tile"><span className="ops-label">Companies</span><span className="ops-num">{c.audit.companies.toLocaleString()}{c.audit.countsCapped && c.audit.companies >= 2000 ? "+" : ""}</span></div>
-          <div className="ops-tile"><span className="ops-label">{built ? "QC fields" : "Owners"}</span><span className="ops-num">{built ? verified : c.audit.owners.length}</span></div>
+          <div className="ops-tile"><span className="ops-label">{built ? "QC fields added" : "Owners"}</span><span className="ops-num">{built ? verified : c.audit.owners.length}</span></div>
+          {built && <div className="ops-tile"><span className="ops-label">Deals from QC</span><span className="ops-num">{pulse?.deals == null ? "–" : pulse.deals.toLocaleString()}</span></div>}
           <div className="ops-tile"><span className="ops-label">Last push</span><span className="ops-num ops-num-sm">{clock(c.lastPushAt)}</span></div>
         </div>
       )}
@@ -329,8 +392,6 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
           {meetingsPushed && <span className="ops-muted">Deals: {meetingsPushed.created} created · {meetingsPushed.updated} updated{meetingsPushed.failed ? ` · ${meetingsPushed.failed} failed` : ""}</span>}
         </div>
       )}
-      {c.lastPushSummary?.errors?.length ? <ul className="ops-errors">{c.lastPushSummary.errors.map((e) => <li key={e}>{e}</li>)}</ul> : null}
-
       {showPlan && c.plan && (
         <section className="ops-panel">
           <div className="ops-panel-head"><span className="ops-label">Game plan</span>{creates.length > 0 && <span className="ops-tag">{creates.length} to create</span>}</div>
@@ -628,6 +689,10 @@ export default function ClientOperations({ slug }: { slug: string }) {
       setView(asked);
     }
   }, []);
+  // The CRM this client doesn't use can't be opened, not even from a link.
+  useEffect(() => {
+    if (crm?.connected && (view === "hubspot" || view === "attio") && crm.provider !== view) setView(crm.provider as View);
+  }, [crm?.connected, crm?.provider, view]);
   // No view asked for: open on the client's CRM once it is known.
   useEffect(() => {
     if (view || !crmState.loaded) return;
@@ -643,7 +708,7 @@ export default function ClientOperations({ slug }: { slug: string }) {
 
   const status = (target: View): { label: string; tone: "good" | "wait" | "off" | "bad" } => {
     if (target === "hubspot" || target === "attio") {
-      if (!crm?.connected || crm.provider !== target) return { label: crm?.connected ? "Off" : "Connect", tone: "off" };
+      if (!crm?.connected || crm.provider !== target) return { label: crm?.connected ? "Not used" : "Connect", tone: "off" };
       if (crm.audit?.missingScopes?.length) return { label: "Scopes", tone: "bad" };
       if (crm.status !== "built") return { label: "Setup", tone: "wait" };
       return dealsAreLive(crm, target) ? { label: "Live", tone: "good" } : { label: "Deals", tone: "wait" };
@@ -674,8 +739,12 @@ export default function ClientOperations({ slug }: { slug: string }) {
           {VIEWS.map((target) => {
             const Logo = VIEW_LOGOS[target];
             const s = status(target);
+            // One CRM per client: once one is connected, the other is locked and the chosen one is outlined green.
+            const isCrm = target === "hubspot" || target === "attio";
+            const chosen = isCrm && crm?.connected && crm.provider === target;
+            const locked = isCrm && crm?.connected && crm.provider !== target;
             return (
-              <button key={target} type="button" className={`ops-dest${view === target ? " ops-dest-on" : ""}`} aria-current={view === target ? "page" : undefined} onClick={() => setView(target)}>
+              <button key={target} type="button" disabled={Boolean(locked)} title={locked ? `${name} uses ${crm?.provider === "hubspot" ? "HubSpot" : "Attio"}` : undefined} className={`ops-dest${view === target ? " ops-dest-on" : ""}${chosen ? " ops-dest-chosen" : ""}${locked ? " ops-dest-locked" : ""}`} aria-current={view === target ? "page" : undefined} onClick={() => setView(target)}>
                 <span className={`ops-dest-logo${target === "attio" ? " ops-attio" : ""}`}><Logo /></span>
                 <span className="ops-dest-name">{VIEW_NAMES[target]}</span>
                 <span className={`ops-dest-state ops-${s.tone}`}>{s.label}</span>

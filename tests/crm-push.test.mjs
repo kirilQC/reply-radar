@@ -168,7 +168,7 @@ test("client Operations page: one button on onboarding, every sign-in comes back
   assert.match(hubspotBack, /\/operations\/\$\{slug/);
   assert.match(ui, /oauth\/start\?return=\$\{encodeURIComponent\(`\/operations\/\$\{slug\}`\)\}/);
   assert.match(bookings, /`\/operations\/\$\{focus\}\?view=meetings`/);
-  assert.match(ui, /crm\.objects\.deals\.read \+ write/);
+  assert.match(ui, /"crm\.objects\.deals\.write",/);
 });
 
 test("the Booked Meeting (QC) stage is never skipped: no opt-out, a key without deals access blocks the build and says why", () => {
@@ -185,16 +185,15 @@ test("the Booked Meeting (QC) stage is never skipped: no opt-out, a key without 
   assert.match(ui, /disabled=\{Boolean\(busy\) \|\| Boolean\(dealsBlocker\) \|\| scopeBlocked\}/);
 });
 
-test("the HubSpot connect steps list every scope QC Command checks for, so a key is never short one", async () => {
+test("the HubSpot connect steps list every scope QC Command checks for, one exact name per bullet", async () => {
   const push = readFileSync(new URL("../app/lib/hubspot-push.ts", import.meta.url), "utf8");
   const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
-  const required = [...push.slice(push.indexOf("export const REQUIRED_SCOPES"), push.indexOf("];", push.indexOf("export const REQUIRED_SCOPES"))).matchAll(/"([a-z.]+)"/g)].map((m) => m[1]);
+  const listOf = (src, marker) => [...src.slice(src.indexOf(marker), src.indexOf("];", src.indexOf(marker))).matchAll(/"([a-z.]+)"/g)].map((m) => m[1]);
+  const required = listOf(push, "export const REQUIRED_SCOPES");
+  const shown = listOf(ui, "const HUBSPOT_SCOPES");
   assert.ok(required.length >= 17);
-  const steps = ui.slice(ui.indexOf("const HUBSPOT_STEPS"), ui.indexOf("const ATTIO_STEPS"));
-  for (const scope of required) {
-    const base = scope.replace(/\.(read|write)$/, "");
-    assert.ok(steps.includes(scope) || steps.includes(`${base}.read + write`), `connect steps miss ${scope}`);
-  }
+  assert.deepEqual([...shown].sort(), [...required].sort());
+  assert.doesNotMatch(ui, /\.read \+ write/);
 });
 
 test("a key short any scope stops every build: scopes re-read live, build refused naming each one, buttons locked", () => {
@@ -213,4 +212,14 @@ test("a key short any scope stops every build: scopes re-read live, build refuse
     assert.ok(ui.slice(Math.max(0, at - 200), at).includes("scopeBlocked"), `${button} not locked by missing scopes`);
   }
   assert.match(deals, /export async function ensureStageFirst/);
+});
+
+test("Operations: the CRM a client doesn't use is locked, the pulse shows QC's share and raises alerts", () => {
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../app/api/crm-push/[slug]/route.ts", import.meta.url), "utf8");
+  assert.match(ui, /disabled=\{Boolean\(locked\)\}/);
+  assert.match(ui, /crm\.provider !== view\) setView/);
+  assert.match(ui, /replies and deals are flowing into/);
+  assert.match(ui, /Ours \(from QC\)/);
+  assert.match(route, /propertyName: "qc_outreach_platform", operator: "HAS_PROPERTY"/);
 });

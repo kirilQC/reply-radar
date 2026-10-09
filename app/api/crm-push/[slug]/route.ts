@@ -4,7 +4,7 @@
 import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
 import { pushOne, pushPass } from "../../../lib/crm-push-run";
-import { REQUIRED_SCOPES, hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotPlan } from "../../../lib/hubspot-push";
+import { REQUIRED_SCOPES, hubspot as hubspotCall, hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotPlan } from "../../../lib/hubspot-push";
 import { REPORTING_WAIT, hubspotBuildReporting, hubspotUserView } from "../../../lib/hubspot-reporting";
 import { dealsApply, dealsAudit, dealsPlan, type DealsPlan } from "../../../lib/hubspot-deals";
 import { pushMeetingsPass } from "../../../lib/meetings-deals-run";
@@ -40,10 +40,38 @@ export async function GET(_: Request, context: { params: Promise<{ slug: string 
   try {
     const c = config();
     const workspace = await workspaceOf(c, (await context.params).slug);
-    return NextResponse.json({ ok: true, hubspotApp: hubspotAppConfigured(), crm: presentDestination(await loadDestination(c, workspace.id, "crm")) });
+    const destination = await loadDestination(c, workspace.id, "crm");
+    return NextResponse.json({ ok: true, hubspotApp: hubspotAppConfigured(), crm: presentDestination(destination), pulse: await pulseOf(c, workspace.id, destination) });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not read the CRM settings." }, { status: 500 });
   }
+}
+
+/**
+ * The live pulse for the Operations page: contacts in the CRM now, how many of them QC brought in, and the
+ * deals QC made from booked meetings. HubSpot counts are asked for live (a few seconds at most); Attio's "ours"
+ * is QC's own push record.
+ */
+async function pulseOf(c: { url: string; key: string }, workspaceId: string, destination: Destination | null) {
+  if (!destination?.api_key || destination.status !== "built") return null;
+  const within = <T,>(work: Promise<T>, fallback: T) => Promise.race([work.catch(() => fallback), new Promise<T>((done) => setTimeout(() => done(fallback), 5000))]);
+  const enc = encodeURIComponent;
+  const deals = within(rows(c, `rr_crm_push_meetings?select=deal_id&workspace_id=eq.${enc(workspaceId)}&provider=eq.${enc(destination.provider)}&deal_id=not.is.null&limit=5000`).then((list) => new Set(list.map((row) => String(row.deal_id))).size as number | null), null);
+  if (destination.provider === "hubspot") {
+    const key = destination.api_key;
+    const count = (filters: Row[]) => hubspotCall(key, "POST", "/crm/v3/objects/contacts/search", { limit: 1, properties: ["hs_object_id"], ...(filters.length ? { filterGroups: [{ filters }] } : {}) }).then((data) => Number(data.total) || 0);
+    const [total, ours, dealCount] = await Promise.all([
+      within(count([]) as Promise<number | null>, null),
+      within(count([{ propertyName: "qc_outreach_platform", operator: "HAS_PROPERTY" }]) as Promise<number | null>, null),
+      deals,
+    ]);
+    return { at: new Date().toISOString(), totalContacts: total, ourContacts: ours, deals: dealCount };
+  }
+  const [ours, dealCount] = await Promise.all([
+    within(rows(c, `rr_crm_push_records?select=error&workspace_id=eq.${enc(workspaceId)}&provider=eq.attio&error=is.null&limit=50000`).then((list) => list.length as number | null), null),
+    deals,
+  ]);
+  return { at: new Date().toISOString(), totalContacts: null, ourContacts: ours, deals: dealCount };
 }
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }) {

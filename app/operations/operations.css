@@ -17,6 +17,10 @@
   --ops-wait: #f2b45a;
   --ops-bad: #ff8a7a;
   --ops-info: #7fb4c9;
+  --ops-green: #4ade80;
+  --ops-yellow: #facc15;
+  --ops-alert-bg: #2a1213;
+  --ops-alert-line: #ff6b5e;
   background: var(--ops-bg);
 }
 body.light-mode .ops-area {
@@ -36,6 +40,10 @@ body.light-mode .ops-area {
   --ops-wait: #a8650e;
   --ops-bad: #c0392b;
   --ops-info: #2f6f8f;
+  --ops-green: #15803d;
+  --ops-yellow: #a16207;
+  --ops-alert-bg: #fdecea;
+  --ops-alert-line: #c0392b;
 }
 
 .ops {
@@ -156,8 +164,9 @@ body.light-mode .ops-area {
 .ops-log td.ops-log-k { width: 80px; color: var(--ops-faint); }
 .ops-log td.ops-log-name { color: var(--ops-strong); white-space: normal; font-family: var(--ops-sans), system-ui, sans-serif; font-size: 13px; }
 .ops-log td.ops-log-d { white-space: normal; color: var(--ops-faint); padding-right: 20px; }
-.ops-r-created, .ops-r-verified { color: var(--ops-good); }
-.ops-r-reused, .ops-r-skipped { color: var(--ops-info); }
+.ops-r-created, .ops-r-verified { color: var(--ops-green); }
+.ops-r-reused { color: var(--ops-yellow); }
+.ops-r-skipped { color: var(--ops-info); }
 .ops-r-failed { color: var(--ops-bad); }
 .ops-r-waiting, .ops-r-removed { color: var(--ops-wait); }
 
@@ -176,3 +185,27 @@ body.light-mode .ops-area {
 .ops-blocked { border-color: var(--ops-bad); }
 .ops-scope-list { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
 .ops-scope-list code { display: inline-block; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--ops-bad); color: var(--ops-strong); font-size: 13px; }
+
+/* Rail: the client's CRM outlined green, the other one locked. */
+.ops .ops-dest-chosen { border-color: var(--ops-green); }
+.ops .ops-dest-chosen.ops-dest-on { border-color: var(--ops-green); box-shadow: inset 0 0 0 1px var(--ops-green); }
+.ops .ops-dest-locked { opacity: .35; cursor: not-allowed; filter: grayscale(1); }
+.ops .ops-dest-locked:hover { background: transparent; }
+
+/* Pulse alerts: anything that needs a person, big and red. */
+.ops-alerts { display: flex; flex-direction: column; gap: 12px; }
+.ops-alert { background: var(--ops-alert-bg); border: 2px solid var(--ops-alert-line); border-radius: 16px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+.ops-alert-title { font-size: 21px; font-weight: 700; line-height: 1.25; color: var(--ops-alert-line); text-wrap: balance; }
+.ops-alert-detail { color: var(--ops-strong); font-size: 14px; line-height: 1.5; }
+.ops-alert-p { margin: 8px 0 0; }
+.ops-alert-list { margin: 0; padding-left: 18px; }
+.ops .ops-alert-btn { background: var(--ops-alert-line); color: #fff; border: 0; }
+
+/* Tiles: six when built, with the QC share highlighted. */
+.ops-tiles-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ops-tile-accent { border-color: var(--ops-accent-line); }
+.ops-tile-sub { font-size: 12px; color: var(--ops-muted); }
+
+/* Connect steps: one exact scope name per bullet. */
+.ops-scope-bullets { margin: 8px 0 4px; padding-left: 20px; display: grid; gap: 4px; list-style: disc; }
+.ops-scope-bullets code { font-size: 13px; color: var(--ops-strong); }
