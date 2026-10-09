@@ -86,3 +86,12 @@ test("Attio: QC's data lives on a shared QC Growth list, the person keeps its ow
   const run = readFileSync(new URL("../app/lib/crm-push-run.ts", import.meta.url), "utf8");
   assert.match(run, /if \(destination\.provider === "attio"\) return attioPush;/);
 });
+
+test("Google Sheets: only mapped columns and QC ID are written, a lead is found again by QC ID, the push needs a confirmed mapping", () => {
+  const lib = readFileSync(new URL("../app/lib/sheets-push.ts", import.meta.url), "utf8");
+  assert.match(lib, /if \(!key\) return;/);
+  assert.match(lib, /const existing = rowById\.get\(record\.conversationId\);/);
+  assert.doesNotMatch(lib, /"DELETE"|:clear|deleteDimension/);
+  const route = readFileSync(new URL("../app/api/sheets-push/[slug]/route.ts", import.meta.url), "utf8");
+  assert.match(route, /if \(destination\.status !== "built"\) return NextResponse\.json\(\{ ok: false, error: "Confirm the column mapping first\." \}/);
+});

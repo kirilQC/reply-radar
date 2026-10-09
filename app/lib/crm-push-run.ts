@@ -11,6 +11,7 @@
 import { pushedRecords, replyRecords, saveDestination, savePushRecord, type Config, type Destination } from "./crm-push";
 import { hubspotPush } from "./hubspot-push";
 import { attioPush } from "./attio-push";
+import { sheetsPushBatch } from "./sheets-push";
 
 /** The provider's push for one conversation. */
 const pushFor = (destination: Destination) => {
@@ -32,6 +33,28 @@ export async function pushPass(config: Config, destination: Destination, opts: {
   for (;;) {
     const { records, scanned } = await replyRecords(config, destination.workspace_id, { since: opts.since, limit: BATCH, offset });
     const stored = await pushedRecords(config, destination.workspace_id, destination.provider, records.map((record) => record.conversationId));
+    if (destination.provider === "google_sheets") {
+      // A sheet takes the whole batch in one write (Google limits writes per minute, not cells).
+      const due = records.filter((record) => stored.get(record.conversationId)?.pushed_hash !== record.hash);
+      summary.unchanged += records.length - due.length;
+      try {
+        const rows = due.length ? await sheetsPushBatch(destination, due) : new Map();
+        for (const record of due) {
+          const placed = rows.get(record.conversationId);
+          await savePushRecord(config, destination.workspace_id, destination.provider, { conversationId: record.conversationId, contactId: placed ? String(placed.row) : null, hash: record.hash, createdContact: placed?.created ?? false });
+          summary.pushed += 1;
+          if (placed?.created && !stored.get(record.conversationId)?.created_contact) summary.created += 1; else summary.updated += 1;
+        }
+      } catch (error) {
+        summary.failed += due.length;
+        summary.errors.push((error instanceof Error ? error.message : "failed").slice(0, 200));
+        break;
+      }
+      offset += scanned;
+      if (scanned < BATCH) { summary.nextOffset = null; break; }
+      if (Date.now() - started > budget) { summary.nextOffset = offset; break; }
+      continue;
+    }
     for (const record of records) {
       const before = stored.get(record.conversationId);
       if (before?.pushed_hash === record.hash) { summary.unchanged += 1; continue; }

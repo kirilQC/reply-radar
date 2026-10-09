@@ -303,17 +303,140 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
   );
 }
 
-function SheetsPanel({ clientName, onClose }: { clientName: string; onClose: () => void }) {
+type Sheet = {
+  connected: boolean;
+  accountName: string | null;
+  status: string;
+  autoPush: boolean;
+  lastPushAt: string | null;
+  lastPushSummary: null | { pushed: number; created: number; updated: number; failed: number; errors: string[] };
+  config: { url?: string; tab?: string; headers?: string[]; mapping?: string[]; qcIdColumn?: number };
+};
+
+function SheetsPanel({ slug, clientName, onClose }: { slug: string; clientName: string; onClose: () => void }) {
+  const [sheet, setSheet] = useState<Sheet | null>(null);
+  const [robot, setRobot] = useState<string | null>(null);
+  const [fields, setFields] = useState<Array<{ key: string; label: string }>>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [url, setUrl] = useState("");
+  const [mapping, setMapping] = useState<string[]>([]);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [progress, setProgress] = useState<{ created: number; updated: number; failed: number } | null>(null);
+
+  const take = (payload: { sheet?: Sheet | null; robotEmail?: string | null; fields?: Array<{ key: string; label: string }> }) => {
+    if (payload.sheet !== undefined) {
+      setSheet(payload.sheet);
+      setMapping(payload.sheet?.config?.mapping ?? []);
+    }
+    if (payload.robotEmail !== undefined) setRobot(payload.robotEmail);
+    if (payload.fields) setFields(payload.fields);
+  };
+  useEffect(() => {
+    void fetch(`/api/sheets-push/${encodeURIComponent(slug)}`, { cache: "no-store" }).then((r) => r.json()).then((payload) => { if (payload?.ok) take(payload); }).finally(() => setLoaded(true));
+  }, [slug]);
+
+  const step = async (action: string, extra: Record<string, unknown> = {}) => {
+    setBusy(action); setError("");
+    try {
+      const response = await fetch(`/api/sheets-push/${encodeURIComponent(slug)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...extra }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) { setError(String(payload.error || `That step failed (${response.status}).`)); return null; }
+      take(payload);
+      return payload;
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const pushAll = async () => {
+    let offset = 0;
+    const total = { created: 0, updated: 0, failed: 0 };
+    setProgress({ ...total });
+    for (let round = 0; round < 40; round += 1) {
+      const payload = await step("push", { offset });
+      if (!payload?.summary) break;
+      total.created += payload.summary.created; total.updated += payload.summary.updated; total.failed += payload.summary.failed;
+      setProgress({ ...total });
+      if (payload.summary.nextOffset == null) break;
+      offset = payload.summary.nextOffset;
+    }
+  };
+
+  const connected = Boolean(sheet?.connected);
+  const headers = sheet?.config?.headers ?? [];
+  const built = sheet?.status === "built";
+
   return (
     <div className="oc-backdrop">
       <button className="oc-scrim" aria-label="Close" onClick={onClose} />
       <aside className="oc-panel" role="dialog" aria-label={`Google Sheets for ${clientName}`}>
         <div className="oc-head">
           <span className="oc-head-logo"><SheetsLogo /></span>
-          <div><h2>Google Sheets</h2><span>{clientName}</span></div>
+          <div><h2>Google Sheets</h2><span>{connected ? `${sheet?.accountName ?? ""} · ${sheet?.config?.tab ?? ""}` : clientName}</span></div>
           <button className="oc-x" onClick={onClose} aria-label="Close">✕</button>
         </div>
-        <section className="oc-section"><p className="oc-muted">Coming after HubSpot and Attio: replies into a shared sheet, one row per lead.</p></section>
+
+        {!loaded && <p className="oc-muted">Loading…</p>}
+        {loaded && !robot && <p className="oc-error">QC Command's Google account is not set up yet (GOOGLE_SERVICE_ACCOUNT_JSON on Vercel).</p>}
+
+        {loaded && robot && !connected && (
+          <section className="oc-section">
+            <h3>Connect</h3>
+            <ol className="oc-steps">
+              <li>Make the sheet and put your headers in row 1</li>
+              <li>Share it with <code>{robot}</code> as Editor</li>
+              <li>Paste the sheet's link here</li>
+            </ol>
+            <div className="oc-row">
+              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" />
+              <button type="button" className="oc-primary" disabled={!url.trim() || Boolean(busy)} onClick={() => void step("connect", { url: url.trim() }).then((ok) => ok && setUrl(""))}>{busy === "connect" ? "Reading sheet…" : "Connect"}</button>
+            </div>
+          </section>
+        )}
+
+        {connected && (
+          <section className="oc-section">
+            <h3>Columns</h3>
+            <ul className="oc-plan">
+              {headers.map((header, index) => index === sheet?.config?.qcIdColumn ? null : (
+                <li key={`${header}-${index}`}>
+                  <span className="oc-tag">{header || `Column ${index + 1}`}</span>
+                  <select value={mapping[index] ?? ""} onChange={(e) => setMapping((current) => { const next = [...current]; next[index] = e.target.value; return next; })}>
+                    <option value="">Leave empty</option>
+                    {fields.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
+                  </select>
+                </li>
+              ))}
+            </ul>
+            <div className="oc-row">
+              <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void step("map", { mapping })}>{busy === "map" ? "Saving…" : built ? "Save mapping" : "Confirm mapping"}</button>
+              <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("reread")}>{busy === "reread" ? "Reading…" : "Re-read headers"}</button>
+              {sheet?.config?.url && <a className="oc-ghost" href={sheet.config.url} target="_blank" rel="noreferrer">Open sheet ↗</a>}
+            </div>
+          </section>
+        )}
+
+        {connected && built && (
+          <section className="oc-section">
+            <h3>Replies → Sheet</h3>
+            <div className="oc-stats"><span><strong>{when(sheet?.lastPushAt ?? null)}</strong>last push</span></div>
+            <div className="oc-row">
+              <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void pushAll()}>{busy === "push" ? "Pushing…" : "Push all replies"}</button>
+              <label className="oc-toggle"><input type="checkbox" checked={Boolean(sheet?.autoPush)} disabled={Boolean(busy)} onChange={(e) => void step("auto", { on: e.target.checked })} /> Push new replies automatically</label>
+            </div>
+            {progress && <p className="oc-muted">{progress.created} added · {progress.updated} updated{progress.failed ? ` · ${progress.failed} failed` : ""}</p>}
+            {sheet?.lastPushSummary?.errors?.length ? <ul className="oc-errors">{sheet.lastPushSummary.errors.map((e) => <li key={e}>{e}</li>)}</ul> : null}
+          </section>
+        )}
+
+        {error && <p className="oc-error" role="alert">{error}</p>}
+        {connected && (
+          <div className="oc-foot">
+            <span className="oc-muted">{robot}</span>
+            <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("disconnect")}>Disconnect</button>
+          </div>
+        )}
       </aside>
     </div>
   );
@@ -339,7 +462,7 @@ export default function OpsCockpit({ slug, clientName }: { slug: string; clientN
       <button type="button" className="oc-button" title="Google Sheets" aria-label="Google Sheets" onClick={() => setOpen("sheets")}><SheetsLogo /></button>
       <Link href={`/bookings/${slug}`} className="oc-button" title="Booked meetings workflow" aria-label="Booked meetings workflow"><MeetingsLogo /></Link>
       {(open === "hubspot" || open === "attio") && <CrmPanel slug={slug} clientName={clientName} provider={open} returned={open === "hubspot" ? returned : undefined} onClose={() => setOpen("")} />}
-      {open === "sheets" && <SheetsPanel clientName={clientName} onClose={() => setOpen("")} />}
+      {open === "sheets" && <SheetsPanel slug={slug} clientName={clientName} onClose={() => setOpen("")} />}
     </div>
   );
 }
