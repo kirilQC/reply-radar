@@ -96,7 +96,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         destination = await loadDestination(c, workspace.id, "crm") ?? destination;
       }
       const failed = log.filter((entry) => entry.result === "failed");
-      await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: failed.length ? "planned" : "built" });
+      await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: failed.length ? "planned" : "built", ...(!failed.length && destination.status !== "built" ? { auto_push: true } : {}) });
       return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
     }
     // Read-only: which HubSpot surfaces this client's key can reach (saved views, reports, segments, HubSQL),

@@ -166,7 +166,7 @@ export async function hubspotAudit(token: string, scopes: string[] = []): Promis
 export const QC_VIEW_NAME = "QC Growth";
 const QC_VIEW_PATH = "/hub/cli/backend/crm/contacts/views";
 const QC_PLATFORMS = ["heyreach", "lemlist", "email_bison"];
-const QC_VIEW_COLUMNS = ["firstname", "lastname", "email", "jobtitle", "company", "qc_campaign", "qc_sender", "qc_outreach_platform", "qc_reply_sentiment", "qc_reply_count", "qc_last_reply_date", "hubspot_owner_id"];
+const QC_VIEW_COLUMNS = ["firstname", "lastname", "email", "jobtitle", "company", "website", "qc_linkedin_url", "qc_company_linkedin_url", "qc_campaign", "qc_sender", "qc_outreach_platform", "qc_reply_sentiment", "qc_reply_count", "qc_last_reply_date", "hubspot_owner_id"];
 const viewList = (data: unknown): Row[] => Array.isArray(data) ? data as Row[] : list(object(data).results ?? object(data).views ?? object(data).data);
 function named(rows: Row[], idKey: string) {
   const row = rows.find((entry) => text(entry.name).trim().toLowerCase() === QC_VIEW_NAME.toLowerCase());
@@ -192,6 +192,7 @@ type PropertySpec = { name: string; label: string; type: string; fieldType: stri
  */
 export const QC_PROPERTIES: PropertySpec[] = [
   { name: "qc_linkedin_url", label: "QC LinkedIn URL", type: "string", fieldType: "text", description: "The lead's LinkedIn profile. Unique, so a lead with no email still matches one contact.", unique: true },
+  { name: "qc_company_linkedin_url", label: "QC company LinkedIn", type: "string", fieldType: "text", description: "The company's LinkedIn page, on the contact so it can be a column in the QC Growth view." },
   { name: "qc_campaign", label: "QC campaign", type: "string", fieldType: "text", description: "The QC Growth campaign the lead replied to." },
   { name: "qc_sender", label: "QC sender", type: "string", fieldType: "text", description: "Who the outreach came from." },
   { name: "qc_outreach_platform", label: "QC outreach platform", type: "enumeration", fieldType: "select", description: "Where the outreach ran.", options: [{ label: "HeyReach", value: "heyreach" }, { label: "lemlist", value: "lemlist" }, { label: "Email Bison", value: "email_bison" }] },
@@ -210,6 +211,7 @@ export const STANDARD_FIELDS: Array<{ object: "contact" | "company"; name: strin
   { object: "contact", name: "email", label: "Email", from: "Lead's email address" },
   { object: "contact", name: "jobtitle", label: "Job title", from: "Lead's job title" },
   { object: "contact", name: "company", label: "Company name", from: "Lead's company" },
+  { object: "contact", name: "website", label: "Website URL", from: "Company domain" },
   { object: "company", name: "name", label: "Company name", from: "Lead's company" },
   { object: "company", name: "domain", label: "Company domain name", from: "Company domain" },
   { object: "company", name: "linkedin_company_page", label: "LinkedIn company page", from: "Company's LinkedIn page" },
@@ -364,13 +366,17 @@ export async function hubspotApply(token: string, plan: HubSpotPlan): Promise<Bu
       log.push({ at: at(), kind: "owner", name: QC_OWNER_EMAIL, result: "failed", detail: error instanceof Error ? error.message : "" });
     }
   }
-  if (plan.items.some((item) => item.kind === "view" && item.action === "create")) {
+  if (plan.items.some((item) => item.kind === "view" && item.action !== "skip")) {
     try {
       const existing = named(viewList(await hubspot(token, "GET", QC_VIEW_PATH).catch(() => [])), "id");
       const view = existing ?? { id: text((await hubspot(token, "POST", QC_VIEW_PATH, qcViewBody())).id), name: QC_VIEW_NAME };
+      // An existing QC Growth view gets today's columns (new QC fields show up without rebuilding it).
+      if (existing) await hubspot(token, "PUT", `${QC_VIEW_PATH}/${view.id}`, qcViewBody()).catch(() => hubspot(token, "PATCH", `${QC_VIEW_PATH}/${view.id}`, qcViewBody()));
       const back = await hubspot(token, "GET", `${QC_VIEW_PATH}/${view.id}`);
       const filtered = JSON.stringify(back.filterGroups ?? []).includes("qc_outreach_platform");
-      log.push({ at: at(), kind: "view", name: QC_VIEW_NAME, result: existing ? "reused" : filtered ? "created" : "failed", detail: filtered ? `Contacts view ${view.id}` : `View ${view.id} saved without its filter` });
+      const columns = list(back.columns).map((column) => text(column.name));
+      const missing = QC_VIEW_COLUMNS.filter((name) => !columns.includes(name));
+      log.push({ at: at(), kind: "view", name: QC_VIEW_NAME, result: !filtered || missing.length ? "failed" : existing ? "reused" : "created", detail: !filtered ? `View ${view.id} saved without its filter` : missing.length ? `View ${view.id} is missing columns: ${missing.join(", ")}` : `Contacts view ${view.id}, ${columns.length} columns` });
     } catch (error) {
       log.push({ at: at(), kind: "view", name: QC_VIEW_NAME, result: "failed", detail: error instanceof Error ? error.message : "" });
     }
@@ -397,7 +403,7 @@ export async function hubspotApply(token: string, plan: HubSpotPlan): Promise<Bu
 
 // ── Push ────────────────────────────────────────────────────────────────────────────────────────
 
-const CONTACT_BASICS = ["email", "firstname", "lastname", "jobtitle", "company", "city", "hubspot_owner_id"];
+const CONTACT_BASICS = ["email", "firstname", "lastname", "jobtitle", "company", "website", "city", "hubspot_owner_id"];
 
 /** Which QC fields the build left usable (a field skipped for a type clash is never written). */
 function usableFields(destination: Destination): Set<string> {
@@ -418,6 +424,7 @@ export async function hubspotPush(
   const put = (name: string, value: unknown) => { if (usable.has(name) && value !== "" && value !== null && value !== undefined) qc[name] = value; };
   put("qc_source", "qc_growth");
   put("qc_linkedin_url", record.linkedinCanonical);
+  put("qc_company_linkedin_url", record.companyLinkedinUrl);
   put("qc_campaign", record.campaign);
   put("qc_sender", record.sender);
   put("qc_outreach_platform", record.platform === "Email Bison" ? "email_bison" : record.platform.toLowerCase());
@@ -425,7 +432,7 @@ export async function hubspotPush(
   put("qc_last_reply_date", record.lastReplyAt ? new Date(record.lastReplyAt).toISOString() : "");
   if (["positive", "neutral", "negative"].includes(record.sentiment)) put("qc_reply_sentiment", record.sentiment);
   put("qc_reply_count", record.replyCount);
-  const basics: Row = { email: record.email, firstname: record.firstName, lastname: record.lastName, jobtitle: record.title, company: record.company };
+  const basics: Row = { email: record.email, firstname: record.firstName, lastname: record.lastName, jobtitle: record.title, company: record.company, website: record.domain };
 
   // Find the contact: the one we stored, else by email, else by QC LinkedIn ID.
   let contactId = "";

@@ -32,7 +32,8 @@ test("the HubSpot build only creates; it never deletes, and only patches the lea
   const source = readFileSync(new URL("../app/lib/hubspot-push.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /"DELETE"/);
   const patches = [...source.matchAll(/hubspot\(token, "PATCH", `([^`]+)`/g)].map((match) => match[1]);
-  assert.deepEqual(patches.sort(), ["/crm/v3/objects/companies/${encodeURIComponent(companyId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/notes/${encodeURIComponent(noteId)}", "/crm/v3/properties/contacts/${encodeURIComponent(item.property!)}"].sort());
+  // The only view it edits is QC's own (found by name "QC Growth"), to keep its columns current.
+  assert.deepEqual(patches.sort(), ["${QC_VIEW_PATH}/${view.id}", "/crm/v3/objects/companies/${encodeURIComponent(companyId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/notes/${encodeURIComponent(noteId)}", "/crm/v3/properties/contacts/${encodeURIComponent(item.property!)}"].sort());
   // A contact the client already had never gets lifecycle, owner or lead source from us.
   assert.match(source, /\/\/ The client's contact: QC's fields always, their basics only where empty, nothing else\.\n    const current/);
 });
@@ -47,9 +48,9 @@ test("a portal already linked to another client is refused, and writes need the 
 test("the plan keeps QC's own fields to the minimum and maps the rest onto HubSpot's standard fields", () => {
   const source = readFileSync(new URL("../app/lib/hubspot-push.ts", import.meta.url), "utf8");
   const own = [...source.slice(source.indexOf("export const QC_PROPERTIES"), source.indexOf("/** Attribution when")).matchAll(/name: "(qc_[a-z_]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(own, ["qc_linkedin_url", "qc_campaign", "qc_sender", "qc_outreach_platform", "qc_first_reply_date", "qc_last_reply_date", "qc_reply_sentiment", "qc_reply_count"]);
+  assert.deepEqual(own, ["qc_linkedin_url", "qc_company_linkedin_url", "qc_campaign", "qc_sender", "qc_outreach_platform", "qc_first_reply_date", "qc_last_reply_date", "qc_reply_sentiment", "qc_reply_count"]);
   assert.match(source, /put\("qc_outreach_platform", record\.platform === "Email Bison" \? "email_bison" : record\.platform\.toLowerCase\(\)\)/);
-  for (const field of ["firstname", "lastname", "email", "jobtitle", "company", "domain", "linkedin_company_page"]) assert.match(source, new RegExp(`name: "${field}"`), field);
+  for (const field of ["firstname", "lastname", "email", "jobtitle", "company", "website", "domain", "linkedin_company_page"]) assert.match(source, new RegExp(`name: "${field}"`), field);
 });
 
 test("saving part of a destination patches the existing row, and re-reading asks HubSpot for the key's scopes again", () => {

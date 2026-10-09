@@ -159,10 +159,13 @@ export async function replyRecords(config: Config, workspaceId: string, opts: { 
       latestReply: text(lastInbound?.body),
       messages: pushMessages,
     };
-    records.push({ ...base, hash: createHash("sha256").update(JSON.stringify(base)).digest("hex").slice(0, 32) });
+    // PUSH_FORMAT changes when the push writes new fields, so every conversation is sent once more.
+    records.push({ ...base, hash: createHash("sha256").update(`${PUSH_FORMAT}:${JSON.stringify(base)}`).digest("hex").slice(0, 32) });
   }
   return { records, scanned: conversations.length };
 }
+
+const PUSH_FORMAT = 2;
 
 export type PushRecordRow = { conversation_id: string; contact_id: string | null; company_id: string | null; note_id: string | null; pushed_hash: string | null; created_contact: boolean };
 
