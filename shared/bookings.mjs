@@ -334,7 +334,7 @@ function sections(text) {
 /**
  * The card in the channel. `meeting` uses the rr_meetings column names.
  * @param {Record<string, unknown>} meeting
- * @param {{ test?: boolean, rescheduledFrom?: string }} [opts]
+ * @param {{ test?: boolean, rescheduledFrom?: string, meetingNumber?: number }} [opts]
  */
 export function buildBookingCard(meeting, opts = {}) {
   const m = obj(meeting);
@@ -353,8 +353,47 @@ export function buildBookingCard(meeting, opts = {}) {
     ["Campaign", out(m.campaign)],
   ].filter(([, value]) => value).map(([label, value]) => `*${label}:* ${value}`);
   if (opts.rescheduledFrom) lines.splice(1, 0, `*Was:* ~${esc(opts.rescheduledFrom)}~`);
-  const text = `${opts.test ? "_Test post. Nothing was sent anywhere else._\n" : ""}${heading}\n\n${lines.join("\n")}`;
+  // Which meeting this is with the person: the first, a second (they've met before), and whether it moved.
+  const number = Number(opts.meetingNumber) || 0;
+  const rescheduled = Boolean(opts.rescheduledFrom) || str(m.status) === "rescheduled";
+  const tag = number ? `*Meeting #${number}* · ${meetingOrdinal(number)} meeting with this lead${rescheduled ? " · rescheduled" : ""}` : rescheduled ? "*Rescheduled*" : "";
+  const text = `${opts.test ? "_Test post. Nothing was sent anywhere else._\n" : ""}${heading}${tag ? `\n${tag}` : ""}\n\n${lines.join("\n")}`;
   return { text: `${canceled ? "Booking canceled" : "New booking"}: ${clean(m.invitee_name) || "someone"}${clean(m.company_name) ? ` (${clean(m.company_name)})` : ""}`, blocks: sections(text) };
+}
+
+/** "first", "second"... for the meeting tag; past ten, "11th". */
+export function meetingOrdinal(number) {
+  const words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
+  if (number >= 1 && number <= 10) return words[number - 1];
+  const tail = number % 100 >= 11 && number % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" })[number % 10] ?? "th";
+  return `${number}${tail}`;
+}
+
+/**
+ * Which meeting with this person a booking is: 1 + the earlier, not-canceled bookings of the same person with
+ * the same client. The same person is the same email, the same LinkedIn profile, or the same name, any one,
+ * because one booking may carry an email and the next only a name.
+ */
+export function meetingNumberAmong(meeting, others) {
+  const m = obj(meeting);
+  const norm = (value) => str(value).trim().toLowerCase();
+  const handle = (value) => (norm(value).match(/linkedin\.com\/in\/([^/?#\s]+)/)?.[1] ?? "");
+  const name = (value) => norm(value).normalize("NFKD").replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+  const me = { email: norm(m.invitee_email), li: handle(m.invitee_linkedin), name: name(m.invitee_name) };
+  const created = Date.parse(str(m.created_at)) || Infinity;
+  const same = (other) => {
+    const o = obj(other);
+    if (me.email && norm(o.invitee_email) === me.email) return true;
+    if (me.li && handle(o.invitee_linkedin) === me.li) return true;
+    return Boolean(me.name && me.name.includes(" ") && name(o.invitee_name) === me.name);
+  };
+  const earlier = (Array.isArray(others) ? others : []).filter((other) => {
+    const o = obj(other);
+    if (str(o.id) && str(o.id) === str(m.id)) return false;
+    if (str(o.status) === "canceled") return false;
+    return (Date.parse(str(o.created_at)) || 0) < created && same(o);
+  });
+  return earlier.length + 1;
 }
 
 const bullet = (label, value) => (value ? `• *${label}:* ${value}` : "");

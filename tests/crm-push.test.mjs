@@ -394,3 +394,21 @@ test("booked meetings: campaign attribution after enrichment (QC leads, then Hey
   const src = readFileSync(new URL("../shared/bookings.mjs", import.meta.url), "utf8");
   assert.equal((src.match(/type: "section", expand: true/g) ?? []).length, 2);
 });
+
+test("the booking card says which meeting with the person it is (canceled ones don't count) and whether it was rescheduled", async () => {
+  const { buildBookingCard, meetingNumberAmong, meetingOrdinal } = await import("../shared/bookings.mjs");
+  const others = [
+    { id: "a", created_at: "2026-09-01", status: "scheduled", invitee_email: "d@sbmf.org", invitee_name: "Derrick Forchetti" },
+    { id: "b", created_at: "2026-09-10", status: "canceled", invitee_email: "d@sbmf.org" },
+    { id: "c", created_at: "2026-09-20", status: "scheduled", invitee_name: "Derrick Forchetti" },
+    { id: "x", created_at: "2026-09-05", status: "scheduled", invitee_email: "o@x.com", invitee_name: "Other Person" },
+  ];
+  assert.equal(meetingNumberAmong(others[0], others), 1);
+  assert.equal(meetingNumberAmong({ id: "d", created_at: "2026-10-01", invitee_name: "Derrick Forchetti" }, others), 3);
+  assert.equal(meetingNumberAmong({ id: "n", created_at: "2026-10-02", invitee_name: "New Lead" }, others), 1);
+  assert.equal(meetingOrdinal(2), "second");
+  assert.equal(meetingOrdinal(12), "12th");
+  const card = buildBookingCard({ invitee_name: "Derrick Forchetti", status: "rescheduled" }, { meetingNumber: 2, rescheduledFrom: "Oct 10" });
+  assert.match(card.blocks[0].text.text, /\*Meeting #2\* · second meeting with this lead · rescheduled/);
+  assert.match(buildBookingCard({ invitee_name: "A B" }, { meetingNumber: 1 }).blocks[0].text.text, /^\*A new booking has been scheduled!\*\n\*Meeting #1\* · first meeting with this lead/);
+});

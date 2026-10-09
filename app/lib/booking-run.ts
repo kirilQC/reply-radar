@@ -27,6 +27,7 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   buildBookingCard,
+  meetingNumberAmong,
   buildInfoThread,
   buildTldrThread,
   changeNote,
@@ -308,12 +309,18 @@ async function meetingByExternalId(config: Config, workspaceId: string, external
 }
 
 /** Edits the card and adds a note to its thread, for a booking moved or canceled after it was posted. */
+/** Which meeting with this person this booking is (1 for the first), from the client's stored bookings. */
+async function meetingNumberFor(config: Config, meeting: Row): Promise<number> {
+  const others = await rows(config, `rr_meetings?select=id,created_at,status,invitee_email,invitee_linkedin,invitee_name&workspace_id=eq.${enc(text(meeting.workspace_id))}&order=created_at.asc&limit=2000`).catch(() => [] as Row[]);
+  return meetingNumberAmong(meeting, others);
+}
+
 async function noteChange(config: Config, meeting: Row, kind: "rescheduled" | "canceled", previousWhen: string): Promise<void> {
   const slack = object(bookingOf(meeting).steps?.slack);
   const channel = text(slack.channel);
   const ts = text(slack.ts);
   if (!channel || !ts || !slackConfigured()) return;
-  const card = buildBookingCard(meeting, { rescheduledFrom: kind === "rescheduled" ? previousWhen : "" });
+  const card = buildBookingCard(meeting, { rescheduledFrom: kind === "rescheduled" ? previousWhen : "", meetingNumber: await meetingNumberFor(config, meeting) });
   await updateMessage(channel, ts, card.text, card.blocks).catch(() => undefined);
   await postMessage(channel, changeNote(meeting, kind, previousWhen), ts).catch(() => "");
 }
@@ -592,7 +599,7 @@ async function runSlack(step: Step, ctx: StepContext): Promise<StepResult> {
   const identity = { username: clientConfig(ctx.workspace).botName || `${text(ctx.workspace.name)} Calls`, iconUrl: /^https:\/\//i.test(logo) ? logo : "" };
   const result: StepResult = { ...ctx.previous, channel };
   if (!text(result.ts)) {
-    const card = buildBookingCard(ctx.meeting, { test: ctx.test });
+    const card = buildBookingCard(ctx.meeting, { test: ctx.test, meetingNumber: await meetingNumberFor(ctx.config, ctx.meeting), rescheduledFrom: "" });
     result.ts = await postMessage(channel, card.text, "", card.blocks, identity);
     await ctx.save(result);
   }
