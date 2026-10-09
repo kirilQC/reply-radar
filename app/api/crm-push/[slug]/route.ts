@@ -136,8 +136,10 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       steps.push({ step: "segment create", status: list.status, id: listId, detail: list.message });
       const reportSql = "SELECT qc_campaign, COUNT(*) FROM CONTACT WHERE qc_outreach_platform IN ('heyreach', 'lemlist', 'email_bison') GROUP BY qc_campaign";
       const report = await call("POST", "/hub/cli/backend/reporting/v1/reports/create", { sql: reportSql, intent: reportSql, chartType: "BAR", name: "TEST QC replies by campaign" });
-      const reportId = String(report.json.id ?? "");
-      steps.push({ step: "report create", status: report.status, id: reportId, detail: report.message });
+      steps.push({ step: "report create (cli backend)", status: report.status, id: String(report.json.id ?? ""), detail: report.message });
+      const direct = report.json.id ? report : await call("POST", "/reporting/v1/reports/create", { sql: reportSql, intent: reportSql, chartType: "BAR", name: "TEST QC replies by campaign" });
+      if (direct !== report) steps.push({ step: "report create (reporting v1)", status: direct.status, id: String(direct.json.id ?? ""), detail: direct.message });
+      const reportId = String(direct.json.id ?? "");
       const dashboard = await call("POST", "/analytics/reporting/2027-03-beta/dashboards", { name: "TEST QC Growth dashboard", permissions: { permissionType: "EVERYONE_VIEW" }, ...(reportId ? { reportIdsToAdd: [reportId] } : {}) });
       const dashboardId = String(dashboard.json.id ?? "");
       steps.push({ step: "dashboard create", status: dashboard.status, id: dashboardId, detail: dashboard.message || `widgets: ${Array.isArray(dashboard.json.widgets) ? dashboard.json.widgets.length : "?"}` });
