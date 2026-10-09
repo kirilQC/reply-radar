@@ -685,10 +685,7 @@ export default function ClientOperations({ slug }: { slug: string }) {
         {(view === "hubspot" || view === "attio") && <CrmView key={view} slug={slug} clientName={name} provider={view} state={crmState} returned={view === "hubspot" ? returned.hubspot : undefined} />}
         {view === "sheets" && <SheetsView slug={slug} state={sheetsState} returned={returned.sheets} />}
         {view === "meetings" && (
-          <div className="ops-stack ops-meetings">
-            <div className="ops-titlebar"><div><span className="ops-label">Booked meetings</span><h1>Booked meetings workflow</h1></div></div>
-            <BookingAlerts focus={slug} />
-          </div>
+          <div className="ops-stack ops-meetings"><BookingAlerts focus={slug} /></div>
         )}
       </main>
     </div>
