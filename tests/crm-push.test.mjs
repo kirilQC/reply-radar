@@ -412,8 +412,10 @@ test("the booking card says which meeting with the person it is (canceled ones d
   assert.match(card.blocks[0].text.text, /\*Meeting #2\* · rescheduled\n/);
   assert.match(buildBookingCard({ invitee_name: "A B" }, { meetingNumber: 1 }).blocks[0].text.text, /^\*A new booking has been scheduled!\*\n\*Meeting #1\*\n/);
   // The lead's photo sits to the right of the card; their company's logo when there is no photo; nothing without either.
-  assert.deepEqual(buildBookingCard({ invitee_name: "A B", invitee_photo_url: "https://media.licdn.com/p.jpg", company_logo_url: "https://logo/x.png" }).blocks[0].accessory, { type: "image", image_url: "https://media.licdn.com/p.jpg", alt_text: "A B" });
-  assert.equal(buildBookingCard({ invitee_name: "A B", company_logo_url: "https://logo/x.png" }).blocks[0].accessory.image_url, "https://logo/x.png");
+  // The company logo comes first; the lead's photo only when no logo can be found.
+  assert.deepEqual(buildBookingCard({ invitee_name: "A B", invitee_photo_url: "https://media.licdn.com/p.jpg", company_logo_url: "https://logo/x.png" }).blocks[0].accessory, { type: "image", image_url: "https://logo/x.png", alt_text: "A B" });
+  assert.equal(buildBookingCard({ invitee_name: "A B", invitee_photo_url: "https://media.licdn.com/p.jpg", invitee_email: "a@acme.com" }).blocks[0].accessory.image_url, "https://www.google.com/s2/favicons?domain=acme.com&sz=128");
+  assert.equal(buildBookingCard({ invitee_name: "A B", invitee_photo_url: "https://media.licdn.com/p.jpg" }).blocks[0].accessory.image_url, "https://media.licdn.com/p.jpg");
   assert.equal(buildBookingCard({ invitee_name: "A B" }).blocks[0].accessory, undefined);
 });
 
