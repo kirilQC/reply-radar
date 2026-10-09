@@ -49,7 +49,11 @@ export function parseInline(line) {
       spans.push({ kind: "code", text: token.slice(1, -1) });
     } else if (token.startsWith("[")) {
       const split = token.indexOf("](");
-      spans.push({ kind: "link", text: token.slice(1, split), href: token.slice(split + 2, -1) });
+      const href = token.slice(split + 2, -1).trim();
+      // Only web, email and in-app links are links. Brain documents can be written by a client (from-client/),
+      // so a javascript:, data: or other scheme is shown as text rather than trusted to the renderer.
+      if (/^(https?:\/\/|mailto:|\/(?!\/)|#)/i.test(href)) spans.push({ kind: "link", text: token.slice(1, split), href });
+      else spans.push({ kind: "text", text: token.slice(1, split) });
     } else {
       spans.push({ kind: "italic", text: token.slice(1, -1) });
     }
