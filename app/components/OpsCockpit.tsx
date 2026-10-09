@@ -218,7 +218,7 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
           </section>
         )}
 
-        {connectedHere && crm?.plan && crm.status !== "built" && (
+        {connectedHere && crm?.plan && (crm.status !== "built" || (provider === "hubspot" && crm.plan.deals && !crm.plan.deals.stageId && crm.plan.deals.pipelines.length > 0)) && (
           <section className="oc-section">
             <h3>Game plan</h3>
             {crm.plan.warnings.map((w) => <p key={w} className="oc-warn">{w}</p>)}
