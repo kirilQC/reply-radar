@@ -134,3 +134,11 @@ test("HubSpot sign-in opens on the portal's own region host, never app.hubspot.c
   assert.match(src, /return `https:\/\/\$\{host\}\/oauth\//);
   assert.match(start, /authorizeUrl\(OAUTH_ORIGIN, slug, destination\?\.account_id, destination\?\.account_name\)/);
 });
+
+test("every action the CRM and Sheets panels send has a handler in the routes (no 'Unknown action.')", () => {
+  const ui = readFileSync(new URL("../app/components/OpsCockpit.tsx", import.meta.url), "utf8");
+  const routes = ["../app/api/crm-push/[slug]/route.ts", "../app/api/sheets-push/[slug]/route.ts"].map((p) => readFileSync(new URL(p, import.meta.url), "utf8")).join("\n");
+  const sent = [...new Set([...ui.matchAll(/step\("([a-z_]+)"/g)].map((m) => m[1]))];
+  assert.ok(sent.length > 5);
+  for (const action of sent) assert.ok(routes.includes(`action === "${action}"`), `no handler for "${action}"`);
+});

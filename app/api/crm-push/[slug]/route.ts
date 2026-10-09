@@ -171,6 +171,23 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       await saveDestination(c, workspace.id, "crm", { auto_push: body.on === true });
       return reply();
     }
+    if (action === "reporting") {
+      if (!hubspotAppConfigured()) return NextResponse.json({ ok: false, error: "QC Growth's HubSpot app keys are not on Vercel yet." }, { status: 400 });
+      const userToken = await hubspotUserToken(c, destination);
+      if (!userToken) return NextResponse.json({ ok: false, error: "Connect the QC Growth user first." }, { status: 400 });
+      const reporting = await hubspotBuildReporting(userToken);
+      const fresh = (await loadDestination(c, workspace.id, "crm")) ?? destination;
+      const userView = fresh.config?.view_user_id ? null : await hubspotUserView(userToken, (fresh.audit as { qcView?: { id: string } } | null)?.qcView?.id ?? null);
+      if (userView) reporting.log.push(userView.log);
+      await saveDestination(c, workspace.id, "crm", { build_log: [...(fresh.build_log ?? []), ...reporting.log] as unknown as Row[], config: { ...(fresh.config ?? {}), ...(reporting.dashboardId ? { dashboard_id: reporting.dashboardId } : {}), ...(userView?.viewId ? { view_user_id: userView.viewId } : {}) } });
+      const failed = reporting.log.filter((entry) => entry.result === "failed");
+      return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
+    }
+    if (action === "disconnect_user") {
+      const { hubspot_user: _, ...rest } = (destination.config ?? {}) as Row;
+      await saveDestination(c, workspace.id, "crm", { config: rest });
+      return reply();
+    }
     if (action === "disconnect") {
       await saveDestination(c, workspace.id, "crm", { api_key: null, status: "disconnected", auto_push: false });
       return reply();
