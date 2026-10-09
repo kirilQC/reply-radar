@@ -309,7 +309,7 @@ export function hubspotPlan(audit: HubSpotAudit): HubSpotPlan {
 
 // ── Apply ───────────────────────────────────────────────────────────────────────────────────────
 
-export type BuildLogEntry = { at: string; kind: string; name: string; result: "created" | "reused" | "skipped" | "failed" | "verified"; detail: string };
+export type BuildLogEntry = { at: string; kind: string; name: string; result: "created" | "reused" | "skipped" | "failed" | "verified" | "removed" | "waiting"; detail: string };
 
 export async function hubspotApply(token: string, plan: HubSpotPlan): Promise<BuildLogEntry[]> {
   const log: BuildLogEntry[] = [];

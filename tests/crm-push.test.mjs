@@ -148,3 +148,12 @@ test("HubSpot dashboard section links to the client's In beta page until a dashb
   assert.match(ui, /\/product-updates\/\$\{crm\.accountId\}\/in-beta/);
   assert.match(ui, /!crm\.config\?\.dashboard_id && crm\.accountId/);
 });
+
+test("HubSpot reports never duplicate: build stops when it cannot read what exists, dedupes by name, one build at a time", () => {
+  const src = readFileSync(new URL("../app/lib/hubspot-reporting.ts", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../app/api/crm-push/[slug]/route.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /allByName[\s\S]{0,400}\.catch\(\(\) => \(\{\} as Row\)\)/, "existing-report lookup must not swallow errors");
+  assert.match(src, /return \{ log, dashboardId: null, pending: waiting \}/);
+  assert.match(src, /DELETE", `\$\{BETA\}\/reports\/\$\{extra\}`/);
+  assert.match(route, /withPushLock\(c, workspace\.id, "reporting"/);
+});

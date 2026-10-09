@@ -7122,7 +7122,12 @@ a.oc-disabled { opacity: .55; pointer-events: none; }
 .oc-toggle { display: flex; align-items: center; gap: 7px; color: var(--text); font-size: 11px; }
 .oc-errors { margin: 0; padding-left: 18px; color: var(--coral, #ed8a77); font-size: 10px; }
 .oc-log summary { cursor: pointer; font-size: 11px; color: var(--text); }
-.oc-log ul { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 10px; color: var(--muted); }
+.oc-log ol { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 10px; color: var(--muted); }
+.oc-log li { display: grid; grid-template-columns: 22px 104px 62px minmax(0, 1fr); gap: 6px; align-items: baseline; }
+.oc-log-n { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; opacity: .7; }
+.oc-log-at { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.oc-removed { color: var(--amber, #e7b45a); }
+.oc-waiting { color: var(--muted); }
 .oc-result { display: inline-block; min-width: 54px; font-weight: 700; text-transform: uppercase; font-size: 9px; }
 .oc-created, .oc-verified { color: var(--green, #55c7a2); }
 .oc-failed { color: var(--coral, #ed8a77); }

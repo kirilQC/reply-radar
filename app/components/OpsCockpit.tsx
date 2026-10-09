@@ -38,7 +38,7 @@ type Crm = {
     warnings: string[];
     deals?: { enabled: boolean; pipelineId?: string | null; pipelineLabel?: string; stageExists?: boolean; stageId?: string | null; createProperties?: string[]; pipelines?: Array<{ id: string; label: string; hasStage: boolean }>; available?: boolean; statusExists?: boolean; createAttributes?: string[] };
   };
-  buildLog: Array<{ kind: string; name: string; result: string; detail: string }>;
+  buildLog: Array<{ at?: string; kind: string; name: string; result: string; detail: string }>;
   autoPush: boolean;
   config: { dashboard_id?: string };
   hubspotUser: null | { user: string; hubId: string; connectedAt: string };
@@ -107,6 +107,12 @@ function when(value: string | null) {
   if (!value) return "Never";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Never" : date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+/** Build log stamp: "Oct 9, 2:54:07 PM". */
+function logTime(value: string) {
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? "" : new Date(time).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
 }
 
 function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: string; clientName: string; provider: "hubspot" | "attio"; onClose: () => void; returned?: { ok: boolean; message: string } }) {
@@ -309,7 +315,7 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
               <>
                 <p className="oc-muted">Signed in as {crm.hubspotUser.user || "QC Growth"}</p>
                 <div className="oc-row">
-                  <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void step("reporting").then((payload) => payload && setNote(payload.built ? "Reports and dashboard ready." : `Some steps failed: ${(payload.failed ?? []).join("; ")}`))}>{busy === "reporting" ? "Building…" : crm.config?.dashboard_id ? "Rebuild reports" : "Build reports and dashboard"}</button>
+                  <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void step("reporting").then((payload) => payload && setNote(payload.built ? "Reports and dashboard ready." : payload.pending ? (payload.failed ?? [])[0] : `Some steps failed: ${(payload.failed ?? []).join("; ")}`))}>{busy === "reporting" ? "Building…" : crm.config?.dashboard_id ? "Rebuild reports" : "Build reports and dashboard"}</button>
                   {crm.config?.dashboard_id && <a className="oc-ghost" href={`https://${(crm.accountName ?? "").includes("hubspot.com") ? crm.accountName : "app.hubspot.com"}/reports-dashboard/${crm.accountId}/view/${crm.config.dashboard_id}`} target="_blank" rel="noreferrer">Open dashboard ↗</a>}
                   <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("disconnect_user")}>Sign out</button>
                 </div>
@@ -327,7 +333,7 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
         {connectedHere && (crm?.buildLog.length ?? 0) > 0 && (
           <details className="oc-section oc-log">
             <summary>Build log ({crm?.buildLog.length})</summary>
-            <ul>{crm?.buildLog.map((entry, index) => <li key={`${entry.name}-${index}`}><span className={`oc-result oc-${entry.result}`}>{entry.result}</span> {entry.kind} <code>{entry.name}</code> {entry.detail}</li>)}</ul>
+            <ol>{crm?.buildLog.map((entry, index) => <li key={`${entry.name}-${index}`}><span className="oc-log-n">{index + 1}</span><time className="oc-log-at" dateTime={entry.at}>{logTime(entry.at ?? "")}</time><span className={`oc-result oc-${entry.result}`}>{entry.result}</span><span>{entry.kind} <code>{entry.name}</code> {entry.detail}</span></li>)}</ol>
           </details>
         )}
 

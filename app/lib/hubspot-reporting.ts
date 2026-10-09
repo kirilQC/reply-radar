@@ -30,24 +30,70 @@ export const QC_REPORTS: Array<{ name: string; chartType: string; sql: string }>
 
 const BETA = "/analytics/reporting/2027-03-beta";
 
-async function byName(token: string, kind: "reports" | "dashboards", prefix: string): Promise<Map<string, string>> {
-  const found = new Map<string, string>();
-  const data = await hubspot(token, "GET", `${BETA}/${kind}?q=${encodeURIComponent(prefix)}&limit=100`).catch(() => ({} as Row));
-  for (const row of list(data.results)) if (text(row.name)) found.set(text(row.name).toLowerCase(), text(row.id));
+/** Every QC item of one kind by lower-cased name, all ids per name (oldest first). Throws when HubSpot refuses. */
+async function allByName(token: string, kind: "reports" | "dashboards", prefix: string): Promise<Map<string, string[]>> {
+  const found = new Map<string, string[]>();
+  let after = "";
+  for (let page = 0; page < 20; page++) {
+    const data = await hubspot(token, "GET", `${BETA}/${kind}?q=${encodeURIComponent(prefix)}&limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`);
+    for (const row of list(data.results)) {
+      const name = text(row.name).toLowerCase();
+      if (name && text(row.id)) found.set(name, [...(found.get(name) ?? []), text(row.id)]);
+    }
+    after = text(((data.paging as Row | undefined)?.next as Row | undefined)?.after);
+    if (!after) break;
+  }
+  for (const [name, ids] of found) found.set(name, [...new Set(ids)].sort((x, y) => Number(x) - Number(y)));
   return found;
 }
 
-/** Builds (or tops up) the QC Growth reports and dashboard. Returns build log entries like hubspotApply. */
-export async function hubspotBuildReporting(token: string): Promise<{ log: BuildLogEntry[]; dashboardId: string | null }> {
+/** HubSpot gates the Reporting API per account; a freshly joined beta takes a few minutes to switch on. */
+export const reportingNotReady = (error: unknown) => error instanceof HubSpotError && (error.status === 403 || /ungated/i.test(error.message));
+
+export const REPORTING_WAIT = "HubSpot has not switched on the Reporting API beta for this account yet (it takes a few minutes after joining). Nothing was built. Try again in a minute.";
+
+/**
+ * Builds (or tops up) the QC Growth reports and dashboard, never twice: it first reads what is already there and
+ * stops without creating anything when it cannot (beta not switched on yet), keeps one report per name (the one
+ * on the dashboard, else the oldest) and deletes any extra copies left by earlier runs.
+ */
+export async function hubspotBuildReporting(token: string): Promise<{ log: BuildLogEntry[]; dashboardId: string | null; pending?: boolean }> {
   const log: BuildLogEntry[] = [];
   const at = () => new Date().toISOString();
-  const existing = await byName(token, "reports", "QC Growth");
+  let reports: Map<string, string[]>;
+  let dashboards: Map<string, string[]>;
+  try {
+    [dashboards, reports] = await Promise.all([allByName(token, "dashboards", QC_DASHBOARD_NAME), allByName(token, "reports", "QC Growth")]);
+  } catch (error) {
+    const waiting = reportingNotReady(error);
+    log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: waiting ? "waiting" : "failed", detail: waiting ? REPORTING_WAIT : `Could not read the reports already there, so nothing was built: ${error instanceof Error ? error.message.slice(0, 200) : ""}` });
+    return { log, dashboardId: null, pending: waiting };
+  }
+
+  let dashboardId = dashboards.get(QC_DASHBOARD_NAME.toLowerCase())?.[0] ?? null;
+  for (const extra of dashboards.get(QC_DASHBOARD_NAME.toLowerCase())?.slice(1) ?? []) {
+    await hubspot(token, "DELETE", `${BETA}/dashboards/${extra}`)
+      .then(() => log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "removed", detail: `Duplicate dashboard ${extra}` }))
+      .catch((error) => log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "failed", detail: `Could not remove duplicate ${extra}: ${error instanceof Error ? error.message.slice(0, 160) : ""}` }));
+  }
+  const onDashboard = new Set<string>();
+  if (dashboardId) {
+    const current = await hubspot(token, "GET", `${BETA}/dashboards/${dashboardId}?properties=widgets`).catch(() => ({} as Row));
+    for (const widget of list(current.widgets)) onDashboard.add(text(widget.reportId ?? (widget.report as Row | undefined)?.id ?? widget.id));
+  }
+
   const reportIds: string[] = [];
   for (const report of QC_REPORTS) {
-    const id = existing.get(report.name.toLowerCase());
-    if (id) {
-      reportIds.push(id);
-      log.push({ at: at(), kind: "report", name: report.name, result: "reused", detail: `Report ${id}` });
+    const ids = reports.get(report.name.toLowerCase()) ?? [];
+    const keep = ids.find((id) => onDashboard.has(id)) ?? ids[0];
+    for (const extra of ids.filter((id) => id !== keep)) {
+      await hubspot(token, "DELETE", `${BETA}/reports/${extra}`)
+        .then(() => log.push({ at: at(), kind: "report", name: report.name, result: "removed", detail: `Duplicate report ${extra}` }))
+        .catch((error) => log.push({ at: at(), kind: "report", name: report.name, result: "failed", detail: `Could not remove duplicate ${extra}: ${error instanceof Error ? error.message.slice(0, 160) : ""}` }));
+    }
+    if (keep) {
+      reportIds.push(keep);
+      log.push({ at: at(), kind: "report", name: report.name, result: "reused", detail: `Report ${keep}` });
       continue;
     }
     try {
@@ -58,24 +104,21 @@ export async function hubspotBuildReporting(token: string): Promise<{ log: Build
       log.push({ at: at(), kind: "report", name: report.name, result: "failed", detail: error instanceof Error ? error.message : "" });
     }
   }
-  let dashboardId = (await byName(token, "dashboards", QC_DASHBOARD_NAME)).get(QC_DASHBOARD_NAME.toLowerCase()) ?? null;
+
   try {
     if (!dashboardId) {
       const created = await hubspot(token, "POST", `${BETA}/dashboards`, { name: QC_DASHBOARD_NAME, description: "Replies from QC Growth's outreach, kept up to date by QC Growth.", permissions: { permissionType: "EVERYONE_VIEW" }, reportIdsToAdd: reportIds });
       dashboardId = text(created.id);
-      const widgets = list(created.widgets).length;
-      log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "created", detail: `Dashboard ${dashboardId}, ${widgets} of ${reportIds.length} reports on it` });
+      log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "created", detail: `Dashboard ${dashboardId}, ${list(created.widgets).length} of ${reportIds.length} reports on it` });
     } else {
-      const current = await hubspot(token, "GET", `${BETA}/dashboards/${dashboardId}?properties=widgets`);
-      const onIt = new Set(list(current.widgets).map((widget) => text(widget.reportId ?? (widget.report as Row | undefined)?.id ?? widget.id)));
       let added = 0;
-      for (const id of reportIds.filter((reportId) => !onIt.has(reportId))) {
+      for (const id of reportIds.filter((reportId) => !onDashboard.has(reportId))) {
         await hubspot(token, "PUT", `${BETA}/dashboards/${dashboardId}/widgets/${id}`).then(() => added++).catch(() => undefined);
       }
       log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "reused", detail: `Dashboard ${dashboardId}${added ? `, ${added} reports added` : ""}` });
     }
   } catch (error) {
-    log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "failed", detail: error instanceof HubSpotError && /ungated/i.test(error.message) ? "This HubSpot account is not in HubSpot's reporting API beta yet. A super admin turns it on in HubSpot under Product updates, In beta, then click Rebuild reports. The reports above are already made." : error instanceof HubSpotError && error.status === 403 ? `HubSpot refused (403): ${error.message.slice(0, 300)}` : error instanceof Error ? error.message : "" });
+    log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: reportingNotReady(error) ? "waiting" : "failed", detail: reportingNotReady(error) ? REPORTING_WAIT : error instanceof Error ? error.message : "" });
   }
   return { log, dashboardId };
 }

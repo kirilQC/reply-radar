@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
 import { pushOne, pushPass } from "../../../lib/crm-push-run";
 import { hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotPlan } from "../../../lib/hubspot-push";
-import { hubspotBuildReporting, hubspotUserView } from "../../../lib/hubspot-reporting";
+import { REPORTING_WAIT, hubspotBuildReporting, hubspotUserView } from "../../../lib/hubspot-reporting";
 import { dealsApply, dealsAudit, dealsPlan, type DealsPlan } from "../../../lib/hubspot-deals";
 import { pushMeetingsPass } from "../../../lib/meetings-deals-run";
 import { attioDealsApply, attioDealsAudit, attioDealsPlan, type AttioDealsPlan } from "../../../lib/attio-deals";
@@ -175,12 +175,18 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       if (!hubspotAppConfigured()) return NextResponse.json({ ok: false, error: "QC Growth's HubSpot app keys are not on Vercel yet." }, { status: 400 });
       const userToken = await hubspotUserToken(c, destination);
       if (!userToken) return NextResponse.json({ ok: false, error: "Connect the QC Growth user first." }, { status: 400 });
-      const reporting = await hubspotBuildReporting(userToken);
-      const fresh = (await loadDestination(c, workspace.id, "crm")) ?? destination;
-      const userView = fresh.config?.view_user_id ? null : await hubspotUserView(userToken, (fresh.audit as { qcView?: { id: string } } | null)?.qcView?.id ?? null);
-      if (userView) reporting.log.push(userView.log);
-      await saveDestination(c, workspace.id, "crm", { build_log: [...(fresh.build_log ?? []), ...reporting.log] as unknown as Row[], config: { ...(fresh.config ?? {}), ...(reporting.dashboardId ? { dashboard_id: reporting.dashboardId } : {}), ...(userView?.viewId ? { view_user_id: userView.viewId } : {}) } });
-      const failed = reporting.log.filter((entry) => entry.result === "failed");
+      // One build at a time per client: a second click while one runs gets told to wait instead of building again.
+      const outcome = await withPushLock(c, workspace.id, "reporting", 240_000, async () => {
+        const reporting = await hubspotBuildReporting(userToken);
+        const fresh = (await loadDestination(c, workspace.id, "crm")) ?? destination;
+        const userView = reporting.pending || fresh.config?.view_user_id ? null : await hubspotUserView(userToken, (fresh.audit as { qcView?: { id: string } } | null)?.qcView?.id ?? null);
+        if (userView) reporting.log.push(userView.log);
+        await saveDestination(c, workspace.id, "crm", { build_log: [...(fresh.build_log ?? []), ...reporting.log] as unknown as Row[], config: { ...(fresh.config ?? {}), ...(reporting.dashboardId ? { dashboard_id: reporting.dashboardId } : {}), ...(userView?.viewId ? { view_user_id: userView.viewId } : {}) } });
+        return reporting;
+      });
+      if (!outcome) return NextResponse.json({ ok: false, error: "Already building the reports for this client. Give it a minute." }, { status: 409 });
+      if (outcome.pending) return reply({ built: false, pending: true, failed: [REPORTING_WAIT] });
+      const failed = outcome.log.filter((entry) => entry.result === "failed");
       return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
     }
     if (action === "disconnect_user") {
