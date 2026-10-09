@@ -213,7 +213,8 @@ export async function pushMeetingsPass(config: Config, destination: Destination,
   const started = Date.now();
   const meetings = await rows(config, `rr_meetings?select=*&workspace_id=eq.${enc(destination.workspace_id)}${opts.since ? `&updated_at=gte.${enc(opts.since)}` : ""}&order=created_at.asc&limit=500`);
   if (!meetings.length) return summary;
-  const storedRows = await rows(config, `rr_crm_push_meetings?select=*&workspace_id=eq.${enc(destination.workspace_id)}&provider=eq.hubspot&meeting_id=in.(${meetings.map((m) => enc(text(m.id))).join(",")})`).catch(() => [] as Row[]);
+  const storedRows = await rows(config, `rr_crm_push_meetings?select=*&workspace_id=eq.${enc(destination.workspace_id)}&provider=eq.hubspot&meeting_id=in.(${meetings.map((m) => enc(text(m.id))).join(",")})`);
+  // (No catch: without knowing which deals exist, pushing would make every one of them again.)
   const stored = new Map(storedRows.map((row) => [text(row.meeting_id), row as unknown as Stored]));
   for (const meeting of meetings) {
     if (Date.now() - started > (opts.budgetMs ?? 60_000)) break;
@@ -225,7 +226,8 @@ export async function pushMeetingsPass(config: Config, destination: Destination,
     if (/cancel/i.test(text(meeting.status)) && !before?.deal_id && !text(object(object(object(meeting.booking).steps).hubspot).deal_id)) { summary.unchanged += 1; continue; }
     try {
       const result = await pushMeetingDeal(destination.api_key, destination, meeting, before);
-      await rest(config, "rr_crm_push_meetings?on_conflict=workspace_id,meeting_id,provider", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ workspace_id: destination.workspace_id, meeting_id: id, provider: "hubspot", deal_id: result.deal_id, contact_id: result.contact_id, company_id: result.company_id, note_id: result.note_id, pushed_hash: hash, pushed_at: new Date().toISOString(), error: null }) });
+      const saved = await rest(config, "rr_crm_push_meetings?on_conflict=workspace_id,meeting_id,provider", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ workspace_id: destination.workspace_id, meeting_id: id, provider: "hubspot", deal_id: result.deal_id, contact_id: result.contact_id, company_id: result.company_id, note_id: result.note_id, pushed_hash: hash, pushed_at: new Date().toISOString(), error: null }) });
+      if (!saved.ok) throw new Error(`Deal ${result.deal_id} made, but QC Command could not remember it (${saved.status}). Stopping so it is not made twice.`);
       summary.pushed += 1;
       if (result.created) summary.created += 1; else summary.updated += 1;
     } catch (error) {
