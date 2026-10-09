@@ -43,6 +43,7 @@ import {
   postMessage,
   removeReaction,
   resolveUserNames,
+  rosterLine,
   slackConfigured,
   threadPosts,
   updateMessage,
@@ -296,6 +297,9 @@ async function runAndReply(opts: {
     const extraParts: string[] = [];
     extraParts.push("In Slack the message must stand on its own even when a file is attached (attachments can fail): give the counts and name the top rows inline.");
     extraParts.push(`You are talking to ${askerName || "a QC team member"}${askedBy ? ` (Slack user <@${askedBy}>)` : ""}. If you file a support ticket, record submittedBy as their name.`);
+    // The team, so a name ("assign it to Kiril Ivlev") becomes the right person without anyone being tagged.
+    const roster = await rosterLine();
+    if (roster) extraParts.push(`The QC team in Slack, name = mention: ${roster}. To name, tag or assign a teammate, use their mention exactly as listed; never ask for someone's Slack id and never guess one.`);
     if (surface === "dm") extraParts.push("This is a private, one-to-one direct message: you are this person's own QC Command assistant, with your full set of tools available. Answer for them alone — there is no channel audience reading along.");
     // "My clients" means the roster on this person's personal assistant, when they have one.
     if (askedBy) {
@@ -384,9 +388,16 @@ async function runAndReply(opts: {
  * top-level mention, or Slack briefly unreachable — the bare question stands on its own so the bot still
  * answers. The turns are already alternating and mention-stripped by `threadToTurns`.
  */
+/** Names for every person tagged in these texts, so a mention reaches the model as "@Name (<@id>)". */
+async function mentionNames(texts: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(texts.flatMap((value) => [...String(value ?? "").matchAll(/<@([A-Z0-9]+)/gi)].map((match) => match[1])))];
+  return ids.length ? resolveUserNames(ids).catch(() => new Map<string, string>()) : new Map<string, string>();
+}
+
 async function conversationTurns(channel: string, threadTs: string, fallback: string): Promise<Turn[]> {
   const identity = await botIdentity();
-  const turns = threadToTurns(await threadPosts(channel, threadTs), identity) as Turn[];
+  const posts = await threadPosts(channel, threadTs);
+  const turns = threadToTurns(posts, identity, await mentionNames(posts.map((post) => str(post.text)))) as Turn[];
   if (turns.length) return turns;
   return fallback ? [{ role: "user", content: fallback }] : [];
 }
@@ -421,7 +432,8 @@ async function answerMention(event: Row): Promise<void> {
   const threadTs = str(event.thread_ts) || str(event.ts);
   if (!channel) return;
 
-  const question = cleanMention(str(event.text));
+  const identity = await botIdentity();
+  const question = cleanMention(str(event.text), { names: await mentionNames([str(event.text)]), botUserId: identity.userId });
   if (!question) {
     await postMessage(channel, "Ask me a question in the same message you mention me, for example _how did Cotool do this week?_", threadTs).catch(() => {});
     return;
@@ -473,12 +485,14 @@ async function replyToBrief(opts: {
   const { channel, threadTs, reactTs, briefThread, instruction } = opts;
 
   // Only the message that tagged the bot is the correction — the team's other thread chatter is not.
-  const replies = [cleanMention(instruction)].filter(Boolean);
+  // `instruction` arrives cleaned with tagged people kept as "@Name (<@id>)".
+  const replies = [instruction.trim()].filter(Boolean);
   if (!replies.length) return;
 
   if (reactTs) await addReaction(channel, reactTs, WORKING_REACTION).catch(() => {});
   try {
-    const { reply, updatedBody } = await writeBriefReply(briefThread.automation, briefThread.body, replies);
+    // The team list, so "assign to Kiril Ivlev" works even when nobody was tagged.
+    const { reply, updatedBody } = await writeBriefReply(briefThread.automation, briefThread.body, replies, await rosterLine());
 
     // Only edit when the model returned a body and the guard clears it as a real change rather than a wipe.
     let edited = false;

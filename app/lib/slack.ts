@@ -362,6 +362,36 @@ export async function threadReplies(channelId: string, threadTs: string): Promis
  * that actually spoke, which in a week of one channel is a handful of people, not the whole company.
  * A lookup that fails falls back to the raw id rather than failing the brief.
  */
+/**
+ * The team: every real person in the Slack workspace (no bots, no deactivated accounts), as name and id,
+ * cached ten minutes. Lets QC Bot turn "assign to Kiril Ivlev" into a real mention without being tagged.
+ */
+let rosterCache: { at: number; people: Array<{ id: string; name: string }> } | null = null;
+export async function teamRoster(): Promise<Array<{ id: string; name: string }>> {
+  if (rosterCache && Date.now() - rosterCache.at < 10 * 60_000) return rosterCache.people;
+  const people: Array<{ id: string; name: string }> = [];
+  let cursor = "";
+  for (let page = 0; page < 10; page += 1) {
+    const body = await call(`users.list?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { method: "GET" });
+    for (const member of (Array.isArray(body.members) ? body.members : []) as Array<Record<string, unknown>>) {
+      if (member.deleted || member.is_bot || member.id === "USLACKBOT") continue;
+      const profile = (member.profile ?? {}) as Record<string, unknown>;
+      const name = String(profile.real_name || profile.display_name || member.real_name || member.name || "").trim();
+      if (name) people.push({ id: String(member.id), name });
+    }
+    cursor = String(((body.response_metadata ?? {}) as Record<string, unknown>).next_cursor ?? "");
+    if (!cursor) break;
+  }
+  rosterCache = { at: Date.now(), people };
+  return people;
+}
+
+/** The roster as a line the model can use: "Kiril Ivlev = <@U09…>, …". */
+export async function rosterLine(): Promise<string> {
+  const people = await teamRoster().catch(() => [] as Array<{ id: string; name: string }>);
+  return people.length ? people.map((person) => `${person.name} = <@${person.id}>`).join("; ") : "";
+}
+
 export async function resolveUserNames(ids: string[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter((id) => /^U[A-Z0-9]+$/i.test(id)))];
   const names = new Map<string, string>();
@@ -490,7 +520,34 @@ async function inviteBot(channelId: string): Promise<{ ok: boolean; error?: stri
   }
 }
 
-export async function postMessage(channelId: string, text: string, threadTs = "", blocks?: unknown[], identity?: { username?: string; iconUrl?: string }): Promise<string> {
+/**
+ * People QC Bot never @mentions, in any message it sends (briefs, answers, alerts, reports). Their mention
+ * is written as their plain name instead, so they are named but not notified. SLACK_NEVER_PING is a
+ * comma-separated list of Slack user ids; Luke (U0680D1FNER) is on it by default.
+ */
+const NEVER_PING_DEFAULT = ["U0680D1FNER"];
+function neverPingIds(): string[] {
+  const configured = (process.env.SLACK_NEVER_PING ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+  return configured.length ? configured : NEVER_PING_DEFAULT;
+}
+
+/** `text` and `blocks` with every mention of a never-ping person replaced by their name. */
+export async function withoutNeverPings<T>(value: T): Promise<T> {
+  const ids = neverPingIds();
+  const serialized = typeof value === "string" ? value : JSON.stringify(value ?? null);
+  const present = ids.filter((id) => serialized.includes(`<@${id}`));
+  if (!present.length) return value;
+  const names = await resolveUserNames(present).catch(() => new Map<string, string>());
+  const swap = (input: string, escape: boolean) => present.reduce((out, id) => {
+    const name = names.get(id) || "Luke";
+    return out.replace(new RegExp(`<@${id}(\\|[^>]*)?>`, "g"), escape ? JSON.stringify(name).slice(1, -1) : name);
+  }, input);
+  return (typeof value === "string" ? swap(value, false) : JSON.parse(swap(serialized, true))) as T;
+}
+
+export async function postMessage(channelId: string, rawText: string, threadTs = "", rawBlocks?: unknown[], identity?: { username?: string; iconUrl?: string }): Promise<string> {
+  const text = await withoutNeverPings(rawText);
+  const blocks = rawBlocks ? await withoutNeverPings(rawBlocks) : rawBlocks;
   // A custom name and icon ("Steadywell Calls" with the client's logo) need the chat:write.customize scope.
   // Without it Slack refuses the post, so the identity is dropped and the post retried as QC Bot.
   let custom = Boolean(identity?.username || identity?.iconUrl);
@@ -561,7 +618,9 @@ export async function postMessage(channelId: string, text: string, threadTs = ""
  * duplicate. Same bot token, same mrkdwn and no-unfurl treatment as `postMessage`, because it is the
  * same message.
  */
-export async function updateMessage(channelId: string, ts: string, text: string, blocks?: unknown[]): Promise<void> {
+export async function updateMessage(channelId: string, ts: string, rawText: string, rawBlocks?: unknown[]): Promise<void> {
+  const text = await withoutNeverPings(rawText);
+  const blocks = rawBlocks ? await withoutNeverPings(rawBlocks) : rawBlocks;
   await call("chat.update", {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },
@@ -585,7 +644,8 @@ export async function updateMessage(channelId: string, ts: string, text: string,
  * How a button press that cannot go ahead says why (a blank left in a draft, a reply already sent)
  * without putting the refusal in front of the whole channel. Needs only `chat:write`.
  */
-export async function postEphemeral(channelId: string, userId: string, text: string, threadTs = ""): Promise<void> {
+export async function postEphemeral(channelId: string, userId: string, rawText: string, threadTs = ""): Promise<void> {
+  const text = await withoutNeverPings(rawText);
   await call("chat.postEphemeral", {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },

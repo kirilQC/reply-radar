@@ -67,12 +67,20 @@ export function verifySlackSignature(opts) {
  * brackets. What is left is trimmed; an empty result means the mention had no question in it.
  *
  * @param {string} text
+ * @param {{ names?: Map<string, string>; botUserId?: string }} [opts]
  * @returns {string}
  */
-export function cleanMention(text) {
+export function cleanMention(text, opts = {}) {
+  const names = opts.names instanceof Map ? opts.names : null;
   return String(text ?? "")
-    // User and bot mentions: <@U123> and <@U123|name>.
-    .replace(/<@[A-Z0-9]+(\|[^>]*)?>/gi, " ")
+    // Mentions: <@U123> and <@U123|name>. With `names` (the route resolved them), a person someone tagged
+    // is kept as "@Kiril Ivlev (<@U123>)", so "assign to @Kiril" says who; only the bot's own mention goes.
+    // Without it every mention goes, as before.
+    .replace(/<@([A-Z0-9]+)(\|[^>]*)?>/gi, (_, id, label) => {
+      if (!names || id === opts.botUserId) return " ";
+      const name = names.get(id) || (label ? String(label).slice(1) : "");
+      return name ? `@${name} (<@${id}>)` : `<@${id}>`;
+    })
     // Channel mentions: <#C123|name>.
     .replace(/<#[A-Z0-9]+(\|[^>]*)?>/gi, " ")
     // Links: <https://x|label> keeps the label, <https://x> keeps the url.
@@ -487,13 +495,14 @@ export function botParticipated(posts, identity) {
  *
  * @param {Array<{ author: string; botId: string; text: string }>} posts
  * @param {{ userId?: string; botId?: string }} identity
+ * @param {Map<string, string>} [names] Names for tagged people; given, a tagged teammate stays in as "@Name (<@id>)".
  * @returns {Array<{ role: "user" | "assistant"; content: string }>}
  */
-export function threadToTurns(posts, identity) {
+export function threadToTurns(posts, identity, names) {
   const turns = [];
   for (const post of (Array.isArray(posts) ? posts : []).slice(-MAX_THREAD_TURNS)) {
     const bot = isOurBot(post, identity);
-    const text = bot ? String(post?.text ?? "").trim() : cleanMention(String(post?.text ?? ""));
+    const text = bot ? String(post?.text ?? "").trim() : cleanMention(String(post?.text ?? ""), names ? { names, botUserId: identity?.userId } : {});
     if (!text) continue;
     const role = bot ? "assistant" : "user";
     const previous = turns.at(-1);

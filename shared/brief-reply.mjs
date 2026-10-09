@@ -79,7 +79,7 @@ This message is not one you should be rewriting from a thread reply, so always r
 /**
  * The message you posted and the replies under it, assembled into one prompt.
  *
- * @param {{ body: string; replies: string[] }} inputs
+ * @param {{ body: string; replies: string[]; roster?: string }} inputs
  * @returns {string}
  */
 export function briefReplyUserContent(inputs) {
@@ -90,9 +90,13 @@ export function briefReplyUserContent(inputs) {
   const repliesText = replies.length
     ? replies.map((reply) => `- ${reply}`).join("\n")
     : "(no reply text could be read)";
+  // The team, name to Slack mention: a reassignment ("give number 1 to Kiril Ivlev") is written as that
+  // person's <@id>, never asked back for, and never guessed.
+  const roster = String(inputs?.roster ?? "").trim();
   return [
     `# The message you posted\n\n${body}`,
     `# The teammate's reply, respond to this\n\n${repliesText}`,
+    ...(roster ? [`# The team (to name or reassign someone, write their mention exactly as given here)\n\n${roster}`] : []),
     `Respond now. Return only the JSON object.`,
   ].join("\n\n---\n\n");
 }
