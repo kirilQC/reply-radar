@@ -271,3 +271,8 @@ test("Airtable picks the client's base (saved one first, then the name) and the 
   assert.equal(suggestTable(tables, "replies"), "t1");
   assert.equal(suggestTable([{ id: "x", name: "Table 1" }], "campaigns"), "x");
 });
+
+test("crm_sync_status counts an Airtable table's mapped fields (mapping by field id, not position)", () => {
+  const src = readFileSync(new URL("../app/lib/crm-sync-status.ts", import.meta.url), "utf8");
+  assert.match(src, /: Object\.values\(object\(sheetConfig\.mapping\)\)\.filter\(Boolean\)\.length/);
+});

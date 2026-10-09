@@ -181,6 +181,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     }
     return NextResponse.json({ ok: false, error: "Unknown action." }, { status: 400 });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "That step failed." }, { status: 500 });
+    const message = error instanceof Error ? error.message : "That step failed.";
+    // The person's input, not the server: an unknown client is a 404, a link that isn't a sheet a 400.
+    const status = /^Unknown client/.test(message) ? 404 : /doesn't look like|Pick a base/.test(message) ? 400 : 500;
+    return NextResponse.json({ ok: false, error: message }, { status });
   }
 }

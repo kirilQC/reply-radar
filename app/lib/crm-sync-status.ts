@@ -107,7 +107,8 @@ export async function crmSyncStatus(config: Config, workspaceIds: string[] | nul
         sheet: `${row.provider === "airtable" ? "Airtable" : "Google Sheet"}: ${text(row.account_name)} · ${text(sheetConfig.tab ?? sheetConfig.tableName)}`,
         holds: sheetConfig.content === "meetings" ? "booked meetings (one row per person)" : sheetConfig.content === "campaigns" ? "campaigns (one row per campaign, figures refreshed on status change and weekly)" : "replies (one row per conversation)",
         mappingConfirmed: row.status === "built",
-        columnsMapped: Array.isArray(sheetConfig.mapping) ? (sheetConfig.mapping as unknown[]).filter(Boolean).length : 0,
+        // A sheet maps by column position (an array); an Airtable table by field id (an object).
+        columnsMapped: Array.isArray(sheetConfig.mapping) ? (sheetConfig.mapping as unknown[]).filter(Boolean).length : Object.values(object(sheetConfig.mapping)).filter(Boolean).length,
         pushAutomatically: row.auto_push === true,
         lastPush: text(row.last_push_at) || null,
         lastPushResult: summary(row.last_push_summary),
