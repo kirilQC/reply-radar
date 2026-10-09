@@ -134,7 +134,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const list = await call("POST", "/crm/v3/lists", { name: "TEST QC Growth segment", objectTypeId: "0-1", processingType: "DYNAMIC", filterBranch: { filterBranchType: "OR", filters: [], filterBranches: [{ filterBranchType: "AND", filterBranches: [], filters: [{ filterType: "PROPERTY", property: "qc_outreach_platform", operation: { operationType: "ENUMERATION", operator: "IS_ANY_OF", values: platforms } }] }] } });
       const listId = String((list.json.list as { listId?: string } | undefined)?.listId ?? "");
       steps.push({ step: "segment create", status: list.status, id: listId, detail: list.message });
-      const report = await call("POST", "/hub/cli/backend/reporting/v1/reports/create", { sql: "SELECT qc_campaign, COUNT(*) FROM CONTACT WHERE qc_outreach_platform IN ('heyreach', 'lemlist', 'email_bison') GROUP BY qc_campaign", chartType: "BAR", name: "TEST QC replies by campaign" });
+      const reportSql = "SELECT qc_campaign, COUNT(*) FROM CONTACT WHERE qc_outreach_platform IN ('heyreach', 'lemlist', 'email_bison') GROUP BY qc_campaign";
+      const report = await call("POST", "/hub/cli/backend/reporting/v1/reports/create", { sql: reportSql, intent: reportSql, chartType: "BAR", name: "TEST QC replies by campaign" });
       const reportId = String(report.json.id ?? "");
       steps.push({ step: "report create", status: report.status, id: reportId, detail: report.message });
       const dashboard = await call("POST", "/analytics/reporting/2027-03-beta/dashboards", { name: "TEST QC Growth dashboard", permissions: { permissionType: "EVERYONE_VIEW" }, ...(reportId ? { reportIdsToAdd: [reportId] } : {}) });
@@ -145,7 +146,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       for (const id of [reportId, ...(Array.isArray(body.extraReports) ? body.extraReports.map(String) : [])].filter(Boolean)) steps.push({ step: "report delete", ...(await call("DELETE", `/dashboard/v2/reports/${id}`)), id });
       if (listId) steps.push({ step: "segment delete", ...(await call("DELETE", `/crm/v3/lists/${listId}`)), id: listId });
       if (viewId) steps.push({ step: "view delete", ...(await call("DELETE", `/hub/cli/backend/crm/contacts/views/${viewId}`)), id: viewId });
-      return NextResponse.json({ ok: true, steps: steps.map(({ step, status, id, detail, message }) => ({ step, status, id, detail: detail ?? message })) });
+      const info = await fetch("https://api.hubapi.com/oauth/v2/private-apps/get/access-token-info", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tokenKey: token }), cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
+      const scopes = (Array.isArray((info as { scopes?: unknown }).scopes) ? (info as { scopes: string[] }).scopes : []).filter((scope) => /report|dashboard|list/i.test(scope));
+      return NextResponse.json({ ok: true, scopes, steps: steps.map(({ step, status, id, detail, message }) => ({ step, status, id, detail: detail ?? message })) });
     }
     if (action === "push_one") {
       return reply({ test: await pushOne(c, destination as Destination) });
