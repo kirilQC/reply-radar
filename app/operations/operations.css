@@ -213,3 +213,17 @@ body.light-mode .ops-area {
 /* Connect steps: one exact scope name per bullet. */
 .ops-scope-bullets { margin: 12px 0 2px; padding-left: 20px; display: grid; gap: 8px; list-style: disc; }
 .ops-scope-bullets code { font-size: 13px; color: var(--ops-strong); }
+
+/* Built CRM: three boxes (replies, booked meetings, dashboard), each confirming what's live and who came in last. */
+.ops-trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
+.ops-box { gap: 14px; }
+.ops-checks { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 13px; color: var(--ops-text); }
+.ops-checks li { position: relative; padding-left: 22px; }
+.ops-checks li::before { content: "✓"; position: absolute; left: 0; color: var(--ops-green); font-weight: 700; }
+.ops-last { margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid var(--ops-line); }
+.ops-last-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.ops-last-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ops-last-who strong { color: var(--ops-strong); font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.ops-last-who span { color: var(--ops-muted); font-size: 12px; }
+.ops-last-when { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 12px; color: var(--ops-muted); white-space: nowrap; }
+@media (max-width: 1100px) { .ops-trio { grid-template-columns: minmax(0, 1fr); } }

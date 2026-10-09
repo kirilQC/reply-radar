@@ -67,7 +67,14 @@ type FieldsByContent = Record<Content, Array<{ key: string; label: string }>>;
 type SheetsPayload = { sheets?: Sheet[]; tables?: Sheet[]; configured?: boolean; robotEmail?: string | null; google?: { email: string } | null; googleOauth?: boolean; fieldsByContent?: FieldsByContent; summary?: { created: number; updated: number; failed: number; nextOffset: number | null } };
 type Client = { name: string; slug: string; logoUrl?: string | null; accentColor?: string | null };
 type Returned = { ok: boolean; message: string } | undefined;
-type Pulse = { at: string; totalContacts: number | null; ourContacts: number | null; deals: number | null };
+type Pulse = {
+  at: string;
+  totalContacts: number | null;
+  ourContacts: number | null;
+  deals: number | null;
+  lastReply: null | { name: string; company: string; at: string; link: string | null };
+  lastDeal: null | { name: string; company: string; meetingAt: string; at: string; link: string | null };
+};
 type Alert = { key: string; title: string; detail: React.ReactNode; action?: React.ReactNode };
 
 function HubSpotLogo() {
@@ -212,6 +219,21 @@ function useCrm(slug: string) {
   return { crm, pulse, appReady, loaded, busy, error, note, setNote, step, load };
 }
 type CrmState = ReturnType<typeof useCrm>;
+
+/** "Last person added": who, a line under it, when, and a link to their record. */
+function LastAdded({ label, entry, empty }: { label: string; entry: { name: string; sub: string; at: string; link: string | null } | null; empty: string }) {
+  return (
+    <div className="ops-last">
+      <span className="ops-label">{label}</span>
+      {entry ? (
+        <div className="ops-last-row">
+          <div className="ops-last-who"><strong>{entry.name || "Someone"}</strong>{entry.sub && <span>{entry.sub}</span>}</div>
+          <div className="ops-last-when"><span>{when(entry.at)}</span>{entry.link && <a className="ops-link" href={entry.link} target="_blank" rel="noreferrer">Open ↗</a>}</div>
+        </div>
+      ) : <p className="ops-muted">{empty}</p>}
+    </div>
+  );
+}
 
 function BuildLog({ entries }: { entries: Crm["buildLog"] }) {
   const [all, setAll] = useState(false);
@@ -395,14 +417,6 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
         </div>
       )}
 
-      {built && (
-        <div className="ops-strip">
-          <label className="ops-check"><input type="checkbox" checked={c.autoPush} disabled={Boolean(busy)} onChange={(e) => void step("auto", { on: e.target.checked })} /> Push new replies automatically</label>
-          {tested && <span className="ops-ok">{tested.created ? "Created" : "Updated"} {tested.name}{tested.company ? ` (${tested.company})` : ""} · {tested.campaign}{tested.link && <> · <a href={tested.link} target="_blank" rel="noreferrer">Open ↗</a></>}</span>}
-          {progress && <span className="ops-muted">{progress.created} created · {progress.updated} updated · {progress.unchanged} unchanged{progress.failed ? ` · ${progress.failed} failed` : ""}</span>}
-          {meetingsPushed && <span className="ops-muted">Deals: {meetingsPushed.created} created · {meetingsPushed.updated} updated{meetingsPushed.failed ? ` · ${meetingsPushed.failed} failed` : ""}</span>}
-        </div>
-      )}
       {showPlan && c.plan && (
         <section className="ops-panel">
           <div className="ops-panel-head"><span className="ops-label">Game plan</span>{creates.length > 0 && <span className="ops-tag">{creates.length} to create</span>}</div>
@@ -445,13 +459,64 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
       )}
 
       {built && (
-        <div className="ops-pair">
+        <div className="ops-trio">
+          <section className="ops-panel ops-box">
+            <div className="ops-panel-head">
+              <span className="ops-label">Replies → {provider === "attio" ? "People" : "Contacts"}</span>
+              {c.autoPush ? <span className="ops-state ops-good">● Live</span> : <span className="ops-state ops-wait">● Paused</span>}
+            </div>
+            <div className="ops-h2">All {verified} QC fields added</div>
+            <ul className="ops-checks">
+              <li>{verified} QC fields verified on {provider === "attio" ? "People" : "contacts"}</li>
+              <li>{provider === "attio" ? "QC Growth list, owned by QC Growth" : "QC Growth view and segment in Contacts"}</li>
+              <li>{(pulse?.ourContacts ?? 0).toLocaleString()} {provider === "attio" ? "people" : "contacts"} from QC so far</li>
+            </ul>
+            <LastAdded label="Last person added" entry={pulse?.lastReply ? { name: pulse.lastReply.name, sub: pulse.lastReply.company, at: pulse.lastReply.at, link: pulse.lastReply.link } : null} empty="No one added yet." />
+            <label className="ops-check"><input type="checkbox" checked={c.autoPush} disabled={Boolean(busy)} onChange={(e) => void step("auto", { on: e.target.checked })} /> Push new replies automatically</label>
+            {tested && <p className="ops-ok">{tested.created ? "Created" : "Updated"} {tested.name}{tested.company ? ` (${tested.company})` : ""} · {tested.campaign}{tested.link && <> · <a href={tested.link} target="_blank" rel="noreferrer">Open ↗</a></>}</p>}
+            {progress && <p className="ops-muted">{progress.created} created · {progress.updated} updated · {progress.unchanged} unchanged{progress.failed ? ` · ${progress.failed} failed` : ""}</p>}
+          </section>
+
+          <section className="ops-panel ops-box">
+            <div className="ops-panel-head">
+              <span className="ops-label">Booked meetings → Deals</span>
+              {dealsLive ? <span className="ops-state ops-good">● Live</span> : dealsBlocker ? <span className="ops-state ops-bad">● Blocked</span> : <span className="ops-state ops-wait">● Needs approval</span>}
+            </div>
+            <div className="ops-h2">Booked Meeting (QC) stage</div>
+            {dealsLive && deals ? (
+              <>
+                <ul className="ops-checks">
+                  <li>Stage built in {provider === "hubspot" ? deals.pipelineLabel || "the pipeline" : "Deals"}</li>
+                  <li>QC deal fields added (meeting, lead, company, conversation, pre-call brief)</li>
+                  <li>{(pulse?.deals ?? 0).toLocaleString()} {pulse?.deals === 1 ? "deal" : "deals"} from booked meetings so far</li>
+                </ul>
+                <LastAdded label="Last booked meeting added" entry={pulse?.lastDeal ? { name: pulse.lastDeal.company || pulse.lastDeal.name, sub: [pulse.lastDeal.company ? pulse.lastDeal.name : "", pulse.lastDeal.meetingAt ? `meeting ${when(pulse.lastDeal.meetingAt)}` : ""].filter(Boolean).join(" · "), at: pulse.lastDeal.at, link: pulse.lastDeal.link } : null} empty="No booked meetings yet." />
+              </>
+            ) : dealsBlocker ? (
+              <>
+                <p className="ops-error">{dealsBlocker}</p>
+                <div className="ops-row"><button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Reading…" : `Re-read ${name}`}</button></div>
+              </>
+            ) : (
+              <p className="ops-muted">Choose the pipeline in the game plan above and approve.</p>
+            )}
+            {meetingsPushed && <p className="ops-muted">{meetingsPushed.created} deals created · {meetingsPushed.updated} updated{meetingsPushed.failed ? ` · ${meetingsPushed.failed} failed` : ""}</p>}
+          </section>
+
           {provider === "hubspot" ? (
-            <section className="ops-panel">
-              <div className="ops-panel-head"><span className="ops-label">Dashboard</span>{c.config?.dashboard_id ? <span className="ops-state ops-good">● Built</span> : <span className="ops-state ops-wait">● Not built</span>}</div>
+            <section className="ops-panel ops-box">
+              <div className="ops-panel-head"><span className="ops-label">Dashboard</span>{c.config?.dashboard_id ? <span className="ops-state ops-good">● Live</span> : <span className="ops-state ops-wait">● Not built</span>}</div>
               {returned && <p className={returned.ok ? "ops-ok" : "ops-error"}>{returned.message}</p>}
-              <div className="ops-h2">QC Growth{c.config?.dashboard_id ? " · 7 reports" : ""}</div>
-              <ul className="ops-reports"><li>Leads who replied</li><li>Replies by month</li><li>Replies by campaign</li><li>Reply sentiment</li><li>Replies by platform</li><li>Replies by sender</li><li>Latest replies</li></ul>
+              <div className="ops-h2">QC Growth dashboard</div>
+              {c.config?.dashboard_id ? (
+                <ul className="ops-checks">
+                  <li>7 reports built, QC leads only</li>
+                  <li>Shared with everyone in {name}</li>
+                  <li>Updates itself as replies arrive</li>
+                </ul>
+              ) : (
+                <ul className="ops-reports"><li>Leads who replied</li><li>Replies by month</li><li>Replies by campaign</li><li>Reply sentiment</li><li>Replies by platform</li><li>Replies by sender</li><li>Latest replies</li></ul>
+              )}
               {!c.hubspotUser ? (
                 <div className="ops-row">
                   <a className={`ops-btn ops-pri${appReady ? "" : " ops-disabled"}`} href={appReady ? `/api/hubspot/oauth/start?slug=${encodeURIComponent(slug)}` : undefined} aria-disabled={!appReady}>Connect QC Growth user</a>
@@ -471,33 +536,20 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
               )}
             </section>
           ) : (
-            <section className="ops-panel">
-              <div className="ops-panel-head"><span className="ops-label">In Attio</span><span className="ops-state ops-good">● Built</span></div>
+            <section className="ops-panel ops-box">
+              <div className="ops-panel-head"><span className="ops-label">Dashboard</span><span className="ops-state ops-good">● Live</span></div>
               <div className="ops-h2">QC Growth list · QC Dashboard</div>
+              <ul className="ops-checks">
+                <li>QC Growth list with QC's columns</li>
+                <li>QC Dashboard app: metrics, charts, latest replies</li>
+                <li>Both read the list live</li>
+              </ul>
               <div className="ops-row">
                 {c.config?.attio_slug && c.plan?.settings.listId && <a className="ops-btn ops-pri" href={`https://app.attio.com/${c.config.attio_slug}/collection/${c.plan.settings.listId}`} target="_blank" rel="noreferrer">Open QC Growth list ↗</a>}
                 {c.config?.attio_slug && <a className="ops-btn ops-sec" href={`https://app.attio.com/${c.config.attio_slug}/apps/qc-growth-dashboard/qc-growth`} target="_blank" rel="noreferrer">Open QC Dashboard ↗</a>}
               </div>
             </section>
           )}
-
-          <section className="ops-panel">
-            <div className="ops-panel-head">
-              <span className="ops-label">Booked meetings → Deals</span>
-              {dealsLive ? <span className="ops-state ops-good">● Live</span> : dealsBlocker ? <span className="ops-state ops-bad">● Blocked</span> : <span className="ops-state ops-wait">● Needs approval</span>}
-            </div>
-            <div className="ops-h2">Booked Meeting (QC) stage</div>
-            {dealsLive && deals ? (
-              <p className="ops-muted">{provider === "hubspot" ? `${deals.pipelineLabel || "Pipeline"} → Booked Meeting (QC)` : "Deals → Booked Meeting (QC)"} · one deal per booked lead, named after the company</p>
-            ) : dealsBlocker ? (
-              <>
-                <p className="ops-error">{dealsBlocker}</p>
-                <div className="ops-row"><button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Reading…" : `Re-read ${name}`}</button></div>
-              </>
-            ) : (
-              <p className="ops-muted">Choose the pipeline in the game plan above and approve.</p>
-            )}
-          </section>
         </div>
       )}
 

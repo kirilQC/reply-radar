@@ -278,3 +278,14 @@ test("crm_sync_status counts an Airtable table's mapped fields (mapping by field
   const src = readFileSync(new URL("../app/lib/crm-sync-status.ts", import.meta.url), "utf8");
   assert.match(src, /: Object\.values\(object\(sheetConfig\.mapping\)\)\.filter\(Boolean\)\.length/);
 });
+
+test("a built CRM shows three boxes (replies, booked meetings, dashboard) with the last person added", () => {
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../app/api/crm-push/[slug]/route.ts", import.meta.url), "utf8");
+  assert.match(ui, /className="ops-trio"/);
+  assert.equal((ui.match(/className="ops-panel ops-box"/g) ?? []).length, 4);
+  assert.match(ui, /label="Last person added"/);
+  assert.match(ui, /label="Last booked meeting added"/);
+  assert.match(route, /created_contact=is\.true&error=is\.null&order=pushed_at\.desc&limit=1/);
+  assert.match(route, /deal_id=not\.is\.null&error=is\.null&order=pushed_at\.desc&limit=1/);
+});

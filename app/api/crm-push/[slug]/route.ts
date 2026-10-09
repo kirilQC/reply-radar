@@ -2,12 +2,12 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
-import { loadDestination, presentDestination, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
+import { loadDestination, presentDestination, replyRecords, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
+import { cleanMeeting, pushMeetingsPass } from "../../../lib/meetings-deals-run";
 import { pushOne, pushPass } from "../../../lib/crm-push-run";
 import { REQUIRED_SCOPES, hubspot as hubspotCall, hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotPlan } from "../../../lib/hubspot-push";
 import { REPORTING_WAIT, hubspotBuildReporting, hubspotUserView } from "../../../lib/hubspot-reporting";
 import { dealsApply, dealsAudit, dealsPlan, type DealsPlan } from "../../../lib/hubspot-deals";
-import { pushMeetingsPass } from "../../../lib/meetings-deals-run";
 import { attioDealsApply, attioDealsAudit, attioDealsPlan, type AttioDealsPlan } from "../../../lib/attio-deals";
 import { ATTIO_REQUIRED_SCOPES, attioApply, attioAudit, attioConnect, attioPlan, type AttioPlan } from "../../../lib/attio-push";
 import { hubspotAppConfigured, hubspotUserToken } from "../../../lib/hubspot-user";
@@ -54,6 +54,44 @@ export async function GET(_: Request, context: { params: Promise<{ slug: string 
  */
 async function pulseOf(c: { url: string; key: string }, workspaceId: string, destination: Destination | null) {
   if (!destination?.api_key || destination.status !== "built") return null;
+  const [lastReply, lastDeal] = await Promise.all([lastReplyAdded(c, workspaceId, destination).catch(() => null), lastDealAdded(c, workspaceId, destination).catch(() => null)]);
+  const counts = await countsOf(c, workspaceId, destination);
+  return counts ? { ...counts, lastReply, lastDeal } : null;
+}
+
+/** The newest person QC added to the CRM from a reply: name, company, when, and their record. */
+async function lastReplyAdded(c: { url: string; key: string }, workspaceId: string, destination: Destination) {
+  const enc = encodeURIComponent;
+  const [record] = await rows(c, `rr_crm_push_records?select=conversation_id,contact_id,pushed_at&workspace_id=eq.${enc(workspaceId)}&provider=eq.${enc(destination.provider)}&created_contact=is.true&error=is.null&order=pushed_at.desc&limit=1`);
+  if (!record) return null;
+  const [conversation] = await rows(c, `rr_conversations?select=lead_id&id=eq.${enc(text(record.conversation_id))}&limit=1`);
+  const { records } = conversation?.lead_id ? await replyRecords(c, workspaceId, { leadIds: [text(conversation.lead_id)], limit: 5 }) : { records: [] as Array<{ name: string; company: string }> };
+  const person = records[0];
+  return { name: person?.name ?? "", company: person?.company ?? "", at: text(record.pushed_at), link: recordLink(destination, "person", text(record.contact_id)) };
+}
+
+/** The newest booked meeting QC turned into a deal: who, which company, when it was booked for, and the deal. */
+async function lastDealAdded(c: { url: string; key: string }, workspaceId: string, destination: Destination) {
+  const enc = encodeURIComponent;
+  const [deal] = await rows(c, `rr_crm_push_meetings?select=meeting_id,deal_id,pushed_at&workspace_id=eq.${enc(workspaceId)}&provider=eq.${enc(destination.provider)}&deal_id=not.is.null&error=is.null&order=pushed_at.desc&limit=1`);
+  if (!deal) return null;
+  const [meeting] = await rows(c, `rr_meetings?select=invitee_name,company_name,meeting_at,when_text&id=eq.${enc(text(deal.meeting_id))}&limit=1`);
+  const clean = meeting ? cleanMeeting(meeting) : null;
+  return { name: text(clean?.invitee_name), company: text(clean?.company_name), meetingAt: text(meeting?.meeting_at) || text(meeting?.when_text), at: text(deal.pushed_at), link: recordLink(destination, "deal", text(deal.deal_id)) };
+}
+
+function recordLink(destination: Destination, kind: "person" | "deal", id: string): string | null {
+  if (!id) return null;
+  if (destination.provider === "hubspot") {
+    const host = (destination.account_name ?? "").includes("hubspot.com") ? destination.account_name : "app.hubspot.com";
+    return destination.account_id ? `https://${host}/contacts/${destination.account_id}/record/${kind === "deal" ? "0-3" : "0-1"}/${id}` : null;
+  }
+  const slug = text(((destination.config ?? {}) as Row).attio_slug);
+  return slug ? `https://app.attio.com/${slug}/${kind === "deal" ? "deals" : "person"}/${id}/overview` : null;
+}
+
+async function countsOf(c: { url: string; key: string }, workspaceId: string, destination: Destination) {
+  if (!destination.api_key) return null;
   const within = <T,>(work: Promise<T>, fallback: T) => Promise.race([work.catch(() => fallback), new Promise<T>((done) => setTimeout(() => done(fallback), 5000))]);
   const enc = encodeURIComponent;
   const deals = within(rows(c, `rr_crm_push_meetings?select=deal_id&workspace_id=eq.${enc(workspaceId)}&provider=eq.${enc(destination.provider)}&deal_id=not.is.null&limit=5000`).then((list) => new Set(list.map((row) => String(row.deal_id))).size as number | null), null);
