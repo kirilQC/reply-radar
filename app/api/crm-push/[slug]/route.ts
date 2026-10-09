@@ -66,7 +66,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     if (!destination?.api_key) return NextResponse.json({ ok: false, error: "Connect the CRM first." }, { status: 400 });
 
     if (action === "replan") {
-      const audit = await hubspotAudit(destination.api_key, (destination.audit as HubSpotAudit | null)?.scopes ?? []);
+      // The key's scopes are asked for again: ticking a scope in HubSpot must clear the warning on re-read.
+      const account = await hubspotConnect(destination.api_key);
+      const audit = await hubspotAudit(destination.api_key, account.scopes);
       await saveDestination(c, workspace.id, "crm", { audit: audit as unknown as Row, plan: hubspotPlan(audit) as unknown as Row, status: destination.status === "built" ? "built" : "planned" });
       return reply();
     }

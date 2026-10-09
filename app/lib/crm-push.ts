@@ -215,13 +215,27 @@ export async function loadDestination(config: Config, workspaceId: string, kind:
   return (row as unknown as Destination) ?? null;
 }
 
+/**
+ * Saves part of a destination. An existing row is PATCHed with just the changed columns; only a new one is
+ * inserted. (An upsert of a partial row failed with 400: Postgres checks the insert's required columns,
+ * like `provider`, before it ever looks for the existing row.)
+ */
 export async function saveDestination(config: Config, workspaceId: string, kind: "crm" | "sheets", patch: Partial<Destination>): Promise<void> {
-  const result = await rest(config, "rr_crm_push?on_conflict=workspace_id,kind", {
+  const body = JSON.stringify({ ...patch, updated_at: new Date().toISOString() });
+  const updated = await rest(config, `rr_crm_push?workspace_id=eq.${enc(workspaceId)}&kind=eq.${kind}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body,
+  });
+  const fail = (result: { status: number; data: unknown }) => new Error(`Could not save the ${kind === "crm" ? "CRM" : "sheet"} settings (${result.status}): ${String(typeof result.data === "string" ? result.data : JSON.stringify(result.data)).slice(0, 200)}`);
+  if (!updated.ok) throw fail(updated);
+  if (Array.isArray(updated.data) && updated.data.length) return;
+  const inserted = await rest(config, "rr_crm_push", {
     method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    headers: { Prefer: "return=minimal" },
     body: JSON.stringify({ workspace_id: workspaceId, kind, ...patch, updated_at: new Date().toISOString() }),
   });
-  if (!result.ok) throw new Error(`Could not save the ${kind === "crm" ? "CRM" : "sheet"} settings (${result.status}). Has the crm push migration been run?`);
+  if (!inserted.ok) throw fail(inserted);
 }
 
 /** What the browser may see of a destination: never the key. */

@@ -51,3 +51,10 @@ test("the plan keeps QC's own fields to the minimum and maps the rest onto HubSp
   assert.match(source, /put\("qc_outreach_platform", record\.platform === "Email Bison" \? "email_bison" : record\.platform\.toLowerCase\(\)\)/);
   for (const field of ["firstname", "lastname", "email", "jobtitle", "company", "domain", "linkedin_company_page"]) assert.match(source, new RegExp(`name: "${field}"`), field);
 });
+
+test("saving part of a destination patches the existing row, and re-reading asks HubSpot for the key's scopes again", () => {
+  const lib = readFileSync(new URL("../app/lib/crm-push.ts", import.meta.url), "utf8");
+  assert.match(lib, /rr_crm_push\?workspace_id=eq\.\$\{enc\(workspaceId\)\}&kind=eq\.\$\{kind\}`, \{\n    method: "PATCH"/);
+  const route = readFileSync(new URL("../app/api/crm-push/[slug]/route.ts", import.meta.url), "utf8");
+  assert.match(route, /if \(action === "replan"\) \{[\s\S]{0,200}const account = await hubspotConnect\(destination\.api_key\);/);
+});
