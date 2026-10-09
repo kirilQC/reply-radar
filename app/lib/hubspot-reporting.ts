@@ -75,7 +75,7 @@ export async function hubspotBuildReporting(token: string): Promise<{ log: Build
       log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "reused", detail: `Dashboard ${dashboardId}${added ? `, ${added} reports added` : ""}` });
     }
   } catch (error) {
-    log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "failed", detail: error instanceof HubSpotError && error.status === 403 ? `HubSpot refused (403): ${error.message.slice(0, 300)}` : error instanceof Error ? error.message : "" });
+    log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "failed", detail: error instanceof HubSpotError && /ungated/i.test(error.message) ? "This HubSpot account is not in HubSpot's reporting API beta yet. A super admin turns it on in HubSpot under Product updates, In beta, then click Rebuild reports. The reports above are already made." : error instanceof HubSpotError && error.status === 403 ? `HubSpot refused (403): ${error.message.slice(0, 300)}` : error instanceof Error ? error.message : "" });
   }
   return { log, dashboardId };
 }
