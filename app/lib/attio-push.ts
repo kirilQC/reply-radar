@@ -126,7 +126,8 @@ export async function attioAudit(token: string, scopes: string[] = []): Promise<
     qcList,
     qcListAttributes,
     scopes,
-    missingScopes: scopes.length ? ATTIO_REQUIRED_SCOPES.filter((scope) => !scopes.includes(scope)) : [],
+    // Read & write covers read: a key with user_management:read-write has user_management:read.
+    missingScopes: scopes.length ? ATTIO_REQUIRED_SCOPES.filter((scope) => !scopes.includes(scope) && !(scope.endsWith(":read") && scopes.includes(`${scope}-write`))) : [],
   };
 }
 
