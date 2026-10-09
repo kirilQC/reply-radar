@@ -224,7 +224,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       return reply({ test: await pushOne(c, destination as Destination) });
     }
     if (action === "push") {
-      const summary = await pushPass(c, destination as Destination, { offset: Number(body.offset) || 0, budgetMs: 240_000 });
+      const summary = await pushPass(c, destination as Destination, { offset: Number(body.offset) || 0, budgetMs: 150_000 });
       return reply({ summary });
     }
     if (action === "auto") {
