@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, type Destination } from "../../../lib/crm-push";
 import { pushPass } from "../../../lib/crm-push-run";
+import { disconnectGoogle, googleAccount, googleOauthConfigured } from "../../../lib/google-user";
 import { accessToken, ensureQcIdColumn, serviceAccount, serviceAccountStatus, SHEET_FIELDS, sheetsConnect, suggestMapping, type SheetConfig } from "../../../lib/sheets-push";
 
 /**
@@ -30,18 +31,18 @@ async function workspaceOf(c: { url: string; key: string }, slug: string) {
   return { id: text(workspace.id), name: text(workspace.name) };
 }
 
-const shared = () => ({ robotEmail: serviceAccount()?.client_email ?? null, googleKey: serviceAccountStatus(), fields: SHEET_FIELDS.map(({ key, label }) => ({ key, label })) });
+const shared = async () => ({ google: await googleAccount().catch(() => null), googleOauth: googleOauthConfigured(), robotEmail: serviceAccount()?.client_email ?? null, googleKey: serviceAccountStatus(), fields: SHEET_FIELDS.map(({ key, label }) => ({ key, label })) });
 
 export async function GET(request: Request, context: { params: Promise<{ slug: string }> }) {
   try {
     // ?check=1 signs in to Google once, so setup problems surface before a sheet is connected.
     if (new URL(request.url).searchParams.get("check")) {
       const signIn = await accessToken().then(() => "ok").catch((error) => (error instanceof Error ? error.message : "failed"));
-      return NextResponse.json({ ok: true, ...shared(), signIn });
+      return NextResponse.json({ ok: true, ...(await shared()), signIn });
     }
     const c = config();
     const workspace = await workspaceOf(c, (await context.params).slug);
-    return NextResponse.json({ ok: true, ...shared(), sheet: presentDestination(await loadDestination(c, workspace.id, "sheets")) });
+    return NextResponse.json({ ok: true, ...(await shared()), sheet: presentDestination(await loadDestination(c, workspace.id, "sheets")) });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not read the sheet settings." }, { status: 500 });
   }
@@ -54,7 +55,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     const c = config();
     const workspace = await workspaceOf(c, (await context.params).slug);
     const destination = await loadDestination(c, workspace.id, "sheets");
-    const reply = async (extra: Row = {}) => NextResponse.json({ ok: true, ...extra, ...shared(), sheet: presentDestination(await loadDestination(c, workspace.id, "sheets")) });
+    const reply = async (extra: Row = {}) => NextResponse.json({ ok: true, ...extra, ...(await shared()), sheet: presentDestination(await loadDestination(c, workspace.id, "sheets")) });
 
     if (action === "connect" || (action === "reread" && destination)) {
       const url = action === "connect" ? text(body.url) : text(((destination?.config ?? {}) as Row).url);
@@ -94,6 +95,10 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     }
     if (action === "auto") {
       await saveDestination(c, workspace.id, "sheets", { auto_push: body.on === true });
+      return reply();
+    }
+    if (action === "disconnect_google") {
+      await disconnectGoogle();
       return reply();
     }
     if (action === "disconnect") {

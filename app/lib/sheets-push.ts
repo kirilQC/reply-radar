@@ -3,6 +3,7 @@
 
 import { createSign } from "node:crypto";
 import { conversationText, type Destination, type ReplyRecord } from "./crm-push";
+import { googleAccount, googleUserToken } from "./google-user";
 
 /**
  * Replies into a Google Sheet the team made, with the headers they want. QC Command writes as one Google
@@ -77,10 +78,20 @@ export class SheetsError extends Error {
   }
 }
 
+/** QC's own Google sign-in (admin@qcgrowth.com) when connected, else the service account. */
+async function sheetsToken(): Promise<string> {
+  return (await googleUserToken().catch(() => null)) ?? accessToken();
+}
+
+/** The address a sheet has to be editable by: the signed-in Google account, else the service account. */
+export async function writerEmail(): Promise<string | null> {
+  return (await googleAccount().catch(() => null))?.email ?? serviceAccount()?.client_email ?? null;
+}
+
 async function sheets(method: string, path: string, body?: unknown, attempt = 0): Promise<Row> {
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${path}`, {
     method,
-    headers: { Authorization: `Bearer ${await accessToken()}`, "content-type": "application/json" },
+    headers: { Authorization: `Bearer ${await sheetsToken()}`, "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
@@ -93,7 +104,7 @@ async function sheets(method: string, path: string, body?: unknown, attempt = 0)
   if (!response.ok) {
     const message = text((data.error as Row | undefined)?.message);
     if (response.status === 403 || response.status === 404) {
-      throw new SheetsError(`QC Command can't open that sheet. Share it with ${serviceAccount()?.client_email ?? "QC Command's Google account"} as Editor.`, response.status);
+      throw new SheetsError(`QC Command can't open that sheet. Make sure ${(await writerEmail()) ?? "QC Command's Google account"} can edit it.`, response.status);
     }
     throw new SheetsError(message || `Google Sheets answered ${response.status}.`, response.status);
   }

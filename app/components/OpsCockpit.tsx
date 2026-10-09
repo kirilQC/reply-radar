@@ -313,9 +313,11 @@ type Sheet = {
   config: { url?: string; tab?: string; headers?: string[]; mapping?: string[]; qcIdColumn?: number };
 };
 
-function SheetsPanel({ slug, clientName, onClose }: { slug: string; clientName: string; onClose: () => void }) {
+function SheetsPanel({ slug, clientName, onClose, returned }: { slug: string; clientName: string; onClose: () => void; returned?: { ok: boolean; message: string } }) {
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [robot, setRobot] = useState<string | null>(null);
+  const [google, setGoogle] = useState<{ email: string } | null>(null);
+  const [googleOauth, setGoogleOauth] = useState(false);
   const [fields, setFields] = useState<Array<{ key: string; label: string }>>([]);
   const [loaded, setLoaded] = useState(false);
   const [url, setUrl] = useState("");
@@ -324,7 +326,9 @@ function SheetsPanel({ slug, clientName, onClose }: { slug: string; clientName: 
   const [error, setError] = useState("");
   const [progress, setProgress] = useState<{ created: number; updated: number; failed: number } | null>(null);
 
-  const take = (payload: { sheet?: Sheet | null; robotEmail?: string | null; fields?: Array<{ key: string; label: string }> }) => {
+  const take = (payload: { sheet?: Sheet | null; robotEmail?: string | null; google?: { email: string } | null; googleOauth?: boolean; fields?: Array<{ key: string; label: string }> }) => {
+    if (payload.google !== undefined) setGoogle(payload.google);
+    if (payload.googleOauth !== undefined) setGoogleOauth(payload.googleOauth);
     if (payload.sheet !== undefined) {
       setSheet(payload.sheet);
       setMapping(payload.sheet?.config?.mapping ?? []);
@@ -364,6 +368,7 @@ function SheetsPanel({ slug, clientName, onClose }: { slug: string; clientName: 
   };
 
   const connected = Boolean(sheet?.connected);
+  const writer = google?.email ?? robot;
   const headers = sheet?.config?.headers ?? [];
   const built = sheet?.status === "built";
 
@@ -378,14 +383,27 @@ function SheetsPanel({ slug, clientName, onClose }: { slug: string; clientName: 
         </div>
 
         {!loaded && <p className="oc-muted">Loading…</p>}
-        {loaded && !robot && <p className="oc-error">QC Command's Google account is not set up yet (GOOGLE_SERVICE_ACCOUNT_JSON on Vercel).</p>}
+        {loaded && (
+          <section className="oc-section">
+            <h3>Google account</h3>
+            {google ? (
+              <div className="oc-row"><span className="oc-muted">Writing as {google.email}</span></div>
+            ) : (
+              <div className="oc-row">
+                <a className={`oc-primary${googleOauth ? "" : " oc-disabled"}`} href={googleOauth ? `/api/google/oauth/start?return=${encodeURIComponent(`/onboarding/${slug}`)}` : undefined} aria-disabled={!googleOauth}>Connect Google</a>
+                <span className="oc-muted">{googleOauth ? "Sign in once as admin@qcgrowth.com" : "Google sign-in keys not on Vercel yet"}</span>
+              </div>
+            )}
+          </section>
+        )}
+        {returned && <p className={returned.ok ? "oc-note" : "oc-error"}>{returned.message}</p>}
 
-        {loaded && robot && !connected && (
+        {loaded && writer && !connected && (
           <section className="oc-section">
             <h3>Connect</h3>
             <ol className="oc-steps">
               <li>Make the sheet and put your headers in row 1</li>
-              <li>Share it with <code>{robot}</code> as Editor</li>
+              <li>{google ? <>Make sure <code>{writer}</code> can edit it (its own sheets already can)</> : <>Share it with <code>{writer}</code> as Editor</>}</li>
               <li>Paste the sheet's link here</li>
             </ol>
             <div className="oc-row">
@@ -433,7 +451,7 @@ function SheetsPanel({ slug, clientName, onClose }: { slug: string; clientName: 
         {error && <p className="oc-error" role="alert">{error}</p>}
         {connected && (
           <div className="oc-foot">
-            <span className="oc-muted">{robot}</span>
+            <span className="oc-muted">{writer}</span>
             <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("disconnect")}>Disconnect</button>
           </div>
         )}
@@ -446,8 +464,17 @@ export default function OpsCockpit({ slug, clientName }: { slug: string; clientN
   const [open, setOpen] = useState<"" | "hubspot" | "attio" | "sheets">("");
   // Back from HubSpot's sign-in: reopen the HubSpot panel with the outcome, and tidy the address bar.
   const [returned, setReturned] = useState<{ ok: boolean; message: string } | undefined>(undefined);
+  const [sheetsReturned, setSheetsReturned] = useState<{ ok: boolean; message: string } | undefined>(undefined);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const googleOk = params.get("google") === "connected";
+    const googleFailure = params.get("google_error");
+    if (googleOk || googleFailure) {
+      setSheetsReturned(googleOk ? { ok: true, message: "Google connected." } : { ok: false, message: googleFailure ?? "" });
+      setOpen("sheets");
+      window.history.replaceState(null, "", window.location.pathname);
+      return;
+    }
     const ok = params.get("hubspot") === "connected";
     const failure = params.get("hubspot_error");
     if (!ok && !failure) return;
@@ -462,7 +489,7 @@ export default function OpsCockpit({ slug, clientName }: { slug: string; clientN
       <button type="button" className="oc-button" title="Google Sheets" aria-label="Google Sheets" onClick={() => setOpen("sheets")}><SheetsLogo /></button>
       <Link href={`/bookings/${slug}`} className="oc-button" title="Booked meetings workflow" aria-label="Booked meetings workflow"><MeetingsLogo /></Link>
       {(open === "hubspot" || open === "attio") && <CrmPanel slug={slug} clientName={clientName} provider={open} returned={open === "hubspot" ? returned : undefined} onClose={() => setOpen("")} />}
-      {open === "sheets" && <SheetsPanel slug={slug} clientName={clientName} onClose={() => setOpen("")} />}
+      {open === "sheets" && <SheetsPanel slug={slug} clientName={clientName} returned={sheetsReturned} onClose={() => setOpen("")} />}
     </div>
   );
 }
