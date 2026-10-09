@@ -89,6 +89,28 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: failed.length ? "planned" : "built" });
       return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
     }
+    // Read-only: which HubSpot surfaces this client's key can reach (saved views, reports, segments, HubSQL),
+    // so the cockpit only offers what the key can actually build. Status codes only, never data.
+    if (action === "probe") {
+      const token = destination.api_key;
+      const probes: Array<[string, string, string, unknown?]> = [
+        ["views (CLI backend)", "GET", "/hub/cli/backend/crm/contacts/views"],
+        ["reports list", "GET", "/dashboard/v2/reports?limit=1"],
+        ["reports (reporting v1 fetch)", "GET", "/reporting/v1/reports/fetch?limit=1"],
+        ["segments (public lists API)", "POST", "/crm/v3/lists/search", { count: 1, processingTypes: ["DYNAMIC"] }],
+        ["segments (CLI backend)", "GET", "/hub/cli/backend/v1/segments/search?limit=1"],
+        ["HubSQL query", "POST", "/analytics/hubsql/2027-03-beta/query", { query: "SELECT COUNT(*) FROM contacts" }],
+      ];
+      const results: Array<{ name: string; status: number; message: string }> = [];
+      for (const [name, method, path, body] of probes) {
+        const response = await fetch(`https://api.hubapi.com${path}`, { method, headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" }).catch(() => null);
+        const raw = response ? await response.text().catch(() => "") : "";
+        let message = "";
+        try { message = String((JSON.parse(raw) as { message?: string; category?: string }).message ?? "").slice(0, 160); } catch { message = raw.slice(0, 80); }
+        results.push({ name, status: response?.status ?? 0, message: response && response.ok ? "" : message });
+      }
+      return NextResponse.json({ ok: true, probe: results });
+    }
     if (action === "push_one") {
       return reply({ test: await pushOne(c, destination as Destination) });
     }
