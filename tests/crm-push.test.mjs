@@ -254,3 +254,20 @@ test("Airtable push finds records again by a QC ID field, writes by field id and
   for (const action of ["connect", "reread", "content", "map", "push", "auto", "disconnect"]) assert.ok(route.includes(`action === "${action}"`), action);
   assert.match(route, /withPushLock\(c, workspace\.id, kind/);
 });
+
+test("Airtable picks the client's base (saved one first, then the name) and the table that fits the content", async () => {
+  const src = readFileSync(new URL("../app/lib/airtable-push.ts", import.meta.url), "utf8");
+  const body = src.slice(src.indexOf("const squash"));
+  const js = body.replace(/: Array<\{ id: string; name: string \}>/g, "").replace(/: \{ id: string; why: string \} \| null/g, "").replace(/: Record<SheetContent, RegExp>/g, "").replace(/, content: SheetContent\): string/g, ", content)").replace(/clientName: string, savedId: string\)/g, "clientName, savedId)").replace(/\(value: string\)/g, "(value)").replace(/export /g, "");
+  const { suggestBase, suggestTable } = new Function(`${js}; return { suggestBase, suggestTable };`)();
+  const bases = [{ id: "app1", name: "Hyperpath" }, { id: "app2", name: "Camb" }, { id: "app3", name: "Camb" }, { id: "app4", name: "Bluevia Health" }, { id: "app5", name: "KI test" }];
+  assert.equal(suggestBase(bases, "Hyperpath", "").id, "app1");
+  assert.equal(suggestBase(bases, "Camb", "app3").id, "app3");
+  assert.equal(suggestBase(bases, "Bluevia", "").id, "app4");
+  assert.equal(suggestBase(bases, "Nobody", ""), null);
+  const tables = [{ id: "t1", name: "Leads" }, { id: "t2", name: "Campaign tracker" }, { id: "t3", name: "Booked calls" }];
+  assert.equal(suggestTable(tables, "campaigns"), "t2");
+  assert.equal(suggestTable(tables, "meetings"), "t3");
+  assert.equal(suggestTable(tables, "replies"), "t1");
+  assert.equal(suggestTable([{ id: "x", name: "Table 1" }], "campaigns"), "x");
+});

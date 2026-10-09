@@ -684,21 +684,29 @@ function AirtableView({ slug, state }: { slug: string; state: SheetsState }) {
   const [baseError, setBaseError] = useState("");
   const [base, setBase] = useState("");
   const [baseTables, setBaseTables] = useState<Array<{ id: string; name: string }>>([]);
+  const [tableHints, setTableHints] = useState<Partial<Record<Content, string>>>({});
   const [table, setTable] = useState("");
   const [content, setContent] = useState<Content>("replies");
+  const [baseWhy, setBaseWhy] = useState("");
   useEffect(() => {
     if (!configured) return;
     void fetch(`/api/airtable-push/${encodeURIComponent(slug)}?bases=1`, { cache: "no-store" }).then((r) => r.json()).then((payload) => {
-      if (payload?.ok) setBases(payload.bases); else setBaseError(String(payload?.error || "Could not list Airtable bases."));
+      if (payload?.ok) {
+        setBases(payload.bases);
+        // The client's own base, picked in advance (saved at onboarding, else the closest name).
+        if (payload.suggested?.id) { setBase(payload.suggested.id); setBaseWhy(payload.suggested.why); }
+      } else setBaseError(String(payload?.error || "Could not list Airtable bases."));
     }).catch(() => setBaseError("Could not list Airtable bases."));
   }, [slug, configured]);
   useEffect(() => {
     setTable(""); setBaseTables([]);
     if (!base) return;
     void fetch(`/api/airtable-push/${encodeURIComponent(slug)}?base=${encodeURIComponent(base)}`, { cache: "no-store" }).then((r) => r.json()).then((payload) => {
-      if (payload?.ok) { setBaseTables(payload.tables); setTable(payload.tables[0]?.id ?? ""); } else setBaseError(String(payload?.error || "Could not read that base."));
+      if (payload?.ok) { setBaseTables(payload.tables); setTableHints(payload.suggested ?? {}); } else setBaseError(String(payload?.error || "Could not read that base."));
     }).catch(() => setBaseError("Could not read that base."));
   }, [slug, base]);
+  // The table that fits what is being pushed (a Campaigns table for campaigns...), chosen again when that changes.
+  useEffect(() => { if (baseTables.length) setTable(tableHints[content] || baseTables[0]?.id || ""); }, [content, baseTables, tableHints]);
   const live = tables.filter((entry) => entry.status === "built").length;
 
   if (!loaded) return <p className="ops-muted">Loading Airtable…</p>;
@@ -721,7 +729,7 @@ function AirtableView({ slug, state }: { slug: string; state: SheetsState }) {
             <li>Pick the base and table here</li>
           </ol>
           <div className="ops-row">
-            <select className="ops-input ops-grow" value={base} onChange={(e) => setBase(e.target.value)} aria-label="Airtable base">
+            <select className="ops-input ops-grow" value={base} onChange={(e) => { setBase(e.target.value); setBaseWhy(""); }} aria-label="Airtable base">
               <option value="">{bases === null && !baseError ? "Loading bases…" : "Choose a base"}</option>
               {(bases ?? []).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
             </select>
@@ -731,6 +739,7 @@ function AirtableView({ slug, state }: { slug: string; state: SheetsState }) {
             </select>
             <button type="button" className="ops-btn ops-pri" disabled={!base || !table || Boolean(busy)} onClick={() => void run("connect", { baseId: base, tableId: table, content }).then((ok) => { if (ok) { setBase(""); setTable(""); } })}>{busy === "new:connect" ? "Reading table…" : "Connect"}</button>
           </div>
+          {baseWhy && base && <p className="ops-muted">Picked {baseWhy}. Change it if that's not right.</p>}
           {baseError && <p className="ops-error">{baseError}</p>}
         </section>
       )}

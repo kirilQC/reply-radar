@@ -583,7 +583,7 @@ export async function GET(incoming: Request) {
     const names = new Map((Array.isArray(workspaceResult.body) ? (workspaceResult.body as Array<Record<string, unknown>>) : []).map((w) => [String(w.id), String(w.name)]));
     const live = crmRows.filter((row) => row.auto_push === true);
     const problems = live.flatMap((row) => {
-      const where = `${names.get(String(row.workspace_id)) ?? "a client"} ${row.provider === "hubspot" ? "HubSpot" : row.provider === "attio" ? "Attio" : `sheet ${String(row.account_name ?? "")}`}`;
+      const where = `${names.get(String(row.workspace_id)) ?? "a client"} ${row.provider === "hubspot" ? "HubSpot" : row.provider === "attio" ? "Attio" : row.provider === "airtable" ? `Airtable ${String(row.account_name ?? "")}` : `sheet ${String(row.account_name ?? "")}`}`;
       const summary = (row.last_push_summary ?? {}) as Record<string, unknown>;
       const age = row.last_push_at ? (Date.now() - Date.parse(String(row.last_push_at))) / 1000 : Infinity;
       const out: string[] = [];

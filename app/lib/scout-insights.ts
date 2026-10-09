@@ -391,10 +391,12 @@ async function clientReadiness(input: Row) {
       ...(() => {
         const mine = (Array.isArray(outbound) ? outbound : []).filter((row) => text(row.workspace_id) === c.id);
         const crm = mine.find((row) => row.kind === "crm");
-        const sheets = mine.filter((row) => row.kind !== "crm");
+        const sheets = mine.filter((row) => row.kind !== "crm" && row.provider !== "airtable");
+        const tables = mine.filter((row) => row.provider === "airtable");
         return {
           crm: crm ? `${crm.provider === "hubspot" ? "HubSpot" : "Attio"} ${crm.status === "built" ? "built" : "connected, build not approved"}${crm.auto_push === true ? ", pushing automatically" : ""}` : "none",
           googleSheets: sheets.length ? `${sheets.length} connected (${sheets.filter((row) => row.status === "built").length} mapped)` : "none",
+          airtableTables: tables.length ? `${tables.length} connected (${tables.filter((row) => row.status === "built").length} mapped)` : "none",
         };
       })(),
     };

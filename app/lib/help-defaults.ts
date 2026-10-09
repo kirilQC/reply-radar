@@ -1274,7 +1274,7 @@ Setups stay saved for the client, so the lead engineer sets it up once and every
     keywords: ["hubspot", "crm", "push", "contacts", "deals", "booked meeting", "dashboard", "service key", "qc growth user", "sync"],
     body: `Every reply becomes a HubSpot contact owned by QC Growth, with the conversation as a note, and every booked meeting becomes a deal.
 
-1. Open the client in **Onboarding** and click the **HubSpot** logo (top right).
+1. Open the client in **Onboarding**, click **Operations** (top right), then **HubSpot** in the left rail.
 2. In the client's HubSpot: **Development → Keys → Service keys → Create service key**, name it QC Growth, tick the scopes the panel lists, and paste the key into **Connect**.
 3. Read the **Game plan**, choose the pipeline for booked meetings, then click **Approve and build**. It adds QC's fields, the QC Growth view and segment, and a **Booked Meeting (QC)** stage.
 4. Click **Push 1 lead (test)**, check it with **Open in HubSpot**, then **Push all replies**. New replies and bookings then push by themselves every few minutes.
@@ -1290,7 +1290,7 @@ Ask Scout or @QC Bot "is <client>'s HubSpot syncing?" any time.`,
     keywords: ["attio", "crm", "push", "qc growth list", "deals", "booked meeting", "qc dashboard", "access token", "sync"],
     body: `Replies land on a **QC Growth** list in the client's Attio, each person filled in where empty, with the conversation as a note. Booked meetings become deals.
 
-1. Open the client in **Onboarding** and click the **Attio** logo.
+1. Open the client in **Onboarding**, click **Operations** (top right), then **Attio** in the left rail.
 2. In the client's Attio: **Workspace settings → Developers → New access token**, name it QC Growth, give Read & write to Records, Object configuration, List configuration, List entries and Notes, and Read to User management. Paste it into **Connect**.
 3. Click **Approve and build**, then **Push all replies**.
 4. Once per client in Attio: open the **QC Growth** list, click **Table**, and add the columns (Attio's API can't make views).
@@ -1299,16 +1299,30 @@ Ask Scout or @QC Bot "is <client>'s HubSpot syncing?" any time.`,
   {
     id: "w-google-sheets",
     kind: "walkthrough",
-    title: "Pushing replies or booked meetings into Google Sheets",
+    title: "Pushing replies, booked meetings or campaigns into Google Sheets",
     page: "/onboarding",
-    keywords: ["google sheets", "sheet", "spreadsheet", "push", "replies", "booked meetings", "mapping", "format", "columns"],
-    body: `A client can push into as many sheets as they like. Each sheet holds replies (one row per conversation) or booked meetings (one row per person).
+    keywords: ["google sheets", "sheet", "spreadsheet", "push", "replies", "booked meetings", "campaigns", "campaign tracker", "mapping", "format", "columns"],
+    body: `A client can push into as many sheets as they like. Each sheet holds replies (one row per conversation), booked meetings (one row per person) or campaigns (one row per campaign: added when it launches, figures refreshed when its status changes and every week).
 
-1. Open the client in **Onboarding** and click the **Google Sheets** logo. The first time, click **Connect Google** and sign in as admin@qcgrowth.com.
+1. Open the client in **Onboarding**, click **Operations**, then **Google Sheets**. The first time, click **Connect Google** and sign in as admin@qcgrowth.com.
 2. Make the sheet with your headers in row 1. admin@qcgrowth.com must be able to edit it.
-3. Under **Connect a sheet**, choose **Replies** or **Booked meetings**, paste the link and click **Connect**.
+3. Under **Connect a sheet**, choose **Replies**, **Booked meetings** or **Campaigns**, paste the link and click **Connect**.
 4. Check each column's match, then **Confirm mapping**. QC adds a hidden QC ID column and formats the sheet.
 5. Click **Push all**. New rows then arrive by themselves. Reordering or adding columns is fine; click **Re-read headers** after renaming one.`,
+  },
+  {
+    id: "w-airtable-push",
+    kind: "walkthrough",
+    title: "Pushing replies, booked meetings or campaigns into Airtable",
+    page: "/onboarding",
+    keywords: ["airtable", "base", "table", "push", "replies", "booked meetings", "campaigns", "campaign tracker", "fields", "mapping"],
+    body: `A client can push into as many Airtable tables as they like, each holding replies, booked meetings or campaigns.
+
+1. Open the client in **Onboarding**, click **Operations**, then **Airtable**.
+2. Make the table in the client's base with the fields you want filled. QC's Airtable account must be able to see the base.
+3. Under **Connect a table**, choose **Replies**, **Booked meetings** or **Campaigns**. The client's base is picked already (the one saved on the client, else the closest name) and the best-fitting table with it; change either if it's wrong. Click **Connect**.
+4. Check each field's match, then **Confirm mapping**. QC adds a **QC ID** field so records update in place.
+5. Click **Push all**. New records then arrive by themselves. Click **Re-read fields** after adding or renaming fields.`,
   },
   {
     id: "w-brain-catch-up",

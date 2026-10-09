@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { presentDestination, rest, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
 import { pushPass, recordKey } from "../../../lib/crm-push-run";
 import { listBases, getBaseTables, isAirtableConfigured } from "../../../lib/airtable";
-import { AIRTABLE_QC_ID, airtableSuggest, airtableTable, ensureQcIdField, writable, type AirtableConfig, type AirtableField } from "../../../lib/airtable-push";
+import { AIRTABLE_QC_ID, suggestBase, suggestTable, airtableSuggest, airtableTable, ensureQcIdField, writable, type AirtableConfig, type AirtableField } from "../../../lib/airtable-push";
 import { contentOf, fieldsFor, type SheetContent } from "../../../lib/sheets-push";
 import { tableItemsPass } from "../../../lib/table-push";
 
@@ -71,13 +71,17 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     if (params.get("bases")) {
       const bases = await listBases();
       if (!bases.ok) return NextResponse.json({ ok: false, error: bases.error }, { status: bases.status });
-      return NextResponse.json({ ok: true, bases: bases.data.map((base) => ({ id: base.id, name: base.name })).sort((a, b) => a.name.localeCompare(b.name)) });
+      const list = bases.data.map((base) => ({ id: base.id, name: base.name })).sort((a, b) => a.name.localeCompare(b.name));
+      // The client's own base, picked in advance: the one saved on the client at onboarding, else the closest name.
+      const [workspace] = await rows(config(), `rr_workspaces?select=name,airtable_base_id&slug=eq.${encodeURIComponent((await context.params).slug)}&limit=1`);
+      return NextResponse.json({ ok: true, bases: list, suggested: suggestBase(list, text(workspace?.name), text(workspace?.airtable_base_id)) });
     }
     const base = text(params.get("base"));
     if (base) {
       const tables = await getBaseTables(base);
       if (!tables.ok) return NextResponse.json({ ok: false, error: tables.error }, { status: tables.status });
-      return NextResponse.json({ ok: true, tables: tables.data.map((table) => ({ id: table.id, name: table.name })) });
+      const list = tables.data.map((table) => ({ id: table.id, name: table.name }));
+      return NextResponse.json({ ok: true, tables: list, suggested: { replies: suggestTable(list, "replies"), meetings: suggestTable(list, "meetings"), campaigns: suggestTable(list, "campaigns") } });
     }
     const c = config();
     const workspace = await workspaceOf(c, (await context.params).slug);

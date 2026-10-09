@@ -177,3 +177,24 @@ export function airtableSuggest(fields: AirtableField[], catalog: Array<{ key: s
   }
   return mapping;
 }
+
+const squash = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+/** The client's base: saved at onboarding, else an exact name, else the closest name containing the other. */
+export function suggestBase(bases: Array<{ id: string; name: string }>, clientName: string, savedId: string): { id: string; why: string } | null {
+  if (savedId && bases.some((base) => base.id === savedId)) return { id: savedId, why: "the base saved on this client" };
+  const client = squash(clientName);
+  if (!client) return null;
+  const exact = bases.find((base) => squash(base.name) === client);
+  if (exact) return { id: exact.id, why: `named ${exact.name}` };
+  const close = bases
+    .filter((base) => { const name = squash(base.name); return name.length >= 3 && (name.includes(client) || client.includes(name)); })
+    .sort((a, b) => Math.abs(squash(a.name).length - client.length) - Math.abs(squash(b.name).length - client.length))[0];
+  return close ? { id: close.id, why: `named ${close.name}` } : null;
+}
+
+const TABLE_HINTS: Record<SheetContent, RegExp> = { replies: /repl|lead|response|inbox|conversation|prospect/i, meetings: /meeting|booked|booking|call|demo|appointment/i, campaigns: /campaign|outreach|sequence/i };
+/** The table that fits what is being pushed, by its name, else the base's first table. */
+export function suggestTable(tables: Array<{ id: string; name: string }>, content: SheetContent): string {
+  return (tables.find((table) => TABLE_HINTS[content].test(table.name)) ?? tables[0])?.id ?? "";
+}
