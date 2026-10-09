@@ -154,6 +154,6 @@ test("HubSpot reports never duplicate: build stops when it cannot read what exis
   const route = readFileSync(new URL("../app/api/crm-push/[slug]/route.ts", import.meta.url), "utf8");
   assert.doesNotMatch(src, /allByName[\s\S]{0,400}\.catch\(\(\) => \(\{\} as Row\)\)/, "existing-report lookup must not swallow errors");
   assert.match(src, /return \{ log, dashboardId: null, pending: waiting \}/);
-  assert.match(src, /DELETE", `\$\{BETA\}\/reports\/\$\{extra\}`/);
+  assert.match(src, /ids\.find\(\(id\) => onDashboard\.has\(id\)\) \?\? ids\[0\]/);
   assert.match(route, /withPushLock\(c, workspace\.id, "reporting"/);
 });

@@ -54,8 +54,8 @@ export const REPORTING_WAIT = "HubSpot has not switched on the Reporting API bet
 
 /**
  * Builds (or tops up) the QC Growth reports and dashboard, never twice: it first reads what is already there and
- * stops without creating anything when it cannot (beta not switched on yet), keeps one report per name (the one
- * on the dashboard, else the oldest) and deletes any extra copies left by earlier runs.
+ * stops without creating anything when it cannot (beta not switched on yet), and keeps one report per name (the
+ * one on the dashboard, else the oldest).
  */
 export async function hubspotBuildReporting(token: string): Promise<{ log: BuildLogEntry[]; dashboardId: string | null; pending?: boolean }> {
   const log: BuildLogEntry[] = [];
@@ -70,12 +70,11 @@ export async function hubspotBuildReporting(token: string): Promise<{ log: Build
     return { log, dashboardId: null, pending: waiting };
   }
 
-  let dashboardId = dashboards.get(QC_DASHBOARD_NAME.toLowerCase())?.[0] ?? null;
-  for (const extra of dashboards.get(QC_DASHBOARD_NAME.toLowerCase())?.slice(1) ?? []) {
-    await hubspot(token, "DELETE", `${BETA}/dashboards/${extra}`)
-      .then(() => log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "removed", detail: `Duplicate dashboard ${extra}` }))
-      .catch((error) => log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "failed", detail: `Could not remove duplicate ${extra}: ${error instanceof Error ? error.message.slice(0, 160) : ""}` }));
-  }
+  // HubSpot's API cannot delete reports or dashboards (405), so copies left from before this guard are reused
+  // (the one on the dashboard, else the oldest) and named in the log for removal in HubSpot's Reports list.
+  const dashboardIds = dashboards.get(QC_DASHBOARD_NAME.toLowerCase()) ?? [];
+  let dashboardId = dashboardIds[0] ?? null;
+  if (dashboardIds.length > 1) log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "skipped", detail: `${dashboardIds.length - 1} extra copies (${dashboardIds.slice(1).join(", ")}); using ${dashboardId}. Delete the extras in HubSpot.` });
   const onDashboard = new Set<string>();
   if (dashboardId) {
     const current = await hubspot(token, "GET", `${BETA}/dashboards/${dashboardId}?properties=widgets`).catch(() => ({} as Row));
@@ -86,11 +85,8 @@ export async function hubspotBuildReporting(token: string): Promise<{ log: Build
   for (const report of QC_REPORTS) {
     const ids = reports.get(report.name.toLowerCase()) ?? [];
     const keep = ids.find((id) => onDashboard.has(id)) ?? ids[0];
-    for (const extra of ids.filter((id) => id !== keep)) {
-      await hubspot(token, "DELETE", `${BETA}/reports/${extra}`)
-        .then(() => log.push({ at: at(), kind: "report", name: report.name, result: "removed", detail: `Duplicate report ${extra}` }))
-        .catch((error) => log.push({ at: at(), kind: "report", name: report.name, result: "failed", detail: `Could not remove duplicate ${extra}: ${error instanceof Error ? error.message.slice(0, 160) : ""}` }));
-    }
+    const extras = ids.filter((id) => id !== keep);
+    if (extras.length) log.push({ at: at(), kind: "report", name: report.name, result: "skipped", detail: `${extras.length} extra copies (${extras.join(", ")}) not on the dashboard. Delete them in HubSpot's Reports list.` });
     if (keep) {
       reportIds.push(keep);
       log.push({ at: at(), kind: "report", name: report.name, result: "reused", detail: `Report ${keep}` });
