@@ -1,7 +1,7 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
-import { hubspot, HubSpotError, type BuildLogEntry } from "./hubspot-push";
+import { hubspot, HubSpotError, QC_VIEW_NAME, QC_VIEW_PATH, qcViewBody, type BuildLogEntry } from "./hubspot-push";
 
 /**
  * QC Growth's reports and dashboard in a client's HubSpot, built as the QC Growth user (hubspot-user.ts).
@@ -78,4 +78,21 @@ export async function hubspotBuildReporting(token: string): Promise<{ log: Build
     log.push({ at: at(), kind: "dashboard", name: QC_DASHBOARD_NAME, result: "failed", detail: error instanceof HubSpotError && error.status === 403 ? "HubSpot refused: the QC Growth user needs reporting access in this account." : error instanceof Error ? error.message : "" });
   }
   return { log, dashboardId };
+}
+
+/**
+ * The QC Growth view, owned by the QC Growth user. A view the service key made shows as made by a
+ * "Deactivated" user, and HubSpot will not keep it open as a tab; one made by a real user stays. So once the
+ * QC Growth user is signed in, the view is made again as them and the key's copy is removed.
+ */
+export async function hubspotUserView(token: string, keyViewId: string | null): Promise<{ log: BuildLogEntry; viewId: string | null }> {
+  const at = new Date().toISOString();
+  try {
+    const created = await hubspot(token, "POST", QC_VIEW_PATH, qcViewBody());
+    const viewId = text(created.id);
+    if (keyViewId && keyViewId !== viewId) await hubspot(token, "DELETE", `${QC_VIEW_PATH}/${keyViewId}`).catch(() => undefined);
+    return { viewId, log: { at, kind: "view", name: QC_VIEW_NAME, result: "created", detail: `Contacts view ${viewId}, owned by the QC Growth user${keyViewId ? ` (replaced ${keyViewId})` : ""}` } };
+  } catch (error) {
+    return { viewId: null, log: { at, kind: "view", name: QC_VIEW_NAME, result: "failed", detail: error instanceof Error ? error.message : "" } };
+  }
 }

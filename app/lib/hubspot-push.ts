@@ -164,7 +164,7 @@ export async function hubspotAudit(token: string, scopes: string[] = []): Promis
 // never flooded. Views go through HubSpot's CLI backend (the only API for saved views; it takes a service key),
 // segments through the public Lists API. Filter: QC outreach platform is set, which only QC's push writes.
 export const QC_VIEW_NAME = "QC Growth";
-const QC_VIEW_PATH = "/hub/cli/backend/crm/contacts/views";
+export const QC_VIEW_PATH = "/hub/cli/backend/crm/contacts/views";
 const QC_PLATFORMS = ["heyreach", "lemlist", "email_bison"];
 const QC_VIEW_COLUMNS = ["firstname", "lastname", "email", "jobtitle", "company", "website", "qc_linkedin_url", "qc_company_linkedin_url", "qc_campaign", "qc_sender", "qc_outreach_platform", "qc_reply_sentiment", "qc_reply_count", "qc_last_reply_date", "hubspot_owner_id"];
 const viewList = (data: unknown): Row[] => Array.isArray(data) ? data as Row[] : list(object(data).results ?? object(data).views ?? object(data).data);

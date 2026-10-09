@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, type Destination } from "../../../lib/crm-push";
 import { pushOne, pushPass } from "../../../lib/crm-push-run";
 import { hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotAudit, type HubSpotPlan } from "../../../lib/hubspot-push";
-import { hubspotBuildReporting } from "../../../lib/hubspot-reporting";
+import { hubspotBuildReporting, hubspotUserView } from "../../../lib/hubspot-reporting";
 import { hubspotAppConfigured, hubspotUserToken } from "../../../lib/hubspot-user";
 
 /**
@@ -92,7 +92,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       if (userToken) {
         const reporting = await hubspotBuildReporting(userToken);
         log.push(...reporting.log);
-        if (reporting.dashboardId) await saveDestination(c, workspace.id, "crm", { config: { ...(destination.config ?? {}), dashboard_id: reporting.dashboardId } });
+        const userView = destination.config?.view_user_id ? null : await hubspotUserView(userToken, (destination.audit as { qcView?: { id: string } } | null)?.qcView?.id ?? null);
+        if (userView) log.push(userView.log);
+        await saveDestination(c, workspace.id, "crm", { config: { ...(destination.config ?? {}), ...(reporting.dashboardId ? { dashboard_id: reporting.dashboardId } : {}), ...(userView?.viewId ? { view_user_id: userView.viewId } : {}) } });
         destination = await loadDestination(c, workspace.id, "crm") ?? destination;
       }
       const failed = log.filter((entry) => entry.result === "failed");
@@ -131,7 +133,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       if (!userToken) return NextResponse.json({ ok: false, error: "Connect the QC Growth user first." }, { status: 400 });
       const reporting = await hubspotBuildReporting(userToken);
       const fresh = (await loadDestination(c, workspace.id, "crm")) ?? destination;
-      await saveDestination(c, workspace.id, "crm", { build_log: [...(fresh.build_log ?? []), ...reporting.log] as unknown as Row[], ...(reporting.dashboardId ? { config: { ...(fresh.config ?? {}), dashboard_id: reporting.dashboardId } } : {}) });
+      const userView = fresh.config?.view_user_id ? null : await hubspotUserView(userToken, (fresh.audit as { qcView?: { id: string } } | null)?.qcView?.id ?? null);
+      if (userView) reporting.log.push(userView.log);
+      await saveDestination(c, workspace.id, "crm", { build_log: [...(fresh.build_log ?? []), ...reporting.log] as unknown as Row[], config: { ...(fresh.config ?? {}), ...(reporting.dashboardId ? { dashboard_id: reporting.dashboardId } : {}), ...(userView?.viewId ? { view_user_id: userView.viewId } : {}) } });
       const failed = reporting.log.filter((entry) => entry.result === "failed");
       return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
     }
