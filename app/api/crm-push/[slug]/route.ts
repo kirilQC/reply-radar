@@ -100,6 +100,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         ["segments (public lists API)", "POST", "/crm/v3/lists/search", { count: 1, processingTypes: ["DYNAMIC"] }],
         ["segments (CLI backend)", "GET", "/hub/cli/backend/v1/segments/search?limit=1"],
         ["HubSQL query", "POST", "/analytics/hubsql/2027-03-beta/query", { query: "SELECT COUNT(*) FROM contacts" }],
+        ["dashboards search (reporting beta)", "POST", "/analytics/reporting/2027-03-beta/dashboards/search", { limit: 1 }],
+        ["reports search (reporting beta)", "POST", "/analytics/reporting/2027-03-beta/reports/search", { limit: 1 }],
       ];
       const results: Array<{ name: string; status: number; message: string }> = [];
       for (const [name, method, path, body] of probes) {
@@ -109,7 +111,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         try { message = String((JSON.parse(raw) as { message?: string; category?: string }).message ?? "").slice(0, 160); } catch { message = raw.slice(0, 80); }
         results.push({ name, status: response?.status ?? 0, message: response && response.ok ? "" : message });
       }
-      return NextResponse.json({ ok: true, probe: results });
+      const info = await fetch("https://api.hubapi.com/oauth/v2/private-apps/get/access-token-info", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tokenKey: token }), cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
+      const scopes = (Array.isArray((info as { scopes?: unknown }).scopes) ? (info as { scopes: string[] }).scopes : []).filter((scope) => /report|dashboard|list|hubsql/i.test(scope));
+      return NextResponse.json({ ok: true, probe: results, scopes });
     }
     if (action === "push_one") {
       return reply({ test: await pushOne(c, destination as Destination) });
