@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { loadDestination, presentDestination, rest, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
 import { pushPass, recordKey } from "../../../lib/crm-push-run";
 import { disconnectGoogle, googleAccount, googleOauthConfigured } from "../../../lib/google-user";
-import { accessToken, contentOf as contentValue, ensureQcIdColumn, parseSheetUrl, serviceAccount, serviceAccountStatus, fieldsFor, sheetsConnect, sheetsFormat, suggestMapping, type SheetConfig, type SheetContent } from "../../../lib/sheets-push";
+import { accessToken, addMissingSheetColumns, contentOf as contentValue, ensureQcIdColumn, parseSheetUrl, serviceAccount, serviceAccountStatus, fieldsFor, sheetsConnect, sheetsFormat, suggestMapping, type SheetConfig, type SheetContent } from "../../../lib/sheets-push";
 import { tableItemsPass } from "../../../lib/table-push";
 
 /**
@@ -89,14 +89,21 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     if (action === "connect" || (action === "reread" && destination)) {
       const url = action === "connect" ? text(body.url) : text(((destination?.config ?? {}) as Row).url);
       const sheet = await sheetsConnect(url);
-      if (!sheet.headers.some(Boolean)) return NextResponse.json({ ok: false, error: "Add your headers in row 1 of the sheet first." }, { status: 400 });
       const previous = (destination?.config ?? {}) as Partial<SheetConfig>;
       const content: SheetContent = action === "connect" ? contentValue(body.content) : contentOf(destination);
       // A re-read keeps the confirmed choices for headers that are still there.
-      const mapping = suggestMapping(sheet.headers, content).map((suggested, index) => {
+      let mapping = suggestMapping(sheet.headers, content).map((suggested, index) => {
         const before = previous.headers?.indexOf(sheet.headers[index]) ?? -1;
         return before >= 0 && previous.mapping ? previous.mapping[before] ?? suggested : suggested;
       });
+      // A new sheet gets the standard columns it lacks (an empty one gets them all), written after its headers.
+      let added: string[] = [];
+      if (action === "connect") {
+        const filled = await addMissingSheetColumns(sheet.spreadsheetId, sheet.tab, sheet.headers, mapping, content);
+        sheet.headers = filled.headers;
+        mapping = filled.mapping;
+        added = filled.added;
+      }
       await saveDestination(c, workspace.id, kind, {
         provider: "google_sheets",
         api_key: "google-service-account",
@@ -106,7 +113,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         config: { ...previous, url, spreadsheetId: sheet.spreadsheetId, tab: sheet.tab, headers: sheet.headers, mapping, content } as unknown as Row,
         ...(action === "connect" ? { auto_push: false, build_log: [] } : {}),
       });
-      return reply();
+      return reply({ added });
     }
     if (!destination) return NextResponse.json({ ok: false, error: "Connect a sheet first." }, { status: 400 });
     const sheetConfig = (destination.config ?? {}) as unknown as SheetConfig & { url: string };
@@ -115,9 +122,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       // What the sheet holds: replies (one row per conversation), booked meetings (one per person) or campaigns.
       const content: SheetContent = contentValue(body.content);
       if (content === contentOf(destination)) return reply();
-      const mapping = suggestMapping(sheetConfig.headers, content);
-      await saveDestination(c, workspace.id, kind, { config: { ...sheetConfig, content, mapping } as unknown as Row, status: "planned" });
-      return reply();
+      const filled = await addMissingSheetColumns(sheetConfig.spreadsheetId, sheetConfig.tab, sheetConfig.headers, suggestMapping(sheetConfig.headers, content), content);
+      await saveDestination(c, workspace.id, kind, { config: { ...sheetConfig, content, headers: filled.headers, mapping: filled.mapping, campaign_state: undefined } as unknown as Row, status: "planned" });
+      return reply({ added: filled.added });
     }
     if (action === "map") {
       const catalog = fieldsFor(contentOf(destination));

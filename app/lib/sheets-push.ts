@@ -295,6 +295,33 @@ export const MEETING_SHEET_FIELDS: Array<{ key: string; label: string; match: Re
 ];
 
 export type SheetContent = "replies" | "meetings" | "campaigns";
+
+/**
+ * The columns a table should have for each content: what "Create the table for me" makes, and what QC adds to
+ * a table or sheet the team points it at when they are missing (the rest of each catalog stays optional).
+ */
+export const STANDARD_FIELDS: Record<SheetContent, string[]> = {
+  replies: ["name", "email", "title", "company", "company_domain", "linkedin", "company_linkedin", "campaign", "sender", "platform", "sentiment", "first_reply", "last_reply", "reply_count", "booked_meeting", "latest_reply", "conversation"],
+  meetings: ["company", "name", "email", "title", "linkedin", "company_domain", "company_linkedin", "industry", "size", "location", "meeting_date", "status", "host", "booked_at", "campaign", "sender", "platform", "sentiment", "latest_reply", "conversation", "pre_call_brief"],
+  campaigns: ["campaign", "platform", "status", "launched", "senders", "total_leads", "leads_pending", "leads_in_progress", "leads_finished", "connections_sent", "connections_accepted", "acceptance_rate", "replies", "reply_rate", "messages_started", "sequence_steps", "first_touch", "follow_up", "updated"],
+};
+export const labelOf = (content: SheetContent, key: string) => fieldsFor(content).find((field) => field.key === key)?.label ?? key;
+
+/**
+ * A sheet's mapping completed with the standard columns it lacks: their headers are written after the last
+ * header in row 1 and mapped to their field. Returns the new headers, mapping and the labels added.
+ */
+export async function addMissingSheetColumns(spreadsheetId: string, tab: string, headers: string[], mapping: string[], content: SheetContent): Promise<{ headers: string[]; mapping: string[]; added: string[] }> {
+  const missing = STANDARD_FIELDS[content].filter((key) => !mapping.includes(key));
+  if (!missing.length) return { headers, mapping, added: [] };
+  let end = headers.length;
+  while (end > 0 && !headers[end - 1]?.trim()) end -= 1;
+  const labels = missing.map((key) => labelOf(content, key));
+  await sheets("PUT", `${spreadsheetId}/values/${encodeURIComponent(`${quote(tab)}!${columnLetter(end)}1:${columnLetter(end + labels.length - 1)}1`)}?valueInputOption=RAW`, { values: [labels] });
+  const nextHeaders = [...headers.slice(0, end), ...labels];
+  const nextMapping = [...mapping.slice(0, end), ...missing];
+  return { headers: nextHeaders, mapping: nextMapping, added: labels };
+}
 export const contentOf = (value: unknown): SheetContent => (value === "meetings" || value === "campaigns" ? value : "replies");
 export const fieldsFor = (content: SheetContent | undefined): Array<{ key: string; label: string; match: RegExp }> => (content === "meetings" ? MEETING_SHEET_FIELDS : content === "campaigns" ? CAMPAIGN_FIELDS : SHEET_FIELDS);
 

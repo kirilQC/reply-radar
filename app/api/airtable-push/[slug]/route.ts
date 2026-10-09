@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { presentDestination, rest, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
 import { pushPass, recordKey } from "../../../lib/crm-push-run";
 import { listBases, getBaseTables, isAirtableConfigured } from "../../../lib/airtable";
-import { AIRTABLE_QC_ID, suggestBase, suggestTable, airtableSuggest, airtableTable, ensureQcIdField, writable, type AirtableConfig, type AirtableField } from "../../../lib/airtable-push";
+import { AIRTABLE_QC_ID, addMissingAirtableFields, createQcTable, suggestBase, suggestTable, airtableSuggest, airtableTable, ensureQcIdField, writable, type AirtableConfig, type AirtableField } from "../../../lib/airtable-push";
 import { contentOf, fieldsFor, type SheetContent } from "../../../lib/sheets-push";
 import { tableItemsPass } from "../../../lib/table-push";
 
@@ -100,6 +100,21 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     const existing = await tablesOf(c, workspace.id);
     const reply = async (extra: Row = {}) => NextResponse.json({ ok: true, ...extra, ...shared(), tables: present(await tablesOf(c, workspace.id)) });
 
+    if (action === "create") {
+      // "Create the table for me": every standard field, typed, mapped and live at once.
+      const baseId = text(body.baseId);
+      if (!/^app[A-Za-z0-9]+$/.test(baseId)) return NextResponse.json({ ok: false, error: "Pick a base." }, { status: 400 });
+      const content = contentOf(body.content);
+      const bases = await listBases();
+      const baseName = bases.ok ? bases.data.find((base) => base.id === baseId)?.name ?? baseId : baseId;
+      const table = await createQcTable(baseId, content);
+      const kind = `airtable:${randomUUID().slice(0, 8)}`;
+      const saved: AirtableConfig = { baseId, baseName, tableId: table.tableId, tableName: table.tableName, url: `https://airtable.com/${baseId}/${table.tableId}`, content, fields: table.fields, mapping: table.mapping, qcIdField: table.qcIdField };
+      const made = await rest(c, "rr_crm_push", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ workspace_id: workspace.id, kind, provider: "airtable", api_key: "qc-airtable-token", account_id: baseId, account_name: baseName, status: "built", auto_push: true, build_log: [], config: saved }) });
+      if (!made.ok) return NextResponse.json({ ok: false, error: `The table was made in Airtable but couldn't be saved here (${made.status}).` }, { status: 500 });
+      return reply({ created: table.tableName });
+    }
+
     if (action === "connect") {
       const baseId = text(body.baseId);
       const tableId = text(body.tableId);
@@ -112,14 +127,16 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const table = await airtableTable(baseId, tableId);
       const content = contentOf(body.content);
       const kind = `airtable:${randomUUID().slice(0, 8)}`;
-      const saved: AirtableConfig = { baseId, baseName, tableId, tableName: table.tableName, url: `https://airtable.com/${baseId}/${tableId}`, content, fields: table.fields, mapping: airtableSuggest(table.fields, fieldsFor(content)) };
+      // QC scans the table, matches what's there, then adds the standard fields it lacks.
+      const filled = await addMissingAirtableFields(baseId, tableId, airtableSuggest(table.fields, fieldsFor(content)), content);
+      const saved: AirtableConfig = { baseId, baseName, tableId, tableName: table.tableName, url: `https://airtable.com/${baseId}/${tableId}`, content, fields: filled.fields, mapping: filled.mapping };
       const made = await rest(c, "rr_crm_push", {
         method: "POST",
         headers: { Prefer: "return=minimal" },
         body: JSON.stringify({ workspace_id: workspace.id, kind, provider: "airtable", api_key: "qc-airtable-token", account_id: baseId, account_name: baseName, status: "planned", auto_push: false, build_log: [], config: saved }),
       });
       if (!made.ok) return NextResponse.json({ ok: false, error: `Could not save the table (${made.status}).` }, { status: 500 });
-      return reply();
+      return reply({ added: filled.added });
     }
 
     const kind = text(body.sheet);
@@ -139,8 +156,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     if (action === "content") {
       const next = contentOf(body.content);
       if (next === content) return reply();
-      await saveDestination(c, workspace.id, kind, { config: { ...saved, content: next, mapping: airtableSuggest(saved.fields, fieldsFor(next)), campaign_state: undefined } as unknown as Row, status: "planned" });
-      return reply();
+      const filled = await addMissingAirtableFields(saved.baseId, saved.tableId, airtableSuggest(saved.fields, fieldsFor(next)), next);
+      await saveDestination(c, workspace.id, kind, { config: { ...saved, content: next, fields: filled.fields, mapping: filled.mapping, campaign_state: undefined } as unknown as Row, status: "planned" });
+      return reply({ added: filled.added });
     }
     if (action === "map") {
       // The page sends one choice per shown field, in order; stored by field id so renames don't break it.

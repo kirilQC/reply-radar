@@ -1,7 +1,7 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
-import type { Cell, TableItem, SheetContent } from "./sheets-push";
+import { STANDARD_FIELDS, labelOf, type Cell, type TableItem, type SheetContent } from "./sheets-push";
 
 /**
  * Airtable as a push destination, the same shape as a Google Sheet: a table the team chose, each of its fields
@@ -202,3 +202,65 @@ export function suggestTable(tables: Array<{ id: string; name: string }>, conten
   const fit = tables.find((table) => TABLE_HINTS[content].test(table.name));
   return fit?.id ?? (tables.length === 1 ? tables[0].id : "");
 }
+
+// ── Making tables and fields ─────────────────────────────────────────────────────────────────────
+
+const DATES = new Set(["first_reply", "last_reply", "meeting_date", "booked_at", "launched", "updated"]);
+const NUMBERS = new Set(["reply_count", "senders", "total_leads", "leads_pending", "leads_in_progress", "leads_finished", "connections_sent", "connections_accepted", "replies", "messages_started", "sequence_steps"]);
+const LONG = new Set(["latest_reply", "conversation", "pre_call_brief", "first_touch", "follow_up"]);
+
+/** The Airtable field QC makes for one of its fields: typed, so dates sort, numbers sum and links open. */
+export function fieldSpec(content: SheetContent, key: string): Row {
+  const name = labelOf(content, key);
+  if (key === "email") return { name, type: "email" };
+  if (key === "linkedin" || key === "company_linkedin") return { name, type: "url" };
+  if (key === "booked_meeting") return { name, type: "checkbox", options: { icon: "check", color: "greenBright" } };
+  if (key === "acceptance_rate" || key === "reply_rate") return { name, type: "percent", options: { precision: 1 } };
+  if (NUMBERS.has(key)) return { name, type: "number", options: { precision: 0 } };
+  if (DATES.has(key)) return { name, type: "dateTime", options: { timeZone: "utc", dateFormat: { name: "local" }, timeFormat: { name: "12hour" } } };
+  if (LONG.has(key)) return { name, type: "multilineText" };
+  return { name, type: "singleLineText" };
+}
+
+export const TABLE_NAMES: Record<SheetContent, string> = { replies: "QC Growth · Replies", meetings: "QC Growth · Booked meetings", campaigns: "QC Growth · Campaigns" };
+
+/**
+ * "Create the table for me": a new table in the base with every standard field for the content, typed, and the
+ * QC ID. Named "QC Growth · Replies" (or meetings, campaigns), with a number added if that name is taken.
+ */
+export async function createQcTable(baseId: string, content: SheetContent): Promise<{ tableId: string; tableName: string; fields: AirtableField[]; mapping: Record<string, string>; qcIdField: string }> {
+  const existing = await airtable("GET", `/meta/bases/${encodeURIComponent(baseId)}/tables`);
+  const names = new Set((Array.isArray(existing.tables) ? (existing.tables as Row[]) : []).map((table) => text(table.name).toLowerCase()));
+  let tableName = TABLE_NAMES[content];
+  for (let n = 2; names.has(tableName.toLowerCase()); n += 1) tableName = `${TABLE_NAMES[content]} ${n}`;
+  const keys = STANDARD_FIELDS[content];
+  const made = await airtable("POST", `/meta/bases/${encodeURIComponent(baseId)}/tables`, {
+    name: tableName,
+    description: `Kept up to date by QC Growth: ${content === "meetings" ? "one record per booked meeting" : content === "campaigns" ? "one record per campaign" : "one record per reply"}.`,
+    fields: [...keys.map((key) => fieldSpec(content, key)), { name: AIRTABLE_QC_ID, type: "singleLineText", description: "QC Growth keeps this to update the same record. Leave it as it is." }],
+  });
+  const fields = (Array.isArray(made.fields) ? (made.fields as Row[]) : []).map((field) => ({ id: text(field.id), name: text(field.name), type: text(field.type) }));
+  const mapping: Record<string, string> = {};
+  keys.forEach((key) => { const field = fields.find((candidate) => candidate.name === labelOf(content, key)); if (field) mapping[field.id] = key; });
+  return { tableId: text(made.id), tableName: text(made.name) || tableName, fields, mapping, qcIdField: fields.find((field) => field.name === AIRTABLE_QC_ID)?.id ?? "" };
+}
+
+/** An existing table completed with the standard fields it lacks (typed), each mapped to its QC field. */
+export async function addMissingAirtableFields(baseId: string, tableId: string, mapping: Record<string, string>, content: SheetContent): Promise<{ mapping: Record<string, string>; added: string[]; fields: AirtableField[] }> {
+  const mapped = new Set(Object.values(mapping).filter(Boolean));
+  const { fields: current } = await airtableTable(baseId, tableId);
+  const taken = new Set(current.map((field) => field.name.trim().toLowerCase()));
+  const next = { ...mapping };
+  const added: string[] = [];
+  for (const key of STANDARD_FIELDS[content].filter((candidate) => !mapped.has(candidate))) {
+    const spec = fieldSpec(content, key);
+    // A field of that name that QC didn't match (a different type, say) is left alone, never duplicated.
+    if (taken.has(String(spec.name).toLowerCase())) continue;
+    const made = await airtable("POST", `/meta/bases/${encodeURIComponent(baseId)}/tables/${encodeURIComponent(tableId)}/fields`, spec);
+    next[text(made.id)] = key;
+    added.push(String(spec.name));
+  }
+  const { fields } = added.length ? await airtableTable(baseId, tableId) : { fields: current };
+  return { mapping: next, added, fields };
+}
+

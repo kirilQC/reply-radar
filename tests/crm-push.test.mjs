@@ -257,7 +257,7 @@ test("Airtable push finds records again by a QC ID field, writes by field id and
 
 test("Airtable picks the client's base (saved one first, then the name) and the table that fits the content", async () => {
   const src = readFileSync(new URL("../app/lib/airtable-push.ts", import.meta.url), "utf8");
-  const body = src.slice(src.indexOf("const squash"));
+  const body = src.slice(src.indexOf("const squash"), src.indexOf("// ── Making tables"));
   const js = body.replace(/: Array<\{ id: string; name: string \}>/g, "").replace(/: \{ id: string; why: string \} \| null/g, "").replace(/: Record<SheetContent, RegExp>/g, "").replace(/, content: SheetContent\): string/g, ", content)").replace(/clientName: string, savedId: string\)/g, "clientName, savedId)").replace(/\(value: string\)/g, "(value)").replace(/export /g, "");
   const { suggestBase, suggestTable } = new Function(`${js}; return { suggestBase, suggestTable };`)();
   const bases = [{ id: "app1", name: "Hyperpath" }, { id: "app2", name: "Camb" }, { id: "app3", name: "Camb" }, { id: "app4", name: "Bluevia Health" }, { id: "app5", name: "KI test" }];
@@ -288,4 +288,25 @@ test("a built CRM shows three boxes (replies, booked meetings, dashboard) with t
   assert.match(ui, /label="Last booked meeting added"/);
   assert.match(route, /created_contact=is\.true&error=is\.null&order=pushed_at\.desc&limit=1/);
   assert.match(route, /deal_id=not\.is\.null&error=is\.null&order=pushed_at\.desc&limit=1/);
+});
+
+test("tables get their standard columns: Airtable can create the table, and missing columns are added to sheets and tables", () => {
+  const sheets = readFileSync(new URL("../app/lib/sheets-push.ts", import.meta.url), "utf8");
+  const airtable = readFileSync(new URL("../app/lib/airtable-push.ts", import.meta.url), "utf8");
+  const sheetRoute = readFileSync(new URL("../app/api/sheets-push/[slug]/route.ts", import.meta.url), "utf8");
+  const atRoute = readFileSync(new URL("../app/api/airtable-push/[slug]/route.ts", import.meta.url), "utf8");
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  // Every standard key exists in its catalog.
+  const block = sheets.slice(sheets.indexOf("export const STANDARD_FIELDS"), sheets.indexOf("};", sheets.indexOf("export const STANDARD_FIELDS")));
+  for (const [content, keys] of [...block.matchAll(/(replies|meetings|campaigns): \[([^\]]+)\]/g)].map((m) => [m[1], [...m[2].matchAll(/"([a-z_]+)"/g)].map((k) => k[1])])) {
+    const catalog = content === "meetings" ? "MEETING_SHEET_FIELDS" : content === "campaigns" ? "CAMPAIGN_FIELDS" : "SHEET_FIELDS";
+    const defs = sheets.slice(sheets.indexOf(`export const ${catalog}`));
+    for (const key of keys) assert.ok(defs.includes(`key: "${key}"`), `${content}: ${key} not in ${catalog}`);
+  }
+  assert.match(sheetRoute, /addMissingSheetColumns\(sheet\.spreadsheetId, sheet\.tab, sheet\.headers, mapping, content\)/);
+  assert.doesNotMatch(sheetRoute, /Add your headers in row 1 of the sheet first/);
+  assert.match(atRoute, /action === "create"/);
+  assert.match(atRoute, /addMissingAirtableFields\(baseId, tableId/);
+  assert.match(airtable, /if \(taken\.has\(String\(spec\.name\)\.toLowerCase\(\)\)\) continue;/);
+  assert.match(ui, /Create the table for me/);
 });

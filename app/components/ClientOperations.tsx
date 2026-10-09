@@ -64,7 +64,7 @@ type Sheet = {
   config: { url?: string; tab?: string; headers?: string[]; types?: string[]; mapping?: string[]; qcIdColumn?: number };
 };
 type FieldsByContent = Record<Content, Array<{ key: string; label: string }>>;
-type SheetsPayload = { sheets?: Sheet[]; tables?: Sheet[]; configured?: boolean; robotEmail?: string | null; google?: { email: string } | null; googleOauth?: boolean; fieldsByContent?: FieldsByContent; summary?: { created: number; updated: number; failed: number; nextOffset: number | null } };
+type SheetsPayload = { added?: string[]; created?: string; sheets?: Sheet[]; tables?: Sheet[]; configured?: boolean; robotEmail?: string | null; google?: { email: string } | null; googleOauth?: boolean; fieldsByContent?: FieldsByContent; summary?: { created: number; updated: number; failed: number; nextOffset: number | null } };
 type Client = { name: string; slug: string; logoUrl?: string | null; accentColor?: string | null };
 type Returned = { ok: boolean; message: string } | undefined;
 type Pulse = {
@@ -563,6 +563,12 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
 
 const CONTENT_NAMES: Record<Content, string> = { replies: "Replies", meetings: "Booked meetings", campaigns: "Campaigns" };
 
+/** What QC just added to a table or sheet, said plainly. */
+const addedNote = (payload: SheetsPayload | null, where: string) =>
+  payload?.created ? `Created "${payload.created}" with every column, mapped and live.`
+    : payload?.added?.length ? `${where} was missing ${payload.added.length} ${payload.added.length === 1 ? "column" : "columns"}, so QC added ${payload.added.length === 1 ? "it" : "them"}: ${payload.added.join(", ")}.`
+      : payload ? `${where} already had every column it needs.` : "";
+
 function ContentSwitch({ value, disabled, onChange }: { value: Content; disabled: boolean; onChange: (value: Content) => void }) {
   return (
     <div className="ops-seg" role="radiogroup" aria-label="What goes in this table">
@@ -580,6 +586,7 @@ function SheetCard({ sheet, fields, run, busy, airtable = false }: { sheet: Shee
   const [mapping, setMapping] = useState<string[]>(sheet.config.mapping ?? []);
   useEffect(() => setMapping(sheet.config.mapping ?? []), [sheet.config.mapping]);
   const [progress, setProgress] = useState<{ created: number; updated: number; failed: number } | null>(null);
+  const [added, setAdded] = useState("");
   const step = (action: string, extra: Record<string, unknown> = {}) => run(action, { sheet: sheet.key, ...extra });
   const mine = busy.startsWith(`${sheet.key}:`);
   const doing = (action: string) => busy === `${sheet.key}:${action}`;
@@ -613,7 +620,8 @@ function SheetCard({ sheet, fields, run, busy, airtable = false }: { sheet: Shee
         <div className="ops-h2">{sheet.accountName ?? "Sheet"} <span className="ops-muted">· {sheet.config.tab ?? ""}</span></div>
         {sheet.config.url && <a className="ops-link" href={sheet.config.url} target="_blank" rel="noreferrer">{airtable ? "Open table ↗" : "Open sheet ↗"}</a>}
       </div>
-      <ContentSwitch value={sheet.content} disabled={Boolean(busy)} onChange={(value) => { if (value !== sheet.content) void step("content", { content: value }); }} />
+      <ContentSwitch value={sheet.content} disabled={Boolean(busy)} onChange={(value) => { if (value !== sheet.content) void step("content", { content: value }).then((payload) => setAdded(addedNote(payload, airtable ? "The table" : "The sheet"))); }} />
+      {added && <p className="ops-ok">{added}</p>}
       <ul className="ops-map">
         {headers.map((header, index) => index === sheet.config.qcIdColumn ? null : (
           <li key={`${header}-${index}`}>
@@ -684,6 +692,7 @@ function SheetsView({ slug, state, returned }: { slug: string; state: SheetsStat
   const { sheets, robot, google, googleOauth, fields, loaded, busy, error, run } = state;
   const [url, setUrl] = useState("");
   const [content, setContent] = useState<Content>("replies");
+  const [added, setAdded] = useState("");
   const writer = google?.email ?? robot;
   const live = sheets.filter((sheet) => sheet.status === "built").length;
 
@@ -714,14 +723,15 @@ function SheetsView({ slug, state, returned }: { slug: string; state: SheetsStat
           <div className="ops-panel-head"><span className="ops-label">{sheets.length ? "Add another sheet" : "Connect a sheet"}</span></div>
           <ContentSwitch value={content} disabled={Boolean(busy)} onChange={setContent} />
           <ol className="ops-steps">
-            <li>Make the sheet and put your headers in row 1</li>
+            <li>Make the sheet. Headers are optional: QC adds any column it needs</li>
             <li>{google ? <>Make sure <code>{writer}</code> can edit it (its own sheets already can)</> : <>Share it with <code>{writer}</code> as Editor</>}</li>
             <li>Paste the sheet's link here</li>
           </ol>
           <div className="ops-row">
             <input className="ops-input ops-grow" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" aria-label="Sheet link" />
-            <button type="button" className="ops-btn ops-pri" disabled={!url.trim() || Boolean(busy)} onClick={() => void run("connect", { url: url.trim(), content }).then((ok) => ok && setUrl(""))}>{busy === "new:connect" ? "Reading sheet…" : "Connect"}</button>
+            <button type="button" className="ops-btn ops-pri" disabled={!url.trim() || Boolean(busy)} onClick={() => void run("connect", { url: url.trim(), content }).then((payload) => { if (payload) { setUrl(""); setAdded(addedNote(payload, "The sheet")); } })}>{busy === "new:connect" ? "Reading sheet…" : "Connect"}</button>
           </div>
+          {added && <p className="ops-ok">{added}</p>}
         </section>
       )}
       {error && <p className="ops-error" role="alert">{error}</p>}
@@ -740,6 +750,8 @@ function AirtableView({ slug, state }: { slug: string; state: SheetsState }) {
   const [table, setTable] = useState("");
   const [content, setContent] = useState<Content>("replies");
   const [baseWhy, setBaseWhy] = useState("");
+  const [mode, setMode] = useState<"create" | "existing">("create");
+  const [added, setAdded] = useState("");
   useEffect(() => {
     if (!configured) return;
     void fetch(`/api/airtable-push/${encodeURIComponent(slug)}?bases=1`, { cache: "no-store" }).then((r) => r.json()).then((payload) => {
@@ -775,22 +787,32 @@ function AirtableView({ slug, state }: { slug: string; state: SheetsState }) {
         <section className="ops-panel">
           <div className="ops-panel-head"><span className="ops-label">{tables.length ? "Add another table" : "Connect a table"}</span></div>
           <ContentSwitch value={content} disabled={Boolean(busy)} onChange={setContent} />
+          <div className="ops-seg" role="radiogroup" aria-label="New or existing table">
+            <button type="button" role="radio" aria-checked={mode === "create"} className={mode === "create" ? "ops-seg-on" : ""} onClick={() => setMode("create")}>Create the table for me</button>
+            <button type="button" role="radio" aria-checked={mode === "existing"} className={mode === "existing" ? "ops-seg-on" : ""} onClick={() => setMode("existing")}>Use an existing table</button>
+          </div>
           <ol className="ops-steps">
-            <li>Make the table in the client's base, with the fields you want filled</li>
-            <li>Make sure QC's Airtable account can see the base (share it with QC, or add it to QC's token)</li>
-            <li>Pick the base and table here</li>
+            <li>Make sure QC's Airtable account can see the client's base (share it with QC, or add it to QC's token)</li>
+            {mode === "create"
+              ? <li>Pick the base. QC makes a "{CONTENT_NAMES[content]}" table with every column, typed and mapped, and starts pushing</li>
+              : <li>Pick the base and table. QC matches the columns that are there and adds any that are missing</li>}
           </ol>
           <div className="ops-row">
             <select className="ops-input ops-grow" value={base} onChange={(e) => { setBase(e.target.value); setBaseWhy(""); }} aria-label="Airtable base">
               <option value="">{bases === null && !baseError ? "Loading bases…" : "Choose a base"}</option>
               {(bases ?? []).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
             </select>
-            <select className="ops-input ops-grow" value={table} onChange={(e) => setTable(e.target.value)} disabled={!baseTables.length} aria-label="Airtable table">
-              <option value="">{baseTables.length ? "Choose a table" : "Choose a base first"}</option>
-              {baseTables.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
-            </select>
-            <button type="button" className="ops-btn ops-pri" disabled={!base || !table || Boolean(busy)} onClick={() => void run("connect", { baseId: base, tableId: table, content }).then((ok) => { if (ok) { setBase(""); setTable(""); } })}>{busy === "new:connect" ? "Reading table…" : "Connect"}</button>
+            {mode === "existing" && (
+              <select className="ops-input ops-grow" value={table} onChange={(e) => setTable(e.target.value)} disabled={!baseTables.length} aria-label="Airtable table">
+                <option value="">{baseTables.length ? "Choose a table" : "Choose a base first"}</option>
+                {baseTables.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+              </select>
+            )}
+            {mode === "create"
+              ? <button type="button" className="ops-btn ops-pri" disabled={!base || Boolean(busy)} onClick={() => void run("create", { baseId: base, content }).then((payload) => setAdded(addedNote(payload, "The table")))}>{busy === "new:create" ? "Creating table…" : `Create ${CONTENT_NAMES[content].toLowerCase()} table`}</button>
+              : <button type="button" className="ops-btn ops-pri" disabled={!base || !table || Boolean(busy)} onClick={() => void run("connect", { baseId: base, tableId: table, content }).then((payload) => { if (payload) { setTable(""); setAdded(addedNote(payload, "The table")); } })}>{busy === "new:connect" ? "Reading table…" : "Use this table"}</button>}
           </div>
+          {added && <p className="ops-ok">{added}</p>}
           {baseWhy && base && <p className="ops-muted">Picked {baseWhy}. Change it if that's not right.</p>}
           {baseError && <p className="ops-error">{baseError}</p>}
         </section>
