@@ -315,6 +315,12 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
                 </div>
               </>
             )}
+            {!crm.config?.dashboard_id && crm.accountId && (
+              <div className="oc-row">
+                <a className="oc-ghost" href={`https://${(crm.accountName ?? "").includes("hubspot.com") ? crm.accountName : "app.hubspot.com"}/product-updates/${crm.accountId}/in-beta`} target="_blank" rel="noreferrer">Join Reporting API beta ↗</a>
+                <span className="oc-muted">"Manage reports and dashboards programmatically with the new Reporting API"</span>
+              </div>
+            )}
           </section>
         )}
 

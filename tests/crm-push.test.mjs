@@ -142,3 +142,9 @@ test("every action the CRM and Sheets panels send has a handler in the routes (n
   assert.ok(sent.length > 5);
   for (const action of sent) assert.ok(routes.includes(`action === "${action}"`), `no handler for "${action}"`);
 });
+
+test("HubSpot dashboard section links to the client's In beta page until a dashboard exists", () => {
+  const ui = readFileSync(new URL("../app/components/OpsCockpit.tsx", import.meta.url), "utf8");
+  assert.match(ui, /\/product-updates\/\$\{crm\.accountId\}\/in-beta/);
+  assert.match(ui, /!crm\.config\?\.dashboard_id && crm\.accountId/);
+});
