@@ -5,6 +5,8 @@ import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, type Destination } from "../../../lib/crm-push";
 import { pushOne, pushPass } from "../../../lib/crm-push-run";
 import { hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotAudit, type HubSpotPlan } from "../../../lib/hubspot-push";
+import { hubspotBuildReporting } from "../../../lib/hubspot-reporting";
+import { hubspotAppConfigured, hubspotUserToken } from "../../../lib/hubspot-user";
 
 /**
  * The onboarding cockpit's CRM panel for one client (session only). GET says where it stands; POST runs one
@@ -34,7 +36,7 @@ export async function GET(_: Request, context: { params: Promise<{ slug: string 
   try {
     const c = config();
     const workspace = await workspaceOf(c, (await context.params).slug);
-    return NextResponse.json({ ok: true, crm: presentDestination(await loadDestination(c, workspace.id, "crm")) });
+    return NextResponse.json({ ok: true, hubspotApp: hubspotAppConfigured(), crm: presentDestination(await loadDestination(c, workspace.id, "crm")) });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not read the CRM settings." }, { status: 500 });
   }
@@ -47,7 +49,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     const c = config();
     const workspace = await workspaceOf(c, (await context.params).slug);
     let destination = await loadDestination(c, workspace.id, "crm");
-    const reply = async (extra: Row = {}) => NextResponse.json({ ok: true, ...extra, crm: presentDestination(await loadDestination(c, workspace.id, "crm")) });
+    const reply = async (extra: Row = {}) => NextResponse.json({ ok: true, ...extra, hubspotApp: hubspotAppConfigured(), crm: presentDestination(await loadDestination(c, workspace.id, "crm")) });
 
     if (action === "connect") {
       const provider = text(body.provider);
@@ -85,6 +87,14 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const items = choices.useLeadSource === false ? plan.items.map((item) => (item.kind === "option" ? { ...item, action: "skip" as const } : item)) : plan.items;
       const approved: HubSpotPlan = { ...plan, items, settings: choices.useLeadSource === false ? { ...settings, leadSourceProperty: null, leadSourceValue: null } : settings };
       const log = await hubspotApply(destination.api_key, approved);
+      // Reports and the dashboard need the QC Growth user's sign-in (a service key acts as nobody).
+      const userToken = await hubspotUserToken(c, destination).catch(() => null);
+      if (userToken) {
+        const reporting = await hubspotBuildReporting(userToken);
+        log.push(...reporting.log);
+        if (reporting.dashboardId) await saveDestination(c, workspace.id, "crm", { config: { ...(destination.config ?? {}), dashboard_id: reporting.dashboardId } });
+        destination = await loadDestination(c, workspace.id, "crm") ?? destination;
+      }
       const failed = log.filter((entry) => entry.result === "failed");
       await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: failed.length ? "planned" : "built" });
       return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
@@ -114,6 +124,21 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const info = await fetch("https://api.hubapi.com/oauth/v2/private-apps/get/access-token-info", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tokenKey: token }), cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
       const scopes = (Array.isArray((info as { scopes?: unknown }).scopes) ? (info as { scopes: string[] }).scopes : []).filter((scope) => /report|dashboard|list|hubsql/i.test(scope));
       return NextResponse.json({ ok: true, probe: results, scopes });
+    }
+    if (action === "reporting") {
+      if (!hubspotAppConfigured()) return NextResponse.json({ ok: false, error: "QC Growth's HubSpot app keys are not on Vercel yet." }, { status: 400 });
+      const userToken = await hubspotUserToken(c, destination);
+      if (!userToken) return NextResponse.json({ ok: false, error: "Connect the QC Growth user first." }, { status: 400 });
+      const reporting = await hubspotBuildReporting(userToken);
+      const fresh = (await loadDestination(c, workspace.id, "crm")) ?? destination;
+      await saveDestination(c, workspace.id, "crm", { build_log: [...(fresh.build_log ?? []), ...reporting.log] as unknown as Row[], ...(reporting.dashboardId ? { config: { ...(fresh.config ?? {}), dashboard_id: reporting.dashboardId } } : {}) });
+      const failed = reporting.log.filter((entry) => entry.result === "failed");
+      return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
+    }
+    if (action === "disconnect_user") {
+      const { hubspot_user: _, ...rest } = (destination.config ?? {}) as Row;
+      await saveDestination(c, workspace.id, "crm", { config: rest });
+      return reply();
     }
     if (action === "probe_calls") {
       // Raw reporting calls with the client's key, for working out what HubSpot accepts. Reporting paths only.

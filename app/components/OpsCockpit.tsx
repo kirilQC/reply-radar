@@ -31,6 +31,8 @@ type Crm = {
   plan: null | { items: PlanItem[]; settings: { leadSourceProperty: string | null; lifecycleOnCreate: string | null; ownerId: string | null }; conversation: string; notTouched: string[]; warnings: string[] };
   buildLog: Array<{ kind: string; name: string; result: string; detail: string }>;
   autoPush: boolean;
+  config: { dashboard_id?: string };
+  hubspotUser: null | { user: string; hubId: string; connectedAt: string };
   lastPushAt: string | null;
   lastPushSummary: null | { pushed: number; created: number; updated: number; unchanged: number; failed: number; errors: string[] };
 };
@@ -91,8 +93,9 @@ function when(value: string | null) {
   return Number.isNaN(date.getTime()) ? "Never" : date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-function CrmPanel({ slug, clientName, provider, onClose }: { slug: string; clientName: string; provider: "hubspot" | "attio"; onClose: () => void }) {
+function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: string; clientName: string; provider: "hubspot" | "attio"; onClose: () => void; returned?: { ok: boolean; message: string } }) {
   const [crm, setCrm] = useState<Crm | null>(null);
+  const [appReady, setAppReady] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState("");
@@ -108,7 +111,7 @@ function CrmPanel({ slug, clientName, provider, onClose }: { slug: string; clien
 
   const load = useCallback(async () => {
     const payload = await fetch(`/api/crm-push/${encodeURIComponent(slug)}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null);
-    if (payload?.ok) setCrm(payload.crm);
+    if (payload?.ok) { setCrm(payload.crm); setAppReady(Boolean(payload.hubspotApp)); }
     setLoaded(true);
   }, [slug]);
   useEffect(() => { void load(); }, [load]);
@@ -250,6 +253,28 @@ function CrmPanel({ slug, clientName, provider, onClose }: { slug: string; clien
           </section>
         )}
 
+        {connectedHere && crm?.status === "built" && provider === "hubspot" && (
+          <section className="oc-section">
+            <h3>Dashboard</h3>
+            {returned && <p className={returned.ok ? "oc-note" : "oc-error"}>{returned.message}</p>}
+            {!crm.hubspotUser ? (
+              <div className="oc-row">
+                <a className={`oc-primary${appReady ? "" : " oc-disabled"}`} href={appReady ? `/api/hubspot/oauth/start?slug=${encodeURIComponent(slug)}` : undefined} aria-disabled={!appReady}>Connect QC Growth user</a>
+                {!appReady && <span className="oc-muted">App keys not on Vercel yet</span>}
+              </div>
+            ) : (
+              <>
+                <p className="oc-muted">Signed in as {crm.hubspotUser.user || "QC Growth"}</p>
+                <div className="oc-row">
+                  <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void step("reporting").then((payload) => payload && setNote(payload.built ? "Reports and dashboard ready." : `Some steps failed: ${(payload.failed ?? []).join("; ")}`))}>{busy === "reporting" ? "Building…" : crm.config?.dashboard_id ? "Rebuild reports" : "Build reports and dashboard"}</button>
+                  {crm.config?.dashboard_id && <a className="oc-ghost" href={`https://${(crm.accountName ?? "").includes("hubspot.com") ? crm.accountName : "app.hubspot.com"}/reports-dashboard/${crm.accountId}/view/${crm.config.dashboard_id}`} target="_blank" rel="noreferrer">Open dashboard ↗</a>}
+                  <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("disconnect_user")}>Sign out</button>
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
         {connectedHere && (crm?.buildLog.length ?? 0) > 0 && (
           <details className="oc-section oc-log">
             <summary>Build log ({crm?.buildLog.length})</summary>
@@ -289,13 +314,24 @@ function SheetsPanel({ clientName, onClose }: { clientName: string; onClose: () 
 
 export default function OpsCockpit({ slug, clientName }: { slug: string; clientName: string }) {
   const [open, setOpen] = useState<"" | "hubspot" | "attio" | "sheets">("");
+  // Back from HubSpot's sign-in: reopen the HubSpot panel with the outcome, and tidy the address bar.
+  const [returned, setReturned] = useState<{ ok: boolean; message: string } | undefined>(undefined);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ok = params.get("hubspot") === "connected";
+    const failure = params.get("hubspot_error");
+    if (!ok && !failure) return;
+    setReturned(ok ? { ok: true, message: "QC Growth user connected." } : { ok: false, message: failure ?? "" });
+    setOpen("hubspot");
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
   return (
     <div className="oc-buttons" role="toolbar" aria-label="Client operations">
       <button type="button" className="oc-button" title="HubSpot" aria-label="HubSpot" onClick={() => setOpen("hubspot")}><HubSpotLogo /></button>
       <button type="button" className="oc-button oc-attio" title="Attio" aria-label="Attio" onClick={() => setOpen("attio")}><AttioLogo /></button>
       <button type="button" className="oc-button" title="Google Sheets" aria-label="Google Sheets" onClick={() => setOpen("sheets")}><SheetsLogo /></button>
       <Link href={`/bookings/${slug}`} className="oc-button" title="Booked meetings workflow" aria-label="Booked meetings workflow"><MeetingsLogo /></Link>
-      {(open === "hubspot" || open === "attio") && <CrmPanel slug={slug} clientName={clientName} provider={open} onClose={() => setOpen("")} />}
+      {(open === "hubspot" || open === "attio") && <CrmPanel slug={slug} clientName={clientName} provider={open} returned={open === "hubspot" ? returned : undefined} onClose={() => setOpen("")} />}
       {open === "sheets" && <SheetsPanel clientName={clientName} onClose={() => setOpen("")} />}
     </div>
   );

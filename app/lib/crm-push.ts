@@ -251,7 +251,12 @@ export function presentDestination(destination: Destination | null) {
     audit: destination.audit,
     plan: destination.plan,
     buildLog: destination.build_log ?? [],
-    config: destination.config ?? {},
+    // The QC Growth user's HubSpot sign-in stays server side; the browser only learns who and which portal.
+    config: (({ hubspot_user, ...rest }) => rest)((destination.config ?? {}) as Row),
+    hubspotUser: (() => {
+      const user = ((destination.config ?? {}) as Row).hubspot_user as Row | undefined;
+      return user?.refresh_token ? { user: String(user.user ?? ""), hubId: String(user.hub_id ?? ""), connectedAt: String(user.connected_at ?? "") } : null;
+    })(),
     autoPush: destination.auto_push,
     lastPushAt: destination.last_push_at,
     lastPushSummary: destination.last_push_summary,
