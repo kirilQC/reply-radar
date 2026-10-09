@@ -55,7 +55,8 @@ function isMachinePath(pathname: string): boolean {
     pathname === "/api/heartbeat" || // liveness ping
     pathname === "/api/database/purge" || // the worker's retention purge
     pathname === "/api/emailbison/sync" || // the worker's Email Bison pass
-    pathname === "/api/lemlist/sync" // the worker's lemlist pass
+    pathname === "/api/lemlist/sync" || // the worker's lemlist pass
+    pathname === "/api/crm-push/sync" // the worker's automatic CRM push
   );
 }
 

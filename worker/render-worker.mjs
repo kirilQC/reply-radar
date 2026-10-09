@@ -2371,6 +2371,13 @@ async function emailLoop() {
       } catch (error) {
         console.warn("reply_radar_email_sync_failed", String(error.message || error).slice(0, 200));
       }
+      // Clients' CRMs: new replies pushed for every client with automatic push on (app/api/crm-push/sync).
+      try {
+        const result = await appPost("/api/crm-push/sync", {}, { timeoutMs: 295_000 });
+        if ((result.report || []).length) console.info("reply_radar_crm_push", { report: result.report });
+      } catch (error) {
+        console.warn("reply_radar_crm_push_failed", String(error.message || error).slice(0, 200));
+      }
       // lemlist, the same way: the backup to its reply webhooks (app/api/lemlist/sync).
       try {
         // Campaign figures hourly, on their own clock so a skipped Email Bison pass cannot make it every 5 minutes.
