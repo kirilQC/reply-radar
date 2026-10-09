@@ -95,3 +95,12 @@ test("Google Sheets: only mapped columns and QC ID are written, a lead is found 
   const route = readFileSync(new URL("../app/api/sheets-push/[slug]/route.ts", import.meta.url), "utf8");
   assert.match(route, /if \(destination\.status !== "built"\) return NextResponse\.json\(\{ ok: false, error: "Confirm the column mapping first\." \}/);
 });
+
+test("HubSpot deals: an existing deal is updated but never moved back a stage, a canceled meeting with no deal stays out", () => {
+  const lib = readFileSync(new URL("../app/lib/hubspot-deals.ts", import.meta.url), "utf8");
+  const qc = lib.slice(lib.indexOf("const qc: Row = {"), lib.indexOf("// The deal: the one we made"));
+  assert.doesNotMatch(qc, /dealstage|pipeline/);
+  assert.match(lib, /PATCH", `\/crm\/v3\/objects\/deals\/\$\{enc\(dealId\)\}`, \{ properties: qc \}/);
+  assert.match(lib, /if \(\/cancel\/i\.test\(text\(meeting\.status\)\) && !before\?\.deal_id/);
+  assert.doesNotMatch(lib, /"DELETE"/);
+});

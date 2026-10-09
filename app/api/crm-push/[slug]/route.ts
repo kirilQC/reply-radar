@@ -6,6 +6,7 @@ import { loadDestination, presentDestination, rows, saveDestination, type Destin
 import { pushOne, pushPass } from "../../../lib/crm-push-run";
 import { hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotAudit, type HubSpotPlan } from "../../../lib/hubspot-push";
 import { hubspotBuildReporting, hubspotUserView } from "../../../lib/hubspot-reporting";
+import { dealsApply, dealsAudit, dealsPlan, pushMeetingsPass, type DealsPlan } from "../../../lib/hubspot-deals";
 import { attioApply, attioAudit, attioConnect, attioPlan, type AttioPlan } from "../../../lib/attio-push";
 import { hubspotAppConfigured, hubspotUserToken } from "../../../lib/hubspot-user";
 
@@ -71,7 +72,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const clash = await rows(c, `rr_crm_push?select=workspace_id&provider=eq.hubspot&account_id=eq.${encodeURIComponent(account.portalId)}&workspace_id=neq.${encodeURIComponent(workspace.id)}&limit=1`);
       if (clash.length) return NextResponse.json({ ok: false, error: `HubSpot portal ${account.portalId} is already connected to another client. Check you are in ${workspace.name}'s HubSpot.` }, { status: 409 });
       const audit = await hubspotAudit(apiKey, account.scopes);
-      const plan = hubspotPlan(audit);
+      const plan = { ...hubspotPlan(audit), deals: dealsPlan(await dealsAudit(apiKey)) };
       await saveDestination(c, workspace.id, "crm", { provider: "hubspot", api_key: apiKey, account_id: account.portalId, account_name: account.name, status: "planned", audit: audit as unknown as Row, plan: plan as unknown as Row, build_log: [], auto_push: false });
       return reply();
     }
@@ -96,7 +97,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       // The key's scopes are asked for again: ticking a scope in HubSpot must clear the warning on re-read.
       const account = await hubspotConnect(destination.api_key);
       const audit = await hubspotAudit(destination.api_key, account.scopes);
-      await saveDestination(c, workspace.id, "crm", { audit: audit as unknown as Row, plan: hubspotPlan(audit) as unknown as Row, status: destination.status === "built" ? "built" : "planned" });
+      const previousDeals = ((destination.plan ?? {}) as { deals?: DealsPlan }).deals ?? null;
+      const plan = { ...hubspotPlan(audit), deals: dealsPlan(await dealsAudit(destination.api_key), previousDeals) };
+      await saveDestination(c, workspace.id, "crm", { audit: audit as unknown as Row, plan: plan as unknown as Row, status: destination.status === "built" ? "built" : "planned" });
       return reply();
     }
     if (action === "apply") {
@@ -110,8 +113,18 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         ...(choices.lifecycleOnCreate !== undefined ? { lifecycleOnCreate: choices.lifecycleOnCreate ? "lead" : null } : {}),
       };
       const items = choices.useLeadSource === false ? plan.items.map((item) => (item.kind === "option" ? { ...item, action: "skip" as const } : item)) : plan.items;
-      const approved: HubSpotPlan = { ...plan, items, settings: choices.useLeadSource === false ? { ...settings, leadSourceProperty: null, leadSourceValue: null } : settings };
+      const approved: HubSpotPlan & { deals?: DealsPlan } = { ...plan, items, settings: choices.useLeadSource === false ? { ...settings, leadSourceProperty: null, leadSourceValue: null } : settings };
       const log = await hubspotApply(destination.api_key, approved);
+      // Booked meetings as deals: the chosen pipeline (re-planned when it changed), its QC stage, the deal fields.
+      const planDeals = (plan as HubSpotPlan & { deals?: DealsPlan }).deals;
+      if (planDeals) {
+        const pipelineId = text(choices.dealPipelineId) || planDeals.pipelineId;
+        const chosen = pipelineId !== planDeals.pipelineId ? dealsPlan(await dealsAudit(destination.api_key), { ...planDeals, pipelineId }) : planDeals;
+        const deals: DealsPlan = { ...chosen, enabled: choices.pushDeals === undefined ? chosen.enabled : choices.pushDeals === true };
+        const built = await dealsApply(destination.api_key, deals);
+        log.push(...(built.log as typeof log));
+        approved.deals = { ...deals, stageId: built.stageId, stageExists: Boolean(built.stageId) };
+      }
       // Reports and the dashboard need the QC Growth user's sign-in (a service key acts as nobody).
       const userToken = await hubspotUserToken(c, destination).catch(() => null);
       if (userToken) {
@@ -224,8 +237,11 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       return reply({ test: await pushOne(c, destination as Destination) });
     }
     if (action === "push") {
-      const summary = await pushPass(c, destination as Destination, { offset: Number(body.offset) || 0, budgetMs: 150_000 });
-      return reply({ summary });
+      const offset = Number(body.offset) || 0;
+      const summary = await pushPass(c, destination as Destination, { offset, budgetMs: 150_000 });
+      // Booked meetings ride along with the first pass of a Push all.
+      const meetings = offset === 0 ? await pushMeetingsPass(c, destination as Destination, { budgetMs: 60_000 }).catch((error) => ({ pushed: 0, created: 0, updated: 0, unchanged: 0, failed: 1, errors: [error instanceof Error ? error.message : "failed"] })) : null;
+      return reply({ summary, meetings });
     }
     if (action === "auto") {
       if (destination.status !== "built") return NextResponse.json({ ok: false, error: "Approve and apply the build first." }, { status: 400 });

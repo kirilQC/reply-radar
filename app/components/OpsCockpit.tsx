@@ -30,7 +30,14 @@ type Crm = {
     countsCapped?: boolean;
     lists?: Array<{ name: string }>;
   };
-  plan: null | { items: PlanItem[]; settings: { leadSourceProperty: string | null; lifecycleOnCreate: string | null; ownerId: string | null }; conversation: string; notTouched: string[]; warnings: string[] };
+  plan: null | {
+    items: PlanItem[];
+    settings: { leadSourceProperty: string | null; lifecycleOnCreate: string | null; ownerId: string | null };
+    conversation: string;
+    notTouched: string[];
+    warnings: string[];
+    deals?: { enabled: boolean; pipelineId: string | null; pipelineLabel: string; stageExists: boolean; stageId: string | null; createProperties: string[]; pipelines: Array<{ id: string; label: string; hasStage: boolean }> };
+  };
   buildLog: Array<{ kind: string; name: string; result: string; detail: string }>;
   autoPush: boolean;
   config: { dashboard_id?: string };
@@ -114,6 +121,12 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
   // The plan's owner (the client's QC Growth user) is the default; QC's leads are never left unassigned.
   useEffect(() => { if (crm?.plan?.settings.ownerId) setOwnerId(crm.plan.settings.ownerId); }, [crm?.plan?.settings.ownerId]);
   const [lifecycle, setLifecycle] = useState(true);
+  const [pushDeals, setPushDeals] = useState(true);
+  const [dealPipeline, setDealPipeline] = useState("");
+  useEffect(() => {
+    if (crm?.plan?.deals) { setPushDeals(crm.plan.deals.enabled); setDealPipeline(crm.plan.deals.pipelineId ?? ""); }
+  }, [crm?.plan?.deals?.enabled, crm?.plan?.deals?.pipelineId]);
+  const [meetingsPushed, setMeetingsPushed] = useState<null | { created: number; updated: number; failed: number }>(null);
   const [leadSource, setLeadSource] = useState(true);
   const [tested, setTested] = useState<null | { name: string; company: string; campaign: string; created: boolean; link: string | null }>(null);
   const [progress, setProgress] = useState<{ pushed: number; created: number; updated: number; unchanged: number; failed: number } | null>(null);
@@ -145,6 +158,7 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
     for (let round = 0; round < 40; round += 1) {
       const payload = await step("push", { offset });
       if (!payload?.summary) break;
+      if (payload.meetings) setMeetingsPushed({ created: payload.meetings.created, updated: payload.meetings.updated, failed: payload.meetings.failed });
       for (const key of Object.keys(total) as Array<keyof typeof total>) total[key] += Number(payload.summary[key]) || 0;
       setProgress({ ...total });
       if (payload.summary.nextOffset === null || payload.summary.nextOffset === undefined) break;
@@ -226,10 +240,22 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
                 </select>
               </label>
             </div>
+            {provider === "hubspot" && crm.plan.deals && crm.plan.deals.pipelines.length > 0 && (
+              <div className="oc-choices">
+                <label><input type="checkbox" checked={pushDeals} onChange={(e) => setPushDeals(e.target.checked)} /> Booked meetings become deals in a "Booked Meeting (QC)" stage</label>
+                {pushDeals && (
+                  <label>Pipeline
+                    <select value={dealPipeline} onChange={(e) => setDealPipeline(e.target.value)}>
+                      {crm.plan.deals.pipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.label}{pipeline.hasStage ? " (stage already there)" : ""}</option>)}
+                    </select>
+                  </label>
+                )}
+              </div>
+            )}
             <p className="oc-muted">{crm.plan.conversation}</p>
             <p className="oc-muted">Not touched: {crm.plan.notTouched.join(" · ")}</p>
             <div className="oc-row">
-              <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void step("apply", { settings: { ownerId, lifecycleOnCreate: lifecycle, useLeadSource: leadSource } })}>
+              <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void step("apply", { settings: { ownerId, lifecycleOnCreate: lifecycle, useLeadSource: leadSource, pushDeals, dealPipelineId: dealPipeline } })}>
                 {busy === "apply" ? "Building…" : `Approve and build${creates.length ? ` (${creates.length} to create)` : ""}`}
               </button>
               <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Reading…" : `Re-read ${name}`}</button>
@@ -256,6 +282,8 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
               </p>
             )}
             {progress && <p className="oc-muted">{progress.created} created · {progress.updated} updated · {progress.unchanged} unchanged{progress.failed ? ` · ${progress.failed} failed` : ""}</p>}
+            {meetingsPushed && <p className="oc-muted">Booked meetings: {meetingsPushed.created} deals created · {meetingsPushed.updated} updated{meetingsPushed.failed ? ` · ${meetingsPushed.failed} failed` : ""}</p>}
+            {provider === "hubspot" && crm.plan?.deals?.enabled && crm.plan.deals.stageId && <p className="oc-muted">Booked meetings go to {crm.plan.deals.pipelineLabel} → Booked Meeting (QC)</p>}
             {crm.lastPushSummary?.errors?.length ? <ul className="oc-errors">{crm.lastPushSummary.errors.map((e) => <li key={e}>{e}</li>)}</ul> : null}
           </section>
         )}
