@@ -84,9 +84,14 @@ export async function dealsApply(token: string, plan: DealsPlan): Promise<{ log:
   if (!stageId) {
     try {
       // First in the pipeline: a booked meeting comes before every stage the client already works.
+      // HubSpot refuses a negative position, so the client's stages each move down one (their order kept)
+      // and the QC stage takes position 0.
       const pipeline = await hubspot(token, "GET", `/crm/v3/pipelines/deals/${enc(plan.pipelineId)}`);
-      const first = Math.min(0, ...list(pipeline.stages).map((s) => Number(s.displayOrder) || 0));
-      const created = await hubspot(token, "POST", `/crm/v3/pipelines/deals/${enc(plan.pipelineId)}/stages`, { label: QC_DEAL_STAGE_LABEL, displayOrder: first - 1, metadata: { probability: "0.2", isClosed: "false" } });
+      const stages = list(pipeline.stages).filter((s) => s.archived !== true).sort((a, b) => (Number(a.displayOrder) || 0) - (Number(b.displayOrder) || 0));
+      for (const [index, stage] of stages.entries()) {
+        await hubspot(token, "PATCH", `/crm/v3/pipelines/deals/${enc(plan.pipelineId)}/stages/${enc(text(stage.id))}`, { displayOrder: index + 1 });
+      }
+      const created = await hubspot(token, "POST", `/crm/v3/pipelines/deals/${enc(plan.pipelineId)}/stages`, { label: QC_DEAL_STAGE_LABEL, displayOrder: 0, metadata: { probability: "0.2", isClosed: "false" } });
       stageId = text(created.id);
       log.push({ at: at(), kind: "deal-stage", name: QC_DEAL_STAGE_LABEL, result: "created", detail: `In ${plan.pipelineLabel}` });
     } catch (error) {
