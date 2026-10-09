@@ -166,7 +166,7 @@ export async function hubspotAudit(token: string, scopes: string[] = []): Promis
 export const QC_VIEW_NAME = "QC Growth";
 export const QC_VIEW_PATH = "/hub/cli/backend/crm/contacts/views";
 const QC_PLATFORMS = ["heyreach", "lemlist", "email_bison"];
-const QC_VIEW_COLUMNS = ["firstname", "lastname", "email", "jobtitle", "company", "website", "qc_linkedin_url", "qc_company_linkedin_url", "qc_campaign", "qc_sender", "qc_outreach_platform", "qc_reply_sentiment", "qc_reply_count", "qc_last_reply_date", "hubspot_owner_id"];
+const QC_VIEW_COLUMNS = ["firstname", "lastname", "email", "jobtitle", "company", "website", "qc_linkedin_url", "qc_company_linkedin_url", "qc_campaign", "qc_sender", "qc_outreach_platform", "qc_reply_sentiment", "qc_reply_count", "qc_last_reply_date", "qc_booked_meeting", "qc_latest_reply", "qc_conversation", "hubspot_owner_id"];
 const viewList = (data: unknown): Row[] => Array.isArray(data) ? data as Row[] : list(object(data).results ?? object(data).views ?? object(data).data);
 function named(rows: Row[], idKey: string) {
   const row = rows.find((entry) => text(entry.name).trim().toLowerCase() === QC_VIEW_NAME.toLowerCase());
@@ -193,6 +193,9 @@ type PropertySpec = { name: string; label: string; type: string; fieldType: stri
 export const QC_PROPERTIES: PropertySpec[] = [
   { name: "qc_linkedin_url", label: "QC LinkedIn URL", type: "string", fieldType: "text", description: "The lead's LinkedIn profile. Unique, so a lead with no email still matches one contact.", unique: true },
   { name: "qc_company_linkedin_url", label: "QC company LinkedIn", type: "string", fieldType: "text", description: "The company's LinkedIn page, on the contact so it can be a column in the QC Growth view." },
+  { name: "qc_latest_reply", label: "QC latest reply", type: "string", fieldType: "textarea", description: "The lead's most recent reply." },
+  { name: "qc_conversation", label: "QC conversation", type: "string", fieldType: "textarea", description: "The whole conversation with the lead, oldest first, kept up to date." },
+  { name: "qc_booked_meeting", label: "QC booked meeting", type: "bool", fieldType: "booleancheckbox", description: "True when the lead has booked a meeting with the client.", options: [{ label: "True", value: "true" }, { label: "False", value: "false" }] },
   { name: "qc_campaign", label: "QC campaign", type: "string", fieldType: "text", description: "The QC Growth campaign the lead replied to." },
   { name: "qc_sender", label: "QC sender", type: "string", fieldType: "text", description: "Who the outreach came from." },
   { name: "qc_outreach_platform", label: "QC outreach platform", type: "enumeration", fieldType: "select", description: "Where the outreach ran.", options: [{ label: "HeyReach", value: "heyreach" }, { label: "lemlist", value: "lemlist" }, { label: "Email Bison", value: "email_bison" }] },
@@ -426,6 +429,9 @@ export async function hubspotPush(
   put("qc_linkedin_url", record.linkedinCanonical);
   put("qc_company_linkedin_url", record.companyLinkedinUrl);
   put("qc_campaign", record.campaign);
+  put("qc_latest_reply", record.latestReply.slice(0, 5000));
+  put("qc_conversation", conversationText(record, 60_000, "plain"));
+  put("qc_booked_meeting", record.bookedMeeting ? "true" : "false");
   put("qc_sender", record.sender);
   put("qc_outreach_platform", record.platform === "Email Bison" ? "email_bison" : record.platform.toLowerCase());
   put("qc_first_reply_date", record.firstReplyAt ? new Date(record.firstReplyAt).toISOString() : "");

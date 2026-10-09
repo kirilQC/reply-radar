@@ -48,7 +48,7 @@ test("a portal already linked to another client is refused, and writes need the 
 test("the plan keeps QC's own fields to the minimum and maps the rest onto HubSpot's standard fields", () => {
   const source = readFileSync(new URL("../app/lib/hubspot-push.ts", import.meta.url), "utf8");
   const own = [...source.slice(source.indexOf("export const QC_PROPERTIES"), source.indexOf("/** Attribution when")).matchAll(/name: "(qc_[a-z_]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(own, ["qc_linkedin_url", "qc_company_linkedin_url", "qc_campaign", "qc_sender", "qc_outreach_platform", "qc_first_reply_date", "qc_last_reply_date", "qc_reply_sentiment", "qc_reply_count"]);
+  assert.deepEqual(own, ["qc_linkedin_url", "qc_company_linkedin_url", "qc_latest_reply", "qc_conversation", "qc_booked_meeting", "qc_campaign", "qc_sender", "qc_outreach_platform", "qc_first_reply_date", "qc_last_reply_date", "qc_reply_sentiment", "qc_reply_count"]);
   assert.match(source, /put\("qc_outreach_platform", record\.platform === "Email Bison" \? "email_bison" : record\.platform\.toLowerCase\(\)\)/);
   for (const field of ["firstname", "lastname", "email", "jobtitle", "company", "website", "domain", "linkedin_company_page"]) assert.match(source, new RegExp(`name: "${field}"`), field);
 });
