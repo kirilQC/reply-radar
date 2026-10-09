@@ -98,9 +98,12 @@ test("Google Sheets: only mapped columns and QC ID are written, a lead is found 
 
 test("HubSpot deals: an existing deal is updated but never moved back a stage, a canceled meeting with no deal stays out", () => {
   const lib = readFileSync(new URL("../app/lib/hubspot-deals.ts", import.meta.url), "utf8");
-  const qc = lib.slice(lib.indexOf("const qc: Row = {"), lib.indexOf("// The deal: the one we made"));
-  assert.doesNotMatch(qc, /dealstage|pipeline/);
-  assert.match(lib, /PATCH", `\/crm\/v3\/objects\/deals\/\$\{enc\(dealId\)\}`, \{ properties: qc \}/);
+  const qc = lib.slice(lib.indexOf("const qc: Row = {}"), lib.indexOf("// The deal: the one we made"));
+  assert.doesNotMatch(qc, /dealstage|"pipeline"|pipeline:/);
+  assert.match(lib, /PATCH", `\/crm\/v3\/objects\/deals\/\$\{enc\(dealId\)\}`, \{ properties: \{ \.\.\.qc, \.\.\.rename \} \}/);
+  // A deal is the company; QC only renames its own old "(QC Growth)" names.
+  assert.match(lib, /const name = text\(meeting\.company_name\) \|\| text\(meeting\.invitee_name\)/);
+  assert.match(lib, /\/\\\(QC Growth\\\)\$\/\.test/);
   assert.match(lib, /if \(\/cancel\/i\.test\(text\(meeting\.status\)\) && !before\?\.deal_id/);
   assert.doesNotMatch(lib, /"DELETE"/);
 });

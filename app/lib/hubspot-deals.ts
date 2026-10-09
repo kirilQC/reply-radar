@@ -2,7 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { createHash } from "node:crypto";
-import { rest, rows, type Config, type Destination } from "./crm-push";
+import { conversationText, replyRecords, rest, rows, type Config, type Destination, type ReplyRecord } from "./crm-push";
 import { canonicalLinkedin } from "../../shared/crm-push-text.mjs";
 import { hubspot, HubSpotError, QC_GROUP, type HubSpotPlan } from "./hubspot-push";
 
@@ -22,10 +22,29 @@ const list = (value: unknown): Row[] => (Array.isArray(value) ? value.map(object
 const enc = encodeURIComponent;
 
 export const QC_DEAL_STAGE_LABEL = "Booked Meeting (QC)";
-const DEAL_PROPERTIES = [
+type DealSpec = { name: string; label: string; type: string; fieldType: string; description: string; options?: string[] };
+const textField = (name: string, label: string, description: string, long = false): DealSpec => ({ name, label, type: "string", fieldType: long ? "textarea" : "text", description });
+/** Everything QC knows about the meeting, the person and the outreach, as fields on the deal. */
+const DEAL_PROPERTIES: DealSpec[] = [
   { name: "qc_meeting_date", label: "QC meeting date", type: "datetime", fieldType: "date", description: "When the meeting QC Growth booked takes place." },
   { name: "qc_meeting_status", label: "QC meeting status", type: "enumeration", fieldType: "select", description: "Scheduled, rescheduled, canceled, completed or no-show.", options: ["scheduled", "rescheduled", "canceled", "completed", "no_show"] },
-  { name: "qc_campaign", label: "QC campaign", type: "string", fieldType: "text", description: "The QC Growth campaign the meeting came from." },
+  textField("qc_meeting_host", "QC meeting host", "Who the meeting is with on the client's side."),
+  textField("qc_campaign", "QC campaign", "The QC Growth campaign the meeting came from."),
+  textField("qc_lead_name", "QC lead name", "The person who booked."),
+  textField("qc_lead_title", "QC lead title", "Their job title."),
+  textField("qc_lead_email", "QC lead email", "Their email."),
+  textField("qc_lead_linkedin", "QC lead LinkedIn", "Their LinkedIn profile."),
+  textField("qc_company_domain", "QC company domain", "The company's website."),
+  textField("qc_company_linkedin", "QC company LinkedIn", "The company's LinkedIn page."),
+  textField("qc_company_industry", "QC company industry", "The company's industry."),
+  textField("qc_company_size", "QC company size", "The company's headcount."),
+  textField("qc_company_location", "QC company location", "Where the company is."),
+  textField("qc_sender", "QC sender", "Who QC's outreach came from."),
+  textField("qc_outreach_platform", "QC outreach platform", "HeyReach, lemlist or Email Bison."),
+  textField("qc_reply_sentiment", "QC reply sentiment", "How the lead's latest reply read."),
+  textField("qc_latest_reply", "QC latest reply", "The lead's most recent reply.", true),
+  textField("qc_conversation", "QC conversation", "The whole outreach conversation, oldest first.", true),
+  textField("qc_pre_call_brief", "QC pre-call brief", "QC's brief on the lead and company for the call.", true),
 ];
 
 export type DealsAudit = { pipelines: Array<{ id: string; label: string; stages: Array<{ id: string; label: string }> }>; dealProperties: string[]; dealGroups: string[] };
@@ -158,29 +177,68 @@ async function findOrCreateCompany(token: string, meeting: Row): Promise<string 
 }
 
 /** One meeting as one deal: created in the QC stage, or updated in place (never moved back a stage). */
-export async function pushMeetingDeal(token: string, destination: Destination, meeting: Row, stored: Stored | undefined): Promise<Stored & { created: boolean }> {
+/** The lead's reply conversation for this meeting (by LinkedIn, then email), for the outreach fields. */
+async function replyFor(config: Config, workspaceId: string, meeting: Row): Promise<ReplyRecord | null> {
+  const handle = /linkedin\.com\/in\/([^/?#\s]+)/i.exec(text(meeting.invitee_linkedin))?.[1] ?? "";
+  const email = text(meeting.invitee_email).toLowerCase();
+  const filters = [
+    handle ? `linkedin_profile_url.ilike.*${handle.replace(/[,()*]/g, "")}*` : "",
+    email ? `raw_data->reply_radar->>email.eq.${email}` : "",
+  ].filter(Boolean);
+  if (!filters.length) return null;
+  const leads = await rows(config, `rr_leads?select=id&workspace_id=eq.${enc(workspaceId)}&or=(${filters.map(enc).join(",")})&limit=5`).catch(() => [] as Row[]);
+  if (!leads.length) return null;
+  const { records } = await replyRecords(config, workspaceId, { leadIds: leads.map((lead) => text(lead.id)), limit: 10 }).catch(() => ({ records: [] as ReplyRecord[] }));
+  return records[0] ?? null;
+}
+
+export async function pushMeetingDeal(token: string, destination: Destination, meeting: Row, stored: Stored | undefined, config: Config): Promise<Stored & { created: boolean }> {
   const plan = object(destination.plan) as unknown as HubSpotPlan & { deals?: DealsPlan };
   const deals = plan.deals;
   if (!deals?.enabled || !deals.pipelineId || !deals.stageId) throw new Error("Booked meetings to deals is not built for this client.");
   const ownerId = plan.settings?.ownerId ?? null;
   const status = STATUSES.has(text(meeting.status)) ? text(meeting.status) : "scheduled";
-  const name = [text(meeting.company_name), text(meeting.invitee_name)].filter(Boolean).join(" · ") || "Booked meeting";
-  const qc: Row = {
-    qc_meeting_status: status,
-    ...(meeting.meeting_at ? { qc_meeting_date: new Date(text(meeting.meeting_at)).toISOString() } : {}),
-    ...(text(meeting.campaign) ? { qc_campaign: text(meeting.campaign) } : {}),
-    ...(text(meeting.summary) ? { description: text(meeting.summary).slice(0, 5000) } : {}),
-  };
+  // The deal is the company; the person when the booking carries no company.
+  const name = text(meeting.company_name) || text(meeting.invitee_name) || "Booked meeting";
+  const reply = await replyFor(config, destination.workspace_id, meeting);
+  const qc: Row = {};
+  const put = (key: string, value: unknown) => { if (value !== "" && value !== null && value !== undefined) qc[key] = value; };
+  put("qc_meeting_status", status);
+  put("qc_meeting_date", meeting.meeting_at ? new Date(text(meeting.meeting_at)).toISOString() : "");
+  put("qc_meeting_host", text(meeting.host));
+  put("qc_campaign", text(meeting.campaign) || reply?.campaign);
+  put("qc_lead_name", text(meeting.invitee_name) || reply?.name);
+  put("qc_lead_title", text(meeting.invitee_title) || reply?.title);
+  put("qc_lead_email", text(meeting.invitee_email) || reply?.email);
+  put("qc_lead_linkedin", canonicalLinkedin(text(meeting.invitee_linkedin)) || reply?.linkedinCanonical);
+  put("qc_company_domain", text(meeting.company_domain) || reply?.domain);
+  put("qc_company_linkedin", text(meeting.company_linkedin) || reply?.companyLinkedinUrl);
+  put("qc_company_industry", text(meeting.company_industry));
+  put("qc_company_size", text(meeting.company_size));
+  put("qc_company_location", text(meeting.company_location));
+  put("qc_sender", reply?.sender);
+  put("qc_outreach_platform", reply?.platform);
+  put("qc_reply_sentiment", reply?.sentiment ? reply.sentiment[0].toUpperCase() + reply.sentiment.slice(1) : "");
+  put("qc_latest_reply", reply?.latestReply.slice(0, 5000));
+  put("qc_conversation", reply ? conversationText(reply, 60_000, "plain") : "");
+  put("qc_pre_call_brief", brief(meeting));
+  if (text(meeting.summary) || text(meeting.company_description)) qc.description = (text(meeting.summary) || text(meeting.company_description)).slice(0, 5000);
 
   // The deal: the one we made, else one the booking alerts already made for this meeting, else a new one.
   let dealId = stored?.deal_id ?? (text(object(object(object(meeting.booking).steps).hubspot).deal_id) || null);
   let created = false;
   if (dealId) {
-    const updated = await hubspot(token, "PATCH", `/crm/v3/objects/deals/${enc(dealId)}`, { properties: qc }).catch((error) => (error instanceof HubSpotError && error.status === 404 ? null : Promise.reject(error)));
-    if (!updated) dealId = null;
+    // The name is only ever corrected from QC's old "… (QC Growth)" form; a name the client chose stays.
+    const current = await hubspot(token, "GET", `/crm/v3/objects/deals/${enc(dealId)}?properties=dealname`).catch((error) => (error instanceof HubSpotError && error.status === 404 ? null : Promise.reject(error)));
+    if (current) {
+      const rename = /\(QC Growth\)$/.test(text(object(current.properties).dealname)) ? { dealname: name } : {};
+      await hubspot(token, "PATCH", `/crm/v3/objects/deals/${enc(dealId)}`, { properties: { ...qc, ...rename } });
+    } else {
+      dealId = null;
+    }
   }
   if (!dealId) {
-    const made = await hubspot(token, "POST", "/crm/v3/objects/deals", { properties: { dealname: `${name} (QC Growth)`, pipeline: deals.pipelineId, dealstage: deals.stageId, ...(ownerId ? { hubspot_owner_id: ownerId } : {}), ...qc } });
+    const made = await hubspot(token, "POST", "/crm/v3/objects/deals", { properties: { dealname: name, pipeline: deals.pipelineId, dealstage: deals.stageId, ...(ownerId ? { hubspot_owner_id: ownerId } : {}), ...qc } });
     dealId = text(made.id);
     created = true;
   }
@@ -208,7 +266,7 @@ export async function pushMeetingDeal(token: string, destination: Destination, m
   return { deal_id: dealId, contact_id: contactId, company_id: companyId, note_id: noteId || null, pushed_hash: null, created };
 }
 
-const meetingHash = (meeting: Row) => createHash("sha256").update(JSON.stringify(["v1", meeting.status, meeting.meeting_at, meeting.when_text, meeting.summary, meeting.campaign, meeting.invitee_name, meeting.invitee_email, meeting.invitee_linkedin, meeting.invitee_title, meeting.company_name, meeting.company_domain, meeting.host, object(object(meeting.booking).tldr)])).digest("hex").slice(0, 32);
+const meetingHash = (meeting: Row) => createHash("sha256").update(JSON.stringify(["v2", meeting.status, meeting.meeting_at, meeting.when_text, meeting.summary, meeting.campaign, meeting.invitee_name, meeting.invitee_email, meeting.invitee_linkedin, meeting.invitee_title, meeting.company_name, meeting.company_domain, meeting.host, object(object(meeting.booking).tldr)])).digest("hex").slice(0, 32);
 
 /** Every meeting that is new or changed since it was last pushed, as deals. `since` narrows to moved rows. */
 export async function pushMeetingsPass(config: Config, destination: Destination, opts: { since?: string; budgetMs?: number } = {}): Promise<{ pushed: number; created: number; updated: number; unchanged: number; failed: number; errors: string[] }> {
@@ -230,7 +288,7 @@ export async function pushMeetingsPass(config: Config, destination: Destination,
     // A canceled meeting that never became a deal stays out; one that did is marked canceled on its deal.
     if (/cancel/i.test(text(meeting.status)) && !before?.deal_id && !text(object(object(object(meeting.booking).steps).hubspot).deal_id)) { summary.unchanged += 1; continue; }
     try {
-      const result = await pushMeetingDeal(destination.api_key, destination, meeting, before);
+      const result = await pushMeetingDeal(destination.api_key, destination, meeting, before, config);
       const saved = await rest(config, "rr_crm_push_meetings?on_conflict=workspace_id,meeting_id,provider", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ workspace_id: destination.workspace_id, meeting_id: id, provider: "hubspot", deal_id: result.deal_id, contact_id: result.contact_id, company_id: result.company_id, note_id: result.note_id, pushed_hash: hash, pushed_at: new Date().toISOString(), error: null }) });
       if (!saved.ok) throw new Error(`Deal ${result.deal_id} made, but QC Command could not remember it (${saved.status}). Stopping so it is not made twice.`);
       summary.pushed += 1;

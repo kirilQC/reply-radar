@@ -91,11 +91,11 @@ const platformOf = (key: string): ReplyRecord["platform"] => (key.startsWith("bi
  * The client's pushable conversations, newest first, as ReplyRecords. `since` narrows to conversations with
  * activity after that time (the automatic sync); `limit` caps one batch.
  */
-export async function replyRecords(config: Config, workspaceId: string, opts: { since?: string; limit?: number; offset?: number } = {}): Promise<{ records: ReplyRecord[]; scanned: number }> {
+export async function replyRecords(config: Config, workspaceId: string, opts: { since?: string; limit?: number; offset?: number; leadIds?: string[] } = {}): Promise<{ records: ReplyRecord[]; scanned: number }> {
   const limit = Math.min(opts.limit ?? 40, 100);
   const conversations = await rows(
     config,
-    `rr_conversations?select=id,lead_id,channel,heyreach_conversation_id,last_message_at&workspace_id=eq.${enc(workspaceId)}${opts.since ? `&last_message_at=gte.${enc(opts.since)}` : ""}&order=last_message_at.desc,id.asc&offset=${opts.offset ?? 0}&limit=${limit}`,
+    `rr_conversations?select=id,lead_id,channel,heyreach_conversation_id,last_message_at&workspace_id=eq.${enc(workspaceId)}${opts.since ? `&last_message_at=gte.${enc(opts.since)}` : ""}${opts.leadIds?.length ? `&lead_id=in.(${opts.leadIds.map(enc).join(",")})` : ""}&order=last_message_at.desc,id.asc&offset=${opts.offset ?? 0}&limit=${limit}`,
   );
   if (!conversations.length) return { records: [], scanned: 0 };
   const leadIds = [...new Set(conversations.map((row) => text(row.lead_id)).filter(Boolean))];
