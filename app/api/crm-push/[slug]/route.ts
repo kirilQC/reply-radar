@@ -93,10 +93,12 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const plan = destination.plan as unknown as AttioPlan;
       const choices = (body.settings && typeof body.settings === "object" ? body.settings : {}) as Row;
       const approved: AttioPlan & { deals?: AttioDealsPlan } = { ...plan, settings: { ...plan.settings, ...(text(choices.ownerId) ? { ownerId: text(choices.ownerId) } : {}) } };
+      // The Booked Meeting (QC) status is part of every build, never skipped.
+      const planDeals = attioDealsPlan(await attioDealsAudit(destination.api_key), (plan as AttioPlan & { deals?: AttioDealsPlan }).deals);
+      if (!planDeals.available) return NextResponse.json({ ok: false, error: "Booked Meeting (QC) stage: the Deals object is switched off in this Attio workspace (or the token can't see it). Turn on Deals in Attio (Workspace settings → Objects), then re-read." }, { status: 400 });
       const log = await attioApply(destination.api_key, approved);
-      const planDeals = (plan as AttioPlan & { deals?: AttioDealsPlan }).deals;
-      if (planDeals) {
-        const deals: AttioDealsPlan = { ...planDeals, enabled: choices.pushDeals === undefined ? planDeals.enabled : choices.pushDeals === true && planDeals.available };
+      {
+        const deals: AttioDealsPlan = { ...planDeals, enabled: true };
         log.push(...(await attioDealsApply(destination.api_key, deals)));
         approved.deals = { ...deals, statusExists: deals.enabled ? true : deals.statusExists, createAttributes: deals.enabled ? [] : deals.createAttributes };
       }
@@ -127,11 +129,13 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const approved: HubSpotPlan & { deals?: DealsPlan } = { ...plan, items, settings: choices.useLeadSource === false ? { ...settings, leadSourceProperty: null, leadSourceValue: null } : settings };
       const log = await hubspotApply(destination.api_key, approved);
       // Booked meetings as deals: the chosen pipeline (re-planned when it changed), its QC stage, the deal fields.
+      // The Booked Meeting (QC) stage is part of every build, never skipped: re-read now, and refuse the build
+      // while HubSpot won't let the key see deals.
       const planDeals = (plan as HubSpotPlan & { deals?: DealsPlan }).deals;
-      if (planDeals) {
-        const pipelineId = text(choices.dealPipelineId) || planDeals.pipelineId;
-        const chosen = pipelineId !== planDeals.pipelineId ? dealsPlan(await dealsAudit(destination.api_key), { ...planDeals, pipelineId }) : planDeals;
-        const deals: DealsPlan = { ...chosen, enabled: choices.pushDeals === undefined ? chosen.enabled : choices.pushDeals === true };
+      const freshDeals = dealsPlan(await dealsAudit(destination.api_key), { ...(planDeals ?? {}), pipelineId: text(choices.dealPipelineId) || planDeals?.pipelineId || null });
+      if (freshDeals.blocker) return NextResponse.json({ ok: false, error: `Booked Meeting (QC) stage: ${freshDeals.blocker}` }, { status: 400 });
+      {
+        const deals: DealsPlan = { ...freshDeals, enabled: true };
         const built = await dealsApply(destination.api_key, deals);
         log.push(...(built.log as typeof log));
         approved.deals = { ...deals, stageId: built.stageId, stageExists: Boolean(built.stageId) };

@@ -79,7 +79,7 @@ export async function hubspotConnect(token: string): Promise<{ portalId: string;
   };
 }
 
-export const REQUIRED_SCOPES = ["crm.objects.contacts.read", "crm.objects.contacts.write", "crm.objects.companies.read", "crm.objects.companies.write", "crm.schemas.contacts.read", "crm.schemas.contacts.write", "crm.objects.owners.read"];
+export const REQUIRED_SCOPES = ["crm.objects.contacts.read", "crm.objects.contacts.write", "crm.objects.companies.read", "crm.objects.companies.write", "crm.schemas.contacts.read", "crm.schemas.contacts.write", "crm.objects.owners.read", "crm.objects.deals.read", "crm.objects.deals.write", "crm.schemas.deals.read", "crm.schemas.deals.write"];
 
 // ── Audit (read only) ───────────────────────────────────────────────────────────────────────────
 
@@ -247,7 +247,9 @@ export function hubspotPlan(audit: HubSpotAudit): HubSpotPlan {
   const warnings: string[] = [];
   if (audit.missingScopes.length) {
     const companies = audit.missingScopes.filter((scope) => scope.includes("companies"));
-    const rest = audit.missingScopes.filter((scope) => !scope.includes("companies"));
+    const deals = audit.missingScopes.filter((scope) => scope.includes("deals"));
+    const rest = audit.missingScopes.filter((scope) => !scope.includes("companies") && !scope.includes("deals"));
+    if (deals.length) warnings.push(`The key is missing ${deals.join(", ")}, so booked meetings can't become deals in the Booked Meeting (QC) stage. Edit the key in HubSpot (Development → Keys), tick them, then re-read. The build waits for this.`);
     if (rest.length) warnings.push(`The key is missing ${rest.join(", ")}. Edit the key in HubSpot (Development → Keys) and tick them, or the build will fail.`);
     if (companies.length) warnings.push(`The key is missing ${companies.join(", ")}, so companies (name, domain, LinkedIn page) cannot be created or linked. Edit the key in HubSpot (Development → Keys) and tick them before pushing.`);
   }

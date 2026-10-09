@@ -170,3 +170,17 @@ test("client Operations page: one button on onboarding, every sign-in comes back
   assert.match(bookings, /`\/operations\/\$\{focus\}\?view=meetings`/);
   assert.match(ui, /crm\.objects\.deals\.read \+ write and crm\.schemas\.deals\.read \+ write/);
 });
+
+test("the Booked Meeting (QC) stage is never skipped: no opt-out, a key without deals access blocks the build and says why", () => {
+  const deals = readFileSync(new URL("../app/lib/hubspot-deals.ts", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../app/api/crm-push/[slug]/route.ts", import.meta.url), "utf8");
+  const push = readFileSync(new URL("../app/lib/hubspot-push.ts", import.meta.url), "utf8");
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(deals, /pipelines\/deals"\)\.then\(\(data\) => list\(data\.results\)\)\.catch\(\(\) => \[\]/, "a refused pipeline read must not look like 'no pipelines'");
+  assert.match(deals, /enabled: true,\n\s+blocker,/);
+  assert.match(route, /if \(freshDeals\.blocker\) return NextResponse\.json\(\{ ok: false/);
+  assert.match(route, /if \(!planDeals\.available\) return NextResponse\.json\(\{ ok: false/);
+  assert.match(push, /"crm\.objects\.deals\.read", "crm\.objects\.deals\.write", "crm\.schemas\.deals\.read", "crm\.schemas\.deals\.write"\]/);
+  assert.doesNotMatch(ui, /setPushDeals/);
+  assert.match(ui, /disabled=\{Boolean\(busy\) \|\| Boolean\(dealsBlocker\)\}/);
+});

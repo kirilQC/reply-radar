@@ -75,6 +75,7 @@ body.light-mode .ops-area {
 .ops-good { color: var(--ops-good); }
 .ops-wait { color: var(--ops-wait); }
 .ops-off { color: var(--ops-faint); }
+.ops-bad { color: var(--ops-bad); }
 .ops-account { padding: 18px; gap: 6px; font: 400 13px var(--ops-mono), ui-monospace, monospace; }
 .ops-account .ops-link { align-self: flex-start; margin-top: 6px; }
 .ops-faint { color: var(--ops-faint); }

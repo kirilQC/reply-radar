@@ -42,7 +42,7 @@ type Crm = {
     conversation: string;
     notTouched: string[];
     warnings: string[];
-    deals?: { enabled: boolean; pipelineId?: string | null; pipelineLabel?: string; stageExists?: boolean; stageId?: string | null; createProperties?: string[]; pipelines?: Array<{ id: string; label: string; hasStage: boolean }>; available?: boolean; statusExists?: boolean; createAttributes?: string[] };
+    deals?: { enabled: boolean; pipelineId?: string | null; pipelineLabel?: string; stageExists?: boolean; stageId?: string | null; createProperties?: string[]; pipelines?: Array<{ id: string; label: string; hasStage: boolean }>; blocker?: string | null; available?: boolean; statusExists?: boolean; createAttributes?: string[] };
   };
   buildLog: Array<{ at?: string; kind: string; name: string; result: string; detail: string }>;
   autoPush: boolean;
@@ -141,6 +141,11 @@ function logTime(value: string) {
   const time = Date.parse(value);
   return Number.isNaN(time) ? "" : new Date(time).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
 }
+/** The Booked Meeting (QC) stage exists, so booked meetings land as deals. */
+const dealsAreLive = (crm: Crm | null, provider: string) => {
+  const deals = crm?.plan?.deals;
+  return Boolean(deals && (provider === "hubspot" ? deals.stageId : deals.statusExists));
+};
 const hubspotHost = (crm: Crm) => ((crm.accountName ?? "").includes("hubspot.com") ? crm.accountName : "app.hubspot.com");
 
 /** The CRM's state and actions, shared by the rail (status) and the HubSpot and Attio views. */
@@ -212,11 +217,10 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
   useEffect(() => { if (crm?.plan?.settings.ownerId) setOwnerId(crm.plan.settings.ownerId); }, [crm?.plan?.settings.ownerId]);
   const [lifecycle, setLifecycle] = useState(true);
   const [leadSource, setLeadSource] = useState(true);
-  const [pushDeals, setPushDeals] = useState(true);
   const [dealPipeline, setDealPipeline] = useState("");
   useEffect(() => {
-    if (crm?.plan?.deals) { setPushDeals(crm.plan.deals.enabled); setDealPipeline(crm.plan.deals.pipelineId ?? crm.plan.deals.pipelines?.[0]?.id ?? ""); }
-  }, [crm?.plan?.deals?.enabled, crm?.plan?.deals?.pipelineId, crm?.plan?.deals?.pipelines]);
+    if (crm?.plan?.deals) setDealPipeline(crm.plan.deals.pipelineId ?? crm.plan.deals.pipelines?.[0]?.id ?? "");
+  }, [crm?.plan?.deals?.pipelineId, crm?.plan?.deals?.pipelines]);
   const [meetingsPushed, setMeetingsPushed] = useState<null | { created: number; updated: number; failed: number }>(null);
   const [tested, setTested] = useState<null | { name: string; company: string; campaign: string; created: boolean; link: string | null }>(null);
   const [progress, setProgress] = useState<{ pushed: number; created: number; updated: number; unchanged: number; failed: number } | null>(null);
@@ -244,9 +248,13 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
   const creates = crm?.plan?.items.filter((item) => item.action === "create") ?? [];
   const verified = crm?.buildLog.filter((entry) => entry.result === "verified").length ?? 0;
   const deals = crm?.plan?.deals;
+  const dealsLive = dealsAreLive(crm, provider);
+  // Why the Booked Meeting (QC) stage can't be built yet. It is never skipped: the build waits on it.
   const dealScopesMissing = provider === "hubspot" && crm?.audit?.scopes ? HUBSPOT_DEAL_SCOPES.filter((scope) => !crm.audit!.scopes!.includes(scope)) : [];
-  const dealsPending = Boolean(deals && (provider === "hubspot" ? !deals.stageId && (deals.pipelines?.length ?? 0) > 0 : deals.available && !deals.statusExists));
-  const showPlan = connectedHere && crm?.plan && (crm.status !== "built" || dealsPending);
+  const dealsBlocker = dealsLive ? null
+    : deals?.blocker ?? (dealScopesMissing.length ? `The service key can't read this HubSpot's deal pipelines. Add ${dealScopesMissing.join(", ")} to the QC Growth key (Development → Keys), then re-read.` : null)
+      ?? (provider === "attio" && deals && !deals.available ? "The Deals object is switched off in this Attio workspace (or the token can't see it). Turn on Deals in Attio (Workspace settings → Objects), then re-read." : null);
+  const showPlan = connectedHere && crm?.plan && (crm.status !== "built" || !dealsLive);
 
   if (!loaded) return <p className="ops-muted">Loading {name}…</p>;
 
@@ -328,26 +336,19 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
                 {(c.audit?.owners ?? []).map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
               </select>
             </label>
-            {provider === "attio" && deals && (deals.available
-              ? <label className="ops-check"><input type="checkbox" checked={pushDeals} onChange={(e) => setPushDeals(e.target.checked)} /> Booked meetings become deals in a Booked Meeting (QC) stage</label>
-              : <span className="ops-muted">Deals are switched off in this Attio workspace.</span>)}
             {provider === "hubspot" && deals && (deals.pipelines?.length ?? 0) > 0 && (
-              <>
-                <label className="ops-check"><input type="checkbox" checked={pushDeals} onChange={(e) => setPushDeals(e.target.checked)} /> Booked meetings become deals in a Booked Meeting (QC) stage</label>
-                {pushDeals && (
-                  <label className="ops-field">Pipeline
-                    <select className="ops-input" value={dealPipeline} onChange={(e) => setDealPipeline(e.target.value)}>
-                      {(deals.pipelines ?? []).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.label}{pipeline.hasStage ? " (stage already there)" : ""}</option>)}
-                    </select>
-                  </label>
-                )}
-              </>
+              <label className="ops-field">Pipeline for the Booked Meeting (QC) stage
+                <select className="ops-input" value={dealPipeline} onChange={(e) => setDealPipeline(e.target.value)}>
+                  {(deals.pipelines ?? []).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.label}{pipeline.hasStage ? " (stage already there)" : ""}</option>)}
+                </select>
+              </label>
             )}
           </div>
           <p className="ops-muted">{c.plan.conversation}</p>
           <p className="ops-muted">Not touched: {c.plan.notTouched.join(" · ")}</p>
+          {dealsBlocker && <p className="ops-error">Booked Meeting (QC) stage: {dealsBlocker}</p>}
           <div className="ops-row">
-            <button type="button" className="ops-btn ops-pri" disabled={Boolean(busy)} onClick={() => void step("apply", { settings: { ownerId, lifecycleOnCreate: lifecycle, useLeadSource: leadSource, pushDeals, dealPipelineId: dealPipeline } })}>
+            <button type="button" className="ops-btn ops-pri" disabled={Boolean(busy) || Boolean(dealsBlocker)} onClick={() => void step("apply", { settings: { ownerId, lifecycleOnCreate: lifecycle, useLeadSource: leadSource, pushDeals: true, dealPipelineId: dealPipeline } })}>
               {busy === "apply" ? "Building…" : `Approve and build${creates.length ? ` (${creates.length} to create)` : ""}`}
             </button>
             <button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Reading…" : `Re-read ${name}`}</button>
@@ -395,23 +396,18 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
           <section className="ops-panel">
             <div className="ops-panel-head">
               <span className="ops-label">Booked meetings → Deals</span>
-              {deals?.enabled && (provider === "hubspot" ? deals.stageId : deals.statusExists)
-                ? <span className="ops-state ops-good">● Live</span>
-                : <span className="ops-state ops-wait">● {dealScopesMissing.length ? "Needs deals access" : dealsPending ? "Needs approval" : deals?.enabled === false ? "Off" : "Not set up"}</span>}
+              {dealsLive ? <span className="ops-state ops-good">● Live</span> : dealsBlocker ? <span className="ops-state ops-bad">● Blocked</span> : <span className="ops-state ops-wait">● Needs approval</span>}
             </div>
             <div className="ops-h2">Booked Meeting (QC) stage</div>
-            {deals?.enabled && (provider === "hubspot" ? deals.stageId : deals.statusExists) ? (
-              <p className="ops-muted">{provider === "hubspot" ? `${deals.pipelineLabel || "Pipeline"} → Booked Meeting (QC)` : "Deals → Booked Meeting (QC)"} · {(deals.createProperties ?? deals.createAttributes ?? []).length || 19} QC deal fields</p>
-            ) : dealScopesMissing.length ? (
+            {dealsLive && deals ? (
+              <p className="ops-muted">{provider === "hubspot" ? `${deals.pipelineLabel || "Pipeline"} → Booked Meeting (QC)` : "Deals → Booked Meeting (QC)"} · first stage, one deal per booked lead, named after the company</p>
+            ) : dealsBlocker ? (
               <>
-                <p className="ops-muted">The service key can't see deals. Add these scopes to the QC Growth key in HubSpot, then re-read:</p>
-                <p className="ops-code">{dealScopesMissing.join(" · ")}</p>
+                <p className="ops-error">{dealsBlocker}</p>
                 <div className="ops-row"><button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Reading…" : `Re-read ${name}`}</button></div>
               </>
-            ) : dealsPending ? (
-              <p className="ops-muted">Pick the pipeline in the game plan above and approve.</p>
             ) : (
-              <div className="ops-row"><button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Reading…" : `Re-read ${name}`}</button></div>
+              <p className="ops-muted">Choose the pipeline in the game plan above and approve.</p>
             )}
           </section>
         </div>
@@ -632,7 +628,8 @@ export default function ClientOperations({ slug }: { slug: string }) {
   const status = (target: View): { label: string; tone: "good" | "wait" | "off" } => {
     if (target === "hubspot" || target === "attio") {
       if (!crm?.connected || crm.provider !== target) return { label: crm?.connected ? "Off" : "Connect", tone: "off" };
-      return crm.status === "built" ? { label: "Live", tone: "good" } : { label: "Setup", tone: "wait" };
+      if (crm.status !== "built") return { label: "Setup", tone: "wait" };
+      return dealsAreLive(crm, target) ? { label: "Live", tone: "good" } : { label: "Deals", tone: "wait" };
     }
     if (target === "sheets") {
       const live = sheetsState.sheets.filter((sheet) => sheet.status === "built").length;

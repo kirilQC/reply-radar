@@ -46,13 +46,18 @@ export const DEAL_PROPERTIES: DealSpec[] = [
   textField("qc_pre_call_brief", "QC pre-call brief", "QC's brief on the lead and company for the call.", true),
 ];
 
-export type DealsAudit = { pipelines: Array<{ id: string; label: string; stages: Array<{ id: string; label: string }> }>; dealProperties: string[]; dealGroups: string[] };
-export type DealsPlan = { enabled: boolean; pipelineId: string | null; pipelineLabel: string; stageId: string | null; stageExists: boolean; createProperties: string[]; pipelines: Array<{ id: string; label: string; hasStage: boolean }> };
+export type DealsAudit = { pipelines: Array<{ id: string; label: string; stages: Array<{ id: string; label: string }> }>; dealProperties: string[]; dealGroups: string[]; access: boolean; accessError: string };
+/** blocker: why the Booked Meeting (QC) stage cannot be built yet. It is never skipped: the build waits on it. */
+export type DealsPlan = { enabled: boolean; pipelineId: string | null; pipelineLabel: string; stageId: string | null; stageExists: boolean; createProperties: string[]; pipelines: Array<{ id: string; label: string; hasStage: boolean }>; blocker: string | null };
+
+export const DEAL_SCOPES = ["crm.objects.deals.read", "crm.objects.deals.write", "crm.schemas.deals.read", "crm.schemas.deals.write"];
 
 /** Read only: the client's deal pipelines and which QC deal fields already exist. */
 export async function dealsAudit(token: string): Promise<DealsAudit> {
+  // A key without deals scopes is refused here: that is "no access", never "no pipelines".
+  let accessError = "";
   const [pipelines, properties, groups] = await Promise.all([
-    hubspot(token, "GET", "/crm/v3/pipelines/deals").then((data) => list(data.results)).catch(() => [] as Row[]),
+    hubspot(token, "GET", "/crm/v3/pipelines/deals").then((data) => list(data.results)).catch((error) => { accessError = error instanceof Error ? error.message.slice(0, 200) : "refused"; return [] as Row[]; }),
     hubspot(token, "GET", "/crm/v3/properties/deals").then((data) => list(data.results)).catch(() => [] as Row[]),
     hubspot(token, "GET", "/crm/v3/properties/deals/groups").then((data) => list(data.results)).catch(() => [] as Row[]),
   ]);
@@ -60,6 +65,8 @@ export async function dealsAudit(token: string): Promise<DealsAudit> {
     pipelines: pipelines.filter((p) => p.archived !== true).map((p) => ({ id: text(p.id), label: text(p.label), stages: list(p.stages).filter((s) => s.archived !== true).map((s) => ({ id: text(s.id), label: text(s.label) })) })),
     dealProperties: properties.map((p) => text(p.name)),
     dealGroups: groups.map((g) => text(g.name)),
+    access: !accessError,
+    accessError,
   };
 }
 
@@ -70,8 +77,12 @@ export function dealsPlan(audit: DealsAudit, previous?: Partial<DealsPlan> | nul
   const pipelines = audit.pipelines.map((p) => ({ id: p.id, label: p.label, hasStage: p.stages.some((s) => isQcStage(s.label)) }));
   const chosen = audit.pipelines.find((p) => p.id === previous?.pipelineId) ?? audit.pipelines.find((p) => p.id === "default") ?? audit.pipelines[0] ?? null;
   const stage = chosen?.stages.find((s) => isQcStage(s.label)) ?? null;
+  const blocker = audit.access === false
+    ? `The service key can't read this HubSpot's deal pipelines. Add ${DEAL_SCOPES.join(", ")} to the QC Growth key (Development → Keys), then re-read.`
+    : !audit.pipelines.length ? "HubSpot returned no deal pipelines for this account." : null;
   return {
-    enabled: previous?.enabled ?? true,
+    enabled: true,
+    blocker,
     pipelineId: chosen?.id ?? null,
     pipelineLabel: chosen?.label ?? "",
     stageId: stage?.id ?? null,
@@ -85,7 +96,10 @@ export function dealsPlan(audit: DealsAudit, previous?: Partial<DealsPlan> | nul
 export async function dealsApply(token: string, plan: DealsPlan): Promise<{ log: Array<{ at: string; kind: string; name: string; result: "created" | "reused" | "failed"; detail: string }>; stageId: string | null }> {
   const log: Array<{ at: string; kind: string; name: string; result: "created" | "reused" | "failed"; detail: string }> = [];
   const at = () => new Date().toISOString();
-  if (!plan.enabled || !plan.pipelineId) return { log, stageId: plan.stageId };
+  if (!plan.pipelineId) {
+    log.push({ at: at(), kind: "deal-stage", name: QC_DEAL_STAGE_LABEL, result: "failed", detail: plan.blocker ?? "No deal pipeline to put the stage in." });
+    return { log, stageId: null };
+  }
   await hubspot(token, "POST", "/crm/v3/properties/deals/groups", { name: QC_GROUP.name, label: QC_GROUP.label, displayOrder: -1 }).catch(() => undefined);
   for (const spec of DEAL_PROPERTIES.filter((p) => plan.createProperties.includes(p.name))) {
     try {

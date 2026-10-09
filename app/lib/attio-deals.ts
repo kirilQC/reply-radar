@@ -36,7 +36,7 @@ export async function attioDealsAudit(token: string): Promise<{ available: boole
 
 export function attioDealsPlan(audit: { available: boolean; stages: string[]; attributes: string[] }, previous?: Partial<AttioDealsPlan> | null): AttioDealsPlan {
   return {
-    enabled: previous?.enabled ?? audit.available,
+    enabled: true,
     available: audit.available,
     statusExists: audit.stages.some((title) => title.trim().toLowerCase() === QC_DEAL_STATUS.toLowerCase()),
     createAttributes: DEAL_PROPERTIES.map((p) => p.name).filter((slug) => !audit.attributes.includes(slug)),
