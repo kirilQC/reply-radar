@@ -119,7 +119,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       // Creates one TEST view, segment, report and dashboard with the client's key, reads each back, deletes them all.
       const token = destination.api_key;
       const call = async (method: string, path: string, payload?: unknown) => {
-        const response = await fetch(`https://api.hubapi.com${path}`, { method, headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: payload === undefined ? undefined : JSON.stringify(payload), cache: "no-store" }).catch(() => null);
+        const response = await fetch(`https://api.hubapi.com${path}`, { method, headers: { Authorization: `Bearer ${token}`, "content-type": "application/json", ...(path.startsWith("/hub/cli/") ? { "user-agent": "hubcli/0.15.1", accept: "*/*" } : {}) }, body: payload === undefined ? undefined : JSON.stringify(payload), cache: "no-store" }).catch(() => null);
         const raw = response ? await response.text().catch(() => "") : "";
         let json: Record<string, unknown> = {};
         try { json = JSON.parse(raw); } catch { /* empty */ }
