@@ -36,7 +36,7 @@ type Crm = {
     conversation: string;
     notTouched: string[];
     warnings: string[];
-    deals?: { enabled: boolean; pipelineId: string | null; pipelineLabel: string; stageExists: boolean; stageId: string | null; createProperties: string[]; pipelines: Array<{ id: string; label: string; hasStage: boolean }> };
+    deals?: { enabled: boolean; pipelineId?: string | null; pipelineLabel?: string; stageExists?: boolean; stageId?: string | null; createProperties?: string[]; pipelines?: Array<{ id: string; label: string; hasStage: boolean }>; available?: boolean; statusExists?: boolean; createAttributes?: string[] };
   };
   buildLog: Array<{ kind: string; name: string; result: string; detail: string }>;
   autoPush: boolean;
@@ -218,7 +218,7 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
           </section>
         )}
 
-        {connectedHere && crm?.plan && (crm.status !== "built" || (provider === "hubspot" && crm.plan.deals && !crm.plan.deals.stageId && crm.plan.deals.pipelines.length > 0)) && (
+        {connectedHere && crm?.plan && (crm.status !== "built" || (provider === "hubspot" && crm.plan.deals && !crm.plan.deals.stageId && (crm.plan.deals.pipelines?.length ?? 0) > 0) || (provider === "attio" && crm.plan.deals?.available && !crm.plan.deals.statusExists)) && (
           <section className="oc-section">
             <h3>Game plan</h3>
             {crm.plan.warnings.map((w) => <p key={w} className="oc-warn">{w}</p>)}
@@ -240,13 +240,20 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
                 </select>
               </label>
             </div>
-            {provider === "hubspot" && crm.plan.deals && crm.plan.deals.pipelines.length > 0 && (
+            {provider === "attio" && crm.plan.deals && (
+              <div className="oc-choices">
+                {crm.plan.deals.available
+                  ? <label><input type="checkbox" checked={pushDeals} onChange={(e) => setPushDeals(e.target.checked)} /> Booked meetings become deals in a "Booked Meeting (QC)" stage</label>
+                  : <span className="oc-muted">Deals are switched off in this Attio workspace, so booked meetings can't become deals.</span>}
+              </div>
+            )}
+            {provider === "hubspot" && crm.plan.deals && (crm.plan.deals.pipelines?.length ?? 0) > 0 && (
               <div className="oc-choices">
                 <label><input type="checkbox" checked={pushDeals} onChange={(e) => setPushDeals(e.target.checked)} /> Booked meetings become deals in a "Booked Meeting (QC)" stage</label>
                 {pushDeals && (
                   <label>Pipeline
                     <select value={dealPipeline} onChange={(e) => setDealPipeline(e.target.value)}>
-                      {crm.plan.deals.pipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.label}{pipeline.hasStage ? " (stage already there)" : ""}</option>)}
+                      {(crm.plan.deals.pipelines ?? []).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.label}{pipeline.hasStage ? " (stage already there)" : ""}</option>)}
                     </select>
                   </label>
                 )}
@@ -284,6 +291,7 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
             {progress && <p className="oc-muted">{progress.created} created · {progress.updated} updated · {progress.unchanged} unchanged{progress.failed ? ` · ${progress.failed} failed` : ""}</p>}
             {meetingsPushed && <p className="oc-muted">Booked meetings: {meetingsPushed.created} deals created · {meetingsPushed.updated} updated{meetingsPushed.failed ? ` · ${meetingsPushed.failed} failed` : ""}</p>}
             {provider === "hubspot" && crm.plan?.deals?.enabled && crm.plan.deals.stageId && <p className="oc-muted">Booked meetings go to {crm.plan.deals.pipelineLabel} → Booked Meeting (QC)</p>}
+            {provider === "attio" && crm.plan?.deals?.enabled && crm.plan.deals.statusExists && <p className="oc-muted">Booked meetings go to Deals → Booked Meeting (QC)</p>}
             {crm.lastPushSummary?.errors?.length ? <ul className="oc-errors">{crm.lastPushSummary.errors.map((e) => <li key={e}>{e}</li>)}</ul> : null}
           </section>
         )}

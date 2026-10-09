@@ -313,7 +313,7 @@ const firstValue = (values: Row, slug: string): Row => object(list(values[slug])
  * the write is tried again without the optional fields, one at a time, in this order.
  */
 const DROPPABLE = ["linkedin", "email_addresses", "job_title", "company"];
-async function writeTolerant(token: string, method: string, path: string, values: Row, wrap: (values: Row) => unknown = (v) => ({ data: { values: v } }), droppable = DROPPABLE): Promise<Row> {
+export async function writeTolerant(token: string, method: string, path: string, values: Row, wrap: (values: Row) => unknown = (v) => ({ data: { values: v } }), droppable = DROPPABLE): Promise<Row> {
   let current = { ...values };
   for (;;) {
     try {

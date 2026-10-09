@@ -4,7 +4,7 @@
 import { NextResponse } from "next/server";
 import { rows, type Destination } from "../../../lib/crm-push";
 import { pushPass } from "../../../lib/crm-push-run";
-import { pushMeetingsPass } from "../../../lib/hubspot-deals";
+import { pushMeetingsPass } from "../../../lib/meetings-deals-run";
 
 /**
  * The worker's automatic push (every few minutes): for every client whose CRM build is applied and whose

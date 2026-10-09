@@ -96,14 +96,14 @@ test("Google Sheets: only mapped columns and QC ID are written, a lead is found 
   assert.match(route, /if \(destination\.status !== "built"\) return NextResponse\.json\(\{ ok: false, error: "Confirm the column mapping first\." \}/);
 });
 
-test("HubSpot deals: an existing deal is updated but never moved back a stage, a canceled meeting with no deal stays out", () => {
-  const lib = readFileSync(new URL("../app/lib/hubspot-deals.ts", import.meta.url), "utf8");
-  const qc = lib.slice(lib.indexOf("const qc: Row = {}"), lib.indexOf("// The deal: the one we made"));
-  assert.doesNotMatch(qc, /dealstage|"pipeline"|pipeline:/);
-  assert.match(lib, /PATCH", `\/crm\/v3\/objects\/deals\/\$\{enc\(dealId\)\}`, \{ properties: \{ \.\.\.qc, \.\.\.rename \} \}/);
-  // A deal is the company; QC only renames its own old "(QC Growth)" names.
-  assert.match(lib, /const name = text\(meeting\.company_name\) \|\| reply\?\.company \|\| text\(meeting\.invitee_name\)/);
-  assert.match(lib, /\/\\\(QC Growth\\\)\$\/\.test/);
-  assert.match(lib, /if \(\/cancel\/i\.test\(text\(meeting\.status\)\) && !before\?\.deal_id/);
-  assert.doesNotMatch(lib, /"DELETE"/);
+test("Deals: an existing deal is updated but never moved back a stage, named for the company, a canceled meeting with no deal stays out", () => {
+  const hub = readFileSync(new URL("../app/lib/hubspot-deals.ts", import.meta.url), "utf8");
+  const attioDeals = readFileSync(new URL("../app/lib/attio-deals.ts", import.meta.url), "utf8");
+  const run = readFileSync(new URL("../app/lib/meetings-deals-run.ts", import.meta.url), "utf8");
+  assert.match(hub, /PATCH", `\/crm\/v3\/objects\/deals\/\$\{enc\(dealId\)\}`, \{ properties: \{ \.\.\.qc, \.\.\.rename \} \}/);
+  assert.match(hub, /name: text\(meeting\.company_name\) \|\| reply\?\.company \|\| text\(meeting\.invitee_name\)/);
+  const attioUpdate = attioDeals.slice(attioDeals.indexOf("if (dealId) {"), attioDeals.indexOf("if (!dealId) {"));
+  assert.doesNotMatch(attioUpdate, /stage:|owner:/);
+  assert.match(run, /if \(\/cancel\/i\.test\(text\(meeting\.status\)\) && !before\?\.deal_id/);
+  for (const source of [hub, attioDeals, run]) assert.doesNotMatch(source, /"DELETE"/);
 });
