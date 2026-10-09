@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, type Destination } from "../../../lib/crm-push";
-import { pushPass } from "../../../lib/crm-push-run";
+import { pushOne, pushPass } from "../../../lib/crm-push-run";
 import { hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotAudit, type HubSpotPlan } from "../../../lib/hubspot-push";
 
 /**
@@ -88,6 +88,9 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const failed = log.filter((entry) => entry.result === "failed");
       await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: failed.length ? "planned" : "built" });
       return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
+    }
+    if (action === "push_one") {
+      return reply({ test: await pushOne(c, destination as Destination) });
     }
     if (action === "push") {
       const summary = await pushPass(c, destination as Destination, { offset: Number(body.offset) || 0, budgetMs: 240_000 });

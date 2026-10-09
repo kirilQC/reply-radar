@@ -103,6 +103,7 @@ function CrmPanel({ slug, clientName, provider, onClose }: { slug: string; clien
   useEffect(() => { if (crm?.plan?.settings.ownerId) setOwnerId(crm.plan.settings.ownerId); }, [crm?.plan?.settings.ownerId]);
   const [lifecycle, setLifecycle] = useState(true);
   const [leadSource, setLeadSource] = useState(true);
+  const [tested, setTested] = useState<null | { name: string; company: string; campaign: string; created: boolean; link: string | null }>(null);
   const [progress, setProgress] = useState<{ pushed: number; created: number; updated: number; unchanged: number; failed: number } | null>(null);
 
   const load = useCallback(async () => {
@@ -234,9 +235,16 @@ function CrmPanel({ slug, clientName, provider, onClose }: { slug: string; clien
               <span><strong>{when(crm.lastPushAt)}</strong>last push</span>
             </div>
             <div className="oc-row">
+              <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("push_one").then((payload) => payload?.test && setTested(payload.test))}>{busy === "push_one" ? "Pushing 1…" : "Push 1 lead (test)"}</button>
               <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void pushAll()}>{busy === "push" ? "Pushing…" : "Push all replies"}</button>
               <label className="oc-toggle"><input type="checkbox" checked={crm.autoPush} disabled={Boolean(busy)} onChange={(e) => void step("auto", { on: e.target.checked })} /> Push new replies automatically</label>
             </div>
+            {tested && (
+              <p className="oc-note">
+                {tested.created ? "Created" : "Updated"} {tested.name}{tested.company ? ` (${tested.company})` : ""} · {tested.campaign}
+                {tested.link && <> · <a href={tested.link} target="_blank" rel="noreferrer">Open in HubSpot ↗</a></>}
+              </p>
+            )}
             {progress && <p className="oc-muted">{progress.created} created · {progress.updated} updated · {progress.unchanged} unchanged{progress.failed ? ` · ${progress.failed} failed` : ""}</p>}
             {crm.lastPushSummary?.errors?.length ? <ul className="oc-errors">{crm.lastPushSummary.errors.map((e) => <li key={e}>{e}</li>)}</ul> : null}
           </section>

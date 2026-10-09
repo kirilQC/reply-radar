@@ -47,3 +47,29 @@ export async function pushPass(config: Config, destination: Destination, opts: {
   await saveDestination(config, destination.workspace_id, destination.kind, { last_push_at: summary.at, last_push_summary: summary as unknown as Record<string, unknown> }).catch(() => undefined);
   return summary;
 }
+
+/**
+ * One lead, for a test before "Push all": the newest reply not pushed yet (or the newest at all when every one
+ * has been), sent on its own. Returns who it was and where the contact is, so the person can check it.
+ */
+export async function pushOne(config: Config, destination: Destination): Promise<{ name: string; company: string; campaign: string; contactId: string; created: boolean; link: string | null }> {
+  if (!destination.api_key) throw new Error("Not connected.");
+  if (destination.status !== "built") throw new Error("The build has not been approved and applied yet.");
+  if (destination.provider !== "hubspot") throw new Error(`${destination.provider} pushing is not built yet.`);
+  const { records } = await replyRecords(config, destination.workspace_id, { limit: 25 });
+  if (!records.length) throw new Error("There are no replies to push yet.");
+  const stored = await pushedRecords(config, destination.workspace_id, destination.provider, records.map((record) => record.conversationId));
+  const record = records.find((candidate) => !stored.has(candidate.conversationId)) ?? records[0];
+  const before = stored.get(record.conversationId);
+  const result = await hubspotPush(destination.api_key, destination, record, before);
+  await savePushRecord(config, destination.workspace_id, destination.provider, { conversationId: record.conversationId, contactId: result.contactId, companyId: result.companyId, noteId: result.noteId, hash: record.hash, createdContact: result.created });
+  const host = (destination.account_name ?? "").includes("hubspot.com") ? destination.account_name : "app.hubspot.com";
+  return {
+    name: record.name,
+    company: record.company,
+    campaign: record.campaign,
+    contactId: result.contactId,
+    created: result.created,
+    link: destination.account_id ? `https://${host}/contacts/${destination.account_id}/record/0-1/${result.contactId}` : null,
+  };
+}

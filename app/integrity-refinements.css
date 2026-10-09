@@ -7124,3 +7124,4 @@ button.booking-chip:disabled { opacity: 0.5; cursor: default; }
 .oc-note { margin: 0; color: var(--green, #55c7a2); font-size: 11px; }
 .oc-error { margin: 0; color: var(--coral, #ed8a77); font-size: 11px; }
 .oc-foot { display: flex; justify-content: space-between; align-items: center; }
+.oc-note a { color: var(--accent); }

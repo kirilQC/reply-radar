@@ -67,3 +67,10 @@ test("QC Growth owns every contact QC brings in: found or created, the default, 
   const route = readFileSync(new URL("../app/api/crm-push/[slug]/route.ts", import.meta.url), "utf8");
   assert.match(route, /\.\.\.\(text\(choices\.ownerId\) \? \{ ownerId: text\(choices\.ownerId\) \} : \{\}\)/);
 });
+
+test("a one-lead test push sends exactly one reply and links to the contact", () => {
+  const run = readFileSync(new URL("../app/lib/crm-push-run.ts", import.meta.url), "utf8");
+  const one = run.slice(run.indexOf("export async function pushOne"));
+  assert.equal((one.match(/hubspotPush\(/g) ?? []).length, 1);
+  assert.match(one, /\/contacts\/\$\{destination\.account_id\}\/record\/0-1\/\$\{result\.contactId\}/);
+});
