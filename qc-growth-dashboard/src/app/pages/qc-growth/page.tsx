@@ -57,11 +57,11 @@ function Dashboard() {
                     <Table.Body>
                         {s.latest.map((row) => (
                             <Table.Row key={`${row.name}-${row.lastReply}`}>
-                                <Table.Cell>{row.name}</Table.Cell>
-                                <Table.Cell>{row.campaign}</Table.Cell>
-                                <Table.Cell>{row.sentiment ? <Table.Cell.Badge color={SENTIMENT_COLOR[row.sentiment] ?? "blue"}>{row.sentiment}</Table.Cell.Badge> : ""}</Table.Cell>
-                                <Table.Cell>{row.lastReply.slice(0, 10)}</Table.Cell>
-                                <Table.Cell>{row.booked ? "Yes" : ""}</Table.Cell>
+                                <Table.Cell>{row.name || "Unknown"}</Table.Cell>
+                                <Table.Cell>{row.campaign || "Not set"}</Table.Cell>
+                                <Table.Cell>{row.sentiment ? <Table.Cell.Badge color={SENTIMENT_COLOR[row.sentiment] ?? "blue"}>{row.sentiment}</Table.Cell.Badge> : "Not read yet"}</Table.Cell>
+                                <Table.Cell>{row.lastReply.slice(0, 10) || "Not set"}</Table.Cell>
+                                <Table.Cell>{row.booked ? "Yes" : "No"}</Table.Cell>
                             </Table.Row>
                         ))}
                     </Table.Body>
@@ -72,7 +72,7 @@ function Dashboard() {
 }
 
 export default Extensions.definePage({
-    name: "QC Growth",
+    name: "QC Dashboard",
     Page: () => (
         <React.Suspense fallback={<LoadingState />}>
             <Dashboard />

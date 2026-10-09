@@ -1,6 +1,6 @@
 {
   "name": "qc-growth-dashboard",
-  "description": "Qc Growth Dashboard",
+  "description": "QC Dashboard",
   "private": true,
   "version": "0.0.1",
   "scripts": {

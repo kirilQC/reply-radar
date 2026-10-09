@@ -307,6 +307,26 @@ function usableColumns(destination: Destination): Set<string> {
 
 const firstValue = (values: Row, slug: string): Row => object(list(values[slug])[0]);
 
+/**
+ * Attio rejects a whole write when one standard field holds a value it does not accept (an oddly shaped
+ * LinkedIn URL or email, say: "Invalid value supplied for attribute with ID ..."). Rather than lose the lead,
+ * the write is tried again without the optional fields, one at a time, in this order.
+ */
+const DROPPABLE = ["linkedin", "email_addresses", "job_title", "company"];
+async function writeTolerant(token: string, method: string, path: string, values: Row, wrap: (values: Row) => unknown = (v) => ({ data: { values: v } }), droppable = DROPPABLE): Promise<Row> {
+  let current = { ...values };
+  for (;;) {
+    try {
+      return await attio(token, method, path, wrap(current));
+    } catch (error) {
+      const next = droppable.find((slug) => slug in current);
+      if (!(error instanceof AttioError && error.status === 400 && /invalid value/i.test(error.message)) || !next) throw error;
+      const { [next]: _, ...rest } = current;
+      current = rest;
+    }
+  }
+}
+
 export async function attioPush(
   token: string,
   destination: Destination,
@@ -360,7 +380,7 @@ export async function attioPush(
     if (record.title && !text(firstValue(current, "job_title").value)) fill.job_title = record.title;
     if (record.linkedinUrl && !text(firstValue(current, "linkedin").value)) fill.linkedin = record.linkedinUrl;
     if (companyId && !text(firstValue(current, "company").target_record_id)) fill.company = [{ target_object: "companies", target_record_id: companyId }];
-    if (Object.keys(fill).length) await attio(token, "PATCH", `/objects/people/records/${personId}`, { data: { values: fill } });
+    if (Object.keys(fill).length) await writeTolerant(token, "PATCH", `/objects/people/records/${personId}`, fill);
   } else {
     const values: Row = {
       name: nameValue,
@@ -370,7 +390,7 @@ export async function attioPush(
       ...(record.linkedinCanonical ? { qc_linkedin_url: record.linkedinCanonical } : {}),
       ...(companyId ? { company: [{ target_object: "companies", target_record_id: companyId }] } : {}),
     };
-    const made = await attio(token, "POST", "/objects/people/records", { data: { values } });
+    const made = await writeTolerant(token, "POST", "/objects/people/records", values);
     personId = text(object(object(made.data).id).record_id);
     created = true;
   }
@@ -393,7 +413,7 @@ export async function attioPush(
   put("qc_company_domain", record.domain);
   put("qc_company_linkedin", record.companyLinkedinUrl);
   if (plan.settings.ownerId) put("qc_owner", [{ referenced_actor_type: "workspace-member", referenced_actor_id: plan.settings.ownerId }]);
-  await attio(token, "PUT", `/lists/${listId}/entries`, { data: { parent_record_id: personId, parent_object: "people", entry_values: entry } });
+  await writeTolerant(token, "PUT", `/lists/${listId}/entries`, entry, (values) => ({ data: { parent_record_id: personId, parent_object: "people", entry_values: values } }), ["qc_owner", "qc_outreach_platform", "qc_reply_sentiment", "qc_linkedin", "qc_company_linkedin", "qc_company_domain"]);
 
   // The conversation: one note, updated in place.
   const title = `${record.channel === "email" ? "Email" : "LinkedIn"} conversation · QC Growth`;
