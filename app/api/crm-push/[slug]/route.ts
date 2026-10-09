@@ -100,8 +100,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         ["segments (public lists API)", "POST", "/crm/v3/lists/search", { count: 1, processingTypes: ["DYNAMIC"] }],
         ["segments (CLI backend)", "GET", "/hub/cli/backend/v1/segments/search?limit=1"],
         ["HubSQL query", "POST", "/analytics/hubsql/2027-03-beta/query", { query: "SELECT COUNT(*) FROM contacts" }],
-        ["dashboards search (reporting beta)", "POST", "/analytics/reporting/2027-03-beta/dashboards/search", { limit: 1 }],
-        ["reports search (reporting beta)", "POST", "/analytics/reporting/2027-03-beta/reports/search", { limit: 1 }],
+        ["dashboards search (reporting beta)", "GET", "/analytics/reporting/2027-03-beta/dashboards?limit=1"],
+        ["reports search (reporting beta)", "GET", "/analytics/reporting/2027-03-beta/reports?limit=1"],
       ];
       const results: Array<{ name: string; status: number; message: string }> = [];
       for (const [name, method, path, body] of probes) {
