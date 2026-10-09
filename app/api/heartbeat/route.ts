@@ -122,6 +122,14 @@ export async function GET(incoming: Request) {
       detail: "",
       latencyMs: null as number | null,
     },
+    {
+      id: "crm_sync",
+      label: "CRM & Sheets push",
+      configured: true,
+      status: "checking",
+      detail: "",
+      latencyMs: null as number | null,
+    },
   ];
   if (!url || !key)
     return slimJson({
@@ -565,6 +573,33 @@ export async function GET(incoming: Request) {
         ? "Airtable accepted the token."
         : `Airtable rejected the token or is unreachable${airtableResult.status ? ` (HTTP ${airtableResult.status})` : ""}.`;
     services[6].latencyMs = airtableResult.durationMs;
+    /*
+     * CRM & Sheets push: every client destination (HubSpot, Attio, Google Sheets) with automatic pushing on.
+     * Amber when one's last push failed or it has not run for 30 minutes (the worker runs it every few), so a
+     * broken key or a revoked sheet shows here before anyone notices missing contacts. Safe columns only.
+     */
+    const crmResult = await request("rr_crm_push?select=workspace_id,kind,provider,account_name,auto_push,last_push_at,last_push_summary&api_key=not.is.null&status=eq.built");
+    const crmRows = Array.isArray(crmResult.body) ? (crmResult.body as Array<Record<string, unknown>>) : [];
+    const names = new Map((Array.isArray(workspaceResult.body) ? (workspaceResult.body as Array<Record<string, unknown>>) : []).map((w) => [String(w.id), String(w.name)]));
+    const live = crmRows.filter((row) => row.auto_push === true);
+    const problems = live.flatMap((row) => {
+      const where = `${names.get(String(row.workspace_id)) ?? "a client"} ${row.provider === "hubspot" ? "HubSpot" : row.provider === "attio" ? "Attio" : `sheet ${String(row.account_name ?? "")}`}`;
+      const summary = (row.last_push_summary ?? {}) as Record<string, unknown>;
+      const age = row.last_push_at ? (Date.now() - Date.parse(String(row.last_push_at))) / 1000 : Infinity;
+      const out: string[] = [];
+      if (Number(summary.failed) > 0) out.push(`${where}: ${Number(summary.failed)} failed (${String((Array.isArray(summary.errors) ? summary.errors[0] : "") ?? "").slice(0, 80)})`);
+      if (age > 30 * 60) out.push(`${where}: no push for ${Number.isFinite(age) ? `${Math.round(age / 60)} min` : "ever"}`);
+      return out;
+    });
+    services[7].latencyMs = crmResult.durationMs;
+    services[7].status = !crmResult.response.ok ? "down" : !live.length ? "disabled" : problems.length ? "down" : "healthy";
+    services[7].detail = !crmResult.response.ok
+      ? "Could not read the CRM push settings."
+      : !live.length
+        ? "No client pushes to a CRM or sheet automatically yet."
+        : problems.length
+          ? problems.slice(0, 4).join(" · ")
+          : `${live.length} destination(s) pushing automatically, all current.`;
 
     const clients = rows.map((row) => {
       const webhookAgeSeconds = ageSeconds(row.last_webhook_received_at);

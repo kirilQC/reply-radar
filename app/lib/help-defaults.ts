@@ -1267,6 +1267,50 @@ For your end of week email, the EOW report has a **Best replies from this week**
 Setups stay saved for the client, so the lead engineer sets it up once and everyone uses it. Prefer plain words? Use the **Prompt** tab and click **Build Jev setup**.`,
   },
   {
+    id: "w-crm-hubspot",
+    kind: "walkthrough",
+    title: "Pushing replies and booked meetings into a client's HubSpot",
+    page: "/onboarding",
+    keywords: ["hubspot", "crm", "push", "contacts", "deals", "booked meeting", "dashboard", "service key", "qc growth user", "sync"],
+    body: `Every reply becomes a HubSpot contact owned by QC Growth, with the conversation as a note, and every booked meeting becomes a deal.
+
+1. Open the client in **Onboarding** and click the **HubSpot** logo (top right).
+2. In the client's HubSpot: **Development → Keys → Service keys → Create service key**, name it QC Growth, tick the scopes the panel lists, and paste the key into **Connect**.
+3. Read the **Game plan**, choose the pipeline for booked meetings, then click **Approve and build**. It adds QC's fields, the QC Growth view and segment, and a **Booked Meeting (QC)** stage.
+4. Click **Push 1 lead (test)**, check it with **Open in HubSpot**, then **Push all replies**. New replies and bookings then push by themselves every few minutes.
+5. For the QC Growth dashboard and reports, click **Connect QC Growth user**, approve as admin@qcgrowth.com, then **Build reports and dashboard**.
+
+Ask Scout or @QC Bot "is <client>'s HubSpot syncing?" any time.`,
+  },
+  {
+    id: "w-crm-attio",
+    kind: "walkthrough",
+    title: "Pushing replies and booked meetings into a client's Attio",
+    page: "/onboarding",
+    keywords: ["attio", "crm", "push", "qc growth list", "deals", "booked meeting", "qc dashboard", "access token", "sync"],
+    body: `Replies land on a **QC Growth** list in the client's Attio, each person filled in where empty, with the conversation as a note. Booked meetings become deals.
+
+1. Open the client in **Onboarding** and click the **Attio** logo.
+2. In the client's Attio: **Workspace settings → Developers → New access token**, name it QC Growth, give Read & write to Records, Object configuration, List configuration, List entries and Notes, and Read to User management. Paste it into **Connect**.
+3. Click **Approve and build**, then **Push all replies**.
+4. Once per client in Attio: open the **QC Growth** list, click **Table**, and add the columns (Attio's API can't make views).
+5. Install the **QC Dashboard** app from the private install link for live charts under **Apps** in Attio.`,
+  },
+  {
+    id: "w-google-sheets",
+    kind: "walkthrough",
+    title: "Pushing replies or booked meetings into Google Sheets",
+    page: "/onboarding",
+    keywords: ["google sheets", "sheet", "spreadsheet", "push", "replies", "booked meetings", "mapping", "format", "columns"],
+    body: `A client can push into as many sheets as they like. Each sheet holds replies (one row per conversation) or booked meetings (one row per person).
+
+1. Open the client in **Onboarding** and click the **Google Sheets** logo. The first time, click **Connect Google** and sign in as admin@qcgrowth.com.
+2. Make the sheet with your headers in row 1. admin@qcgrowth.com must be able to edit it.
+3. Under **Connect a sheet**, choose **Replies** or **Booked meetings**, paste the link and click **Connect**.
+4. Check each column's match, then **Confirm mapping**. QC adds a hidden QC ID column and formats the sheet.
+5. Click **Push all**. New rows then arrive by themselves. Reordering or adding columns is fine; click **Re-read headers** after renaming one.`,
+  },
+  {
     id: "w-brain-catch-up",
     kind: "walkthrough",
     title: "Catching up on a client you just joined",
