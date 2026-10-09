@@ -326,4 +326,7 @@ test("booked meetings on Operations: six numbered steps, everything saves itself
   assert.match(about, /web_search_20250305/);
   assert.match(about, /thinking: \{ type: "between_tools" \}/);
   assert.match(about, /const undash/);
+  // The answer only: nothing from before the last search, and cited pieces joined without breaks.
+  assert.match(about, /blocks\.slice\(lastTool \+ 1\)/);
+  assert.match(about, /\.join\(""\)/);
 });

@@ -99,7 +99,11 @@ export async function POST(request: Request) {
   if (!response.ok) return NextResponse.json({ ok: false, error: `Claude could not write it (${response.status}): ${text(((payload.error ?? {}) as Row).message).slice(0, 200)}` }, { status: 502 });
 
   const blocks = Array.isArray(payload.content) ? (payload.content as Row[]) : [];
-  const about = undash(blocks.filter((block) => block.type === "text").map((block) => text(block.text)).join("\n\n").replace(/\n{3,}/g, "\n\n").trim());
+  // Only the answer: text before or between searches is the model thinking aloud ("I'll check..."). Cited text
+  // arrives split into several blocks mid-sentence, so the pieces are joined as they are, not as paragraphs.
+  const lastTool = blocks.reduce((at, block, index) => (block.type === "server_tool_use" || block.type === "web_search_tool_result" ? index : at), -1);
+  const raw = blocks.slice(lastTool + 1).filter((block) => block.type === "text").map((block) => (typeof block.text === "string" ? block.text : "")).join("");
+  const about = undash(raw.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim());
   if (!about) return NextResponse.json({ ok: false, error: "Claude returned nothing. Try again." }, { status: 502 });
 
   // Where it came from, for the chips under the text.
