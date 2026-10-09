@@ -181,9 +181,14 @@ async function findOrCreateCompany(token: string, meeting: Row): Promise<string 
 async function replyFor(config: Config, workspaceId: string, meeting: Row): Promise<ReplyRecord | null> {
   const handle = /linkedin\.com\/in\/([^/?#\s]+)/i.exec(text(meeting.invitee_linkedin))?.[1] ?? "";
   const email = text(meeting.invitee_email).toLowerCase();
+  // Same name: first and last name both in the lead's name ("Yvette Domke" for "Yvette Lynn Domke"), the
+  // fallback when the booking carries a personal email and no LinkedIn. Only within this client's leads.
+  const words = text(meeting.invitee_name).toLowerCase().replace(/[^a-z\s'-]/g, " ").split(/\s+/).filter((word) => word.length > 1 && !["dr", "md", "phd", "mba", "jr", "sr", "ii", "iii"].includes(word));
+  const byName = words.length >= 2 ? `and(name.ilike.*${words[0]}*,name.ilike.*${words[words.length - 1]}*)` : "";
   const filters = [
     handle ? `linkedin_profile_url.ilike.*${handle.replace(/[,()*]/g, "")}*` : "",
     email ? `raw_data->reply_radar->>email.eq.${email}` : "",
+    byName,
   ].filter(Boolean);
   if (!filters.length) return null;
   const leads = await rows(config, `rr_leads?select=id&workspace_id=eq.${enc(workspaceId)}&or=(${filters.map(enc).join(",")})&limit=5`).catch(() => [] as Row[]);
@@ -199,8 +204,8 @@ export async function pushMeetingDeal(token: string, destination: Destination, m
   const ownerId = plan.settings?.ownerId ?? null;
   const status = STATUSES.has(text(meeting.status)) ? text(meeting.status) : "scheduled";
   // The deal is the company; the person when the booking carries no company.
-  const name = text(meeting.company_name) || text(meeting.invitee_name) || "Booked meeting";
   const reply = await replyFor(config, destination.workspace_id, meeting);
+  const name = text(meeting.company_name) || reply?.company || text(meeting.invitee_name) || "Booked meeting";
   const qc: Row = {};
   const put = (key: string, value: unknown) => { if (value !== "" && value !== null && value !== undefined) qc[key] = value; };
   put("qc_meeting_status", status);
@@ -231,7 +236,10 @@ export async function pushMeetingDeal(token: string, destination: Destination, m
     // The name is only ever corrected from QC's old "… (QC Growth)" form; a name the client chose stays.
     const current = await hubspot(token, "GET", `/crm/v3/objects/deals/${enc(dealId)}?properties=dealname`).catch((error) => (error instanceof HubSpotError && error.status === 404 ? null : Promise.reject(error)));
     if (current) {
-      const rename = /\(QC Growth\)$/.test(text(object(current.properties).dealname)) ? { dealname: name } : {};
+      // QC's own names only: the old "… (QC Growth)" form, or the person's name used before the company was known.
+      const currentName = text(object(current.properties).dealname);
+      const ours = /\(QC Growth\)$/.test(currentName) || (currentName === text(meeting.invitee_name) && name !== currentName);
+      const rename = ours ? { dealname: name } : {};
       await hubspot(token, "PATCH", `/crm/v3/objects/deals/${enc(dealId)}`, { properties: { ...qc, ...rename } });
     } else {
       dealId = null;
@@ -266,7 +274,7 @@ export async function pushMeetingDeal(token: string, destination: Destination, m
   return { deal_id: dealId, contact_id: contactId, company_id: companyId, note_id: noteId || null, pushed_hash: null, created };
 }
 
-const meetingHash = (meeting: Row) => createHash("sha256").update(JSON.stringify(["v2", meeting.status, meeting.meeting_at, meeting.when_text, meeting.summary, meeting.campaign, meeting.invitee_name, meeting.invitee_email, meeting.invitee_linkedin, meeting.invitee_title, meeting.company_name, meeting.company_domain, meeting.host, object(object(meeting.booking).tldr)])).digest("hex").slice(0, 32);
+const meetingHash = (meeting: Row) => createHash("sha256").update(JSON.stringify(["v3", meeting.status, meeting.meeting_at, meeting.when_text, meeting.summary, meeting.campaign, meeting.invitee_name, meeting.invitee_email, meeting.invitee_linkedin, meeting.invitee_title, meeting.company_name, meeting.company_domain, meeting.host, object(object(meeting.booking).tldr)])).digest("hex").slice(0, 32);
 
 /** Every meeting that is new or changed since it was last pushed, as deals. `since` narrows to moved rows. */
 export async function pushMeetingsPass(config: Config, destination: Destination, opts: { since?: string; budgetMs?: number } = {}): Promise<{ pushed: number; created: number; updated: number; unchanged: number; failed: number; errors: string[] }> {
