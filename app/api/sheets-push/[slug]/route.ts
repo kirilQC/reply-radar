@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { loadDestination, presentDestination, rest, rows, saveDestination, type Destination } from "../../../lib/crm-push";
+import { loadDestination, presentDestination, rest, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
 import { pushPass, recordKey } from "../../../lib/crm-push-run";
 import { disconnectGoogle, googleAccount, googleOauthConfigured } from "../../../lib/google-user";
 import { accessToken, ensureQcIdColumn, serviceAccount, serviceAccountStatus, fieldsFor, sheetsConnect, sheetsFormat, sheetsPushMeetings, suggestMapping, type SheetConfig, type SheetContent } from "../../../lib/sheets-push";
@@ -131,14 +131,17 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     }
     if (action === "push") {
       if (destination.status !== "built") return NextResponse.json({ ok: false, error: "Confirm the column mapping first." }, { status: 400 });
-      if (contentOf(destination) === "meetings") {
-        const done = await sheetsPushMeetings(c, destination as Destination);
-        const summary = { pushed: done.pushed, created: done.created, updated: done.updated, unchanged: 0, failed: 0, errors: [] as string[], nextOffset: null, at: new Date().toISOString() };
-        await saveDestination(c, workspace.id, kind, { last_push_at: summary.at, last_push_summary: summary as unknown as Row });
-        return reply({ summary });
-      }
-      const summary = await pushPass(c, destination as Destination, { offset: Number(body.offset) || 0, budgetMs: 150_000 });
-      return reply({ summary });
+      const done = await withPushLock(c, workspace.id, kind, 300_000, async () => {
+        if (contentOf(destination) === "meetings") {
+          const result = await sheetsPushMeetings(c, destination as Destination);
+          const summary = { pushed: result.pushed, created: result.created, updated: result.updated, unchanged: 0, failed: 0, errors: [] as string[], nextOffset: null, at: new Date().toISOString() };
+          await saveDestination(c, workspace.id, kind, { last_push_at: summary.at, last_push_summary: summary as unknown as Row });
+          return summary;
+        }
+        return pushPass(c, destination as Destination, { offset: Number(body.offset) || 0, budgetMs: 150_000 });
+      });
+      if (done === null) return NextResponse.json({ ok: false, error: "A push to this sheet is already running. Try again in a minute." }, { status: 409 });
+      return reply({ summary: done });
     }
     if (action === "auto") {
       await saveDestination(c, workspace.id, kind, { auto_push: body.on === true });

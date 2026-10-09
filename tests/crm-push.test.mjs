@@ -116,3 +116,13 @@ test("Deals: names cleaned, one deal per person, QC's own test bookings skipped"
   assert.match(run, /const before = own \?\? byPerson\.get\(personKey\(meeting\)\);/);
   assert.match(run, /if \(internalMeeting\(meeting\)\) \{ summary\.unchanged \+= 1; continue; \}/);
 });
+
+test("Every push path takes the per-destination lock, so the sync and a click never both create the same deal or row", () => {
+  const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+  assert.match(read("../app/api/crm-push/sync/route.ts"), /withPushLock\(config, destination\.workspace_id, destination\.kind/);
+  const crmRoute = read("../app/api/crm-push/[slug]/route.ts");
+  assert.equal((crmRoute.match(/withPushLock\(c, workspace\.id, "crm"/g) ?? []).length, 2);
+  assert.match(read("../app/api/sheets-push/[slug]/route.ts"), /withPushLock\(c, workspace\.id, kind/);
+  assert.match(read("../app/lib/crm-sync-status.ts"), /withPushLock\(config, workspaceId, destination\.kind/);
+  assert.doesNotMatch(crmRoute, /probe_calls|probe_write/);
+});

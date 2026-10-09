@@ -2,7 +2,7 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
-import { loadDestination, presentDestination, rows, saveDestination, type Destination } from "../../../lib/crm-push";
+import { loadDestination, presentDestination, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
 import { pushOne, pushPass } from "../../../lib/crm-push-run";
 import { hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotPlan } from "../../../lib/hubspot-push";
 import { hubspotBuildReporting, hubspotUserView } from "../../../lib/hubspot-reporting";
@@ -151,14 +151,20 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
     }
     if (action === "push_one") {
-      return reply({ test: await pushOne(c, destination as Destination) });
+      const test = await withPushLock(c, workspace.id, "crm", 300_000, () => pushOne(c, destination as Destination));
+      if (test === null) return NextResponse.json({ ok: false, error: "A push is already running for this client. Try again in a minute." }, { status: 409 });
+      return reply({ test });
     }
     if (action === "push") {
       const offset = Number(body.offset) || 0;
-      const summary = await pushPass(c, destination as Destination, { offset, budgetMs: 150_000 });
-      // Booked meetings ride along with the first pass of a Push all.
-      const meetings = offset === 0 ? await pushMeetingsPass(c, destination as Destination, { budgetMs: 60_000 }).catch((error) => ({ pushed: 0, created: 0, updated: 0, unchanged: 0, failed: 1, errors: [error instanceof Error ? error.message : "failed"] })) : null;
-      return reply({ summary, meetings });
+      const done = await withPushLock(c, workspace.id, "crm", 300_000, async () => {
+        const summary = await pushPass(c, destination as Destination, { offset, budgetMs: 150_000 });
+        // Booked meetings ride along with the first pass of a Push all.
+        const meetings = offset === 0 ? await pushMeetingsPass(c, destination as Destination, { budgetMs: 60_000 }).catch((error) => ({ pushed: 0, created: 0, updated: 0, unchanged: 0, failed: 1, errors: [error instanceof Error ? error.message : "failed"] })) : null;
+        return { summary, meetings };
+      });
+      if (done === null) return NextResponse.json({ ok: false, error: "A push is already running for this client (the automatic sync, or another click). Try again in a minute." }, { status: 409 });
+      return reply(done);
     }
     if (action === "auto") {
       if (destination.status !== "built") return NextResponse.json({ ok: false, error: "Approve and apply the build first." }, { status: 400 });

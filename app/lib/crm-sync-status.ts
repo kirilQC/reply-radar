@@ -1,7 +1,7 @@
 // Built by Kiril Ivlev · https://www.linkedin.com/in/kiril-ivlev/
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
-import { rows, type Config, type Destination } from "./crm-push";
+import { rows, withPushLock, type Config, type Destination } from "./crm-push";
 import { pushPass, recordKey } from "./crm-push-run";
 import { pushMeetingsPass } from "./meetings-deals-run";
 import { sheetsPushMeetings } from "./sheets-push";
@@ -59,7 +59,9 @@ export async function crmSyncStatus(config: Config, workspaceIds: string[] | nul
     : [[], []];
   const count = (list: Row[], workspace: string, provider: string) => {
     const mine = list.filter((row) => text(row.workspace_id) === workspace && text(row.provider) === provider);
-    return { total: mine.length, failing: mine.filter((row) => text(row.error)).length, sampleErrors: mine.filter((row) => text(row.error)).slice(0, 3).map((row) => text(row.error).slice(0, 160)) };
+    // Deals: several bookings by one person share a deal, so count distinct deals, not bookings.
+    const distinct = new Set(mine.map((row) => text(row.deal_id)).filter(Boolean));
+    return { total: "deal_id" in (mine[0] ?? {}) ? distinct.size : mine.length, failing: mine.filter((row) => text(row.error)).length, sampleErrors: mine.filter((row) => text(row.error)).slice(0, 3).map((row) => text(row.error).slice(0, 160)) };
   };
 
   const clients = new Map<string, Row>();
@@ -132,11 +134,14 @@ export async function crmPushNow(config: Config, workspaceId: string) {
     const last = Date.parse(destination.last_push_at ?? "");
     const since = new Date((Number.isNaN(last) ? Date.now() - 86_400_000 : last) - 15 * 60_000).toISOString();
     try {
-      const replies = await pushPass(config, destination, { since, budgetMs: 45_000 });
-      const meetings = destination.provider === "google_sheets"
-        ? (object(destination.config).content === "meetings" ? await sheetsPushMeetings(config, destination, { since }) : null)
-        : await pushMeetingsPass(config, destination, { since, budgetMs: 30_000 });
-      out.push({ where, replies: { pushed: replies.pushed, failed: replies.failed, errors: replies.errors }, meetings });
+      const done = await withPushLock(config, workspaceId, destination.kind, 300_000, async () => {
+        const replies = await pushPass(config, destination, { since, budgetMs: 45_000 });
+        const meetings = destination.provider === "google_sheets"
+          ? (object(destination.config).content === "meetings" ? await sheetsPushMeetings(config, destination, { since }) : null)
+          : await pushMeetingsPass(config, destination, { since, budgetMs: 30_000 });
+        return { where, replies: { pushed: replies.pushed, failed: replies.failed, errors: replies.errors }, meetings };
+      });
+      out.push(done ?? { where, note: "A push was already running for this; it will have sent the latest." });
     } catch (error) {
       out.push({ where, error: error instanceof Error ? error.message.slice(0, 200) : "failed" });
     }

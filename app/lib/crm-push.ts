@@ -287,3 +287,29 @@ export function presentDestination(destination: Destination | null) {
     lastPushSummary: destination.last_push_summary,
   };
 }
+
+/**
+ * One push at a time per destination: the worker's automatic sync and a "Push all" click (or QC Bot's
+ * crm_push_now) can otherwise both see a new booking or reply as unpushed and both create it, which is how a
+ * deal, note or sheet row gets made twice. A row in rr_app_config is the lock (its insert is atomic on the key);
+ * it expires after `ttlMs` so a crashed run never blocks the client for good. Returns null when busy.
+ */
+export async function withPushLock<T>(config: Config, workspaceId: string, kind: string, ttlMs: number, run: () => Promise<T>): Promise<T | null> {
+  const key = `crm_push_lock:${workspaceId}:${kind}`;
+  const value = { until: new Date(Date.now() + ttlMs).toISOString(), token: Math.random().toString(36).slice(2) };
+  const claim = () => rest(config, "rr_app_config", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ key, value }) });
+  let claimed = await claim();
+  if (!claimed.ok && claimed.status === 409) {
+    const [held] = await rows(config, `rr_app_config?select=value&key=eq.${enc(key)}&limit=1`).catch(() => [] as Row[]);
+    const until = Date.parse(String(((held?.value ?? {}) as Row).until ?? ""));
+    if (!Number.isNaN(until) && until > Date.now()) return null;
+    await rest(config, `rr_app_config?key=eq.${enc(key)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+    claimed = await claim();
+  }
+  if (!claimed.ok) return null;
+  try {
+    return await run();
+  } finally {
+    await rest(config, `rr_app_config?key=eq.${enc(key)}&value->>token=eq.${enc(value.token)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }).catch(() => undefined);
+  }
+}
