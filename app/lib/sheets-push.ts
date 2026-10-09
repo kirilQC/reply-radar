@@ -30,6 +30,14 @@ export function serviceAccount(): ServiceAccount | null {
   }
 }
 
+/** Whether the key is there and readable, never its contents: for the panel's setup message. */
+export function serviceAccountStatus(): { present: boolean; parses: boolean; hasEmail: boolean; hasKey: boolean; length: number } {
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim() ?? "";
+  let parsed: Partial<ServiceAccount> | null = null;
+  try { parsed = raw ? (JSON.parse(raw) as Partial<ServiceAccount>) : null; } catch { parsed = null; }
+  return { present: Boolean(raw), parses: Boolean(parsed), hasEmail: Boolean(parsed?.client_email), hasKey: Boolean(parsed?.private_key), length: raw.length };
+}
+
 let cached: { token: string; until: number } | null = null;
 
 async function accessToken(): Promise<string> {

@@ -4,7 +4,7 @@
 import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, type Destination } from "../../../lib/crm-push";
 import { pushPass } from "../../../lib/crm-push-run";
-import { ensureQcIdColumn, serviceAccount, SHEET_FIELDS, sheetsConnect, suggestMapping, type SheetConfig } from "../../../lib/sheets-push";
+import { ensureQcIdColumn, serviceAccount, serviceAccountStatus, SHEET_FIELDS, sheetsConnect, suggestMapping, type SheetConfig } from "../../../lib/sheets-push";
 
 /**
  * The onboarding cockpit's Google Sheets panel for one client (session only). GET says where it stands;
@@ -30,7 +30,7 @@ async function workspaceOf(c: { url: string; key: string }, slug: string) {
   return { id: text(workspace.id), name: text(workspace.name) };
 }
 
-const shared = () => ({ robotEmail: serviceAccount()?.client_email ?? null, fields: SHEET_FIELDS.map(({ key, label }) => ({ key, label })) });
+const shared = () => ({ robotEmail: serviceAccount()?.client_email ?? null, googleKey: serviceAccountStatus(), fields: SHEET_FIELDS.map(({ key, label }) => ({ key, label })) });
 
 export async function GET(_: Request, context: { params: Promise<{ slug: string }> }) {
   try {
