@@ -102,11 +102,21 @@ export async function replyRecords(config: Config, workspaceId: string, opts: { 
   const [leads, messages, meetings] = await Promise.all([
     leadIds.length ? rows(config, `rr_leads?select=*&id=in.(${leadIds.map(enc).join(",")})`) : Promise.resolve([] as Row[]),
     rows(config, `rr_messages?select=id,conversation_id,direction,body,sent_at,raw_data&conversation_id=in.(${conversations.map((row) => enc(text(row.id))).join(",")})&order=sent_at.asc,id.asc&limit=5000`),
-    rows(config, `rr_meetings?select=invitee_email,invitee_linkedin,status&workspace_id=eq.${enc(workspaceId)}&limit=5000`).catch(() => [] as Row[]),
+    rows(config, `rr_meetings?select=invitee_email,invitee_linkedin,invitee_name,status&workspace_id=eq.${enc(workspaceId)}&limit=5000`).catch(() => [] as Row[]),
   ]);
   const live = meetings.filter((meeting) => !/cancel/i.test(text(meeting.status)));
   const bookedEmails = new Set(live.map((meeting) => normalizeEmail(meeting.invitee_email)).filter(Boolean));
   const bookedLinkedins = new Set(live.map((meeting) => normalizeLinkedin(meeting.invitee_linkedin)).filter(Boolean));
+  // Third way in: the booking often has a work email QC never had. First and last name both in the invitee's
+  // name ("Yvette Domke" in "Yvette Lynn Domke"), only ever within this one client's meetings.
+  const nameWords = (value: unknown) => text(value).toLowerCase().normalize("NFKD").replace(/[^a-z\s'-]/g, " ").split(/\s+/).filter((word) => word.length > 1 && !NAME_NOISE.has(word));
+  const bookedNames = live.map((meeting) => new Set(nameWords(meeting.invitee_name)));
+  const bookedByName = (name: string) => {
+    const words = nameWords(name);
+    if (words.length < 2) return false;
+    const [first, last] = [words[0], words[words.length - 1]];
+    return bookedNames.some((invitee) => invitee.has(first) && invitee.has(last));
+  };
   const leadById = new Map(leads.map((row) => [text(row.id), row]));
   const byConversation = new Map<string, Row[]>();
   for (const message of dedupeMessages(messages)) {
@@ -164,7 +174,7 @@ export async function replyRecords(config: Config, workspaceId: string, opts: { 
       lastMessageAt: text(conversation.last_message_at),
       replyCount: inbound.length,
       latestReply: text(lastInbound?.body),
-      bookedMeeting: Boolean((normalizeEmail(card.email) && bookedEmails.has(normalizeEmail(card.email))) || (normalizeLinkedin(card.linkedinUrl) && bookedLinkedins.has(normalizeLinkedin(card.linkedinUrl)))),
+      bookedMeeting: Boolean((normalizeEmail(card.email) && bookedEmails.has(normalizeEmail(card.email))) || (normalizeLinkedin(card.linkedinUrl) && bookedLinkedins.has(normalizeLinkedin(card.linkedinUrl))) || bookedByName(card.name)),
       messages: pushMessages,
     };
     // PUSH_FORMAT changes when the push writes new fields, so every conversation is sent once more.
@@ -173,7 +183,9 @@ export async function replyRecords(config: Config, workspaceId: string, opts: { 
   return { records, scanned: conversations.length };
 }
 
-const PUSH_FORMAT = 4;
+const PUSH_FORMAT = 5;
+/** Titles and credentials that are not part of matching a person by name. */
+const NAME_NOISE = new Set(["dr", "mr", "mrs", "ms", "md", "do", "phd", "mba", "mph", "rn", "np", "pa", "jd", "cpa", "jr", "sr", "ii", "iii", "iv", "fache", "facp", "msn", "bsn", "lcsw", "pmp"]);
 
 export type PushRecordRow = { conversation_id: string; contact_id: string | null; company_id: string | null; note_id: string | null; pushed_hash: string | null; created_contact: boolean };
 
