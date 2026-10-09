@@ -10,6 +10,14 @@
 
 import { pushedRecords, replyRecords, saveDestination, savePushRecord, type Config, type Destination } from "./crm-push";
 import { hubspotPush } from "./hubspot-push";
+import { attioPush } from "./attio-push";
+
+/** The provider's push for one conversation. */
+const pushFor = (destination: Destination) => {
+  if (destination.provider === "hubspot") return hubspotPush;
+  if (destination.provider === "attio") return attioPush;
+  throw new Error(`${destination.provider} pushing is not built yet.`);
+};
 
 export type PushSummary = { pushed: number; created: number; updated: number; unchanged: number; failed: number; errors: string[]; nextOffset: number | null; at: string };
 
@@ -28,8 +36,7 @@ export async function pushPass(config: Config, destination: Destination, opts: {
       const before = stored.get(record.conversationId);
       if (before?.pushed_hash === record.hash) { summary.unchanged += 1; continue; }
       try {
-        if (destination.provider !== "hubspot") throw new Error(`${destination.provider} pushing is not built yet.`);
-        const result = await hubspotPush(destination.api_key, destination, record, before);
+        const result = await pushFor(destination)(destination.api_key, destination, record, before);
         await savePushRecord(config, destination.workspace_id, destination.provider, { conversationId: record.conversationId, contactId: result.contactId, companyId: result.companyId, noteId: result.noteId, hash: record.hash, createdContact: result.created });
         summary.pushed += 1;
         if (result.created && !before?.created_contact) summary.created += 1; else summary.updated += 1;
@@ -55,13 +62,13 @@ export async function pushPass(config: Config, destination: Destination, opts: {
 export async function pushOne(config: Config, destination: Destination): Promise<{ name: string; company: string; campaign: string; contactId: string; created: boolean; link: string | null }> {
   if (!destination.api_key) throw new Error("Not connected.");
   if (destination.status !== "built") throw new Error("The build has not been approved and applied yet.");
-  if (destination.provider !== "hubspot") throw new Error(`${destination.provider} pushing is not built yet.`);
+  const push = pushFor(destination);
   const { records } = await replyRecords(config, destination.workspace_id, { limit: 25 });
   if (!records.length) throw new Error("There are no replies to push yet.");
   const stored = await pushedRecords(config, destination.workspace_id, destination.provider, records.map((record) => record.conversationId));
   const record = records.find((candidate) => !stored.has(candidate.conversationId)) ?? records[0];
   const before = stored.get(record.conversationId);
-  const result = await hubspotPush(destination.api_key, destination, record, before);
+  const result = await push(destination.api_key, destination, record, before);
   await savePushRecord(config, destination.workspace_id, destination.provider, { conversationId: record.conversationId, contactId: result.contactId, companyId: result.companyId, noteId: result.noteId, hash: record.hash, createdContact: result.created });
   const host = (destination.account_name ?? "").includes("hubspot.com") ? destination.account_name : "app.hubspot.com";
   return {
@@ -70,6 +77,8 @@ export async function pushOne(config: Config, destination: Destination): Promise
     campaign: record.campaign,
     contactId: result.contactId,
     created: result.created,
-    link: destination.account_id ? `https://${host}/contacts/${destination.account_id}/record/0-1/${result.contactId}` : null,
+    link: destination.provider === "attio"
+      ? `https://app.attio.com/${String((destination.config ?? {}).attio_slug ?? "")}/person/${result.contactId}/overview`
+      : destination.account_id ? `https://${host}/contacts/${destination.account_id}/record/0-1/${result.contactId}` : null,
   };
 }

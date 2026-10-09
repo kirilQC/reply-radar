@@ -72,6 +72,17 @@ test("QC Growth owns every contact QC brings in: found or created, the default, 
 test("a one-lead test push sends exactly one reply and links to the contact", () => {
   const run = readFileSync(new URL("../app/lib/crm-push-run.ts", import.meta.url), "utf8");
   const one = run.slice(run.indexOf("export async function pushOne"));
-  assert.equal((one.match(/hubspotPush\(/g) ?? []).length, 1);
+  assert.equal((one.match(/await push\(destination\.api_key/g) ?? []).length, 1);
   assert.match(one, /\/contacts\/\$\{destination\.account_id\}\/record\/0-1\/\$\{result\.contactId\}/);
+});
+
+test("Attio: QC's data lives on a shared QC Growth list, the person keeps its own fields, nothing is deleted", () => {
+  const source = readFileSync(new URL("../app/lib/attio-push.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /"DELETE"/);
+  assert.match(source, /workspace_access: "full-access"/);
+  assert.match(source, /\/\/ The client's person: QC's match key always, their own fields only where empty, nothing else\./);
+  const person = [...source.slice(source.indexOf("QC_PERSON_ATTRIBUTES"), source.indexOf("QC_LIST_ATTRIBUTES")).matchAll(/slug: "(qc_[a-z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(person, ["qc_linkedin_url"]);
+  const run = readFileSync(new URL("../app/lib/crm-push-run.ts", import.meta.url), "utf8");
+  assert.match(run, /if \(destination\.provider === "attio"\) return attioPush;/);
 });

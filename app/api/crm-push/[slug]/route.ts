@@ -6,6 +6,7 @@ import { loadDestination, presentDestination, rows, saveDestination, type Destin
 import { pushOne, pushPass } from "../../../lib/crm-push-run";
 import { hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotAudit, type HubSpotPlan } from "../../../lib/hubspot-push";
 import { hubspotBuildReporting, hubspotUserView } from "../../../lib/hubspot-reporting";
+import { attioApply, attioAudit, attioConnect, attioPlan, type AttioPlan } from "../../../lib/attio-push";
 import { hubspotAppConfigured, hubspotUserToken } from "../../../lib/hubspot-user";
 
 /**
@@ -54,7 +55,16 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     if (action === "connect") {
       const provider = text(body.provider);
       const apiKey = text(body.apiKey);
-      if (provider !== "hubspot") return NextResponse.json({ ok: false, error: provider === "attio" ? "Attio is next; HubSpot first." : "Choose HubSpot or Attio." }, { status: 400 });
+      if (provider === "attio") {
+        if (!apiKey) return NextResponse.json({ ok: false, error: "Paste the client's Attio API key." }, { status: 400 });
+        const account = await attioConnect(apiKey);
+        const clash = await rows(c, `rr_crm_push?select=workspace_id&provider=eq.attio&account_id=eq.${encodeURIComponent(account.workspaceId)}&workspace_id=neq.${encodeURIComponent(workspace.id)}&limit=1`);
+        if (clash.length) return NextResponse.json({ ok: false, error: `Attio workspace ${account.name} is already connected to another client. Check you are in ${workspace.name}'s Attio.` }, { status: 409 });
+        const audit = await attioAudit(apiKey, account.scopes);
+        await saveDestination(c, workspace.id, "crm", { provider: "attio", api_key: apiKey, account_id: account.workspaceId, account_name: account.name, status: "planned", audit: audit as unknown as Row, plan: attioPlan(audit) as unknown as Row, build_log: [], auto_push: false, config: { attio_slug: account.slug } });
+        return reply();
+      }
+      if (provider !== "hubspot") return NextResponse.json({ ok: false, error: "Choose HubSpot or Attio." }, { status: 400 });
       if (!apiKey) return NextResponse.json({ ok: false, error: "Paste the client's HubSpot service key." }, { status: 400 });
       const account = await hubspotConnect(apiKey);
       // One portal, one client: a key for a portal already linked to another client is refused.
@@ -67,6 +77,21 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     }
     if (!destination?.api_key) return NextResponse.json({ ok: false, error: "Connect the CRM first." }, { status: 400 });
 
+    if (action === "replan" && destination.provider === "attio") {
+      const account = await attioConnect(destination.api_key);
+      const audit = await attioAudit(destination.api_key, account.scopes);
+      await saveDestination(c, workspace.id, "crm", { audit: audit as unknown as Row, plan: attioPlan(audit) as unknown as Row, status: destination.status === "built" ? "built" : "planned" });
+      return reply();
+    }
+    if (action === "apply" && destination.provider === "attio") {
+      const plan = destination.plan as unknown as AttioPlan;
+      const choices = (body.settings && typeof body.settings === "object" ? body.settings : {}) as Row;
+      const approved: AttioPlan = { ...plan, settings: { ...plan.settings, ...(text(choices.ownerId) ? { ownerId: text(choices.ownerId) } : {}) } };
+      const log = await attioApply(destination.api_key, approved);
+      const failed = log.filter((entry) => entry.result === "failed");
+      await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: failed.length ? "planned" : "built", ...(!failed.length && destination.status !== "built" ? { auto_push: true } : {}) });
+      return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
+    }
     if (action === "replan") {
       // The key's scopes are asked for again: ticking a scope in HubSpot must clear the warning on re-read.
       const account = await hubspotConnect(destination.api_key);

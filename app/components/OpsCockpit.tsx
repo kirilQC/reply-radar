@@ -27,6 +27,8 @@ type Crm = {
     recentSources: Array<{ source: string; count: number }>;
     lookAlikes: Array<{ name: string; label: string; why: string }>;
     missingScopes: string[];
+    countsCapped?: boolean;
+    lists?: Array<{ name: string }>;
   };
   plan: null | { items: PlanItem[]; settings: { leadSourceProperty: string | null; lifecycleOnCreate: string | null; ownerId: string | null }; conversation: string; notTouched: string[]; warnings: string[] };
   buildLog: Array<{ kind: string; name: string; result: string; detail: string }>;
@@ -85,6 +87,13 @@ const HUBSPOT_STEPS = [
   "Name it QC Growth",
   "Scopes: crm.objects.contacts.read + write, crm.objects.companies.read + write, crm.schemas.contacts.read + write, crm.objects.owners.read, crm.lists.write (the QC Growth segment), and settings.users.write if there is no QC Growth user in HubSpot yet",
   "Copy the key (starts with pat-) and paste it here",
+];
+
+const ATTIO_STEPS = [
+  "In the client's Attio: Workspace settings → Developers → New access token",
+  "Name it QC Growth",
+  "Read & write: Records, Object configuration, List configuration, List entries, Notes. Read: User management",
+  "Copy the token and paste it here",
 ];
 
 function when(value: string | null) {
@@ -158,26 +167,23 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
           <span className={`oc-head-logo oc-${provider}`}>{provider === "hubspot" ? <HubSpotLogo /> : <AttioLogo />}</span>
           <div>
             <h2>{name}</h2>
-            <span>{connectedHere ? `${crm?.accountName ?? ""} · portal ${crm?.accountId ?? ""}` : clientName}</span>
+            <span>{connectedHere ? (provider === "hubspot" ? `${crm?.accountName ?? ""} · portal ${crm?.accountId ?? ""}` : `${crm?.accountName ?? ""} workspace`) : clientName}</span>
           </div>
           <button className="oc-x" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
         {!loaded && <p className="oc-muted">Loading…</p>}
-        {loaded && provider === "attio" && !connectedHere && (
-          <section className="oc-section"><h3>Attio</h3><p className="oc-muted">Coming next, on the same connect → plan → build flow as HubSpot.</p></section>
-        )}
         {loaded && otherProvider && (
           <section className="oc-section"><p className="oc-muted">{clientName} is connected to {crm?.provider === "hubspot" ? "HubSpot" : "Attio"}. A client uses one CRM.</p></section>
         )}
 
-        {loaded && provider === "hubspot" && !crm?.connected && (
+        {loaded && !crm?.connected && (
           <section className="oc-section">
             <h3>Connect</h3>
-            <ol className="oc-steps">{HUBSPOT_STEPS.map((line) => <li key={line}>{line}</li>)}</ol>
+            <ol className="oc-steps">{(provider === "hubspot" ? HUBSPOT_STEPS : ATTIO_STEPS).map((line) => <li key={line}>{line}</li>)}</ol>
             <div className="oc-row">
-              <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="pat-…" />
-              <button type="button" className="oc-primary" disabled={!apiKey.trim() || Boolean(busy)} onClick={() => void step("connect", { provider: "hubspot", apiKey: apiKey.trim() }).then((ok) => ok && setApiKey(""))}>{busy === "connect" ? "Reading HubSpot…" : "Connect"}</button>
+              <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={provider === "hubspot" ? "pat-…" : "Attio access token"} />
+              <button type="button" className="oc-primary" disabled={!apiKey.trim() || Boolean(busy)} onClick={() => void step("connect", { provider, apiKey: apiKey.trim() }).then((ok) => ok && setApiKey(""))}>{busy === "connect" ? `Reading ${name}…` : "Connect"}</button>
             </div>
           </section>
         )}
@@ -186,10 +192,11 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
           <section className="oc-section">
             <h3>Lay of the land</h3>
             <div className="oc-stats">
-              <span><strong>{crm.audit.contacts.toLocaleString()}</strong>contacts</span>
+              <span><strong>{crm.audit.contacts.toLocaleString()}{crm.audit.countsCapped ? "+" : ""}</strong>{provider === "attio" ? "people" : "contacts"}</span>
               <span><strong>{crm.audit.companies.toLocaleString()}</strong>companies</span>
               <span><strong>{crm.audit.owners.length}</strong>owners</span>
             </div>
+            {provider === "attio" && (crm.audit.lists?.length ?? 0) > 0 && <p className="oc-muted">Lists: {crm.audit.lists!.map((l) => l.name).join(", ")}</p>}
             {crm.audit.recentSources.length > 0 && <p className="oc-muted">Last 100 contacts came from: {crm.audit.recentSources.slice(0, 4).map((s) => `${s.source} (${s.count})`).join(", ")}</p>}
             {crm.audit.lookAlikes.length > 0 && (
               <p className="oc-muted">Existing look-alike fields: {crm.audit.lookAlikes.slice(0, 6).map((f) => `${f.label} (${f.why})`).join(", ")}</p>
@@ -210,11 +217,11 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
               ))}
             </ul>
             <div className="oc-choices">
-              <label><input type="checkbox" checked={lifecycle} disabled={!crm.plan.settings.lifecycleOnCreate} onChange={(e) => setLifecycle(e.target.checked)} /> New contacts get lifecycle stage Lead</label>
+              {provider === "hubspot" && <label><input type="checkbox" checked={lifecycle} disabled={!crm.plan.settings.lifecycleOnCreate} onChange={(e) => setLifecycle(e.target.checked)} /> New contacts get lifecycle stage Lead</label>}
               {crm.plan.settings.leadSourceProperty && <label><input type="checkbox" checked={leadSource} onChange={(e) => setLeadSource(e.target.checked)} /> New contacts get lead source QC Growth</label>}
-              <label>Owner for new contacts
+              <label>{provider === "attio" ? "Owner on the QC Growth list" : "Owner for new contacts"}
                 <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-                  {!crm.plan.settings.ownerId && <option value="">QC Growth (added by the build)</option>}
+                  {!crm.plan.settings.ownerId && <option value="">{provider === "attio" ? "None (invite QC Growth to set it)" : "QC Growth (added by the build)"}</option>}
                   {(crm.audit?.owners ?? []).map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
                 </select>
               </label>
@@ -225,7 +232,7 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
               <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void step("apply", { settings: { ownerId, lifecycleOnCreate: lifecycle, useLeadSource: leadSource } })}>
                 {busy === "apply" ? "Building…" : `Approve and build${creates.length ? ` (${creates.length} to create)` : ""}`}
               </button>
-              <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Reading…" : "Re-read HubSpot"}</button>
+              <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Reading…" : `Re-read ${name}`}</button>
             </div>
           </section>
         )}
