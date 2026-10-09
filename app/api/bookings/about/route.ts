@@ -114,11 +114,12 @@ export async function POST(request: Request) {
       try { searched.add(new URL(text(result.url)).hostname.replace(/^www\./, "")); } catch { /* not a link */ }
     }
   }
-  const sources = [
+  const site_ = site.text ? site.url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "") : "";
+  const sources = [...new Set([
     ...(brain.documents.length ? [`QC Brain · ${brain.documents.length} ${brain.documents.length === 1 ? "doc" : "docs"}`] : []),
     ...(clientBrief ? ["Client brief"] : []),
-    ...(site.text ? [site.url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")] : []),
-    ...[...searched].slice(0, 5),
-  ];
+    ...(site_ ? [site_] : []),
+    ...[...searched].filter((host) => host !== site_).slice(0, 5),
+  ])];
   return NextResponse.json({ ok: true, about, sources, usedSearch, stop: payload.stop_reason ?? null });
 }
