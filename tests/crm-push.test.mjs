@@ -107,3 +107,10 @@ test("Deals: an existing deal is updated but never moved back a stage, named for
   assert.match(run, /if \(\/cancel\/i\.test\(text\(meeting\.status\)\) && !before\?\.deal_id/);
   for (const source of [hub, attioDeals, run]) assert.doesNotMatch(source, /"DELETE"/);
 });
+
+test("Deals: names cleaned, one deal per person, QC's own test bookings skipped", () => {
+  const run = readFileSync(new URL("../app/lib/meetings-deals-run.ts", import.meta.url), "utf8");
+  assert.match(run, /split\(";"\)/);
+  assert.match(run, /const before = own \?\? byPerson\.get\(personKey\(meeting\)\);/);
+  assert.match(run, /if \(internal\(meeting\)\) \{ summary\.unchanged \+= 1; continue; \}/);
+});
