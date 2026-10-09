@@ -39,3 +39,8 @@ yarn-error.log*
 
 # typescript build cache
 tsconfig.tsbuildinfo
+
+# QC Growth Attio app (qc-growth-dashboard/): its own dependencies and build output
+qc-growth-dashboard/node_modules
+qc-growth-dashboard/dist
+qc-growth-dashboard/lib
