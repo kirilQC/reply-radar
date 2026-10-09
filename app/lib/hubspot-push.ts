@@ -167,6 +167,10 @@ type PropertySpec = { name: string; label: string; type: string; fieldType: stri
 export const QC_PROPERTIES: PropertySpec[] = [
   { name: "qc_linkedin_url", label: "QC LinkedIn URL", type: "string", fieldType: "text", description: "The lead's LinkedIn profile. Unique, so a lead with no email still matches one contact.", unique: true },
   { name: "qc_campaign", label: "QC campaign", type: "string", fieldType: "text", description: "The QC Growth campaign the lead replied to." },
+  { name: "qc_sender", label: "QC sender", type: "string", fieldType: "text", description: "Who the outreach came from." },
+  { name: "qc_outreach_platform", label: "QC outreach platform", type: "enumeration", fieldType: "select", description: "Where the outreach ran.", options: [{ label: "HeyReach", value: "heyreach" }, { label: "lemlist", value: "lemlist" }, { label: "Email Bison", value: "email_bison" }] },
+  { name: "qc_first_reply_date", label: "QC first reply", type: "datetime", fieldType: "date", description: "When the lead first replied to QC Growth's outreach." },
+  { name: "qc_last_reply_date", label: "QC last reply", type: "datetime", fieldType: "date", description: "When the lead last replied." },
 ];
 /** Attribution when the client has no lead source dropdown to put "QC Growth" in. */
 export const QC_SOURCE_PROPERTY: PropertySpec = { name: "qc_source", label: "QC Growth source", type: "enumeration", fieldType: "select", description: "Set on contacts QC Growth's outreach brought in.", options: [{ label: "QC Growth", value: "qc_growth" }] };
@@ -325,6 +329,10 @@ export async function hubspotPush(
   put("qc_source", "qc_growth");
   put("qc_linkedin_url", record.linkedinCanonical);
   put("qc_campaign", record.campaign);
+  put("qc_sender", record.sender);
+  put("qc_outreach_platform", record.platform === "Email Bison" ? "email_bison" : record.platform.toLowerCase());
+  put("qc_first_reply_date", record.firstReplyAt ? new Date(record.firstReplyAt).toISOString() : "");
+  put("qc_last_reply_date", record.lastReplyAt ? new Date(record.lastReplyAt).toISOString() : "");
   const basics: Row = { email: record.email, firstname: record.firstName, lastname: record.lastName, jobtitle: record.title, company: record.company };
 
   // Find the contact: the one we stored, else by email, else by QC LinkedIn ID.
