@@ -139,7 +139,10 @@ body.light-mode .ops-area {
 .ops-errors { margin: 0; padding-left: 18px; color: var(--ops-bad); font-size: 12px; }
 .ops-code { margin: 0; font: 400 12px var(--ops-mono), ui-monospace, monospace; color: var(--ops-strong); word-break: break-word; }
 .ops-tag { font: 500 11px var(--ops-mono), ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--ops-muted); padding: 3px 8px; border-radius: 6px; background: var(--ops-bg); border: 1px solid var(--ops-line); white-space: nowrap; }
-.ops-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--ops-text); font-size: 14px; }
+/* Setup steps: numbered badges with room between each step. */
+.ops-steps { margin: 4px 0; padding: 0; list-style: none; counter-reset: ops-step; display: grid; gap: 18px; color: var(--ops-text); font-size: 15px; line-height: 1.55; }
+.ops-steps > li { counter-increment: ops-step; position: relative; padding-left: 44px; min-height: 28px; }
+.ops-steps > li::before { content: counter(ops-step); position: absolute; left: 0; top: -1px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--ops-raised); border: 1px solid var(--ops-accent-line); color: var(--ops-accent); font: 600 13px var(--ops-mono), ui-monospace, monospace; }
 
 /* Plan */
 .ops-plan { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
@@ -208,5 +211,5 @@ body.light-mode .ops-area {
 .ops-tile-sub { font-size: 12px; color: var(--ops-muted); }
 
 /* Connect steps: one exact scope name per bullet. */
-.ops-scope-bullets { margin: 8px 0 4px; padding-left: 20px; display: grid; gap: 4px; list-style: disc; }
+.ops-scope-bullets { margin: 12px 0 2px; padding-left: 20px; display: grid; gap: 8px; list-style: disc; }
 .ops-scope-bullets code { font-size: 13px; color: var(--ops-strong); }
