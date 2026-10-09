@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { loadDestination, presentDestination, rest, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
 import { pushPass, recordKey } from "../../../lib/crm-push-run";
 import { disconnectGoogle, googleAccount, googleOauthConfigured } from "../../../lib/google-user";
-import { accessToken, ensureQcIdColumn, serviceAccount, serviceAccountStatus, fieldsFor, sheetsConnect, sheetsFormat, sheetsPushMeetings, suggestMapping, type SheetConfig, type SheetContent } from "../../../lib/sheets-push";
+import { accessToken, ensureQcIdColumn, parseSheetUrl, serviceAccount, serviceAccountStatus, fieldsFor, sheetsConnect, sheetsFormat, sheetsPushMeetings, suggestMapping, type SheetConfig, type SheetContent } from "../../../lib/sheets-push";
 
 /**
  * The onboarding cockpit's Google Sheets panel for one client (session only). GET says where it stands;
@@ -71,9 +71,13 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     const existing = await sheetsOf(c, workspace.id);
     let kind = text(body.sheet);
     if (action === "connect") {
-      const parsedUrl = text(body.url);
-      const clash = existing.find((row) => text(((row.config ?? {}) as Row).url).split("#")[0] === parsedUrl.split("#")[0]);
-      if (clash) return NextResponse.json({ ok: false, error: "That sheet is already connected for this client." }, { status: 409 });
+      // The same tab twice is refused; another tab of the same spreadsheet is its own sheet.
+      const target = parseSheetUrl(text(body.url));
+      const clash = target && existing.find((row) => {
+        const there = parseSheetUrl(text(((row.config ?? {}) as Row).url));
+        return there?.spreadsheetId === target.spreadsheetId && (there.gid ?? "0") === (target.gid ?? "0");
+      });
+      if (clash) return NextResponse.json({ ok: false, error: "That tab is already connected for this client." }, { status: 409 });
       const first = await loadDestination(c, workspace.id, "sheets");
       kind = !first || first.status === "disconnected" || !first.api_key ? "sheets" : `sheets:${randomUUID().slice(0, 8)}`;
     }
