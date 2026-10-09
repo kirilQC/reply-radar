@@ -450,7 +450,7 @@ async function answerMention(event: Row): Promise<void> {
       const posts = await threadPosts(channel, threadTs);
       const briefThread = await findBriefThread(credential, channel, posts).catch(() => null);
       if (briefThread) {
-        await replyToBrief({ channel, threadTs, reactTs: str(event.ts), briefThread, instruction: question });
+        await replyToBrief({ channel, threadTs, reactTs: str(event.ts), briefThread, instruction: question, posts });
         return;
       }
     }
@@ -481,8 +481,25 @@ async function replyToBrief(opts: {
   reactTs: string;
   briefThread: BriefThread;
   instruction: string;
+  /** Every post in the thread, read so the reply is understood in context. */
+  posts?: Array<{ author: string; botId: string; text: string; ts: string }>;
 }): Promise<void> {
   const { channel, threadTs, reactTs, briefThread, instruction } = opts;
+  // The conversation under the brief, oldest first: everything except the brief's header and body and the
+  // message being answered. Context only; the tagged message stays the instruction.
+  const identity = await botIdentity();
+  const earlier = (opts.posts ?? []).filter((post) => post.ts !== threadTs && post.ts !== briefThread.bodyTs && post.ts !== reactTs && Number(post.ts) < Number(reactTs || "9e12"));
+  const names = await mentionNames(earlier.flatMap((post) => [post.text, `<@${post.author}>`]));
+  const history = earlier
+    .map((post) => {
+      const bot = Boolean(post.botId) || post.author === identity.userId;
+      const who = bot ? "QC Bot (you)" : names.get(post.author) || "A teammate";
+      const said = bot ? post.text.trim() : cleanMention(post.text, { names, botUserId: identity.userId });
+      return said ? `${who}: ${said}` : "";
+    })
+    .filter(Boolean)
+    .slice(-20)
+    .join("\n");
 
   // Only the message that tagged the bot is the correction — the team's other thread chatter is not.
   // `instruction` arrives cleaned with tagged people kept as "@Name (<@id>)".
@@ -492,7 +509,7 @@ async function replyToBrief(opts: {
   if (reactTs) await addReaction(channel, reactTs, WORKING_REACTION).catch(() => {});
   try {
     // The team list, so "assign to Kiril Ivlev" works even when nobody was tagged.
-    const { reply, updatedBody } = await writeBriefReply(briefThread.automation, briefThread.body, replies, await rosterLine());
+    const { reply, updatedBody } = await writeBriefReply(briefThread.automation, briefThread.body, replies, await rosterLine(), history);
 
     // Only edit when the model returned a body and the guard clears it as a real change rather than a wipe.
     let edited = false;

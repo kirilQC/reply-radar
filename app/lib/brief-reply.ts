@@ -104,9 +104,10 @@ export async function writeBriefReply(
   body: string,
   replies: string[],
   roster = "",
+  history = "",
 ): Promise<{ reply: string; updatedBody: string | null }> {
   const systemPrompt = briefReplySystemPrompt(automation);
-  const userContent = briefReplyUserContent({ body, replies, roster });
+  const userContent = briefReplyUserContent({ body, replies, roster, history });
   const raw = await writeBrief(systemPrompt, userContent, BRIEF_MODEL);
   return parseBriefReplyOutput(raw);
 }

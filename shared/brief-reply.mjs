@@ -40,7 +40,7 @@ export const EOW_REPORT = "eow_report";
  * @returns {string}
  */
 export function briefReplySystemPrompt(automation) {
-  const shared = `You are QC Bot, replying to a teammate in the Slack thread under a message you posted earlier for one client of a B2B outbound growth agency. You are given the exact message you posted and the teammate's reply to it.
+  const shared = `You are QC Bot, replying to a teammate in the Slack thread under a message you posted earlier for one client of a B2B outbound growth agency. You are given the exact message you posted, the conversation so far in this thread (earlier replies from the team and from you), and the teammate's newest reply. The newest reply is what you act on; read the conversation to understand it. A short reply is often the answer to a question you asked a moment ago ("who should I put on it?" then "@Kiril Ivlev"), so carry out the original request with that answer instead of asking again.
 
 Answer the reply directly in one or two short sentences, first person, warm and plain. Slack mrkdwn only: *bold* with single asterisks, \`-\` for bullets, no headings, no double asterisks, no emoji, no @ mentions, no em or en dashes.
 
@@ -59,6 +59,7 @@ This message is a morning brief: the team's own internal working list of what to
 - When the reply says an item is done, handled, already sent, or no longer needed, strike that whole item through. Wrap the item's task text, and every sub-bullet beneath it, in ~tildes~ (Slack strikethrough), so the entire item reads as struck with nothing left in plain text.
 - If the item begins with an owner mention such as <@U123ABC> (usually followed by the word "to"), remove that mention and the "to", because a finished item has no owner, then strike the rest. A Slack mention pill cannot be struck through, so leaving it in is exactly what makes an item look half-struck. Keep the list number in place.
 - Strike only that item. Do not delete the whole line, do not reorder anything, do not touch any other line, and do not touch the section headings.
+- When the reply (with the conversation) asks to give an item to someone else, replace that item's owner mention with the new person's mention, written exactly as it appears in the team list or the reply (for example <@U09BWJMV8DT>). Change nothing else on that item or any other line.
 - If you cannot tell which item they mean, do not guess and do not edit: ask which one in "reply".
 - Keep "reply" to a short confirmation of what you struck.`;
   }
@@ -79,7 +80,7 @@ This message is not one you should be rewriting from a thread reply, so always r
 /**
  * The message you posted and the replies under it, assembled into one prompt.
  *
- * @param {{ body: string; replies: string[]; roster?: string }} inputs
+ * @param {{ body: string; replies: string[]; roster?: string; history?: string }} inputs
  * @returns {string}
  */
 export function briefReplyUserContent(inputs) {
@@ -93,8 +94,11 @@ export function briefReplyUserContent(inputs) {
   // The team, name to Slack mention: a reassignment ("give number 1 to Kiril Ivlev") is written as that
   // person's <@id>, never asked back for, and never guessed.
   const roster = String(inputs?.roster ?? "").trim();
+  // The thread so far, oldest first, so a short answer ("@Kiril Ivlev") is read as the answer to what was asked.
+  const history = String(inputs?.history ?? "").trim();
   return [
     `# The message you posted\n\n${body}`,
+    ...(history ? [`# The conversation so far in this thread (context; act on the newest reply below)\n\n${history}`] : []),
     `# The teammate's reply, respond to this\n\n${repliesText}`,
     ...(roster ? [`# The team (to name or reassign someone, write their mention exactly as given here)\n\n${roster}`] : []),
     `Respond now. Return only the JSON object.`,

@@ -39,3 +39,12 @@ test("QC Bot never pings the never-ping list: every Slack send goes through the 
     assert.match(slack, new RegExp(`export async function ${fn}\\([^)]*rawText[\\s\\S]{0,200}withoutNeverPings\\(rawText\\)`), `${fn} filters`);
   }
 });
+
+test("the brief editor reads the conversation in the thread, so a short answer completes the earlier ask", () => {
+  const history = "Kiril Ivlev: number 1 shouldnt be assigned to luke, assign to kiril ivlev instead\nQC Bot (you): Who should I put on it?";
+  const content = briefReplyUserContent({ body: "1. Luma link (<@U0680D1FNER>)", replies: ["@Kiril Ivlev (<@U09BWJMV8DT>)"], history });
+  assert.match(content, /# The conversation so far in this thread[\s\S]*assign to kiril ivlev instead[\s\S]*Who should I put on it\?[\s\S]*# The teammate's reply/);
+  const route = readFileSync(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8");
+  assert.match(route, /replyToBrief\(\{[^}]*posts \}\)/);
+  assert.match(route, /writeBriefReply\(briefThread\.automation, briefThread\.body, replies, await rosterLine\(\), history\)/);
+});
