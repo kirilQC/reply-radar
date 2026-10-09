@@ -137,7 +137,9 @@ type AttributeSpec = { slug: string; title: string; type: "text" | "number" | "c
 
 /** The one QC field on the person: how a lead with no email still matches one record. */
 export const QC_PERSON_ATTRIBUTES: AttributeSpec[] = [
-  { slug: "qc_linkedin_url", title: "QC LinkedIn URL", type: "text", description: "The lead's LinkedIn profile, as QC Growth matches on it. Unique, so a lead with no email still matches one person.", unique: true },
+  // Not unique: Attio refuses a unique custom text attribute ("Cannot set attribute as unique"). The push
+  // looks the person up by this exact value before creating one, so a lead still matches one person.
+  { slug: "qc_linkedin_url", title: "QC LinkedIn URL", type: "text", description: "The lead's LinkedIn profile, as QC Growth matches on it, so a lead with no email still matches one person." },
 ];
 
 /** The QC Growth list's columns: everything QC knows about the lead, kept off the person record. */
@@ -223,7 +225,7 @@ export function attioPlan(audit: AttioAudit): AttioPlan {
 export type AttioBuildLogEntry = { at: string; kind: string; name: string; result: "created" | "reused" | "skipped" | "failed" | "verified"; detail: string };
 
 function attributeBody(spec: AttributeSpec) {
-  return { data: { title: spec.title, description: spec.description, api_slug: spec.slug, type: spec.type, is_required: false, is_unique: spec.unique === true, is_multiselect: false, config: {} } };
+  return { data: { title: spec.title, description: spec.description, api_slug: spec.slug, type: spec.type, is_required: false, is_unique: false, is_multiselect: false, config: {} } };
 }
 
 async function ensureOptions(token: string, base: string, spec: AttributeSpec) {
