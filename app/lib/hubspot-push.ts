@@ -171,6 +171,8 @@ export const QC_PROPERTIES: PropertySpec[] = [
   { name: "qc_outreach_platform", label: "QC outreach platform", type: "enumeration", fieldType: "select", description: "Where the outreach ran.", options: [{ label: "HeyReach", value: "heyreach" }, { label: "lemlist", value: "lemlist" }, { label: "Email Bison", value: "email_bison" }] },
   { name: "qc_first_reply_date", label: "QC first reply", type: "datetime", fieldType: "date", description: "When the lead first replied to QC Growth's outreach." },
   { name: "qc_last_reply_date", label: "QC last reply", type: "datetime", fieldType: "date", description: "When the lead last replied." },
+  { name: "qc_reply_sentiment", label: "QC reply sentiment", type: "enumeration", fieldType: "select", description: "How the lead's latest reply reads.", options: [{ label: "Positive", value: "positive" }, { label: "Neutral", value: "neutral" }, { label: "Negative", value: "negative" }] },
+  { name: "qc_reply_count", label: "QC replies", type: "number", fieldType: "number", description: "How many messages the lead has sent." },
 ];
 /** Attribution when the client has no lead source dropdown to put "QC Growth" in. */
 export const QC_SOURCE_PROPERTY: PropertySpec = { name: "qc_source", label: "QC Growth source", type: "enumeration", fieldType: "select", description: "Set on contacts QC Growth's outreach brought in.", options: [{ label: "QC Growth", value: "qc_growth" }] };
@@ -333,6 +335,8 @@ export async function hubspotPush(
   put("qc_outreach_platform", record.platform === "Email Bison" ? "email_bison" : record.platform.toLowerCase());
   put("qc_first_reply_date", record.firstReplyAt ? new Date(record.firstReplyAt).toISOString() : "");
   put("qc_last_reply_date", record.lastReplyAt ? new Date(record.lastReplyAt).toISOString() : "");
+  if (["positive", "neutral", "negative"].includes(record.sentiment)) put("qc_reply_sentiment", record.sentiment);
+  put("qc_reply_count", record.replyCount);
   const basics: Row = { email: record.email, firstname: record.firstName, lastname: record.lastName, jobtitle: record.title, company: record.company };
 
   // Find the contact: the one we stored, else by email, else by QC LinkedIn ID.
