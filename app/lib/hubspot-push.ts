@@ -79,7 +79,22 @@ export async function hubspotConnect(token: string): Promise<{ portalId: string;
   };
 }
 
-export const REQUIRED_SCOPES = ["crm.objects.contacts.read", "crm.objects.contacts.write", "crm.objects.companies.read", "crm.objects.companies.write", "crm.schemas.contacts.read", "crm.schemas.contacts.write", "crm.objects.owners.read", "crm.objects.deals.read", "crm.objects.deals.write", "crm.schemas.deals.read", "crm.schemas.deals.write"];
+/**
+ * Every scope the QC Growth service key needs, from the calls QC Command makes with it (contacts, companies, deals
+ * and their fields, notes on them, associations, owners, the QC Growth segment, the deal pipeline stage, and
+ * adding the QC Growth user). The connect steps list exactly these; a key missing any is flagged on connect.
+ */
+export const REQUIRED_SCOPES = [
+  "crm.objects.contacts.read", "crm.objects.contacts.write",
+  "crm.objects.companies.read", "crm.objects.companies.write",
+  "crm.objects.deals.read", "crm.objects.deals.write",
+  "crm.schemas.contacts.read", "crm.schemas.contacts.write",
+  "crm.schemas.companies.read", "crm.schemas.companies.write",
+  "crm.schemas.deals.read", "crm.schemas.deals.write",
+  "crm.objects.owners.read",
+  "crm.lists.read", "crm.lists.write",
+  "settings.users.read", "settings.users.write",
+];
 
 // ── Audit (read only) ───────────────────────────────────────────────────────────────────────────
 

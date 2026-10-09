@@ -113,7 +113,10 @@ function MeetingsLogo() {
 const HUBSPOT_STEPS = [
   "In the client's HubSpot: Development → Keys → Service keys → Create service key",
   "Name it QC Growth",
-  "Scopes: crm.objects.contacts.read + write, crm.objects.companies.read + write, crm.schemas.contacts.read + write, crm.objects.owners.read, crm.lists.write (the QC Growth segment), crm.objects.deals.read + write and crm.schemas.deals.read + write (booked meetings as deals), and settings.users.write if there is no QC Growth user in HubSpot yet",
+  "Tick every scope below (search each name in the scope picker):",
+  "CRM records: crm.objects.contacts.read + write, crm.objects.companies.read + write, crm.objects.deals.read + write",
+  "CRM fields: crm.schemas.contacts.read + write, crm.schemas.companies.read + write, crm.schemas.deals.read + write",
+  "Owners, segments, users: crm.objects.owners.read, crm.lists.read + write, settings.users.read + write",
   "Copy the key (starts with pat-) and paste it here",
 ];
 const ATTIO_STEPS = [

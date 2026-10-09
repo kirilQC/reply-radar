@@ -168,7 +168,7 @@ test("client Operations page: one button on onboarding, every sign-in comes back
   assert.match(hubspotBack, /\/operations\/\$\{slug/);
   assert.match(ui, /oauth\/start\?return=\$\{encodeURIComponent\(`\/operations\/\$\{slug\}`\)\}/);
   assert.match(bookings, /`\/operations\/\$\{focus\}\?view=meetings`/);
-  assert.match(ui, /crm\.objects\.deals\.read \+ write and crm\.schemas\.deals\.read \+ write/);
+  assert.match(ui, /crm\.objects\.deals\.read \+ write/);
 });
 
 test("the Booked Meeting (QC) stage is never skipped: no opt-out, a key without deals access blocks the build and says why", () => {
@@ -180,7 +180,19 @@ test("the Booked Meeting (QC) stage is never skipped: no opt-out, a key without 
   assert.match(deals, /enabled: true,\n\s+blocker,/);
   assert.match(route, /if \(freshDeals\.blocker\) return NextResponse\.json\(\{ ok: false/);
   assert.match(route, /if \(!planDeals\.available\) return NextResponse\.json\(\{ ok: false/);
-  assert.match(push, /"crm\.objects\.deals\.read", "crm\.objects\.deals\.write", "crm\.schemas\.deals\.read", "crm\.schemas\.deals\.write"\]/);
+  for (const scope of ["crm.objects.deals.read", "crm.objects.deals.write", "crm.schemas.deals.read", "crm.schemas.deals.write"]) assert.ok(push.includes(`"${scope}"`), scope);
   assert.doesNotMatch(ui, /setPushDeals/);
   assert.match(ui, /disabled=\{Boolean\(busy\) \|\| Boolean\(dealsBlocker\)\}/);
+});
+
+test("the HubSpot connect steps list every scope QC Command checks for, so a key is never short one", async () => {
+  const push = readFileSync(new URL("../app/lib/hubspot-push.ts", import.meta.url), "utf8");
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  const required = [...push.slice(push.indexOf("export const REQUIRED_SCOPES"), push.indexOf("];", push.indexOf("export const REQUIRED_SCOPES"))).matchAll(/"([a-z.]+)"/g)].map((m) => m[1]);
+  assert.ok(required.length >= 17);
+  const steps = ui.slice(ui.indexOf("const HUBSPOT_STEPS"), ui.indexOf("const ATTIO_STEPS"));
+  for (const scope of required) {
+    const base = scope.replace(/\.(read|write)$/, "");
+    assert.ok(steps.includes(scope) || steps.includes(`${base}.read + write`), `connect steps miss ${scope}`);
+  }
 });
