@@ -620,7 +620,10 @@ function SheetCard({ sheet, fields, run, busy, airtable = false }: { sheet: Shee
         <div className="ops-h2">{sheet.accountName ?? "Sheet"} <span className="ops-muted">· {sheet.config.tab ?? ""}</span></div>
         {sheet.config.url && <a className="ops-link" href={sheet.config.url} target="_blank" rel="noreferrer">{airtable ? "Open table ↗" : "Open sheet ↗"}</a>}
       </div>
-      <ContentSwitch value={sheet.content} disabled={Boolean(busy)} onChange={(value) => { if (value !== sheet.content) void step("content", { content: value }).then((payload) => setAdded(addedNote(payload, airtable ? "The table" : "The sheet"))); }} />
+      {/* What a table holds is chosen once: after the mapping is confirmed it is that table for good (remove it to change). */}
+      {built
+        ? <span className="bk-chip bk-chip-on ops-holds">Holds {CONTENT_NAMES[sheet.content].toLowerCase()}</span>
+        : <ContentSwitch value={sheet.content} disabled={Boolean(busy)} onChange={(value) => { if (value !== sheet.content) void step("content", { content: value }).then((payload) => setAdded(addedNote(payload, airtable ? "The table" : "The sheet"))); }} />}
       {added && <p className="ops-ok">{added}</p>}
       <ul className="ops-map">
         {headers.map((header, index) => index === sheet.config.qcIdColumn ? null : (

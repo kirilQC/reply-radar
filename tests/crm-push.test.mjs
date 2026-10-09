@@ -330,3 +330,12 @@ test("booked meetings on Operations: six numbered steps, everything saves itself
   assert.match(about, /blocks\.slice\(lastTool \+ 1\)/);
   assert.match(about, /\.join\(""\)/);
 });
+
+test("a confirmed sheet or Airtable table holds one thing for good: no content switch, and the server refuses a change", () => {
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  const at = readFileSync(new URL("../app/api/airtable-push/[slug]/route.ts", import.meta.url), "utf8");
+  const sh = readFileSync(new URL("../app/api/sheets-push/[slug]/route.ts", import.meta.url), "utf8");
+  assert.match(ui, /\{built\s*\? <span className="bk-chip bk-chip-on ops-holds">Holds/);
+  assert.match(at, /if \(destination\.status === "built" && contentOf\(body\.content\) !== content\) return NextResponse\.json\(\{ ok: false/);
+  assert.match(sh, /if \(destination\.status === "built" && contentValue\(body\.content\) !== contentOf\(destination\)\) return NextResponse\.json\(\{ ok: false/);
+});

@@ -154,6 +154,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       return reply();
     }
     if (action === "content") {
+      // Locked once the mapping is confirmed: a table holds one thing for good. Remove it to change.
+      if (destination.status === "built" && contentOf(body.content) !== content) return NextResponse.json({ ok: false, error: "This table is set up. To hold something else, remove it and connect a new one." }, { status: 409 });
       const next = contentOf(body.content);
       if (next === content) return reply();
       const filled = await addMissingAirtableFields(saved.baseId, saved.tableId, airtableSuggest(saved.fields, fieldsFor(next)), next);

@@ -119,6 +119,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     const sheetConfig = (destination.config ?? {}) as unknown as SheetConfig & { url: string };
 
     if (action === "content") {
+      // Locked once the mapping is confirmed: a sheet holds one thing for good. Remove it to change.
+      if (destination.status === "built" && contentValue(body.content) !== contentOf(destination)) return NextResponse.json({ ok: false, error: "This sheet is set up. To hold something else, remove it and connect a new one." }, { status: 409 });
       // What the sheet holds: replies (one row per conversation), booked meetings (one per person) or campaigns.
       const content: SheetContent = contentValue(body.content);
       if (content === contentOf(destination)) return reply();

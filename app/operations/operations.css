@@ -274,3 +274,5 @@ body.light-mode .ops-area {
 .bk-recent li small { grid-column: 1 / -1; }
 .bk-empty { padding: 0 20px 18px; }
 @media (max-width: 900px) { .bk-two { grid-template-columns: minmax(0, 1fr); } .bk-step { grid-template-columns: minmax(0, 1fr); } }
+
+.ops-holds { align-self: flex-start; font-size: 13px; padding: 8px 12px; }
