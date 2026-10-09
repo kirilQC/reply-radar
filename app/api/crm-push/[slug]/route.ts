@@ -115,6 +115,20 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const scopes = (Array.isArray((info as { scopes?: unknown }).scopes) ? (info as { scopes: string[] }).scopes : []).filter((scope) => /report|dashboard|list|hubsql/i.test(scope));
       return NextResponse.json({ ok: true, probe: results, scopes });
     }
+    if (action === "probe_calls") {
+      // Raw reporting calls with the client's key, for working out what HubSpot accepts. Reporting paths only.
+      const allowed = /^\/(analytics\/reporting\/|hub\/cli\/backend\/reporting\/|dashboard\/v2\/|reporting\/v\d\/)/;
+      const calls = (Array.isArray(body.calls) ? body.calls : []).slice(0, 12) as Array<{ method?: string; path?: string; body?: unknown; ua?: boolean }>;
+      const out: Array<{ method: string; path: string; status: number; body: string }> = [];
+      for (const entry of calls) {
+        const method = String(entry.method ?? "GET").toUpperCase();
+        const path = String(entry.path ?? "");
+        if (!allowed.test(path)) { out.push({ method, path, status: 0, body: "path not allowed" }); continue; }
+        const response = await fetch(`https://api.hubapi.com${path}`, { method, headers: { Authorization: `Bearer ${destination.api_key}`, "content-type": "application/json", ...(entry.ua ? { "user-agent": "hubcli/0.15.1" } : {}) }, body: entry.body === undefined ? undefined : JSON.stringify(entry.body), cache: "no-store" }).catch(() => null);
+        out.push({ method, path, status: response?.status ?? 0, body: response ? (await response.text().catch(() => "")).slice(0, 1500) : "" });
+      }
+      return NextResponse.json({ ok: true, out });
+    }
     if (action === "probe_write") {
       // Creates one TEST view, segment, report and dashboard with the client's key, reads each back, deletes them all.
       const token = destination.api_key;
