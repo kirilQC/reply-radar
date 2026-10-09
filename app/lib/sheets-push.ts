@@ -19,28 +19,39 @@ const text = (value: unknown) => (typeof value === "string" ? value.trim() : typ
 
 type ServiceAccount = { client_email: string; private_key: string };
 
+/** QC Command's Google robot (not secret): used when the variable holds only the private key. */
+const QC_ROBOT_EMAIL = (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? "qc-growth@adept-region-511117-t8.iam.gserviceaccount.com").trim();
+
+/** Reads the key file's JSON, or just its private key (the whole file is not always what gets pasted). */
 export function serviceAccount(): ServiceAccount | null {
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Partial<ServiceAccount>;
-    return parsed.client_email && parsed.private_key ? { client_email: parsed.client_email, private_key: parsed.private_key.replace(/\\n/g, "\n") } : null;
+    const parsed = JSON.parse(raw) as Partial<ServiceAccount> | string;
+    if (typeof parsed === "string" && parsed.includes("PRIVATE KEY")) return { client_email: QC_ROBOT_EMAIL, private_key: parsed.replace(/\\n/g, "\n") };
+    if (typeof parsed === "object" && parsed?.client_email && parsed.private_key) return { client_email: parsed.client_email, private_key: parsed.private_key.replace(/\\n/g, "\n") };
   } catch {
-    return null;
+    // not JSON: a bare PEM key, possibly with escaped newlines
   }
+  if (raw.includes("BEGIN PRIVATE KEY")) {
+    const pem = raw.replace(/^"|"$/g, "").replace(/\\n/g, "\n");
+    return { client_email: QC_ROBOT_EMAIL, private_key: pem };
+  }
+  return null;
 }
 
 /** Whether the key is there and readable, never its contents: for the panel's setup message. */
-export function serviceAccountStatus(): { present: boolean; parses: boolean; hasEmail: boolean; hasKey: boolean; length: number } {
+export function serviceAccountStatus(): { present: boolean; parses: boolean; hasEmail: boolean; hasKey: boolean; length: number; signIn?: string } {
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim() ?? "";
   let parsed: Partial<ServiceAccount> | null = null;
   try { parsed = raw ? (JSON.parse(raw) as Partial<ServiceAccount>) : null; } catch { parsed = null; }
-  return { present: Boolean(raw), parses: Boolean(parsed), hasEmail: Boolean(parsed?.client_email), hasKey: Boolean(parsed?.private_key), length: raw.length };
+  const account = serviceAccount();
+  return { present: Boolean(raw), parses: Boolean(parsed), hasEmail: Boolean(account?.client_email), hasKey: Boolean(account?.private_key), length: raw.length };
 }
 
 let cached: { token: string; until: number } | null = null;
 
-async function accessToken(): Promise<string> {
+export async function accessToken(): Promise<string> {
   if (cached && cached.until - Date.now() > 60_000) return cached.token;
   const account = serviceAccount();
   if (!account) throw new Error("QC Command's Google account is not set up (GOOGLE_SERVICE_ACCOUNT_JSON on Vercel).");
