@@ -138,14 +138,15 @@ export function normalizeMeeting(payload) {
   return {
     client: get("client", "client_name", "workspace", "account"),
     fields: {
-      invitee_name: get("invitee_name", "name", "invitee", "lead_name", "full_name", "attendee"),
+      // The same Zap joins two copies of the name too ("Jane Doe; Jane Doe", "Jane Doe;"): keep it once.
+      invitee_name: dedupeParts(get("invitee_name", "name", "invitee", "lead_name", "full_name", "attendee")),
       invitee_email: get("invitee_email", "email", "lead_email"),
       invitee_linkedin: get("invitee_linkedin", "linkedin", "lead_linkedin", "linkedin_url", "person_linkedin"),
       // The booking flow joins two copies of the title with ";" ("CPO ; CPO"); keep each distinct part once.
       invitee_title: dedupeParts(get("invitee_title", "title", "lead_title", "job_title")),
       invitee_location: get("invitee_location", "lead_location", "person_location", "location"),
       invitee_headline: get("invitee_headline", "lead_headline", "headline"),
-      company_name: get("company_name", "company", "organization"),
+      company_name: dedupeParts(get("company_name", "company", "organization")),
       company_domain: get("company_domain", "domain", "website"),
       company_linkedin: get("company_linkedin", "company_linkedin_url"),
       company_location: get("company_location"),
