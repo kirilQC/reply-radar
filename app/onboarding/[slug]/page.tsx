@@ -5,7 +5,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import OpsCockpit from "../../components/OpsCockpit";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import AppSidebar from "../../components/AppSidebar";
@@ -427,7 +426,10 @@ export default function OnboardingChecklistPage() {
                   <h1>{client.name}</h1>
                   <Link href="/onboarding" className="onb-back">← All clients</Link>
                 </div>
-                <OpsCockpit slug={client.slug} clientName={client.name} />
+                <Link href={`/operations/${client.slug}`} className="onb-ops-link" aria-label={`${client.name} operations: HubSpot, Attio, Google Sheets and booked meetings`}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></svg>
+                  Operations
+                </Link>
               </div>
 
               <div className="onb-progress-sticky">

@@ -136,7 +136,7 @@ test("HubSpot sign-in opens on the portal's own region host, never app.hubspot.c
 });
 
 test("every action the CRM and Sheets panels send has a handler in the routes (no 'Unknown action.')", () => {
-  const ui = readFileSync(new URL("../app/components/OpsCockpit.tsx", import.meta.url), "utf8");
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
   const routes = ["../app/api/crm-push/[slug]/route.ts", "../app/api/sheets-push/[slug]/route.ts"].map((p) => readFileSync(new URL(p, import.meta.url), "utf8")).join("\n");
   const sent = [...new Set([...ui.matchAll(/step\("([a-z_]+)"/g)].map((m) => m[1]))];
   assert.ok(sent.length > 5);
@@ -144,9 +144,9 @@ test("every action the CRM and Sheets panels send has a handler in the routes (n
 });
 
 test("HubSpot dashboard section links to the client's In beta page until a dashboard exists", () => {
-  const ui = readFileSync(new URL("../app/components/OpsCockpit.tsx", import.meta.url), "utf8");
-  assert.match(ui, /\/product-updates\/\$\{crm\.accountId\}\/in-beta/);
-  assert.match(ui, /!crm\.config\?\.dashboard_id && crm\.accountId/);
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  assert.match(ui, /\/product-updates\/\$\{c\.accountId\}\/in-beta/);
+  assert.match(ui, /!c\.config\?\.dashboard_id && c\.accountId/);
 });
 
 test("HubSpot reports never duplicate: build stops when it cannot read what exists, dedupes by name, one build at a time", () => {
@@ -156,4 +156,17 @@ test("HubSpot reports never duplicate: build stops when it cannot read what exis
   assert.match(src, /return \{ log, dashboardId: null, pending: waiting \}/);
   assert.match(src, /ids\.find\(\(id\) => onDashboard\.has\(id\)\) \?\? ids\[0\]/);
   assert.match(route, /withPushLock\(c, workspace\.id, "reporting"/);
+});
+
+test("client Operations page: one button on onboarding, every sign-in comes back to it, deals scopes asked for", () => {
+  const onboarding = readFileSync(new URL("../app/onboarding/[slug]/page.tsx", import.meta.url), "utf8");
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  const hubspotBack = readFileSync(new URL("../app/api/hubspot/oauth/callback/route.ts", import.meta.url), "utf8");
+  const bookings = readFileSync(new URL("../app/slack/BookingAlerts.tsx", import.meta.url), "utf8");
+  assert.match(onboarding, /href=\{`\/operations\/\$\{client\.slug\}`\}/);
+  assert.doesNotMatch(onboarding, /OpsCockpit/);
+  assert.match(hubspotBack, /\/operations\/\$\{slug/);
+  assert.match(ui, /oauth\/start\?return=\$\{encodeURIComponent\(`\/operations\/\$\{slug\}`\)\}/);
+  assert.match(bookings, /`\/operations\/\$\{focus\}\?view=meetings`/);
+  assert.match(ui, /crm\.objects\.deals\.read \+ write and crm\.schemas\.deals\.read \+ write/);
 });

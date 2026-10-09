@@ -68,7 +68,7 @@ async function call(path: string, init?: RequestInit) {
  * `focus` (a client slug) is the per-client page opened from onboarding: that client only, opened up, with
  * its pre-call brief and recent bookings. Without it, every client, from the Slack tab.
  */
-export default function BookingAlerts({ onBack, backLabel = "← Slack automations", focus = "" }: { onBack: () => void; backLabel?: string; focus?: string }) {
+export default function BookingAlerts({ onBack, backLabel = "← Slack automations", focus = "" }: { onBack?: () => void; backLabel?: string; focus?: string }) {
   const settingsPath = focus ? `/api/bookings/settings?client=${encodeURIComponent(focus)}` : "/api/bookings/settings";
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState("");
@@ -80,7 +80,7 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
   const [setupOpen, setSetupOpen] = useState(!focus);
   // Each client's own event types, loaded when its row is opened: one client's Calendly is one client's events.
   const [events, setEvents] = useState<Record<string, { list: CalendarEvent[]; errors: string[]; loading: boolean }>>({});
-  const returnPath = focus ? `/bookings/${focus}` : "/slack?view=bookings";
+  const returnPath = focus ? `/operations/${focus}?view=meetings` : "/slack?view=bookings";
 
   const take = (payload: Payload | null) => {
     if (payload?.global) {
@@ -184,7 +184,7 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
   if (!data) {
     return (
       <main className="reports-hub">
-        <button type="button" className="config-back" onClick={onBack}>{backLabel}</button>
+        {onBack && <button type="button" className="config-back" onClick={onBack}>{backLabel}</button>}
         <div className="hub-lede"><h1>{focus ? "Booked meetings" : "Booked meetings"}</h1></div>
         {error ? <div className="config-error">{error}</div> : <div className="hub-empty">Loading…</div>}
       </main>
@@ -244,7 +244,7 @@ export default function BookingAlerts({ onBack, backLabel = "← Slack automatio
 
   return (
     <main className="reports-hub">
-      <button type="button" className="config-back" onClick={onBack}>{backLabel}</button>
+      {onBack && <button type="button" className="config-back" onClick={onBack}>{backLabel}</button>}
       <div className="hub-lede"><h1>{focus && data.clients[0] ? `${data.clients[0].name} booked meetings` : "Booked meetings"}</h1></div>
 
       <div className="hub-group-label">

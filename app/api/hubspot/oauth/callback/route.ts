@@ -13,7 +13,7 @@ import { OAUTH_ORIGIN, exchangeCode, readOauthState } from "../../../../lib/hubs
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const slug = readOauthState(params.get("state") ?? "");
-  const back = (query: string) => NextResponse.redirect(`${OAUTH_ORIGIN}/onboarding/${slug ?? ""}?${query}`);
+  const back = (query: string) => NextResponse.redirect(`${OAUTH_ORIGIN}/operations/${slug ?? ""}?${query}`);
   if (!slug) return NextResponse.redirect(`${OAUTH_ORIGIN}/onboarding?hubspot_error=${encodeURIComponent("That HubSpot sign-in link expired. Try Connect again.")}`);
   if (params.get("error")) return back(`hubspot_error=${encodeURIComponent(params.get("error_description") ?? params.get("error") ?? "HubSpot sign-in was cancelled.")}`);
   try {

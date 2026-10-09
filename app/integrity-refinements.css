@@ -7135,3 +7135,8 @@ a.oc-disabled { opacity: .55; pointer-events: none; }
 .oc-error { margin: 0; color: var(--coral, #ed8a77); font-size: 11px; }
 .oc-foot { display: flex; justify-content: space-between; align-items: center; }
 .oc-note a { color: var(--accent); }
+
+/* Onboarding: the one button that opens the client's Operations page. */
+.onb-ops-link { margin-left: auto; align-self: center; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 12px; background: var(--accent); color: var(--accent-ink, #06201c); font-weight: 700; font-size: 14px; text-decoration: none; white-space: nowrap; }
+.onb-ops-link:hover { filter: brightness(1.06); }
+.onb-ops-link svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }

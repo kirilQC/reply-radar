@@ -16,6 +16,6 @@ export async function GET(request: Request) {
     const destination = workspace ? await loadDestination(c, String(workspace.id), "crm") : null;
     return NextResponse.redirect(authorizeUrl(OAUTH_ORIGIN, slug, destination?.account_id, destination?.account_name));
   } catch (error) {
-    return NextResponse.redirect(`${OAUTH_ORIGIN}/onboarding/${slug}?hubspot_error=${encodeURIComponent(error instanceof Error ? error.message : "Could not start the HubSpot sign-in.")}`);
+    return NextResponse.redirect(`${OAUTH_ORIGIN}/operations/${slug}?hubspot_error=${encodeURIComponent(error instanceof Error ? error.message : "Could not start the HubSpot sign-in.")}`);
   }
 }
