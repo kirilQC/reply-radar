@@ -18,13 +18,13 @@ export async function GET(request: Request) {
   if (params.get("error")) return back(`hubspot_error=${encodeURIComponent(params.get("error_description") ?? params.get("error") ?? "HubSpot sign-in was cancelled.")}`);
   try {
     const c = { url: process.env.SUPABASE_URL ?? "", key: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "" };
-    const [workspace] = await rows(c, `rr_workspaces?select=id&slug=eq.${encodeURIComponent(slug)}&limit=1`);
+    const [workspace] = await rows(c, `rr_workspaces?select=id,name&slug=eq.${encodeURIComponent(slug)}&limit=1`);
     if (!workspace) throw new Error("Unknown client.");
     const workspaceId = String(workspace.id);
     const destination = await loadDestination(c, workspaceId, "crm");
     if (!destination?.account_id) throw new Error("Connect the client's HubSpot service key first.");
     const user = await exchangeCode(OAUTH_ORIGIN, params.get("code") ?? "");
-    if (user.hub_id !== destination.account_id) throw new Error(`That sign-in was for HubSpot account ${user.hub_id}, not this client's (${destination.account_id}). Pick ${destination.account_name ?? "their account"} when HubSpot asks.`);
+    if (user.hub_id !== destination.account_id) throw new Error(`That sign-in was for HubSpot account ${user.hub_id}, not ${String(workspace.name ?? "this client")}'s (${destination.account_id}). Pick ${String(workspace.name ?? "the client's")} account when HubSpot asks.`);
     await saveDestination(c, workspaceId, "crm", { config: { ...(destination.config ?? {}), hubspot_user: user } });
     return back("hubspot=connected");
   } catch (error) {

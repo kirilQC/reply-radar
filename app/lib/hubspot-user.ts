@@ -50,7 +50,8 @@ export function readOauthState(state: string): string | null {
   return slug;
 }
 
-export function authorizeUrl(origin: string, slug: string): string {
+/** With the client's portal id, HubSpot opens straight on that account instead of asking which one. */
+export function authorizeUrl(origin: string, slug: string, portalId?: string | null): string {
   const { clientId } = app();
   const params = new URLSearchParams({
     client_id: clientId,
@@ -59,7 +60,7 @@ export function authorizeUrl(origin: string, slug: string): string {
     optional_scope: HUBSPOT_USER_OPTIONAL_SCOPES.join(" "),
     state: oauthState(slug),
   });
-  return `https://app.hubspot.com/oauth/authorize?${params}`;
+  return `https://app.hubspot.com/oauth/${portalId && /^\d+$/.test(portalId) ? `${portalId}/` : ""}authorize?${params}`;
 }
 
 async function tokenRequest(fields: Record<string, string>): Promise<Row> {
