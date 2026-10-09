@@ -19,7 +19,8 @@ export const QC_DASHBOARD_NAME = "QC Growth";
 
 export const QC_REPORTS: Array<{ name: string; chartType: string; sql: string }> = [
   { name: "QC Growth · Leads who replied", chartType: "KPI", sql: `SELECT COUNT(*) FROM CONTACT ${QC_ONLY}` },
-  { name: "QC Growth · Replies over time", chartType: "LINE", sql: `SELECT DATE_TRUNC(qc_first_reply_date, 'WEEK'), COUNT(*) FROM CONTACT ${QC_ONLY} GROUP BY DATE_TRUNC(qc_first_reply_date, 'WEEK')` },
+  // Monthly: HubSpot saves a WEEK grouping as YEAR (tested 2026-10-09), MONTH holds.
+  { name: "QC Growth · Replies by month", chartType: "COLUMN", sql: `SELECT DATE_TRUNC(qc_first_reply_date, 'MONTH'), COUNT(*) FROM CONTACT ${QC_ONLY} GROUP BY DATE_TRUNC(qc_first_reply_date, 'MONTH')` },
   { name: "QC Growth · Replies by campaign", chartType: "HORIZONTAL_BAR", sql: `SELECT qc_campaign, COUNT(*) FROM CONTACT ${QC_ONLY} GROUP BY qc_campaign ORDER BY COUNT(*) DESC` },
   { name: "QC Growth · Reply sentiment", chartType: "DONUT", sql: `SELECT qc_reply_sentiment, COUNT(*) FROM CONTACT ${QC_ONLY} GROUP BY qc_reply_sentiment` },
   { name: "QC Growth · Replies by platform", chartType: "DONUT", sql: `SELECT qc_outreach_platform, COUNT(*) FROM CONTACT ${QC_ONLY} GROUP BY qc_outreach_platform` },
