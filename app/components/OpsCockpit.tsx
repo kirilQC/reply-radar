@@ -252,7 +252,7 @@ function CrmPanel({ slug, clientName, provider, onClose, returned }: { slug: str
             {tested && (
               <p className="oc-note">
                 {tested.created ? "Created" : "Updated"} {tested.name}{tested.company ? ` (${tested.company})` : ""} · {tested.campaign}
-                {tested.link && <> · <a href={tested.link} target="_blank" rel="noreferrer">Open in HubSpot ↗</a></>}
+                {tested.link && <> · <a href={tested.link} target="_blank" rel="noreferrer">Open in {name} ↗</a></>}
               </p>
             )}
             {progress && <p className="oc-muted">{progress.created} created · {progress.updated} updated · {progress.unchanged} unchanged{progress.failed ? ` · ${progress.failed} failed` : ""}</p>}
