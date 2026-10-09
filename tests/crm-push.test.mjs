@@ -102,7 +102,7 @@ test("HubSpot deals: an existing deal is updated but never moved back a stage, a
   assert.doesNotMatch(qc, /dealstage|"pipeline"|pipeline:/);
   assert.match(lib, /PATCH", `\/crm\/v3\/objects\/deals\/\$\{enc\(dealId\)\}`, \{ properties: \{ \.\.\.qc, \.\.\.rename \} \}/);
   // A deal is the company; QC only renames its own old "(QC Growth)" names.
-  assert.match(lib, /const name = text\(meeting\.company_name\) \|\| text\(meeting\.invitee_name\)/);
+  assert.match(lib, /const name = text\(meeting\.company_name\) \|\| reply\?\.company \|\| text\(meeting\.invitee_name\)/);
   assert.match(lib, /\/\\\(QC Growth\\\)\$\/\.test/);
   assert.match(lib, /if \(\/cancel\/i\.test\(text\(meeting\.status\)\) && !before\?\.deal_id/);
   assert.doesNotMatch(lib, /"DELETE"/);
