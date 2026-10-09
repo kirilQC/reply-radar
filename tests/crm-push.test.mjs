@@ -422,3 +422,12 @@ test("a lead photo Slack can't fetch never costs the booking post: it is posted 
   assert.match(run, /postMessage\(channel, card\.text, "", card\.blocks, identity\)\.catch\(\(error\) => \{\s*if \(!card\.blocks\.some/);
   assert.match(run, /return postMessage\(channel, card\.text, "", plain, identity\);/);
 });
+
+test("booking card image falls back to the company's logo by its domain (Clay's domain or a work email), never a personal mailbox's", async () => {
+  const { buildBookingCard } = await import("../shared/bookings.mjs");
+  assert.equal(buildBookingCard({ invitee_name: "K", invitee_email: "k@qcgrowth.com" }).blocks[0].accessory.image_url, "https://www.google.com/s2/favicons?domain=qcgrowth.com&sz=128");
+  assert.equal(buildBookingCard({ invitee_name: "X", company_domain: "https://www.trychroma.com/" }).blocks[0].accessory.image_url, "https://www.google.com/s2/favicons?domain=trychroma.com&sz=128");
+  assert.equal(buildBookingCard({ invitee_name: "Y", invitee_email: "y@gmail.com" }).blocks[0].accessory, undefined);
+  const domains = readFileSync(new URL("../app/lib/company-domain.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(domains, /logo\.clearbit\.com/);
+});

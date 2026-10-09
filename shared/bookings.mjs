@@ -360,10 +360,15 @@ export function buildBookingCard(meeting, opts = {}) {
   const text = `${opts.test ? "_Test post. Nothing was sent anywhere else._\n" : ""}${heading}${tag ? `\n${tag}` : ""}\n\n${lines.join("\n")}`;
   const blocks = sections(text);
   // The lead's photo to the right of the card (their company's logo when there is no photo).
-  const image = [m.invitee_photo_url, m.company_logo_url].map((value) => str(value).trim()).find((value) => /^https:\/\//i.test(value));
+  // Last resort: the company's own logo by its domain (Clay's, else a work email's), which always loads.
+  const domain = clean(m.company_domain).replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, "") || workDomain(str(m.invitee_email));
+  const image = [m.invitee_photo_url, m.company_logo_url, domain ? companyLogoUrl(domain) : ""].map((value) => str(value).trim()).find((value) => /^https:\/\//i.test(value));
   if (image && blocks[0]) blocks[0] = { ...blocks[0], accessory: { type: "image", image_url: image, alt_text: clean(m.invitee_name) || clean(m.company_name) || "Lead" } };
   return { text: `${canceled ? "Booking canceled" : "New booking"}: ${clean(m.invitee_name) || "someone"}${clean(m.company_name) ? ` (${clean(m.company_name)})` : ""}`, blocks };
 }
+
+/** A company's logo by its website domain (Google's favicon service: always answers, 128 px). */
+export const companyLogoUrl = (domain) => `https://www.google.com/s2/favicons?domain=${encodeURIComponent(str(domain).trim().toLowerCase())}&sz=128`;
 
 /** "first", "second"... for the meeting tag; past ten, "11th". */
 export function meetingOrdinal(number) {

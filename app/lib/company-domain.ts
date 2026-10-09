@@ -79,7 +79,8 @@ async function lookup(name: string): Promise<Resolved> {
     const domain = str(first?.domain);
     // Autocomplete always returns `logo: null`; the real logo comes from Clearbit's logo endpoint, built
     // from the domain we just found. So a resolved domain also yields a usable logo.
-    return { domain, logo: domain ? `https://logo.clearbit.com/${domain}` : "" };
+    // Clearbit's free logo service is gone; Google's favicon service answers for any domain.
+    return { domain, logo: domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128` : "" };
   } catch {
     return { domain: "", logo: "" };
   }
