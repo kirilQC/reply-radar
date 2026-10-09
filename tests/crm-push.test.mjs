@@ -357,3 +357,16 @@ test("Send a test: the person types name, email, company and title, and the row 
   assert.equal(row["USER title"], "CTO");
   assert.equal(row.test, true);
 });
+
+test("Clay's answer: lead name and email accepted (never over what the booking form had), photo and logo from AI Ark by LinkedIn", async () => {
+  const { fromClay } = await import("../shared/bookings.mjs");
+  const parsed = fromClay({ meeting_id: "m1", test: "false", lead_name: "Ada Lovelace", lead_email: "ada@analytical.com", client: "Chroma", date: "Oct 12", lead_linkedin: "linkedin.com/in/ada" });
+  assert.equal(parsed.meetingId, "m1");
+  assert.equal(parsed.fields.invitee_name, "Ada Lovelace");
+  assert.equal(parsed.fields.invitee_email, "ada@analytical.com");
+  assert.equal(fromClay({ meeting_id: "m2", company_name: "Acme" }).fields.invitee_name, "");
+  const run = readFileSync(new URL("../app/lib/booking-run.ts", import.meta.url), "utf8");
+  assert.match(run, /const FORM_COLUMNS = new Set\(\["invitee_title", "company_name", "invitee_name", "invitee_email"\]\)/);
+  assert.match(run, /photosFromAiArk\(linkedin,/);
+  assert.match(run, /if \(pictures\?\.photo && !clean\(meeting\.invitee_photo_url\)\)/);
+});

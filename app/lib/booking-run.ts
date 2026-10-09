@@ -46,6 +46,7 @@ import { campaignFromLead, enrichMeeting, findLeadForMeeting, getMeetingConversa
 import { postMessage, slackConfigured, updateMessage } from "./slack";
 import { publicBaseUrl } from "./public-url";
 import { writeAuditEvent } from "./audit-log";
+import { extractAiArkEnrichment, lookupPeople, normalizeLinkedIn } from "./ai-ark-enrichment";
 
 type Row = Record<string, unknown>;
 export type Config = { url: string; key: string };
@@ -415,10 +416,20 @@ export async function sendToClay(settings: BookingSettings, row: Row): Promise<{
   return { ok: true };
 }
 
+/** The person's photo and their company's logo from AI Ark, by LinkedIn profile. */
+async function photosFromAiArk(linkedin: string, company: string): Promise<{ photo: string; logo: string } | null> {
+  const found = await lookupPeople([linkedin]);
+  if (!found.ok) return null;
+  const person = found.people.get(normalizeLinkedIn(linkedin));
+  if (!person) return null;
+  const enrichment = extractAiArkEnrichment(person, company);
+  return { photo: text(enrichment.profilePhotoUrl), logo: text(enrichment.companyPhotoUrl) };
+}
+
 // ── Clay's answer ─────────────────────────────────────────────────────────────────────────────────
 
 /** Columns the person typed on the booking form. Clay fills them only when the form left them empty. */
-const FORM_COLUMNS = new Set(["invitee_title", "company_name"]);
+const FORM_COLUMNS = new Set(["invitee_title", "company_name", "invitee_name", "invitee_email"]);
 
 /**
  * What Clay's HTTP API column posts. Stores the enrichment and says what to run next. A test row (from the
@@ -437,6 +448,13 @@ export async function intakeClay(config: Config, body: unknown): Promise<{ ok: b
     if (!incoming) continue;
     if (FORM_COLUMNS.has(column) && clean(meeting[column])) continue;
     patch[column] = incoming;
+  }
+  // Photo and logo are not asked of Clay: QC fills them from AI Ark by the LinkedIn, when the booking lacks them.
+  const linkedin = text(patch.invitee_linkedin) || text(meeting.invitee_linkedin);
+  if (linkedin && (!clean(meeting.invitee_photo_url) || !clean(meeting.company_logo_url))) {
+    const pictures = await photosFromAiArk(linkedin, text(patch.company_name) || text(meeting.company_name)).catch(() => null);
+    if (pictures?.photo && !clean(meeting.invitee_photo_url)) patch.invitee_photo_url = pictures.photo;
+    if (pictures?.logo && !clean(meeting.company_logo_url)) patch.company_logo_url = pictures.logo;
   }
   if (Object.keys(patch).length) await patchMeeting(config, text(meeting.id), patch);
   const booking = bookingOf(meeting);

@@ -273,6 +273,8 @@ export function fromClay(body) {
     meetingId: get("meeting_id", "meetingid", "qc_meeting_id", "booking_id"),
     test: testValue === "true" || testValue === "1" || testValue === "yes",
     fields: {
+      invitee_name: get("lead_name", "full_name", "person_name", "name"),
+      invitee_email: get("lead_email", "work_email", "person_email", "email"),
       invitee_linkedin: linkedinUrl(get("lead_linkedin", "USER LINKEDIN FINAL!!", "linkedin", "linkedin_url", "person_linkedin", "linkedin_profile", "linkedin_profile_url", "spark_linkedin")),
       invitee_title: get("lead_title", "title", "job_title", "person_title"),
       invitee_location: get("lead_location", "person_location", "location_name", "location"),
