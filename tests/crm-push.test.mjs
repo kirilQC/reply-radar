@@ -4,13 +4,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { conversationText, linkedinKey } from "../shared/crm-push-text.mjs";
+import { canonicalLinkedin, conversationText, linkedinKey } from "../shared/crm-push-text.mjs";
 
 test("every form of the same LinkedIn profile gives one key, so the CRM never gets two contacts", () => {
   for (const url of ["https://www.linkedin.com/in/Jane-Doe-12/", "http://linkedin.com/in/jane-doe-12?utm=x", "https://uk.linkedin.com/in/jane-doe-12", "linkedin.com/in/Jane%2DDoe%2D12"]) {
     assert.equal(linkedinKey(url), "jane-doe-12", url);
   }
   assert.equal(linkedinKey(""), "");
+  assert.equal(canonicalLinkedin("http://uk.linkedin.com/in/Jane-Doe-12/?x=1"), "https://www.linkedin.com/in/jane-doe-12");
 });
 
 test("the conversation note is labelled QC Growth, carries campaign and sender, and keeps the newest messages when too long", () => {
@@ -31,7 +32,7 @@ test("the HubSpot build only creates; it never deletes, and only patches the lea
   const source = readFileSync(new URL("../app/lib/hubspot-push.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /"DELETE"/);
   const patches = [...source.matchAll(/hubspot\(token, "PATCH", `([^`]+)`/g)].map((match) => match[1]);
-  assert.deepEqual(patches.sort(), ["/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/notes/${encodeURIComponent(noteId)}", "/crm/v3/properties/contacts/${encodeURIComponent(item.property!)}"].sort());
+  assert.deepEqual(patches.sort(), ["/crm/v3/objects/companies/${encodeURIComponent(companyId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/notes/${encodeURIComponent(noteId)}", "/crm/v3/properties/contacts/${encodeURIComponent(item.property!)}"].sort());
   // A contact the client already had never gets lifecycle, owner or lead source from us.
   assert.match(source, /\/\/ The client's contact: QC's fields always, their basics only where empty, nothing else\.\n    const current/);
 });
@@ -41,4 +42,11 @@ test("a portal already linked to another client is refused, and writes need the 
   assert.match(route, /already connected to another client/);
   const run = readFileSync(new URL("../app/lib/crm-push-run.ts", import.meta.url), "utf8");
   assert.match(run, /if \(destination\.status !== "built"\) throw/);
+});
+
+test("the plan keeps QC's own fields to the minimum and maps the rest onto HubSpot's standard fields", () => {
+  const source = readFileSync(new URL("../app/lib/hubspot-push.ts", import.meta.url), "utf8");
+  const own = [...source.slice(source.indexOf("export const QC_PROPERTIES"), source.indexOf("/** Attribution when")).matchAll(/name: "(qc_[a-z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(own, ["qc_linkedin_url", "qc_campaign"]);
+  for (const field of ["firstname", "lastname", "email", "jobtitle", "company", "domain", "linkedin_company_page"]) assert.match(source, new RegExp(`name: "${field}"`), field);
 });

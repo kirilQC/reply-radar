@@ -198,7 +198,7 @@ function CrmPanel({ slug, clientName, provider, onClose }: { slug: string; clien
             <ul className="oc-plan">
               {crm.plan.items.map((item) => (
                 <li key={item.id} className={`oc-plan-${item.action}`}>
-                  <span className="oc-tag">{item.action === "create" ? "Create" : item.action === "reuse" ? "Reuse" : "Skip"}</span>
+                  <span className="oc-tag">{item.action === "create" ? "Create" : item.action === "reuse" ? "Existing" : "Skip"}</span>
                   <div><strong>{item.label}</strong> <code>{item.name}</code><small>{item.detail}</small></div>
                 </li>
               ))}

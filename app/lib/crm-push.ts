@@ -17,7 +17,7 @@ import { isOurCampaign } from "../../shared/campaign-code.mjs";
 import { classifyConversationOrigin } from "../../shared/conversation-origin.mjs";
 import { dedupeMessages } from "./message-dedupe";
 import { leadFromRow } from "./reply-alert";
-import { conversationText as conversationTextImpl, linkedinKey } from "../../shared/crm-push-text.mjs";
+import { canonicalLinkedin, conversationText as conversationTextImpl, linkedinKey } from "../../shared/crm-push-text.mjs";
 
 export { linkedinKey };
 /** The conversation as readable text for a destination (shared/crm-push-text.mjs). */
@@ -62,6 +62,9 @@ export type ReplyRecord = {
   linkedinUrl: string;
   /** The stable LinkedIn key: the lower-cased /in/ slug (or the whole normalized URL when there is no slug). */
   linkedinId: string;
+  /** The profile URL in the one form QC stores and matches on (https://www.linkedin.com/in/<slug>). */
+  linkedinCanonical: string;
+  companyLinkedinUrl: string;
   email: string;
   location: string;
   channel: "linkedin" | "email";
@@ -140,6 +143,8 @@ export async function replyRecords(config: Config, workspaceId: string, opts: { 
       domain: card.domain,
       linkedinUrl: card.linkedinUrl,
       linkedinId: linkedinKey(card.linkedinUrl),
+      linkedinCanonical: canonicalLinkedin(card.linkedinUrl),
+      companyLinkedinUrl: card.companyLinkedinUrl,
       email: card.email.toLowerCase(),
       location: card.location,
       channel: channel as ReplyRecord["channel"],

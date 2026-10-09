@@ -159,22 +159,31 @@ export const QC_GROUP = { name: "qc_growth", label: "QC Growth" };
 
 type PropertySpec = { name: string; label: string; type: string; fieldType: string; description: string; options?: Array<{ label: string; value: string }>; unique?: boolean };
 
-/** QC Growth's fields on a contact. The group keeps them together on the record. */
+/**
+ * QC Growth's own fields on a contact, kept to the few HubSpot has no standard field for. Everything else
+ * (name, email, title, company, domain, company LinkedIn page) goes into HubSpot's standard fields, and
+ * channel, sender and the conversation itself live in the timeline note.
+ */
 export const QC_PROPERTIES: PropertySpec[] = [
-  { name: "qc_source", label: "QC Growth source", type: "enumeration", fieldType: "select", description: "Set when QC Growth's outreach produced this reply.", options: [{ label: "QC Growth", value: "qc_growth" }] },
-  { name: "qc_linkedin_id", label: "QC LinkedIn ID", type: "string", fieldType: "text", description: "The lead's LinkedIn profile id, used by QC Growth to match contacts without an email.", unique: true },
-  { name: "qc_linkedin_url", label: "QC LinkedIn URL", type: "string", fieldType: "text", description: "The lead's LinkedIn profile." },
+  { name: "qc_linkedin_url", label: "QC LinkedIn URL", type: "string", fieldType: "text", description: "The lead's LinkedIn profile. Unique, so a lead with no email still matches one contact.", unique: true },
   { name: "qc_campaign", label: "QC campaign", type: "string", fieldType: "text", description: "The QC Growth campaign the lead replied to." },
-  { name: "qc_sender", label: "QC sender", type: "string", fieldType: "text", description: "Who the outreach came from." },
-  { name: "qc_reply_channel", label: "QC reply channel", type: "enumeration", fieldType: "select", description: "Where the lead replied.", options: [{ label: "LinkedIn", value: "linkedin" }, { label: "Email", value: "email" }] },
-  { name: "qc_reply_sentiment", label: "QC reply sentiment", type: "enumeration", fieldType: "select", description: "How the lead's latest reply reads.", options: [{ label: "Positive", value: "positive" }, { label: "Neutral", value: "neutral" }, { label: "Negative", value: "negative" }] },
-  { name: "qc_first_reply_date", label: "QC first reply", type: "datetime", fieldType: "date", description: "When the lead first replied to QC Growth's outreach." },
-  { name: "qc_last_reply_date", label: "QC last reply", type: "datetime", fieldType: "date", description: "When the lead last replied." },
-  { name: "qc_reply_count", label: "QC replies", type: "number", fieldType: "number", description: "How many messages the lead has sent." },
-  { name: "qc_latest_reply", label: "QC latest reply", type: "string", fieldType: "textarea", description: "The lead's latest message." },
+];
+/** Attribution when the client has no lead source dropdown to put "QC Growth" in. */
+export const QC_SOURCE_PROPERTY: PropertySpec = { name: "qc_source", label: "QC Growth source", type: "enumeration", fieldType: "select", description: "Set on contacts QC Growth's outreach brought in.", options: [{ label: "QC Growth", value: "qc_growth" }] };
+
+/** The standard HubSpot fields the push fills, shown on the plan so it is clear where everything lands. */
+export const STANDARD_FIELDS: Array<{ object: "contact" | "company"; name: string; label: string; from: string }> = [
+  { object: "contact", name: "firstname", label: "First name", from: "Lead's full name (first part)" },
+  { object: "contact", name: "lastname", label: "Last name", from: "Lead's full name (rest)" },
+  { object: "contact", name: "email", label: "Email", from: "Lead's email address" },
+  { object: "contact", name: "jobtitle", label: "Job title", from: "Lead's job title" },
+  { object: "contact", name: "company", label: "Company name", from: "Lead's company" },
+  { object: "company", name: "name", label: "Company name", from: "Lead's company" },
+  { object: "company", name: "domain", label: "Company domain name", from: "Company domain" },
+  { object: "company", name: "linkedin_company_page", label: "LinkedIn company page", from: "Company's LinkedIn page" },
 ];
 
-export type PlanItem = { id: string; kind: "group" | "property" | "option"; name: string; label: string; detail: string; action: "create" | "reuse" | "skip"; spec?: PropertySpec; property?: string; optionLabel?: string };
+export type PlanItem = { id: string; kind: "group" | "property" | "option" | "standard"; name: string; label: string; detail: string; action: "create" | "reuse" | "skip"; spec?: PropertySpec; property?: string; optionLabel?: string };
 export type HubSpotPlan = {
   at: string;
   items: PlanItem[];
@@ -187,12 +196,22 @@ export type HubSpotPlan = {
 export function hubspotPlan(audit: HubSpotAudit): HubSpotPlan {
   const items: PlanItem[] = [];
   const warnings: string[] = [];
-  if (audit.missingScopes.length) warnings.push(`The key is missing ${audit.missingScopes.join(", ")}. Edit the key in HubSpot (Development → Keys) and tick them, or the build will fail.`);
+  if (audit.missingScopes.length) {
+    const companies = audit.missingScopes.filter((scope) => scope.includes("companies"));
+    const rest = audit.missingScopes.filter((scope) => !scope.includes("companies"));
+    if (rest.length) warnings.push(`The key is missing ${rest.join(", ")}. Edit the key in HubSpot (Development → Keys) and tick them, or the build will fail.`);
+    if (companies.length) warnings.push(`The key is missing ${companies.join(", ")}, so companies (name, domain, LinkedIn page) cannot be created or linked. Edit the key in HubSpot (Development → Keys) and tick them before pushing.`);
+  }
   items.push(audit.groups.includes(QC_GROUP.name)
     ? { id: "group", kind: "group", name: QC_GROUP.name, label: QC_GROUP.label, detail: "Already there, reused.", action: "reuse" }
     : { id: "group", kind: "group", name: QC_GROUP.name, label: QC_GROUP.label, detail: "A field group on contacts that holds QC Growth's fields together.", action: "create" });
+  for (const field of STANDARD_FIELDS) {
+    items.push({ id: `standard:${field.object}:${field.name}`, kind: "standard", name: field.name, label: `${field.object === "company" ? "Company · " : ""}${field.label}`, detail: `${field.from}. HubSpot's own field, filled in where empty.`, action: "reuse" });
+  }
   const byName = new Map(audit.properties.map((p) => [p.name, p]));
-  for (const spec of QC_PROPERTIES) {
+  // Attribution: the client's lead source dropdown when they have one, else our own one-option field.
+  const leadSource = audit.leadSourceCandidates[0] ?? null;
+  for (const spec of leadSource ? QC_PROPERTIES : [...QC_PROPERTIES, QC_SOURCE_PROPERTY]) {
     const existing = byName.get(spec.name);
     if (!existing) {
       items.push({ id: `property:${spec.name}`, kind: "property", name: spec.name, label: spec.label, detail: `${spec.description}${spec.unique ? " Unique, so no two contacts can share it." : ""}`, action: "create", spec });
@@ -203,8 +222,6 @@ export function hubspotPlan(audit: HubSpotAudit): HubSpotPlan {
       warnings.push(`"${spec.name}" already exists with a different type, so it is skipped.`);
     }
   }
-  // Attribution on the client's own lead source dropdown, when they have one.
-  const leadSource = audit.leadSourceCandidates[0] ?? null;
   if (leadSource) {
     const existingOption = leadSource.options.find((option) => /qc growth/i.test(option.label));
     const has = Boolean(existingOption);
@@ -306,16 +323,8 @@ export async function hubspotPush(
   const qc: Row = {};
   const put = (name: string, value: unknown) => { if (usable.has(name) && value !== "" && value !== null && value !== undefined) qc[name] = value; };
   put("qc_source", "qc_growth");
-  put("qc_linkedin_id", record.linkedinId);
-  put("qc_linkedin_url", record.linkedinUrl);
+  put("qc_linkedin_url", record.linkedinCanonical);
   put("qc_campaign", record.campaign);
-  put("qc_sender", record.sender);
-  put("qc_reply_channel", record.channel);
-  if (["positive", "neutral", "negative"].includes(record.sentiment)) put("qc_reply_sentiment", record.sentiment);
-  put("qc_first_reply_date", record.firstReplyAt ? new Date(record.firstReplyAt).toISOString() : "");
-  put("qc_last_reply_date", record.lastReplyAt ? new Date(record.lastReplyAt).toISOString() : "");
-  put("qc_reply_count", record.replyCount);
-  put("qc_latest_reply", record.latestReply.slice(0, 60_000));
   const basics: Row = { email: record.email, firstname: record.firstName, lastname: record.lastName, jobtitle: record.title, company: record.company };
 
   // Find the contact: the one we stored, else by email, else by QC LinkedIn ID.
@@ -327,7 +336,7 @@ export async function hubspotPush(
   if (!contactId) {
     const filterGroups = [
       ...(record.email ? [{ filters: [{ propertyName: "email", operator: "EQ", value: record.email }] }] : []),
-      ...(record.linkedinId && usable.has("qc_linkedin_id") ? [{ filters: [{ propertyName: "qc_linkedin_id", operator: "EQ", value: record.linkedinId }] }] : []),
+      ...(record.linkedinCanonical && usable.has("qc_linkedin_url") ? [{ filters: [{ propertyName: "qc_linkedin_url", operator: "EQ", value: record.linkedinCanonical }] }] : []),
     ];
     if (filterGroups.length) {
       const hit = list((await hubspot(token, "POST", "/crm/v3/objects/contacts/search", { filterGroups, limit: 1, properties: CONTACT_BASICS })).results)[0];
@@ -366,8 +375,16 @@ export async function hubspotPush(
   // The company, by domain: found or created, then associated (adding an association twice is harmless).
   let companyId: string | null = stored?.company_id ?? null;
   if (!companyId && record.domain) {
-    const hit = list((await hubspot(token, "POST", "/crm/v3/objects/companies/search", { filterGroups: [{ filters: [{ propertyName: "domain", operator: "EQ", value: record.domain }] }], limit: 1, properties: ["domain", "name"] }).catch(() => ({} as Row))).results)[0];
-    companyId = hit ? text(hit.id) : text((await hubspot(token, "POST", "/crm/v3/objects/companies", { properties: { domain: record.domain, ...(record.company ? { name: record.company } : {}) } }).catch(() => ({} as Row))).id) || null;
+    const hit = list((await hubspot(token, "POST", "/crm/v3/objects/companies/search", { filterGroups: [{ filters: [{ propertyName: "domain", operator: "EQ", value: record.domain }] }], limit: 1, properties: ["domain", "name", "linkedin_company_page"] }).catch(() => ({} as Row))).results)[0];
+    companyId = hit ? text(hit.id) : text((await hubspot(token, "POST", "/crm/v3/objects/companies", { properties: { domain: record.domain, ...(record.company ? { name: record.company } : {}), ...(record.companyLinkedinUrl ? { linkedin_company_page: record.companyLinkedinUrl } : {}) } }).catch(() => ({} as Row))).id) || null;
+    // A company the client already had keeps its own values; only an empty LinkedIn page or name is filled.
+    if (hit && companyId) {
+      const current = object(hit.properties);
+      const fill: Row = {};
+      if (record.companyLinkedinUrl && !text(current.linkedin_company_page)) fill.linkedin_company_page = record.companyLinkedinUrl;
+      if (record.company && !text(current.name)) fill.name = record.company;
+      if (Object.keys(fill).length) await hubspot(token, "PATCH", `/crm/v3/objects/companies/${encodeURIComponent(companyId)}`, { properties: fill }).catch(() => undefined);
+    }
   }
   if (companyId) await hubspot(token, "PUT", `/crm/v4/objects/contact/${encodeURIComponent(contactId)}/associations/default/company/${encodeURIComponent(companyId)}`).catch(() => undefined);
 

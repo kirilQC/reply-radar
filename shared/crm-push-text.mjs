@@ -51,3 +51,10 @@ export function conversationText(record, maxChars, format) {
   return body.slice(0, maxChars);
 }
 
+
+/** The one form of a profile URL QC stores and matches on: "https://www.linkedin.com/in/<slug>". Other URLs as given. */
+export function canonicalLinkedin(url) {
+  const key = linkedinKey(url);
+  if (!key) return "";
+  return /linkedin\.com\/in\//i.test(String(url)) ? `https://www.linkedin.com/in/${key}` : text(url);
+}
