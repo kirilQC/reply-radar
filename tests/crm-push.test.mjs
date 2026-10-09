@@ -380,3 +380,17 @@ test("a test lead carries on after Clay: brief and Slack post to the test channe
   assert.match(run, /settings\.steps\.filter\(\(step\) => step\.enabled && \(!test \|\| step\.type === "slack"\)\)/);
   assert.match(run, /let meeting = test && opts\.meeting \? opts\.meeting : await loadMeeting/);
 });
+
+test("booked meetings: campaign attribution after enrichment (QC leads, then HeyReach by LinkedIn and email), Slack posts expanded, typed test values win", async () => {
+  const run = readFileSync(new URL("../app/lib/booking-run.ts", import.meta.url), "utf8");
+  assert.match(run, /export async function attributeCampaign\(/);
+  assert.match(run, /if \(linkedin\) lookups\.push\(\{ profileUrl: linkedin \}\);/);
+  assert.match(run, /if \(email\.includes\("@"\)\) lookups\.push\(\{ email \}\);/);
+  assert.match(run, /items\.find\(\(item\) => isOurCampaign\(item\.name\)\) \?\? items\[0\]/);
+  // Runs for every booking with no campaign yet, Clay or not, tests included (tests save nothing).
+  assert.match(run, /if \(!clean\(meeting\.campaign\)\) \{\s*const attributed = await attributeCampaign\(config, workspace, meeting\)/);
+  assert.match(run, /\.\.\.form,\s*\};/);
+  const { bookingBlocks } = await import("../shared/bookings.mjs").catch(() => ({}));
+  const src = readFileSync(new URL("../shared/bookings.mjs", import.meta.url), "utf8");
+  assert.equal((src.match(/type: "section", expand: true/g) ?? []).length, 2);
+});

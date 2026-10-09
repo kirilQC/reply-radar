@@ -47,6 +47,8 @@ import { postMessage, slackConfigured, updateMessage } from "./slack";
 import { publicBaseUrl } from "./public-url";
 import { writeAuditEvent } from "./audit-log";
 import { extractAiArkEnrichment, lookupPeople, normalizeLinkedIn } from "./ai-ark-enrichment";
+import { campaignsForLead } from "./heyreach-api";
+import { isOurCampaign } from "../../shared/campaign-code.mjs";
 
 type Row = Record<string, unknown>;
 export type Config = { url: string; key: string };
@@ -58,6 +60,8 @@ type Booking = {
   source?: string;
   received_at?: string;
   clay?: { sent_at?: string; received_at?: string; error?: string; timed_out?: boolean };
+  /** Which campaign the booking was attributed to, and where that was found (qc_leads, heyreach_linkedin, heyreach_email). */
+  attribution?: { campaign: string; source: string; at: string };
   tldr?: Tldr;
   tldr_source?: string;
   steps?: Record<string, StepResult>;
@@ -96,6 +100,8 @@ export type BookingSettings = {
   last_clay_callback?: { at: string; meeting_id: string; test: boolean; fields: string[] } | null;
   /** The last test lead that ran on to Slack after Clay answered: when, and how it went. */
   last_test_post?: { at: string; workspace_id: string; ok: boolean; reason: string } | null;
+  /** What the person typed for the last test lead; it wins over Clay like a booking form's answers do. */
+  last_test_lead?: { workspace_id: string; name: string; email: string; company: string; title: string } | null;
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "");
@@ -379,6 +385,31 @@ async function matchKnownLead(config: Config, meeting: Row): Promise<Row> {
   const campaign = campaignFromLead(lead);
   if (!clean(meeting.campaign) && campaign) patch.campaign = campaign;
   return patch;
+}
+
+/**
+ * Campaign attribution, the reason this workflow exists: which of QC's campaigns this person was in. QC's own
+ * leads first (everyone who replied), then the client's HeyReach, which knows everyone a campaign reached,
+ * replied or not: by LinkedIn profile (usually found by Clay), then by email. QC's coded campaigns win over
+ * the client's own. Returns the campaign and where it was found, or null.
+ */
+export async function attributeCampaign(config: Config, workspace: Row | null, meeting: Row): Promise<{ campaign: string; source: string } | null> {
+  const known = await matchKnownLead(config, meeting).catch(() => ({} as Row));
+  if (text(known.campaign)) return { campaign: text(known.campaign), source: "qc_leads" };
+  const apiKey = text(workspace?.heyreach_api_key_ciphertext);
+  if (!apiKey) return null;
+  const lookups: Array<{ profileUrl?: string; email?: string }> = [];
+  const linkedin = text(meeting.invitee_linkedin) || text(known.invitee_linkedin);
+  if (linkedin) lookups.push({ profileUrl: linkedin });
+  const email = text(meeting.invitee_email).toLowerCase();
+  if (email.includes("@")) lookups.push({ email });
+  for (const lead of lookups) {
+    const page = await campaignsForLead(apiKey, lead, 10).catch(() => null);
+    const items = page?.items ?? [];
+    const picked = items.find((item) => isOurCampaign(item.name)) ?? items[0];
+    if (picked?.name) return { campaign: picked.name, source: lead.profileUrl ? "heyreach_linkedin" : "heyreach_email" };
+  }
+  return null;
 }
 
 /** Step 2: hand the booking to Clay, or straight to the steps when no Clay table is set up. */
@@ -699,12 +730,19 @@ export async function deliverBooking(config: Config, meetingId: string, opts: { 
     // one, only the campaign, now that Clay found the LinkedIn it is matched on.
     if (!test) {
       if (!booking.clay?.received_at) await enrichMeeting(meetingId).catch(() => false);
-      else if (!clean(meeting.campaign)) {
-        const known = await matchKnownLead(config, meeting);
-        if (known.campaign) await patchMeeting(config, meetingId, { campaign: known.campaign });
-      }
       meeting = (await loadMeeting(config, meetingId)) ?? meeting;
       booking = bookingOf(meeting);
+    }
+    // Campaign attribution once enrichment is in (Clay's LinkedIn, or QC's own): QC's leads, then HeyReach.
+    if (!clean(meeting.campaign)) {
+      const attributed = await attributeCampaign(config, workspace, meeting).catch(() => null);
+      if (attributed) {
+        meeting = { ...meeting, campaign: attributed.campaign };
+        if (!test) {
+          await patchMeeting(config, meetingId, { campaign: attributed.campaign });
+          booking = await saveBooking(config, meetingId, { attribution: { campaign: attributed.campaign, source: attributed.source, at: now() } });
+        }
+      }
     }
 
     let tldr: Tldr | null = hasTldr(booking.tldr) ? (booking.tldr as Tldr) : null;
@@ -804,6 +842,11 @@ async function runTestLead(config: Config, workspaceId: string, fields: Row): Pr
   const channel = (process.env[TEST_CHANNEL_ENV] ?? "").trim();
   const record = (ok: boolean, reason: string) => writeSettings(config, { last_test_post: { at: now(), workspace_id: workspaceId, ok, reason } }).catch(() => undefined);
   if (!channel) { await record(false, `${TEST_CHANNEL_ENV} is not set, so there is no test channel.`); return; }
+  // What the person typed wins over Clay for the form's own fields, exactly as on a real booking.
+  const typed = (await readSettings(config).catch(() => ({} as BookingSettings))).last_test_lead;
+  const form: Row = typed && typed.workspace_id === workspaceId
+    ? Object.fromEntries(Object.entries({ invitee_name: typed.name, invitee_email: typed.email, company_name: typed.company, invitee_title: typed.title }).filter(([, value]) => text(value)))
+    : {};
   const meeting: Row = {
     id: "test",
     workspace_id: workspaceId,
@@ -811,6 +854,7 @@ async function runTestLead(config: Config, workspaceId: string, fields: Row): Pr
     status: "scheduled",
     meeting_at: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
     ...Object.fromEntries(Object.entries(fields).filter(([, value]) => text(value))),
+    ...form,
   };
   const linkedin = text(meeting.invitee_linkedin);
   if (linkedin) {
@@ -830,6 +874,7 @@ async function runTestLead(config: Config, workspaceId: string, fields: Row): Pr
  */
 export async function clayTest(config: Config, request?: Request, lead?: { name: string; email: string; company: string; title: string; client: { name: string; slug: string; id: string } }): Promise<{ ok: boolean; error?: string }> {
   const settings = await ensureCallbackSecret(config, await readSettings(config), request);
+  if (lead?.client.id) await writeSettings(config, { last_test_lead: { workspace_id: lead.client.id, name: lead.name, email: lead.email, company: lead.company, title: lead.title } }).catch(() => undefined);
   return sendToClay(settings, clayRow({
     // "test:<client id>": Clay sends it back, and QC runs that client's Slack step on the answer.
     id: lead?.client.id ? `test:${lead.client.id}` : "test",

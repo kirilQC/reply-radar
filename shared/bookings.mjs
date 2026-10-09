@@ -323,10 +323,11 @@ function sections(text) {
   let rest = text;
   while (rest.length > 2900) {
     const cut = rest.lastIndexOf("\n", 2900) > 1000 ? rest.lastIndexOf("\n", 2900) : 2900;
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: rest.slice(0, cut) } });
+    blocks.push({ type: "section", expand: true, text: { type: "mrkdwn", text: rest.slice(0, cut) } });
     rest = rest.slice(cut).replace(/^\n+/, "");
   }
-  if (rest.trim()) blocks.push({ type: "section", text: { type: "mrkdwn", text: rest } });
+  // expand: Slack otherwise folds a long section behind "Show more"; the post always arrives open.
+  if (rest.trim()) blocks.push({ type: "section", expand: true, text: { type: "mrkdwn", text: rest } });
   return blocks;
 }
 
