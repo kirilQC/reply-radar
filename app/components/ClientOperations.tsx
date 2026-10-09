@@ -270,7 +270,8 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
   const otherProvider = crm?.connected && crm.provider !== provider;
   const built = connectedHere && crm?.status === "built";
   const creates = crm?.plan?.items.filter((item) => item.action === "create") ?? [];
-  const verified = crm?.buildLog.filter((entry) => entry.result === "verified").length ?? 0;
+  // Distinct QC fields checked on the CRM (every rebuild re-verifies the same ones).
+  const verified = new Set(crm?.buildLog.filter((entry) => entry.result === "verified" && entry.kind === "check").map((entry) => entry.name)).size;
   const deals = crm?.plan?.deals;
   const dealsLive = dealsAreLive(crm, provider);
   // Why the Booked Meeting (QC) stage can't be built yet. It is never skipped: the build waits on it.
@@ -329,7 +330,7 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
   const alerts: Alert[] = !built ? [] : [
     ...(scopeBlocked ? [{ key: "scopes", title: `The ${name} key is missing ${missingScopes.length === 1 ? "a scope" : `${missingScopes.length} scopes`}. Nothing will be built until ${missingScopes.length === 1 ? "it's" : "they're"} added.`, detail: <><ul className="ops-scope-list">{missingScopes.map((scope) => <li key={scope}><code>{scope}</code></li>)}</ul><p className="ops-alert-p">{provider === "hubspot" ? "In HubSpot: Development → Keys → QC Growth → edit scopes, add each one above, save." : "In Attio: Workspace settings → Developers → the QC Growth token, add each one above, save."} Then re-read.</p></>, action: reread }] : []),
     ...(!dealsLive ? [{ key: "deals", title: "Booked meetings are not becoming deals.", detail: dealsBlocker ?? "The Booked Meeting (QC) stage isn't built yet. Approve the game plan below.", action: dealsBlocker ? reread : undefined }] : []),
-    ...(dealsLive && provider === "hubspot" && lastOrder?.result === "failed" ? [{ key: "order", title: `Booked Meeting (QC) is not the first stage in ${c.plan?.deals?.pipelineLabel || "the pipeline"}.`, detail: <>{lastOrder.detail} HubSpot won't let the API move it above the first stage. Drag it to the top in HubSpot: Settings → Objects → Deals → Pipelines.</> }] : []),
+    ...(dealsLive && provider === "hubspot" && lastOrder?.result === "failed" ? [{ key: "order", title: `Booked Meeting (QC) is not the first stage in ${c.plan?.deals?.pipelineLabel || "the pipeline"}.`, detail: <>{lastOrder.detail}. HubSpot won't let the API move it above the first stage. Drag it to the top in HubSpot: Settings → Objects → Deals → Pipelines.</> }] : []),
     ...(!c.autoPush ? [{ key: "auto", title: "Automatic push is off.", detail: "New replies won't reach the CRM until someone pushes by hand.", action: <button type="button" className="ops-btn ops-alert-btn" disabled={Boolean(busy)} onClick={() => void step("auto", { on: true })}>Turn it on</button> }] : []),
     ...(c.autoPush && lastPushAge > 3 * 3600_000 ? [{ key: "stale", title: `Nothing has been pushed since ${when(c.lastPushAt)}.`, detail: "The automatic push runs every few minutes. Check System health for the CRM & Sheets push, or push all now." }] : []),
     ...(pushErrors.length || (c.lastPushSummary?.failed ?? 0) > 0 ? [{ key: "push", title: `The last push had ${c.lastPushSummary?.failed || pushErrors.length} ${(c.lastPushSummary?.failed || pushErrors.length) === 1 ? "failure" : "failures"}.`, detail: <ul className="ops-alert-list">{pushErrors.slice(0, 5).map((e) => <li key={e}>{e}</li>)}</ul> }] : []),
@@ -477,7 +478,7 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
             </div>
             <div className="ops-h2">Booked Meeting (QC) stage</div>
             {dealsLive && deals ? (
-              <p className="ops-muted">{provider === "hubspot" ? `${deals.pipelineLabel || "Pipeline"} → Booked Meeting (QC)` : "Deals → Booked Meeting (QC)"} · first stage, one deal per booked lead, named after the company</p>
+              <p className="ops-muted">{provider === "hubspot" ? `${deals.pipelineLabel || "Pipeline"} → Booked Meeting (QC)` : "Deals → Booked Meeting (QC)"} · one deal per booked lead, named after the company</p>
             ) : dealsBlocker ? (
               <>
                 <p className="ops-error">{dealsBlocker}</p>
