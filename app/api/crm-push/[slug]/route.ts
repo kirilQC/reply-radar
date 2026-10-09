@@ -184,7 +184,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     }
     if (action === "probe_calls") {
       // Raw reporting calls with the client's key, for working out what HubSpot accepts. Reporting paths only.
-      const allowed = /^\/(analytics\/reporting\/|hub\/cli\/backend\/reporting\/|dashboard\/v2\/|reporting\/v\d\/)/;
+      const allowed = /^\/(analytics\/reporting\/|hub\/cli\/backend\/reporting\/|dashboard\/v2\/|reporting\/v\d\/|crm\/v3\/pipelines\/)/;
       const calls = (Array.isArray(body.calls) ? body.calls : []).slice(0, 12) as Array<{ method?: string; path?: string; body?: unknown; ua?: boolean }>;
       const out: Array<{ method: string; path: string; status: number; body: string }> = [];
       for (const entry of calls) {
