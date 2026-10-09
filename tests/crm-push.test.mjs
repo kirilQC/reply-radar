@@ -33,7 +33,7 @@ test("the HubSpot build only creates; it never deletes, and only patches the lea
   assert.doesNotMatch(source, /"DELETE"/);
   const patches = [...source.matchAll(/hubspot\(token, "PATCH", `([^`]+)`/g)].map((match) => match[1]);
   // The only view it edits is QC's own (found by name "QC Growth"), to keep its columns current.
-  assert.deepEqual(patches.sort(), ["${QC_VIEW_PATH}/${view.id}", "/crm/v3/objects/companies/${encodeURIComponent(companyId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/notes/${encodeURIComponent(noteId)}", "/crm/v3/properties/contacts/${encodeURIComponent(item.property!)}"].sort());
+  assert.deepEqual(patches.sort(), ["${QC_VIEW_PATH}/${view.id}", "/crm/v3/objects/companies/${encodeURIComponent(companyId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/contacts/${encodeURIComponent(contactId)}", "/crm/v3/objects/notes/${encodeURIComponent(noteId)}", "/crm/v3/properties/contacts/${encodeURIComponent(item.property!)}"].sort());
   // A contact the client already had never gets lifecycle, owner or lead source from us.
   assert.match(source, /\/\/ The client's contact: QC's fields always, their basics only where empty, nothing else\.\n    const current/);
 });

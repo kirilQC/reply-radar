@@ -165,7 +165,7 @@ export async function replyRecords(config: Config, workspaceId: string, opts: { 
   return { records, scanned: conversations.length };
 }
 
-const PUSH_FORMAT = 2;
+const PUSH_FORMAT = 3;
 
 export type PushRecordRow = { conversation_id: string; contact_id: string | null; company_id: string | null; note_id: string | null; pushed_hash: string | null; created_contact: boolean };
 

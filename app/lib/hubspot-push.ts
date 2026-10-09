@@ -497,6 +497,22 @@ export async function hubspotPush(
   }
   if (companyId) await hubspot(token, "PUT", `/crm/v4/objects/contact/${encodeURIComponent(contactId)}/associations/default/company/${encodeURIComponent(companyId)}`).catch(() => undefined);
 
+  // The view's company columns live on the contact. Where QC has no domain or company LinkedIn for the lead,
+  // they come from the company the contact is linked to in HubSpot (often the client's own record), empty only.
+  if (!record.domain || !record.companyLinkedinUrl) {
+    try {
+      const contact = object((await hubspot(token, "GET", `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=associatedcompanyid,website,qc_company_linkedin_url`)).properties);
+      const linked = companyId || text(contact.associatedcompanyid);
+      if (linked && (!text(contact.website) || (usable.has("qc_company_linkedin_url") && !text(contact.qc_company_linkedin_url)))) {
+        const company = object((await hubspot(token, "GET", `/crm/v3/objects/companies/${encodeURIComponent(linked)}?properties=domain,linkedin_company_page`)).properties);
+        const fill: Row = {};
+        if (!text(contact.website) && text(company.domain)) fill.website = text(company.domain);
+        if (usable.has("qc_company_linkedin_url") && !text(contact.qc_company_linkedin_url) && text(company.linkedin_company_page)) fill.qc_company_linkedin_url = text(company.linkedin_company_page);
+        if (Object.keys(fill).length) await hubspot(token, "PATCH", `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, { properties: fill });
+      }
+    } catch { /* the columns stay empty; the push itself already succeeded */ }
+  }
+
   // The conversation: one note, updated in place.
   const noteProperties = { hs_note_body: conversationText(record, 60_000, "html"), hs_timestamp: new Date(record.lastMessageAt || record.lastReplyAt || Date.now()).toISOString() };
   let noteId = stored?.note_id ?? "";
