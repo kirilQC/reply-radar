@@ -13,6 +13,9 @@ import { hubspotPush } from "./hubspot-push";
 import { attioPush } from "./attio-push";
 import { sheetsPushBatch } from "./sheets-push";
 
+/** Which push records belong to this destination: each Google Sheet keeps its own (the first one "google_sheets"). */
+export const recordKey = (destination: Destination) => (destination.provider === "google_sheets" && destination.kind !== "sheets" ? `google_sheets:${destination.kind.slice("sheets:".length)}` : destination.provider);
+
 /** The provider's push for one conversation. */
 const pushFor = (destination: Destination) => {
   if (destination.provider === "hubspot") return hubspotPush;
@@ -32,7 +35,7 @@ export async function pushPass(config: Config, destination: Destination, opts: {
   let offset = opts.offset ?? 0;
   for (;;) {
     const { records, scanned } = await replyRecords(config, destination.workspace_id, { since: opts.since, limit: BATCH, offset });
-    const stored = await pushedRecords(config, destination.workspace_id, destination.provider, records.map((record) => record.conversationId));
+    const stored = await pushedRecords(config, destination.workspace_id, recordKey(destination), records.map((record) => record.conversationId));
     if (destination.provider === "google_sheets" && (destination.config as { content?: string } | null)?.content === "meetings") { summary.nextOffset = null; break; }
     if (destination.provider === "google_sheets") {
       // A sheet takes the whole batch in one write (Google limits writes per minute, not cells).
@@ -42,7 +45,7 @@ export async function pushPass(config: Config, destination: Destination, opts: {
         const rows = due.length ? await sheetsPushBatch(destination, due) : new Map();
         for (const record of due) {
           const placed = rows.get(record.conversationId);
-          await savePushRecord(config, destination.workspace_id, destination.provider, { conversationId: record.conversationId, contactId: placed ? String(placed.row) : null, hash: record.hash, createdContact: placed?.created ?? false });
+          await savePushRecord(config, destination.workspace_id, recordKey(destination), { conversationId: record.conversationId, contactId: placed ? String(placed.row) : null, hash: record.hash, createdContact: placed?.created ?? false });
           summary.pushed += 1;
           if (placed?.created && !stored.get(record.conversationId)?.created_contact) summary.created += 1; else summary.updated += 1;
         }
@@ -61,14 +64,14 @@ export async function pushPass(config: Config, destination: Destination, opts: {
       if (before?.pushed_hash === record.hash) { summary.unchanged += 1; continue; }
       try {
         const result = await pushFor(destination)(destination.api_key, destination, record, before);
-        await savePushRecord(config, destination.workspace_id, destination.provider, { conversationId: record.conversationId, contactId: result.contactId, companyId: result.companyId, noteId: result.noteId, hash: record.hash, createdContact: result.created });
+        await savePushRecord(config, destination.workspace_id, recordKey(destination), { conversationId: record.conversationId, contactId: result.contactId, companyId: result.companyId, noteId: result.noteId, hash: record.hash, createdContact: result.created });
         summary.pushed += 1;
         if (result.created && !before?.created_contact) summary.created += 1; else summary.updated += 1;
       } catch (error) {
         const message = error instanceof Error ? error.message : "failed";
         summary.failed += 1;
         if (summary.errors.length < 5) summary.errors.push(`${record.name}: ${message.slice(0, 160)}`);
-        await savePushRecord(config, destination.workspace_id, destination.provider, { conversationId: record.conversationId, contactId: before?.contact_id, companyId: before?.company_id, noteId: before?.note_id, createdContact: before?.created_contact, error: message.slice(0, 300) }).catch(() => undefined);
+        await savePushRecord(config, destination.workspace_id, recordKey(destination), { conversationId: record.conversationId, contactId: before?.contact_id, companyId: before?.company_id, noteId: before?.note_id, createdContact: before?.created_contact, error: message.slice(0, 300) }).catch(() => undefined);
       }
     }
     offset += scanned;
@@ -89,11 +92,11 @@ export async function pushOne(config: Config, destination: Destination): Promise
   const push = pushFor(destination);
   const { records } = await replyRecords(config, destination.workspace_id, { limit: 25 });
   if (!records.length) throw new Error("There are no replies to push yet.");
-  const stored = await pushedRecords(config, destination.workspace_id, destination.provider, records.map((record) => record.conversationId));
+  const stored = await pushedRecords(config, destination.workspace_id, recordKey(destination), records.map((record) => record.conversationId));
   const record = records.find((candidate) => !stored.has(candidate.conversationId)) ?? records[0];
   const before = stored.get(record.conversationId);
   const result = await push(destination.api_key, destination, record, before);
-  await savePushRecord(config, destination.workspace_id, destination.provider, { conversationId: record.conversationId, contactId: result.contactId, companyId: result.companyId, noteId: result.noteId, hash: record.hash, createdContact: result.created });
+  await savePushRecord(config, destination.workspace_id, recordKey(destination), { conversationId: record.conversationId, contactId: result.contactId, companyId: result.companyId, noteId: result.noteId, hash: record.hash, createdContact: result.created });
   const host = (destination.account_name ?? "").includes("hubspot.com") ? destination.account_name : "app.hubspot.com";
   return {
     name: record.name,

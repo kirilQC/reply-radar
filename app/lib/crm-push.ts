@@ -218,7 +218,8 @@ export async function savePushRecord(config: Config, workspaceId: string, provid
 
 export type Destination = {
   workspace_id: string;
-  kind: "crm" | "sheets";
+  /** "crm", or one Google Sheet: "sheets" (the first) or "sheets:<id>". */
+  kind: string;
   provider: "hubspot" | "attio" | "google_sheets";
   api_key: string | null;
   account_id: string | null;
@@ -233,8 +234,8 @@ export type Destination = {
   last_push_summary: Row | null;
 };
 
-export async function loadDestination(config: Config, workspaceId: string, kind: "crm" | "sheets"): Promise<Destination | null> {
-  const [row] = await rows(config, `rr_crm_push?select=*&workspace_id=eq.${enc(workspaceId)}&kind=eq.${kind}&limit=1`);
+export async function loadDestination(config: Config, workspaceId: string, kind: string): Promise<Destination | null> {
+  const [row] = await rows(config, `rr_crm_push?select=*&workspace_id=eq.${enc(workspaceId)}&kind=eq.${enc(kind)}&limit=1`);
   return (row as unknown as Destination) ?? null;
 }
 
@@ -243,9 +244,9 @@ export async function loadDestination(config: Config, workspaceId: string, kind:
  * inserted. (An upsert of a partial row failed with 400: Postgres checks the insert's required columns,
  * like `provider`, before it ever looks for the existing row.)
  */
-export async function saveDestination(config: Config, workspaceId: string, kind: "crm" | "sheets", patch: Partial<Destination>): Promise<void> {
+export async function saveDestination(config: Config, workspaceId: string, kind: string, patch: Partial<Destination>): Promise<void> {
   const body = JSON.stringify({ ...patch, updated_at: new Date().toISOString() });
-  const updated = await rest(config, `rr_crm_push?workspace_id=eq.${enc(workspaceId)}&kind=eq.${kind}`, {
+  const updated = await rest(config, `rr_crm_push?workspace_id=eq.${enc(workspaceId)}&kind=eq.${enc(kind)}`, {
     method: "PATCH",
     headers: { Prefer: "return=representation" },
     body,
@@ -265,6 +266,7 @@ export async function saveDestination(config: Config, workspaceId: string, kind:
 export function presentDestination(destination: Destination | null) {
   if (!destination) return null;
   return {
+    key: destination.kind,
     provider: destination.provider,
     connected: Boolean(destination.api_key),
     keyMasked: destination.api_key ? `••••${destination.api_key.slice(-4)}` : "",

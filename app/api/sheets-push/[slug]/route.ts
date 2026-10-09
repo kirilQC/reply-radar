@@ -2,8 +2,9 @@
 // Reply Radar — proprietary. Not licensed for redistribution or resale.
 
 import { NextResponse } from "next/server";
-import { loadDestination, presentDestination, rows, saveDestination, type Destination } from "../../../lib/crm-push";
-import { pushPass } from "../../../lib/crm-push-run";
+import { randomUUID } from "node:crypto";
+import { loadDestination, presentDestination, rest, rows, saveDestination, type Destination } from "../../../lib/crm-push";
+import { pushPass, recordKey } from "../../../lib/crm-push-run";
 import { disconnectGoogle, googleAccount, googleOauthConfigured } from "../../../lib/google-user";
 import { accessToken, ensureQcIdColumn, serviceAccount, serviceAccountStatus, fieldsFor, sheetsConnect, sheetsFormat, sheetsPushMeetings, suggestMapping, type SheetConfig, type SheetContent } from "../../../lib/sheets-push";
 
@@ -32,7 +33,14 @@ async function workspaceOf(c: { url: string; key: string }, slug: string) {
 }
 
 const contentOf = (destination: { config?: unknown } | null) => (((destination?.config ?? {}) as { content?: SheetContent }).content === "meetings" ? "meetings" : "replies") as SheetContent;
-const shared = async (content: SheetContent = "replies") => ({ content, google: await googleAccount().catch(() => null), googleOauth: googleOauthConfigured(), robotEmail: serviceAccount()?.client_email ?? null, googleKey: serviceAccountStatus(), fields: fieldsFor(content).map(({ key, label }) => ({ key, label })) });
+const shared = async (content: SheetContent = "replies") => ({ content, google: await googleAccount().catch(() => null), googleOauth: googleOauthConfigured(), robotEmail: serviceAccount()?.client_email ?? null, googleKey: serviceAccountStatus(), fields: fieldsFor(content).map(({ key, label }) => ({ key, label })), fieldsByContent: { replies: fieldsFor("replies").map(({ key, label }) => ({ key, label })), meetings: fieldsFor("meetings").map(({ key, label }) => ({ key, label })) } });
+
+/** Every sheet the client pushes into: the first is kind "sheets", the rest "sheets:<id>". Disconnected ones are left out. */
+async function sheetsOf(c: { url: string; key: string }, workspaceId: string) {
+  const all = (await rows(c, `rr_crm_push?select=*&workspace_id=eq.${encodeURIComponent(workspaceId)}&or=(kind.eq.sheets,kind.like.sheets:*)&order=created_at.asc`)) as unknown as Destination[];
+  return all.filter((row) => row.api_key && row.status !== "disconnected");
+}
+const present = (list: Destination[]) => list.map((row) => ({ ...presentDestination(row), content: ((row.config ?? {}) as { content?: string }).content === "meetings" ? "meetings" : "replies" }));
 
 export async function GET(request: Request, context: { params: Promise<{ slug: string }> }) {
   try {
@@ -43,8 +51,7 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     }
     const c = config();
     const workspace = await workspaceOf(c, (await context.params).slug);
-    const destination = await loadDestination(c, workspace.id, "sheets");
-    return NextResponse.json({ ok: true, ...(await shared(contentOf(destination))), sheet: presentDestination(destination) });
+    return NextResponse.json({ ok: true, ...(await shared()), sheets: present(await sheetsOf(c, workspace.id)) });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Could not read the sheet settings." }, { status: 500 });
   }
@@ -56,11 +63,23 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   try {
     const c = config();
     const workspace = await workspaceOf(c, (await context.params).slug);
-    const destination = await loadDestination(c, workspace.id, "sheets");
-    const reply = async (extra: Row = {}) => {
-      const fresh = await loadDestination(c, workspace.id, "sheets");
-      return NextResponse.json({ ok: true, ...extra, ...(await shared(contentOf(fresh))), sheet: presentDestination(fresh) });
-    };
+    if (action === "disconnect_google") {
+      await disconnectGoogle();
+      return NextResponse.json({ ok: true, ...(await shared()), sheets: present(await sheetsOf(c, workspace.id)) });
+    }
+    // Which sheet: the one named in the request, or a new one for "connect".
+    const existing = await sheetsOf(c, workspace.id);
+    let kind = text(body.sheet);
+    if (action === "connect") {
+      const parsedUrl = text(body.url);
+      const clash = existing.find((row) => text(((row.config ?? {}) as Row).url).split("#")[0] === parsedUrl.split("#")[0]);
+      if (clash) return NextResponse.json({ ok: false, error: "That sheet is already connected for this client." }, { status: 409 });
+      const first = await loadDestination(c, workspace.id, "sheets");
+      kind = !first || first.status === "disconnected" || !first.api_key ? "sheets" : `sheets:${randomUUID().slice(0, 8)}`;
+    }
+    if (!/^sheets(:[a-z0-9-]+)?$/.test(kind)) return NextResponse.json({ ok: false, error: "Which sheet?" }, { status: 400 });
+    const destination = action === "connect" ? null : await loadDestination(c, workspace.id, kind);
+    const reply = async (extra: Row = {}) => NextResponse.json({ ok: true, ...extra, ...(await shared()), sheets: present(await sheetsOf(c, workspace.id)) });
 
     if (action === "connect" || (action === "reread" && destination)) {
       const url = action === "connect" ? text(body.url) : text(((destination?.config ?? {}) as Row).url);
@@ -73,7 +92,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         const before = previous.headers?.indexOf(sheet.headers[index]) ?? -1;
         return before >= 0 && previous.mapping ? previous.mapping[before] ?? suggested : suggested;
       });
-      await saveDestination(c, workspace.id, "sheets", {
+      await saveDestination(c, workspace.id, kind, {
         provider: "google_sheets",
         api_key: "google-service-account",
         account_id: sheet.spreadsheetId,
@@ -92,7 +111,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const content: SheetContent = body.content === "meetings" ? "meetings" : "replies";
       if (content === contentOf(destination)) return reply();
       const mapping = suggestMapping(sheetConfig.headers, content);
-      await saveDestination(c, workspace.id, "sheets", { config: { ...sheetConfig, content, mapping } as unknown as Row, status: "planned" });
+      await saveDestination(c, workspace.id, kind, { config: { ...sheetConfig, content, mapping } as unknown as Row, status: "planned" });
       return reply();
     }
     if (action === "map") {
@@ -100,7 +119,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const chosen = Array.isArray(body.mapping) ? (body.mapping as unknown[]).map((key) => (catalog.some((field) => field.key === key) ? String(key) : "")) : sheetConfig.mapping;
       const { headers, qcIdColumn } = await ensureQcIdColumn(sheetConfig.spreadsheetId, sheetConfig.tab, sheetConfig.headers);
       const mapping = headers.map((_, index) => (index === qcIdColumn ? "" : chosen[index] ?? ""));
-      await saveDestination(c, workspace.id, "sheets", { config: { ...sheetConfig, headers, mapping, qcIdColumn } as unknown as Row, status: "built", ...(destination.status !== "built" ? { auto_push: true } : {}) });
+      await saveDestination(c, workspace.id, kind, { config: { ...sheetConfig, headers, mapping, qcIdColumn } as unknown as Row, status: "built", ...(destination.status !== "built" ? { auto_push: true } : {}) });
       // QC's house style on every confirmed mapping; a formatting hiccup never undoes the mapping.
       const formatted = await sheetsFormat({ ...sheetConfig, headers, mapping, qcIdColumn }).then(() => "").catch((error) => (error instanceof Error ? error.message : "Formatting failed."));
       return reply(formatted ? { warning: `Mapping saved, but formatting failed: ${formatted}` } : {});
@@ -115,22 +134,21 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       if (contentOf(destination) === "meetings") {
         const done = await sheetsPushMeetings(c, destination as Destination);
         const summary = { pushed: done.pushed, created: done.created, updated: done.updated, unchanged: 0, failed: 0, errors: [] as string[], nextOffset: null, at: new Date().toISOString() };
-        await saveDestination(c, workspace.id, "sheets", { last_push_at: summary.at, last_push_summary: summary as unknown as Row });
+        await saveDestination(c, workspace.id, kind, { last_push_at: summary.at, last_push_summary: summary as unknown as Row });
         return reply({ summary });
       }
       const summary = await pushPass(c, destination as Destination, { offset: Number(body.offset) || 0, budgetMs: 150_000 });
       return reply({ summary });
     }
     if (action === "auto") {
-      await saveDestination(c, workspace.id, "sheets", { auto_push: body.on === true });
-      return reply();
-    }
-    if (action === "disconnect_google") {
-      await disconnectGoogle();
+      await saveDestination(c, workspace.id, kind, { auto_push: body.on === true });
       return reply();
     }
     if (action === "disconnect") {
-      await saveDestination(c, workspace.id, "sheets", { api_key: null, status: "disconnected", auto_push: false });
+      // Removes QC Command's connection to this sheet; the sheet and its rows stay as they are.
+      await rest(c, `rr_crm_push?workspace_id=eq.${encodeURIComponent(workspace.id)}&kind=eq.${encodeURIComponent(kind)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+      // Its push records go too, so a sheet connected later in the same slot starts fresh.
+      await rest(c, `rr_crm_push_records?workspace_id=eq.${encodeURIComponent(workspace.id)}&provider=eq.${encodeURIComponent(recordKey(destination as Destination))}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
       return reply();
     }
     return NextResponse.json({ ok: false, error: "Unknown action." }, { status: 400 });
