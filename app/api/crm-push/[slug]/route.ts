@@ -122,7 +122,10 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         approved.deals = { ...deals, statusExists: deals.enabled ? true : deals.statusExists, createAttributes: deals.enabled ? [] : deals.createAttributes };
       }
       const failed = log.filter((entry) => entry.result === "failed");
-      await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: failed.length ? "planned" : "built", ...(!failed.length && destination.status !== "built" ? { auto_push: true } : {}) });
+      // A client already built stays built when a rebuild hits a snag (the log shows it): pushes keep running.
+      // The stage's position is reported, not blocking: the stage itself exists and deals land in it.
+      const blocking = failed.filter((entry) => entry.kind !== "deal-stage-order");
+      await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: blocking.length && destination.status !== "built" ? "planned" : "built", ...(!blocking.length && destination.status !== "built" ? { auto_push: true } : {}) });
       return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
     }
     if (action === "replan") {
@@ -172,7 +175,10 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         destination = await loadDestination(c, workspace.id, "crm") ?? destination;
       }
       const failed = log.filter((entry) => entry.result === "failed");
-      await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: failed.length ? "planned" : "built", ...(!failed.length && destination.status !== "built" ? { auto_push: true } : {}) });
+      // A client already built stays built when a rebuild hits a snag (the log shows it): pushes keep running.
+      // The stage's position is reported, not blocking: the stage itself exists and deals land in it.
+      const blocking = failed.filter((entry) => entry.kind !== "deal-stage-order");
+      await saveDestination(c, workspace.id, "crm", { plan: approved as unknown as Row, build_log: [...(destination.build_log ?? []), ...log] as unknown as Row[], status: blocking.length && destination.status !== "built" ? "planned" : "built", ...(!blocking.length && destination.status !== "built" ? { auto_push: true } : {}) });
       return reply({ built: !failed.length, failed: failed.map((entry) => `${entry.name}: ${entry.detail}`) });
     }
     if (action === "push_one") {

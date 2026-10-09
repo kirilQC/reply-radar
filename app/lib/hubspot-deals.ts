@@ -160,6 +160,15 @@ export async function ensureStageFirst(token: string, pipelineId: string, stageI
       await hubspot(token, "PATCH", `/crm/v3/pipelines/deals/${enc(pipelineId)}/stages/${enc(text(stage.id))}`, { label: text(stage.label), displayOrder: index + 1, metadata: stage.metadata ?? {} });
     }
     stages = await liveStages(token, pipelineId);
+    if (text(stages[0]?.id) === stageId) return entry("verified", `Moved to first: ${orderOf(stages)}`);
+    // HubSpot can ignore a partial update's position; a full replace of each stage (same label and metadata,
+    // so nothing else changes) carries it.
+    const fresh = stages.find((s) => text(s.id) === stageId);
+    if (fresh) await hubspot(token, "PUT", `/crm/v3/pipelines/deals/${enc(pipelineId)}/stages/${enc(stageId)}`, { label: text(fresh.label), displayOrder: 0, metadata: fresh.metadata ?? {} });
+    for (const [index, stage] of stages.filter((s) => text(s.id) !== stageId).entries()) {
+      await hubspot(token, "PUT", `/crm/v3/pipelines/deals/${enc(pipelineId)}/stages/${enc(text(stage.id))}`, { label: text(stage.label), displayOrder: index + 1, metadata: stage.metadata ?? {} });
+    }
+    stages = await liveStages(token, pipelineId);
     return text(stages[0]?.id) === stageId
       ? entry("verified", `Moved to first: ${orderOf(stages)}`)
       : entry("failed", `HubSpot kept ${text(stages[0]?.label)} first after the reorder. Order now: ${orderOf(stages)}`);
