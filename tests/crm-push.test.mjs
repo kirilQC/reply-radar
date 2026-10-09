@@ -339,3 +339,21 @@ test("a confirmed sheet or Airtable table holds one thing for good: no content s
   assert.match(at, /if \(destination\.status === "built" && contentOf\(body\.content\) !== content\) return NextResponse\.json\(\{ ok: false/);
   assert.match(sh, /if \(destination\.status === "built" && contentValue\(body\.content\) !== contentOf\(destination\)\) return NextResponse\.json\(\{ ok: false/);
 });
+
+test("Send a test: the person types name, email, company and title, and the row goes to Clay with the client's name", async () => {
+  const ui = readFileSync(new URL("../app/components/BookingSetup.tsx", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../app/api/bookings/test/route.ts", import.meta.url), "utf8");
+  const run = readFileSync(new URL("../app/lib/booking-run.ts", import.meta.url), "utf8");
+  for (const label of ["Name", "Email", "Company name", "Job title"]) assert.ok(ui.includes(`ops-field">${label}<input`), label);
+  assert.match(ui, /JSON\.stringify\(\{ clay: true, workspaceId: client\.id, lead \}\)/);
+  assert.match(route, /rr_workspaces\?select=name,slug&id=eq\./);
+  assert.match(run, /lead\?\.client \?\? \{ name: "QC Command test", slug: "test" \}/);
+  const { clayRow } = await import("../shared/bookings.mjs");
+  const row = clayRow({ id: "test", invitee_name: "Ada Lovelace", invitee_email: "ada@example.com", company_name: "Analytical", invitee_title: "CTO" }, { name: "Chroma", slug: "chroma" }, "https://cb", true);
+  assert.equal(row.Client, "Chroma");
+  assert.equal(row.Name, "Ada Lovelace");
+  assert.equal(row.Email, "ada@example.com");
+  assert.equal(row["USER company name"], "Analytical");
+  assert.equal(row["USER title"], "CTO");
+  assert.equal(row.test, true);
+});

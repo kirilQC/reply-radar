@@ -34,7 +34,7 @@ type Client = {
 };
 type Payload = {
   ok: boolean;
-  global: { clayWebhookUrl: string; calendlyOAuth: { clientIdSet: boolean; secretSet: boolean } };
+  global: { clayWebhookUrl: string; calendlyOAuth: { clientIdSet: boolean; secretSet: boolean }; lastClayCallback: { at: string; test: boolean; fields: string[] } | null };
   clients: Client[];
   testChannelSet: boolean;
   defaultBriefInstructions: string;
@@ -78,6 +78,8 @@ export default function BookingSetup({ slug, deals }: { slug: string; deals: Dea
   const [events, setEvents] = useState<{ list: CalendarEvent[]; errors: string[]; loading: boolean } | null>(null);
   const [preview, setPreview] = useState<{ brief: Brief; who: string } | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [testOpen, setTestOpen] = useState(false);
+  const [clayWaiting, setClayWaiting] = useState<string | null>(null);
   const saved = useRef<Record<string, number>>({});
 
   const take = (payload: Payload | null) => { if (payload?.global) { setData(payload); setError(""); } };
@@ -185,7 +187,32 @@ export default function BookingSetup({ slug, deals }: { slug: string; deals: Dea
     setBusy("test");
     const result = await call("/api/bookings/test", { method: "POST", body: JSON.stringify({ workspaceId: client.id }) });
     setBusy("");
-    setNote((current) => ({ ...current, test: result.ok ? "Test posted to the test channel." : result.error }));
+    setNote((current) => ({ ...current, test: result.ok ? "Latest booking posted to the test channel." : result.error }));
+  };
+  /** A test lead to Clay with this client's name, then watch for Clay's answer for a minute. */
+  const sendClayTest = async () => {
+    const lead = { name: draft("tName", "").trim(), email: draft("tEmail", "").trim(), company: draft("tCompany", "").trim(), title: draft("tTitle", "").trim() };
+    setBusy("clay");
+    const sentAt = new Date().toISOString();
+    const result = await call("/api/bookings/test", { method: "POST", body: JSON.stringify({ clay: true, workspaceId: client.id, lead }) });
+    setBusy("");
+    if (!result.ok) { setNote((current) => ({ ...current, test: result.error })); return; }
+    setNote((current) => ({ ...current, test: `Sent ${lead.name || lead.email} to Clay with client ${client.name}. Waiting for Clay's answer…` }));
+    setClayWaiting(sentAt);
+    for (let i = 0; i < 12; i += 1) {
+      await new Promise((done) => setTimeout(done, 5000));
+      const fresh = await call(settingsPath);
+      if (!fresh.ok) continue;
+      take(fresh.payload);
+      const answer = (fresh.payload as Payload).global.lastClayCallback;
+      if (answer?.test && answer.at >= sentAt) {
+        setNote((current) => ({ ...current, test: `Clay answered with ${answer.fields.length} ${answer.fields.length === 1 ? "field" : "fields"}${answer.fields.length ? `: ${answer.fields.join(", ")}` : ""}.` }));
+        setClayWaiting(null);
+        return;
+      }
+    }
+    setNote((current) => ({ ...current, test: "Sent to Clay. No answer within a minute: check the table's HTTP column runs and posts back." }));
+    setClayWaiting(null);
   };
   const setSteps = (steps: Step[], key: string) => save({ steps }, key);
 
@@ -343,10 +370,26 @@ export default function BookingSetup({ slug, deals }: { slug: string; deals: Dea
       <StepCard n={6} state={state(5)} title="Turn it on" status={client.enabled ? `On since ${when(client.enabledAt)}` : ready ? "Ready" : "Needs steps 1 to 3"}>
         <div className="ops-row">
           <label className="ops-check bk-switch"><input type="checkbox" checked={client.enabled} disabled={busy === "enabled" || (!client.enabled && !ready)} onChange={(e) => void save({ enabled: e.target.checked }, "enabled")} /> {client.enabled ? "On" : "Off"}</label>
-          <button type="button" className="ops-btn ops-sec" disabled={busy === "test" || !data.testChannelSet} onClick={() => void sendTest()}>{busy === "test" ? "Sending…" : "Send a test"}</button>
-          {!data.testChannelSet && <span className="ops-muted">Tests need SLACK_TEST_CHANNEL_ID.</span>}
-          {(note.test || (note.enabled && note.enabled !== "Saved")) && <span className={note.test?.startsWith("Test posted") ? "ops-ok" : "ops-error"}>{note.test || note.enabled}</span>}
+          <button type="button" className="ops-btn ops-sec" aria-expanded={testOpen} onClick={() => setTestOpen((value) => !value)}>Send a test {testOpen ? "▴" : "▾"}</button>
+          {note.enabled && note.enabled !== "Saved" && <span className="ops-error">{note.enabled}</span>}
         </div>
+        {testOpen && (
+          <div className="bk-box">
+            <div className="bk-box-head"><strong>Test lead</strong><span className="ops-muted">Goes to the Clay table as a test, with client {client.name}</span></div>
+            <div className="bk-two">
+              <label className="ops-field">Name<input className="ops-input" value={draft("tName", "")} onChange={(e) => setDraft("tName", e.target.value)} /></label>
+              <label className="ops-field">Email<input className="ops-input" type="email" value={draft("tEmail", "")} onChange={(e) => setDraft("tEmail", e.target.value)} /></label>
+              <label className="ops-field">Company name<input className="ops-input" value={draft("tCompany", "")} onChange={(e) => setDraft("tCompany", e.target.value)} /></label>
+              <label className="ops-field">Job title<input className="ops-input" value={draft("tTitle", "")} onChange={(e) => setDraft("tTitle", e.target.value)} /></label>
+            </div>
+            <div className="ops-row">
+              <button type="button" className="ops-btn ops-pri" disabled={busy === "clay" || Boolean(clayWaiting) || !data.global.clayWebhookUrl || (!draft("tName", "").trim() && !draft("tEmail", "").trim())} onClick={() => void sendClayTest()}>{busy === "clay" ? "Sending…" : clayWaiting ? "Waiting for Clay…" : "Send to Clay"}</button>
+              {client.recent.length > 0 && data.testChannelSet && <button type="button" className="ops-btn ops-sec" disabled={busy === "test"} onClick={() => void sendTest()}>{busy === "test" ? "Posting…" : "Post the latest booking to the test channel"}</button>}
+              {!data.global.clayWebhookUrl && <span className="ops-muted">No Clay table is connected (shared setup).</span>}
+            </div>
+            {note.test && <p className={/^(Clay answered|Sent|Latest booking posted)/.test(note.test) ? "ops-ok" : "ops-error"}>{note.test}</p>}
+          </div>
+        )}
       </StepCard>
 
       <section className="ops-panel ops-flush" aria-label="Recent bookings">

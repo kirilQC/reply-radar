@@ -773,17 +773,22 @@ export async function bookingTest(config: Config, workspaceId: string): Promise<
 }
 
 /** A made-up row sent to the Clay table, marked as a test, to check the table answers back. */
-export async function clayTest(config: Config, request?: Request): Promise<{ ok: boolean; error?: string }> {
+/**
+ * A test row to the shared Clay table, marked test so its answer is only recorded. From a client's Booked
+ * meetings step, the person typed the lead (name, email, company, title) and the row carries that client's
+ * name in the Client column, exactly like a real booking would; without one, a sample lead.
+ */
+export async function clayTest(config: Config, request?: Request, lead?: { name: string; email: string; company: string; title: string; client: { name: string; slug: string } }): Promise<{ ok: boolean; error?: string }> {
   const settings = await ensureCallbackSecret(config, await readSettings(config), request);
   return sendToClay(settings, clayRow({
     id: "test",
-    invitee_name: "Tim Puri",
-    invitee_email: "",
-    company_name: "Curana Health",
-    invitee_title: "Chief Medical Officer, Population Health",
+    invitee_name: lead?.name || "Tim Puri",
+    invitee_email: lead?.email ?? "",
+    company_name: lead?.company || "Curana Health",
+    invitee_title: lead?.title || "Chief Medical Officer, Population Health",
     summary: "Test booking",
     meeting_at: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-  }, { name: "QC Command test", slug: "test" }, clayCallbackUrl(settings), true));
+  }, lead?.client ?? { name: "QC Command test", slug: "test" }, clayCallbackUrl(settings), true));
 }
 
 // ── Calendly ──────────────────────────────────────────────────────────────────────────────────────
