@@ -199,13 +199,27 @@ export async function ensureQcIdColumn(spreadsheetId: string, tab: string, heade
   return { headers: [...headers, QC_ID_HEADER], qcIdColumn: index };
 }
 
+/**
+ * The sheet as it is now: row 1 read again, each column's field found by its header name (the mapping is
+ * confirmed per header, not per position), so columns can be reordered or inserted after connecting.
+ */
+async function currentLayout(config: SheetConfig): Promise<SheetConfig> {
+  const header = await sheets("GET", `${config.spreadsheetId}/values/${encodeURIComponent(`${quote(config.tab)}!1:1`)}`);
+  const headers = ((Array.isArray(header.values) ? header.values[0] : []) as unknown[]).map((cell) => text(cell));
+  const byName = new Map(config.headers.map((name, index) => [name.trim().toLowerCase(), config.mapping[index] ?? ""]));
+  const qcIdColumn = headers.findIndex((name) => name.trim().toLowerCase() === QC_ID_HEADER.toLowerCase());
+  if (qcIdColumn < 0) throw new Error(`The "${QC_ID_HEADER}" column was removed from the sheet. Click Confirm mapping to add it back.`);
+  const mapping = headers.map((name, index) => (index === qcIdColumn ? "" : byName.get(name.trim().toLowerCase()) ?? ""));
+  return { ...config, headers, mapping, qcIdColumn };
+}
+
 // ── Push: a batch of records, one row each ───────────────────────────────────────────────────────
 
 /** Writes the batch: existing leads' rows updated in place, new leads appended. Returns the row per record. */
 export async function sheetsPushBatch(destination: Destination, records: ReplyRecord[]): Promise<Map<string, { row: number; created: boolean }>> {
-  const config = destination.config as unknown as SheetConfig;
-  if (!config?.spreadsheetId || !Array.isArray(config.mapping)) throw new Error("Map the sheet's columns first.");
-  const { spreadsheetId, tab, mapping, qcIdColumn } = config;
+  const saved = destination.config as unknown as SheetConfig;
+  if (!saved?.spreadsheetId || !Array.isArray(saved.mapping)) throw new Error("Map the sheet's columns first.");
+  const { spreadsheetId, tab, mapping, qcIdColumn } = await currentLayout(saved);
   const width = Math.max(mapping.length, qcIdColumn + 1);
   const letter = columnLetter(qcIdColumn);
   const idColumn = await sheets("GET", `${spreadsheetId}/values/${encodeURIComponent(`${quote(tab)}!${letter}:${letter}`)}`);
@@ -257,7 +271,8 @@ const grey = (level: number) => ({ red: level, green: level, blue: level });
  * centered, the reply and conversation left-aligned and wrapped, wider columns where text runs long, and
  * the QC ID column hidden. Existing banding or a filter on the sheet is kept, not duplicated.
  */
-export async function sheetsFormat(config: SheetConfig): Promise<void> {
+export async function sheetsFormat(saved: SheetConfig): Promise<void> {
+  const config = await currentLayout(saved);
   const meta = await sheets("GET", `${config.spreadsheetId}?fields=sheets(properties(sheetId,title),bandedRanges(bandedRangeId),basicFilter)`);
   const tab = (Array.isArray(meta.sheets) ? meta.sheets : []).map((sheet) => sheet as Row).find((sheet) => text(((sheet.properties as Row) ?? {}).title) === config.tab);
   if (!tab) throw new Error(`The tab "${config.tab}" is gone from that sheet.`);
