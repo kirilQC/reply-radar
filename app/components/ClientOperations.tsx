@@ -706,7 +706,7 @@ function AirtableView({ slug, state }: { slug: string; state: SheetsState }) {
     }).catch(() => setBaseError("Could not read that base."));
   }, [slug, base]);
   // The table that fits what is being pushed (a Campaigns table for campaigns...), chosen again when that changes.
-  useEffect(() => { if (baseTables.length) setTable(tableHints[content] || baseTables[0]?.id || ""); }, [content, baseTables, tableHints]);
+  useEffect(() => { if (baseTables.length) setTable(tableHints[content] ?? ""); }, [content, baseTables, tableHints]);
   const live = tables.filter((entry) => entry.status === "built").length;
 
   if (!loaded) return <p className="ops-muted">Loading Airtable…</p>;
@@ -734,7 +734,7 @@ function AirtableView({ slug, state }: { slug: string; state: SheetsState }) {
               {(bases ?? []).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
             </select>
             <select className="ops-input ops-grow" value={table} onChange={(e) => setTable(e.target.value)} disabled={!baseTables.length} aria-label="Airtable table">
-              {!baseTables.length && <option value="">Choose a base first</option>}
+              <option value="">{baseTables.length ? "Choose a table" : "Choose a base first"}</option>
               {baseTables.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
             </select>
             <button type="button" className="ops-btn ops-pri" disabled={!base || !table || Boolean(busy)} onClick={() => void run("connect", { baseId: base, tableId: table, content }).then((ok) => { if (ok) { setBase(""); setTable(""); } })}>{busy === "new:connect" ? "Reading table…" : "Connect"}</button>

@@ -270,6 +270,8 @@ test("Airtable picks the client's base (saved one first, then the name) and the 
   assert.equal(suggestTable(tables, "meetings"), "t3");
   assert.equal(suggestTable(tables, "replies"), "t1");
   assert.equal(suggestTable([{ id: "x", name: "Table 1" }], "campaigns"), "x");
+  // No clear fit in a base with several tables: left to the person, never a guess like the onboarding table.
+  assert.equal(suggestTable([{ id: "o", name: "Onboarding Responses" }, { id: "p", name: "Tasks" }], "replies"), "");
 });
 
 test("crm_sync_status counts an Airtable table's mapped fields (mapping by field id, not position)", () => {

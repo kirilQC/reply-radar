@@ -193,8 +193,12 @@ export function suggestBase(bases: Array<{ id: string; name: string }>, clientNa
   return close ? { id: close.id, why: `named ${close.name}` } : null;
 }
 
-const TABLE_HINTS: Record<SheetContent, RegExp> = { replies: /repl|lead|response|inbox|conversation|prospect/i, meetings: /meeting|booked|booking|call|demo|appointment/i, campaigns: /campaign|outreach|sequence/i };
-/** The table that fits what is being pushed, by its name, else the base's first table. */
+const TABLE_HINTS: Record<SheetContent, RegExp> = { replies: /\brepl(y|ies)\b|\bleads?\b|inbox|conversation|prospect/i, meetings: /meeting|booked|booking|\bcalls?\b|\bdemos?\b|appointment/i, campaigns: /campaign|outreach|sequence/i };
+/**
+ * The table that fits what is being pushed, by its name. With no clear fit the choice is left to the person
+ * (a base's only table is still picked): a wrong guess would write replies into, say, an onboarding table.
+ */
 export function suggestTable(tables: Array<{ id: string; name: string }>, content: SheetContent): string {
-  return (tables.find((table) => TABLE_HINTS[content].test(table.name)) ?? tables[0])?.id ?? "";
+  const fit = tables.find((table) => TABLE_HINTS[content].test(table.name));
+  return fit?.id ?? (tables.length === 1 ? tables[0].id : "");
 }
