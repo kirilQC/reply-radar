@@ -78,7 +78,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const choices = (body.settings && typeof body.settings === "object" ? body.settings : {}) as Row;
       const settings = {
         ...plan.settings,
-        ...(choices.ownerId !== undefined ? { ownerId: text(choices.ownerId) || null } : {}),
+        // QC Growth owns QC's leads; an empty choice keeps the plan's QC Growth owner rather than unassigning.
+        ...(text(choices.ownerId) ? { ownerId: text(choices.ownerId) } : {}),
         ...(choices.lifecycleOnCreate !== undefined ? { lifecycleOnCreate: choices.lifecycleOnCreate ? "lead" : null } : {}),
       };
       const items = choices.useLeadSource === false ? plan.items.map((item) => (item.kind === "option" ? { ...item, action: "skip" as const } : item)) : plan.items;

@@ -58,3 +58,12 @@ test("saving part of a destination patches the existing row, and re-reading asks
   const route = readFileSync(new URL("../app/api/crm-push/[slug]/route.ts", import.meta.url), "utf8");
   assert.match(route, /if \(action === "replan"\) \{[\s\S]{0,200}const account = await hubspotConnect\(destination\.api_key\);/);
 });
+
+test("QC Growth owns every contact QC brings in: found or created, the default, never unassigned by an empty choice", () => {
+  const source = readFileSync(new URL("../app/lib/hubspot-push.ts", import.meta.url), "utf8");
+  assert.match(source, /lifecycleOnCreate: lifecycle, ownerId: qcOwner\?\.id \?\? null \}/);
+  assert.match(source, /"\/settings\/v3\/users", \{ email: QC_OWNER_EMAIL, firstName: "QC", lastName: "Growth"/);
+  assert.match(source, /if \(settings\.ownerId && !text\(current\.hubspot_owner_id\)\) fill\.hubspot_owner_id = settings\.ownerId;/);
+  const route = readFileSync(new URL("../app/api/crm-push/[slug]/route.ts", import.meta.url), "utf8");
+  assert.match(route, /\.\.\.\(text\(choices\.ownerId\) \? \{ ownerId: text\(choices\.ownerId\) \} : \{\}\)/);
+});

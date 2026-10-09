@@ -189,7 +189,19 @@ export const STANDARD_FIELDS: Array<{ object: "contact" | "company"; name: strin
   { object: "company", name: "linkedin_company_page", label: "LinkedIn company page", from: "Company's LinkedIn page" },
 ];
 
-export type PlanItem = { id: string; kind: "group" | "property" | "option" | "standard"; name: string; label: string; detail: string; action: "create" | "reuse" | "skip"; spec?: PropertySpec; property?: string; optionLabel?: string };
+/**
+ * The QC Growth user in the client's HubSpot, who owns every contact QC brings in (the attribution: our leads
+ * are never assigned to the client's people). Matched by name "QC Growth" or a qcgrowth.com address.
+ */
+export const QC_OWNER_EMAIL = (process.env.QC_HUBSPOT_OWNER_EMAIL ?? "admin@qcgrowth.com").trim();
+export function qcOwnerOf(owners: Array<{ id: string; name: string; email: string }>) {
+  return owners.find((owner) => /^qc\s*growth$/i.test(owner.name.trim()))
+    ?? owners.find((owner) => owner.email.toLowerCase() === QC_OWNER_EMAIL.toLowerCase())
+    ?? owners.find((owner) => /@qcgrowth\.com$/i.test(owner.email))
+    ?? null;
+}
+
+export type PlanItem = { id: string; kind: "group" | "property" | "option" | "standard" | "owner"; name: string; label: string; detail: string; action: "create" | "reuse" | "skip"; spec?: PropertySpec; property?: string; optionLabel?: string };
 export type HubSpotPlan = {
   at: string;
   items: PlanItem[];
@@ -234,11 +246,18 @@ export function hubspotPlan(audit: HubSpotAudit): HubSpotPlan {
     items.push({ id: `option:${leadSource.name}`, kind: "option", name: leadSource.name, label: leadSource.label, detail: has ? `Your "${leadSource.label}" field already has a "QC Growth" option; contacts QC creates get it.` : `Add a "QC Growth" option to your "${leadSource.label}" field; contacts QC creates get it. Existing options are not changed.`, action: has ? "reuse" : "create", property: leadSource.name, optionLabel: "QC Growth" });
   }
   const lifecycle = audit.lifecycleOptions.includes("lead") ? "lead" : null;
+  // Owner: the QC Growth user, found or created. Creating one needs settings.users.write on the key, and
+  // HubSpot emails QC_OWNER_EMAIL an invite (a HubSpot user, free on any plan without a paid seat).
+  const qcOwner = qcOwnerOf(audit.owners);
+  items.push(qcOwner
+    ? { id: "owner", kind: "owner", name: qcOwner.email || qcOwner.name, label: `Owner: ${qcOwner.name}`, detail: "Your QC Growth user owns every contact QC brings in.", action: "reuse" }
+    : { id: "owner", kind: "owner", name: QC_OWNER_EMAIL, label: "Owner: QC Growth", detail: `Add a HubSpot user "QC Growth" (${QC_OWNER_EMAIL}) to own every contact QC brings in. HubSpot emails that address an invite.`, action: "create" });
+  if (!qcOwner && audit.scopes.length && !audit.scopes.includes("settings.users.write")) warnings.push("To add the QC Growth user, the key also needs settings.users.write. Tick it in HubSpot (Development → Keys) and re-read, or add a user named QC Growth in HubSpot yourself.");
   return {
     at: new Date().toISOString(),
     items,
     // The option's stored value: the client's own when they already had a QC Growth option, else ours.
-    settings: { leadSourceProperty: leadSource?.name ?? null, leadSourceValue: leadSource ? leadSource.options.find((option) => /qc growth/i.test(option.label))?.value ?? "qc_growth" : null, lifecycleOnCreate: lifecycle, ownerId: null },
+    settings: { leadSourceProperty: leadSource?.name ?? null, leadSourceValue: leadSource ? leadSource.options.find((option) => /qc growth/i.test(option.label))?.value ?? "qc_growth" : null, lifecycleOnCreate: lifecycle, ownerId: qcOwner?.id ?? null },
     conversation: "Each conversation is logged as one note on the contact's timeline (LinkedIn or email, with campaign and sender), updated in place as the conversation continues.",
     notTouched: [
       "Existing fields, workflows, pipelines, lists and views",
@@ -297,6 +316,22 @@ export async function hubspotApply(token: string, plan: HubSpotPlan): Promise<Bu
       log.push({ at: at(), kind: "option", name: `${item.property} = QC Growth`, result: "failed", detail: error instanceof Error ? error.message : "" });
     }
   }
+  // The QC Growth user, when the plan adds one: created, then found as an owner so contacts can be assigned.
+  const ownerItem = plan.items.find((item) => item.kind === "owner" && item.action === "create");
+  if (ownerItem) {
+    try {
+      await hubspot(token, "POST", "/settings/v3/users", { email: QC_OWNER_EMAIL, firstName: "QC", lastName: "Growth", sendWelcomeEmail: true }).catch((error) => {
+        if (!(error instanceof HubSpotError && error.status === 409)) throw error;
+      });
+      const owner = list((await hubspot(token, "GET", `/crm/v3/owners?email=${encodeURIComponent(QC_OWNER_EMAIL)}&limit=1`)).results)[0];
+      if (!owner) throw new Error("The user was added but HubSpot has not listed it as an owner yet; re-read in a minute.");
+      plan.settings.ownerId = text(owner.id);
+      log.push({ at: at(), kind: "owner", name: QC_OWNER_EMAIL, result: "created", detail: `QC Growth, owner ${text(owner.id)}` });
+    } catch (error) {
+      log.push({ at: at(), kind: "owner", name: QC_OWNER_EMAIL, result: "failed", detail: error instanceof Error ? error.message : "" });
+    }
+  }
+
   // Read back every field the routing will write, and say what is really there.
   const after = new Map(list((await hubspot(token, "GET", "/crm/v3/properties/contacts")).results).map((row) => [text(row.name), propertyOf(row)]));
   for (const item of plan.items.filter((entry) => entry.kind === "property" && entry.action !== "skip" && entry.spec)) {
@@ -309,7 +344,7 @@ export async function hubspotApply(token: string, plan: HubSpotPlan): Promise<Bu
 
 // ── Push ────────────────────────────────────────────────────────────────────────────────────────
 
-const CONTACT_BASICS = ["email", "firstname", "lastname", "jobtitle", "company", "city"];
+const CONTACT_BASICS = ["email", "firstname", "lastname", "jobtitle", "company", "city", "hubspot_owner_id"];
 
 /** Which QC fields the build left usable (a field skipped for a type clash is never written). */
 function usableFields(destination: Destination): Set<string> {
@@ -362,6 +397,8 @@ export async function hubspotPush(
     const current = object((await hubspot(token, "GET", `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=${CONTACT_BASICS.join(",")}`)).properties);
     const fill: Row = {};
     for (const [name, value] of Object.entries(basics)) if (value && !text(current[name])) fill[name] = value;
+    // A contact with no owner gets QC Growth; one the client already assigned keeps its owner.
+    if (settings.ownerId && !text(current.hubspot_owner_id)) fill.hubspot_owner_id = settings.ownerId;
     await hubspot(token, "PATCH", `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, { properties: { ...fill, ...qc } });
   } else {
     const properties: Row = { ...Object.fromEntries(Object.entries(basics).filter(([, value]) => value)), ...qc };

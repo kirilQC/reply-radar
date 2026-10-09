@@ -81,7 +81,7 @@ function MeetingsLogo() {
 const HUBSPOT_STEPS = [
   "In the client's HubSpot: Development → Keys → Service keys → Create service key",
   "Name it QC Growth",
-  "Scopes: crm.objects.contacts.read + write, crm.objects.companies.read + write, crm.schemas.contacts.read + write, crm.objects.owners.read",
+  "Scopes: crm.objects.contacts.read + write, crm.objects.companies.read + write, crm.schemas.contacts.read + write, crm.objects.owners.read, and settings.users.write if there is no QC Growth user in HubSpot yet",
   "Copy the key (starts with pat-) and paste it here",
 ];
 
@@ -99,6 +99,8 @@ function CrmPanel({ slug, clientName, provider, onClose }: { slug: string; clien
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [ownerId, setOwnerId] = useState("");
+  // The plan's owner (the client's QC Growth user) is the default; QC's leads are never left unassigned.
+  useEffect(() => { if (crm?.plan?.settings.ownerId) setOwnerId(crm.plan.settings.ownerId); }, [crm?.plan?.settings.ownerId]);
   const [lifecycle, setLifecycle] = useState(true);
   const [leadSource, setLeadSource] = useState(true);
   const [progress, setProgress] = useState<{ pushed: number; created: number; updated: number; unchanged: number; failed: number } | null>(null);
@@ -208,7 +210,7 @@ function CrmPanel({ slug, clientName, provider, onClose }: { slug: string; clien
               {crm.plan.settings.leadSourceProperty && <label><input type="checkbox" checked={leadSource} onChange={(e) => setLeadSource(e.target.checked)} /> New contacts get lead source QC Growth</label>}
               <label>Owner for new contacts
                 <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-                  <option value="">Unassigned</option>
+                  {!crm.plan.settings.ownerId && <option value="">QC Growth (added by the build)</option>}
                   {(crm.audit?.owners ?? []).map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
                 </select>
               </label>
