@@ -81,7 +81,7 @@ function MeetingsLogo() {
 const HUBSPOT_STEPS = [
   "In the client's HubSpot: Development → Keys → Service keys → Create service key",
   "Name it QC Growth",
-  "Scopes: crm.objects.contacts.read + write, crm.objects.companies.read + write, crm.schemas.contacts.read + write, crm.objects.owners.read, and settings.users.write if there is no QC Growth user in HubSpot yet",
+  "Scopes: crm.objects.contacts.read + write, crm.objects.companies.read + write, crm.schemas.contacts.read + write, crm.objects.owners.read, crm.lists.write (the QC Growth segment), and settings.users.write if there is no QC Growth user in HubSpot yet",
   "Copy the key (starts with pat-) and paste it here",
 ];
 

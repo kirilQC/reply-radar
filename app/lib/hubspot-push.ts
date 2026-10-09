@@ -53,7 +53,7 @@ export async function hubspot(token: string, method: string, path: string, body?
   if (response.status === 204) return {};
   const raw = await response.text().catch(() => "");
   let data: Row = {};
-  try { data = object(JSON.parse(raw)); } catch { data = { message: raw.slice(0, 300) }; }
+  try { const parsed = JSON.parse(raw); data = Array.isArray(parsed) ? { results: parsed } : object(parsed); } catch { data = { message: raw.slice(0, 300) }; }
   if (!response.ok) throw new HubSpotError(text(data.message) || `HubSpot answered ${response.status}.`, response.status);
   return data;
 }
@@ -98,6 +98,9 @@ export type HubSpotAudit = {
   lifecycleOptions: string[];
   scopes: string[];
   missingScopes: string[];
+  /** QC Growth's saved view and segment, when an earlier build made them. */
+  qcView: { id: string; name: string } | null;
+  qcSegment: { id: string; name: string } | null;
 };
 
 const propertyOf = (row: Row): HubSpotProperty => ({
@@ -114,13 +117,15 @@ const propertyOf = (row: Row): HubSpotProperty => ({
 
 export async function hubspotAudit(token: string, scopes: string[] = []): Promise<HubSpotAudit> {
   const count = async (objectType: string) => Number((await hubspot(token, "POST", `/crm/v3/objects/${objectType}/search`, { limit: 1, properties: ["hs_object_id"] }).catch(() => ({} as Row))).total) || 0;
-  const [contacts, companies, propertyRows, groupRows, ownerRows, recent] = await Promise.all([
+  const [contacts, companies, propertyRows, groupRows, ownerRows, recent, viewRows, segmentRows] = await Promise.all([
     count("contacts"),
     count("companies"),
     hubspot(token, "GET", "/crm/v3/properties/contacts").then((data) => list(data.results)),
     hubspot(token, "GET", "/crm/v3/properties/contacts/groups").then((data) => list(data.results)).catch(() => [] as Row[]),
     hubspot(token, "GET", "/crm/v3/owners?limit=100").then((data) => list(data.results)).catch(() => [] as Row[]),
     hubspot(token, "POST", "/crm/v3/objects/contacts/search", { limit: 100, sorts: [{ propertyName: "createdate", direction: "DESCENDING" }], properties: ["hs_object_source_label", "hs_object_source", "hs_object_source_detail_1"] }).then((data) => list(data.results)).catch(() => [] as Row[]),
+    hubspot(token, "GET", QC_VIEW_PATH).then(viewList).catch(() => [] as Row[]),
+    hubspot(token, "POST", "/crm/v3/lists/search", { query: QC_VIEW_NAME, count: 50 }).then((data) => list(data.lists)).catch(() => [] as Row[]),
   ]);
   const properties = propertyRows.map(propertyOf);
   const sources = new Map<string, number>();
@@ -150,7 +155,28 @@ export async function hubspotAudit(token: string, scopes: string[] = []): Promis
     lifecycleOptions: (lifecycle?.options ?? []).map((option) => option.value),
     scopes,
     missingScopes: scopes.length ? REQUIRED_SCOPES.filter((scope) => !scopes.includes(scope)) : [],
+    qcView: named(viewRows, "id"),
+    qcSegment: named(segmentRows, "listId"),
   };
+}
+
+// The contacts saved view and segment holding only QC Growth's contacts, so the client's own Contacts tab is
+// never flooded. Views go through HubSpot's CLI backend (the only API for saved views; it takes a service key),
+// segments through the public Lists API. Filter: QC outreach platform is set, which only QC's push writes.
+export const QC_VIEW_NAME = "QC Growth";
+const QC_VIEW_PATH = "/hub/cli/backend/crm/contacts/views";
+const QC_PLATFORMS = ["heyreach", "lemlist", "email_bison"];
+const QC_VIEW_COLUMNS = ["firstname", "lastname", "email", "jobtitle", "company", "qc_campaign", "qc_sender", "qc_outreach_platform", "qc_reply_sentiment", "qc_reply_count", "qc_last_reply_date", "hubspot_owner_id"];
+const viewList = (data: unknown): Row[] => Array.isArray(data) ? data as Row[] : list(object(data).results ?? object(data).views ?? object(data).data);
+function named(rows: Row[], idKey: string) {
+  const row = rows.find((entry) => text(entry.name).trim().toLowerCase() === QC_VIEW_NAME.toLowerCase());
+  return row ? { id: text(row[idKey] ?? row.id), name: text(row.name) } : null;
+}
+export function qcViewBody() {
+  return { name: QC_VIEW_NAME, objectTypeId: "contacts", columns: QC_VIEW_COLUMNS.map((name) => ({ name })), filterGroups: [{ filters: [{ property: "qc_outreach_platform", operator: "IN", values: QC_PLATFORMS }] }], sort: { property: "qc_last_reply_date", direction: "DESCENDING" } };
+}
+export function qcSegmentBody() {
+  return { name: QC_VIEW_NAME, objectTypeId: "0-1", processingType: "DYNAMIC", filterBranch: { filterBranchType: "OR", filters: [], filterBranches: [{ filterBranchType: "AND", filterBranches: [], filters: [{ filterType: "PROPERTY", property: "qc_outreach_platform", operation: { operationType: "ENUMERATION", operator: "IS_ANY_OF", values: QC_PLATFORMS } }] }] } };
 }
 
 // ── Plan ────────────────────────────────────────────────────────────────────────────────────────
@@ -201,7 +227,7 @@ export function qcOwnerOf(owners: Array<{ id: string; name: string; email: strin
     ?? null;
 }
 
-export type PlanItem = { id: string; kind: "group" | "property" | "option" | "standard" | "owner"; name: string; label: string; detail: string; action: "create" | "reuse" | "skip"; spec?: PropertySpec; property?: string; optionLabel?: string };
+export type PlanItem = { id: string; kind: "group" | "property" | "option" | "standard" | "owner" | "view" | "segment"; name: string; label: string; detail: string; action: "create" | "reuse" | "skip"; spec?: PropertySpec; property?: string; optionLabel?: string };
 export type HubSpotPlan = {
   at: string;
   items: PlanItem[];
@@ -252,6 +278,13 @@ export function hubspotPlan(audit: HubSpotAudit): HubSpotPlan {
   items.push(qcOwner
     ? { id: "owner", kind: "owner", name: qcOwner.email || qcOwner.name, label: `Owner: ${qcOwner.name}`, detail: "Your QC Growth user owns every contact QC brings in.", action: "reuse" }
     : { id: "owner", kind: "owner", name: QC_OWNER_EMAIL, label: "Owner: QC Growth", detail: `Add a HubSpot user "QC Growth" (${QC_OWNER_EMAIL}) to own every contact QC brings in. HubSpot emails that address an invite.`, action: "create" });
+  items.push(audit.qcView
+    ? { id: "view", kind: "view", name: audit.qcView.id, label: `Contacts view: ${QC_VIEW_NAME}`, detail: "Already there, reused.", action: "reuse" }
+    : { id: "view", kind: "view", name: QC_VIEW_NAME, label: `Contacts view: ${QC_VIEW_NAME}`, detail: "A saved view in Contacts showing only the contacts QC brings in, newest reply first, with campaign, sender, platform, sentiment and reply count.", action: "create" });
+  const listsOk = !audit.scopes.length || audit.scopes.includes("crm.lists.write");
+  items.push(audit.qcSegment
+    ? { id: "segment", kind: "segment", name: audit.qcSegment.id, label: `Segment: ${QC_VIEW_NAME}`, detail: "Already there, reused.", action: "reuse" }
+    : { id: "segment", kind: "segment", name: QC_VIEW_NAME, label: `Segment: ${QC_VIEW_NAME}`, detail: listsOk ? "An active segment of every contact QC brings in, for reports, exports and workflows." : "Needs crm.lists.write on the key; skipped until it is ticked.", action: listsOk ? "create" : "skip" });
   if (!qcOwner && audit.scopes.length && !audit.scopes.includes("settings.users.write")) warnings.push("To add the QC Growth user, the key also needs settings.users.write. Tick it in HubSpot (Development → Keys) and re-read, or add a user named QC Growth in HubSpot yourself.");
   return {
     at: new Date().toISOString(),
@@ -260,7 +293,7 @@ export function hubspotPlan(audit: HubSpotAudit): HubSpotPlan {
     settings: { leadSourceProperty: leadSource?.name ?? null, leadSourceValue: leadSource ? leadSource.options.find((option) => /qc growth/i.test(option.label))?.value ?? "qc_growth" : null, lifecycleOnCreate: lifecycle, ownerId: qcOwner?.id ?? null },
     conversation: "Each conversation is logged as one note on the contact's timeline (LinkedIn or email, with campaign and sender), updated in place as the conversation continues.",
     notTouched: [
-      "Existing fields, workflows, pipelines, lists and views",
+      "Existing fields, workflows, pipelines, segments and views (QC adds its own, never edits theirs)",
       "Lifecycle stage, lead status, owner and lead source of contacts that already exist",
       "Contacts' existing names, titles and companies (only empty ones are filled in)",
       "Deals",
@@ -329,6 +362,26 @@ export async function hubspotApply(token: string, plan: HubSpotPlan): Promise<Bu
       log.push({ at: at(), kind: "owner", name: QC_OWNER_EMAIL, result: "created", detail: `QC Growth, owner ${text(owner.id)}` });
     } catch (error) {
       log.push({ at: at(), kind: "owner", name: QC_OWNER_EMAIL, result: "failed", detail: error instanceof Error ? error.message : "" });
+    }
+  }
+  if (plan.items.some((item) => item.kind === "view" && item.action === "create")) {
+    try {
+      const existing = named(viewList(await hubspot(token, "GET", QC_VIEW_PATH).catch(() => [])), "id");
+      const view = existing ?? { id: text((await hubspot(token, "POST", QC_VIEW_PATH, qcViewBody())).id), name: QC_VIEW_NAME };
+      const back = await hubspot(token, "GET", `${QC_VIEW_PATH}/${view.id}`);
+      const filtered = JSON.stringify(back.filterGroups ?? []).includes("qc_outreach_platform");
+      log.push({ at: at(), kind: "view", name: QC_VIEW_NAME, result: existing ? "reused" : filtered ? "created" : "failed", detail: filtered ? `Contacts view ${view.id}` : `View ${view.id} saved without its filter` });
+    } catch (error) {
+      log.push({ at: at(), kind: "view", name: QC_VIEW_NAME, result: "failed", detail: error instanceof Error ? error.message : "" });
+    }
+  }
+  if (plan.items.some((item) => item.kind === "segment" && item.action === "create")) {
+    try {
+      const existing = named(list((await hubspot(token, "POST", "/crm/v3/lists/search", { query: QC_VIEW_NAME, count: 50 })).lists), "listId");
+      const id = existing?.id ?? text(object((await hubspot(token, "POST", "/crm/v3/lists", qcSegmentBody())).list).listId);
+      log.push({ at: at(), kind: "segment", name: QC_VIEW_NAME, result: existing ? "reused" : "created", detail: `Segment ${id}` });
+    } catch (error) {
+      log.push({ at: at(), kind: "segment", name: QC_VIEW_NAME, result: "failed", detail: error instanceof Error ? error.message : "" });
     }
   }
 
