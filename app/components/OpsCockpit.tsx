@@ -418,8 +418,8 @@ function SheetsPanel({ slug, clientName, onClose, returned }: { slug: string; cl
             <h3>Columns</h3>
             <ul className="oc-plan">
               {headers.map((header, index) => index === sheet?.config?.qcIdColumn ? null : (
-                <li key={`${header}-${index}`}>
-                  <span className="oc-tag">{header || `Column ${index + 1}`}</span>
+                <li key={`${header}-${index}`} className="oc-sheet-col">
+                  <span>{header || `Column ${index + 1}`}</span>
                   <select value={mapping[index] ?? ""} onChange={(e) => setMapping((current) => { const next = [...current]; next[index] = e.target.value; return next; })}>
                     <option value="">Leave empty</option>
                     {fields.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
@@ -430,6 +430,7 @@ function SheetsPanel({ slug, clientName, onClose, returned }: { slug: string; cl
             <div className="oc-row">
               <button type="button" className="oc-primary" disabled={Boolean(busy)} onClick={() => void step("map", { mapping })}>{busy === "map" ? "Saving…" : built ? "Save mapping" : "Confirm mapping"}</button>
               <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("reread")}>{busy === "reread" ? "Reading…" : "Re-read headers"}</button>
+              {built && <button type="button" className="oc-ghost" disabled={Boolean(busy)} onClick={() => void step("format")}>{busy === "format" ? "Formatting…" : "Format sheet"}</button>}
               {sheet?.config?.url && <a className="oc-ghost" href={sheet.config.url} target="_blank" rel="noreferrer">Open sheet ↗</a>}
             </div>
           </section>

@@ -244,3 +244,52 @@ export async function sheetsPushBatch(destination: Destination, records: ReplyRe
   if (data.length) await sheets("POST", `${spreadsheetId}/values:batchUpdate`, { valueInputOption: "USER_ENTERED", data });
   return result;
 }
+
+// ── Formatting: QC's house style, applied to whole columns so new rows inherit it ───────────────
+
+const LEFT_WRAPPED = new Set(["latest_reply", "conversation"]);
+const LEFT = new Set(["name", "first_name", "last_name", "email", "linkedin", "company_linkedin"]);
+const WIDTH: Record<string, number> = { latest_reply: 420, conversation: 520, linkedin: 260, company_linkedin: 260, campaign: 300, title: 260, email: 220 };
+const grey = (level: number) => ({ red: level, green: level, blue: level });
+
+/**
+ * Header row bold, grey, centered and frozen with filter buttons; alternating row colors; short fields
+ * centered, the reply and conversation left-aligned and wrapped, wider columns where text runs long, and
+ * the QC ID column hidden. Existing banding or a filter on the sheet is kept, not duplicated.
+ */
+export async function sheetsFormat(config: SheetConfig): Promise<void> {
+  const meta = await sheets("GET", `${config.spreadsheetId}?fields=sheets(properties(sheetId,title),bandedRanges(bandedRangeId),basicFilter)`);
+  const tab = (Array.isArray(meta.sheets) ? meta.sheets : []).map((sheet) => sheet as Row).find((sheet) => text(((sheet.properties as Row) ?? {}).title) === config.tab);
+  if (!tab) throw new Error(`The tab "${config.tab}" is gone from that sheet.`);
+  const sheetId = Number(((tab.properties as Row) ?? {}).sheetId);
+  const columns = Math.max(config.headers.length, config.qcIdColumn + 1);
+  const requests: Row[] = [];
+  const column = (index: number) => ({ sheetId, startColumnIndex: index, endColumnIndex: index + 1, startRowIndex: 1 });
+
+  requests.push({ updateSheetProperties: { properties: { sheetId, gridProperties: { frozenRowCount: 1 } }, fields: "gridProperties.frozenRowCount" } });
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: columns },
+      cell: { userEnteredFormat: { backgroundColor: grey(0.8), horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE", wrapStrategy: "WRAP", textFormat: { bold: true } } },
+      fields: "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy,textFormat.bold)",
+    },
+  });
+  config.mapping.forEach((key, index) => {
+    if (index === config.qcIdColumn) return;
+    const wrapped = LEFT_WRAPPED.has(key);
+    requests.push({
+      repeatCell: {
+        range: column(index),
+        cell: { userEnteredFormat: { horizontalAlignment: wrapped || LEFT.has(key) ? "LEFT" : "CENTER", verticalAlignment: "MIDDLE", wrapStrategy: wrapped ? "WRAP" : "CLIP" } },
+        fields: "userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy)",
+      },
+    });
+    if (WIDTH[key]) requests.push({ updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: index, endIndex: index + 1 }, properties: { pixelSize: WIDTH[key] }, fields: "pixelSize" } });
+  });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: config.qcIdColumn, endIndex: config.qcIdColumn + 1 }, properties: { hiddenByUser: true }, fields: "hiddenByUser" } });
+  if (!Array.isArray(tab.bandedRanges) || !tab.bandedRanges.length) {
+    requests.push({ addBanding: { bandedRange: { range: { sheetId, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: columns }, rowProperties: { headerColor: grey(0.8), firstBandColor: grey(1), secondBandColor: grey(0.95) } } } });
+  }
+  if (!tab.basicFilter) requests.push({ setBasicFilter: { filter: { range: { sheetId, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: columns } } } });
+  await sheets("POST", `${config.spreadsheetId}:batchUpdate`, { requests });
+}

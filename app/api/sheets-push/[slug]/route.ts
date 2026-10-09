@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, type Destination } from "../../../lib/crm-push";
 import { pushPass } from "../../../lib/crm-push-run";
 import { disconnectGoogle, googleAccount, googleOauthConfigured } from "../../../lib/google-user";
-import { accessToken, ensureQcIdColumn, serviceAccount, serviceAccountStatus, SHEET_FIELDS, sheetsConnect, suggestMapping, type SheetConfig } from "../../../lib/sheets-push";
+import { accessToken, ensureQcIdColumn, serviceAccount, serviceAccountStatus, SHEET_FIELDS, sheetsConnect, sheetsFormat, suggestMapping, type SheetConfig } from "../../../lib/sheets-push";
 
 /**
  * The onboarding cockpit's Google Sheets panel for one client (session only). GET says where it stands;
@@ -86,6 +86,13 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       const { headers, qcIdColumn } = await ensureQcIdColumn(sheetConfig.spreadsheetId, sheetConfig.tab, sheetConfig.headers);
       const mapping = headers.map((_, index) => (index === qcIdColumn ? "" : chosen[index] ?? ""));
       await saveDestination(c, workspace.id, "sheets", { config: { ...sheetConfig, headers, mapping, qcIdColumn } as unknown as Row, status: "built", ...(destination.status !== "built" ? { auto_push: true } : {}) });
+      // QC's house style on every confirmed mapping; a formatting hiccup never undoes the mapping.
+      const formatted = await sheetsFormat({ ...sheetConfig, headers, mapping, qcIdColumn }).then(() => "").catch((error) => (error instanceof Error ? error.message : "Formatting failed."));
+      return reply(formatted ? { warning: `Mapping saved, but formatting failed: ${formatted}` } : {});
+    }
+    if (action === "format") {
+      if (destination.status !== "built") return NextResponse.json({ ok: false, error: "Confirm the column mapping first." }, { status: 400 });
+      await sheetsFormat(sheetConfig);
       return reply();
     }
     if (action === "push") {

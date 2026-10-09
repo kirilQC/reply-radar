@@ -7110,8 +7110,9 @@ a.oc-disabled { opacity: .55; pointer-events: none; }
 .oc-plan li div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .oc-plan small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .oc-plan code, .oc-log code { color: var(--muted); font-size: 10px; }
-.oc-plan li select { margin-left: auto; min-width: 180px; max-width: 60%; }
-.oc-plan li .oc-tag { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.oc-plan li.oc-sheet-col { align-items: center; }
+.oc-plan li.oc-sheet-col > span { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.oc-plan li.oc-sheet-col select { flex: 0 0 52%; }
 .oc-tag { flex: 0 0 auto; width: 48px; text-align: center; padding: 2px 0; border-radius: 4px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; background: var(--panel-2); color: var(--muted); }
 .oc-plan-create .oc-tag { background: color-mix(in srgb, var(--green, #55c7a2) 18%, var(--panel)); color: var(--green, #55c7a2); }
 .oc-plan-skip .oc-tag { background: color-mix(in srgb, var(--coral, #ed8a77) 16%, var(--panel)); color: var(--coral, #ed8a77); }
