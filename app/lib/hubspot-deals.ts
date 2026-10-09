@@ -93,8 +93,8 @@ export function dealsPlan(audit: DealsAudit, previous?: Partial<DealsPlan> | nul
 }
 
 /** The approved part of the build for deals: the QC deal fields, then the stage at the start of the pipeline. */
-export async function dealsApply(token: string, plan: DealsPlan): Promise<{ log: Array<{ at: string; kind: string; name: string; result: "created" | "reused" | "failed"; detail: string }>; stageId: string | null }> {
-  const log: Array<{ at: string; kind: string; name: string; result: "created" | "reused" | "failed"; detail: string }> = [];
+export async function dealsApply(token: string, plan: DealsPlan): Promise<{ log: Array<{ at: string; kind: string; name: string; result: "created" | "reused" | "failed" | "verified"; detail: string }>; stageId: string | null }> {
+  const log: Array<{ at: string; kind: string; name: string; result: "created" | "reused" | "failed" | "verified"; detail: string }> = [];
   const at = () => new Date().toISOString();
   if (!plan.pipelineId) {
     log.push({ at: at(), kind: "deal-stage", name: QC_DEAL_STAGE_LABEL, result: "failed", detail: plan.blocker ?? "No deal pipeline to put the stage in." });
@@ -132,7 +132,40 @@ export async function dealsApply(token: string, plan: DealsPlan): Promise<{ log:
   } else {
     log.push({ at: at(), kind: "deal-stage", name: QC_DEAL_STAGE_LABEL, result: "reused", detail: `In ${plan.pipelineLabel}` });
   }
+  if (stageId) log.push(await ensureStageFirst(token, plan.pipelineId, stageId, at()));
   return { log, stageId };
+}
+
+/** The pipeline's live stages, in HubSpot's order. */
+async function liveStages(token: string, pipelineId: string): Promise<Row[]> {
+  const pipeline = await hubspot(token, "GET", `/crm/v3/pipelines/deals/${enc(pipelineId)}`);
+  return list(pipeline.stages).filter((s) => s.archived !== true).sort((a, b) => (Number(a.displayOrder) || 0) - (Number(b.displayOrder) || 0));
+}
+const orderOf = (stages: Row[]) => stages.map((s) => `${text(s.label)} (${Number(s.displayOrder) || 0})`).join(", ");
+
+/**
+ * Reads the pipeline back and makes sure Booked Meeting (QC) really is first: HubSpot can accept a reorder and
+ * keep its old order, so the log says what HubSpot shows, not what was asked for.
+ */
+export async function ensureStageFirst(token: string, pipelineId: string, stageId: string, at: string): Promise<{ at: string; kind: string; name: string; result: "verified" | "failed"; detail: string }> {
+  const entry = (result: "verified" | "failed", detail: string) => ({ at, kind: "deal-stage-order", name: QC_DEAL_STAGE_LABEL, result, detail });
+  try {
+    let stages = await liveStages(token, pipelineId);
+    if (text(stages[0]?.id) === stageId) return entry("verified", `First in the pipeline: ${orderOf(stages)}`);
+    // Every stage gets its full label and a clean position, the QC stage at 0 and the rest one after another.
+    const qc = stages.find((s) => text(s.id) === stageId);
+    const others = stages.filter((s) => text(s.id) !== stageId);
+    if (qc) await hubspot(token, "PATCH", `/crm/v3/pipelines/deals/${enc(pipelineId)}/stages/${enc(stageId)}`, { label: text(qc.label), displayOrder: 0, metadata: qc.metadata ?? {} });
+    for (const [index, stage] of others.entries()) {
+      await hubspot(token, "PATCH", `/crm/v3/pipelines/deals/${enc(pipelineId)}/stages/${enc(text(stage.id))}`, { label: text(stage.label), displayOrder: index + 1, metadata: stage.metadata ?? {} });
+    }
+    stages = await liveStages(token, pipelineId);
+    return text(stages[0]?.id) === stageId
+      ? entry("verified", `Moved to first: ${orderOf(stages)}`)
+      : entry("failed", `HubSpot kept ${text(stages[0]?.label)} first after the reorder. Order now: ${orderOf(stages)}`);
+  } catch (error) {
+    return entry("failed", `Could not check the stage order: ${error instanceof Error ? error.message.slice(0, 200) : ""}`);
+  }
 }
 
 // ── Push ────────────────────────────────────────────────────────────────────────────────────────

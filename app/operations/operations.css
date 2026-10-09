@@ -171,3 +171,8 @@ body.light-mode .ops-area {
   .ops-pair, .ops-map { grid-template-columns: minmax(0, 1fr); }
   .ops-titlebar h1 { font-size: 28px; }
 }
+
+/* A key short a scope: the one thing on the page that stops everything. */
+.ops-blocked { border-color: var(--ops-bad); }
+.ops-scope-list { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+.ops-scope-list code { display: inline-block; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--ops-bad); color: var(--ops-strong); font-size: 13px; }

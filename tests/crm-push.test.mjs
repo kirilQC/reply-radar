@@ -182,7 +182,7 @@ test("the Booked Meeting (QC) stage is never skipped: no opt-out, a key without 
   assert.match(route, /if \(!planDeals\.available\) return NextResponse\.json\(\{ ok: false/);
   for (const scope of ["crm.objects.deals.read", "crm.objects.deals.write", "crm.schemas.deals.read", "crm.schemas.deals.write"]) assert.ok(push.includes(`"${scope}"`), scope);
   assert.doesNotMatch(ui, /setPushDeals/);
-  assert.match(ui, /disabled=\{Boolean\(busy\) \|\| Boolean\(dealsBlocker\)\}/);
+  assert.match(ui, /disabled=\{Boolean\(busy\) \|\| Boolean\(dealsBlocker\) \|\| scopeBlocked\}/);
 });
 
 test("the HubSpot connect steps list every scope QC Command checks for, so a key is never short one", async () => {
@@ -195,4 +195,22 @@ test("the HubSpot connect steps list every scope QC Command checks for, so a key
     const base = scope.replace(/\.(read|write)$/, "");
     assert.ok(steps.includes(scope) || steps.includes(`${base}.read + write`), `connect steps miss ${scope}`);
   }
+});
+
+test("a key short any scope stops every build: scopes re-read live, build refused naming each one, buttons locked", () => {
+  const route = readFileSync(new URL("../app/api/crm-push/[slug]/route.ts", import.meta.url), "utf8");
+  const ui = readFileSync(new URL("../app/components/ClientOperations.tsx", import.meta.url), "utf8");
+  const deals = readFileSync(new URL("../app/lib/hubspot-deals.ts", import.meta.url), "utf8");
+  for (const action of ["apply\" && destination.provider === \"attio", "apply", "reporting"]) {
+    const at = route.indexOf(`if (action === "${action}") {`);
+    assert.ok(at > 0, action);
+    assert.match(route.slice(at, at + 200), /const blocked = await scopeGate\(\);\s+if \(blocked\) return blocked;/, `${action} is not gated`);
+  }
+  assert.match(route, /REQUIRED_SCOPES\.filter\(\(scope\) => !scopes\.includes\(scope\)\)/);
+  assert.match(route, /Nothing was built\. The key is missing/);
+  for (const button of ["step(\"apply\"", "step(\"reporting\")", "step(\"push_one\")", "pushAll()"]) {
+    const at = ui.indexOf(button);
+    assert.ok(ui.slice(Math.max(0, at - 200), at).includes("scopeBlocked"), `${button} not locked by missing scopes`);
+  }
+  assert.match(deals, /export async function ensureStageFirst/);
 });

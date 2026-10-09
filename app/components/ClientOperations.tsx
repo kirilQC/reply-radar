@@ -258,6 +258,9 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
     : deals?.blocker ?? (dealScopesMissing.length ? `The service key can't read this HubSpot's deal pipelines. Add ${dealScopesMissing.join(", ")} to the QC Growth key (Development → Keys), then re-read.` : null)
       ?? (provider === "attio" && deals && !deals.available ? "The Deals object is switched off in this Attio workspace (or the token can't see it). Turn on Deals in Attio (Workspace settings → Objects), then re-read." : null);
   const showPlan = connectedHere && crm?.plan && (crm.status !== "built" || !dealsLive);
+  // A key short any scope stops everything: nothing is built until a re-read shows the full set.
+  const missingScopes = connectedHere ? crm?.audit?.missingScopes ?? [] : [];
+  const scopeBlocked = missingScopes.length > 0;
 
   if (!loaded) return <p className="ops-muted">Loading {name}…</p>;
 
@@ -293,11 +296,21 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
         <div><span className="ops-label">{name}</span><h1>{built ? `Replies flowing into ${name}` : `Set up ${name}`}</h1></div>
         {built && (
           <div className="ops-row">
-            <button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("push_one").then((payload) => payload?.test && setTested(payload.test))}>{busy === "push_one" ? "Pushing 1…" : "Push 1 lead (test)"}</button>
-            <button type="button" className="ops-btn ops-pri" disabled={Boolean(busy)} onClick={() => void pushAll()}>{busy === "push" ? "Pushing…" : "Push all replies"}</button>
+            <button type="button" className="ops-btn ops-sec" disabled={Boolean(busy) || scopeBlocked} onClick={() => void step("push_one").then((payload) => payload?.test && setTested(payload.test))}>{busy === "push_one" ? "Pushing 1…" : "Push 1 lead (test)"}</button>
+            <button type="button" className="ops-btn ops-pri" disabled={Boolean(busy) || scopeBlocked} onClick={() => void pushAll()}>{busy === "push" ? "Pushing…" : "Push all replies"}</button>
           </div>
         )}
       </div>
+
+      {scopeBlocked && (
+        <section className="ops-panel ops-blocked" role="alert">
+          <div className="ops-panel-head"><span className="ops-label">Can't continue</span><span className="ops-state ops-bad">● {missingScopes.length} {missingScopes.length === 1 ? "scope" : "scopes"} missing</span></div>
+          <div className="ops-h2">The {name} key is missing {missingScopes.length === 1 ? "a scope" : "scopes"}. Nothing will be built until {missingScopes.length === 1 ? "it's" : "they're"} added.</div>
+          <ul className="ops-scope-list">{missingScopes.map((scope) => <li key={scope}><code>{scope}</code></li>)}</ul>
+          <p className="ops-muted">{provider === "hubspot" ? "In HubSpot: Development → Keys → QC Growth → edit scopes, tick each one above, save." : "In Attio: Workspace settings → Developers → the QC Growth token, add each one above, save."} Then re-read.</p>
+          <div className="ops-row"><button type="button" className="ops-btn ops-pri" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Checking…" : `Re-read ${name}`}</button></div>
+        </section>
+      )}
 
       {c.audit && (
         <div className="ops-tiles">
@@ -351,7 +364,7 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
           <p className="ops-muted">Not touched: {c.plan.notTouched.join(" · ")}</p>
           {dealsBlocker && <p className="ops-error">Booked Meeting (QC) stage: {dealsBlocker}</p>}
           <div className="ops-row">
-            <button type="button" className="ops-btn ops-pri" disabled={Boolean(busy) || Boolean(dealsBlocker)} onClick={() => void step("apply", { settings: { ownerId, lifecycleOnCreate: lifecycle, useLeadSource: leadSource, pushDeals: true, dealPipelineId: dealPipeline } })}>
+            <button type="button" className="ops-btn ops-pri" disabled={Boolean(busy) || Boolean(dealsBlocker) || scopeBlocked} onClick={() => void step("apply", { settings: { ownerId, lifecycleOnCreate: lifecycle, useLeadSource: leadSource, pushDeals: true, dealPipelineId: dealPipeline } })}>
               {busy === "apply" ? "Building…" : `Approve and build${creates.length ? ` (${creates.length} to create)` : ""}`}
             </button>
             <button type="button" className="ops-btn ops-sec" disabled={Boolean(busy)} onClick={() => void step("replan")}>{busy === "replan" ? "Reading…" : `Re-read ${name}`}</button>
@@ -376,7 +389,7 @@ function CrmView({ slug, clientName, provider, state, returned }: { slug: string
                 <>
                   <div className="ops-row">
                     {c.config?.dashboard_id && <a className="ops-btn ops-pri" href={`https://${hubspotHost(c)}/reports-dashboard/${c.accountId}/view/${c.config.dashboard_id}`} target="_blank" rel="noreferrer">Open dashboard ↗</a>}
-                    <button type="button" className={`ops-btn ${c.config?.dashboard_id ? "ops-sec" : "ops-pri"}`} disabled={Boolean(busy)} onClick={() => void step("reporting").then((payload) => payload && setNote(payload.built ? "Reports and dashboard ready." : payload.pending ? (payload.failed ?? [])[0] : `Some steps failed: ${(payload.failed ?? []).join("; ")}`))}>{busy === "reporting" ? "Building…" : c.config?.dashboard_id ? "Rebuild" : "Build reports and dashboard"}</button>
+                    <button type="button" className={`ops-btn ${c.config?.dashboard_id ? "ops-sec" : "ops-pri"}`} disabled={Boolean(busy) || scopeBlocked} onClick={() => void step("reporting").then((payload) => payload && setNote(payload.built ? "Reports and dashboard ready." : payload.pending ? (payload.failed ?? [])[0] : `Some steps failed: ${(payload.failed ?? []).join("; ")}`))}>{busy === "reporting" ? "Building…" : c.config?.dashboard_id ? "Rebuild" : "Build reports and dashboard"}</button>
                   </div>
                   <div className="ops-row ops-quiet"><span className="ops-muted">Signed in as {c.hubspotUser.user || "QC Growth"}</span><button type="button" className="ops-link" disabled={Boolean(busy)} onClick={() => void step("disconnect_user")}>Sign out</button></div>
                 </>
@@ -628,9 +641,10 @@ export default function ClientOperations({ slug }: { slug: string }) {
     window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
   }, [view]);
 
-  const status = (target: View): { label: string; tone: "good" | "wait" | "off" } => {
+  const status = (target: View): { label: string; tone: "good" | "wait" | "off" | "bad" } => {
     if (target === "hubspot" || target === "attio") {
       if (!crm?.connected || crm.provider !== target) return { label: crm?.connected ? "Off" : "Connect", tone: "off" };
+      if (crm.audit?.missingScopes?.length) return { label: "Scopes", tone: "bad" };
       if (crm.status !== "built") return { label: "Setup", tone: "wait" };
       return dealsAreLive(crm, target) ? { label: "Live", tone: "good" } : { label: "Deals", tone: "wait" };
     }

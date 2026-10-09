@@ -4,12 +4,12 @@
 import { NextResponse } from "next/server";
 import { loadDestination, presentDestination, rows, saveDestination, withPushLock, type Destination } from "../../../lib/crm-push";
 import { pushOne, pushPass } from "../../../lib/crm-push-run";
-import { hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotPlan } from "../../../lib/hubspot-push";
+import { REQUIRED_SCOPES, hubspotApply, hubspotAudit, hubspotConnect, hubspotPlan, type HubSpotPlan } from "../../../lib/hubspot-push";
 import { REPORTING_WAIT, hubspotBuildReporting, hubspotUserView } from "../../../lib/hubspot-reporting";
 import { dealsApply, dealsAudit, dealsPlan, type DealsPlan } from "../../../lib/hubspot-deals";
 import { pushMeetingsPass } from "../../../lib/meetings-deals-run";
 import { attioDealsApply, attioDealsAudit, attioDealsPlan, type AttioDealsPlan } from "../../../lib/attio-deals";
-import { attioApply, attioAudit, attioConnect, attioPlan, type AttioPlan } from "../../../lib/attio-push";
+import { ATTIO_REQUIRED_SCOPES, attioApply, attioAudit, attioConnect, attioPlan, type AttioPlan } from "../../../lib/attio-push";
 import { hubspotAppConfigured, hubspotUserToken } from "../../../lib/hubspot-user";
 
 /**
@@ -89,7 +89,26 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       await saveDestination(c, workspace.id, "crm", { audit: audit as unknown as Row, plan: plan as unknown as Row, status: destination.status === "built" ? "built" : "planned" });
       return reply();
     }
+    // Nothing is built on a key that is short a scope: the scopes are asked for live from HubSpot or Attio
+    // right before every build, and the build stops and names each missing one. Half a build never happens.
+    const gated = destination;
+    const scopeGate = async (): Promise<NextResponse | null> => {
+      const destination = gated;
+      const key = destination.api_key!;
+      const scopes = destination.provider === "attio" ? (await attioConnect(key)).scopes : (await hubspotConnect(key)).scopes;
+      const missing = destination.provider === "attio"
+        ? ATTIO_REQUIRED_SCOPES.filter((scope) => !scopes.includes(scope) && !(scope.endsWith(":read") && scopes.includes(`${scope}-write`)))
+        : REQUIRED_SCOPES.filter((scope) => !scopes.includes(scope));
+      const where = destination.provider === "attio" ? "Attio (Workspace settings → Developers → the QC Growth token)" : "HubSpot (Development → Keys → the QC Growth key)";
+      if (!scopes.length) return NextResponse.json({ ok: false, error: `Could not read the key's scopes from ${destination.provider === "attio" ? "Attio" : "HubSpot"}, so nothing was built. Re-read and try again.` }, { status: 400 });
+      if (!missing.length) return null;
+      await saveDestination(c, workspace.id, "crm", { audit: { ...((destination.audit ?? {}) as Row), scopes, missingScopes: missing } as unknown as Row });
+      return NextResponse.json({ ok: false, missingScopes: missing, error: `Nothing was built. The key is missing ${missing.length === 1 ? "this scope" : `these ${missing.length} scopes`}: ${missing.join(", ")}. Add ${missing.length === 1 ? "it" : "them"} in ${where}, then click Re-read and build again.` }, { status: 400 });
+    };
+
     if (action === "apply" && destination.provider === "attio") {
+      const blocked = await scopeGate();
+      if (blocked) return blocked;
       const plan = destination.plan as unknown as AttioPlan;
       const choices = (body.settings && typeof body.settings === "object" ? body.settings : {}) as Row;
       const approved: AttioPlan & { deals?: AttioDealsPlan } = { ...plan, settings: { ...plan.settings, ...(text(choices.ownerId) ? { ownerId: text(choices.ownerId) } : {}) } };
@@ -116,6 +135,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       return reply();
     }
     if (action === "apply") {
+      const blocked = await scopeGate();
+      if (blocked) return blocked;
       const plan = destination.plan as unknown as HubSpotPlan;
       // The person's choices on the plan: owner for new contacts, lifecycle on create, the lead source option.
       const choices = (body.settings && typeof body.settings === "object" ? body.settings : {}) as Row;
@@ -176,6 +197,8 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       return reply();
     }
     if (action === "reporting") {
+      const blocked = await scopeGate();
+      if (blocked) return blocked;
       if (!hubspotAppConfigured()) return NextResponse.json({ ok: false, error: "QC Growth's HubSpot app keys are not on Vercel yet." }, { status: 400 });
       const userToken = await hubspotUserToken(c, destination);
       if (!userToken) return NextResponse.json({ ok: false, error: "Connect the QC Growth user first." }, { status: 400 });
